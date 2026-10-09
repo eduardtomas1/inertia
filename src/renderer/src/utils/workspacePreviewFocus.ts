@@ -11,6 +11,7 @@ export function usePreviewTabCloseFocus(
   tabs: readonly { id: string }[],
   activeTabId: string | null,
   tabRefs: RefObject<Map<string, HTMLButtonElement>>,
+  fallbackRef?: RefObject<HTMLElement | null>,
 ): (closedTabId: string) => void {
   const pending = useRef<PendingPreviewTabCloseFocus | null>(null);
   useEffect(() => {
@@ -28,11 +29,11 @@ export function usePreviewTabCloseFocus(
     }
     const targetId = activeTabId ?? tabs[0]?.id;
     if (!targetId) return;
-    const element = tabRefs.current.get(targetId);
+    const element = tabRefs.current.get(targetId) ?? fallbackRef?.current;
     if (!element) return;
     pending.current = null;
     element.focus();
-  }, [activeTabId, tabRefs, tabs]);
+  }, [activeTabId, fallbackRef, tabRefs, tabs]);
   return (closedTabId) => {
     pending.current = {
       closedTabId,

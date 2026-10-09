@@ -569,6 +569,7 @@ export class PreviewBroker {
       url: contents?.getURL() ?? "", loading: contents?.isLoading() ?? false,
       canGoBack: contents?.navigationHistory.canGoBack() ?? false, canGoForward: contents?.navigationHistory.canGoForward() ?? false,
       activeTabId: session?.activeTabId ?? null, agentActivity: session?.activity ?? null,
+      pageFocused: contents?.isFocused() ?? false,
       tabs: session ? [...session.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
     };
   }

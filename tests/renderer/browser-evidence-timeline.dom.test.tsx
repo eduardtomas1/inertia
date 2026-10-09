@@ -338,13 +338,13 @@ describe("Browser evidence timeline", () => {
     view.rerender(panel([tabs[2]!], "three"));
     await waitFor(() => expect(address).toHaveFocus());
 
-    view.rerender(panel([tabs[0]!], "one"));
+    view.rerender(panel([tabs[0]!, tabs[2]!], "one"));
+    screen.getByRole("tab", { name: "One" }).focus();
     fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "Delete" });
     expect(onCloseTab).toHaveBeenLastCalledWith("one");
-    view.rerender(panel([
-      { id: "replacement", title: "New page", url: "", loading: false },
-    ], "replacement"));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "New page" })).toHaveFocus());
+    view.rerender(panel([tabs[2]!], "three"));
+    expect(screen.queryByRole("tab")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Preview address" })).toHaveFocus());
   });
 
   it("restores close-button focus after delayed removal without stealing newer focus", async () => {

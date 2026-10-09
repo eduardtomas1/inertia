@@ -229,10 +229,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await previewTools.getByRole("textbox", {
       name: "Preview address",
     }).fill(hostilePreviewUrl);
-    await previewTools.getByRole("button", {
-      name: "Go",
-      exact: true,
-    }).click();
+    await previewTools.getByRole("textbox", {
+      name: "Preview address",
+    }).press("Enter");
     await expect.poll(
       () => app.nativePreviewIsVisible(hostilePreviewUrl),
     ).toBe(true);

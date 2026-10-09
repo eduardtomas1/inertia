@@ -67,6 +67,7 @@ import {
 import { AppUpdateService } from "./app-update.js";
 import { MainWindowCreation } from "./main-window-creation.js";
 import { registerEditContextMenu } from "./edit-context-menu.js";
+import { installApplicationMenu } from "./application-menu.js";
 import { validateDesktopAppUpdateCandidate } from "./app-update-candidate-viability.js";
 import { AppUpdateRuntimeReadiness } from "./app-update-runtime-readiness.js";
 import { startApplicationWithUpdateHandoff } from "./app-update-startup.js";
@@ -889,6 +890,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
   privilegedCleanup = tracked; return tracked;
 }
 async function bootstrap(): Promise<void> {
+  installApplicationMenu();
   runtimeDiagnostics = openRuntimeDiagnostics(app.getPath("userData"));
   setDiagnosticsReportSource(() => runtimeDiagnostics);
   setImmediate(() => runtimeDiagnostics?.record("app.start"));

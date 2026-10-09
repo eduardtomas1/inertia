@@ -267,7 +267,7 @@ test("offers link and navigation actions for a user's right-click in the Browser
     await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
     const pageUrl = new URL("/agent-browser-page", app.previewUrl).toString();
     await page.getByRole("textbox", { name: "Preview address" }).fill(pageUrl);
-    await page.getByRole("button", { name: "Go", exact: true }).click();
+    await page.getByRole("textbox", { name: "Preview address" }).press("Enter");
     await expect.poll(() => app.electronApp.evaluate(({ webContents }, url) =>
       webContents.getAllWebContents().some((contents) => contents.getURL() === url && !contents.isLoading()), pageUrl))
       .toBe(true);

@@ -383,14 +383,13 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
   await primaryPreview.getByRole("textbox", {
     name: "Preview address",
   }).fill(primaryPreviewUrl);
-  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await primaryPreview.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await secondaryPreview.getByRole("textbox", {
     name: "Preview address",
   }).fill(secondaryPreviewUrl);
-  await secondaryPreview.getByRole("button", {
-    name: "Go",
-    exact: true,
-  }).click();
+  await secondaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  }).press("Enter");
   await expect(primaryPreview.getByRole("textbox", {
     name: "Preview address",
   })).toHaveValue(primaryPreviewUrl);
@@ -450,7 +449,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
   await primaryPreview.getByRole("textbox", {
     name: "Preview address",
   }).fill(secondPrimaryPreviewUrl);
-  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await primaryPreview.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await expect.poll(() => app.electronApp.evaluate(
     ({ webContents }, url) => webContents.getAllWebContents().some(
       (contents) => contents.getURL() === url,
@@ -631,7 +630,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
     typeDestinationUrl,
   });
   await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
-  await expect(browserTabs).toHaveCount(1);
+  await expect(browserTabs).toHaveCount(0);
   await expect.poll(() => app.nativePreviewIsVisible(primaryPreviewUrl)).toBe(true);
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({

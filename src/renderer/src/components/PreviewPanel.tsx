@@ -21,6 +21,7 @@ import {
 } from "../utils/workspacePreviewFocus";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
+import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import "./PreviewPanel.css";
 
 const BrowserEvidenceTimeline = lazy(() => import("./BrowserEvidenceTimeline"));
@@ -35,6 +36,7 @@ export type PreviewPanelProps = {
   tabs?: PreviewTabState[];
   activeTabId?: string | null;
   evidence?: BrowserEvidenceSnapshot;
+  pageFocused?: boolean;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -107,6 +109,7 @@ export function PreviewPanel({
   tabs = [],
   activeTabId = null,
   evidence = { revision: 0, entries: [], omitted: false },
+  pageFocused = false,
   onNavigate,
   onOpenExternal,
   onBack,
@@ -125,11 +128,14 @@ export function PreviewPanel({
   const stageRef = useRef<HTMLDivElement>(null);
   const evidenceToggleRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const addressElementRef = useRef<HTMLInputElement | null>(null);
   const addressRef = useCallback((address: HTMLInputElement | null) => {
+    addressElementRef.current = address;
     registerWorkspacePreviewAddress(owner, address);
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
-  const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs);
+  const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs, addressElementRef);
+  const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeTabId });
 
   useEffect(() => {
     setDraftUrl(url);
@@ -215,66 +221,116 @@ export function PreviewPanel({
   };
 
   return (
-    <section className="preview-panel" aria-label="Browser preview" aria-busy={loading}>
-      <div className="preview-tab-strip" aria-label="Inertia Browser pages">
-        <span className="preview-browser-label">
-          <Globe size={14} aria-hidden="true" />
-          <span>Browser</span>
-        </span>
-        <div className="preview-tabs" role="tablist" aria-label="Browser pages">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={`preview-tab-shell${tab.id === activeTabId ? " active" : ""}`}
-            >
-              <button
-                id={`preview-tab-${owner}-${tab.id}`}
-                ref={(element) => {
-                  if (element) tabRefs.current.set(tab.id, element);
-                  else tabRefs.current.delete(tab.id);
-                }}
-                type="button"
-                role="tab"
-                aria-selected={tab.id === activeTabId}
-                aria-controls={evidenceOpen ? undefined : `preview-page-${owner}`}
-                tabIndex={tab.id === (activeTabId ?? tabs[0]?.id) ? 0 : -1}
-                className="preview-tab"
-                onClick={() => onActivateTab?.(tab.id)}
-                onKeyDown={(event) => {
-                  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-                    event.preventDefault();
-                    moveTabFocus(tab.id, event.key);
-                  } else if (event.key === "Delete" && onCloseTab) {
-                    event.preventDefault();
-                    prepareTabCloseFocus(tab.id);
-                    onCloseTab(tab.id);
-                  }
-                }}
-              >
-                <span>{tab.title || (tab.url ? previewTabHost(tab.url) : "New page")}</span>
-              </button>
-              {onCloseTab && (
-                <button
-                  type="button"
-                  className="preview-tab-close"
-                  aria-label={`Close ${tab.title || "browser page"}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    prepareTabCloseFocus(tab.id);
-                    onCloseTab(tab.id);
-                  }}
+    <section
+      className="preview-panel"
+      aria-label="Browser preview"
+      aria-busy={loading}
+      data-page-focused={pageFocused || undefined}
+    >
+      {tabs.length > 1 && (
+        <div className="preview-tab-strip" aria-label="Inertia Browser pages">
+          <div
+            className="panel-tab-row preview-tabs"
+            role="tablist"
+            aria-label="Browser pages"
+            {...tabRow.listHandlers}
+          >
+            {tabs.map((tab) => {
+              const title = tab.title || (tab.url ? previewTabHost(tab.url) : "New page");
+              return (
+                <div
+                  key={tab.id}
+                  className={`panel-tab preview-tab-shell${tab.id === activeTabId ? " active" : ""}`}
+                  data-tab-key={tab.id}
                 >
-                  <X size={14} aria-hidden="true" />
-                </button>
-              )}
-            </div>
-          ))}
+                  <button
+                    id={`preview-tab-${owner}-${tab.id}`}
+                    ref={(element) => {
+                      if (element) tabRefs.current.set(tab.id, element);
+                      else tabRefs.current.delete(tab.id);
+                    }}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab.id === activeTabId}
+                    aria-controls={evidenceOpen ? undefined : `preview-page-${owner}`}
+                    tabIndex={tab.id === (activeTabId ?? tabs[0]?.id) ? 0 : -1}
+                    className="preview-tab"
+                    onClick={() => onActivateTab?.(tab.id)}
+                    onKeyDown={(event) => {
+                      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                        event.preventDefault();
+                        moveTabFocus(tab.id, event.key);
+                      } else if (event.key === "Delete" && onCloseTab) {
+                        event.preventDefault();
+                        prepareTabCloseFocus(tab.id);
+                        onCloseTab(tab.id);
+                      }
+                    }}
+                  >
+                    <Globe size={14} aria-hidden="true" />
+                    <span className="panel-tab-label" data-text={title}>{title}</span>
+                  </button>
+                  {onCloseTab && (
+                    <IconButton
+                      className="panel-tab-close preview-tab-close"
+                      label={`Close ${tab.title || "browser page"}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        prepareTabCloseFocus(tab.id);
+                        onCloseTab(tab.id);
+                      }}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </IconButton>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
-        {onOpenTab && (
-          <IconButton label="Open browser page" onClick={onOpenTab} disabled={tabs.length >= 8}>
-            <Plus size={14} />
+      )}
+      <header className="preview-chrome">
+        {onBack && (
+          <IconButton label="Go back" onClick={onBack} disabled={!canGoBack}>
+            <ArrowLeft size={14} />
           </IconButton>
         )}
+        {onForward && (
+          <IconButton label="Go forward" onClick={onForward} disabled={!canGoForward}>
+            <ArrowRight size={14} />
+          </IconButton>
+        )}
+        {onReload && (
+          <IconButton label="Reload preview" onClick={onReload} disabled={!url || loading}>
+            <RefreshCw size={14} />
+          </IconButton>
+        )}
+        <form className="preview-address-form" onSubmit={(event) => { event.preventDefault(); navigate(); }}>
+          {currentLocation && !("error" in currentLocation) && currentLocation.parsed.protocol === "https:" && (
+            <Lock size={14} aria-label="Secure HTTPS address" />
+          )}
+          <input
+            ref={addressRef}
+            type="text"
+            inputMode="url"
+            enterKeyHint="go"
+            value={draftUrl}
+            aria-label="Preview address"
+            aria-invalid={Boolean(validationError)}
+            aria-describedby={validationError ? "preview-url-error" : undefined}
+            placeholder="localhost:3000"
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            onChange={(event) => {
+              setDraftUrl(event.currentTarget.value);
+              if (validationError) setValidationError(null);
+            }}
+          />
+        </form>
+        <IconButton label="Open in system browser" onClick={openExternal} disabled={!url && !draftUrl.trim()}>
+          <ExternalLink size={14} />
+        </IconButton>
         <button
           ref={evidenceToggleRef}
           type="button"
@@ -287,56 +343,14 @@ export function PreviewPanel({
           ))}
         >
           <History size={14} aria-hidden="true" />
-          <span>Evidence</span>
           <small>{evidence.entries.length}</small>
         </button>
-      </div>
-      <header className="preview-chrome">
-        <div className="preview-history-actions">
-          {onBack && (
-            <IconButton label="Go back" onClick={onBack} disabled={!canGoBack}>
-              <ArrowLeft size={14} />
-            </IconButton>
-          )}
-          {onForward && (
-            <IconButton label="Go forward" onClick={onForward} disabled={!canGoForward}>
-              <ArrowRight size={14} />
-            </IconButton>
-          )}
-          {onReload && (
-            <IconButton label="Reload preview" onClick={onReload} disabled={!url || loading}>
-              {loading ? <LoadingMark label="Loading preview" /> : <RefreshCw size={14} />}
-            </IconButton>
-          )}
-        </div>
-
-        <form className="preview-address-form" onSubmit={(event) => { event.preventDefault(); navigate(); }}>
-          {currentLocation && !("error" in currentLocation) && currentLocation.parsed.protocol === "https:"
-            ? <Lock size={14} aria-label="Secure HTTPS address" />
-            : <Globe size={14} aria-hidden="true" />}
-          <input
-            ref={addressRef}
-            type="text"
-            inputMode="url"
-            value={draftUrl}
-            aria-label="Preview address"
-            aria-invalid={Boolean(validationError)}
-            aria-describedby={validationError ? "preview-url-error" : undefined}
-            placeholder="localhost:3000 or https://example.com"
-            spellCheck={false}
-            autoCapitalize="none"
-            autoCorrect="off"
-            onChange={(event) => {
-              setDraftUrl(event.currentTarget.value);
-              if (validationError) setValidationError(null);
-            }}
-          />
-          <button type="submit" className="preview-go-button">Go</button>
-        </form>
-
-        <IconButton label="Open in system browser" onClick={openExternal} disabled={!url && !draftUrl.trim()}>
-          <ExternalLink size={14} />
-        </IconButton>
+        {onOpenTab && (
+          <IconButton label="Open browser page" onClick={onOpenTab} disabled={tabs.length >= 8}>
+            <Plus size={14} />
+          </IconButton>
+        )}
+        {loading && <span className="preview-loading-bar" aria-hidden="true" />}
       </header>
 
       {validationError && <p className="preview-address-error" id="preview-url-error" role="alert">{validationError}</p>}
@@ -357,27 +371,22 @@ export function PreviewPanel({
           id={`preview-page-${owner}`}
           ref={stageRef}
           role="tabpanel"
-          aria-labelledby={activeTabId ? `preview-tab-${owner}-${activeTabId}` : undefined}
+          aria-labelledby={tabs.length > 1 && activeTabId ? `preview-tab-${owner}-${activeTabId}` : undefined}
+          aria-label={tabs.length > 1 && activeTabId ? undefined : "Browser page"}
         >
           {loading ? (
             <div className="panel-loading"><LoadingMark label="Connecting to preview" /><span>Connecting to preview…</span></div>
           ) : currentLocation && !("error" in currentLocation) ? (
-            <div className="preview-safe-card">
-              <span className="panel-kicker">Safe preview target</span>
-              <h3>{currentLocation.parsed.hostname}</h3>
-              <p>{currentLocation.parsed.origin}</p>
-              <p className="preview-safe-note">
-                Inertia keeps remote content outside the React renderer. Navigation is handed to the desktop preview service.
-              </p>
+            <div className="panel-empty preview-safe-card">
+              <h3>{currentLocation.parsed.origin}</h3>
+              <p>This page loads outside the Inertia window.</p>
               <button type="button" className="secondary-button" onClick={openExternal}>
-                <ExternalLink size={14} aria-hidden="true" />
-                <span>Open externally</span>
+                Open externally
               </button>
             </div>
           ) : (
             <div className="panel-empty preview-empty">
               <h3>Open a local preview</h3>
-              <p>Enter a development server URL above. No untrusted page is embedded in this renderer.</p>
             </div>
           )}
         </div>

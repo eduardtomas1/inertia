@@ -35,6 +35,7 @@ import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import { installWindowCloseShortcut } from "./utils/globalShortcuts";
 import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
 import "./detached-chat.css";
@@ -312,6 +313,15 @@ export default function DetachedChatApp({
       setActionError(publicError(error, "This window could not be closed."));
     });
   }, [conversationId]);
+  const closeWindowRef = useRef(closeWindow);
+  useEffect(() => {
+    closeWindowRef.current = closeWindow;
+  }, [closeWindow]);
+  useEffect(() => installWindowCloseShortcut(
+    window,
+    window.inertia?.getPlatform?.() ?? "unknown",
+    () => closeWindowRef.current(),
+  ), []);
   const toggleAlwaysOnTop = useCallback(() => {
     if (pinning) return;
     setPinning(true);

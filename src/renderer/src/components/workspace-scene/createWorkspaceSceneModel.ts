@@ -90,6 +90,7 @@ type WorkspaceSceneLayout = Pick<
   | "openSurface"
   | "activateSurface"
   | "closeSurface"
+  | "moveSurface"
   | "toggleWorkspaceTools"
 >;
 
@@ -776,6 +777,7 @@ export function createWorkspaceSceneModel({
         onActivateSurface: openPanelSurface,
         onOpenSurface: openPanelSurface,
         onCloseSurface: layout.closeSurface,
+        onMoveSurface: layout.moveSurface,
         onClosePanel: layout.toggleWorkspaceTools,
       },
       usage: {
@@ -1034,6 +1036,7 @@ export function createWorkspaceSceneModel({
         tabs: desktopTools.previewNavigation.tabs,
         activeTabId: desktopTools.previewNavigation.activeTabId,
         evidence: desktopTools.previewNavigation.evidence,
+        pageFocused: desktopTools.previewNavigation.pageFocused ?? false,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),

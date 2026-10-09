@@ -699,6 +699,36 @@ describe("detached chat main-process boundary", () => {
     }
   });
 
+  it("closes only the detached window whose keyboard shortcut asks, never the main window", async () => {
+    const value = fixture();
+    try {
+      for (const [conversationId, title] of [[FIRST_ID, "First"], [SECOND_ID, "Second"]] as const) {
+        await value.ipc.invoke(
+          DETACHED_CHAT_IPC.open,
+          eventFor(value.main.webContents),
+          { conversationId, title, draft: "" },
+        );
+      }
+      const [first, second] = value.popups;
+      await value.ipc.invoke(DETACHED_CHAT_IPC.close, eventFor(first!.webContents), "kept draft");
+      await afterIpcReply();
+      expect(first!.destroyed).toBe(true);
+      expect(second!.destroyed).toBe(false);
+      expect(value.main.destroyed).toBe(false);
+      expect(value.coordinator.summaries().map((summary) => summary.conversationId)).toEqual([SECOND_ID]);
+      await expect(value.ipc.invoke(
+        DETACHED_CHAT_IPC.close,
+        eventFor(value.main.webContents),
+        "",
+      )).rejects.toThrow("Rejected untrusted renderer request");
+      await afterIpcReply();
+      expect(value.main.destroyed).toBe(false);
+      expect(value.docked).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(value);
+    }
+  });
+
   it("docks only after an explicit dock closes; native close stays silent", async () => {
     let value: Fixture;
     const dockObservations: Array<{ destroyed: boolean; summaries: number }> = [];

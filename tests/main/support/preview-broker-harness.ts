@@ -37,6 +37,7 @@ export function createPreviewBrokerElectronState() {
       on(name: string, handler: (...args: unknown[]) => void): void;
       getURL(): string;
       isDestroyed(): boolean;
+      focused: boolean;
       loading: boolean;
       crashed: boolean;
       stop: ReturnType<typeof vi.fn>;

@@ -404,7 +404,7 @@ describe("streamed agent text", () => {
     const { default: App } = await import("../../src/renderer/src/App");
     await renderReadyTranscript(<App />);
     for (const [name, shortcut] of [["New chat", "⌘N"], ["Toggle project navigation", "⌘B"]] as const) {
-      const button = screen.getAllByRole("button", { name, exact: true })
+      const button = screen.getAllByRole("button", { name })
         .find((candidate) => candidate.classList.contains("icon-button"))!;
       fireEvent.pointerEnter(button, { pointerType: "mouse" });
       await waitFor(() => expect(document.querySelector('[role="tooltip"] kbd')).toHaveTextContent(shortcut), { timeout: 2_000 });

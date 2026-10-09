@@ -202,16 +202,15 @@ function estimateTypographyScale(options: TimelineRowEstimateOptions): number {
 }
 
 function estimateAnswerMaxWidth(scale: InterfaceScale | undefined): number {
-  if (scale === "compact") return 720;
-  if (scale === "comfortable" || scale === "large") return 780;
-  return 760;
+  if (scale === "compact") return 680;
+  if (scale === "comfortable" || scale === "large") return 740;
+  return 720;
 }
 
 function estimateRequestMaxWidth(scale: InterfaceScale | undefined): number {
-  if (scale === "compact") return 640;
-  if (scale === "comfortable") return 700;
-  if (scale === "large") return 720;
-  return 680;
+  if (scale === "compact") return 544;
+  if (scale === "comfortable" || scale === "large") return 592;
+  return 576;
 }
 
 function estimateTurnGap(density: ResponseDensity | undefined): number {

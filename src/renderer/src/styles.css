@@ -94,8 +94,8 @@
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-fade: ease-out;
   --ui-control-height: 32px;
-  --transcript-max-width: 760px;
-  --final-answer-max-width: 760px;
+  --transcript-max-width: 720px;
+  --final-answer-max-width: 720px;
   --commentary-max-width: 740px;
   --user-request-max-width: 80%;
   --composer-max-width: 860px;
@@ -133,8 +133,8 @@
   --text-xl: 22px;
   --ui-control-height: 30px;
   --text-diff: 12px;
-  --transcript-max-width: 720px;
-  --final-answer-max-width: 720px;
+  --transcript-max-width: 680px;
+  --final-answer-max-width: 680px;
   --commentary-max-width: 700px;
   --user-request-max-width: 80%;
   --composer-max-width: 760px;
@@ -156,8 +156,8 @@
   --text-xl: 26px;
   --ui-control-height: 35px;
   --text-diff: 13px;
-  --transcript-max-width: 780px;
-  --final-answer-max-width: 780px;
+  --transcript-max-width: 740px;
+  --final-answer-max-width: 740px;
   --commentary-max-width: 760px;
   --user-request-max-width: 80%;
   --composer-max-width: 900px;
@@ -179,8 +179,8 @@
   --text-xl: 28px;
   --ui-control-height: 38px;
   --text-diff: 14px;
-  --transcript-max-width: 780px;
-  --final-answer-max-width: 780px;
+  --transcript-max-width: 740px;
+  --final-answer-max-width: 740px;
   --commentary-max-width: 780px;
   --user-request-max-width: 80%;
   --composer-max-width: 940px;
@@ -11506,9 +11506,6 @@ button.sent-attachment-open:hover {
   margin-top: 0;
 }
 
-.response-turn .response-markdown > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) {
-  max-width: 68ch;
-}
 
 .turn-final-answer-document .response-markdown > :last-child {
   margin-bottom: 0;

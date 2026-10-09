@@ -628,7 +628,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
     typeDestinationUrl,
   });
   await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
-  await expect(browserTabs).toHaveCount(1);
+  await expect(browserTabs).toHaveCount(0);
   await expect.poll(() => app.nativePreviewIsVisible(primaryPreviewUrl)).toBe(true);
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({

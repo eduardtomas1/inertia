@@ -420,7 +420,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     };
     await expectButtonExpansionAnchored(
       ".turn-run-details-toggle",
-      "Execution transcript",
+      "Diagnostics",
     );
     await expectExpansionAnchored(".turn-changed-files > summary");
 

@@ -505,17 +505,14 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(expandedWork).toBeGreaterThan(collapsed);
     expect(expandedWork).toBeLessThan(collapsed + 200);
     expect(expandedGroups).toBeGreaterThan(expandedWork + 2_000);
-    expect(expandedRun).toBeGreaterThan(collapsed + 100);
-    const mediumRun = estimateTimelineRowSize(item, {
-      availableWidth: 600,
-      runDetailsExpanded: true,
-    });
-    const narrowRun = estimateTimelineRowSize(item, {
-      availableWidth: 400,
-      runDetailsExpanded: true,
-    });
-    expect(mediumRun).toBeGreaterThan(expandedRun + 100);
-    expect(narrowRun).toBeGreaterThan(mediumRun + 150);
+    const runDetailsCost = expandedRun - collapsed;
+    expect(runDetailsCost).toBeGreaterThan(expandedWork - collapsed + 30);
+    expect(runDetailsCost).toBeLessThan(expandedWork - collapsed + 40);
+    for (const availableWidth of [600, 400]) {
+      const narrowCost = estimateTimelineRowSize(item, { availableWidth, runDetailsExpanded: true })
+        - estimateTimelineRowSize(item, { availableWidth });
+      expect(Math.abs(narrowCost - runDetailsCost)).toBeLessThanOrEqual(1);
+    }
 
     const oneFile = buildItem({ id: "one-file", gitArtifact: artifact("one-file", 1) });
     const manyFiles = buildItem({ id: "many-files", gitArtifact: artifact("many-files", 80) });
@@ -606,7 +603,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     const quietEstimate = estimateTimelineRowSize(quiet);
     expect(estimateTimelineRowSize(warning)).toBeGreaterThanOrEqual(quietEstimate + 50);
     expect(estimateTimelineRowSize(quiet, { runDetailsExpanded: true }))
-      .toBeGreaterThan(quietEstimate + 100);
+      .toBeGreaterThan(quietEstimate + 50);
   });
 
   it("models commentary growth without inflating collapsed settled history", () => {
@@ -636,7 +633,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       .toBeGreaterThan(estimateTimelineRowSize(settled) + 500);
   });
 
-  it("reserves visible space for approvals, provider questions, warnings, and failures", () => {
+  it("reserves visible space for approvals and provider questions and folds failures behind their row", () => {
     const base = buildItem({ id: "base-active", status: "running", answer: "" });
     const approvalItem = buildItem({
       id: "approval",
@@ -677,10 +674,11 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(base, { runDetailsExpanded: true })).toBe(baseEstimate);
     expect(estimateTimelineRowSize(approvalItem)).toBeGreaterThan(baseEstimate + 100);
     expect(estimateTimelineRowSize(questionItem)).toBeGreaterThan(baseEstimate + 180);
-    const visibleFailureDelta = estimateTimelineRowSize(failedItem)
-      - estimateTimelineRowSize(failedBase);
-    expect(visibleFailureDelta).toBeGreaterThan(0);
-    expect(visibleFailureDelta).toBeLessThanOrEqual(80);
+    expect(estimateTimelineRowSize(failedItem)).toBe(estimateTimelineRowSize(failedBase));
+    const openedFailureDelta = estimateTimelineRowSize(failedItem, { workDetailsExpanded: true })
+      - estimateTimelineRowSize(failedBase, { workDetailsExpanded: true });
+    expect(openedFailureDelta).toBeGreaterThan(0);
+    expect(openedFailureDelta).toBeLessThanOrEqual(80);
   });
 
   it("does not reserve a hidden row for an expected non-Git artifact absence", () => {
@@ -785,7 +783,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(timeline.at(-1)?.id).toBe("turn-599");
     expect(shouldVirtualizeTimeline(timeline.length)).toBe(true);
     expect(buildTimelineMinimapMarkers(responseTurns(timeline))).toHaveLength(40);
-    expect(estimates.every((estimate) => Number.isInteger(estimate) && estimate >= 190)).toBe(true);
+    expect(estimates.every((estimate) => Number.isInteger(estimate) && estimate >= 160)).toBe(true);
     expect(estimates.reduce((total, estimate) => total + estimate, 0)).toBeLessThan(count * 430);
 
     const stable = stabilizeResponseTimeline(timeline, []);

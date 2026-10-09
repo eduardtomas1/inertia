@@ -364,11 +364,18 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(completedTurn.locator('[data-turn-layer="agent-execution"] [data-turn-layer="final-answer"]')).toHaveCount(0);
     await expect(completedTurn.locator('[data-turn-layer="final-answer"]')).toContainText("The provider route now");
     await expect(completedTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
-      .toHaveText("Codex · OpenAI · GPT-5.6");
+      .toHaveCount(0);
     const turnMetaPrimary = completedTurn.locator(".turn-meta-primary");
     const runDetailsToggle = completedTurn.getByRole("button", { name: "Run details" });
     const runDetails = completedTurn.locator(".turn-run-details");
-    await expect(turnMetaPrimary).toContainText("Completed");
+    const footerOpacity = (): Promise<string> =>
+      turnMetaPrimary.evaluate((element) => getComputedStyle(element).opacity);
+    await page.mouse.move(1, 1);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await expect.poll(footerOpacity).toBe("0");
+    await runDetailsToggle.focus();
+    await expect.poll(footerOpacity).toBe("1");
+    await expect(turnMetaPrimary).not.toContainText("Completed");
     await expect(turnMetaPrimary).toContainText("Worked 42s");
     await expect(turnMetaPrimary).not.toContainText(codexSelection.harnessId);
     await expect(turnMetaPrimary).not.toContainText(codexSelection.backendProfileId);
@@ -377,13 +384,17 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await runDetailsToggle.click();
     await expect(runDetailsToggle).toHaveAttribute("aria-expanded", "true");
     await expect(runDetails).toBeVisible();
+    await expect(runDetails.getByRole("list", { name: "Agent work transcript" })).toBeVisible();
+    await expect(runDetails).not.toContainText("Harness ID");
+    const diagnosticsToggle = runDetails.getByRole("button", { name: "Diagnostics" });
+    await expect(diagnosticsToggle).toHaveAttribute("aria-expanded", "false");
+    await diagnosticsToggle.click();
+    await expect(diagnosticsToggle).toHaveAttribute("aria-expanded", "true");
     await expect(runDetails).toContainText("Harness ID");
     await expect(runDetails).toContainText(codexSelection.harnessId);
     await expect(runDetails).toContainText("Requested alias");
     await expect(runDetails).toContainText(codexSelection.alias ?? "Not requested");
     await expect(runDetails).toContainText("Session continuation");
-    await expect(runDetails).toContainText("Execution transcript");
-    await expect(runDetails.getByRole("list", { name: "Agent work transcript" })).toBeVisible();
     await captureElementScenario("completed-run-details", completedTurn.locator(".turn-meta"));
     await runDetailsToggle.click();
     await expect(runDetailsToggle).toHaveAttribute("aria-expanded", "false");
@@ -473,7 +484,15 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
 
     const failedTurn = page.locator(`[data-turn-id="${failed.turn.id}"]`);
     await revealTurn(failedTurn, failed.turn.id);
-    await expect(failedTurn.locator(".turn-settled-summary")).toContainText("Failed after 42s · 2 actions");
+    const failedSummary = failedTurn.locator(".turn-settled-summary");
+    await expect(failedSummary).toContainText(
+      "Failed after 42s · The provider connection closed before verification completed.",
+    );
+    await expect(failedSummary).toContainText("Details");
+    await expect(failedTurn.locator(".agent-activity.is-failed")).toHaveCount(0);
+    await expect(failedTurn.locator("[data-turn-failure-diagnostics]")).toHaveCount(0);
+    await failedSummary.click();
+    await expect(failedSummary).toHaveAttribute("aria-expanded", "true");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
     const failureDiagnostics = failedTurn.locator("[data-turn-failure-diagnostics]");

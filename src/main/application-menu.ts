@@ -14,6 +14,7 @@ export function applicationMenuTemplate(platform: NodeJS.Platform): MenuItemCons
         ? [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }]
         : [{ role: "minimize" }, { role: "zoom" }, close],
     },
+    { role: "help", submenu: [] },
   ];
 }
 

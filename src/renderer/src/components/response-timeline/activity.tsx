@@ -12,7 +12,7 @@ import {
 import {
   Check,
   ChevronDown,
-  CircleCheck,
+  ChevronRight,
   CircleDot,
   Clock,
   Code2,
@@ -48,6 +48,7 @@ import {
   resolveActivityGroupWindow,
   summarizeActivities,
   turnStatusLabel,
+  workStatusLabel,
   workSummaryLabel,
   type ActivityAttentionSeverity,
   type ActivityWorkKind,
@@ -1066,7 +1067,6 @@ export function WorkLog({
   const workStream = exchange.length > 0
     ? stream.filter((entry) => !exchange.includes(entry))
     : stream;
-  const hasFoldableDetails = workStream.length > 0 || supplementalCount > 0;
   const status = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
     ? "limited"
     : turn.agentTurn.status === "failed"
@@ -1074,16 +1074,26 @@ export function WorkLog({
     : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
       ? "stopped"
       : "completed";
+  const failureRow = status === "failed"
+    || status === "limited"
+    || failureDiagnostics.length > 0;
+  const latestFailure = failureDiagnostics.at(-1);
+  const hasFoldableDetails = workStream.length > 0
+    || supplementalCount > 0
+    || failureDiagnostics.length > 0
+    || (failureRow && attentionGroup !== null);
   const summaryContent = (
     <>
       {status === "failed"
         ? <TriangleAlert size={14} aria-hidden="true" />
         : status === "limited"
           ? <Clock size={14} aria-hidden="true" />
-        : status === "stopped"
-          ? <CircleDot size={14} aria-hidden="true" />
-          : <CircleCheck size={14} aria-hidden="true" />}
-      <span>{workSummaryLabel(turn)}</span>
+          : null}
+      <span>
+        {latestFailure
+          ? `${workStatusLabel(turn)} · ${latestFailure.title}`
+          : workSummaryLabel(turn)}
+      </span>
     </>
   );
 
@@ -1107,8 +1117,8 @@ export function WorkLog({
             {...anchorToggleHandlers}
           >
             {summaryContent}
-            <small>{expanded ? "Hide details" : "Details"}</small>
-            <ChevronDown size={14} className="turn-work-chevron" aria-hidden="true" />
+            {failureRow && <small>Details</small>}
+            <ChevronRight size={14} className="turn-work-chevron" aria-hidden="true" />
           </summary>
           <div id={detailsId} hidden={!expanded}>
             {expanded && (
@@ -1126,6 +1136,23 @@ export function WorkLog({
                 onAfterToggle={onAfterToggle}
               />
             )}
+            {expanded && failureRow && attentionGroup && (
+              <ActivityGroup
+                entry={attentionGroup}
+                settled
+                revealLatestFailure
+                onBeforeToggle={onBeforeToggle}
+                onAfterToggle={onAfterToggle}
+              />
+            )}
+            {expanded && failureDiagnostics.map((activity) => (
+              <Suspense fallback={null} key={activity.id}>
+                <FailureDiagnostics
+                  turn={turn.agentTurn}
+                  activity={activity}
+                />
+              </Suspense>
+            ))}
           </div>
         </details>
       )}
@@ -1134,24 +1161,14 @@ export function WorkLog({
           {summaryContent}
         </div>
       )}
-      {attentionGroup && (
+      {!failureRow && attentionGroup && (
         <ActivityGroup
           entry={attentionGroup}
           settled
-          revealLatestFailure={status === "failed" || status === "limited"}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />
       )}
-      {failureDiagnostics.map((activity) => (
-        <Suspense fallback={null} key={activity.id}>
-          <FailureDiagnostics
-            turn={turn.agentTurn}
-            activity={activity}
-            anchor={[onBeforeToggle, onAfterToggle]}
-          />
-        </Suspense>
-      ))}
       <ExecutionStream
         entries={exchange}
         label="Follow-up messages"

@@ -1,0 +1,197 @@
+import { readFileSync } from "node:fs";
+
+import { fireEvent, render, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import { providerNativeBackendProfile } from "../../src/shared/model-routing";
+
+const conversationId = "45454545-4545-4545-8545-454545454545";
+
+function turn(
+  id: string,
+  providerId: "claude" | "codex",
+  requestedAt: string,
+  update: Partial<AgentTurn> = {},
+): AgentTurn {
+  const harnessId = providerId === "claude" ? "claude-agent-sdk" : "codex-app-server";
+  const backendProfileId = providerNativeBackendProfile(providerId).id;
+  const model = providerId === "claude" ? "claude-sonnet-4-6" : "gpt-5.6";
+  return {
+    id,
+    conversationId,
+    runId: `run-${id}`,
+    userMessageId: `user-${id}`,
+    terminalAssistantMessageId: `assistant-${id}`,
+    providerId,
+    modelSelection: {
+      harnessId,
+      backendProfileId,
+      backendProfileDisplayName: providerNativeBackendProfile(providerId).displayName,
+      modelId: model,
+      alias: null,
+      reasoningEffort: null,
+      contextWindowOverride: null,
+      providerOptions: {},
+      capabilities: [],
+      backendConfigurationRevision: 1,
+    },
+    continuationIdentity: {
+      harnessId,
+      backendProfileId,
+      backendConfigurationRevision: 1,
+      modelIdentity: model,
+      endpointIdentity: null,
+    },
+    harnessId,
+    backendProfileId,
+    model,
+    modelAlias: null,
+    reasoningEffort: "",
+    interactionMode: "build",
+    accessMode: "auto-edit",
+    providerSessionBefore: null,
+    providerSessionAfter: `session-${id}`,
+    requestedAt,
+    startedAt: requestedAt,
+    completedAt: requestedAt,
+    status: "completed",
+    terminalReason: "provider-completed",
+    checkpointId: null,
+    usageAtStart: null,
+    usageAtCompletion: null,
+    configurationRevision: 1,
+    association: "authoritative",
+    createdAt: requestedAt,
+    updatedAt: requestedAt,
+    ...update,
+  };
+}
+
+function messages(agentTurn: AgentTurn, request: string, answer: string): ChatMessage[] {
+  return [
+    { id: agentTurn.userMessageId, conversationId, turnId: agentTurn.id, role: "user", content: request, attachments: [], createdAt: agentTurn.requestedAt },
+    { id: agentTurn.terminalAssistantMessageId!, conversationId, turnId: agentTurn.id, role: "assistant", content: answer, attachments: [], createdAt: agentTurn.completedAt! },
+  ];
+}
+
+function timeline(turns: AgentTurn[], providerIdentityLabels?: Record<string, string>) {
+  return render(<ResponseTimeline
+    turns={turns}
+    messages={turns.flatMap((agentTurn) => messages(agentTurn, `Request ${agentTurn.id}`, `Answer ${agentTurn.id}`))}
+    activities={[]}
+    reasonings={[]}
+    plans={[]}
+    checkpoints={[]}
+    projectRoot="/workspace"
+    projectId="project-quiet-turn-chrome"
+    conversationId={conversationId}
+    streamingText=""
+    streamingReasoning=""
+    streamingChannel={null}
+    approvals={[]}
+    inputRequests={[]}
+    showTimestamps={false}
+    showThinking
+    defaultCodeWrap={false}
+    autoCollapseWorkLog
+    showChangedFileSummaries={false}
+    checkpointRestoreDisabled
+    providerIdentityLabels={providerIdentityLabels}
+    onRespondToApproval={async () => undefined}
+    onRespondToInput={async () => undefined}
+    onRevertCheckpoint={() => undefined}
+    onOpenTurnDiff={() => undefined}
+    onCompareTurnArtifacts={() => undefined}
+    onOpenTurnFile={() => undefined}
+    onStop={() => undefined}
+  />);
+}
+
+let stylesheet: HTMLStyleElement | null = null;
+
+function loadStyles(): void {
+  stylesheet = document.createElement("style");
+  stylesheet.textContent = readFileSync("src/renderer/src/styles.css", "utf8");
+  document.head.append(stylesheet);
+}
+
+afterEach(() => {
+  stylesheet?.remove();
+  stylesheet = null;
+});
+
+function turnElement(id: string): HTMLElement {
+  return document.querySelector<HTMLElement>(`[data-turn-id="${id}"]`)!;
+}
+
+describe("quiet turn chrome", () => {
+  it("shows the answer identity only on the turn whose provider changed", () => {
+    timeline([
+      turn("turn-codex-a", "codex", "2026-09-01T10:00:00.000Z"),
+      turn("turn-codex-b", "codex", "2026-09-01T10:01:00.000Z"),
+      turn("turn-claude", "claude", "2026-09-01T10:02:00.000Z"),
+      turn("turn-claude-again", "claude", "2026-09-01T10:03:00.000Z"),
+    ]);
+
+    for (const id of ["turn-codex-a", "turn-codex-b", "turn-claude-again"]) {
+      expect(turnElement(id).querySelector(".final-answer-identity")).toBeNull();
+    }
+    const identity = within(turnElement("turn-claude")).getByLabelText("Historical answer identity");
+    expect(identity).toHaveTextContent("Claude · Anthropic · claude-sonnet-4-6");
+    expect(document.querySelectorAll(".final-answer-identity")).toHaveLength(1);
+  });
+
+  it("keeps the request bubble free of a You and time row", () => {
+    timeline([turn("turn-bubble", "codex", "2026-09-01T10:00:00.000Z")]);
+
+    const request = within(turnElement("turn-bubble")).getByRole("article", { name: "Your request" });
+    expect(request.querySelector(".message-meta")).toBeNull();
+    expect(request.querySelector("time")).toBeNull();
+    expect(request).toHaveTextContent(/^Request turn-bubble$/u);
+  });
+
+  it("hides the footer at rest and reveals it while the turn holds focus or its details are open", () => {
+    loadStyles();
+    timeline([turn("turn-footer", "codex", "2026-09-01T10:00:00.000Z", {
+      completedAt: "2026-09-01T10:00:42.000Z",
+    })]);
+    const footer = within(turnElement("turn-footer")).getByRole("contentinfo", {
+      name: "Final answer actions and run metadata",
+    });
+    const primary = footer.querySelector<HTMLElement>(".turn-meta-primary")!;
+    const runDetails = within(footer).getByRole("button", { name: "Run details" });
+
+    expect(footer).not.toHaveTextContent("Completed");
+    expect(footer).toHaveTextContent("Worked 42s");
+    expect(getComputedStyle(primary).opacity).toBe("0");
+    expect(getComputedStyle(primary).visibility).not.toBe("hidden");
+    expect(getComputedStyle(primary).display).not.toBe("none");
+    runDetails.focus();
+    expect(runDetails).toHaveFocus();
+    expect(stylesheet!.textContent).toMatch(
+      /\.response-turn:is\(:hover, :focus-within\) \.turn-meta-primary,\n\.turn-meta\[data-run-details-expanded\] \.turn-meta-primary \{\n {2}opacity: 1;/u,
+    );
+    fireEvent.click(runDetails);
+    runDetails.blur();
+    expect(footer).toHaveAttribute("data-run-details-expanded", "true");
+    expect(getComputedStyle(primary).opacity).toBe("1");
+  });
+
+  it("keeps the twelve run fields behind a Diagnostics disclosure inside Run details", () => {
+    timeline([turn("turn-diagnostics", "codex", "2026-09-01T10:00:00.000Z")]);
+    const footer = within(turnElement("turn-diagnostics")).getByRole("contentinfo");
+
+    fireEvent.click(within(footer).getByRole("button", { name: "Run details" }));
+    const diagnostics = within(footer).getByRole("button", { name: "Diagnostics" });
+    expect(diagnostics).toHaveAttribute("aria-expanded", "false");
+    expect(footer.querySelector("dt")).toBeNull();
+
+    fireEvent.click(diagnostics);
+    expect(diagnostics).toHaveAttribute("aria-expanded", "true");
+    const fields = document.getElementById(diagnostics.getAttribute("aria-controls")!)!;
+    expect([...fields.querySelectorAll("dt")].map(({ textContent }) => textContent)).toContain("Harness ID");
+    expect(fields).toHaveTextContent("codex-app-server");
+  });
+});

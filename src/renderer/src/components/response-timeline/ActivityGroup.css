@@ -11,9 +11,9 @@
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 26px;
+  min-height: 24px;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   margin: 0;
   padding: 0 4px;
   border: 0;
@@ -46,8 +46,8 @@
 }
 
 .turn-activity-group-mark svg {
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
 }
 
 .turn-activity-group[data-activity-group-state="folded"] .turn-activity-group-mark {
@@ -207,8 +207,8 @@
 }
 
 .turn-activity-group .agent-activity-icon svg {
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
   margin: 0;
   color: inherit;
   animation: none;

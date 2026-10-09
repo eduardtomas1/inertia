@@ -938,9 +938,14 @@ describe("authoritative response timeline", () => {
       },
       configurationRevision: 7,
     });
+    const previous = agentTurn("turn-codex", "user-codex", {
+      terminalAssistantMessageId: "assistant-codex",
+    });
     const html = renderToStaticMarkup(createElement(ResponseTimeline, {
-      turns: [turn],
+      turns: [previous, turn],
       messages: [
+        message("user-codex", previous.id, "user", "Start with Codex", previous.requestedAt),
+        message("assistant-codex", previous.id, "assistant", "Codex answer", previous.completedAt!),
         message("user-kimi", turn.id, "user", "Use Kimi", turn.requestedAt),
         message("assistant-kimi", turn.id, "assistant", "Kimi answer", turn.completedAt!),
       ],
@@ -971,6 +976,8 @@ describe("authoritative response timeline", () => {
     }));
 
     expect(html).toContain('data-final-answer-identity="historical-model-selection">Claude · Kimi · K3</span>');
+    expect(html.match(/data-final-answer-identity=/gu)).toHaveLength(1);
+    expect(html.indexOf("data-final-answer-identity")).toBeGreaterThan(html.indexOf("Codex answer"));
     expect(html).toContain("<span>Run details</span>");
     expect(html).not.toContain("Claude harness ·");
   });
@@ -1038,7 +1045,7 @@ describe("authoritative response timeline", () => {
 
     const footerStart = html.indexOf('aria-label="Final answer actions and run metadata"');
     const primaryEnd = html.indexOf("</div>", footerStart);
-    const detailsEnd = html.indexOf("</dl>", primaryEnd);
+    const detailsEnd = html.indexOf("</footer>", primaryEnd);
     const footerPrimary = html.slice(footerStart, primaryEnd);
     const runDetails = html.slice(primaryEnd, detailsEnd);
 
@@ -1046,8 +1053,8 @@ describe("authoritative response timeline", () => {
     expect(html.indexOf("1 file changed")).toBeGreaterThan(footerStart);
     expect(footerPrimary).toContain('aria-label="Copy final answer"');
     expect(footerPrimary).toContain(`dateTime="${turn.completedAt}"`);
-    expect(footerPrimary).toContain('data-turn-status="completed">Completed</span>');
-    expect(footerPrimary).toContain('class="turn-duration">Worked 7s</span>');
+    expect(footerPrimary).not.toContain(">Completed</span>");
+    expect(footerPrimary).toContain('class="turn-duration" data-turn-status="completed">Worked 7s</span>');
     expect(footerPrimary).toContain('aria-expanded="false"');
     expect(footerPrimary).toContain('aria-controls="turn-run-details-turn-footer"');
     expect(footerPrimary).toContain("<span>Run details</span>");

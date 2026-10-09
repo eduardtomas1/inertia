@@ -44,6 +44,7 @@ export {
   turnQueueElapsedMs,
   turnStatusLabel,
   turnTimingLabels,
+  workStatusLabel,
   workSummaryLabel,
 } from "./response-timeline/timing";
 export {

@@ -126,7 +126,8 @@ describe("provider handoff divider", () => {
     expect(row).toHaveAttribute("aria-label", separator.getAttribute("aria-label"));
     const pill = row.querySelector(".provider-handoff-marker")!;
     expect(pill).toHaveAttribute("aria-hidden", "true");
-    expect(pill).toHaveTextContent("Context handoff·Claude · claude-sonnet-4-6Codex · gpt-5.6·2 earlier messages carried");
+    expect(pill).toHaveTextContent("Context handoff·Claude · claude-sonnet-4-6→Codex · gpt-5.6·2 earlier messages carried");
+    expect(row.querySelector("svg")).toBeNull();
 
     const before = container.querySelector('[data-turn-id="turn-claude"]')!;
     const after = container.querySelector('[data-turn-id="turn-codex"]')!;

@@ -1,7 +1,6 @@
 import type { AgentActivity, ChatMessage } from "@shared/contracts";
 import { contextCompactionLabel } from "@shared/context-compaction";
 import type { ResponseTimelineItem } from "../../utils/responseTimeline";
-import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import "./ContextCompactionRow.css";
 
 const COMPACTED_CONTEXT = "Compacted context";
@@ -35,7 +34,6 @@ export function ContextCompactionMarker({
     >
       <span aria-hidden="true" />
       <small className="context-compaction-marker" aria-hidden="true">
-        <ContextCompactionIcon />
         <span>{live ? COMPACTING_CONTEXT : COMPACTED_CONTEXT}</span>
         {detail && <i>·</i>}
         {detail && <span>{detail}</span>}

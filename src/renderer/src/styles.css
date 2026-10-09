@@ -7510,8 +7510,7 @@ button.turn-agents-line:hover {
 .plan-progress { height: 3px; background: var(--fill); }
 .plan-progress > span { display: block; height: 100%; background: var(--accent); transition: width var(--dur-fast) var(--ease); }
 .plan-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
-.plan-copy-button { display: grid; width: 26px; height: 26px; place-items: center; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; }
-.plan-copy-button:hover { color: var(--text); background: var(--fill); }
+.plan-copy-button.icon-button { width: var(--control-height-small); height: var(--control-height-small); }
 .plan-percent { color: var(--text-muted); font-size: var(--text-xs); }
 .plan-scroll { min-height: 0; flex: 1; overflow-y: auto; }
 .plan-summary { margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-prose); }

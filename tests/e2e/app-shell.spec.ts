@@ -313,9 +313,8 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
     expect(readyGeometry.borderRadius).toBe("50%");
     await expect.poll(() => readySend.evaluate((button) =>
-      getComputedStyle(button).backgroundColor)).not.toBe(
-      disabledStyle.background,
-    );
+      getComputedStyle(button).opacity)).toBe("1");
+    expect(readyGeometry.background).toBe(disabledStyle.background);
     expect(readyGeometry.boxShadow).toBe("none");
     expect(readyGeometry.filter).toBe("none");
     await expect(textbox).toBeFocused();

@@ -428,7 +428,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     fireEvent.click(within(document.querySelector<HTMLElement>(".diff-selection-popover")!)
       .getByRole("button", { name: "Note" }));
     expect(screen.getByText("2 selected lines")).toBeInTheDocument();
-    expect(screen.getByText(/Shift\+Enter/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ after" })).toHaveAttribute("aria-keyshortcuts", "Shift+Enter");
   });
 
   it("names each review note control after its note", () => {
@@ -559,8 +559,8 @@ describe("WorkspaceChangesPanel repository scope", () => {
     const rootFile = screen.getByText("README.md", { exact: true })
       .closest("button");
     expect(rootFile).not.toBeNull();
-    expect(within(rootFile!).getAllByText("unstaged", { exact: true }))
-      .toHaveLength(1);
+    expect(rootFile!.querySelector(".change-file-status"))
+      .toHaveAttribute("title", "Modified, unstaged");
     expect(screen.queryByText("Main.java", { exact: true })).not.toBeInTheDocument();
 
     fireEvent.change(repositoryScope, { target: { value: "modules/alpha" } });
@@ -1279,9 +1279,9 @@ describe("WorkspaceChangesPanel repository scope", () => {
       node.textContent,
       node.getAttribute("title"),
     ])).toEqual([
-      ["C", "Copied"],
-      ["T", "Type changed"],
-      ["?", "Unknown"],
+      ["C", "Copied, unstaged"],
+      ["T", "Type changed, unstaged"],
+      ["?", "Unknown, unstaged"],
       ["U", "Untracked"],
     ]);
     expect(screen.getByRole("combobox", { name: "Repository and changed file" }))

@@ -55,6 +55,7 @@ import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
 import { projectPathContextMenu } from "../utils/contextMenu";
+import { rememberedExpandedFolders, rememberExpandedFolders } from "../utils/filesPanelExpandedFolders";
 import { useStableActions } from "../hooks/useStableController";
 import { buildFileTreeGitIndex, type FileTreeGitState } from "../utils/fileTreeGit";
 import { directoryChain, freshWorkspaceDirectoryPages, visibleDirectoryEntries } from "../utils/workspaceDirectoryPages";
@@ -243,8 +244,12 @@ export function FilesPanel({
   const directoryPagesRef = useRef(directoryPages);
   const rootInputRef = useRef({ entries, entriesTruncated });
   const directoryGeneration = useRef(0);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
+  const expandedFoldersKey = `${projectId}:${conversationId ?? "project"}`;
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
+    () => rememberedExpandedFolders(expandedFoldersKey),
+  );
   const expandedPathsRef = useRef(expandedPaths);
+  const restoredExpandedPathsRef = useRef(false);
   const [loadingDirectories, setLoadingDirectories] = useState<Set<string>>(() => new Set());
   const [directoryErrors, setDirectoryErrors] = useState<Map<string, string>>(() => new Map());
   const [query, setQuery] = useState("");
@@ -627,6 +632,18 @@ export function FilesPanel({
     }
   }, [entries, entriesTruncated, loadDirectory, selectedPath]);
 
+  useEffect(() => {
+    if (restoredExpandedPathsRef.current) return;
+    restoredExpandedPathsRef.current = true;
+    for (const path of expandedPathsRef.current) {
+      if (!directoryPagesRef.current.has(path)) void loadDirectory(path);
+    }
+  }, [loadDirectory]);
+
+  useEffect(() => {
+    rememberExpandedFolders(expandedFoldersKey, expandedPaths);
+  }, [expandedFoldersKey, expandedPaths]);
+
   const updateQuery = useCallback((value: string): void => {
     ++searchGeneration.current;
     markWorkspaceFileSearchEdit(projectId, conversationId);
@@ -943,7 +960,7 @@ export function FilesPanel({
             </div>
             <div className={`${FILE_PREVIEW_CLASS}-metadata`}>
               {selectedPath && <FileGitBadge index={gitIndex} path={selectedPath} />}
-              {previewLanguage && (
+              {previewLanguage && !markdownPreview && (
                 <span
                   className={FILE_LANGUAGE_CLASS}
                   data-language-family={previewLanguage.family}

@@ -41,8 +41,7 @@ import {
 import {
   changedFilePathParts,
   changedFileStatusCode,
-  changedFileStatusLabel,
-  changedFileWorkingState,
+  changedFileStatusTitle,
   ChangesPanel,
   type ChangesPanelProps,
   type DiffSelection,
@@ -832,9 +831,9 @@ export function WorkspaceChangesPanel({
                     onContextMenu={menu?.onContextMenu}
                     onKeyDown={menu?.onKeyDown}
                   >
-                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
+                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span></span>
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
-                    <span className="workspace-repository-file-stats"><small>{changedFileWorkingState(file)}</small><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
+                    <span className="workspace-repository-file-stats"><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>
                   <IconButton
                     label={`Open ${file.path} from ${label}`}
@@ -923,14 +922,14 @@ export function WorkspaceChangesPanel({
     ? workspaceGitRepositoryLabel(projectName, activeRepository.repositoryPath)
     : null;
   const emptyState = !snapshot
-    ? { title: "Loading repositories", detail: "Looking for Git repositories inside this workspace." }
+    ? { title: "Loading repositories", detail: "" }
     : snapshot.repositories.length === 0
-      ? { title: "No Git repositories found", detail: "No Git root was found at the project root or within the bounded module scan." }
+      ? { title: "No Git repositories found", detail: "" }
       : activeRepository?.state === "error"
         ? { title: "Repository unavailable", detail: activeRepository.error ?? "This repository could not be inspected." }
         : activeRepository?.clean && !allRepositoriesClean
-          ? { title: `${activeRepositoryLabel ?? "Repository"} is clean`, detail: "Choose another repository scope to inspect its local changes." }
-          : { title: "No local changes", detail: "The discovered repositories are clean." };
+          ? { title: `${activeRepositoryLabel ?? "Repository"} is clean`, detail: "" }
+          : { title: "No local changes", detail: "" };
 
   return (
     <>
@@ -965,9 +964,7 @@ export function WorkspaceChangesPanel({
       emptyState={emptyState}
       diffEmptyState={{
         title: allRepositoriesClean ? "Repositories are clean" : emptyState.title,
-        detail: allRepositoriesClean
-          ? "There are no modified files to inspect in the discovered repositories."
-          : emptyState.detail,
+        detail: allRepositoriesClean ? "" : emptyState.detail,
       }}
       capabilities={{
         persistentReview: true,

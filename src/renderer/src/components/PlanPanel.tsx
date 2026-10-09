@@ -136,7 +136,6 @@ export function PlanPanel({
         {steps.length === 0 ? !body && (
           <div className="panel-empty plan-empty">
             <h3>No plan yet</h3>
-            <p>Switch the agent to Plan mode to build a step-by-step approach.</p>
           </div>
         ) : (
           <>

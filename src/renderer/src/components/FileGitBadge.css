@@ -2,4 +2,5 @@
 .file-git-badge.is-modified { color: var(--warning); }
 .file-git-badge.is-added { color: var(--status-completed); }
 .file-git-badge.is-deleted, .file-git-badge.is-conflict { color: var(--danger); }
+.file-git-status:empty { display: none; }
 .file-git-status { margin: 0; padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-chrome); overflow-wrap: anywhere; }

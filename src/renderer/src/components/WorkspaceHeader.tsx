@@ -36,7 +36,7 @@ import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
 import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
-import { IconButton } from "./ui";
+import { IconButton, TooltipButton } from "./ui";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
 const WorkspaceHeaderActions = lazy(async () => ({
@@ -316,16 +316,16 @@ export function WorkspaceHeader({
           {showProjectCrumb && (
             <>
               {onCreateConversationInProject ? (
-                <button
+                <TooltipButton
                   type="button"
                   className="header-breadcrumb-project"
                   aria-label={newChatInProjectLabel}
-                  title={newChatInProjectLabel}
+                  tooltip={newChatInProjectLabel}
                   onClick={onCreateConversationInProject}
                 >
                   <ProjectIcon project={project} size={14} />
                   <ProjectName project={project}>{project.name}</ProjectName>
-                </button>
+                </TooltipButton>
               ) : (
                 <span className="header-breadcrumb-project">
                   <ProjectIcon project={project} size={14} />
@@ -353,14 +353,14 @@ export function WorkspaceHeader({
             ) : (
               <h1>
                 {titleMenuAvailable ? (
-                  <button
+                  <TooltipButton
                     ref={(node) => {
                       titleButtonRef.current = node;
                       setMenuTrigger("title", node);
                     }}
                     type="button"
                     className="header-title-button"
-                    title="Chat actions · double-click to rename"
+                    tooltip="Chat actions · double-click to rename"
                     aria-haspopup="menu"
                     aria-expanded={menu === "title"}
                     aria-controls={conversation ? `conversation-actions-${conversation.id}` : undefined}
@@ -380,7 +380,7 @@ export function WorkspaceHeader({
                   >
                     <span className="header-title-text">{title}</span>
                     <ChevronDown size={14} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
-                  </button>
+                  </TooltipButton>
                 ) : (
                   <span className="header-title-text">{title}</span>
                 )}

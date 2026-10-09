@@ -12,6 +12,7 @@ import {
 import { FocusFirstMenuItem } from "./FocusFirstMenuItem";
 import { HeaderMenuGroup } from "./HeaderMenuGroup";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
+import { TooltipButton } from "../ui";
 
 export type HeaderControlPresentation = "toolbar" | "menu";
 
@@ -144,16 +145,16 @@ export function ProjectActionsControl({
     if (!onAddAction) return null;
     return (
       <div className="header-split" role="group" aria-label="Project actions">
-        <button
+        <TooltipButton
           type="button"
           className="header-split-primary"
           aria-label="Add action"
-          title="Add action"
+          tooltip="Add action"
           onClick={addAction}
         >
           <Plus size={14} aria-hidden="true" />
           <span className="header-split-label">Add action</span>
-        </button>
+        </TooltipButton>
       </div>
     );
   }
@@ -162,11 +163,11 @@ export function ProjectActionsControl({
   return (
     <div ref={anchorRef} className="header-split-anchor" data-header-menu="actions">
       <div className="header-split" role="group" aria-label="Project actions">
-        <button
+        <TooltipButton
           type="button"
           className="header-split-primary"
           aria-label={liveRuns > 0 ? `${primaryLabel}, ${liveRuns} running` : primaryLabel}
-          title={primaryAction ? `${primaryLabel} · ${primaryAction.command}` : primaryLabel}
+          tooltip={primaryAction ? `${primaryLabel} · ${primaryAction.command}` : primaryLabel}
           onClick={() => {
             if (primaryAction) run(primaryAction);
             else addAction();
@@ -174,13 +175,13 @@ export function ProjectActionsControl({
         >
           {primaryAction ? <Play size={14} aria-hidden="true" className="header-run-icon" /> : <Plus size={14} aria-hidden="true" />}
           <span className="header-split-label">{primaryAction ? primaryAction.label : "Add action"}</span>
-        </button>
-        <button
+        </TooltipButton>
+        <TooltipButton
           ref={(node) => setMenuTrigger("actions", node)}
           type="button"
           className="header-split-chevron"
           aria-label="Project action options"
-          title="Project action options"
+          tooltip="Project action options"
           aria-haspopup="menu"
           aria-expanded={menu === "actions"}
           aria-controls={menuId}
@@ -189,7 +190,7 @@ export function ProjectActionsControl({
           onClick={() => toggleMenu("actions")}
         >
           <ChevronDown size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       </div>
       {menu === "actions" && (
         <div

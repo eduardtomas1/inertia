@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { WorkspaceHeaderActions } from "../../src/renderer/src/components/workspace-header/WorkspaceHeaderActions";
+import { hoverTooltipText } from "./tooltip-fixtures";
 import type {
   GitStatusSnapshot,
   Project,
@@ -215,7 +216,8 @@ describe("WorkspaceHeader Git split button", () => {
     const primary = screen.getByRole("button", { name: "Commit" });
     expect(primary).toHaveAttribute("aria-disabled", "true");
     expect(primary).not.toBeDisabled();
-    expect(primary).toHaveAttribute("title", "Branch is up to date. Nothing to commit or push.");
+    expect(primary).not.toHaveAttribute("title");
+    expect(hoverTooltipText(primary)).toBe("Branch is up to date. Nothing to commit or push.");
     expect(primary).toHaveAccessibleDescription("Branch is up to date. Nothing to commit or push.");
     fireEvent.click(primary);
     expect(props.onCommit).not.toHaveBeenCalled();

@@ -1351,18 +1351,25 @@ button.header-breadcrumb-project:hover {
 
 .corner-toggle {
   position: relative;
-  display: grid;
-  width: 28px;
+  display: inline-flex;
+  min-width: 28px;
   height: 28px;
-  place-items: center;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 6px;
   border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background-color var(--dur-fast) var(--ease-fade), color var(--dur-fast) var(--ease-fade);
 }
 
-.corner-toggle:hover:not(:disabled),
+.corner-toggle:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--fill);
+}
+
 .corner-toggle[aria-pressed="true"] {
   color: var(--text);
   background: var(--fill-strong);
@@ -1372,22 +1379,11 @@ button.header-breadcrumb-project:hover {
   opacity: var(--disabled-opacity);
 }
 
-.corner-toggle-badge {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-  border-radius: var(--radius-xs);
-  color: var(--accent-text);
-  background: var(--status-working);
-  box-shadow: 0 0 0 2px var(--bg);
+.corner-toggle-count {
+  color: var(--status-working);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  line-height: 16px;
-  text-align: center;
 }
 
 .header-usage-meter-anchor {
@@ -7640,7 +7636,7 @@ button.turn-agents-line:hover {
 .pane-resize-handle.is-horizontal { cursor: row-resize; }
 .pane-resize-handle.is-vertical::after { inset: 0 3px; }
 .pane-resize-handle.is-horizontal::after { inset: 3px 0; }
-.pane-resize-handle:hover::after,
+.pane-resize-handle:hover::after { background: var(--line-strong); }
 .pane-resize-handle:focus-visible::after { background: var(--accent); }
 .terminal-session-grid.is-vertical > .terminal-split-handle { grid-column: 2; grid-row: 1; }
 .terminal-session-grid.is-horizontal > .terminal-split-handle { grid-column: 1; grid-row: 2; }

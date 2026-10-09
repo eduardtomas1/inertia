@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { PanelLayoutControls } from "../../src/renderer/src/components/workspace-header/PanelLayoutControls";
 import type { EnvironmentUsageSummary } from "../../src/renderer/src/utils/environmentSummary";
+import { hoverTooltipText } from "./tooltip-fixtures";
 
 function usage(fiveHourRemaining: number): EnvironmentUsageSummary {
   return {
@@ -89,18 +90,20 @@ describe("corner panel controls and header meter", () => {
     expect(screen.queryByRole("button", { name: /^Usage:/u })).not.toBeInTheDocument();
   });
 
-  it("toggles the terminal and right panel with pressed state and an active background task badge", () => {
+  it("toggles the terminal and right panel with pressed state and an active background task count", () => {
     const props = controls({ terminalOpen: true, rightPanelOpen: true, activeBackgroundTaskCount: 2 });
     render(<PanelLayoutControls {...props} />);
     const terminal = screen.getByRole("button", { name: "Toggle terminal" });
     expect(terminal).toHaveAttribute("aria-pressed", "true");
-    expect(terminal).toHaveAttribute("title", "Toggle terminal (Ctrl+J)");
+    expect(terminal).not.toHaveAttribute("title");
+    expect(hoverTooltipText(terminal)).toBe("Toggle terminal (Ctrl+J)");
     fireEvent.click(terminal);
     expect(props.onToggleTerminal).toHaveBeenCalledOnce();
 
     const panel = screen.getByRole("button", { name: "Toggle right panel, 2 background tasks active" });
     expect(panel).toHaveAttribute("aria-pressed", "true");
-    expect(panel).toHaveTextContent("2");
+    expect(panel).toHaveTextContent(/^2$/u);
+    expect(panel.querySelector(".corner-toggle-count")).toHaveTextContent("2");
     fireEvent.click(panel);
     expect(props.onToggleRightPanel).toHaveBeenCalledOnce();
   });

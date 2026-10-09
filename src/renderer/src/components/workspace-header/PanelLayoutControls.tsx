@@ -9,6 +9,7 @@ import { PanelBottom, PanelRight } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../../utils/environmentSummary";
 import { activeBackgroundTasksLabel } from "../../utils/backgroundTaskRuns";
+import { TooltipButton } from "../ui";
 
 const HeaderUsageMeter = lazy(async () => ({
   default: (await import("./HeaderUsageMeter")).HeaderUsageMeter,
@@ -78,22 +79,22 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           <HeaderUsageMeter usage={usage} onOpenUsage={onOpenUsage} />
         </Suspense>
       )}
-      <button
-        type="button"
+      <TooltipButton
         className="corner-toggle"
+        tooltip={terminalLabel}
         aria-label={terminalAvailable ? "Toggle terminal" : terminalLabel}
-        title={terminalLabel}
+        title={terminalAvailable ? undefined : terminalLabel}
         aria-pressed={terminalOpen}
         disabled={!terminalAvailable}
         onClick={onToggleTerminal}
       >
         <PanelBottom size={16} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
+      </TooltipButton>
+      <TooltipButton
         className="corner-toggle"
+        tooltip={rightPanelLabel}
         aria-label={rightPanelLabel}
-        title={rightPanelLabel}
+        title={rightPanelAvailable ? undefined : rightPanelLabel}
         aria-pressed={rightPanelOpen}
         disabled={!rightPanelAvailable}
         data-right-panel-toggle
@@ -101,9 +102,9 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       >
         <PanelRight size={16} aria-hidden="true" />
         {activeBackgroundTaskCount > 0 && (
-          <span className="corner-toggle-badge" aria-hidden="true">{activeBackgroundTaskCount}</span>
+          <span className="corner-toggle-count" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}
-      </button>
+      </TooltipButton>
     </div>
   );
 });

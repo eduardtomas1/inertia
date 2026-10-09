@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
-import { IconButton } from "../../src/renderer/src/components/ui";
+import { IconButton, TooltipButton } from "../../src/renderer/src/components/ui";
 
 function tooltip(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[role="tooltip"]');
@@ -116,5 +116,19 @@ describe("icon button tooltip", () => {
     expect(tooltip()).toBeNull();
     expect(onPointerEnter).toHaveBeenCalledTimes(1);
     expect(onPointerLeave).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a labelled button keep its own accessible name beside a shorter tooltip", () => {
+    render(<TooltipButton tooltip="Snooze thread" aria-label="Snooze Draft the notes" className="row-action">Z</TooltipButton>);
+    const button = screen.getByRole("button", { name: "Snooze Draft the notes" });
+    expect(button).toHaveClass("row-action");
+    expect(button).not.toHaveClass("icon-button");
+    expect(button).not.toHaveAttribute("title");
+    hover(button);
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(tooltip()).toHaveTextContent(/^Snooze thread$/u);
+    leave(button);
   });
 });

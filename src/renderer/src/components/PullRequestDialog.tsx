@@ -196,7 +196,7 @@ export function PullRequestDialog({
           disabled={busy}
           onChange={(event) => setDraft(event.target.checked)}
         />
-        <span><strong>Create as draft</strong><small>Mark it ready on GitHub after review.</small></span>
+        <span>Create as draft</span>
       </label>}
       {!createdUrl && <p className="commit-stage-note">{integrated ? "The branch must already be pushed. If GitHub CLI is unavailable, continue in your browser." : "Inertia constructs the provider-hosted request URL locally and does not receive hosting credentials."}</p>}
     </DialogShell>

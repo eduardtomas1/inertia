@@ -262,7 +262,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
       className="commit-shell"
       titleId="commit-dialog-title"
       title="Commit changes"
-      description={<><strong>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")}</strong> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></>}
+      description={<>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")} · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></>}
       closeLabel="Close commit dialog"
       closeDisabled={locked}
       onClose={onClose}
@@ -274,8 +274,8 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
     >
       <div className="commit-path-heading">
         <span>Paths to stage and commit</span>
-        <button type="button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths(status?.files.map((file) => file.path) ?? [])}>All</button>
-        <button type="button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths([])}>None</button>
+        <button type="button" className="text-button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths(status?.files.map((file) => file.path) ?? [])}>All</button>
+        <button type="button" className="text-button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths([])}>None</button>
       </div>
       <div className="commit-path-list">
         {status?.files.map((file) => (
@@ -288,11 +288,11 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
                 ? [...new Set([...current, file.path])]
                 : current.filter((path) => path !== file.path))}
             />
-            <span><strong>{file.path}</strong><small>{file.untracked ? "Untracked" : `${file.staged ? "Staged" : ""}${file.staged && file.unstaged ? " + " : ""}${file.unstaged ? "Unstaged" : ""}`}</small></span>
+            <span className="commit-path-name" title={file.path}>{file.path}</span><span className="commit-path-state">{file.untracked ? "Untracked" : `${file.staged ? "Staged" : ""}${file.staged && file.unstaged ? " + " : ""}${file.unstaged ? "Unstaged" : ""}`}</span>
           </label>
         ))}
       </div>
-      <p className="commit-stage-note">Only checked paths will be staged and committed. Review marks never stage files.</p>
+      <p className="commit-stage-note">Review marks never stage files.</p>
       {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
       {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
       {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}

@@ -66,7 +66,7 @@ export function ReviewNoteDialog({ draft, onClose }: {
         <textarea ref={textarea} value={body} maxLength={8_000} rows={6}
           disabled={busy} onChange={(event) => setBody(event.target.value)} />
       </label>
-      {error && <p role="alert">The note could not be saved. Your text is still here; try again.</p>}
+      {error && <p className="dialog-error" role="alert">The note could not be saved. Your text is still here; try again.</p>}
     </DialogShell>, document.body,
   );
 }

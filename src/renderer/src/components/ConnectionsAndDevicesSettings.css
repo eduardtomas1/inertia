@@ -15,7 +15,7 @@
   gap: 12px;
   margin-top: 12px;
   padding-top: 14px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .private-connect-qr {
@@ -61,7 +61,7 @@
   display: grid;
   gap: 12px;
   padding: 14px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .private-connect-device-heading {
@@ -87,7 +87,8 @@
   min-width: 0;
   gap: 6px;
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .private-connect-device-fields .setting-select {
@@ -108,7 +109,8 @@
   margin-bottom: 8px;
   padding: 0;
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .private-connect-projects label {
@@ -135,7 +137,7 @@
 .private-connect-disclosure {
   margin-top: 12px;
   padding-top: 8px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .private-connect-disclosure .setting-disclosure-content {
@@ -162,7 +164,7 @@
 }
 
 .private-connect-audit-list li + li {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .private-connect-audit-list span {
@@ -202,7 +204,7 @@
 }
 
 .private-connect-diagnostics dl > div + div {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .private-connect-diagnostics dt {

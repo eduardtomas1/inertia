@@ -98,6 +98,7 @@ describe("Connections and devices settings", () => {
     expect(screen.getByRole("button", { name: "Create pairing link" })).toHaveClass("secondary-button");
     expect(container.querySelector(".settings-card-heading > div")).toBeNull();
     expect(container.textContent).not.toMatch(/[●↺]|\bQR\b/u);
+    expect(container.textContent).not.toMatch(/Turn on Private Connect to create a private link|Recent local authority events/u);
     for (const summary of ["Security activity", "Advanced diagnostics"]) {
       expect(screen.getByText(summary).closest("details")).not.toHaveAttribute("open");
     }

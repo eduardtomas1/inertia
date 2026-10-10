@@ -107,8 +107,7 @@ for (const theme of ["dark", "light"] as const) test(`reviews ${theme} snapshot 
     await devices.focus(); await devices.press("Enter");
     const setup = page.getByRole("main", { name: "Settings", exact: true });
     await expect(setup.getByRole("switch", { name: "Window snapshots" })).not.toBeChecked();
-    await setup.getByText("How to take a snapshot", { exact: true }).click();
-    await expect(setup.getByText(/Switch to the window you want to share/u)).toBeVisible();
+    await expect(setup.getByText("How to take a snapshot", { exact: true })).toHaveCount(0);
     await app.expectNoViewportOverflow();
     await save(`snapshot-settings-privacy-${theme}`);
     await navigation.getByRole("button", { name: "Keyboard", exact: true }).click();

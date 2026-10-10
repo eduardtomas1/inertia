@@ -4,9 +4,8 @@
 
 .discord-field {
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
 }
 
 .discord-field small {
@@ -43,7 +42,7 @@
   display: grid;
   gap: 6px;
   margin-top: 10px;
-  padding: 11px 12px;
+  padding: 12px;
   border-radius: var(--radius-sm);
   background: var(--fill);
 }

@@ -91,6 +91,16 @@ describe("agents settings", () => {
   });
 });
 
+describe("devices and integrations", () => {
+  it("separates Discord fields and Private Connect blocks like other rows", () => {
+    const discord = rule("../../src/renderer/src/components/DiscordSettings.css", ".discord-field");
+    expect(discord).toContain("padding: 10px 0;");
+    expect(discord).toContain("border-top: 1px solid var(--line-soft);");
+    expect(source("../../src/renderer/src/components/ConnectionsAndDevicesSettings.css")).not.toMatch(/solid var\(--line\);/u);
+    expect(rule("../../src/renderer/src/components/ConnectionsAndDevicesSettings.css", ".private-connect-projects legend")).toContain("font-size: var(--text-sm);");
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

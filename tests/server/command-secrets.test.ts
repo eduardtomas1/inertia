@@ -30,6 +30,9 @@ describe("scrubCommandSecrets", () => {
     ["aws configure set aws_secret_access_key ABCDEFxyz", "aws configure set aws_secret_access_key [redacted]"],
     ["curl -H \"Authorization: token abcdef123456\" https://x", "curl -H \"Authorization: [redacted]\" https://x"],
     ["curl -H \"X-Api-Key: abcdef123456\" https://x", "curl -H \"X-Api-Key: [redacted]\" https://x"],
+    ["gh secret set DEPLOY_KEY --body hunter2 --repo o/r", "gh secret set DEPLOY_KEY --body [redacted] --repo o/r"],
+    ["gh secret set DEPLOY_KEY --body=hunter2", "gh secret set DEPLOY_KEY --body=[redacted]"],
+    ["gh secret set NAME -b \"two words\"", "gh secret set NAME -b [redacted]"],
   ])("redacts the credential in the command %j", (command, scrubbed) => {
     expect(scrubCommandSecrets(command)).toBe(scrubbed);
     expect(scrubCommandSecrets(scrubbed)).toBe(scrubbed);
@@ -49,6 +52,7 @@ describe("scrubCommandSecrets", () => {
     "curl -u admin https://x",
     "docker login --password-stdin registry",
     "mysql -u root -P 3306 -p",
+    "gh pr create --title Fix --body \"Ready for review\"",
   ])("leaves the ordinary command %j intact", (command) => {
     expect(scrubCommandSecrets(command)).toBe(command);
   });

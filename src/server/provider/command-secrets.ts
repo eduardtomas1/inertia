@@ -15,6 +15,10 @@ const SHORT_PASSWORD_FLAG = new RegExp(
   String.raw`(\b(?:mysql|mysqldump|mysqladmin|mariadb(?:-dump|-admin)?|(?:docker|podman|buildah|nerdctl)\s+login)\b[^;&|\n]*?\s-p)(\s*)(?:${SECRET_VALUE})`,
   "gu",
 );
+const GH_SECRET_BODY = new RegExp(
+  String.raw`(\bgh\s+secret\s+set\b[^;&|\n]*?\s(?:--body|-b))(\s+|=)(?:${SECRET_VALUE})`,
+  "gu",
+);
 const CURL_USER_PASSWORD =
   /(\bcurl\b[^;&|\n]*?\s(?:-u|--user)(?:\s+|=))(?:(["'])([^:"'\n]+):[^"'\n]*\2|([^\s:"';&|]+):[^\s;&|]+)/gu;
 const AWS_CONFIGURE_SECRET = new RegExp(
@@ -29,6 +33,8 @@ export function scrubCommandSecrets(command: string): string {
     .replace(SECRET_FLAG, (_flag: string, name: string, separator: string) =>
       `${name}${separator}[redacted]`)
     .replace(SHORT_PASSWORD_FLAG, (_flag: string, prefix: string, separator: string) =>
+      `${prefix}${separator}[redacted]`)
+    .replace(GH_SECRET_BODY, (_body: string, prefix: string, separator: string) =>
       `${prefix}${separator}[redacted]`)
     .replace(
       CURL_USER_PASSWORD,

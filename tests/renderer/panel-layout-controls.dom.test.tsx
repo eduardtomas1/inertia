@@ -121,4 +121,27 @@ describe("corner panel controls and header meter", () => {
     fireEvent.click(panel);
     expect(props.onToggleRightPanel).toHaveBeenCalledOnce();
   });
+
+  it("names unavailable toggles only through the shared tooltip, without a second native title", () => {
+    render(<PanelLayoutControls {...controls({ terminalAvailable: false, rightPanelAvailable: false })} />);
+    for (const name of ["Terminal is unavailable", "Right panel is unavailable"]) {
+      const toggle = screen.getByRole("button", { name });
+      expect(toggle).toBeDisabled();
+      expect(toggle).not.toHaveAttribute("title");
+      vi.useFakeTimers();
+      try {
+        fireEvent.pointerEnter(toggle, { pointerType: "mouse" });
+        act(() => {
+          vi.advanceTimersByTime(500);
+        });
+        expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(name);
+        fireEvent.pointerLeave(toggle, { pointerType: "mouse" });
+        act(() => {
+          vi.advanceTimersByTime(1_000);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  });
 });

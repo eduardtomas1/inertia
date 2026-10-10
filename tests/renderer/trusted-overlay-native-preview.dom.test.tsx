@@ -256,7 +256,6 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
         onDismissDatabaseRecoveryNotice={vi.fn()}
         onImportRecovery={vi.fn(async () => undefined)}
@@ -272,7 +271,6 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
         onDismissDatabaseRecoveryNotice={vi.fn()}
         onImportRecovery={vi.fn(async () => undefined)}
@@ -287,7 +285,6 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={{ ...appUpdate, error: "The update check could not be completed." }}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
         onDismissDatabaseRecoveryNotice={vi.fn()}
         onImportRecovery={vi.fn(async () => undefined)}
@@ -301,7 +298,6 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
         onDismissDatabaseRecoveryNotice={vi.fn()}
         onImportRecovery={vi.fn(async () => undefined)}
@@ -316,7 +312,6 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={{
           id: "runtime-1-database-recovery",
           outcome: "created-empty",
@@ -345,7 +340,6 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
         onDismissDatabaseRecoveryNotice={vi.fn()}
         onImportRecovery={vi.fn(async () => undefined)}

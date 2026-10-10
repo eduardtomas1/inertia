@@ -22,7 +22,6 @@ interface AppStatusOverlaysProps {
   appUpdate: ReturnType<typeof useAppUpdate>;
   providerQuotaNotices: ProviderQuotaNoticeController;
   error: string | null;
-  onDismissError: () => void;
   databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
   onDismissDatabaseRecoveryNotice: () => void;
   onImportRecovery: () => Promise<void>;
@@ -34,7 +33,6 @@ export function AppStatusOverlays({
   appUpdate,
   providerQuotaNotices,
   error,
-  onDismissError,
   databaseRecoveryNotice,
   onDismissDatabaseRecoveryNotice,
   onImportRecovery,
@@ -90,7 +88,9 @@ export function StatusToastStack({
   providerQuotaNotices,
   error,
   onDismissError,
-}: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error" | "onDismissError">): React.JSX.Element | null {
+}: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error"> & {
+  onDismissError: () => void;
+}): React.JSX.Element | null {
   if (!appUpdate.error && providerQuotaNotices.notices.length === 0 && !error) return null;
   const diagnosticError = error ? diagnosticErrorReference(error) : null;
   return (

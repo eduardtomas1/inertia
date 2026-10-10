@@ -933,7 +933,6 @@ export const AppLayout = memo(function AppLayout({
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={visibleError}
-        onDismissError={dismissVisibleError}
         databaseRecoveryNotice={connection.databaseRecoveryNotice}
         onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
         onImportRecovery={async () => {

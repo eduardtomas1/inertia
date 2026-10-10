@@ -40,7 +40,6 @@ describe("status toast stack", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={{ notices: [], dismiss: vi.fn() }}
         error="Git is not installed or could not be started."
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
         onDismissDatabaseRecoveryNotice={vi.fn()}
         onImportRecovery={vi.fn(async () => undefined)}

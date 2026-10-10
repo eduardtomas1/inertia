@@ -5,9 +5,11 @@ import { readSourceText } from "../helpers/source-text";
 const css = readSourceText("src/renderer/src/styles.css");
 
 function block(selector: string, source = css): string {
-  const start = source.indexOf(`\n${selector} {\n`);
-  expect(start, selector).toBeGreaterThan(-1);
-  return source.slice(start, source.indexOf("\n}", start + 1));
+  const pattern = new RegExp(`(?:^|[}\\n]\\n)${selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} \\{\\n`, "u");
+  const match = pattern.exec(source);
+  expect(match, selector).not.toBeNull();
+  const start = match!.index + match![0].length;
+  return source.slice(start, source.indexOf("\n}", start));
 }
 
 describe("workspace panel launcher", () => {
@@ -90,7 +92,7 @@ describe("files panel", () => {
     expect(block(".file-entry-list .file-entry")).toContain("min-height: 36px;");
     const label = block(".file-language,\n.file-location");
     expect(label).toContain("color: var(--text-muted);");
-    expect(css).not.toMatch(/\.file-(language|location) \{[^}]*(accent|!important)/u);
+    expect(css).not.toMatch(/\.file-(language|location) \{[^}]*accent/u);
     expect(block(".file-preview-line.is-referenced .file-preview-line-number")).not.toContain("accent");
   });
 

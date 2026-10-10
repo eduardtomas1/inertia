@@ -23,3 +23,62 @@ describe("workspace panel launcher", () => {
     expect(hint).not.toContain("--warning");
   });
 });
+
+const motion = readSourceText("src/renderer/src/components/BeautifulUiMotion.css");
+
+describe("changes panel", () => {
+  it("selects rows on --fill-strong with the name at 500 and rests names at 400", () => {
+    expect(block(".workspace-repository-files > li:has(.workspace-repository-file.is-selected)")).toContain("background: var(--fill-strong);");
+    expect(block(".workspace-repository-file-copy strong")).toContain("font-weight: 400;");
+    expect(block(".workspace-repository-file.is-selected .workspace-repository-file-copy strong")).toContain("font-weight: 500;");
+    expect(css).toContain(".change-file-name, .file-entry-name { overflow: hidden; font-weight: 400;");
+    expect(block(".change-file-button,\n.file-entry")).toContain("min-height: 36px;");
+    expect(block(".change-file-button.is-selected,\n.file-entry.is-selected")).toContain("background: var(--fill-strong);");
+  });
+
+  it("sizes the Git row buttons as small chrome buttons and keeps the repository icon neutral", () => {
+    const button = block(".workspace-repository-scope-actions > button");
+    expect(button).toContain("height: var(--control-height-small);");
+    expect(button).toContain("font-size: var(--text-sm);");
+    expect(button).toContain("font-weight: 500;");
+    expect(block(".workspace-repository-scope-leading > svg")).toContain("color: var(--text-muted);");
+  });
+
+  it("draws diffs at the diff size without accent hunk headers, accent buttons or a progress bar", () => {
+    expect(block(".diff-code,\n.file-preview-code")).toContain("font-size: var(--text-diff);");
+    expect(css).not.toMatch(/\.diff-hunk-header \{[^}]*accent/u);
+    expect(css).not.toMatch(/\.diff-line\.is-hunk \{[^}]*accent/u);
+    expect(css).not.toMatch(/\.diff-hunk-actions button \{[^}]*accent/u);
+    expect(css).not.toMatch(/is-reviewed \{[^}]*accent/u);
+    expect(css).not.toContain(".diff-review-toolbar progress");
+    expect(css).not.toMatch(/\.diff-review-toolbar \{[^}]*background/u);
+    expect(css).not.toContain("filter: brightness(0.98)");
+    expect(css).toContain(".diff-code .diff-line.is-selected { background-image: linear-gradient(var(--fill-strong), var(--fill-strong)); }");
+  });
+
+  it("shows the review filter as plain buttons with --fill-strong for the pressed one", () => {
+    expect(motion).toContain('.diff-review-filter button[aria-pressed="true"] { color: var(--text); background: var(--fill-strong); }');
+    expect(motion).not.toMatch(/\.diff-review-filter[^{]*\{[^}]*accent/u);
+    expect(motion).not.toMatch(/\.diff-review-filter \{[^}]*border/u);
+  });
+
+  it("puts the diff selection popover on the shared popover base", () => {
+    expect(css).toMatch(/\.diff-selection-popover \{[^}]*padding: 4px; border: 1px solid var\(--line-soft\);/u);
+    expect(css).not.toMatch(/\.diff-reversal-scope \{[^}]*border/u);
+    expect(css).toMatch(/\.diff-selection-popover textarea \{[^}]*font: var\(--text-sm\)/u);
+  });
+
+  it("rings diff line buttons inside the row", () => {
+    const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
+    expect(inset).toContain(".diff-code .diff-line");
+  });
+
+  it("keeps changed-file and tree icons neutral", () => {
+    expect(block(".file-entry > svg.file-language-icon,\n.change-file-button .file-language-icon,\n.workspace-repository-file .file-language-icon")).toContain("color: var(--text-muted);");
+  });
+
+  it("keeps the panel toolbar on the 4px grid with one chrome text size", () => {
+    expect(block(".panel-toolbar")).toContain("min-height: 48px;");
+    expect(css).toContain(".panel-heading-copy h2 { margin: 0; font-size: var(--text-sm); font-weight: 500; }");
+  });
+});

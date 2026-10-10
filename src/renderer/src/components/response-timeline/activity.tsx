@@ -977,12 +977,12 @@ export function WorkLog({
     const layered = layeredHtmlRenders(turn);
     return withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message)));
   }, [turn]);
-  // Transient text is the final visible execution entry, except that it stays
-  // above follow-ups saved while it was already streaming. Inserting that one
-  // row keeps settled commentary and activity-group identities stable instead
-  // of sorting the complete workstream for every provider token. A reconnect
-  // may retain the text while deliberately closing its live channel, so only
-  // the current text channel gets live semantics and animation.
+  // Transient text is the final visible execution entry unless follow-ups
+  // were saved while it streamed; then it sits just above them. Inserting that
+  // one row keeps settled commentary and activity-group identities stable
+  // instead of sorting the complete workstream for every provider token. A
+  // reconnect may retain the text while deliberately closing its live channel,
+  // so only the current text channel gets live semantics and animation.
   const stream = useMemo<TurnWorkStreamEntry[]>(() => {
     if (!turn.isActive || !liveContent) return durableStream;
     return withLiveCommentary(durableStream, {

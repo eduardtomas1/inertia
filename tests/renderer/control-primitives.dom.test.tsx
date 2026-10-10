@@ -333,6 +333,7 @@ describe("icon primitives", () => {
       "LifeBuoy", "LockKeyhole", "PlugZap", "SquareArrowOutUpRight", "Clipboard", "BarChart3", "Bot", "Brain",
       "BrainCircuit", "Command", "Network", "Share2", "Star", "WandSparkles", "Table2", "WrapText", "Compass",
       "MessageSquareX", "ArrowUpRight", "LoaderCircle", "Activity", "FilePenLine", "FileSearch",
+      "TerminalSquare", "SquareTerminal",
     ]);
     const offenders = lucideImports.flatMap(({ path, names }) => names
       .filter((name) => retired.has(name) || (name === "Sparkles" && !path.endsWith("ProjectIcon.tsx")))

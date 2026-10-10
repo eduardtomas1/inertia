@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import clsx from "clsx";
-import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Square, StickyNote, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, FileDiff, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Square, StickyNote, Trash2, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLineFingerprint } from "@shared/diff-review";
 import { sourceLanguageForFile } from "@shared/source-language";
@@ -531,7 +531,7 @@ export function ChangesPanel({
       {noteDraft && ReviewNoteDialog && <ReviewNoteDialog draft={noteDraft} onClose={() => setNoteDraft(null)} />}
       <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
-          <GitCompareArrows size={16} aria-hidden="true" />
+          <FileDiff size={16} aria-hidden="true" />
           <div className="panel-heading-copy"><h2>Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
         </div>
         <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>

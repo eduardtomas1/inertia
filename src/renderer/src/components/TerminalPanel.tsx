@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
-import { ChevronDown, Columns2, Plus, TerminalSquare, X } from "lucide-react";
+import { ChevronDown, Columns2, Plus, Terminal, X } from "lucide-react";
 import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
@@ -408,7 +408,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
-                <TerminalSquare size={14} /><span className="panel-tab-label" data-text={tab.label}>{tab.label}</span>
+                <Terminal size={14} /><span className="panel-tab-label" data-text={tab.label}>{tab.label}</span>
               </button>
               <IconButton className="panel-tab-close" label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
                 onClick={() => closeTerminal(tab.id)}><X size={14} /></IconButton>

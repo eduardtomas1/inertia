@@ -1,4 +1,4 @@
-import { ExternalLink, FileCode2, GitCompareArrows, RotateCcw } from "lucide-react";
+import { ExternalLink, FileCode2, FileDiff, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 
 import type {
@@ -66,7 +66,7 @@ export function HistoricalDiffPanel({
     <section className="changes-panel historical-diff-panel" aria-label="Historical turn changes">
       <header className="panel-toolbar">
         <div className="panel-heading">
-          <GitCompareArrows size={16} aria-hidden="true" />
+          <FileDiff size={16} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>{diff.title}</h2>
             <span>Historical snapshot · not current workspace state</span>

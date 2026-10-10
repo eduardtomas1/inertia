@@ -163,7 +163,7 @@ export class ConversationRepository {
       WHERE conversation_id = ? AND role = 'user'
       ORDER BY created_at DESC, id DESC LIMIT 1
     `).get(conversationId) as { content: string } | undefined;
-    const title = message?.content.replace(/\s+/gu, " ").trim().slice(0, 64);
+    const title = Array.from(message?.content.replace(/\s+/gu, " ").trim() ?? "").slice(0, 64).join("");
     if (!title) throw new Error("Send a text message before regenerating this thread's title.");
     this.update(conversationId, { title });
   }

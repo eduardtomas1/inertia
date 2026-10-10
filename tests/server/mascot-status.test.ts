@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentActivity, AgentApprovalRequest, AgentInputRequest, ChatMessage } from "../../src/shared/contracts/agent";
 import { AGENT_RUN_STATES } from "../../src/shared/run-state";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
-import { mascotFeedViolation } from "../../src/shared/mascot-feed";
+import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
+import { mascotPreview } from "../../src/server/runtime/mascot-message";
 
 const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
 const MINUTE = 60_000;
@@ -527,5 +528,20 @@ describe("mascot text bounds", () => {
     expect(parseMascotStatus({ ...chat, message: "ok 😀" })).not.toBeNull();
     expect(parseMascotStatus({ ...chat, message: `${"a".repeat(278)}\ud83d…` })).toBeNull();
     expect(parseMascotStatus({ ...chat, chatTitle: "\ude00 title" })).toBeNull();
+  });
+
+  it("publishes well-formed text when a title or the agent's words were cut inside an emoji", () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+    const title = `${"Please make the parser accept emoji in identifiers like this one".slice(0, 63)}😀`.slice(0, 64);
+    const shell = { ...conversation("chat", "running"), title };
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    publisher.observe(said(`${"x".repeat(4_000)}. Short ${"y".repeat(85)}😀😀`, "2026-09-06T10:00:01.000Z"));
+    const { status } = feed();
+    expect(lone.test(status.chatTitle!)).toBe(false);
+    expect(lone.test(status.message!)).toBe(false);
+    expect(parseMascotFeed(JSON.parse(JSON.stringify(feed())) as Record<string, unknown>)).not.toBeNull();
+    expect(mascotPreview("\ud83d and \ude00")).toBe("\ufffd and \ufffd");
+    expect(mascotPreview(`${" ".repeat(4_095)}😀`)).toBeNull();
   });
 });

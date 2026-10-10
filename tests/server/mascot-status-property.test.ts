@@ -13,6 +13,10 @@ function random(seed: number): () => number {
 }
 
 const ADVANCES = [100, 500, 1_400, 1_600, 60_000, 11 * 60_000, 61 * 60_000, 3 * 3_600_000, 23 * 3_600_000];
+const WORDS = [
+  "I am checking the files now.", "Running the tests next.", "Done with the edit.", "\ud83d", "Half an emoji \ude00 here.",
+  `${"x".repeat(4_000)}. Short ${"y".repeat(85)}😀😀`, `${"z".repeat(95)}😀`, `${"w".repeat(4_095)}😀`,
+];
 
 function run(seed: number): string | null {
   const next = random(seed);
@@ -33,7 +37,7 @@ function run(seed: number): string | null {
       const turnId = !shell || next() < 0.3 ? `${id}-t${step}` : shell.latestTurn!.id;
       const updated = mascotShell(id, state, {
         turnId, requestedAt: iso(now - Math.floor(next() * 1e6)), updatedAt: iso(now - Math.floor(next() * 1e5)),
-        lastViewedAt: next() < 0.3 ? iso(now + 1_000) : null,
+        lastViewedAt: next() < 0.3 ? iso(now + 1_000) : null, title: pick(WORDS),
       });
       updated.latestTurn!.runId = `${turnId}-run`;
       shells.set(id, updated);
@@ -47,11 +51,11 @@ function run(seed: number): string | null {
       if (!owner) continue;
       const kind = Math.floor(next() * 7);
       if (kind === 0) publisher.observe({ type: "agent.input.requested", request: { ...owner, id: `q${step}`, providerId: "codex", autoResolutionMs: null,
-        questions: [{ id: "x", header: "h", question: "Proceed?", isSecret: false, isOther: false, allowMultiple: false, options: [] }] } });
+        questions: [{ id: "x", header: "h", question: pick(WORDS), isSecret: false, isOther: false, allowMultiple: false, options: [] }] } });
       if (kind === 1) publisher.observe({ type: "agent.commentary.persisted", message: { id: `m${step}`, conversationId: id, turnId: owner.turnId,
-        role: "assistant", attachments: [], content: pick(["I am checking the files now.", "Running the tests next.", "Done with the edit."]), createdAt: iso(now) } as never });
+        role: "assistant", attachments: [], content: pick(WORDS), createdAt: iso(now) } as never });
       if (kind === 2) publisher.observe({ type: "agent.activity", activity: { ...owner, id: `a${step}`, kind: "command", title: "Run command",
-        detail: "Command:\nnpm test", status: pick(["running", "completed", "failed"] as const), createdAt: iso(now) } });
+        detail: `Command:\n${pick(WORDS)}`, status: pick(["running", "completed", "failed"] as const), createdAt: iso(now) } });
       if (kind === 3) publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null,
         steps: [{ step: "Read", status: "completed" }, { step: "Write code", status: pick(["inProgress", "pending"] as const) }] } });
       if (kind === 4) publisher.observe({ type: "agent.text", ...owner, text: "words" });

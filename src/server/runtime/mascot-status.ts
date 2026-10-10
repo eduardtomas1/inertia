@@ -3,7 +3,8 @@ import type { ConversationShell, Project } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
 import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
 import {
-  emptyMascotStatus, isLiveMascotPhase, isMascotAttention, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, mascotTier, type MascotStatus,
+  emptyMascotStatus, isLiveMascotPhase, isMascotAttention, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, mascotTier, parseMascotStatus,
+  type MascotStatus,
 } from "../../shared/mascot";
 import type { MascotFeed } from "../../shared/mascot-feed";
 import {
@@ -279,10 +280,11 @@ export class MascotStatusPublisher {
     }
     const request = isMascotAttention(entry.status.phase)
       ? [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase) : undefined;
-    return { ...entry.status, activeCount, message: entry.line.text,
+    const status: MascotStatus = { ...entry.status, activeCount, message: entry.line.text,
       ...(isMascotAttention(entry.status.phase) ? { progress: request?.progress ?? null } : {}),
       quietSince: this.quiet(entry, now) ? new Date(entry.heardAt).toISOString() : null,
     };
+    return parseMascotStatus(status) ? status : { ...status, chatTitle: null, projectName: null, message: null, progress: null };
   }
 
   private wakeAtMost(at: number): void {

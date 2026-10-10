@@ -19,14 +19,18 @@ function cut(text: string, length: number): string {
   return /[\uD800-\uDBFF]$/u.test(part) ? part.slice(0, -1) : part;
 }
 
+function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
+}
+
 export function mascotPreview(value: string | null | undefined, limit = 280): string | null {
-  const text = (value ?? "").slice(0, 4_096)
+  const text = wellFormed(cut(value ?? "", 4_096))
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
     .replace(/`([^`]+)`|\*\*([^*]+)\*\*/gu, (_match, code: string | undefined, bold: string | undefined) => code ?? bold ?? "")
     .replace(/^#{1,6}\s+/u, "")
     .replace(/[‪-‮⁦-⁩]/gu, "")
     .replace(/[\s\x00-\x1f\x7f]+/gu, " ").trim();
-  return text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text || null;
+  return wellFormed(text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text) || null;
 }
 
 function sentences(text: string): string[] {

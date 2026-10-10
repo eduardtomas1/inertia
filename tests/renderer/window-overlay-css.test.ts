@@ -12,6 +12,7 @@ describe("Windows title bar overlay clearance", () => {
   });
 
   it("measures the overlay inset from the window controls overlay geometry", () => {
+    expect(css).toMatch(/@property --titlebar-overlay-inset \{\n  syntax: "<length>";\n  inherits: true;\n  initial-value: 0px;\n\}/u);
     expect(css).toMatch(/\.app-shell\.platform-win32 \{[^}]*--titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
     expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \{\n  --titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
   });

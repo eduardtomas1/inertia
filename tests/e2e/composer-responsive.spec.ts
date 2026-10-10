@@ -10,6 +10,7 @@ import { attachRuntimeConnectionEvidence, createRuntimeConnectionEvidence } from
 import {
   createComposerResponsiveHelpers,
   exerciseComposerQueue,
+  expectComposerLabelsFit,
   expectHoverBackground,
   fixtureCheckoutLabel,
   inspectLongComposerHeading,
@@ -294,6 +295,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);
+    await expectComposerLabelsFit(dock);
     expect(wideGeometry.optionMarkers.filter((marker) => marker !== "reasoning"))
       .toEqual([
       "model",

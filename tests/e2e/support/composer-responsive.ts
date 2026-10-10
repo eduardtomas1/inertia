@@ -238,3 +238,11 @@ export async function inspectLongComposerHeading(
     };
   });
 }
+
+export async function expectComposerLabelsFit(dock: Locator): Promise<void> {
+  const clipped = await dock.evaluate((element) => [...element.querySelectorAll<HTMLElement>(
+    ".composer-toolbar .selected-model-chip-label, .composer-toolbar .composer-setting-value",
+  )].filter((label) => label.getClientRects().length > 0 && label.scrollWidth > label.clientWidth + 1)
+    .map((label) => label.textContent));
+  expect(clipped).toEqual([]);
+}

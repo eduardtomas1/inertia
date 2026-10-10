@@ -9534,7 +9534,7 @@ button.sent-attachment-open:hover {
 }
 
 .orphan-run-flow {
-  max-width: 760px;
+  max-width: var(--final-answer-max-width);
   margin: 0 auto var(--response-block-gap);
 }
 

@@ -310,6 +310,11 @@ describe("quiet turn chrome", () => {
     );
   });
 
+  it("keeps recovered legacy history in the same column as the turns so its footer lines up", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toContain(".orphan-run-flow {\n  max-width: var(--final-answer-max-width);\n");
+  });
+
   it("adds no legacy time footer while message timestamps are off", () => {
     const { container } = timeline([], undefined, false, [
       { id: "legacy-quiet", conversationId, turnId: null, role: "assistant", content: "Recovered answer", attachments: [], createdAt: "2026-09-01T08:00:00.000Z" },

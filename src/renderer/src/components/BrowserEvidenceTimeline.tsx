@@ -4,6 +4,7 @@ import type {
   BrowserEvidenceEntry,
   BrowserEvidenceSnapshot,
 } from "@shared/browser-evidence";
+import { X } from "lucide-react";
 import { IconButton } from "./ui";
 import "./BrowserEvidenceTimeline.css";
 
@@ -78,21 +79,17 @@ export function BrowserEvidenceTimeline({
       }}
     >
       <header className="browser-evidence-header">
-        <span className="browser-evidence-heading-icon">
-          <span aria-hidden="true">•</span>
-        </span>
         <span>
           <strong id={`${id}-title`}>Local evidence</strong>
           <small>Clears with this Browser session</small>
         </span>
         <IconButton ref={closeRef} label="Close Browser evidence" onClick={onClose}>
-          <span aria-hidden="true">×</span>
+          <X size={14} />
         </IconButton>
       </header>
 
       {entries.length === 0 ? (
         <div className="browser-evidence-empty">
-          <span className="browser-evidence-empty-mark" aria-hidden="true">•</span>
           <strong>No evidence yet</strong>
           <span>Screenshots, page failures, navigation, and agent actions stay on this device.</span>
         </div>
@@ -107,12 +104,9 @@ export function BrowserEvidenceTimeline({
                 key={entry.id}
                 className={`browser-evidence-entry is-${entry.kind}`}
               >
-                <span className="browser-evidence-entry-icon">
-                  <span aria-hidden="true">{kindLabel[0]}</span>
-                </span>
                 <span className="browser-evidence-entry-copy">
                   <span className="browser-evidence-entry-meta">
-                    <span>{kindLabel}</span>
+                    <span className="browser-evidence-entry-kind">{kindLabel}</span>
                     <span>Page {entry.pageNumber}</span>
                     <time dateTime={entry.occurredAt}>{time}</time>
                   </span>

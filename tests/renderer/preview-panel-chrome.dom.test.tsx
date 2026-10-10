@@ -41,6 +41,11 @@ describe("browser chrome", () => {
     expect(screen.queryByText("Evidence")).toBeNull();
   });
 
+  it("shows loading with the stage mark only and frames the address with a hairline", () => {
+    const { container } = render(panel({ loading: true }));
+    expect(container.querySelector(".preview-loading-bar")).toBeNull();
+  });
+
   it("navigates when Enter submits the address", () => {
     const onNavigate = vi.fn();
     render(panel({ onNavigate }));

@@ -112,3 +112,14 @@ describe("files panel", () => {
     expect(badge).toContain("font-weight: 500;");
   });
 });
+
+describe("browser panel", () => {
+  const evidence = readSourceText("src/renderer/src/components/BrowserEvidenceTimeline.css");
+
+  it("frames the address with --line, has no accent loading sweep and keeps evidence free of accent", () => {
+    expect(css).toMatch(/\.preview-address-form \{[^}]*border: 1px solid var\(--line\);[^}]*background: transparent;/u);
+    expect(css).not.toContain(".preview-loading-bar");
+    expect(evidence).not.toContain("accent");
+    expect(evidence).not.toContain("browser-evidence-entry-icon");
+  });
+});

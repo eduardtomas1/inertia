@@ -6697,14 +6697,10 @@ button.turn-agents-line:hover {
 .preview-tabs::-webkit-scrollbar { display: none; }
 .preview-chrome { position: relative; display: flex; height: 36px; flex: 0 0 auto; align-items: center; gap: 2px; padding: 0 4px; border-bottom: 1px solid var(--line-soft); background: var(--surface); }
 .preview-chrome > .icon-button { width: var(--control-height-small); height: var(--control-height-small); }
-.preview-address-form { display: flex; min-width: 0; height: var(--control-height-small); flex: 1; align-items: center; gap: 6px; margin-inline: 4px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--fill); }
+.preview-address-form { display: flex; min-width: 0; height: var(--control-height-small); flex: 1; align-items: center; gap: 8px; margin-inline: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; }
 .preview-address-form > svg { flex: 0 0 auto; }
 .preview-address-form input { min-width: 0; height: 100%; flex: 1; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font-size: var(--text-sm); }
 .preview-address-form input::placeholder { color: var(--text-muted); }
-.preview-loading-bar { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; overflow: hidden; pointer-events: none; }
-.preview-loading-bar::before { position: absolute; top: 0; bottom: 0; left: 0; width: 40%; content: ""; background: var(--accent); animation: preview-loading-bar calc(var(--dur-slow) * 5) var(--ease) infinite; }
-@keyframes preview-loading-bar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
-@media (prefers-reduced-motion: reduce) { .preview-loading-bar::before { width: 100%; animation: none; opacity: 0.5; } }
 .preview-address-error { margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line-soft); color: var(--danger); font-size: var(--text-sm); }
 .preview-safe-stage { display: flex; min-height: 0; flex: 1; }
 

@@ -21,6 +21,7 @@ import {
 } from "../utils/workspacePreviewFocus";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
+import { TooltipButton } from "./TooltipButton";
 import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import "./PreviewPanel.css";
 
@@ -331,9 +332,9 @@ export function PreviewPanel({
         <IconButton label="Open in system browser" onClick={openExternal} disabled={!url && !draftUrl.trim()}>
           <ExternalLink size={14} />
         </IconButton>
-        <button
+        <TooltipButton
           ref={evidenceToggleRef}
-          type="button"
+          tooltip="Browser evidence"
           className={`preview-evidence-toggle${evidenceOpen ? " is-active" : ""}${evidence.entries.some((entry) => entry.kind === "console-error" || entry.kind === "network-failure") ? " has-failures" : ""}`}
           aria-label={`Evidence ${evidence.entries.length}`}
           aria-expanded={evidenceOpen}
@@ -343,14 +344,12 @@ export function PreviewPanel({
           ))}
         >
           <History size={14} aria-hidden="true" />
-          <small>{evidence.entries.length}</small>
-        </button>
+        </TooltipButton>
         {onOpenTab && (
           <IconButton label="Open browser page" onClick={onOpenTab} disabled={tabs.length >= 8}>
             <Plus size={14} />
           </IconButton>
         )}
-        {loading && <span className="preview-loading-bar" aria-hidden="true" />}
       </header>
 
       {validationError && <p className="preview-address-error" id="preview-url-error" role="alert">{validationError}</p>}

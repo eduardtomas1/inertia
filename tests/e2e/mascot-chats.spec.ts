@@ -95,8 +95,7 @@ test("mascot follows three provider chats by priority, lists the others and spea
     await select("B");
     await send("[B] Fix the flaky login test.");
     await gate("B-1");
-    await expect(rows.getByRole("button")).toHaveCount(1);
-    expect(await rowTexts()).toEqual([`${TITLES.B}· working`]);
+    await expect.poll(rowTexts).toEqual([`${TITLES.B}· working`]);
     await expect(title).toHaveText(TITLES.A);
     await capture(app, overlay, "two-working", info);
 

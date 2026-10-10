@@ -151,17 +151,19 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   await page.screenshot({ animations: "disabled", path: wideLight });
   expect((await page.locator("body").screenshot()).byteLength).toBeGreaterThan(1_000);
 
-  const workspaceBody = page.locator(".workspace-body");
-  const previousToolsWidth = await workspaceBody.evaluate((element) =>
+  const workspaceFrame = page.locator(".workspace-frame");
+  const previousToolsWidth = await workspaceFrame.evaluate((element) =>
     element.style.getPropertyValue("--workspace-tools-width"));
-  await workspaceBody.evaluate((element) => {
+  const toolsMinimumWidth = 300 + await page.locator(".app-shell").evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).getPropertyValue("--titlebar-overlay-inset")));
+  await workspaceFrame.evaluate((element) => {
     element.style.setProperty("--workspace-tools-width", "300px");
   });
   await expect.poll(async () => await changes.locator(".workspace-repository-scope")
     .evaluate((element) => ({
       fits: element.scrollWidth <= element.clientWidth + 1,
       width: element.clientWidth,
-    }))).toEqual({ fits: true, width: 300 });
+    }))).toEqual({ fits: true, width: Math.round(toolsMinimumWidth) });
   const repositoryTypography = await changes.evaluate((element) => {
     const root = getComputedStyle(document.documentElement);
     const scope = element.querySelector<HTMLElement>(
@@ -181,7 +183,7 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
     .toBeGreaterThanOrEqual(repositoryTypography.expectedMicro);
   expect(repositoryTypography.fileName)
     .toBeGreaterThanOrEqual(repositoryTypography.expectedSecondary);
-  await workspaceBody.evaluate((element, value) => {
+  await workspaceFrame.evaluate((element, value) => {
     if (value) element.style.setProperty("--workspace-tools-width", value);
     else element.style.removeProperty("--workspace-tools-width");
   }, previousToolsWidth);

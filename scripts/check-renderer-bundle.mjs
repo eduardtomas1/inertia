@@ -78,14 +78,13 @@ const budgets = {
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
   detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748,
-  // The surface and reduced-motion-safe transition system measure 344.7 KiB
-  // on Linux x64; keep only narrow cross-platform headroom.
-  entryCss: 346 * kibibyte + 760,
+  // The token pass and the plain surfaces measure 256,646 bytes on every
+  // platform; keep only narrow cross-platform headroom.
+  entryCss: 250.9 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet. The aurora adds exactly
-  // 552 bytes to the integrated palette (12,470 total). Its scoped LF rule
-  // keeps Windows identical. Preserve headroom; see release-v0058 evidence.
-  colorThemesCss: 12 * kibibyte + 552,
+  // separate from the generated entry stylesheet and measures 8,123 bytes.
+  // Its scoped LF rule keeps Windows identical; keep narrow headroom.
+  colorThemesCss: 8 * kibibyte + 120,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,

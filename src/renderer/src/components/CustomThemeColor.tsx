@@ -59,7 +59,6 @@ export function CustomThemeColor({ mode, value, muted = false, disabled, onChang
       <div className="custom-theme-controls">
         <div className="custom-theme-label">
           <label htmlFor={`${id}-hex`}><span className={`appearance-mode-icon is-${mode}`} aria-hidden="true" />{label} colour</label>
-          {value && <span className="custom-theme-status">Selected</span>}
         </div>
         <div className="custom-theme-inputs">
           <input ref={colorInput} type="color" aria-label={`${label} colour picker`} defaultValue={color} disabled={disabled} />

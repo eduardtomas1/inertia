@@ -23,7 +23,11 @@ describe("Theme library", () => {
       expect(screen.getByRole("button", { name: `${option.label} theme` }))
         .toHaveAttribute("aria-pressed", String(option.id === "inertia"));
     }
-    expect(screen.getByText(/circle for one appearance/u)).toBeVisible();
+    expect(screen.queryByText(/circle for one appearance/u)).toBeNull();
+    expect(screen.getByRole("button", { name: "Grove theme" })).toHaveAccessibleDescription("Use Grove for both light and dark");
+    expect(screen.getByRole("button", { name: "Use Grove for dark" })).toHaveAccessibleDescription("Use Grove for dark only");
+    for (const button of screen.getAllByRole("button")) expect(button).not.toHaveAttribute("title");
+    expect(document.querySelector(".color-theme-mode-badge")).toBeNull();
 
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     expect(onUpdate).toHaveBeenCalledWith({ theme: "dark" });
@@ -91,7 +95,12 @@ describe("Theme library", () => {
     expect(labelled(screen.getByRole("group", { name: "Colour theme" }))).toBe("Colour theme");
     expect(labelled(screen.getByRole("group", { name: "Custom colours" }))).toBe("Custom colours");
     const cards = [...container.querySelectorAll<HTMLElement>(".color-theme-option")];
-    expect(cards.map((card) => card.textContent)).toEqual(COLOR_THEME_OPTIONS.map(({ label }) => label));
+    const visibleText = (card: HTMLElement): string | null => {
+      const copy = card.cloneNode(true) as HTMLElement;
+      for (const hidden of copy.querySelectorAll(".visually-hidden")) hidden.remove();
+      return copy.textContent;
+    };
+    expect(cards.map(visibleText)).toEqual(COLOR_THEME_OPTIONS.map(({ label }) => label));
     expect(container.querySelectorAll("h4, .color-theme-selected")).toHaveLength(0);
   });
 

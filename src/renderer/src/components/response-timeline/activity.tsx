@@ -56,6 +56,7 @@ import {
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { Tooltip, useTooltip } from "../Tooltip";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
 import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
 import {
@@ -253,6 +254,8 @@ export const ActivityRow = memo(function ActivityRow({
 }): React.JSX.Element {
   const [detailExpanded, setDetailExpanded] = useState(false);
   const outputId = useId();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const tooltip = useTooltip(rowRef, {});
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const interrupted = isInterruptedActivity(activity);
   const attentionSeverity = activityAttentionSeverity(activity);
@@ -311,7 +314,10 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-work={workKind}
       data-activity-severity={severity}
       data-activity-visibility={visibility}
-      title={visibleTitle}
+      ref={rowRef}
+      onPointerEnter={tooltip.handlers.onPointerEnter}
+      onPointerLeave={tooltip.handlers.onPointerLeave}
+      onPointerDown={tooltip.handlers.onPointerDown}
     >
       <span
         className="agent-activity-icon"
@@ -373,6 +379,7 @@ export const ActivityRow = memo(function ActivityRow({
           {detailPresentation.full}
         </pre>
       )}
+      {tooltip.layer && <Tooltip anchor={rowRef} layer={tooltip.layer} label={visibleTitle} />}
     </div>
   );
 });

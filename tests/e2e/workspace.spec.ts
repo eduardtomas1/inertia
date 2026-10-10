@@ -111,7 +111,7 @@ test("filters Work by project and manages chat history", async () => {
 });
 
 test("collapses composer settings without displacing send and right-aligns user turns", async () => {
-  await resizeWindow(900, 600);
+  await resizeWindow(820, 600);
   const composer = page.locator(".composer");
   const more = page.getByRole("button", { name: "More composer options" });
   const send = page.getByRole("button", { name: "Send message" });
@@ -133,7 +133,7 @@ test("collapses composer settings without displacing send and right-aligns user 
   expect(chooserBounds).not.toBeNull();
   expect(chooserBounds?.x ?? -1).toBeGreaterThanOrEqual(0);
   expect((chooserBounds?.x ?? 0) + (chooserBounds?.width ?? 0))
-    .toBeLessThanOrEqual(900);
+    .toBeLessThanOrEqual(820);
   await page.keyboard.press("Escape");
 
   await more.click();

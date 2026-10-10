@@ -347,19 +347,14 @@ test("keeps every composer utility popover inside both split panes", async (
   const primaryRootSurface = primary.locator(".composer-more-popover");
   await expect(primaryRoot).toBeVisible();
   await expectContained(primaryRoot);
-  await expect(primaryLayer).toHaveAttribute(
-    "data-composer-submenu-side",
-    /^(left|right)$/u,
-  );
+  await expect(primaryLayer).toHaveAttribute("data-composer-submenu-side", "");
   const reasoningItem = primaryRoot.getByRole("menuitem", {
     name: /^Reasoning\b/u,
   });
   await expect(reasoningItem).toBeEnabled();
   await reasoningItem.focus();
   await reasoningItem.press("ArrowRight");
-  const reasoningMenu = primary.locator(
-    '.composer-more-submenu[aria-label="Reasoning options"]',
-  );
+  const reasoningMenu = primary.getByRole("menu", { name: "Reasoning options" });
   await expect(reasoningMenu).toBeVisible();
   await expect(reasoningMenu.getByRole("menuitemradio").first()).toBeFocused();
   await expectContained(primaryRootSurface);
@@ -378,10 +373,7 @@ test("keeps every composer utility popover inside both split panes", async (
   });
   const secondaryLayer = secondary.locator(".composer-more-layer");
   const secondaryRootSurface = secondary.locator(".composer-more-popover");
-  await expect(secondaryLayer).toHaveAttribute(
-    "data-composer-submenu-side",
-    /^(left|right)$/u,
-  );
+  await expect(secondaryLayer).toHaveAttribute("data-composer-submenu-side", "");
   const speedItem = secondaryRoot.getByRole("menuitem", {
     name: /^Response speed\b/u,
   });

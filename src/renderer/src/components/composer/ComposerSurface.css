@@ -8,6 +8,7 @@
   --composer-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
   --composer-drawer-shadow: var(--composer-shadow);
   --composer-highlight: none;
+  --composer-tool-size: max(28px, calc(var(--composer-control-height) - 2px));
 }
 :root[data-theme="dark"] .composer-shell {
   --composer-outline: rgb(255 255 255 / 5%);
@@ -104,8 +105,8 @@
 }
 .composer-shell .selected-model-chip,
 .composer-shell .composer-pill {
-  height: 28px;
-  min-height: 28px;
+  height: var(--composer-tool-size);
+  min-height: var(--composer-tool-size);
   gap: 6px;
   padding: 0 10px;
   border: 0;
@@ -207,9 +208,9 @@
 .composer-shell .composer-tools-toggle,
 .composer-shell .composer-attach-actions .icon-button,
 .composer-shell .composer-more-control .composer-pill {
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: var(--composer-tool-size);
+  height: var(--composer-tool-size);
+  min-height: var(--composer-tool-size);
   padding: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
@@ -232,6 +233,7 @@
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
   animation: composer-tools-in var(--dur) var(--ease-fade) both;
+  overflow: visible !important;
 }
 .composer-shell .composer-more-tools:not([data-composer-popover-positioned="true"]) {
   visibility: hidden;
@@ -250,9 +252,9 @@
   border: 0;
 }
 .composer-shell .composer-tools .icon-button {
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: var(--composer-tool-size);
+  height: var(--composer-tool-size);
+  min-height: var(--composer-tool-size);
   color: var(--text-muted);
 }
 .composer-shell .composer-end {
@@ -281,9 +283,9 @@
   margin: 0;
 }
 .composer-shell .usage-popover-trigger {
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
+  min-width: var(--composer-tool-size);
+  height: var(--composer-tool-size);
+  min-height: var(--composer-tool-size);
   gap: 6px;
   padding: 0 4px;
   border-radius: var(--radius-xs);
@@ -320,7 +322,7 @@
   font-weight: 500;
 }
 .composer-input-actions {
-  --composer-send-size: 32px;
+  --composer-send-size: max(32px, var(--composer-control-height));
   position: static;
   z-index: 1;
   display: flex;
@@ -338,9 +340,7 @@
   border-radius: 50%;
   color: var(--accent-text);
   background: var(--accent);
-  box-shadow:
-    0 1px 2px 0 color-mix(in srgb, var(--accent) 24%, transparent),
-    inset 0 1px rgb(255 255 255 / 16%);
+  box-shadow: none;
   transition:
     background-color var(--dur-fast) var(--ease),
     opacity var(--dur-fast) var(--ease),
@@ -352,7 +352,6 @@
   scale: 1.05;
 }
 .composer-shell .composer-input-actions .send-button:not(:disabled):active {
-  box-shadow: inset 0 1px rgb(0 0 0 / 8%);
   scale: 1;
 }
 .composer-shell .composer-input-actions .send-button:disabled {
@@ -369,7 +368,6 @@
 .composer-shell .composer-input-actions .stop-button:disabled {
   color: var(--accent-text);
   background: var(--danger);
-  box-shadow: 0 1px 2px 0 color-mix(in srgb, var(--danger) 24%, transparent);
   opacity: 1;
 }
 .composer-shell .composer-input-actions .stop-button .composer-send-motion-icon {
@@ -519,6 +517,17 @@
   }
   .composer-shell .composer-setting-control::before {
     display: none;
+  }
+}
+@container conversation-workspace (max-height: 420px) {
+  .composer-shell {
+    padding-bottom: 16px;
+  }
+  .composer-shell .composer-input-zone {
+    padding-top: 14px;
+  }
+  .composer-shell .composer textarea {
+    min-height: 24px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

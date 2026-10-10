@@ -1289,7 +1289,7 @@ button.header-breadcrumb-project:hover {
 .header-menu-hint-text {
   max-width: 260px;
   margin: 0 9px 6px;
-  color: var(--warning);
+  color: var(--text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-chrome);
 }
@@ -5138,7 +5138,11 @@ button.turn-agents-line:hover {
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-.workspace-panel-launcher-list > button:hover,
+.workspace-panel-launcher-list > button:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
 .workspace-panel-launcher-list > button.is-highlighted {
   color: var(--text);
   background: var(--fill-strong);
@@ -5165,7 +5169,7 @@ button.turn-agents-line:hover {
 
 .workspace-panel-launcher-list > .is-unavailable {
   cursor: default;
-  opacity: 0.55;
+  opacity: var(--disabled-opacity);
 }
 
 .workspace-panel-launcher-list > .is-unavailable > span > small {

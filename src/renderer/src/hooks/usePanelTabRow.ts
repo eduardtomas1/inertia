@@ -31,6 +31,24 @@ function tabElements(list: HTMLElement): HTMLElement[] {
   return Array.from(list.querySelectorAll<HTMLElement>(":scope > [data-tab-key]"));
 }
 
+function fitActiveTab(list: HTMLElement, tab: HTMLElement): void {
+  const label = tab.querySelector<HTMLElement>(".panel-tab-label");
+  const icon = tab.querySelector<SVGElement>('[role="tab"] > svg:first-child');
+  if (!label || !icon) return;
+  const width = tab.getBoundingClientRect().width;
+  const rowBound = width >= list.clientWidth - 0.5;
+  const cut = label.scrollWidth - label.clientWidth;
+  if (tab.dataset.compact === undefined) {
+    if (!rowBound || cut <= 0.5) return;
+    const gap = Number.parseFloat(getComputedStyle(icon.parentElement!).columnGap) || 0;
+    tab.dataset.compact = String(icon.getBoundingClientRect().width + gap);
+    return;
+  }
+  if (width + Math.max(0, cut) + Number(tab.dataset.compact) <= list.clientWidth + 0.5) {
+    delete tab.dataset.compact;
+  }
+}
+
 export function usePanelTabRow<K extends string>({
   keys,
   activeKey,
@@ -47,6 +65,10 @@ export function usePanelTabRow<K extends string>({
   const measure = useCallback(() => {
     const list = listRef.current;
     if (!list) return;
+    for (const tab of tabElements(list)) {
+      if (tab.dataset.tabKey === activeKey) fitActiveTab(list, tab);
+      else delete tab.dataset.compact;
+    }
     list.toggleAttribute("data-overflow-start", list.scrollLeft > 1);
     list.toggleAttribute("data-overflow-end", list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
     const bounds = list.getBoundingClientRect();
@@ -59,7 +81,7 @@ export function usePanelTabRow<K extends string>({
     }
     list.style.setProperty("--tab-row-clip-start", `${clipStart}px`);
     list.style.setProperty("--tab-row-clip-end", `${clipEnd}px`);
-  }, []);
+  }, [activeKey]);
 
   const revealActive = useCallback(() => {
     const list = listRef.current;
@@ -70,10 +92,11 @@ export function usePanelTabRow<K extends string>({
     if (tab) {
       const bounds = list.getBoundingClientRect();
       const box = tab.getBoundingClientRect();
-      const target = box.left < bounds.left + EDGE_MARGIN
-        ? Math.max(0, list.scrollLeft - (bounds.left + EDGE_MARGIN - box.left))
-        : box.right > bounds.right - EDGE_MARGIN
-          ? list.scrollLeft + box.right - bounds.right + EDGE_MARGIN
+      const margin = Math.max(0, Math.min(EDGE_MARGIN, (bounds.width - box.width) / 2));
+      const target = box.left < bounds.left + margin
+        ? Math.max(0, list.scrollLeft - (bounds.left + margin - box.left))
+        : box.right > bounds.right - margin
+          ? list.scrollLeft + box.right - bounds.right + margin
           : list.scrollLeft;
       if (target !== list.scrollLeft) list.scrollLeft = target;
     }

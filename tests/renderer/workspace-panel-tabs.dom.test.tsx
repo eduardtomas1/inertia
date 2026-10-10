@@ -254,6 +254,72 @@ describe("workspace panel tab row", () => {
     expect(list.scrollLeft).toBe(304);
   });
 
+  it("lines up an active tab as wide as the row with the row's edge instead of cutting it", () => {
+    render(<Host initial={state("changes", "changes", "agents")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    const [first, second] = list.querySelectorAll<HTMLElement>(":scope > [data-tab-key]");
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 140, 32);
+    first!.getBoundingClientRect = () => new DOMRect(-list.scrollLeft, 0, 100, 32);
+    second!.getBoundingClientRect = () => new DOMRect(100 - list.scrollLeft, 0, 140, 32);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Background tasks" }));
+
+    expect(list.scrollLeft).toBe(100);
+  });
+
+  it("drops the active tab's icon before cutting its label and brings it back once the row has room", () => {
+    render(<Host initial={state("agents", "changes", "agents")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    const tab = list.querySelector<HTMLElement>('[data-tab-key="agents"]')!;
+    const label = tab.querySelector<HTMLElement>(".panel-tab-label")!;
+    const icon = tab.querySelector<SVGElement>('[role="tab"] > svg:first-child')!;
+    const size = (element: HTMLElement, property: string, value: number) => {
+      Object.defineProperty(element, property, { configurable: true, value });
+    };
+    icon.getBoundingClientRect = () => new DOMRect(0, 0, 14, 14);
+    tab.getBoundingClientRect = () => new DOMRect(0, 0, 140, 32);
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 140, 32);
+    size(list, "clientWidth", 140);
+    size(list, "scrollWidth", 240);
+    size(label, "clientWidth", 90);
+    size(label, "scrollWidth", 112);
+    fireEvent.scroll(list);
+    expect(tab).toHaveAttribute("data-compact");
+
+    size(label, "clientWidth", 104);
+    fireEvent.scroll(list);
+    expect(tab).toHaveAttribute("data-compact");
+
+    tab.getBoundingClientRect = () => new DOMRect(0, 0, 133, 32);
+    size(label, "clientWidth", 112);
+    fireEvent.scroll(list);
+    expect(tab).toHaveAttribute("data-compact");
+
+    tab.getBoundingClientRect = () => new DOMRect(0, 0, 133, 32);
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 300, 32);
+    size(list, "clientWidth", 300);
+    size(label, "clientWidth", 112);
+    fireEvent.scroll(list);
+    expect(tab).not.toHaveAttribute("data-compact");
+  });
+
+  it("gives the active tab room first and ends a cut label with an ellipsis", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    const block = (selector: string) => {
+      const start = css.indexOf(`\n${selector} {\n`);
+      expect(start).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf("\n}", start + 1));
+    };
+    expect(block(".panel-tab:is(.is-active, .active)")).toContain("flex-shrink: 0;");
+    expect(block(".panel-tab:is(.is-active, .active)")).toContain("min-width: 0;");
+    expect(block(".panel-tab:is(.is-active, .active)")).toContain("max-width: min(200px, 100%);");
+    expect(block(".workspace-panel-tabs:has(> [data-overflow-start], > [data-overflow-end])")).toContain("gap: 0;");
+    expect(block('.panel-tab[data-compact] > [role="tab"] > svg:first-child')).toContain("display: none;");
+    const label = block(".panel-tab-label");
+    expect(label).toContain("text-overflow: ellipsis;");
+    expect(label).not.toContain("mask-image");
+  });
+
   it("puts a focusable close control over the tab icon and closes with it", () => {
     render(<Host initial={state("preview", "changes", "preview")} />);
     const tab = screen.getByRole("tab", { name: "Browser" }).closest<HTMLElement>(".panel-tab")!;

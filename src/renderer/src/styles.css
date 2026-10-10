@@ -4899,6 +4899,10 @@ button.turn-agents-line:hover {
   background: transparent;
 }
 
+.workspace-panel-tabs:has(> [data-overflow-start], > [data-overflow-end]) {
+  gap: 0;
+}
+
 .workspace-panel.is-stacked > .workspace-panel-tabs {
   height: 40px;
   min-height: 40px;
@@ -4957,6 +4961,12 @@ button.turn-agents-line:hover {
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
+.panel-tab:is(.is-active, .active) {
+  min-width: 0;
+  max-width: min(200px, 100%);
+  flex-shrink: 0;
+}
+
 .panel-tab:hover {
   color: var(--text);
   background: var(--fill);
@@ -4994,17 +5004,20 @@ button.turn-agents-line:hover {
   transition: opacity var(--dur-fast) var(--ease-fade);
 }
 
+.panel-tab[data-compact] > [role="tab"] > svg:first-child {
+  display: none;
+}
+
 .panel-tab-label {
-  display: inline-grid;
+  display: block;
   min-width: 0;
   flex: 0 1 auto;
   overflow: hidden;
-  margin-right: -8px;
-  padding-right: 8px;
-  mask-image: linear-gradient(to left, transparent, black 8px);
+  text-overflow: ellipsis;
 }
 
 .panel-tab-label::after {
+  display: block;
   height: 0;
   overflow: hidden;
   content: attr(data-text);
@@ -5034,6 +5047,10 @@ button.turn-agents-line:hover {
 
 .panel-tab:is(:hover, :has(:focus-visible)) > [role="tab"] > svg:first-child {
   opacity: 0;
+}
+
+.panel-tab[data-compact]:is(:hover, :has(:focus-visible)) > [role="tab"] {
+  padding-left: 30px;
 }
 
 .panel-tab-close.icon-button:hover:not(:disabled) {

@@ -24,7 +24,6 @@ function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<
   });
 }
 
-const PROVIDER_ENDED_ANSWER_HARNESSES = new Set(["claude-agent-sdk"]);
 const UNKNOWN_DELIVERY = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
 
 interface TurnFollowUpCoordinatorOptions {
@@ -33,7 +32,7 @@ interface TurnFollowUpCoordinatorOptions {
   now(): string;
   activeForConversation(conversationId: string): ActiveTurn | undefined;
   answerBoundary?: {
-    prepare(active: ActiveTurn, keepAnswerOpen: boolean): { deferred: boolean; after: string | null };
+    prepare(active: ActiveTurn): { deferred: boolean; after: string | null };
     record(active: ActiveTurn, createdAt: string, deferred: boolean): void;
   };
 }
@@ -167,10 +166,7 @@ export class TurnFollowUpCoordinator {
         ),
       };
     }
-    const boundary = this.options.answerBoundary?.prepare(
-      active,
-      PROVIDER_ENDED_ANSWER_HARNESSES.has(active.turn.harnessId),
-    );
+    const boundary = this.options.answerBoundary?.prepare(active);
     const message = this.options.store.createAcknowledgedFollowUpMessage(
       lease.conversationId,
       active.turn.id,

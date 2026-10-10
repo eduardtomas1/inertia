@@ -631,6 +631,44 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       });
   });
 
+  it.each([
+    ["open", ["text:Answer to the fir", "text:st task.", "boundary", "text:Renamed it."]],
+    ["ended", ["text:Answer to the fir", "boundary", "text:Renamed it."]],
+    ["unfinished", ["text:Answer to the fir", "text:st task.", "boundary", "text:Renamed it."]],
+  ] as const)("ends the answer that was %s when a follow-up was steered before the reply", async (state, expected) => {
+    const root = portableFixtureRoot(`OpenCode steered answer ${state}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, `steer-answer-${state}`));
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const stream: string[] = [];
+    let followUp: Promise<boolean> | null = null;
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: `opencode-steered-answer-${state}`,
+      cwd: root,
+      prompt: "Answer, then take a follow-up.",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onEvent: (event) => {
+        if (event.type === "text") stream.push(`text:${event.text}`);
+        if (event.type === "text-boundary") stream.push("boundary");
+        if (event.type !== "text" || followUp) return;
+        followUp = manager.steer(event.conversationId, {
+          content: "Also rename the file.",
+          imagePaths: [],
+        }, { runId: event.runId, turnId: event.turnId! });
+      },
+    })).resolves.toMatchObject({ status: "completed" });
+    await expect(followUp).resolves.toBe(true);
+    expect(stream).toEqual(expected);
+  });
+
   it("prompts a new session from its creation response without reading it again", async () => {
     const root = portableFixtureRoot("OpenCode created session");
     roots.push(root);

@@ -174,7 +174,7 @@ export class TurnController {
       activeForConversation: (conversationId) =>
         this.activeByConversation.get(conversationId),
       answerBoundary: {
-        prepare: (active, keepAnswerOpen) => this.streams.prepareFollowUp(active, keepAnswerOpen),
+        prepare: (active) => this.streams.prepareFollowUp(active),
         record: (active, createdAt, deferred) => this.streams.recordFollowUp(active, createdAt, deferred),
       },
     });

@@ -61,6 +61,7 @@ import {
 } from "./opencode-event-stream";
 import {
   createOpenCodeEventState,
+  deferOpenCodeAnswerBoundary,
   openCodeCanonicalResult,
   settleOpenCodePromptOutput,
   type OpenCodeUsageState,
@@ -1045,6 +1046,7 @@ function startOpenCodeRun(
             if (accepted) {
               hasAdmittedV2Work = true;
               ownership.acceptPrompt(id);
+              deferOpenCodeAnswerBoundary(eventState, emitter);
               armEventInactivityDeadline();
               return true;
             }

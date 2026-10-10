@@ -91,11 +91,8 @@ export class TurnStreamProjection {
     return closed;
   }
 
-  prepareFollowUp(
-    active: ActiveTurn,
-    keepAnswerOpen: boolean,
-  ): { deferred: boolean; after: string | null } {
-    const deferred = keepAnswerOpen && Boolean(active.assistantSegmentText);
+  prepareFollowUp(active: ActiveTurn): { deferred: boolean; after: string | null } {
+    const deferred = Boolean(active.assistantSegmentText);
     if (deferred) this.flush(active, "assistant");
     else this.closeAssistantSegment(active);
     const latest = active.latestAssistantMessageId
@@ -121,6 +118,12 @@ export class TurnStreamProjection {
     } else {
       this.commitFollowUpBoundary(active, createdAt, active.latestAssistantMessageId);
     }
+  }
+
+  terminalAssistantMessageId(active: ActiveTurn): string | null {
+    const boundary = active.pendingFollowUpBoundary ?? active.followUpBoundary;
+    const latest = active.latestAssistantMessageId;
+    return boundary && boundary.messageId === latest ? null : latest;
   }
 
   private commitFollowUpBoundary(
@@ -207,6 +210,7 @@ export class TurnStreamProjection {
     if (result.textTruncated && active.assistantText.startsWith(finalText)) {
       return;
     }
+    const providerText = normalizedPrefix(normalizedResult, MAX_ASSISTANT_TEXT);
     const completedPrefix = active.assistantText.slice(
       0,
       active.assistantText.length - active.assistantSegmentText.length,
@@ -216,12 +220,14 @@ export class TurnStreamProjection {
       && !active.assistantSegmentText
       && !finalText.startsWith(completedPrefix)
     ) {
-      this.appendNormalizedAssistant(active, finalText);
+      if (!completedPrefix.endsWith(providerText)) {
+        this.appendNormalizedAssistant(active, providerText);
+      }
       return;
     }
     const correctedSegment = finalText.startsWith(completedPrefix)
       ? finalText.slice(completedPrefix.length)
-      : finalText;
+      : providerText;
     active.assistantText = `${completedPrefix}${correctedSegment}`;
     active.assistantSegmentText = correctedSegment;
     active.assistantStream.replacePending(correctedSegment);

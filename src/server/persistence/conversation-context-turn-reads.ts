@@ -27,6 +27,7 @@ const MAX_TURN_ACTIVITIES = 2_000;
 const MAX_TURN_MESSAGES = 500;
 const MAX_REQUEST_HEAD_BYTES = 2_048;
 const MAX_COMMAND_DETAIL_CHARS = 4_096;
+export const UNREACHED_TURN_LOOKBACK = 16;
 
 export interface ConversationContextTurnReadContext {
   database: Database.Database;
@@ -141,16 +142,28 @@ export class ConversationContextTurnReads {
     const target = this.context.requireConversation(input.targetConversationId);
     if (source.id === target.id) return "own";
     const sameWorkspace = this.sameWorkspace(source.id, target.id);
+    const messageIds = this.resentReferenceMessageIds(
+      target.id,
+      input.targetTurnId,
+      input.targetUserMessageId,
+    );
     const referenced = this.context.database.prepare(`
       SELECT packet.workspace_relation
       FROM conversation_context_packets packet
+      JOIN messages message ON message.id = packet.consumed_message_id
+        AND message.conversation_id = packet.target_conversation_id
       WHERE packet.target_conversation_id = ?
-        AND packet.consumed_message_id = ?
         AND packet.source_conversation_id = ?
+        AND (? IS NULL OR packet.consumed_message_id IN (SELECT value FROM json_each(?)))
         AND NOT EXISTS (
           SELECT 1 FROM agent_context_requests request WHERE request.packet_id = packet.id
         )
-    `).all(target.id, input.targetUserMessageId, source.id) as Array<{
+    `).all(
+      target.id,
+      source.id,
+      messageIds && JSON.stringify(messageIds),
+      messageIds && JSON.stringify(messageIds),
+    ) as Array<{
       workspace_relation: "same-workspace" | "different-workspace";
     }>;
     if (referenced.some(({ workspace_relation }) =>
@@ -170,6 +183,41 @@ export class ConversationContextTurnReads {
       sameWorkspace || workspace_relation === "different-workspace")
       ? "approved"
       : null;
+  }
+
+  private resentReferenceMessageIds(
+    conversationId: string,
+    turnId: string,
+    userMessageId: string,
+  ): string[] | null {
+    const current = this.context.database.prepare(`
+      SELECT requested_at,
+        CASE WHEN json_valid(session_recovery_json)
+          THEN json_extract(session_recovery_json, '$.restoredMessageCount')
+        END AS restored_message_count
+      FROM agent_turns
+      WHERE id = ? AND conversation_id = ?
+    `).get(turnId, conversationId) as {
+      requested_at: string;
+      restored_message_count: number | null;
+    } | undefined;
+    if (!current) return [userMessageId];
+    if ((current.restored_message_count ?? 0) > 0) return null;
+    const earlier = this.context.database.prepare(`
+      SELECT user_message_id, terminal_reason FROM agent_turns
+      WHERE conversation_id = ? AND (requested_at, id) < (?, ?)
+      ORDER BY requested_at DESC, id DESC
+      LIMIT ?
+    `).all(conversationId, current.requested_at, turnId, UNREACHED_TURN_LOOKBACK) as Array<{
+      user_message_id: string | null;
+      terminal_reason: string | null;
+    }>;
+    const reached = earlier.findIndex(({ terminal_reason }) => terminal_reason !== "turn-start-failed");
+    return [
+      userMessageId,
+      ...earlier.slice(0, reached === -1 ? earlier.length : reached)
+        .flatMap(({ user_message_id }) => user_message_id ? [user_message_id] : []),
+    ];
   }
 
   requestedByCall(targetTurnId: string, toolCallIdHash: string): boolean {

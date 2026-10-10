@@ -167,6 +167,7 @@ function startCodexRun(
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
       onText: emitter.text,
+      onTextBoundary: emitter.textBoundary,
       onActivity: emitter.activity,
       onSession: (sessionId) => {
         // The App Server has returned the exact opened/resumed thread and has

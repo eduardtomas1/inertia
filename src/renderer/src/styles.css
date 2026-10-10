@@ -8312,16 +8312,21 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--fill);
 }
 
-.status-overlay-stack {
-  position: fixed;
-  right: 22px;
-  bottom: 20px;
+.workspace-frame > .status-overlay-stack {
+  position: absolute;
+  top: calc(48px + 12px);
+  right: 12px;
   z-index: 100;
   display: flex;
-  width: min(440px, calc(100vw - 44px));
+  width: min(440px, calc(100% - 24px));
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
+}
+
+.workspace-frame.has-right-panel > .status-overlay-stack {
+  right: calc(var(--workspace-tools-width) + 12px);
+  width: min(440px, calc(100% - var(--workspace-tools-width) - 24px));
 }
 
 .provider-quota-notices {
@@ -8572,12 +8577,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
   .database-recovery-notice > button:not(.icon-button) {
     grid-column: 2;
-  }
-
-  .status-overlay-stack {
-    right: 12px;
-    bottom: 12px;
-    width: calc(100vw - 24px);
   }
 
   .app-update-notice {

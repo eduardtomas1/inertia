@@ -92,4 +92,40 @@ describe("text button tooltip", () => {
     });
     expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent("The stored patch is unavailable");
   });
+
+  it("opens above when its trigger sits on a row that a native view covers below", () => {
+    const rect = (top: number, height: number, width: number) => ({
+      top, bottom: top + height, left: 100, right: 100 + width, width, height, x: 100, y: top, toJSON: () => ({}),
+    });
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute("role") === "tooltip" ? rect(0, 26, 90) : rect(60, 28, 28);
+    });
+    try {
+      render(
+        <div>
+          <TooltipButton tooltip="Reload preview" aria-label="Reload preview">R</TooltipButton>
+          <header data-tooltip-placement="above">
+            <TooltipButton tooltip="Go back" aria-label="Go back">B</TooltipButton>
+          </header>
+        </div>,
+      );
+      const open = (name: string): HTMLElement => {
+        const button = screen.getByRole("button", { name });
+        fireEvent.pointerEnter(button, { pointerType: "mouse" });
+        act(() => {
+          vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+        });
+        const tooltip = screen.getByRole("tooltip", { hidden: true });
+        fireEvent.pointerLeave(button, { pointerType: "mouse" });
+        act(() => {
+          vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
+        });
+        return tooltip;
+      };
+      expect(open("Reload preview").style.top).toBe("92px");
+      expect(open("Go back").style.top).toBe("30px");
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

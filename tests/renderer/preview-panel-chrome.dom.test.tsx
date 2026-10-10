@@ -30,6 +30,7 @@ describe("browser chrome", () => {
     const { container } = render(panel());
     const rows = container.querySelectorAll(".preview-chrome");
     expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveAttribute("data-tooltip-placement", "above");
     const row = within(rows[0] as HTMLElement);
     for (const name of ["Go back", "Go forward", "Reload preview", "Open in system browser", "Evidence 0", "Open browser page"]) {
       expect(row.getByRole("button", { name })).toBeInTheDocument();

@@ -131,9 +131,10 @@ export function Tooltip({
   const [position, setPosition] = useState<TooltipPosition | null>(null);
 
   useLayoutEffect(() => {
-    const trigger = anchor.current?.getBoundingClientRect();
+    const element = anchor.current;
+    const trigger = element?.getBoundingClientRect();
     const box = tooltip.current?.getBoundingClientRect();
-    if (!trigger || !box) return;
+    if (!element || !trigger || !box) return;
     const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
     const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
     const centered = trigger.left + trigger.width / 2 - box.width / 2;
@@ -142,7 +143,8 @@ export function Tooltip({
       Math.max(VIEWPORT_PADDING, viewportWidth - VIEWPORT_PADDING - box.width),
     );
     const below = trigger.bottom + TOOLTIP_GAP;
-    const top = below + box.height > viewportHeight - VIEWPORT_PADDING
+    const prefersAbove = element.closest('[data-tooltip-placement="above"]') !== null;
+    const top = prefersAbove || below + box.height > viewportHeight - VIEWPORT_PADDING
       ? Math.max(VIEWPORT_PADDING, trigger.top - TOOLTIP_GAP - box.height)
       : below;
     setPosition({ top, left });

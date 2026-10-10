@@ -289,7 +289,7 @@ export function PreviewPanel({
           </div>
         </div>
       )}
-      <header className="preview-chrome">
+      <header className="preview-chrome" data-tooltip-placement="above">
         {onBack && (
           <IconButton label="Go back" onClick={onBack} disabled={!canGoBack}>
             <ArrowLeft size={14} />

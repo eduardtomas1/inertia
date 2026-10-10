@@ -44,4 +44,14 @@ describe("composer context rows", () => {
       expect(declarationsFor(rules, selector).has("box-shadow"), selector).toBe(false);
     }
   });
+
+  it("selects menu rows with the strong fill and keyboard-active rows the same way", () => {
+    expect(declarationsFor(rules, '.composer-popover button[aria-checked="true"]').get("background"))
+      .toBe("var(--fill-strong)");
+    expect(source).not.toContain(".option-check");
+    expect(source).toMatch(/\)\[data-active="true"\]:not\(:disabled, \[aria-disabled="true"\]\) \{\n  background: var\(--fill-strong\);/u);
+    const layer = declarationsFor(rules, ".composer-more-layer");
+    expect(layer.get("bottom")).toBe("calc(100% + var(--popover-offset))");
+    expect(declarationsFor(rules, ".composer-more-drilldown-header").get("border-bottom")).toBe("1px solid var(--line-soft)");
+  });
 });

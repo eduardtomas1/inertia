@@ -554,8 +554,24 @@ button:disabled,
   .palette-group button,
   .project-menu button,
   .thread-submenu button
-):is(:hover, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"]) {
+):is(:hover, .is-active, [aria-expanded="true"]):not(:disabled, [aria-disabled="true"]) {
   background: var(--fill);
+}
+
+:where(
+  .composer-command-list button,
+  .composer-popover button,
+  .composer-suggestion-menu button,
+  .conversation-menu button,
+  .git-branch-results button,
+  .header-menu-item,
+  .header-popover .header-action-item,
+  .header-popover > button,
+  .palette-group button,
+  .project-menu button,
+  .thread-submenu button
+)[data-active="true"]:not(:disabled, [aria-disabled="true"]) {
+  background: var(--fill-strong);
 }
 
 :where(
@@ -3865,7 +3881,7 @@ button.turn-agents-line:hover {
   position: absolute;
   z-index: 20;
   right: 0;
-  bottom: calc(100% + 9px);
+  bottom: calc(100% + var(--popover-offset));
   overflow: visible;
 }
 
@@ -3888,8 +3904,11 @@ button.turn-agents-line:hover {
   gap: 2px;
 }
 
-.composer-more-root > button {
-  min-height: 42px;
+.composer-popover .composer-more-root > button > span {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .composer-more-root > button.is-open {
@@ -3914,11 +3933,11 @@ button.turn-agents-line:hover {
 }
 
 .composer-more-submenu.opens-right {
-  left: calc(100% + 8px);
+  left: calc(100% + var(--popover-offset));
 }
 
 .composer-more-submenu.opens-left {
-  right: calc(100% + 8px) !important;
+  right: calc(100% + var(--popover-offset)) !important;
 }
 
 .composer-more-layer[data-popover-vertical="below"]
@@ -3930,36 +3949,27 @@ button.turn-agents-line:hover {
 .composer-more-drilldown-header {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin: 0 1px 5px;
-  padding: 2px 2px 7px;
-  border-bottom: 1px solid var(--line);
+  gap: 4px;
+  margin: 0 -4px 4px;
+  padding: 0 4px 4px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .composer-more-drilldown-header .composer-more-back {
   display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   place-items: center;
   padding: 0;
 }
 
-.composer-more-drilldown-header > div {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 1px;
-}
-
 .composer-more-drilldown-header strong {
-  font-size: var(--text-xs);
-}
-
-.composer-more-drilldown-header small {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @container (max-width: 560px) {
@@ -4605,7 +4615,6 @@ button.turn-agents-line:hover {
 }
 .option-popover,
 .access-popover { right: 0; }
-.access-popover { width: 245px; }
 .provider-popover { right: 0; width: 250px; }
 
 .popover-title {
@@ -4633,10 +4642,10 @@ button.turn-agents-line:hover {
 .reasoning-popover,
 .access-popover,
 .composer-mode-popover {
-  width: min(260px, calc(100vw - 32px));
+  width: min(var(--popover-width), calc(100vw - 32px));
 }
 
-.composer-setting-popover button[aria-checked="true"] {
+.composer-popover button[aria-checked="true"] {
   background: var(--fill-strong);
 }
 
@@ -4668,13 +4677,6 @@ button.turn-agents-line:hover {
   color: var(--status-failed);
   font-size: var(--text-xs);
   line-height: var(--leading-chrome);
-}
-
-.option-check {
-  max-width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
 }
 
 .model-input-label {

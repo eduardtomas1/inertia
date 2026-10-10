@@ -536,7 +536,6 @@ export function ComposerToolbar({
                         aria-label="Project actions"
                         onKeyDown={handleComposerMenuNavigation}
                       >
-                        <div className="popover-title">Project actions</div>
                         {actions.map((action) => (
                           <button
                             type="button"

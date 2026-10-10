@@ -124,7 +124,6 @@ export function ComposerSettings({
               aria-label="Reasoning level"
               onKeyDown={handleComposerMenuNavigation}
             >
-              <div className="popover-title">Reasoning</div>
               {selectedModel.reasoningOptions.map((option) => (
                 <button
                   type="button"
@@ -147,9 +146,6 @@ export function ComposerSettings({
                         : ""}
                     </strong>
                   </span>
-                  {selectedReasoning === option.value && (
-                    <span className="option-check" />
-                  )}
                 </button>
               ))}
             </div>
@@ -190,7 +186,6 @@ export function ComposerSettings({
               aria-label={RESPONSE_SPEED_LABEL}
               onKeyDown={handleComposerMenuNavigation}
             >
-              <div className="popover-title">{RESPONSE_SPEED_LABEL}</div>
               <ComposerResponseSpeedOptions
                 fastMode={fastMode}
                 selectedFastMode={selectedFastMode}
@@ -241,7 +236,6 @@ export function ComposerSettings({
             aria-label="Project access"
             onKeyDown={handleComposerMenuNavigation}
           >
-            <div className="popover-title">Project access</div>
             {accessOptions.map((option) => (
               <button
                 type="button"
@@ -260,9 +254,6 @@ export function ComposerSettings({
                   <strong>{option.label}</strong>
                   <small>{option.description}</small>
                 </span>
-                {conversation.accessMode === option.value && (
-                  <span className="option-check" />
-                )}
               </button>
             ))}
           </div>

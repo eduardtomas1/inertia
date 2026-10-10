@@ -135,9 +135,6 @@ export function ComposerMoreMenu({
             </strong>
             <small>{option.description}</small>
           </span>
-          {selectedReasoning === option.value && (
-            <span className="option-check" />
-          )}
         </button>
       ));
     }
@@ -171,15 +168,7 @@ export function ComposerMoreMenu({
         >
           <span>
             <strong>{mode === "build" ? "Build" : "Plan"}</strong>
-            <small>
-              {mode === "build"
-                ? "Work directly in the project"
-                : "Inspect and propose steps first"}
-            </small>
           </span>
-          {conversation.interactionMode === mode && (
-            <span className="option-check" />
-          )}
         </button>
       ));
     }
@@ -201,9 +190,6 @@ export function ComposerMoreMenu({
           <strong>{option.label}</strong>
           <small>{option.description}</small>
         </span>
-        {conversation.accessMode === option.value && (
-          <span className="option-check" />
-        )}
       </button>
     ));
   };
@@ -304,10 +290,7 @@ export function ComposerMoreMenu({
                   >
                     <ArrowLeft size={14} />
                   </button>
-                  <div>
-                    <strong>{moreSectionLabel(moreSection)}</strong>
-                    <small>Composer options</small>
-                  </div>
+                  <strong>{moreSectionLabel(moreSection)}</strong>
                 </div>
                 <div className="composer-more-options" data-more-submenu>
                   {renderMoreSectionOptions(moreSection)}
@@ -315,7 +298,6 @@ export function ComposerMoreMenu({
               </>
             ) : (
               <>
-                <div className="popover-title">Composer options</div>
                 <div className="composer-more-root">
                   {moreRootItems.map((item) => (
                     <button
@@ -380,9 +362,6 @@ export function ComposerMoreMenu({
                 handleMoreMenuNavigation(event);
               }}
             >
-              <div className="popover-title">
-                {moreSectionLabel(moreSection)}
-              </div>
               {renderMoreSectionOptions(moreSection)}
             </div>
           )}

@@ -31,6 +31,7 @@
 .composer-shell .composer-box {
   position: relative;
   z-index: 1;
+  padding: 1px;
   border-radius: var(--composer-radius);
   box-shadow: var(--composer-shadow);
 }
@@ -98,6 +99,7 @@
   gap: 4px;
 }
 .composer-shell .model-chooser-anchor {
+  flex: 0 1 auto;
   margin-inline-start: -10px;
 }
 .composer-shell .selected-model-chip,
@@ -371,6 +373,9 @@
   opacity: 1;
 }
 .composer-shell .composer-input-actions .stop-button .composer-send-motion-icon {
+  scale: 0.75;
+}
+.composer-shell .composer-input-actions .stop-button .composer-send-motion-icon path {
   fill: currentcolor;
 }
 .composer-shell .composer-checkout-strip {

@@ -13,6 +13,7 @@ import {
 import type { ProjectAction } from "@shared/contracts";
 
 import type { EnvironmentRunItem } from "../../utils/environmentSummary";
+import { TooltipButton } from "../TooltipButton";
 import {
   workspaceRunStatusLabel,
   type WorkspaceRunsModel,
@@ -43,61 +44,61 @@ function RunRow({
         <small title={`${detail}${owner}`}>{detail}{owner}</small>
       </span>
       {run.canOpenPreview && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Open preview for ${run.label}${owner}`}
-          title="Open preview"
+          tooltip="Open preview"
+          describeTooltip={false}
           onClick={() => { onDone(); runs.onOpenRunPreview(run); }}
         >
           <ExternalLink size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       )}
       {run.canAcknowledge && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Acknowledge ${run.label}${owner}`}
-          title="Acknowledge"
+          tooltip="Acknowledge"
+          describeTooltip={false}
           onClick={(event) => {
             onBeforeRowAction(event);
             runs.onAcknowledgeRun(run);
           }}
         >
           <Check size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       )}
       {run.canDismiss && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Dismiss ${run.label}${owner}`}
-          title="Dismiss"
+          tooltip="Dismiss"
+          describeTooltip={false}
           onClick={(event) => {
             onBeforeRowAction(event);
             runs.onDismissRun(run);
           }}
         >
           <Trash2 size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       )}
       {run.canStop && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Stop ${run.label}${owner}`}
-          title="Stop"
+          tooltip="Stop"
+          describeTooltip={false}
           onClick={(event) => {
             onBeforeRowAction(event);
             runs.onStopRun(run);
           }}
         >
           <Square size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       )}
     </div>
   );

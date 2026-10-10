@@ -351,22 +351,22 @@ export function PromptPresetMenu({
               {error && <p className="prompt-preset-error" role="status">{error}</p>}
               {editor.kind === "edit" && editor.preset && (
                 <div className="prompt-preset-editor-tools">
-                  <button
-                    type="button"
+                  <TooltipButton
                     aria-label={`Move ${editor.preset.name} up`}
-                    title="Move up"
+                    tooltip="Move up"
+                    describeTooltip={false}
                     disabled={pending || editor.position === 0}
                     onClick={() => void move(editor.preset!, "up")}
-                  ><ArrowUp size={14} /></button>
-                  <button
-                    type="button"
+                  ><ArrowUp size={14} /></TooltipButton>
+                  <TooltipButton
                     aria-label={`Move ${editor.preset.name} down`}
-                    title="Move down"
+                    tooltip="Move down"
+                    describeTooltip={false}
                     disabled={
                       pending || editor.position === presets.length - 1
                     }
                     onClick={() => void move(editor.preset!, "down")}
-                  ><ArrowDown size={14} /></button>
+                  ><ArrowDown size={14} /></TooltipButton>
                   <button
                     type="button"
                     disabled={pending || presets.length >= MAX_PROMPT_PRESETS}
@@ -480,13 +480,13 @@ export function PromptPresetMenu({
                             <small>{blockedReason ?? preset.body}</small>
                           </span>
                         </button>
-                        <button
-                          type="button"
+                        <TooltipButton
                           className="prompt-preset-edit"
                           aria-label={`Edit prompt preset: ${preset.name}`}
-                          title={`Edit ${preset.name}`}
+                          tooltip={`Edit ${preset.name}`}
+                          describeTooltip={false}
                           onClick={() => beginEdit(preset)}
-                        ><Pencil size={14} /></button>
+                        ><Pencil size={14} /></TooltipButton>
                       </div>
                     );
                   })}

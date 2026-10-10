@@ -169,16 +169,16 @@ export function PromptStashMenu({
                     <span aria-hidden="true">↻</span>
                     {entry.recurrence && <small>{entry.recurrence === "daily" ? "1d" : "7d"}</small>}
                   </button>
-                  <button
-                    type="button"
+                  <TooltipButton
                     role="menuitem"
                     className="prompt-stash-remove"
                     aria-label={deleteLabel}
-                    title={deleteLabel}
+                    tooltip="Delete saved prompt"
+                    describeTooltip={false}
                     onClick={() => onRemove(entry.id)}
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </TooltipButton>
                 </div>
                 );
               })}

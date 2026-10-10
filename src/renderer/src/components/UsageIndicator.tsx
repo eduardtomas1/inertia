@@ -15,6 +15,7 @@ import {
   usageDisplayBehavior,
 } from "../utils/usageDisplay";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { TooltipButton } from "./TooltipButton";
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
@@ -323,22 +324,22 @@ export function UsageIndicator({
       data-composer-control="usage"
     >
       <div ref={anchorRef} className="usage-popover-anchor">
-        <button
+        <TooltipButton
           ref={triggerRef}
-          type="button"
           className={`usage-popover-trigger${open ? " is-open" : ""}`}
           aria-label={triggerLabel}
           aria-haspopup="dialog"
           aria-controls={detailsId}
           aria-expanded={open}
-          title={triggerSummary}
+          tooltip={triggerSummary}
+          describeTooltip={false}
           onClick={() => setOpen((current) => !current)}
         >
           <ContextRing context={context} quotaRefreshing={quotaRefreshing} />
           {behavior.showAdjacentValue && (
             <span className="usage-trigger-value" aria-hidden="true">{context.valueLabel}</span>
           )}
-        </button>
+        </TooltipButton>
 
         <div
           id={detailsId}

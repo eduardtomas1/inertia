@@ -474,6 +474,28 @@ describe("Environment content in its workspace surfaces", () => {
     expect(within(menu).getByText(/Needs attention/u)).toBeVisible();
   });
 
+  it("names each run row action in the shared tooltip instead of a native title", async () => {
+    const failed = environmentRun({
+      id: "failed-check",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    render(<RunControl runs={runsModel({ checks: [failed] })} />);
+    const menu = await openRunMenu();
+    const actions = [
+      within(menu).getByRole("menuitem", { name: /^Stop Docs preview/u }),
+      within(menu).getByRole("menuitem", { name: /^Open preview for Docs preview/u }),
+      within(menu).getByRole("menuitem", { name: "Acknowledge Typecheck" }),
+      within(menu).getByRole("menuitem", { name: "Dismiss Typecheck" }),
+    ];
+    for (const action of actions) expect(action).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(actions[0]!, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent)).toContain("Stop"));
+    fireEvent.pointerLeave(actions[0]!, { pointerType: "mouse" });
+  });
+
   it("moves focus to the next run action when a row disappears", async () => {
     const running = environmentRun({ id: "build", label: "Build", canStop: true });
     const failed = environmentRun({

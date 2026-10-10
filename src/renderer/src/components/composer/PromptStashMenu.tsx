@@ -62,6 +62,7 @@ export function PromptStashMenu({
         aria-controls={menuId("stash")}
         aria-expanded={menu === "stash"}
         tooltip={label}
+        describeTooltip={false}
         onClick={() => { focusLegacy.current = false; toggleMenu("stash"); }}
         onKeyDown={(event) => {
           focusLegacy.current = false;

@@ -62,9 +62,11 @@ describe("PromptStashMenu", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", {
+    const trigger = screen.getByRole("button", {
       name: "Scratch prompts, 1 saved",
-    }));
+    });
+    expect(trigger).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(trigger);
     expect(screen.getByRole("menu", { name: "Scratch prompts" }))
       .toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Saved scratch prompts" }))

@@ -115,9 +115,11 @@ describe("PromptPresetMenu", () => {
       entries={[legacyPreset]}
       currentRoute={{ ...route, fastMode: true }}
     />);
-    fireEvent.click(screen.getByRole("button", {
+    const trigger = screen.getByRole("button", {
       name: "Prompt presets, 1 saved",
-    }));
+    });
+    expect(trigger).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(trigger);
     expect(await screen.findByTitle(/speed Standard/u))
       .toHaveAttribute("aria-disabled", "true");
   });

@@ -246,6 +246,7 @@ export function PromptPresetMenu({
         aria-controls={menuId("presets")}
         aria-expanded={menu === "presets"}
         tooltip="Prompt presets"
+        describeTooltip={false}
         onClick={() => toggleMenu("presets")}
         onKeyDown={(event) =>
           handleComposerMenuTriggerKeyDown("presets", event)}

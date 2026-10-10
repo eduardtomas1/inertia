@@ -829,6 +829,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain("modified · +64 −9");
     expect(html).toContain("added · +20 −12");
     expect(html).toContain('data-language-family="java"');
+    expect(html).not.toMatch(/<span[^>]*\btitle="[^"]*"[^>]*role="listitem"/u);
     expect(html).toContain("Open exact turn diff");
     expect(html).toContain('aria-label="Open src/history.ts"');
     expect(html).toContain("The complete file summary is retained, but the stored patch reached its size limit.");

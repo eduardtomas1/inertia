@@ -109,7 +109,6 @@ export function ChangedFilesSummary({
             return (
               <span
                 key={file.path}
-                title={`${file.path} · ${language.label}`}
                 role="listitem"
                 data-language-family={language.family}
               >

@@ -44,4 +44,25 @@ describe("workspace header project crumb", () => {
     render(<WorkspaceHeader {...props({})} />);
     expect(hoverTooltipText(screen.getByRole("button", { name: "New chat in Studio" }))).toBe("New chat in Studio");
   });
+
+  it("describes the title hint outside the heading text", () => {
+    const callbacks = props({});
+    const noop = vi.fn();
+    render(
+      <WorkspaceHeader
+        {...callbacks}
+        conversationMenu={{
+          activeConversationId: callbacks.conversation!.id, detachedChatLimitReached: false, isDetached: false,
+          runs: [], splitConversationIds: new Set(), onAcknowledgeRun: noop, onArchiveConversation: noop,
+          onCloseConversationSplit: noop, onDeleteConversation: noop, onDismissRun: noop,
+          onOpenConversationInSplit: noop, onOpenConversationInWindow: noop, onPinConversation: noop,
+          onRestoreConversation: noop, onSettleConversation: noop, onSnoozeConversation: noop,
+        }}
+      />,
+    );
+    const heading = screen.getByRole("heading", { level: 1 });
+    const title = callbacks.conversation!.title;
+    expect(heading).toHaveTextContent(new RegExp(`^${title}$`, "u"));
+    expect(screen.getByRole("button", { name: title })).toHaveAccessibleDescription("Chat actions · double-click to rename");
+  });
 });

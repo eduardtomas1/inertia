@@ -1,15 +1,10 @@
 .context-compaction-row { display: grid; gap: 24px; max-width: var(--transcript-max-width); margin-inline: auto; padding-block: 12px; }
-.context-compaction-row > .turn-user-request { justify-self: end; width: fit-content; max-width: var(--user-request-max-width); padding: 11px 13px 10px; border-radius: var(--radius-sm); background: var(--fill); }
-.context-compaction-separator { display: flex; align-items: center; gap: 12px; color: var(--text-muted); padding-block: 4px; }
-.context-compaction-separator > span { height: 1px; flex: 1; background: linear-gradient(90deg, transparent, var(--line)); }
-.context-compaction-separator > span:last-child { background: linear-gradient(90deg, var(--line), transparent); }
-.context-compaction-separator small { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); text-align: center; }
-.context-compaction-separator svg { flex: none; }
+.context-compaction-row > .turn-user-request { justify-self: end; }
+.context-compaction-separator { display: flex; align-items: center; gap: 12px; color: var(--text-faint); padding-block: 4px; }
+.context-compaction-separator > span { height: 1px; flex: 1; background: var(--line-soft); }
 .turn-execution-stream .context-compaction-separator, .turn-agent-execution > .context-compaction-separator { margin-block: 8px; }
-.context-compaction-marker { min-width: 0; padding: 3px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.context-compaction-marker > i { color: var(--text-faint); font-style: normal; }
-.context-compaction-marker .context-compaction-icon { width: 14px; height: 14px; }
-.context-compaction-marker .context-compaction-icon > g { animation: none; }
+.context-compaction-marker { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.context-compaction-marker > i { font-style: normal; }
 @media (forced-colors: active) {
-  .context-compaction-separator > span, .context-compaction-separator > span:last-child { background: CanvasText; }
+  .context-compaction-separator > span { background: CanvasText; }
 }

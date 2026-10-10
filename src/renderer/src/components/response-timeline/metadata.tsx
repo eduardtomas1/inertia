@@ -26,6 +26,7 @@ import {
 import { shouldShowChangedFilesSummary } from "./changedFiles";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
+import { TooltipButton } from "../TooltipButton";
 
 export function CopyAnswerButton({
   content,
@@ -41,10 +42,9 @@ export function CopyAnswerButton({
   const label = error ? "Copy failed" : ariaLabel;
   return (
     <>
-      <button
-        type="button"
+      <TooltipButton
         className="turn-action"
-        title={copied ? "Answer copied" : label}
+        tooltip={copied ? "Answer copied" : label}
         aria-label={copied ? copiedAriaLabel : label}
         onClick={(event) => {
           const article = [...event.currentTarget.closest(".response-turn")
@@ -58,8 +58,8 @@ export function CopyAnswerButton({
           iconState={copied ? "copied" : "copy"}
           size={14}
         />
-        <span>{copied ? "Copied" : error ? "Copy failed" : "Copy"}</span>
-      </button>
+        {error && <span>Copy failed</span>}
+      </TooltipButton>
       <span className="visually-hidden" role="status" aria-live="polite">
         {copied ? "Answer copied." : ""}
       </span>
@@ -200,10 +200,12 @@ export function TurnMetadata({
   const [detailsExpanded, setDetailsExpanded] = useState(
     workDetailsExpandedByDefault === true,
   );
+  const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
   const { agentTurn } = turn;
   const presentation = turnMetadataPresentation(turn);
   const detailsId = `turn-run-details-${turn.id}`;
   const detailsLabelId = `${detailsId}-label`;
+  const diagnosticsId = `${detailsId}-diagnostics`;
   const togglePrepared = useRef(false);
   const prepareToggle = (): void => {
     if (togglePrepared.current) return;
@@ -214,25 +216,45 @@ export function TurnMetadata({
     prepareToggle();
     setDetailsExpanded((current) => !current);
   };
+  const toggleDiagnostics = (): void => {
+    prepareToggle();
+    setDiagnosticsExpanded((current) => !current);
+  };
   useLayoutEffect(() => {
     if (!togglePrepared.current) return;
     onAfterToggle?.();
     togglePrepared.current = false;
-  }, [detailsExpanded, onAfterToggle]);
+  }, [detailsExpanded, diagnosticsExpanded, onAfterToggle]);
   useEffect(() => {
     setDetailsExpanded(workDetailsExpandedByDefault === true);
   }, [workDetailsExpandedByDefault]);
+  const completed = agentTurn.status === "completed";
+  const time = terminalAnswer?.createdAt
+    ?? (turn.isActive ? turn.startedAt ?? turn.requestedAt : turn.completedAt ?? turn.requestedAt);
+  if (turn.isActive) {
+    return (
+      <footer className="turn-meta" aria-label="Turn time">
+        <div className="turn-meta-primary">
+          <time dateTime={time} title={formatFullDateTime(time)}>{formatMessageTime(time)}</time>
+        </div>
+      </footer>
+    );
+  }
   return (
-    <footer className="turn-meta" aria-label="Final answer actions and run metadata">
+    <footer
+      className="turn-meta"
+      aria-label="Final answer actions and run metadata"
+      data-run-details-expanded={detailsExpanded || undefined}
+    >
       <div className="turn-meta-primary">
         {terminalAnswer && (
           <CopyAnswerButton content={terminalAnswer.content} answerId={terminalAnswer.id} ariaLabel="Copy final answer" />
         )}
-        {showTimestamp && terminalAnswer && (
-          <time dateTime={terminalAnswer.createdAt} title={formatFullDateTime(terminalAnswer.createdAt)}>{formatMessageTime(terminalAnswer.createdAt)}</time>
+        {showTimestamp && (
+          <time dateTime={time} title={formatFullDateTime(time)}>{formatMessageTime(time)}</time>
         )}
-        <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>
-        <span className="turn-duration">{presentation.durationLabel}</span>
+        {!completed && <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>}
+        <span className="turn-duration" data-turn-status={completed ? agentTurn.status : undefined}>{presentation.durationLabel}</span>
         <button
           type="button"
           className="turn-run-details-toggle"
@@ -245,25 +267,39 @@ export function TurnMetadata({
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       </div>
-      <dl
+      <div
         className="turn-run-details"
         id={detailsId}
         aria-labelledby={detailsLabelId}
         hidden={!detailsExpanded}
+        role="group"
       >
-        {detailsExpanded && presentation.details.map((detail) => (
-            <div key={detail.label}>
-              <dt>{detail.label}</dt>
-              <dd>{detail.technical ? <code>{detail.value}</code> : detail.value}</dd>
-            </div>
-        ))}
-          {detailsExpanded && settledWorkDetails && (
-            <div className="turn-run-work-details">
-              <dt>Execution transcript</dt>
-              <dd>{settledWorkDetails}</dd>
-            </div>
-          )}
-      </dl>
+        {detailsExpanded && settledWorkDetails && (
+          <div className="turn-run-work-details">{settledWorkDetails}</div>
+        )}
+        {detailsExpanded && (
+          <button
+            type="button"
+            className="turn-run-diagnostics-toggle"
+            aria-expanded={diagnosticsExpanded}
+            aria-controls={diagnosticsId}
+            onClick={toggleDiagnostics}
+          >
+            <span>Diagnostics</span>
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+        )}
+        {detailsExpanded && (
+          <dl className="turn-run-diagnostics" id={diagnosticsId} hidden={!diagnosticsExpanded}>
+            {diagnosticsExpanded && presentation.details.map((detail) => (
+              <div key={detail.label}>
+                <dt>{detail.label}</dt>
+                <dd>{detail.technical ? <code>{detail.value}</code> : detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </div>
     </footer>
   );
 }

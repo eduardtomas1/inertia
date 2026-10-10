@@ -8,10 +8,6 @@ export async function verifyFailureDiagnostics(
   await expect(diagnostics).toContainText(
     "The provider connection closed before verification completed.",
   );
-  const toggle = diagnostics.locator(".turn-failure-toggle");
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(diagnostics.getByRole("heading", {
     name: "Provider & process",
   })).toBeVisible();

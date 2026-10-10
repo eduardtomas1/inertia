@@ -7,6 +7,7 @@ import {
 } from "@playwright/test";
 
 const TARGET_REVEAL_RETRY_INTERVAL_MS = 50;
+const CODE_COPY_NAME = /^(?:Copy|Copying|Copied|Copy failed)$/u;
 
 type TargetRevealEvidence = {
   mounted: boolean;
@@ -143,8 +144,8 @@ export async function verifyDesktopMarkdownControls(input: {
   const codeBlocks = completedTurn.locator(".response-code-block");
   await expect(codeBlocks).toHaveCount(2);
   const firstWrap = codeBlocks.nth(0).getByRole("button", { name: "Wrap" });
-  const firstCopy = codeBlocks.nth(0).locator('button[title="Copy code"]');
-  const secondCopy = codeBlocks.nth(1).locator('button[title="Copy code"]');
+  const firstCopy = codeBlocks.nth(0).getByRole("button", { name: CODE_COPY_NAME });
+  const secondCopy = codeBlocks.nth(1).getByRole("button", { name: CODE_COPY_NAME });
   await firstWrap.evaluate((button) => {
     button.scrollIntoView({ block: "center", inline: "nearest" });
   });
@@ -360,7 +361,7 @@ export async function verifyNarrowDesktopMarkdownControls(input: {
   );
   await electronApp.evaluate(({ clipboard }) =>
     clipboard.writeText("narrow-sentinel"));
-  await codeBlocks.nth(1).locator('button[title="Copy code"]').click();
+  await codeBlocks.nth(1).getByRole("button", { name: CODE_COPY_NAME }).click();
   await expect.poll(() => electronApp.evaluate(({ clipboard }) =>
     clipboard.readText())).toBe('{"route":"secondary","verified":true}');
   const tableToolbar = completedTurn.locator(".response-table-toolbar").first();

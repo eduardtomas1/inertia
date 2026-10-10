@@ -34,7 +34,7 @@ import {
 } from "../../utils/sidebarModel";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 import {
   RouteRepairIcon,
   routeRepairLabel,

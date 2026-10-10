@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 import type { ChatAttachment } from "@shared/contracts";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {

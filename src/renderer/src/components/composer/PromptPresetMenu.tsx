@@ -11,7 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import "./PromptPresetMenu.css";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 
 import {
   MAX_PROMPT_PRESETS,

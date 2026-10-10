@@ -94,7 +94,7 @@ import type {
   FinalAnswerAutoScrollEvent,
   ResponseTimelineProps,
 } from "./response-timeline/types";
-import { LoadingMark } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
 
@@ -1025,7 +1025,7 @@ export function ChatWorkspace({
         </div>
       </div>
 
-      {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
+      {showJump && <div className="timeline-follow-controls"><IconButton label="Jump to latest" onClick={() => scrollToLatest("auto")}><ArrowDown size={16} /></IconButton></div>}
 
       <div ref={composerRegionRef} className="composer-region">
         {pendingInputRequest && (

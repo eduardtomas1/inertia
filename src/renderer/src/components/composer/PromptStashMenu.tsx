@@ -4,7 +4,7 @@ import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
 import { readPromptStash, type PromptStashEntry } from "../../utils/promptStash";
 import { menuId } from "./config";
 import type { ComposerMenuController } from "./useComposerMenus";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 
 const LegacyPromptStash = lazy(() => import("./LegacyPromptStash"));
 

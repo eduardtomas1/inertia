@@ -48,6 +48,7 @@ import {
   MarkdownImageSchedulerProvider,
   useMarkdownImageSchedule,
 } from "./markdown/MarkdownImageScheduler";
+import { TooltipButton } from "./TooltipButton";
 
 export const RESPONSE_MARKDOWN_TAG_NAMES = [
   "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
@@ -432,8 +433,8 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
   const csvCopy = useCopiedState();
   return (
     <div className="response-table-shell">
+      <div className="response-table-scroll"><table {...props}>{children}</table></div>
       <div className="response-table-toolbar">
-        <span>Table</span>
         <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
         <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
       </div>
@@ -451,7 +452,6 @@ function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"tabl
               : ""}
         </span>
       )}
-      <div className="response-table-scroll"><table {...props}>{children}</table></div>
     </div>
   );
 }
@@ -578,10 +578,9 @@ function CodeBlock({
           ? <LocalFileLink path={fileTarget.path} url={fileTarget.url} className="response-code-file-link">{meta.file}</LocalFileLink>
           : fileTarget?.kind === "project" && onOpenProjectFile
           ? (
-              <button
-                type="button"
+              <TooltipButton
                 className="response-code-file-link"
-                title={`Open ${fileTarget.relativePath} in Files`}
+                tooltip={`Open ${fileTarget.relativePath} in Files`}
                 data-language-family={sourceLanguage.family}
                 onClick={() => {
                   if (fileTarget.literalPath) {
@@ -601,7 +600,7 @@ function CodeBlock({
                 }}
               >
                 {fileLabel}
-              </button>
+              </TooltipButton>
             )
           : (
               <span
@@ -619,8 +618,8 @@ function CodeBlock({
               </span>
             )}
         <div>
-          <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><span>Wrap</span></button>
-          <button type="button" title="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={14} /> : <Copy size={14} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></button>
+          <TooltipButton aria-pressed={wrap} tooltip={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><span>Wrap</span></TooltipButton>
+          <TooltipButton tooltip="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={14} /> : <Copy size={14} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></TooltipButton>
         </div>
       </header>
       {clipboard.error && (

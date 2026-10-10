@@ -24,6 +24,7 @@ import {
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { messageContextMenu } from "./messageContextMenu";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { TooltipButton } from "../TooltipButton";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { AgentPixelGrid } from "../AgentPixelGrid";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
@@ -125,13 +126,13 @@ export function UserRequestLayer({
       tabIndex={-1}
       {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
-      <div className="message-meta">
-        <span>You</span>
-        <MessageOrigin message={turn.userMessage} />
-        {props.showTimestamps && <time dateTime={turn.userMessage.createdAt} title={formatFullDateTime(turn.userMessage.createdAt)}>{formatMessageTime(turn.userMessage.createdAt)}</time>}
-        {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</button>}
-        {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
-      </div>
+      {(turn.userMessage.privateConnectDeviceId || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
+        <div className="message-meta">
+          <MessageOrigin message={turn.userMessage} />
+          {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
+          {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
+        </div>
+      )}
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
         data-request-content={collapsible ? "collapsible" : "complete"}
@@ -284,9 +285,11 @@ export function AgentExecutionLayer({
                 conversationId={props.conversationId}
               />
               <span className="turn-working-copy">
-                <strong>{activePresentation.label}</strong>
+                <strong className={activePresentation.detail ? "visually-hidden" : undefined}>
+                  {activePresentation.label}
+                </strong>
                 {activePresentation.detail && (
-                  <small className="turn-working-detail-chip" aria-hidden="true">
+                  <small className="turn-working-detail" aria-hidden="true">
                     {activePresentation.detail}
                   </small>
                 )}
@@ -432,15 +435,17 @@ export function FinalAnswerDocument({
       tabIndex={-1}
       {...messageContextMenu(presentation.terminalAnswer, presentation.content)}
     >
-      <header
-        className="final-answer-identity"
-        aria-label="Historical answer identity"
-        data-identity-source="persisted-model-selection"
-      >
-        <span data-final-answer-identity="historical-model-selection">
-          {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
-        </span>
-      </header>
+      {turn.providerChanged && (
+        <header
+          className="final-answer-identity"
+          aria-label="Historical answer identity"
+          data-identity-source="persisted-model-selection"
+        >
+          <span data-final-answer-identity="historical-model-selection">
+            {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
+          </span>
+        </header>
+      )}
       <ResponseMarkdown
         content={presentation.content}
         projectRoot={props.projectRoot}
@@ -472,7 +477,19 @@ export function SupportingLedgerLayer({
     () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
     [consolidatesSettledWork, turn],
   );
-  if (turn.isActive) return null;
+  if (turn.isActive) {
+    return props.showTimestamps
+      ? (
+          <section
+            className="turn-supporting-ledger"
+            aria-label="Supporting turn ledger"
+            data-turn-layer="supporting-ledger"
+          >
+            <TurnMetadata turn={turn} terminalAnswer={null} showTimestamp />
+          </section>
+        )
+      : null;
+  }
   const includesReasoning = consolidatesSettledWork
     && props.showThinking
     && Boolean(turn.reasoning?.content);
@@ -482,7 +499,9 @@ export function SupportingLedgerLayer({
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
-  if (!turn.terminalAssistantMessage && !showChangedFiles) return null;
+  const showsFooter = turn.terminalAssistantMessage !== null
+    || turn.agentTurn.status !== "completed";
+  if (!showsFooter && !showChangedFiles) return null;
 
   return (
     <section
@@ -490,7 +509,7 @@ export function SupportingLedgerLayer({
       aria-label="Supporting turn ledger"
       data-turn-layer="supporting-ledger"
     >
-      {turn.terminalAssistantMessage && (
+      {showsFooter && (
         <TurnMetadata
           turn={turn}
           terminalAnswer={turn.terminalAssistantMessage}

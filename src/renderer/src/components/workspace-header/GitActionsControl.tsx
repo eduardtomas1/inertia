@@ -13,7 +13,7 @@ import type { GitStatusSnapshot } from "@shared/contracts";
 
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 import {
   resolveQuickAction,
   type GitQuickAction,

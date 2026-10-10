@@ -236,11 +236,8 @@
 .goal-panel-subagents .subagent-detail-reveal { grid-column: 2 / -1; }
 
 .turn-working-copy small {
-  display: inline-flex; min-width: 0; min-height: 19px; align-items: center; margin-left: 6px; padding: 1px 6px;
-  overflow: hidden; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--fill);
-  font: var(--text-xs)/var(--leading-heading) var(--font-mono); text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; overflow: hidden; color: var(--text-muted); font: inherit; text-overflow: ellipsis; white-space: nowrap;
 }
-.turn-working-copy small::before { content: none; }
 :is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span):nth-child(2) { --motion-index: 1; }
 :is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span):nth-child(3) { --motion-index: 2; }
 :is(.composer-attachment, .plan-step, .turn-reasoning-step, .turn-changed-files-list > span):nth-child(4) { --motion-index: 3; }

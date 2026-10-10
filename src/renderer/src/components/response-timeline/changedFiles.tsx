@@ -12,6 +12,7 @@ import {
   type TurnGitArtifactSummary,
 } from "../../utils/responseTimeline";
 import { sourceLanguageForFile } from "@shared/source-language";
+import { TooltipButton } from "../TooltipButton";
 import { useAnchoredDetailsToggle } from "./activity";
 import type { ResponseTimelineProps } from "./types";
 
@@ -56,7 +57,6 @@ export function ChangedFilesSummary({
         data-turn-jump-target="artifact"
         tabIndex={-1}
       >
-        <TriangleAlert size={14} aria-hidden="true" />
         <span>
           <strong>Turn changes unavailable</strong>
           <small>{artifact.failureReason ?? "No authoritative Git snapshot was captured for this turn."}</small>
@@ -113,10 +113,9 @@ export function ChangedFilesSummary({
                 role="listitem"
                 data-language-family={language.family}
               >
-                <button
-                  type="button"
+                <TooltipButton
                   disabled={!patchAvailable}
-                  title={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
+                  tooltip={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
                   onClick={() => props.onOpenTurnDiff(artifact.turnId, file.path)}
                 >
                   <FileCode2
@@ -126,15 +125,14 @@ export function ChangedFilesSummary({
                   />
                   <code>{file.path}</code>
                   <small>{file.status} · +{file.insertions} −{file.deletions}</small>
-                </button>
-                <button
-                  type="button"
-                  title={`Open ${file.path}`}
+                </TooltipButton>
+                <TooltipButton
+                  tooltip={`Open ${file.path}`}
                   aria-label={`Open ${file.path}`}
                   onClick={() => props.onOpenTurnFile(file.path)}
                 >
                   <ExternalLink size={14} aria-hidden="true" />
-                </button>
+                </TooltipButton>
               </span>
             );
           })}

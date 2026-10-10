@@ -24,6 +24,7 @@ import {
 } from "./support/workspace-tools";
 import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 import { verifyMobileNavigationControls } from "./support/layout-assertions";
+import { verifyQuietTurnFooter } from "./support/quiet-turn-footer";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -364,29 +365,10 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(completedTurn.locator('[data-turn-layer="agent-execution"] [data-turn-layer="final-answer"]')).toHaveCount(0);
     await expect(completedTurn.locator('[data-turn-layer="final-answer"]')).toContainText("The provider route now");
     await expect(completedTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
-      .toHaveText("Codex · OpenAI · GPT-5.6");
-    const turnMetaPrimary = completedTurn.locator(".turn-meta-primary");
-    const runDetailsToggle = completedTurn.getByRole("button", { name: "Run details" });
-    const runDetails = completedTurn.locator(".turn-run-details");
-    await expect(turnMetaPrimary).toContainText("Completed");
-    await expect(turnMetaPrimary).toContainText("Worked 42s");
-    await expect(turnMetaPrimary).not.toContainText(codexSelection.harnessId);
-    await expect(turnMetaPrimary).not.toContainText(codexSelection.backendProfileId);
-    await expect(turnMetaPrimary).not.toContainText(codexSelection.modelId);
-    await expect(runDetailsToggle).toHaveAttribute("aria-expanded", "false");
-    await runDetailsToggle.click();
-    await expect(runDetailsToggle).toHaveAttribute("aria-expanded", "true");
-    await expect(runDetails).toBeVisible();
-    await expect(runDetails).toContainText("Harness ID");
-    await expect(runDetails).toContainText(codexSelection.harnessId);
-    await expect(runDetails).toContainText("Requested alias");
-    await expect(runDetails).toContainText(codexSelection.alias ?? "Not requested");
-    await expect(runDetails).toContainText("Session continuation");
-    await expect(runDetails).toContainText("Execution transcript");
-    await expect(runDetails.getByRole("list", { name: "Agent work transcript" })).toBeVisible();
-    await captureElementScenario("completed-run-details", completedTurn.locator(".turn-meta"));
-    await runDetailsToggle.click();
-    await expect(runDetailsToggle).toHaveAttribute("aria-expanded", "false");
+      .toHaveCount(0);
+    const { runDetails, runDetailsToggle } = await verifyQuietTurnFooter({
+      page, turn: completedTurn, selection: codexSelection, capture: captureElementScenario,
+    });
     const changedFiles = completedTurn.getByLabel("Changed by this turn");
     const changedFilesSummary = changedFiles.locator("summary");
     await expect(changedFiles).toContainText("3 files changed");
@@ -423,6 +405,12 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(changedFilesSummary).toHaveAttribute("aria-expanded", "true");
     await expect(changedFiles.locator('[role="listitem"]')).toHaveCount(3);
     await expect(changedFiles.getByRole("button", { name: "Open exact turn diff" })).toBeDisabled();
+    const unavailablePatch = changedFiles.locator('[role="listitem"] > button').first();
+    await expect(unavailablePatch).toBeDisabled();
+    await expect(unavailablePatch).toHaveAccessibleDescription("The stored patch is unavailable");
+    await unavailablePatch.hover();
+    await expect(page.locator('[role="tooltip"]')).toHaveText("The stored patch is unavailable");
+    await page.mouse.move(1, 1);
     await expect(changedFiles).toContainText(
       "The historical file summary is available without a stored patch.",
     );
@@ -473,7 +461,15 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
 
     const failedTurn = page.locator(`[data-turn-id="${failed.turn.id}"]`);
     await revealTurn(failedTurn, failed.turn.id);
-    await expect(failedTurn.locator(".turn-settled-summary")).toContainText("Failed after 42s · 2 actions");
+    const failedSummary = failedTurn.locator(".turn-settled-summary");
+    await expect(failedSummary).toContainText(
+      "Failed after 42s · The provider connection closed before verification completed.",
+    );
+    await expect(failedSummary).toContainText("Details");
+    await expect(failedTurn.locator(".agent-activity.is-failed")).toHaveCount(0);
+    await expect(failedTurn.locator("[data-turn-failure-diagnostics]")).toHaveCount(0);
+    await failedSummary.click();
+    await expect(failedSummary).toHaveAttribute("aria-expanded", "true");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
     const failureDiagnostics = failedTurn.locator("[data-turn-failure-diagnostics]");

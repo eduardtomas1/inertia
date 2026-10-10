@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
-import { IconButton, TooltipButton } from "../../src/renderer/src/components/ui";
+import { TooltipButton } from "../../src/renderer/src/components/TooltipButton";
+import { IconButton } from "../../src/renderer/src/components/ui";
 
 function tooltip(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[role="tooltip"]');
@@ -33,6 +34,12 @@ describe("icon button tooltip", () => {
     const button = screen.getByRole("button", { name: "Refresh changes" });
     expect(button).toHaveAttribute("aria-label", "Refresh changes");
     expect(button).not.toHaveAttribute("title");
+  });
+
+  it("describes the shortcut its tooltip shows without changing the name", () => {
+    render(<IconButton label="New chat" shortcut="⌘N">N</IconButton>);
+    const button = screen.getByRole("button", { name: "New chat" });
+    expect(button).toHaveAccessibleDescription("⌘N");
   });
 
   it("opens after 500ms of hover and shows the shortcut as faint text", () => {

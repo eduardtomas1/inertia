@@ -267,8 +267,8 @@ describe("final-answer turn metadata", () => {
     const primaryEnd = html.indexOf("</div>", primaryStart);
     const primary = html.slice(primaryStart, primaryEnd);
 
-    expect(primary).toContain('data-turn-status="completed">Completed</span>');
-    expect(primary).toContain('class="turn-duration">Worked 7s</span>');
+    expect(primary).not.toContain(">Completed</span>");
+    expect(primary).toContain('class="turn-duration" data-turn-status="completed">Worked 7s</span>');
     expect(primary).not.toContain("custom-harness");
     expect(primary).not.toContain("custom:acme");
     expect(primary).not.toContain("acme/code-pro");
@@ -307,7 +307,7 @@ describe("final-answer turn metadata", () => {
 
     expect(withoutTimestamp).toContain('aria-label="Copy final answer"');
     expect(withoutTimestamp).toContain('data-icon-state="copy"');
-    expect(withoutTimestamp).toContain("<span>Copy</span>");
+    expect(withoutTimestamp).not.toContain("<span>Copy</span>");
     expect(withoutTimestamp).not.toContain("<span>Copy answer</span>");
     expect(withoutTimestamp).not.toContain("<time");
     expect(withTimestamp).toContain(`<time dateTime="${completedAt}"`);

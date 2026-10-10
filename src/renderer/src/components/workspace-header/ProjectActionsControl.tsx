@@ -12,7 +12,7 @@ import {
 import { FocusFirstMenuItem } from "./FocusFirstMenuItem";
 import { HeaderMenuGroup } from "./HeaderMenuGroup";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 
 export type HeaderControlPresentation = "toolbar" | "menu";
 

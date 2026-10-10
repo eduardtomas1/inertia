@@ -125,4 +125,22 @@ describe("focus visibility guard", () => {
       .map(({ file, selector }) => `${file}: ${selector}`);
     expect(offenders).toEqual([]);
   });
+
+  it("draws keyboard focus at the 2px ring strength, never a faint or thin outline", () => {
+    const weakOutline = (body: string): boolean => body.split(";").some((declaration) => {
+      const match = /^\s*outline(?:-width|-color)?\s*:\s*(?<value>.+)$/su.exec(declaration);
+      const value = match?.groups?.value.trim();
+      if (!value || /^(?:none|0)$/u.test(value)) return false;
+      const width = /(?<size>\d*\.?\d+)px/u.exec(value)?.groups?.size;
+      return (width !== undefined && Number(width) < 2)
+        || /\bthin\b/u.test(value)
+        || /var\(--(?:line|line-soft|line-strong|text-faint|fill|fill-strong)\)/u.test(value);
+    });
+    const faint = all
+      .filter((rule) => !rule.forcedColors && weakOutline(rule.body))
+      .flatMap((rule) => rule.selectors.flatMap(innerList).map((selector) => ({ file: rule.file, selector })))
+      .filter(({ selector }) => /:focus(?:-visible|-within)?\b/u.test(selector))
+      .map(({ file, selector }) => `${file}: ${selector}`);
+    expect(faint).toEqual([]);
+  });
 });

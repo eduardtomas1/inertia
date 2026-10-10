@@ -228,7 +228,8 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain('class="message is-user turn-user-request"');
     expect(html).toContain('data-turn-layer="user-request"');
     expect(html).toContain('data-request-layout="content"');
-    expect(html).toMatch(new RegExp(`<time dateTime="${requestedAt}" title="[^"]+ 2026 at [^"]+">Jul 23, 10:00\\sAM</time>`, "u"));
+    expect(html).not.toContain("<time");
+    expect(html).not.toContain("<span>You</span>");
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
     expect(html).toContain('aria-label="Request attachments"');
@@ -241,6 +242,24 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).not.toContain("/workspace/reference.png");
     expect(html.indexOf("reference.png"))
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
+  });
+
+  it("moves the request time into the turn footer when the turn ends without an answer", () => {
+    const html = renderRequest("Run the checks.", {
+      turn: {
+        status: "failed",
+        terminalReason: "provider-failed",
+        completedAt: "2026-07-23T10:00:02.000Z",
+      },
+    });
+    const request = html.slice(
+      html.indexOf('data-turn-layer="user-request"'),
+      html.indexOf("</article>"),
+    );
+
+    expect(request).not.toContain("<time");
+    expect(html).toMatch(/<footer class="turn-meta"[^>]*>[\s\S]*<time dateTime="2026-07-23T10:00:02.000Z"/u);
+    expect(html).toContain('data-turn-status="failed">Failed</span>');
   });
 
   it("labels historical documents truthfully without exposing their private path", () => {

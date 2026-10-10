@@ -17,7 +17,7 @@ import {
   type HeaderControlPresentation,
 } from "./ProjectActionsControl";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
-import { TooltipButton } from "../ui";
+import { TooltipButton } from "../TooltipButton";
 
 export type { OpenInTarget } from "./HeaderActionMenus";
 

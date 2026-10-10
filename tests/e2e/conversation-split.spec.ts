@@ -106,7 +106,7 @@ async function verifyScopedTools(testInfo: TestInfo) {
   await expect(secondaryCode.locator("pre")).not.toHaveClass(/wraps/u);
   await app.electronApp.evaluate(({ clipboard }) =>
     clipboard.writeText("split-clipboard-sentinel"));
-  await secondaryCode.locator('button[title="Copy code"]').click();
+  await secondaryCode.getByRole("button", { name: "Copy", exact: true }).click();
   await expect.poll(() => app.electronApp.evaluate(({ clipboard }) =>
     clipboard.readText())).toBe('const pane = "secondary";');
   const duplicateIds = await page.locator("[id]").evaluateAll((elements) => {

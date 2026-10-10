@@ -217,6 +217,9 @@ describe("agent loading and trace DOM", () => {
     );
     expect(container.querySelector(".turn-working-copy small"))
       .toHaveTextContent("Web search");
+    expect(container.querySelector(".turn-working-copy strong"))
+      .toHaveClass("visually-hidden");
+    expect(container.querySelector(".turn-working-detail-chip")).toBeNull();
     expect(grid).toHaveAttribute("aria-hidden", "true");
     expect(grid).toHaveAttribute("data-animated", "true");
     expect(grid).toHaveAttribute("data-phase", "searching");
@@ -700,7 +703,7 @@ describe("agent loading and trace DOM", () => {
     expect(historical).not.toHaveAttribute("aria-live");
     expect(historical.querySelector("[aria-live]")).toBeNull();
     expect(historical.querySelector("[role=status]")).toBeNull();
-    expect(within(historical).getByTitle("Copy code")).toBeInTheDocument();
+    expect(within(historical).getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(within(historical).getByRole("button", { name: "Markdown" }))
       .toBeInTheDocument();
     expect(historical.querySelector(".response-markdown"))

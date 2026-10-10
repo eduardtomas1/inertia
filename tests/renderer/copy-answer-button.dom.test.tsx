@@ -73,29 +73,12 @@ describe("final answer copy feedback", () => {
     expect(copy).toHaveTextContent("Copy failed");
   });
 
-  it("keeps the Copy icon when narrow windows hide its label", () => {
-    const css = readFileSync("src/renderer/src/styles.css", "utf8")
-      .replace(/\/\*[\s\S]*?\*\//gu, "");
-    const hidden: string[] = [];
-    for (const start of [...css.matchAll(/@media \(max-width: 760px\) \{/gu)].map((match) => match.index! + match[0].length)) {
-      let depth = 1;
-      let end = start;
-      while (depth > 0) {
-        if (css[end] === "{") depth += 1;
-        if (css[end] === "}") depth -= 1;
-        end += 1;
-      }
-      for (const [, selectors, body] of css.slice(start, end - 1).matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
-        if (/display:\s*none/u.test(body!)) hidden.push(selectors!.trim());
-      }
-    }
-    const view = render(<CopyAnswerButton content="Narrow answer" answerId="answer-1" />);
+  it("shows only the Copy icon and names it without a native title", () => {
+    render(<CopyAnswerButton content="Quiet answer" answerId="answer-1" />);
     const copy = screen.getByRole("button", { name: "Copy answer" });
-    const icon = copy.querySelector(".inertia-morph-icon")!;
-    const label = [...copy.children].find((child) => child.textContent === "Copy")!;
-    const matched = hidden.flatMap((selector) => [...view.container.querySelectorAll(selector)]);
-    expect(matched).toContain(label);
-    expect(matched).not.toContain(icon);
+    expect(copy.querySelector(".inertia-morph-icon")).not.toBeNull();
+    expect(copy.textContent).toBe("");
+    expect(copy).not.toHaveAttribute("title");
   });
 
   it("copies the rendered answer as plain text when its article is mounted", async () => {

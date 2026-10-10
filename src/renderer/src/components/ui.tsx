@@ -1,57 +1,7 @@
-import { useCallback, useRef, type ComponentPropsWithRef, type ReactNode, type Ref } from "react";
+import { type ComponentPropsWithRef, type ReactNode } from "react";
 import clsx from "clsx";
 
-import { Tooltip, useTooltip } from "./Tooltip";
-
-function assignRef<T>(ref: Ref<T> | undefined, value: T | null): void {
-  if (typeof ref === "function") ref(value);
-  else if (ref) ref.current = value;
-}
-
-export function TooltipButton({
-  tooltip,
-  shortcut,
-  children,
-  ref,
-  onPointerEnter,
-  onPointerLeave,
-  onPointerDown,
-  onFocus,
-  onBlur,
-  onKeyDown,
-  ...props
-}: ComponentPropsWithRef<"button"> & {
-  tooltip: string;
-  shortcut?: string;
-  children: ReactNode;
-}): React.JSX.Element {
-  const button = useRef<HTMLButtonElement | null>(null);
-  const tooltipState = useTooltip(button, {
-    onPointerEnter,
-    onPointerLeave,
-    onPointerDown,
-    onFocus,
-    onBlur,
-    onKeyDown,
-  });
-  const setButton = useCallback((node: HTMLButtonElement | null) => {
-    button.current = node;
-    assignRef(ref, node);
-  }, [ref]);
-  return (
-    <>
-      <button
-        ref={setButton}
-        type="button"
-        {...props}
-        {...tooltipState.handlers}
-      >
-        {children}
-      </button>
-      {tooltipState.layer && <Tooltip anchor={button} layer={tooltipState.layer} label={tooltip} shortcut={shortcut} />}
-    </>
-  );
-}
+import { TooltipButton } from "./TooltipButton";
 
 export function IconButton({
   label,
@@ -62,7 +12,7 @@ export function IconButton({
   shortcut?: string;
   children: ReactNode;
 }): React.JSX.Element {
-  return <TooltipButton tooltip={label} aria-label={label} className={clsx("icon-button", className)} {...props} />;
+  return <TooltipButton tooltip={label} describeTooltip={false} aria-label={label} className={clsx("icon-button", className)} {...props} />;
 }
 
 export function Switch({

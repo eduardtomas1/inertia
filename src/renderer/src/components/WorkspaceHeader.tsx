@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -36,7 +37,8 @@ import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
 import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
-import { IconButton, TooltipButton } from "./ui";
+import { TooltipButton } from "./TooltipButton";
+import { IconButton } from "./ui";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
 const WorkspaceHeaderActions = lazy(async () => ({
@@ -164,6 +166,7 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps): React.JSX.Element {
   const headerRef = useRef<HTMLElement>(null);
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const titleHintId = useId();
   const [headerWidth, setHeaderWidth] = useState(Number.POSITIVE_INFINITY);
   const collapsed = headerActionsCollapsed({ containerWidth: headerWidth, compact });
   const [titleAnchor, setTitleAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -363,6 +366,7 @@ export function WorkspaceHeader({
                     type="button"
                     className="header-title-button"
                     tooltip="Chat actions · double-click to rename"
+                    aria-describedby={titleHintId}
                     aria-haspopup="menu"
                     aria-expanded={menu === "title"}
                     aria-controls={conversation ? `conversation-actions-${conversation.id}` : undefined}
@@ -387,6 +391,9 @@ export function WorkspaceHeader({
                   <span className="header-title-text">{title}</span>
                 )}
               </h1>
+            )}
+            {titleMenuAvailable && !renaming && (
+              <span id={titleHintId} className="visually-hidden">Chat actions · double-click to rename</span>
             )}
           </div>
         </nav>

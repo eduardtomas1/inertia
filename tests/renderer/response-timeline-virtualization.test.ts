@@ -505,17 +505,14 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(expandedWork).toBeGreaterThan(collapsed);
     expect(expandedWork).toBeLessThan(collapsed + 200);
     expect(expandedGroups).toBeGreaterThan(expandedWork + 2_000);
-    expect(expandedRun).toBeGreaterThan(collapsed + 100);
-    const mediumRun = estimateTimelineRowSize(item, {
-      availableWidth: 600,
-      runDetailsExpanded: true,
-    });
-    const narrowRun = estimateTimelineRowSize(item, {
-      availableWidth: 400,
-      runDetailsExpanded: true,
-    });
-    expect(mediumRun).toBeGreaterThan(expandedRun + 100);
-    expect(narrowRun).toBeGreaterThan(mediumRun + 150);
+    const runDetailsCost = expandedRun - collapsed;
+    expect(runDetailsCost).toBeGreaterThan(expandedWork - collapsed + 30);
+    expect(runDetailsCost).toBeLessThan(expandedWork - collapsed + 40);
+    for (const availableWidth of [600, 400]) {
+      const narrowCost = estimateTimelineRowSize(item, { availableWidth, runDetailsExpanded: true })
+        - estimateTimelineRowSize(item, { availableWidth });
+      expect(Math.abs(narrowCost - runDetailsCost)).toBeLessThanOrEqual(1);
+    }
 
     const oneFile = buildItem({ id: "one-file", gitArtifact: artifact("one-file", 1) });
     const manyFiles = buildItem({ id: "many-files", gitArtifact: artifact("many-files", 80) });
@@ -606,7 +603,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     const quietEstimate = estimateTimelineRowSize(quiet);
     expect(estimateTimelineRowSize(warning)).toBeGreaterThanOrEqual(quietEstimate + 50);
     expect(estimateTimelineRowSize(quiet, { runDetailsExpanded: true }))
-      .toBeGreaterThan(quietEstimate + 100);
+      .toBeGreaterThan(quietEstimate + 50);
   });
 
   it("models commentary growth without inflating collapsed settled history", () => {
@@ -636,7 +633,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       .toBeGreaterThan(estimateTimelineRowSize(settled) + 500);
   });
 
-  it("reserves visible space for approvals, provider questions, warnings, and failures", () => {
+  it("reserves visible space for approvals and provider questions and folds failures behind their row", () => {
     const base = buildItem({ id: "base-active", status: "running", answer: "" });
     const approvalItem = buildItem({
       id: "approval",
@@ -677,10 +674,47 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRowSize(base, { runDetailsExpanded: true })).toBe(baseEstimate);
     expect(estimateTimelineRowSize(approvalItem)).toBeGreaterThan(baseEstimate + 100);
     expect(estimateTimelineRowSize(questionItem)).toBeGreaterThan(baseEstimate + 180);
-    const visibleFailureDelta = estimateTimelineRowSize(failedItem)
-      - estimateTimelineRowSize(failedBase);
-    expect(visibleFailureDelta).toBeGreaterThan(0);
-    expect(visibleFailureDelta).toBeLessThanOrEqual(80);
+    expect(estimateTimelineRowSize(failedItem)).toBe(estimateTimelineRowSize(failedBase));
+    const opened = { workDetailsExpanded: true };
+    expect(estimateTimelineRowSize(failedItem, opened))
+      .toBeGreaterThan(estimateTimelineRowSize(failedBase, opened));
+    const answered = Array.from({ length: 6 }, () =>
+      "The verification stopped at one actionable renderer failure.").join("\n\n");
+    const answeredBase = buildItem({ id: "answered-base", status: "failed", answer: answered });
+    const diagnosedItem = buildItem({
+      id: "diagnosed",
+      status: "failed",
+      answer: answered,
+      activities: [activity("diagnosed-error", "diagnosed", {
+        kind: "error",
+        title: "The provider connection closed before verification completed.",
+        status: "failed",
+        detail: [
+          "Reason: transport-closed",
+          "Phase: running",
+          "Exit code: 17",
+          "Signal: not reported",
+          "Terminal event: not received",
+          "Activity: renderer-verification",
+          "Cleanup: confirmed",
+          "Cause: RPC transport closed",
+          "Stack:",
+          "    at verify (<workspace>/src/renderer/verification.ts:41:9)",
+          "",
+          "Recent provider context:",
+          "Renderer assertion 17 did not settle before the transport closed.",
+          "The diagnostic tail was retained after redaction.",
+        ].join("\n"),
+      })],
+    });
+    expect(estimateTimelineRowSize(diagnosedItem)).toBe(estimateTimelineRowSize(answeredBase));
+    const openPanel = estimateTimelineRowSize(diagnosedItem, opened)
+      - estimateTimelineRowSize(answeredBase, opened);
+    expect(openPanel).toBeGreaterThanOrEqual(420);
+    expect(openPanel).toBeLessThanOrEqual(506);
+    const narrowPanel = estimateTimelineRowSize(diagnosedItem, { ...opened, availableWidth: 600 })
+      - estimateTimelineRowSize(answeredBase, { ...opened, availableWidth: 600 });
+    expect(narrowPanel).toBeGreaterThan(openPanel + 100);
   });
 
   it("does not reserve a hidden row for an expected non-Git artifact absence", () => {
@@ -785,7 +819,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(timeline.at(-1)?.id).toBe("turn-599");
     expect(shouldVirtualizeTimeline(timeline.length)).toBe(true);
     expect(buildTimelineMinimapMarkers(responseTurns(timeline))).toHaveLength(40);
-    expect(estimates.every((estimate) => Number.isInteger(estimate) && estimate >= 190)).toBe(true);
+    expect(estimates.every((estimate) => Number.isInteger(estimate) && estimate >= 160)).toBe(true);
     expect(estimates.reduce((total, estimate) => total + estimate, 0)).toBeLessThan(count * 430);
 
     const stable = stabilizeResponseTimeline(timeline, []);

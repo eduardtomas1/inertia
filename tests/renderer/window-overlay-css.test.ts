@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
-const read = (path: string) => readFileSync(new URL(`../../src/renderer/src/${path}`, import.meta.url), "utf8");
+import { readSourceText } from "../helpers/source-text";
+
+const read = (path: string) => readSourceText(new URL(`../../src/renderer/src/${path}`, import.meta.url));
 const css = read("styles.css");
 const detachedCss = read("detached-chat.css");
 

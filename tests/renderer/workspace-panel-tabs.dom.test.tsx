@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +15,7 @@ import {
   openRightPanelSurface,
   type RightPanelState,
 } from "../../src/renderer/src/utils/rightPanelSurfaces";
+import { readSourceText } from "../helpers/source-text";
 
 function Host({
   initial,
@@ -240,14 +239,14 @@ describe("workspace panel tab row", () => {
   });
 
   it("swaps the tab icon for the close control on hover or keyboard focus only", () => {
-    const css = readFileSync("src/renderer/src/styles.css", "utf8");
+    const css = readSourceText("src/renderer/src/styles.css");
     expect(css).toContain(".panel-tab:is(:hover, :has(:focus-visible)) > .panel-tab-close {");
     expect(css).toContain(".panel-tab:is(:hover, :has(:focus-visible)) > [role=\"tab\"] > svg:first-child {");
     expect(css).not.toContain(".panel-tab:is(:hover, :focus-within)");
   });
 
   it("keeps the add button on the 2px outside button ring", () => {
-    const css = readFileSync("src/renderer/src/styles.css", "utf8");
+    const css = readSourceText("src/renderer/src/styles.css");
     const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
     expect(inset).toContain('[role="tab"]');
     expect(inset).not.toContain(".workspace-panel-add");

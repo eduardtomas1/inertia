@@ -1,13 +1,13 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { render, screen } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { IconButton, LoadingMark } from "../../src/renderer/src/components/ui";
+import { readSourceText } from "../helpers/source-text";
 
-const css = readFileSync("src/renderer/src/styles.css", "utf8")
-  .replace(/\r\n?/gu, "\n");
+const css = readSourceText("src/renderer/src/styles.css");
 
 let sheet: HTMLStyleElement;
 
@@ -89,7 +89,7 @@ describe("focus ring", () => {
     "components/UsageView.css",
     "components/UsageLimitsPanel.css",
     "components/ThemeLibrary.css",
-  ].map((path) => readFileSync(`src/renderer/src/${path}`, "utf8")).join("\n");
+  ].map((path) => readSourceText(`src/renderer/src/${path}`)).join("\n");
 
   it("draws one accent ring, outset on controls and inset on rows, tabs and menu items", () => {
     expect(css).toMatch(/^:focus-visible \{\n  outline: 2px solid var\(--focus-ring\);\n  outline-offset: 2px;\n\}/mu);
@@ -109,7 +109,7 @@ describe("focus ring", () => {
 });
 
 describe("field primitives", () => {
-  const composerCss = readFileSync("src/renderer/src/components/composer/ComposerSurface.css", "utf8");
+  const composerCss = readSourceText("src/renderer/src/components/composer/ComposerSurface.css");
 
   it("moves a bordered field from the line to the accent on focus with no glow or ring", () => {
     const fields = /^:is\(\n(?<fields>[\s\S]*?)\n\):focus,\n:is\(\n(?<wraps>[\s\S]*?)\n\):focus-within \{\n(?<body>[\s\S]*?)\n\}/mu.exec(css)?.groups;
@@ -134,9 +134,9 @@ describe("popover primitives", () => {
   const surfaces = [".project-menu", ".conversation-menu", ".header-popover", ".composer-popover", ".command-palette", ".thread-submenu"];
   const allCss = [
     css,
-    readFileSync("src/renderer/src/components/sidebar/thread-actions.css", "utf8"),
-    readFileSync("src/renderer/src/components/composer/ComposerCommandMenu.css", "utf8"),
-    readFileSync("src/renderer/src/components/composer/ComposerSurface.css", "utf8"),
+    readSourceText("src/renderer/src/components/sidebar/thread-actions.css"),
+    readSourceText("src/renderer/src/components/composer/ComposerCommandMenu.css"),
+    readSourceText("src/renderer/src/components/composer/ComposerSurface.css"),
   ].join("\n");
 
   function whereRule(member: string, suffix = ""): { list: string; body: string } | undefined {
@@ -206,7 +206,7 @@ describe("dialog primitives", () => {
       "components/composer/SnapshotControl.css",
       "components/sidebar/SidebarUpdateControl.css",
       "components/response-timeline/HtmlRenderDialog.css",
-    ].map((path) => readFileSync(`src/renderer/src/${path}`, "utf8")),
+    ].map((path) => readSourceText(`src/renderer/src/${path}`)),
   ].join("\n");
 
   it("gives every dialog one surface, radius, overlay shadow and title size, without icon tiles", () => {
@@ -260,7 +260,7 @@ describe("loading primitives", () => {
   });
 
   it("uses no second spinner, per-word stream spans, blur reveal or pulsing caret", () => {
-    const renderer = sources("src/renderer/src").map((path) => readFileSync(path, "utf8")).join("\n");
+    const renderer = sources("src/renderer/src").map((path) => readSourceText(path)).join("\n");
     expect(renderer).not.toMatch(/\bLoaderCircle\b|Loader2|provider-status-spinner|response-stream-word|streaming-caret|beautiful-stream-in/u);
     expect(renderer).toMatch(/\.response-stream-block,\n\.response-markdown\.is-streaming:not\(\.is-plain-stream\) > \* \{\n  animation: beautiful-fade-in var\(--dur-slow\) var\(--ease-fade\) both;/u);
     expect(css).toMatch(/animation: turn-thinking-sweep 2200ms/u);
@@ -298,7 +298,7 @@ describe("icon primitives", () => {
       return /\.tsx?$/u.test(entry.name) ? [path] : [];
     });
   }
-  const files = tsxSources("src/renderer/src").map((path) => ({ path, source: readFileSync(path, "utf8") }));
+  const files = tsxSources("src/renderer/src").map((path) => ({ path, source: readSourceText(path) }));
   const lucideImports = files.map(({ path, source }) => ({
     path,
     source,

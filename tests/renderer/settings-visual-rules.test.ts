@@ -67,6 +67,30 @@ describe("project appearance controls", () => {
   });
 });
 
+describe("agents settings", () => {
+  const providers = "../../src/renderer/src/components/settings/ProvidersSettings.css";
+  const backends = "../../src/renderer/src/components/ModelBackendsSettings.css";
+
+  it("marks the active provider tab with the selected fill, not an accent underline", () => {
+    expect(source(providers)).not.toContain("var(--accent)");
+    expect(rule(providers, ".provider-settings-tabs button.is-active")).toContain("background: var(--fill-strong);");
+    expect(rule(providers, ".provider-settings-tabs button:hover")).toContain("background: var(--fill);");
+  });
+
+  it("uses quiet dividers and chrome sizes inside the provider and backend panes", () => {
+    for (const path of [providers, backends]) expect(source(path)).not.toMatch(/solid var\(--line\);/u);
+    expect(source(providers)).not.toContain("--text-base");
+    expect(source(backends)).not.toContain("--text-base");
+    expect(rule(providers, ".provider-settings-maintenance .provider-maintenance-actions > button:not(.icon-button)"))
+      .toContain("min-height: var(--control-height-small);");
+  });
+
+  it("marks the selected backend and harness with the selected fill and no accent", () => {
+    expect(rule(backends, ".backend-profile-rail-item.is-active")).toContain("background: var(--fill-strong);");
+    expect(source(backends)).not.toMatch(/var\(--accent/u);
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

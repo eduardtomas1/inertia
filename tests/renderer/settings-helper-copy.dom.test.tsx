@@ -1,9 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
 import type { SettingsSection } from "../../src/renderer/src/lib/settingsTarget";
-import { settingsViewProps } from "./settings-view-fixtures";
+import { settingsProvider, settingsViewProps } from "./settings-view-fixtures";
 
 beforeEach(() => {
   Object.defineProperty(window, "inertia", {
@@ -75,5 +75,20 @@ describe("settings helper copy", () => {
     expect(await screen.findByText(anchor, { exact: true })).toBeVisible();
     for (const text of gone) expect(screen.queryByText(text, { exact: true }), text).toBeNull();
     for (const text of kept) expect(screen.getByText(text, { exact: true })).toBeVisible();
+  });
+});
+
+describe("agents helper copy", () => {
+  it("keeps the credential note and one-line empty states", async () => {
+    render(<SettingsView {...settingsViewProps({ target: { section: "agents" }, providers: [settingsProvider("codex", "Codex")] })} />);
+    expect(await screen.findByText("Sign-in stays in the provider's own flow. Inertia stores no provider passwords or tokens.")).toBeVisible();
+    for (const text of [
+      "Use the coding tools and accounts already installed on this computer.",
+      "Shown wherever Inertia names this account.",
+      "Found automatically. A file you choose is version-checked before it is saved.",
+      "Route chats through your own compatible endpoint.",
+    ]) expect(screen.queryByText(text)).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: /^Models/u }));
+    expect(screen.getByText("No models reported yet.", { exact: true })).toBeVisible();
   });
 });

@@ -30,6 +30,7 @@ interface MascotMainOptions {
   registerHealthRenderer(contents: WebContents): () => void;
   openChat(conversationId: string): Promise<void>;
   focusChat(conversationId: string | null, request: number): void;
+  feedRejected(): void;
   spriteOrigin: string;
 }
 const SPRITE_ACTIONS: readonly unknown[] = ["import", "apply", "reset", "export-template"] satisfies MascotSpriteAction[];
@@ -62,6 +63,7 @@ export class MascotMain {
   private showItems: MenuItem[] = [];
   private showOffered: boolean | null = null;
   private registered = false;
+  private rejecting = false;
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
 
   constructor(private readonly options: MascotMainOptions) {
@@ -85,6 +87,7 @@ export class MascotMain {
   }
 
   observe({ status, chats, rows, focus, counts, request }: MascotFeed): void {
+    this.rejecting = false;
     this.feed = { status, chats, rows, counts };
     this.pinning.answer(focus, request);
     this.broadcast();
@@ -115,7 +118,18 @@ export class MascotMain {
 
   runtimePhase(phase: string): void {
     this.pinning.runtime(phase === "ready");
-    if (phase !== "ready") this.observe({ status: emptyMascotStatus("unavailable"), chats: [], rows: [], focus: null, counts: null, request: null });
+    if (phase !== "ready") this.unavailable();
+  }
+
+  reject(): void {
+    const first = !this.rejecting;
+    this.unavailable();
+    this.rejecting = true;
+    if (first) this.options.feedRejected();
+  }
+
+  private unavailable(): void {
+    this.observe({ status: emptyMascotStatus("unavailable"), chats: [], rows: [], focus: null, counts: null, request: null });
   }
 
   attach(): void {

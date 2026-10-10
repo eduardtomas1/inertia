@@ -137,10 +137,11 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   await main.loadURL("inertia://bundle/index.html");
   const openChat = vi.fn(async () => undefined);
   const focusChat = vi.fn();
+  const feedRejected = vi.fn();
   const unregister = vi.fn();
   const mascot = new MascotMain({
     mainWindow: () => main, rendererUrl: "inertia://bundle/index.html", userDataDirectory: directory,
-    registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat, focusChat,
+    registerProtocol: vi.fn(), registerHealthRenderer: () => unregister, openChat, focusChat, feedRejected,
     spriteOrigin: "inertia://bundle/",
   });
   mascot.attach();
@@ -151,13 +152,33 @@ async function fixture(directory = mkdtempSync(join(tmpdir(), "mascot-main-"))) 
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
   const gesture = (id = 1) => [mascot.snapshot().gesture![0], id] as const;
-  return { mascot, main, invoke, openChat, focusChat, unregister, directory, gesture };
+  return { mascot, main, invoke, openChat, focusChat, feedRejected, unregister, directory, gesture };
 }
 
 describe("mascot chat selection", () => {
   const chat = (id: string, phase: MascotStatus["phase"]): MascotStatus => ({
     ...emptyMascotStatus(), phase, conversationId: id, projectId: "project", runId: `${id}-run`, turnId: `${id}-turn`,
     activeCount: 1, chatTitle: `Chat ${id}`,
+  });
+
+  it("shows the unavailable state after a rejected feed and reports each run of rejections once", async () => {
+    const app = await fixture();
+    app.mascot.runtimePhase("ready");
+    const working = chat("working", "running");
+    app.mascot.observe(feed(working, [working]));
+    app.mascot.reject();
+    expect(app.mascot.snapshot()).toMatchObject({ status: { phase: "unavailable", conversationId: null }, chats: [], rows: [] });
+    app.mascot.reject();
+    app.mascot.reject();
+    expect(app.feedRejected).toHaveBeenCalledTimes(1);
+    app.mascot.observe(feed(working, [working]));
+    expect(app.mascot.snapshot().status).toEqual(working);
+    app.mascot.reject();
+    expect(app.feedRejected).toHaveBeenCalledTimes(2);
+    app.mascot.runtimePhase("restarting");
+    app.mascot.runtimePhase("ready");
+    app.mascot.reject();
+    expect(app.feedRejected).toHaveBeenCalledTimes(3);
   });
 
   it("pins a listed chat through validated IPC and opens exactly that chat", async () => {

@@ -7,6 +7,7 @@ import {
 import { Check, Pin } from "lucide-react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { TooltipButton } from "./TooltipButton";
 import { providerIdForHarness, providerNativeBackendProfile } from "../../../shared/model-routing";
 import { MODEL_SOURCE_PROVIDER_LABELS } from "../utils/modelSourceRail";
 import type { ModelSearchRoute } from "../utils/modelSearch";
@@ -286,16 +287,16 @@ export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButt
   onFavoriteToggle,
 }: ModelChooserFavoriteButtonProps): JSX.Element {
   return (
-    <button
-      type="button"
+    <TooltipButton
       className="model-chooser-row-favorite"
       aria-label={`${row.favorite ? "Unpin" : "Pin"} ${row.displayName} on ${row.backendProfileName}`}
       aria-pressed={row.favorite}
-      title={row.favorite ? "Unpin model" : "Pin model"}
+      tooltip={row.favorite ? "Unpin model" : "Pin model"}
+      describeTooltip={false}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => activateModelChooserFavorite(event, row, onFavoriteToggle)}
     >
       <Pin size={14} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
-    </button>
+    </TooltipButton>
   );
 });

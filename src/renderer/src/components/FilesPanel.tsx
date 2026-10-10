@@ -51,6 +51,7 @@ import {
   type WorkspaceFileLocation,
 } from "../utils/workspaceFileReference";
 import { IconButton, LoadingMark } from "./ui";
+import { TooltipButton } from "./TooltipButton";
 import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
@@ -982,11 +983,11 @@ export function FilesPanel({
                   role="group"
                   aria-label="Markdown"
                 >
-                  <button
-                    type="button"
+                  <TooltipButton
                     aria-pressed={renderedMarkdownPreview}
                     disabled={markdownPreviewBlockedReason !== null}
-                    title={markdownPreviewBlockedReason ?? "Preview"}
+                    tooltip={markdownPreviewBlockedReason ?? "Preview"}
+                    describeTooltip={false}
                     onClick={() => setPreviewViewState({
                       identity: previewViewIdentity,
                       view: "preview",
@@ -994,11 +995,10 @@ export function FilesPanel({
                   >
                     <Eye size={14} aria-hidden="true" />
                     <span>Preview</span>
-                  </button>
+                  </TooltipButton>
                   <button
                     type="button"
                     aria-pressed={!renderedMarkdownPreview}
-                    title="Source"
                     onClick={() => setPreviewViewState({
                       identity: previewViewIdentity,
                       view: "source",

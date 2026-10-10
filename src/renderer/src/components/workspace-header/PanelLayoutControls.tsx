@@ -80,7 +80,6 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         className="corner-toggle"
         label={terminalAvailable ? "Toggle terminal" : terminalUnavailableLabel}
         shortcut={terminalAvailable ? terminalShortcutLabel ?? undefined : undefined}
-        title={terminalAvailable ? undefined : terminalUnavailableLabel}
         aria-pressed={terminalOpen}
         disabled={!terminalAvailable}
         onClick={onToggleTerminal}
@@ -90,7 +89,6 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       <IconButton
         className="corner-toggle"
         label={rightPanelLabel}
-        title={rightPanelAvailable ? undefined : rightPanelLabel}
         aria-pressed={rightPanelOpen}
         disabled={!rightPanelAvailable}
         data-right-panel-toggle

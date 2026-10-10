@@ -106,7 +106,7 @@ describe("UsageIndicator", () => {
     expect(compact).toContain('aria-expanded="false"');
     expect(compact).toContain('data-context-state="current"');
     expect(compact).toContain('data-context-ring-state="current"');
-    expect(compact).toContain('title="Context window 50% remaining."');
+    expect(compact).not.toContain('title="Context window');
     expect(compact).toContain('aria-label="Open usage and context. Context window 50% remaining."');
     expect(compact).toContain('class="usage-context-ring-value"');
     expect(compact).toContain('stroke-dasharray="50 50"');
@@ -161,7 +161,7 @@ describe("UsageIndicator", () => {
     expect(html).toContain('data-context-state="near-limit"');
     expect(html).toContain('data-context-ring-state="near-limit"');
     expect(html).toContain('stroke-dasharray="15 85"');
-    expect(html).toContain('title="Context window 15% remaining, near limit."');
+    expect(html).not.toContain('title="Context window');
     expect(html).toContain("15%");
     expect(html).toContain("95% left");
     expect(html).not.toContain('title="Context window 95%');
@@ -184,9 +184,36 @@ describe("UsageIndicator", () => {
     expect(html).toContain('data-context-state="unavailable"');
     expect(html).toContain('data-quota-refreshing="true"');
     expect(html).toContain("usage-quota-refresh-indicator");
-    expect(html).toContain('title="Context window unavailable. Provider quota refreshing."');
+    expect(html).not.toContain('title="Context window');
     expect(html).toContain('aria-label="Open usage and context. Context window unavailable. Provider quota refreshing."');
     expect(html).not.toContain('data-context-ring-state="refreshing"');
+  });
+
+  it("draws the trigger without context data as a plain 16px ring in the icon stroke instead of a dashed placeholder", () => {
+    const html = render(null, [], freshState, "compact");
+    expect(html).toContain('data-context-ring-state="unavailable"');
+    expect(html).not.toContain("usage-context-ring-label");
+    expect(html).not.toContain("—");
+    expect(render(null, [], freshState, "expanded")).not.toContain("usage-trigger-value");
+
+    const css = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    ).replace(/\r\n?/gu, "\n");
+    expect(css).toContain([
+      ".usage-popover-trigger .usage-context-ring.is-unavailable {",
+      "  width: 16px;",
+      "  height: 16px;",
+      "}",
+    ].join("\n"));
+    expect(css).toContain([
+      ".usage-popover-trigger .usage-context-ring.is-unavailable .usage-context-ring-track {",
+      "  stroke: currentcolor;",
+      "  stroke-width: 1.75;",
+      "  vector-effect: none;",
+      "}",
+    ].join("\n"));
+    expect(css).not.toMatch(/\.usage-context-ring\.is-unavailable \.usage-context-ring-track \{[^}]*stroke-dasharray/u);
   });
 
   it("removes the context ring transition for reduced motion", () => {
@@ -433,7 +460,7 @@ describe("UsageIndicator", () => {
     });
     const low = render(usage(), [limit(80), limit(23)], freshState, "compact");
     expect(low).not.toContain("usage-trigger-quota");
-    expect(low).toContain('title="Context window 50% remaining."');
+    expect(low).not.toContain('title="Context window');
     expect(low).toContain('aria-label="Open usage and context. Context window 50% remaining."');
     expect(low).toContain('class="usage-popover-quota" data-tone="ok"');
     expect(low).toContain('class="usage-popover-quota" data-tone="low"');

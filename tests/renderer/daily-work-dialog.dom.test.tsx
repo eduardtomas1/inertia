@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DailyWorkDialog,
@@ -12,6 +12,7 @@ import type {
   ServerEvent,
   UsageMeasuredValue,
 } from "../../src/shared/contracts";
+import { readSourceText } from "../helpers/source-text";
 
 function metric(
   value: number | null,
@@ -119,6 +120,30 @@ function renderDialog(
   return { ...view, request, onClose, onOpenConversation };
 }
 
+let stylesheet: HTMLStyleElement | null = null;
+
+function loadStyles(): void {
+  stylesheet = document.createElement("style");
+  stylesheet.textContent = [
+    readSourceText("src/renderer/src/styles.css"),
+    readSourceText("src/renderer/src/components/DailyWorkDialog.css"),
+  ].join("\n");
+  document.head.append(stylesheet);
+}
+
+afterEach(() => {
+  stylesheet?.remove();
+  stylesheet = null;
+});
+
+function declared(element: Element, property: string): string | undefined {
+  return [...stylesheet!.sheet!.cssRules]
+    .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && element.matches(rule.selectorText))
+    .map((rule) => rule.style.getPropertyValue(property))
+    .filter(Boolean)
+    .at(-1);
+}
+
 describe("DailyWorkDialog", () => {
   it("requests the current local day and renders totals, providers, and navigable conversations", async () => {
     const user = userEvent.setup();
@@ -148,6 +173,35 @@ describe("DailyWorkDialog", () => {
 
     expect(within(dialog).getByRole("button", { name: /New planning chat/u }))
       .toHaveTextContent("Created this day");
+  });
+
+  it("draws running state, the active-turn note, providers and conversations as plain text and rows on the dialog surface", async () => {
+    loadStyles();
+    const view = renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+    const active = await within(dialog).findByRole("button", { name: /Implement daily work/u });
+
+    const running = within(active).getByText("Running");
+    expect(running.tagName).toBe("SPAN");
+    expect(declared(running, "color")).toBe("var(--text-muted)");
+    expect(declared(running, "border")).toBeUndefined();
+    expect(declared(running, "background")).toBeUndefined();
+
+    const note = within(dialog).getByText(/active turn is excluded/u);
+    expect(declared(note, "color")).toBe("var(--text-muted)");
+    expect(declared(note, "border")).toBeUndefined();
+    expect(declared(note, "background")).toBeUndefined();
+
+    const provider = view.container.querySelector(".daily-work-provider-summary")!;
+    const css = readSourceText("src/renderer/src/components/DailyWorkDialog.css");
+    for (const row of [provider, active]) {
+      const marker = `\n.${row.classList[0]} {\n`;
+      const body = css.slice(css.indexOf(marker) + marker.length, css.indexOf("\n}", css.indexOf(marker)));
+      expect(body).toContain("border: 0;");
+      expect(body).toContain("border-top: 1px solid var(--line-soft);");
+      expect(body).toContain("border-radius: 0;");
+      expect(body).toContain("background: transparent;");
+    }
   });
 
   it("renders each provider's settled token share against the day total", async () => {

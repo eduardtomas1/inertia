@@ -187,6 +187,16 @@ describe("popover primitives", () => {
     expect(whereRule(".project-menu button", " > svg")?.body).toContain("color: var(--text-muted);");
   });
 
+  it("separates the palette search from its results with one soft rule that keeps its colour while typing", () => {
+    expect(css).toMatch(/\n\.palette-search \{\n[^}]*  border-bottom: 1px solid var\(--line-soft\);\n/u);
+    expect(css).not.toMatch(/\.palette-search:focus-within \{[^}]*(?:--focus-ring|--accent|border)/u);
+  });
+
+  it("separates the model search from its results with the same soft rule and no accent while typing", () => {
+    expect(css).toMatch(/\n\.model-chooser-header \{\n[^}]*  border-bottom: 1px solid var\(--line-soft\);\n/u);
+    expect(css).not.toMatch(/\.model-chooser-header(?::focus-within)?::after/u);
+  });
+
   it("prints shortcut hints as plain faint text instead of key boxes", () => {
     render(<div className="palette-group"><button type="button">Open <kbd>⌘K</kbd></button></div>);
     const hint = screen.getByText("⌘K");

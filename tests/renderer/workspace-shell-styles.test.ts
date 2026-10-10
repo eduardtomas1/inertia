@@ -163,3 +163,17 @@ describe("terminal", () => {
     expect(css).not.toContain(".resume-picker-footer {");
   });
 });
+
+describe("plan panel", () => {
+  it("lists steps as quiet rows without accent markers, status chips or connector lines", () => {
+    expect(css).not.toContain(".plan-progress");
+    expect(css).not.toMatch(/\.plan-step-marker\.is-[a-z-]+ \{[^}]*accent/u);
+    expect(motion).not.toMatch(/\.plan-step[^{]*\{[^}]*accent/u);
+    expect(motion).not.toContain(".plan-step:not(:last-child)::after");
+    expect(motion).not.toMatch(/\.plan-step-status \{[^}]*background/u);
+    expect(css).toContain(".plan-step.is-active { background: var(--fill-strong); }");
+    expect(css).toMatch(/\.plan-document-toggle \{[^}]*border: 1px solid var\(--line\);[^}]*background: transparent;/u);
+    const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
+    expect(inset).toContain(".plan-step-button");
+  });
+});

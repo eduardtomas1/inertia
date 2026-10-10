@@ -80,24 +80,17 @@
 .diff-code .diff-line { transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
 .diff-selection-popover { transform-origin: top left; animation: beautiful-pop-in var(--dur) var(--ease) both; }
 
-.plan-progress > span { transition: width var(--dur-slow) var(--ease); }
 .plan-step {
-  position: relative; border-radius: var(--radius-sm);
+  position: relative; border-radius: var(--radius-xs);
   animation: beautiful-fade-up var(--dur-slow) var(--ease) both;
   animation-delay: calc(var(--motion-index, 0) * var(--stagger));
   transition: border-radius var(--dur-slow) var(--ease), background var(--dur-slow) var(--ease);
 }
-.plan-step:not(:last-child)::after {
-  position: absolute; z-index: 0; top: 30px; bottom: -13px; left: 19.5px; width: 1px;
-  background: var(--line); content: "";
-}
 .plan-step-status {
-  flex: 0 0 auto; margin-top: 1px; padding: 2px 6px; border-radius: var(--radius-xs);
-  background: var(--fill); animation: beautiful-fade-in var(--dur) ease-out both;
+  flex: 0 0 auto; margin-top: 1px; animation: beautiful-fade-in var(--dur) ease-out both;
 }
-.plan-step.is-completed .plan-step-status { color: var(--blue); background: var(--fill); }
-.plan-step.is-in-progress .plan-step-status { color: var(--accent-strong); background: var(--fill); }
-.plan-step.is-blocked .plan-step-status { color: var(--danger); background: var(--fill); }
+.plan-step.is-in-progress .plan-step-status { color: var(--text); }
+.plan-step.is-blocked .plan-step-status { color: var(--danger); }
 
 .turn-working-status .turn-working-copy strong {
   color: var(--text-muted);

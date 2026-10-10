@@ -26,7 +26,7 @@ describe("cancelled native plan steps", () => {
 
     render(<PlanPanel steps={result.current} />);
     expect(screen.getByText("1 of 2 complete")).toBeTruthy();
-    expect(screen.getByLabelText("50% complete")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(document.querySelector('[data-plan-step-status="cancelled"]')).not.toBeNull();
   });

@@ -263,11 +263,9 @@ test("opens a language-aware project link at its exact validated Java range", as
   const toolsHandle = page.getByRole("separator", {
     name: "Resize workspace tools",
   });
-  const toolsMinimumWidth = 300 + await page.locator(".app-shell").evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).getPropertyValue("--titlebar-overlay-inset")));
   await toolsHandle.focus();
   await toolsHandle.press("Home");
-  await expect(toolsHandle).toHaveAttribute("aria-valuenow", String(Math.round(toolsMinimumWidth)));
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "300");
   const resizedTree = lightPanel.getByRole("tree", { name: "Files" });
   const resizedSelection = resizedTree.getByRole("treeitem", {
     name: "OrderService.java",
@@ -300,7 +298,7 @@ test("opens a language-aware project link at its exact validated Java range", as
     );
   }).toBe(false);
   await toolsHandle.press("ArrowLeft");
-  await expect(toolsHandle).toHaveAttribute("aria-valuenow", String(Math.round(toolsMinimumWidth + 12)));
+  await expect(toolsHandle).toHaveAttribute("aria-valuenow", "312");
   await expect.poll(async () => {
     const treeBounds = await resizedTree.boundingBox();
     const selectedBounds = await resizedSelection.boundingBox();

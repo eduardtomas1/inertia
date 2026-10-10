@@ -2,13 +2,18 @@ import type { Input, KeyboardInputEvent } from "electron";
 
 const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n", "w"]);
 
-export function previewAppShortcutKey(input: Pick<
-  Input,
-  "alt" | "control" | "key" | "meta" | "shift" | "type"
->): string | null {
+export function previewAppShortcutKey(
+  input: Pick<Input, "alt" | "control" | "key" | "meta" | "shift" | "type">,
+  platform: NodeJS.Platform | string,
+): string | null {
   const key = input.key.toLowerCase();
+  const modified = key === "w"
+    ? platform === "darwin"
+      ? input.meta && !input.control
+      : input.control && !input.meta
+    : input.meta || input.control;
   return input.type === "keyDown"
-      && (input.meta || input.control)
+      && modified
       && !input.alt
       && !input.shift
       && APP_SHORTCUT_KEYS.has(key)

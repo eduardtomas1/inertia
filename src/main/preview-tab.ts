@@ -71,7 +71,7 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
       event.preventDefault();
       return;
     }
-    const shortcutKey = previewAppShortcutKey(input);
+    const shortcutKey = previewAppShortcutKey(input, process.platform);
     const key = input.key.toLowerCase();
     const ownsKeyUp = input.type === "keyUp" && ownedKeyUps.delete(key);
     if (!shortcutKey && !ownsKeyUp) {

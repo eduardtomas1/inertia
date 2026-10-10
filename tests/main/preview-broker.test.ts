@@ -29,13 +29,31 @@ describe("preview broker isolation", () => {
       shift: false,
     };
 
-    expect(previewAppShortcutKey(input)).toBe("k");
-    expect(previewAppShortcutKey({ ...input, key: "w" })).toBe("w");
-    expect(previewAppShortcutKey({ ...input, key: "w", meta: false, control: true })).toBe("w");
-    expect(previewAppShortcutKey({ ...input, key: "w", shift: true })).toBeNull();
-    expect(previewAppShortcutKey({ ...input, key: "X" })).toBeNull();
-    expect(previewAppShortcutKey({ ...input, meta: false })).toBeNull();
-    expect(previewAppShortcutKey({ ...input, alt: true })).toBeNull();
-    expect(previewAppShortcutKey({ ...input, type: "keyUp" })).toBeNull();
+    expect(previewAppShortcutKey(input, "darwin")).toBe("k");
+    expect(previewAppShortcutKey({ ...input, meta: false, control: true }, "darwin")).toBe("k");
+    expect(previewAppShortcutKey({ ...input, key: "w" }, "darwin")).toBe("w");
+    expect(previewAppShortcutKey({ ...input, key: "w", meta: false, control: true }, "linux")).toBe("w");
+    expect(previewAppShortcutKey({ ...input, key: "w", shift: true }, "darwin")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, key: "X" }, "darwin")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, meta: false }, "darwin")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, alt: true }, "darwin")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, type: "keyUp" }, "darwin")).toBeNull();
+  });
+
+  it("leaves Ctrl+W to the page on macOS and Cmd+W to the page elsewhere", () => {
+    const input = {
+      type: "keyDown",
+      key: "w",
+      control: true,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
+
+    expect(previewAppShortcutKey(input, "darwin")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, control: false, meta: true }, "linux")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, control: false, meta: true }, "win32")).toBeNull();
+    expect(previewAppShortcutKey({ ...input, meta: true }, "darwin")).toBeNull();
+    expect(previewAppShortcutKey(input, "win32")).toBe("w");
   });
 });

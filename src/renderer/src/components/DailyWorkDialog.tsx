@@ -2,7 +2,6 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   ChevronRight,
   RefreshCw,
-  X,
 } from "lucide-react";
 import {
   useEffect,
@@ -23,10 +22,8 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
-import {
-  focusModalOnAnimationFrame,
-  trapModalFocus,
-} from "../utils/modalFocus";
+import { focusModalOnAnimationFrame } from "../utils/modalFocus";
+import { DialogShell } from "./DialogShell";
 import { ProviderMark } from "./ProviderMark";
 import { IconButton, LoadingMark } from "./ui";
 import "./DailyWorkDialog.css";
@@ -218,183 +215,162 @@ export function DailyWorkDialog({
   }, [open, refreshVersion, request, selectedDateKey, status]);
 
   return (
-    <div
-      className="dialog-backdrop daily-work-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <DialogShell
+      className="daily-work-dialog"
+      bodyClassName="daily-work-content"
+      titleId={titleId}
+      title="Daily work"
+      description={<>Agent work<span className="daily-work-header-date">{dateLabel}</span></>}
+      descriptionId={descriptionId}
+      closeLabel="Close daily work"
+      closeRef={closeRef}
+      onClose={onClose}
+      onDismiss={onClose}
+      aria-busy={loading}
+      headerActions={<>
+        <input
+          className="daily-work-date-input"
+          type="date"
+          aria-label="Daily work date"
+          value={selectedDateKey}
+          max={todayKey}
+          onChange={(event) => {
+            const date = event.currentTarget.value;
+            if (date && date <= todayKey) setSelectedDateKey(date);
+          }}
+        />
+        <IconButton
+          ref={refreshRef}
+          label="Refresh daily work"
+          disabled={loading || status !== "online"}
+          onClick={refresh}
+        >
+          <RefreshCw size={16} aria-hidden="true" />
+        </IconButton>
+      </>}
+      footerStart={!loading && !error && dashboard
+        ? "Runtime is clipped to this local day. Tokens count when turns settle."
+        : undefined}
     >
-      <section
-        className="daily-work-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        aria-busy={loading}
-        onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
-      >
-        <header className="daily-work-header">
-          <div>
-            <h2 id={titleId}>Daily work</h2>
-            <p id={descriptionId}>
-              Agent work<span className="daily-work-header-date">{dateLabel}</span>
-            </p>
+      {loading && (
+        <div className="daily-work-loading">
+          <p className="daily-work-loading-status">
+            <LoadingMark label="Loading daily work" />
+            <span>Loading daily work…</span>
+          </p>
+          <div className="daily-work-skeleton" aria-hidden="true">
+            <div className="daily-work-skeleton-band"><i /><i /><i /></div>
+            <div className="daily-work-skeleton-rows"><i /><i /><i /><i /></div>
           </div>
-          <input
-            className="daily-work-date-input"
-            type="date"
-            aria-label="Daily work date"
-            value={selectedDateKey}
-            max={todayKey}
-            onChange={(event) => {
-              const date = event.currentTarget.value;
-              if (date && date <= todayKey) setSelectedDateKey(date);
-            }}
-          />
-          <button
-            ref={refreshRef}
-            type="button"
-            className="daily-work-refresh"
-            aria-label="Refresh daily work"
-            disabled={loading || status !== "online"}
-            onClick={refresh}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-          </button>
-          <IconButton ref={closeRef} label="Close daily work" onClick={onClose}>
-            <X size={16} />
-          </IconButton>
-        </header>
-
-        <div className="daily-work-content">
-          {loading && (
-            <div className="daily-work-loading">
-              <p className="daily-work-loading-status">
-                <LoadingMark label="Loading daily work" />
-                <span>Loading daily work…</span>
-              </p>
-              <div className="daily-work-skeleton" aria-hidden="true">
-                <div className="daily-work-skeleton-band"><i /><i /><i /></div>
-                <div className="daily-work-skeleton-rows"><i /><i /><i /><i /></div>
-              </div>
-            </div>
-          )}
-          {!loading && error && (
-            <div className="daily-work-error" role="alert">
-              <span><strong>Daily work could not be loaded</strong><small>{error}</small></span>
-              <button type="button" onClick={refresh} disabled={status !== "online"}>Try again</button>
-            </div>
-          )}
-          {!loading && !error && dashboard && (
-            <>
-              <section
-                className="daily-work-totals"
-                aria-label="Daily work totals"
-              >
-                <article className="is-primary">
-                  <span>Processed tokens</span>
-                  <strong><MetricValue metric={dashboard.totals.processedTokens} format={formatCompact} /></strong>
-                  <small>Settled only</small>
-                </article>
-                <article>
-                  <span>Agent runtime</span>
-                  <strong><MetricValue metric={dashboard.totals.runtime} format={formatDuration} /></strong>
-                  <small>Settled only</small>
-                </article>
-                <article className="is-conversation-count">
-                  <span>Conversations</span>
-                  <strong>{formatCount(dashboard.totals.conversationCount)}</strong>
-                  <small>
-                    {formatCount(dashboard.totals.turnCount)} {dashboard.totals.turnCount === 1 ? "turn" : "turns"}
-                  </small>
-                </article>
-              </section>
-
-              {dashboard.totals.activeTurnCount > 0 && (
-                <p className="daily-work-active-note" role="status">
-                  {formatCount(dashboard.totals.activeTurnCount)} active {dashboard.totals.activeTurnCount === 1 ? "turn is" : "turns are"} excluded from settled totals.
-                </p>
-              )}
-
-              {dashboard.providers.length > 0 && (
-                <section className="daily-work-provider-section" aria-labelledby="daily-work-provider-heading">
-                  <h3 id="daily-work-provider-heading">By provider</h3>
-                  <div>
-                    {dashboard.providers.map((provider) => (
-                      <ProviderSummary
-                        provider={provider}
-                        share={shareOfTotal(
-                          provider.processedTokens,
-                          dashboard.totals.processedTokens,
-                        )}
-                        key={provider.providerId}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              <section className="daily-work-conversations" aria-labelledby="daily-work-conversations-heading">
-                <header>
-                  <h3 id="daily-work-conversations-heading">Conversations</h3>
-                  <span>Most recent first</span>
-                </header>
-                {dashboard.conversations.length === 0 ? (
-                  <div className="daily-work-empty">
-                    <strong>No work recorded</strong>
-                    <span>No conversations or settled agent turns were found for this date.</span>
-                  </div>
-                ) : (
-                  <div className="daily-work-conversation-list">
-                    {dashboard.conversations.map((conversation) => (
-                      <button
-                        type="button"
-                        className="daily-work-conversation-card"
-                        onClick={() => onOpenConversation(conversation.conversationId)}
-                        key={conversation.conversationId}
-                      >
-                        <span className="daily-work-provider-stack" aria-label={conversation.providerIds.join(", ")}>
-                          {conversation.providerIds.map((providerId) => (
-                            <ProviderMark providerId={providerId} size={18} key={providerId} />
-                          ))}
-                        </span>
-                        <span className="daily-work-conversation-identity">
-                          <strong>{conversation.title}</strong>
-                          <span className="daily-work-conversation-meta">
-                            <small>{conversation.projectName} · {conversation.turnCount} {conversation.turnCount === 1 ? "turn" : "turns"}</small>
-                            {conversation.running && <span className="daily-work-conversation-state">Running</span>}
-                            {conversation.createdToday && (
-                              <span className="daily-work-conversation-state">Created this day</span>
-                            )}
-                          </span>
-                        </span>
-                        <span className="daily-work-card-metrics">
-                          <span>
-                            <small>Runtime</small>
-                            <strong><MetricValue metric={conversation.runtime} format={formatDuration} /></strong>
-                          </span>
-                          <span>
-                            <small>Tokens</small>
-                            <strong><MetricValue metric={conversation.processedTokens} format={formatCompact} /></strong>
-                          </span>
-                        </span>
-                        <ChevronRight className="daily-work-card-chevron" size={14} aria-hidden="true" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
         </div>
+      )}
+      {!loading && error && (
+        <div className="daily-work-error" role="alert">
+          <span><strong>Daily work could not be loaded</strong><small>{error}</small></span>
+          <button type="button" onClick={refresh} disabled={status !== "online"}>Try again</button>
+        </div>
+      )}
+      {!loading && !error && dashboard && (
+        <>
+          <section
+            className="daily-work-totals"
+            aria-label="Daily work totals"
+          >
+            <article className="is-primary">
+              <span>Processed tokens</span>
+              <strong><MetricValue metric={dashboard.totals.processedTokens} format={formatCompact} /></strong>
+              <small>Settled only</small>
+            </article>
+            <article>
+              <span>Agent runtime</span>
+              <strong><MetricValue metric={dashboard.totals.runtime} format={formatDuration} /></strong>
+              <small>Settled only</small>
+            </article>
+            <article className="is-conversation-count">
+              <span>Conversations</span>
+              <strong>{formatCount(dashboard.totals.conversationCount)}</strong>
+              <small>
+                {formatCount(dashboard.totals.turnCount)} {dashboard.totals.turnCount === 1 ? "turn" : "turns"}
+              </small>
+            </article>
+          </section>
 
-        {!loading && !error && dashboard && (
-          <footer className="daily-work-note">
-            Runtime is clipped to this local day. Tokens count when turns settle.
-          </footer>
-        )}
-      </section>
-    </div>
+          {dashboard.totals.activeTurnCount > 0 && (
+            <p className="daily-work-active-note" role="status">
+              {formatCount(dashboard.totals.activeTurnCount)} active {dashboard.totals.activeTurnCount === 1 ? "turn is" : "turns are"} excluded from settled totals.
+            </p>
+          )}
+
+          {dashboard.providers.length > 0 && (
+            <section className="daily-work-provider-section" aria-labelledby="daily-work-provider-heading">
+              <h3 id="daily-work-provider-heading">By provider</h3>
+              <div>
+                {dashboard.providers.map((provider) => (
+                  <ProviderSummary
+                    provider={provider}
+                    share={shareOfTotal(
+                      provider.processedTokens,
+                      dashboard.totals.processedTokens,
+                    )}
+                    key={provider.providerId}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="daily-work-conversations" aria-labelledby="daily-work-conversations-heading">
+            <header>
+              <h3 id="daily-work-conversations-heading">Conversations</h3>
+              <span>Most recent first</span>
+            </header>
+            {dashboard.conversations.length === 0 ? (
+              <div className="daily-work-empty">
+                <strong>No work recorded</strong>
+                <span>No conversations or settled agent turns were found for this date.</span>
+              </div>
+            ) : (
+              <div className="daily-work-conversation-list">
+                {dashboard.conversations.map((conversation) => (
+                  <button
+                    type="button"
+                    className="daily-work-conversation-card"
+                    onClick={() => onOpenConversation(conversation.conversationId)}
+                    key={conversation.conversationId}
+                  >
+                    <span className="daily-work-provider-stack" aria-label={conversation.providerIds.join(", ")}>
+                      {conversation.providerIds.map((providerId) => (
+                        <ProviderMark providerId={providerId} size={18} key={providerId} />
+                      ))}
+                    </span>
+                    <span className="daily-work-conversation-identity">
+                      <strong>{conversation.title}</strong>
+                      <span className="daily-work-conversation-meta">
+                        <small>{conversation.projectName} · {conversation.turnCount} {conversation.turnCount === 1 ? "turn" : "turns"}</small>
+                        {conversation.running && <span className="daily-work-conversation-state">Running</span>}
+                        {conversation.createdToday && (
+                          <span className="daily-work-conversation-state">Created this day</span>
+                        )}
+                      </span>
+                    </span>
+                    <span className="daily-work-card-metrics">
+                      <span>
+                        <small>Runtime</small>
+                        <strong><MetricValue metric={conversation.runtime} format={formatDuration} /></strong>
+                      </span>
+                      <span>
+                        <small>Tokens</small>
+                        <strong><MetricValue metric={conversation.processedTokens} format={formatCompact} /></strong>
+                      </span>
+                    </span>
+                    <ChevronRight className="daily-work-card-chevron" size={14} aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </DialogShell>
   );
 }

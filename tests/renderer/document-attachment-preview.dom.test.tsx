@@ -320,7 +320,7 @@ describe("document attachment previews", () => {
     expect(screen.queryByText(/Preview is bounded for responsiveness/u)).toBeNull();
   });
 
-  it("presents an opaque file as saved, with a generic file icon and its full name", async () => {
+  it("presents an opaque file as saved, with a generic file icon in the list and its full name as the dialog title", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const user = userEvent.setup();
@@ -332,7 +332,7 @@ describe("document attachment previews", () => {
     expect(screen.getByText(name, { exact: true })).toHaveAttribute("title", name);
     await user.click(trigger);
     const dialog = await screen.findByRole("dialog", { name });
-    expect(dialog.querySelector(".attachment-preview-header .lucide-file")).not.toBeNull();
+    expect(dialog.querySelector(".dialog-shell-header svg:not(.lucide-x)")).toBeNull();
     const block = dialog.querySelector(".attachment-preview-unavailable");
     expect(block).not.toBeNull();
     expect(block?.querySelector("strong")).toHaveTextContent("No preview for this file type");

@@ -1,11 +1,5 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
-import {
-  ExternalLink,
-  File,
-  FileSpreadsheet,
-  FileText,
-  X,
-} from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import {
   lazy,
   startTransition,
@@ -43,11 +37,9 @@ import {
   formatAttachmentSize,
   type AttachmentPreviewSource,
 } from "../utils/composerAttachments";
-import {
-  focusModalOnAnimationFrame,
-  trapModalFocus,
-} from "../utils/modalFocus";
+import { focusModalOnAnimationFrame } from "../utils/modalFocus";
 import { pdfCanvasLayout } from "../utils/pdfCanvasLayout";
+import { DialogShell } from "./DialogShell";
 import { ZoomableAttachmentImage } from "./ZoomableAttachmentImage";
 import { LoadingMark } from "./ui";
 
@@ -394,133 +386,98 @@ export function AttachmentPreviewDialog({
   }, [onClose]);
 
   return createPortal(
-    <div
-      className="attachment-preview-backdrop"
-      data-document-visible={documentVisible}
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <DialogShell
+      className="attachment-preview-dialog"
+      backdropClassName="attachment-preview-backdrop"
+      backdropData={{ "data-document-visible": documentVisible }}
+      bodyClassName="attachment-preview-body is-flush"
+      data-preview-kind={previewKind}
+      titleId={titleId}
+      title={attachment.name}
+      description={<>
+        {chatAttachmentTypeLabel(attachment.mimeType)}
+        {" · "}
+        {formatAttachmentSize(attachment.size)}
+      </>}
+      descriptionId={descriptionId}
+      closeLabel={`Close preview of ${attachment.name}`}
+      closeRef={closeRef}
+      onClose={onClose}
+      onDismiss={onClose}
+      footerStart={previewKind === "pdf" && (openFailed
+        ? <span className="attachment-preview-open-error" role="alert">The validated copy could not be opened.</span>
+        : "If the embedded viewer is unavailable, open this validated copy in your default PDF app.")}
+      footer={previewKind === "pdf" && (
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={opening}
+          onClick={() => {
+            if (opening) return;
+            setOpenFailed(false);
+            setOpening(true);
+            void window.inertia.openAttachmentExternally(attachment.id)
+              .catch(() => setOpenFailed(true))
+              .finally(() => setOpening(false));
+          }}
+        >
+          <ExternalLink size={14} aria-hidden="true" />
+          <span>{opening ? "Opening…" : "Open in PDF app"}</span>
+        </button>
+      )}
     >
-      <section
-        className="attachment-preview-dialog"
-        data-preview-kind={previewKind}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
-      >
-        <header className="attachment-preview-header">
-          <span className="attachment-preview-identity">
-            {previewKind === "spreadsheet"
-              ? <FileSpreadsheet size={16} aria-hidden="true" />
-              : previewKind === "file"
-                ? <File size={16} aria-hidden="true" />
-                : previewKind !== "image"
-                  ? <FileText size={16} aria-hidden="true" />
-                  : null}
-            <span>
-              <strong id={titleId}>{attachment.name}</strong>
-              <small id={descriptionId}>
-                {chatAttachmentTypeLabel(attachment.mimeType)}
-                {" · "}
-                {formatAttachmentSize(attachment.size)}
-              </small>
-            </span>
-          </span>
-          <button
-            ref={closeRef}
-            type="button"
-            className="attachment-preview-close"
-            aria-label={`Close preview of ${attachment.name}`}
-            onClick={onClose}
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
-        {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
-        <div className="attachment-preview-stage" data-load-failed={loadFailed}>
-          {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
+      {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
+      <div className="attachment-preview-stage" data-load-failed={loadFailed}>
+        {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
+          ? (
+              <div className="attachment-preview-unavailable" role="alert">
+                <strong>Preview unavailable</strong>
+                <span>
+                  This file could not be previewed. It may use an unsupported format, have changed, or have been removed from storage.
+                </span>
+              </div>
+            )
+          : previewKind === "file"
             ? (
-                <div className="attachment-preview-unavailable" role="alert">
-                  <strong>Preview unavailable</strong>
-                  <span>
-                    This file could not be previewed. It may use an unsupported format, have changed, or have been removed from storage.
-                  </span>
+                <div className="attachment-preview-unavailable">
+                  <strong>No preview for this file type</strong>
+                  <span>The complete file is saved. The agent can read or search it with file tools.</span>
                 </div>
               )
-            : previewKind === "file"
+            : previewKind === "image"
+            ? (
+                <ZoomableAttachmentImage
+                  source={previewUrl}
+                  alt={attachment.name}
+                  onFailure={markLoadFailed}
+                />
+              )
+            : previewKind === "pdf"
               ? (
-                  <div className="attachment-preview-unavailable">
-                    <strong>No preview for this file type</strong>
-                    <span>The complete file is saved. The agent can read or search it with file tools.</span>
-                  </div>
-                )
-              : previewKind === "image"
-              ? (
-                  <ZoomableAttachmentImage
-                    source={previewUrl}
-                    alt={attachment.name}
-                    onFailure={markLoadFailed}
-                  />
-                )
-              : previewKind === "pdf"
-                ? (
-                    <Suspense fallback={(
-                      <div className="document-attachment-preview-loading" role="status">
-                        <span>Preparing secure preview…</span>
-                      </div>
-                    )}>
-                      <PdfAttachmentPreview
-                        source={previewUrl}
-                        title={attachment.name}
-                        onFailure={markLoadFailed}
-                        loadAttachment={loadPdfAttachment}
-                        prepareCanvas={preparePdfCanvas}
-                      />
-                    </Suspense>
-                  )
-                : (
-                    <DocumentAttachmentPreview
+                  <Suspense fallback={(
+                    <div className="document-attachment-preview-loading" role="status">
+                      <span>Preparing secure preview…</span>
+                    </div>
+                  )}>
+                    <PdfAttachmentPreview
                       source={previewUrl}
                       title={attachment.name}
-                      mimeType={attachment.mimeType}
                       onFailure={markLoadFailed}
+                      loadAttachment={loadPdfAttachment}
+                      prepareCanvas={preparePdfCanvas}
                     />
-                  )}
-        </div>
-        {previewKind === "pdf" && (
-          <footer className="attachment-preview-footer">
-            <span>
-              If the embedded viewer is unavailable, open this validated copy
-              in your default PDF app.
-            </span>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={opening}
-              onClick={() => {
-                if (opening) return;
-                setOpenFailed(false);
-                setOpening(true);
-                void window.inertia.openAttachmentExternally(attachment.id)
-                  .catch(() => setOpenFailed(true))
-                  .finally(() => setOpening(false));
-              }}
-            >
-              <ExternalLink size={14} aria-hidden="true" />
-              <span>{opening ? "Opening…" : "Open in PDF app"}</span>
-            </button>
-            {openFailed && (
-              <span className="attachment-preview-open-error" role="alert">
-                The validated copy could not be opened.
-              </span>
-            )}
-          </footer>
-        )}
-      </section>
-    </div>,
+                  </Suspense>
+                )
+              : (
+                  <DocumentAttachmentPreview
+                    source={previewUrl}
+                    title={attachment.name}
+                    mimeType={attachment.mimeType}
+                    onFailure={markLoadFailed}
+                  />
+                )}
+      </div>
+    </DialogShell>,
     document.body,
   );
 }

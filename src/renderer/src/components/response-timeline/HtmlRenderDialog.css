@@ -2,30 +2,18 @@
    follows the page's reported content height (at least 240px) and shrinks to
    the viewport cap, past which the page scrolls inside the frame. */
 .html-render-dialog {
-  display: flex;
-  flex-direction: column;
-  width: min(1200px, 100%);
-  max-height: min(90dvh, calc(100dvh - clamp(16px, 6vw, 56px)));
-  min-height: 0;
-  overflow: hidden;
+  --dialog-width: 1200px;
+  max-height: min(90dvh, calc(100dvh - 48px));
 }
 
 .html-render-dialog:focus {
   outline: none;
 }
 
-.html-render-dialog > .attachment-preview-header {
-  flex: none;
-}
-
-.html-render-dialog-title {
-  min-width: 0;
-  flex: 1;
+.html-render-dialog > .dialog-shell-body {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  font-size: var(--text-base);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .html-render-dialog-frame {
@@ -48,10 +36,4 @@
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
-}
-
-@media (max-width: 560px) {
-  .html-render-dialog {
-    border-radius: var(--radius-sm);
-  }
 }

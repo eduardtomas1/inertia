@@ -1,6 +1,6 @@
 import { INTERFACE_LOCALE } from "../lib/locale";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, Info, RefreshCw, X } from "lucide-react";
+import { ChevronDown, Info, RefreshCw } from "lucide-react";
 import type { ServerEvent } from "@shared/contracts";
 import { USAGE_RESET_CONFIRMATION_EXPIRED, usageSourceOrigin, usageSourceProfileId, type UsageAccount, type UsageLimitsSnapshot, type UsageResetConfirmation } from "@shared/provider-usage-limits";
 import { deduplicateUsageAccounts, usagePools, type UsagePool } from "@shared/usage-limits-projection";
@@ -8,7 +8,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { trapModalFocus } from "../utils/modalFocus";
+import { DialogShell } from "./DialogShell";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { useUsageLimitsContext } from "./usage-limits-state";
 import "./UsageLimitsPanel.css";
@@ -211,7 +211,7 @@ function UsageSources({ snapshot, request, onChange, online }: { snapshot: Usage
   </details>;
 }
 
-export function UsageLimitsPanel({ request, status }: Props): React.JSX.Element {
+export function UsageLimitsPanel({ request, status, heading = true }: Props & { heading?: boolean }): React.JSX.Element {
   const context = useUsageLimitsContext();
   const [snapshot, setSnapshot] = useState<UsageLimitsSnapshot | null>(context?.snapshot ?? null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
@@ -258,7 +258,7 @@ export function UsageLimitsPanel({ request, status }: Props): React.JSX.Element 
   });
   return <section className="usage-limits-panel" aria-label="Provider limits" aria-busy={busy}>
     <header className="limits-heading">
-      <div className="limits-title"><h2>Limits</h2><button type="button" className="limits-about" aria-label="About these numbers" aria-expanded={about} aria-controls={aboutId} onClick={() => setAbout(!about)}><Info size={14} aria-hidden="true" /></button></div>
+      <div className="limits-title">{heading && <h2>Limits</h2>}<button type="button" className="limits-about" aria-label="About these numbers" aria-expanded={about} aria-controls={aboutId} onClick={() => setAbout(!about)}><Info size={14} aria-hidden="true" /></button></div>
       <small className="limits-checked" title={snapshot?.checkedAt ? dateLabel(snapshot.checkedAt) : undefined}>{checked ? `Checked ${checked}` : "Not checked yet"}</small>
       <button type="button" className="limits-refresh" disabled={busy || status !== "online"} onClick={() => void load(true, true)}><RefreshCw size={14} aria-hidden="true" />{busy ? "Refreshing…" : "Refresh limits"}</button>
     </header>
@@ -303,7 +303,7 @@ export function UsageAccountsHint({ providerId, remaining }: { providerId: strin
 }
 
 export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void; returnFocusTo?: HTMLElement | null }): React.JSX.Element | null {
-  const context = useUsageLimitsContext(); const dialog = useRef<HTMLElement>(null);
+  const context = useUsageLimitsContext(); const dialog = useRef<HTMLElement>(null); const titleId = useId();
   useNativePreviewSuspension(true);
   // The visible modal must own keyboard focus in its first committed frame.
   useLayoutEffect(() => {
@@ -312,10 +312,9 @@ export function UsageLimitsDialog({ onClose, returnFocusTo }: { onClose(): void;
     return () => { if (previous?.isConnected) previous.focus(); };
   }, [returnFocusTo]);
   if (!context) return null;
-  return <div className="dialog-backdrop limits-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={dialog} role="dialog" aria-modal="true" aria-label="Provider usage limits" className="limits-dialog" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } else trapModalFocus(event, event.currentTarget); }}>
-      <button type="button" className="limits-dialog-close" aria-label="Close provider limits" onClick={onClose}><X size={16} /></button>
-      <UsageLimitsPanel request={context.request} status={context.status} />
-    </section>
-  </div>;
+  return <DialogShell ref={dialog} className="limits-dialog" backdropClassName="limits-dialog-backdrop" aria-label="Provider usage limits" titleId={titleId} title="Usage limits"
+    closeLabel="Close provider limits" onClose={onClose} onDismiss={onClose}
+    onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <UsageLimitsPanel request={context.request} status={context.status} heading={false} />
+  </DialogShell>;
 }

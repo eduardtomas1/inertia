@@ -1,22 +1,25 @@
 .cli-import-dialog {
+  --dialog-width: 820px;
+  max-height: min(80vh, calc(100dvh - 48px));
+  outline: none;
+}
+
+.cli-import-shell-body {
   display: flex;
-  width: min(820px, 100%);
-  max-height: min(80vh, calc(100dvh - 44px));
-  min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  outline: none;
 }
 
 .cli-import-search {
   display: flex;
   min-width: 0;
-  min-height: 54px;
+  min-height: 48px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 9px;
-  padding: 0 10px 0 15px;
-  border-bottom: 1px solid var(--line);
+  gap: 8px;
+  padding: 0 16px 0 20px;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
   color: var(--text-muted);
   transition: border-color var(--dur-fast) var(--ease);
 }

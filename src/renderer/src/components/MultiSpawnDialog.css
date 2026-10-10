@@ -1,57 +1,11 @@
-.multi-spawn-backdrop {
-  align-items: safe center;
-  justify-items: center;
-  overflow-y: auto;
-}
-
 .multi-spawn-dialog {
-  position: relative;
-  display: grid;
-  width: min(980px, 100%);
-  max-height: min(860px, calc(100dvh - 32px));
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
+  --dialog-width: 980px;
+  max-height: min(860px, calc(100dvh - 48px));
 }
 
 .multi-spawn-dialog-body {
-  min-height: 0;
-  overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-}
-
-.multi-spawn-dialog-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 18px 14px;
-  border-bottom: 1px solid var(--line-strong);
-  background: var(--surface-raised);
-}
-
-.multi-spawn-dialog-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  background: var(--fill);
-}
-
-.multi-spawn-dialog-header h2 {
-  margin: 0 0 3px;
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-
-.multi-spawn-dialog-header p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  line-height: var(--leading-chrome);
 }
 
 .multi-spawn-prompt-zone {
@@ -627,20 +581,6 @@
   max-width: 100%;
 }
 
-.multi-spawn-dialog-footer {
-  position: sticky;
-  z-index: 4;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 13px 18px 15px;
-  border-top: 1px solid var(--line-strong);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  background: var(--surface-raised);
-}
-
 .multi-spawn-preset-toggle {
   display: inline-flex;
   min-width: 0;
@@ -668,28 +608,12 @@
   font-size: var(--text-xs);
 }
 
-.multi-spawn-dialog-footer > div {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
 .multi-spawn-launch {
   gap: 7px;
   min-width: 126px;
 }
 
 @media (max-width: 780px) {
-  .multi-spawn-backdrop {
-    place-items: start center;
-    padding: 12px;
-  }
-
-  .multi-spawn-dialog {
-    max-height: calc(100dvh - 24px);
-    border-radius: var(--radius-md);
-  }
-
   .multi-spawn-sides {
     padding-right: 12px;
     padding-left: 12px;
@@ -713,14 +637,6 @@
 }
 
 @media (max-width: 480px) {
-  .multi-spawn-dialog-header {
-    padding: 14px;
-  }
-
-  .multi-spawn-dialog-header p {
-    display: none;
-  }
-
   .multi-spawn-prompt-zone,
   .multi-spawn-sides {
     padding-right: 14px;
@@ -739,15 +655,5 @@
   .multi-spawn-field-grid,
   .multi-spawn-field-grid.is-compact {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .multi-spawn-dialog-footer {
-    align-items: stretch;
-    flex-direction: column;
-    padding: 12px 14px 14px;
-  }
-
-  .multi-spawn-dialog-footer > div {
-    justify-content: flex-end;
   }
 }

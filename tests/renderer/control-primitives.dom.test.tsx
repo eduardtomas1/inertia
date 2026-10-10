@@ -216,39 +216,52 @@ describe("popover primitives", () => {
 });
 
 describe("dialog primitives", () => {
-  const dialogCss = [
-    css,
-    ...[
+  const componentDialogCss = [
+      "components/DialogShell.css",
       "components/AddProjectDialog.css",
       "components/CliConversationImportDialog.css",
       "components/MultiSpawnDialog.css",
       "components/DailyWorkDialog.css",
-      "components/welcome-guide/WelcomeGuide.css",
       "components/composer/SnapshotControl.css",
+      "components/composer/ReviewedScreenshotControl.css",
       "components/sidebar/SidebarUpdateControl.css",
       "components/response-timeline/HtmlRenderDialog.css",
-    ].map((path) => readSourceText(`src/renderer/src/${path}`)),
-  ].join("\n");
+      "components/UsageLimitsPanel.css",
+      "components/ReviewNoteDialog.css",
+      "components/SnapshotAttachment.css",
+    ].map((path) => readSourceText(`src/renderer/src/${path}`)).join("\n");
+  const dialogCss = `${css}\n${componentDialogCss}\n${readSourceText("src/renderer/src/components/welcome-guide/WelcomeGuide.css")}`;
+  const shellCss = readSourceText("src/renderer/src/components/DialogShell.css");
 
   it("gives every dialog one surface, radius, overlay shadow and title size, without icon tiles", () => {
     const base = /^:where\(\n(?<list>[^)]*)\n\) \{\n(?<body>[^}]*)\n\}/mu.exec(css.slice(css.indexOf("@keyframes dialog-surface-out")))?.groups;
     expect(base?.body).toBe([
       "  border: 1px solid var(--line-soft);",
-      "  border-radius: var(--radius-md);",
+      "  border-radius: var(--radius-lg);",
       "  color: var(--text);",
       "  background: var(--surface-raised);",
       "  box-shadow: var(--shadow-overlay);",
     ].join("\n"));
-    for (const dialog of [".commit-dialog", ".file-editor-dialog", ".pre-merge-dialog", ".provider-auth-dialog", ".add-project-dialog", ".multi-spawn-dialog", ".welcome-guide"]) {
+    for (const dialog of [".dialog-shell", ".commit-dialog", ".provider-auth-dialog", ".welcome-guide"]) {
       expect(base?.list, dialog).toContain(dialog);
     }
-    expect(css).toMatch(/\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
-    expect(dialogCss).not.toMatch(/\.dialog-icon|--scrim\b|--scrim-strong|backdrop-filter: blur\(5px\)|welcome-guide-open|palette-panel-in/u);
+    expect(css).toMatch(/:where\(\n  \.commit-dialog,\n  \.dialog-shell\n\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
+    expect(dialogCss).not.toMatch(/\.dialog-icon|--scrim\b|--scrim-strong|backdrop-filter: blur\(5px\)|welcome-guide-open|palette-panel-in|multi-spawn-dialog-mark|attachment-preview-close|limits-dialog-close|daily-work-refresh/u);
+    expect(dialogCss).not.toMatch(/(?:dialog|preview|review)[\w-]*\s*\{[^}]*border-radius: var\(--radius-(?:sm|md)\)[^}]*box-shadow: var\(--shadow-overlay\)/u);
+  });
+
+  it("closes every dialog from one title row and ends it with 32px footer buttons", () => {
+    expect(shellCss).toMatch(/\.dialog-shell-header \{[^}]*align-items: center;[^}]*\}/u);
+    expect(shellCss).toMatch(/\.dialog-shell-footer > :is\(\.primary-button, \.secondary-button\) \{\n  min-height: var\(--control-height\);/u);
+    expect(shellCss).toMatch(/\.dialog-shell \{\n  display: flex;\n  width: min\(var\(--dialog-width, 480px\), 100%\);/u);
+    expect(componentDialogCss).not.toMatch(/min-height: (?:30|34|36|37|39)px|height: (?:30|37|39)px/u);
   });
 
   it("dims the window behind dialogs with one backdrop token and no blur", () => {
     expect(css).toMatch(/--backdrop: rgb\(0 0 0 \/ 0\.48\);/u);
-    expect(css).toMatch(/\.attachment-preview-backdrop\n\),\n\.update-restart-dialog::backdrop \{\n  background: var\(--backdrop\);\n\}/u);
+    expect(css).toMatch(/:where\(\n  \.dialog-backdrop,\n  \.palette-backdrop\n\),\n\.update-restart-dialog::backdrop \{\n  background: var\(--backdrop\);\n\}/u);
+    expect(css).toMatch(/\.dialog-backdrop \{\n  position: fixed;\n  inset: 0;\n  z-index: 90;\n  display: grid;\n  place-items: center;\n  padding: 24px;\n\}/u);
+    expect(dialogCss).not.toMatch(/\.(?:snapshot|attachment-preview|multi-spawn|daily-work)-backdrop \{[^}]*(?:padding|place-items)/u);
   });
 
   it("opens with a fade and slight scale and closes the same way while DialogPresence holds it", () => {
@@ -256,6 +269,8 @@ describe("dialog primitives", () => {
     expect(css).toMatch(/@keyframes dialog-surface-out \{\n  to \{\n    opacity: 0;\n    transform: scale\(0\.98\);/u);
     expect(css).toMatch(/\.dialog-presence\.is-closing > \.dialog-backdrop > \* \{\n    animation: dialog-surface-out/u);
     expect(css).toMatch(/\.dialog-backdrop > \*,[\s\S]*?\{\n    animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
+    expect(css).toMatch(/  \.dialog-backdrop,\n  \.update-restart-dialog::backdrop \{\n    animation: dialog-veil-in/u);
+    expect(css).toMatch(/  \.dialog-backdrop > \*,\n  \.update-restart-dialog \{\n    animation: dialog-surface-in/u);
   });
 });
 

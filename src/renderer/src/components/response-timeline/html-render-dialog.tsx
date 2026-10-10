@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
 import {
   clampHtmlRenderHeight,
   htmlRenderThemeFragment,
@@ -8,9 +7,9 @@ import {
   type HtmlRenderReference,
 } from "@shared/html-render";
 import { useHtmlRenderTheme } from "../../hooks/useHtmlRenderTheme";
-import { TooltipButton } from "../TooltipButton";
+import { DialogShell } from "../DialogShell";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { focusModalOnAnimationFrame, trapModalFocus } from "../../utils/modalFocus";
+import { focusModalOnAnimationFrame } from "../../utils/modalFocus";
 import { htmlRenderUrl } from "../../utils/htmlRenderUrl";
 import { useHtmlRenderFrameBridge, useHtmlRenderLinkOpener, useReportedFrameHeight } from "./html-render-bridge";
 import "./HtmlRenderDialog.css";
@@ -63,53 +62,37 @@ export function HtmlRenderDialog({
   const focusLast = (): void => frameRef.current?.focus();
 
   return createPortal(
-    <div
-      className="attachment-preview-backdrop html-render-dialog-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <DialogShell
+      className="html-render-dialog"
+      backdropClassName="attachment-preview-backdrop html-render-dialog-backdrop"
+      bodyClassName="is-flush"
+      data-testid="html-render-dialog"
+      tabIndex={-1}
+      titleId={titleId}
+      title={reference.title}
+      closeLabel={`Close ${reference.title}`}
+      closeRef={closeRef}
+      onClose={onClose}
+      onDismiss={onClose}
+      before={<span className="html-render-dialog-guard" tabIndex={0} aria-hidden="true" onFocus={focusLast} />}
+      after={<span className="html-render-dialog-guard" tabIndex={0} aria-hidden="true" onFocus={focusFirst} />}
     >
-      <span className="html-render-dialog-guard" tabIndex={0} aria-hidden="true" onFocus={focusLast} />
-      <section
-        className="html-render-dialog"
-        data-testid="html-render-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onKeyDown={(event) => trapModalFocus(event, event.currentTarget)}
-      >
-        <header className="attachment-preview-header">
-          <strong id={titleId} className="html-render-dialog-title">{reference.title}</strong>
-          <TooltipButton
-            ref={closeRef}
-            className="attachment-preview-close"
-            aria-label={`Close ${reference.title}`}
-            tooltip="Close"
-            onClick={onClose}
-          >
-            <X size={16} aria-hidden="true" />
-          </TooltipButton>
-        </header>
-        <iframe
-          ref={frameRef}
-          className="html-render-dialog-frame"
-          data-testid="html-render-dialog-frame"
-          title={reference.title}
-          src={src}
-          sandbox="allow-scripts"
-          referrerPolicy="no-referrer"
-          allow=""
-          style={{
-            colorScheme: theme.scheme,
-            "--html-render-content-height": `${contentHeight}px`,
-          } as CSSProperties}
-          onLoad={handleLoad}
-        />
-      </section>
-      <span className="html-render-dialog-guard" tabIndex={0} aria-hidden="true" onFocus={focusFirst} />
-    </div>,
+      <iframe
+        ref={frameRef}
+        className="html-render-dialog-frame"
+        data-testid="html-render-dialog-frame"
+        title={reference.title}
+        src={src}
+        sandbox="allow-scripts"
+        referrerPolicy="no-referrer"
+        allow=""
+        style={{
+          colorScheme: theme.scheme,
+          "--html-render-content-height": `${contentHeight}px`,
+        } as CSSProperties}
+        onLoad={handleLoad}
+      />
+    </DialogShell>,
     document.body,
   );
 }

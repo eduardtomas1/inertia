@@ -46,10 +46,9 @@
 .update-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
 .update-detail-actions > button { min-height: 30px; margin: 0; font-size: var(--text-xs); }
 .update-detail-actions .text-button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
-.update-restart-dialog { position: fixed; inset: 0; margin: auto; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 24px; }
-.update-restart-dialog h2 { margin: 0; text-wrap: balance; }
-.update-restart-dialog p { margin: 12px 0 0; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-prose); }
-.update-restart-dialog .update-detail-actions { justify-content: flex-end; margin-top: 24px; }
+.update-restart-dialog { --dialog-width: 420px; position: fixed; inset: 0; margin: auto; padding: 0; }
+.update-restart-dialog:not([open]) { display: none; }
+.update-restart-dialog p { margin: 0 0 8px; color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-prose); }
 @media (prefers-reduced-motion: reduce) {
   .update-status-icon.is-checking { animation: none; }
   .update-progress-value { transition: none; }

@@ -1,4 +1,4 @@
-import { Save, X } from "lucide-react";
+import { Save } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -14,6 +14,7 @@ import {
   focusModalOnAnimationFrame,
   trapModalFocus,
 } from "../utils/modalFocus";
+import { DialogShell } from "./DialogShell";
 import { LoadingMark } from "./ui";
 import { SyntaxTextarea } from "./SyntaxTextarea";
 
@@ -125,70 +126,58 @@ export function FileEditorDialog({
   };
 
   return createPortal(
-    <div className="dialog-backdrop file-editor-backdrop" role="presentation">
-      <section
-        className="file-editor-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        aria-busy={saving}
-        onKeyDown={trapFocus}
-      >
-        <header>
-          <div>
-            <h2 id={titleId}>Edit {file.path.split("/").at(-1)}</h2>
-            <p id={descriptionId} title={file.path}>{file.path}</p>
-          </div>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Close file editor"
-            disabled={saving}
-            onClick={closeSafely}
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </header>
-        <SyntaxTextarea
-          editorRef={editorRef}
-          path={file.path}
-          value={content}
+    <DialogShell
+      className="file-editor-dialog"
+      bodyClassName="is-flush"
+      titleId={titleId}
+      title={`Edit ${file.path.split("/").at(-1)}`}
+      description={<span title={file.path}>{file.path}</span>}
+      descriptionId={descriptionId}
+      closeLabel="Close file editor"
+      closeDisabled={saving}
+      onClose={closeSafely}
+      aria-busy={saving}
+      trapFocus={false}
+      onKeyDown={trapFocus}
+      footerStart="Changes are checked against the version you opened."
+      footer={<>
+        <button
+          type="button"
+          className="secondary-button"
           disabled={saving}
-          onChange={(value) => {
-            setContent(value);
-            setError(null);
-          }}
-        />
-        {(error || sizeError) && (
-          <p className="file-editor-error" role="alert">
-            {error ?? sizeError}
-          </p>
-        )}
-        <footer>
-          <span>Changes are checked against the version you opened.</span>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={saving}
-            onClick={closeSafely}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!changed || saving || !withinTransportLimit}
-            onClick={() => void save()}
-          >
-            {saving
-              ? <LoadingMark label="Saving file" />
-              : <Save size={14} aria-hidden="true" />}
-            <span>{saving ? "Saving…" : "Save"}</span>
-          </button>
-        </footer>
-      </section>
-    </div>,
+          onClick={closeSafely}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={!changed || saving || !withinTransportLimit}
+          onClick={() => void save()}
+        >
+          {saving
+            ? <LoadingMark label="Saving file" />
+            : <Save size={14} aria-hidden="true" />}
+          <span>{saving ? "Saving…" : "Save"}</span>
+        </button>
+      </>}
+    >
+      <SyntaxTextarea
+        editorRef={editorRef}
+        path={file.path}
+        value={content}
+        disabled={saving}
+        onChange={(value) => {
+          setContent(value);
+          setError(null);
+        }}
+      />
+      {(error || sizeError) && (
+        <p className="file-editor-error" role="alert">
+          {error ?? sizeError}
+        </p>
+      )}
+    </DialogShell>,
     document.body,
   );
 }

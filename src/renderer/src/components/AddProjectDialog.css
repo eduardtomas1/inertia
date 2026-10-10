@@ -1,18 +1,5 @@
 .add-project-dialog {
-  width: min(540px, calc(100vw - 32px));
-  max-height: calc(100dvh - 40px);
-  overflow-y: auto;
-}
-.add-project-dialog header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--line);
-}
-.add-project-dialog h2 {
-  flex: 1;
-  margin: 0;
+  --dialog-width: 540px;
 }
 .add-project-search {
   display: flex;
@@ -73,7 +60,7 @@
 .add-project-dialog form {
   display: grid;
   gap: 16px;
-  padding: 20px;
+  padding: 4px 20px 0;
 }
 .add-project-dialog label {
   display: grid;
@@ -96,13 +83,6 @@
   color: var(--text);
   font-size: var(--text-sm);
 }
-.add-project-dialog footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.add-project-dialog footer > span,
 .add-project-hint {
   color: var(--text-muted);
   font-size: var(--text-sm);
@@ -116,9 +96,6 @@
   margin: 0;
 }
 
-.add-project-dialog {
-  animation: dialog-surface-in var(--dur) var(--ease) both;
-}
 .add-project-dialog form,
 .add-project-sources {
   animation: add-project-content-in var(--dur-fast) var(--ease);
@@ -138,7 +115,6 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .add-project-dialog,
   .add-project-dialog form,
   .add-project-sources {
     animation: none;

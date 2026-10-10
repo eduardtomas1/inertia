@@ -1,5 +1,4 @@
-.snapshot-dialog.screenshot-review { width: min(820px, 100%); }
-.screenshot-review header button { min-width: 32px; min-height: 32px; }
+.snapshot-dialog.screenshot-review { --dialog-width: 820px; }
 .screenshot-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .screenshot-sources button { padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text); background: var(--surface); text-align: left; }
 .screenshot-sources img { width: 100%; height: 120px; object-fit: contain; background: var(--fill); }
@@ -11,6 +10,3 @@
 .screenshot-edit legend { color: var(--text-muted); font-size: var(--text-sm); }
 .screenshot-edit label { display: grid; gap: 4px; font-size: var(--text-sm); }
 .screenshot-edit input { width: 72px; min-height: 32px; padding: 4px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xs); }
-.screenshot-review footer { display: flex; flex-wrap: wrap; justify-content: end; align-items: center; gap: 10px; }
-
-.screenshot-review footer button { margin: 0; min-height: 36px; padding: 8px 12px; }

@@ -960,7 +960,7 @@ export class CodexAppServerEvents {
         this.completeParentTurn("failed", 1);
       }
       this.deltaItems.clear();
-    this.answerBoundaryItems.clear();
+      this.answerBoundaryItems.clear();
       this.outputItems.clear();
       this.commandOutput.clear();
       this.reasoningDeltaItems.clear();

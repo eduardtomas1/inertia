@@ -575,6 +575,38 @@ describe("assistant rows around an accepted follow-up", () => {
     }
   });
 
+  it.each([
+    [undefined, "Renamed it.", "Renamed it."],
+    ["claude", "Renamed it.", "Renamed it."],
+    [undefined, "Draft.", "Final."],
+    ["claude", "Draft.", "Final."],
+  ] as const)("keeps the earlier answer out of a final answer that arrives after the reply row closed (%s: %s)", async (providerId, streamed, result) => {
+    const { runtime, turnId } = await running(providerId);
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Earlier answer." });
+      answerEnded(runtime);
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: "Starting a helper." });
+      runtime.provider.emit({ ...identity, type: "activity", kind: "tool", phase: "started", label: "Task", activityId: "helper" });
+      runtime.provider.emit({ ...identity, type: "text", text: streamed });
+      answerEnded(runtime);
+      runtime.provider.resolve({ text: result });
+      await flushTurnControllerTestPromises();
+      flushStreams(runtime);
+      expect(rows(runtime, turnId)).toEqual([
+        "assistant:Earlier answer.",
+        "user:Also rename the file.",
+        "assistant:Starting a helper.",
+        `assistant:${streamed}`,
+        ...(streamed === result ? [] : [`assistant:${result}`]),
+      ]);
+      expect(terminalAnswer(runtime, turnId)).toBe(result);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("keeps a Claude answer that is still streaming before the follow-up until Claude ends that answer", async () => {
     const { runtime, turnId } = await running("claude");
     try {

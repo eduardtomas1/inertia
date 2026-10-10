@@ -210,6 +210,7 @@ export class TurnStreamProjection {
     if (result.textTruncated && active.assistantText.startsWith(finalText)) {
       return;
     }
+    const providerText = normalizedPrefix(normalizedResult, MAX_ASSISTANT_TEXT);
     const completedPrefix = active.assistantText.slice(
       0,
       active.assistantText.length - active.assistantSegmentText.length,
@@ -219,12 +220,14 @@ export class TurnStreamProjection {
       && !active.assistantSegmentText
       && !finalText.startsWith(completedPrefix)
     ) {
-      this.appendNormalizedAssistant(active, finalText);
+      if (!completedPrefix.endsWith(providerText)) {
+        this.appendNormalizedAssistant(active, providerText);
+      }
       return;
     }
     const correctedSegment = finalText.startsWith(completedPrefix)
       ? finalText.slice(completedPrefix.length)
-      : normalizedPrefix(normalizedResult, MAX_ASSISTANT_TEXT);
+      : providerText;
     active.assistantText = `${completedPrefix}${correctedSegment}`;
     active.assistantSegmentText = correctedSegment;
     active.assistantStream.replacePending(correctedSegment);

@@ -29,7 +29,6 @@ import type {
 } from "@shared/contracts";
 import type { DesktopWindowContext } from "@shared/desktop";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
-import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
@@ -435,16 +434,9 @@ export default function DetachedChatApp({
     });
   }, [conversationId, project]);
 
-  const visibleRun = useMemo(
-    () => selectConversationWorkspaceRun(
-      conversationId,
-      connection.snapshot?.runs ?? [],
-    ),
-    [connection.snapshot?.runs, conversationId],
-  );
   useMarkRunSeen({
     request,
-    run: visibleRun,
+    runs: connection.snapshot?.runs,
     conversationId,
     workspaceVisible: documentPresence > 0,
     latestContentVisible,

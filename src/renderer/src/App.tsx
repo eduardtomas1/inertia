@@ -21,7 +21,6 @@ import {
 import type { MessageSearchHit } from "@shared/message-search";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
 import { DEFAULT_QUOTA_WARNINGS } from "@shared/quota-warnings";
-import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
 import { AppLayout } from "./components/AppLayout";
@@ -234,12 +233,6 @@ export default function App(): React.JSX.Element {
   const authProvider = useMemo(
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
     [authProviderId, connection.snapshot?.providers],
-  );
-  const visibleConversationRun = useMemo(
-    () => conversation
-      ? selectConversationWorkspaceRun(conversation.id, connection.snapshot?.runs ?? [])
-      : null,
-    [connection.snapshot?.runs, conversation],
   );
   const planSteps = usePlanSteps(
     plans,
@@ -467,7 +460,7 @@ export default function App(): React.JSX.Element {
   });
   useMarkRunSeen({
     request,
-    run: visibleConversationRun,
+    runs: connection.snapshot?.runs,
     conversationId: view === "workspace" ? conversation?.id ?? null : null,
     workspaceVisible: view === "workspace",
     latestContentVisible,

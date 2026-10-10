@@ -32,7 +32,6 @@ import {
 } from "../lib/runtimeCommands";
 import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
-import { selectConversationWorkspaceRun } from "@shared/attention";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
   useActivityActions,
@@ -187,15 +186,9 @@ export function useSplitWorkspaceScene({
     onOpenPlan: () => undefined,
     onTerminal,
   }));
-  const visibleRun = useMemo(
-    () => splitConversation
-      ? selectConversationWorkspaceRun(splitConversation.id, connection.snapshot?.runs ?? [])
-      : null,
-    [connection.snapshot?.runs, splitConversation],
-  );
   useMarkRunSeen({
     request,
-    run: visibleRun,
+    runs: connection.snapshot?.runs,
     conversationId: splitConversation?.id ?? null,
     workspaceVisible: visible,
     latestContentVisible,

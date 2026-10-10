@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { selectConversationWorkspaceRun } from "@shared/attention";
 import type { ServerEvent, WorkspaceRun } from "@shared/contracts";
 
 import type { CommandWithoutId } from "../lib/runtimeCommands";
@@ -6,7 +7,7 @@ import { shouldMarkWorkspaceRunSeen } from "../utils/attentionVisibility";
 
 export function useMarkRunSeen({
   request,
-  run,
+  runs,
   conversationId,
   workspaceVisible,
   latestContentVisible,
@@ -14,7 +15,7 @@ export function useMarkRunSeen({
   refresh,
 }: {
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
-  run: WorkspaceRun | null;
+  runs: readonly WorkspaceRun[] | undefined;
   conversationId: string | null;
   workspaceVisible: boolean;
   latestContentVisible: boolean;
@@ -22,6 +23,10 @@ export function useMarkRunSeen({
   refresh: number;
 }): void {
   const pendingRef = useRef(new Set<string>());
+  const run = useMemo(
+    () => conversationId && runs ? selectConversationWorkspaceRun(conversationId, runs) : null,
+    [conversationId, runs],
+  );
   useEffect(() => {
     if (
       !run

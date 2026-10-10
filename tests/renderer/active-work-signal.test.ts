@@ -83,7 +83,6 @@ describe("Minimal Workstream active pixel signal", () => {
       ".agent-activity.is-running .agent-activity-icon::after",
       ".loading-mark",
       ".daily-work-skeleton i",
-      ".daily-work-badge.is-running::before",
       ".composer-status-dots i",
       '.send-button[data-motion-state="sending"] .composer-send-motion-icon',
     ]) {

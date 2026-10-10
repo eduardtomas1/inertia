@@ -55,6 +55,12 @@ import {
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
+import {
+  withHtmlRenders,
+  withLiveCommentary,
+  type TurnWorkStreamEntry,
+} from "../../utils/response-timeline/execution";
+import { layeredHtmlRenders } from "../../utils/response-timeline/model";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { Tooltip, useTooltip } from "../Tooltip";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
@@ -69,6 +75,7 @@ import { messageContextMenu } from "./messageContextMenu";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
+import { HtmlRenderStreamItem } from "./html-render";
 import {
   advanceThinkingLine,
   IDLE_THINKING_LINE,
@@ -652,7 +659,7 @@ function ExecutionStream({
   onBeforeToggle,
   onAfterToggle,
 }: {
-  entries: TurnExecutionStreamEntry[];
+  entries: TurnWorkStreamEntry[];
   live?: boolean;
   label?: string;
   projectRoot: string;
@@ -668,6 +675,16 @@ function ExecutionStream({
   return (
     <div className="turn-execution-stream" role="list" aria-label={label}>
       {entries.map((entry, index) => {
+        if (entry.kind === "html-render") {
+          return entry.message.htmlRender && (
+            <div role="listitem" key={entry.id}>
+              <HtmlRenderStreamItem
+                key={entry.message.htmlRender.renderId}
+                reference={entry.message.htmlRender}
+              />
+            </div>
+          );
+        }
         if (entry.kind === "commentary") {
           return (
             <div role="listitem" key={entry.id}>
@@ -863,7 +880,7 @@ export function SettledWorkDetails({
   onAfterToggle,
 }: {
   id?: string;
-  entries: TurnExecutionStreamEntry[];
+  entries: TurnWorkStreamEntry[];
   turn: ResponseTurn;
   reasoningContent: string;
   includesReasoning: boolean;
@@ -898,6 +915,8 @@ export function SettledWorkDetails({
   );
 }
 
+const NO_HELD_FOLLOW_UPS: string[] = [];
+
 export function WorkLog({
   turn,
   autoCollapse,
@@ -905,6 +924,7 @@ export function WorkLog({
   reasoningStreaming,
   liveContent,
   liveContentStreaming,
+  heldFollowUpIds = NO_HELD_FOLLOW_UPS,
   showThinking,
   projectRoot,
   projectId,
@@ -920,6 +940,7 @@ export function WorkLog({
   reasoningStreaming: boolean;
   liveContent: string;
   liveContentStreaming: boolean;
+  heldFollowUpIds?: string[];
   showThinking: boolean;
   projectRoot: string;
   projectId: string;
@@ -953,28 +974,28 @@ export function WorkLog({
       includeCompactions: turn.isActive,
     }), previousDurableStream.current);
     previousDurableStream.current = next;
-    return next;
+    const layered = layeredHtmlRenders(turn);
+    return withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message)));
   }, [turn]);
-  // Transient text is always the final visible execution entry. Appending that
-  // one row keeps settled commentary and activity-group identities stable
-  // instead of sorting the complete workstream for every provider token. A
-  // reconnect may retain the text while deliberately closing its live channel,
-  // so only the current text channel gets live semantics and animation.
-  const stream = useMemo<TurnExecutionStreamEntry[]>(() => {
+  // Transient text is the final visible execution entry, except that it stays
+  // above follow-ups saved while it was already streaming. Inserting that one
+  // row keeps settled commentary and activity-group identities stable instead
+  // of sorting the complete workstream for every provider token. A reconnect
+  // may retain the text while deliberately closing its live channel, so only
+  // the current text channel gets live semantics and animation.
+  const stream = useMemo<TurnWorkStreamEntry[]>(() => {
     if (!turn.isActive || !liveContent) return durableStream;
-    return [
-      ...durableStream,
-      {
-        kind: "commentary",
-        id: `live-commentary:${turn.id}`,
-        createdAt: turn.agentTurn.updatedAt,
-        message: null,
-        content: liveContent,
-        streaming: liveContentStreaming,
-      },
-    ];
+    return withLiveCommentary(durableStream, {
+      kind: "commentary",
+      id: `live-commentary:${turn.id}`,
+      createdAt: turn.agentTurn.updatedAt,
+      message: null,
+      content: liveContent,
+      streaming: liveContentStreaming,
+    }, heldFollowUpIds);
   }, [
     durableStream,
+    heldFollowUpIds,
     liveContent,
     liveContentStreaming,
     turn.agentTurn.updatedAt,
@@ -1088,7 +1109,9 @@ export function WorkLog({
   }
 
   const exchange = stream.filter((entry) =>
-    entry.kind === "follow-up" || (entry.kind === "commentary" && entry.answer));
+    entry.kind === "follow-up"
+    || entry.kind === "html-render"
+    || (entry.kind === "commentary" && entry.answer));
   const workStream = exchange.length > 0
     ? stream.filter((entry) => !exchange.includes(entry))
     : stream;

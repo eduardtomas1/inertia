@@ -226,6 +226,7 @@ export function AgentExecutionLayer({
   providerLabel,
   reasoningContent,
   liveContent,
+  heldFollowUpIds,
   timerStart,
   completionAnnouncement,
   onBeforeToggle,
@@ -237,6 +238,7 @@ export function AgentExecutionLayer({
   providerLabel: string;
   reasoningContent: string;
   liveContent: string;
+  heldFollowUpIds: string[];
   timerStart: string;
   completionAnnouncement: string;
   onBeforeToggle?: () => void;
@@ -319,6 +321,7 @@ export function AgentExecutionLayer({
             reasoningStreaming={props.streamingChannel === "reasoning"}
             liveContent={liveContent}
             liveContentStreaming={props.streamingChannel === "text"}
+            heldFollowUpIds={heldFollowUpIds}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}

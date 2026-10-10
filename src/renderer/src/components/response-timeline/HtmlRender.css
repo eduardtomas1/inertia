@@ -24,6 +24,11 @@
   margin: 0 auto;
 }
 
+.turn-answer-tail > .turn-commentary-row {
+  padding-right: 0;
+  padding-left: 0;
+}
+
 .html-render {
   position: relative;
   min-width: 0;

@@ -81,6 +81,15 @@ export function shouldConsolidateSettledWorkIntoRunDetails(
     && turn.systemMessages.length === 0;
 }
 
+export function layeredHtmlRenders(
+  turn: Pick<ResponseTurn, "htmlRenders" | "followUpMessages">,
+): ChatMessage[] {
+  const lastFollowUp = turn.followUpMessages.at(-1);
+  if (!lastFollowUp) return turn.htmlRenders;
+  const since = timestamp(lastFollowUp.createdAt);
+  return turn.htmlRenders.filter(({ createdAt }) => timestamp(createdAt) > since);
+}
+
 export function answerTailCommentary(
   turn: Pick<
     ResponseTurn,
@@ -93,7 +102,7 @@ export function answerTailCommentary(
     | "followUpMessages"
   >,
 ): ChatMessage[] | null {
-  const lastRender = turn.htmlRenders.at(-1);
+  const lastRender = layeredHtmlRenders(turn).at(-1);
   if (!turn.isActive || !lastRender) return null;
   if (turn.approvals.length > 0 || turn.inputRequests.length > 0) return null;
   const since = timestamp(lastRender.createdAt);

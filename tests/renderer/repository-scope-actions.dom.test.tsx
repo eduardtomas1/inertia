@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RepositoryScopeActions } from "../../src/renderer/src/components/RepositoryScopeActions";
@@ -103,6 +103,22 @@ describe("Changes repository actions", () => {
     expect(within(group).getByRole("button", { name: "Fetch" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "More actions for inertia" })).toBeNull();
     expect(screen.getByTestId("launcher")).toHaveTextContent("buttons");
+  });
+
+  it("returns focus to the More trigger after a collapsed action runs", async () => {
+    sizes.rowScroll = 760;
+    const onFetch = vi.fn();
+    render(actionsRow(onFetch));
+    const trigger = screen.getByRole("button", { name: "More actions for inertia" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const fetch = within(screen.getByRole("menu", { name: "More actions for inertia" }))
+      .getByRole("menuitem", { name: "Fetch" });
+    fetch.focus();
+    fireEvent.click(fetch);
+    expect(onFetch).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu", { name: "More actions for inertia" })).toBeNull();
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("collapses when lazily loaded actions arrive after the row was measured", async () => {

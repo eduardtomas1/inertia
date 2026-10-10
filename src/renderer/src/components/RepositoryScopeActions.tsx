@@ -159,7 +159,7 @@ export function RepositoryScopeActions({
                   title={item.title}
                   onClick={() => {
                     if (item.disabled) return;
-                    dismissMenu("context-change");
+                    dismissMenu("selection");
                     item.onSelect();
                   }}
                 >

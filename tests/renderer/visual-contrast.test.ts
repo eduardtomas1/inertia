@@ -573,6 +573,14 @@ describe("composer primary action contrast", () => {
       .toBe("var(--danger)");
   });
 
+  it("draws disabled send as a neutral circle instead of a faded accent", () => {
+    const disabled = cascades.find(({ state }) => state.name === "send disabled")!;
+    const ready = cascades.find(({ state }) => state.name === "send ready")!;
+    expect([disabled.background, disabled.color, disabled.opacity])
+      .toEqual(["var(--fill-strong)", "var(--text-muted)", "1"]);
+    expect(ready.background).toBe("var(--accent)");
+  });
+
   it.each(themeCases)(
     "keeps the %s %s send and stop icons visible in every state",
     (colorTheme, theme) => {

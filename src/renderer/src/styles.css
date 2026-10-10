@@ -3895,11 +3895,11 @@ button.turn-agents-line:hover {
 
 .send-button:disabled {
   border-color: transparent;
-  color: var(--accent-text);
-  background: var(--accent);
+  color: var(--text-muted);
+  background: var(--fill-strong);
   box-shadow: none;
   filter: none;
-  opacity: var(--disabled-opacity);
+  opacity: 1;
 }
 
 .send-button-loading:disabled {

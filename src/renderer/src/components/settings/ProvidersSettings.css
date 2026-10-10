@@ -1,7 +1,3 @@
-.settings-content.is-providers {
-  max-width: 952px;
-}
-
 .settings-card.provider-settings-section {
   container: providers / inline-size;
 }

@@ -8083,10 +8083,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .settings-toolbar .secondary-button { flex: 0 0 auto; }
 
 .setting-action-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
-.setting-action-row > span { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.setting-action-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .setting-action-row small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setting-action-row > div { display: flex; flex: 0 0 auto; gap: 8px; }
-.runtime-log-setting { align-items: flex-start; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.runtime-log-setting { align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
 .runtime-log-setting small { max-width: 620px; overflow: visible; line-height: var(--leading-chrome); white-space: normal; }
 .runtime-log-setting > div,
 .application-update-setting > div { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

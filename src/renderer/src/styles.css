@@ -5037,6 +5037,10 @@ button.turn-agents-line:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.workspace-panel-tab:is(.is-active, .is-dragging) .workspace-panel-badge {
+  color: var(--text-muted);
+}
+
 .workspace-panel-add-anchor {
   position: relative;
   flex: 0 0 auto;

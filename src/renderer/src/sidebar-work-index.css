@@ -156,6 +156,11 @@
   color: var(--text-faint);
 }
 
+.activity-thread.is-active .activity-thread-trailing,
+.activity-thread.is-active .activity-thread-trailing time {
+  color: var(--text-muted);
+}
+
 .activity-thread-status-label {
   display: inline-flex;
   align-items: center;

@@ -17,6 +17,11 @@ describe("sidebar index presentation contracts", () => {
     expect(css).not.toMatch(/\.activity-thread-select:focus-visible\s*\{[^}]*outline:\s*(?:0|none)/su);
   });
 
+  it("lifts faint metadata to muted text on selected fills, where faint text falls below 4.5:1", () => {
+    expect(css).toContain(".activity-thread.is-active .activity-thread-trailing,\n.activity-thread.is-active .activity-thread-trailing time {\n  color: var(--text-muted);\n}");
+    expect(css).toContain(".workspace-panel-tab:is(.is-active, .is-dragging) .workspace-panel-badge {\n  color: var(--text-muted);\n}");
+  });
+
   it("keeps the trailing action hit target stable during press feedback", () => {
     expect(css).toMatch(/\.activity-thread-trailing\s*\{[^}]*pointer-events:\s*none;/su);
     expect(css).not.toContain(".activity-thread-menu-button");

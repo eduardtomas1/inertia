@@ -315,6 +315,7 @@ export function AgentExecutionLayer({
             </button>
           </header>
           <WorkLog
+            key="work-log"
             turn={turn}
             autoCollapse={props.autoCollapseWorkLog}
             reasoningContent={reasoningContent}
@@ -335,6 +336,7 @@ export function AgentExecutionLayer({
       ) : !consolidatesSettledWork ? (
         <div className="turn-execution-rail is-settled">
           <WorkLog
+            key="work-log"
             turn={turn}
             autoCollapse={props.autoCollapseWorkLog}
             reasoningContent={reasoningContent}

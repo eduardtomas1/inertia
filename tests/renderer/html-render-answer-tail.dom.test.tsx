@@ -319,6 +319,16 @@ describe("a visual reply around a follow-up", () => {
     expect(finalAnswerAnchorTarget(final)).toBe(final);
   });
 
+  it("keeps the frame of a page made before the follow-up when the turn settles", () => {
+    const view = render(<ResponseTimeline {...props("running", [page, earlier, followUp], ANSWER)} />);
+    const frame = element("[data-testid='html-render-frame']");
+
+    view.rerender(<ResponseTimeline {...props("settled", [page, earlier, followUp, reply])} />);
+
+    expect(element("[data-testid='html-render-frame']")).toBe(frame);
+    expect(order()).toEqual(["page", "earlier", "follow-up", "answer"]);
+  });
+
   it("keeps a page made after the follow-up in the layer the anchor lands on", () => {
     const early = chatMessage("follow-up", "user", "Make it a chart.", 2);
     render(<ResponseTimeline {...props("settled", [early, page, answer])} />);

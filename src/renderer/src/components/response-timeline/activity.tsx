@@ -1043,6 +1043,7 @@ export function WorkLog({
     return (
       <div className="turn-work-log is-live">
         <ExecutionStream
+          key="stream"
           entries={stream}
           live
           projectRoot={projectRoot}
@@ -1218,6 +1219,7 @@ export function WorkLog({
         />
       )}
       <ExecutionStream
+        key="stream"
         entries={exchange}
         label="Follow-up messages"
         projectRoot={projectRoot}

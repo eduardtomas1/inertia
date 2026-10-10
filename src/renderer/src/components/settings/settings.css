@@ -332,6 +332,7 @@
 
 .setting-status {
   flex: 0 0 auto;
+  line-height: 1;
   white-space: nowrap;
 }
 

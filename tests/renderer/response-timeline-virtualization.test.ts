@@ -419,6 +419,30 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       .toBeGreaterThan(400);
   });
 
+  it("estimates a running follow-up bubble as its padding and text without a speaker line", () => {
+    const running = (followUp: string | null): ResponseTimelineItem => {
+      const turn = agentTurn("follow-up-bubble", "running", null);
+      const at = (second: number) => `2026-07-26T10:00:0${second}.000Z`;
+      const item = buildResponseTimeline({
+        turns: [turn],
+        messages: [
+          { ...message("follow-up-bubble-request", turn.id, "user", "Fix the parser.\n".repeat(8).trim()), createdAt: at(1) },
+          ...(followUp === null
+            ? []
+            : [{ ...message("follow-up-bubble-message", turn.id, "user", followUp), createdAt: at(2) }]),
+        ],
+        activities: [],
+        reasonings: [],
+        checkpoints: [],
+      }).find((candidate) => candidate.kind === "turn");
+      if (!item) throw new Error("Missing running turn.");
+      return item;
+    };
+
+    expect(estimateTimelineRowSize(running("Also rename the file.")) - estimateTimelineRowSize(running(null)))
+      .toBe(14 + 18);
+  });
+
   it("accounts for wrapping, interface scale, and response density using integer CSS-pixel estimates", () => {
     const item = buildItem({
       id: "scaled",

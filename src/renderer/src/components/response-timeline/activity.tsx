@@ -468,7 +468,6 @@ export function FollowUpRow({
       tabIndex={-1}
       {...messageContextMenu(entry.message, entry.message.content)}
     >
-      <span>You</span>
       <p>{entry.message.content}</p>
       <SentMessageAttachmentList
         attachments={entry.message.attachments}

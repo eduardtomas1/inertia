@@ -441,7 +441,7 @@ function estimateExpandedWorkHeight(
           return total + 10 + estimatedWrappedLines(entry.content, columns) * 18;
         }
         if (entry.kind === "follow-up") {
-          return total + 27 + estimatedWrappedLines(entry.message.content, columns - 6) * 18;
+          return total + 14 + estimatedWrappedLines(entry.message.content, columns - 6) * 18;
         }
         return total + estimateActivityGroupHeight(entry.activities, expandActivityGroups);
       }, 0);
@@ -508,7 +508,7 @@ function estimateTurnRowSize(
   const activeCommentaryHeight = turn.commentaryMessages.reduce((total, message) =>
     total + 12 + estimatedWrappedLines(message.content, answerColumns) * 18, 0);
   const activeFollowUpHeight = turn.followUpMessages.reduce((total, message) =>
-    total + 27 + estimatedWrappedLines(message.content, answerColumns - 6) * 18, 0);
+    total + 14 + estimatedWrappedLines(message.content, answerColumns - 6) * 18, 0);
   const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
   const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
   const importantHeight = estimateActivityGroupHeight(

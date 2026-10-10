@@ -2,6 +2,7 @@ import { fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { FollowUpRow } from "../../src/renderer/src/components/response-timeline/activity";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import { providerNativeBackendProfile } from "../../src/shared/model-routing";
 import { readSourceText } from "../helpers/source-text";
@@ -308,6 +309,26 @@ describe("quiet turn chrome", () => {
     expect(stylesheet!.textContent).toMatch(
       /\n\.legacy-exchange:is\(:hover, :focus-within\) \.turn-meta-primary \{\n {2}opacity: 1;\n\}/u,
     );
+  });
+
+  it("draws a follow-up bubble without a visible You row, named for assistive technology", () => {
+    const message: ChatMessage = {
+      id: "follow-up-quiet",
+      conversationId,
+      turnId: "turn-follow-up-quiet",
+      role: "user",
+      content: "Also rename the file.",
+      attachments: [],
+      createdAt: "2026-09-01T08:00:00.000Z",
+    };
+    const { container } = render(
+      <FollowUpRow entry={{ kind: "follow-up", id: message.id, createdAt: message.createdAt, message }} />,
+    );
+    const row = within(container).getByRole("article", { name: "Your follow-up" });
+
+    expect(row).toHaveTextContent(/^Also rename the file\.$/u);
+    expect(within(row).queryByText("You")).toBeNull();
+    expect(readSourceText("src/renderer/src/styles.css")).not.toContain(".turn-follow-up-row > span {");
   });
 
   it("names each recovered legacy message by its speaker the way turn messages are named", () => {

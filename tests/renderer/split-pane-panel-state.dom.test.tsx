@@ -1,10 +1,11 @@
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { CommandWithoutId, GitStatusSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
+import type { GitStatusSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { buildDraftConversation, buildNewConversationPayload } from "../../src/renderer/src/lib/newConversation";
+import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { useConversationPaneLayout } from "../../src/renderer/src/hooks/useConversationPaneLayout";
 import type { InertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { useSplitPaneScenes } from "../../src/renderer/src/hooks/useSplitPaneScenes";

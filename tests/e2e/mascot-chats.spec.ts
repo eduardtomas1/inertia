@@ -121,7 +121,7 @@ test("mascot follows three provider chats by priority, lists the others and spea
     await app.page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(title).toHaveText(TITLES.B);
     await expect(mascot).toHaveAttribute("data-phase", "waiting-for-approval");
-    await expect(message).toHaveText("Approve command: rm -rf node_modules/.vite && npm ci — Clear the Vite cache and reinstall dependencies, because the failure only appears with a stale optimized dependency bundle.");
+    await expect(message).toHaveText("Run rm -rf node_modules/.vite && npm ci? — Clear the Vite cache and reinstall dependencies, because the failure only appears with a stale optimized dependency bundle.");
     await gate("A-4");
     await expect.poll(rowTexts).toEqual([`${TITLES.C}· working 0/3`, `${TITLES.A}· working 3/4`]);
     await capture(app, overlay, "approval-shown", info);

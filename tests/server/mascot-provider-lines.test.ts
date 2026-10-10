@@ -140,7 +140,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
       reason: "Clear the Vite cache and reinstall dependencies.",
     })!;
     turn.approve({ ...approval.request, id: "approval" });
-    expect(turn.line()).toBe(`${approval.request.title}: rm -rf node_modules/.vite && npm ci — Clear the Vite cache and reinstall dependencies.`);
+    expect(turn.line()).toBe("Run rm -rf node_modules/.vite && npm ci? — Clear the Vite cache and reinstall dependencies.");
     turn.resume();
     turn.finish("## Summary\n\nI split the **status feed** into `MascotFeed` per chat and kept the ranking stable.\n\n- Updated `mascot-status.ts`");
     expect(turn.line()).toBe("I split the status feed into MascotFeed per chat and kept the ranking stable.");
@@ -173,7 +173,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     ]);
     expect(turn.line()).toBe("I'm updating it to keep the agent's words.");
     turn.approve({ requestId: "approval", kind: "command", title: "Claude wants to use Bash", detail: "npm run build", command: "npm run build" });
-    expect(turn.line()).toBe("Claude wants to use Bash: npm run build");
+    expect(turn.line()).toBe("Run npm run build?");
     turn.resume();
     turn.fail("Claude Code process exited with code 1: ENOENT: no such file or directory, open 'package.json'");
     expect(turn.line()).toBe("Claude Code process exited with code 1: ENOENT: no such file or directory, open 'package.json'");
@@ -198,7 +198,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     expect(turn.line()).toBe("Edited Mascot.ts");
     turn.approve({ requestId: "permission", kind: "command", title: permissionTitle,
       detail: acpPermissionDetail({ toolCall: { toolCallId: "tool-4", title: commandTitle, rawInput: { command: "git push origin feature" } } } as never, permissionTitle) });
-    expect(turn.line()).toBe(`${permissionTitle}: git push origin feature`);
+    expect(turn.line()).toBe("Run git push origin feature?");
     turn.resume();
     turn.fail(`${providerId === "cursor" ? "Cursor" : "Kimi Code"}: model quota exceeded for this workspace`);
     expect(turn.line()).toMatch(/quota exceeded/u);
@@ -222,7 +222,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     expect(turn.line()).toBe("Running npm run lint -- --fix");
     const display = openCodeApprovalDisplay({ permission: "bash", patterns: ["git push origin feature"] })!;
     turn.approve({ requestId: "permission", kind: "command", title: display.title, detail: display.detail });
-    expect(turn.line()).toBe("OpenCode wants to use bash: git push origin feature");
+    expect(turn.line()).toBe("Run git push origin feature?");
     turn.expectNoBareLabel();
   });
 

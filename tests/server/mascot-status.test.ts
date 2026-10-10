@@ -393,7 +393,7 @@ describe("mascot bubble words", () => {
       title: "Approve command", reason: "Verify the mascot changes", detail: "PRIVATE DETAIL", command: "/bin/zsh -lc 'npm test -- --token=PRIVATE_SECRET_VALUE'",
       cwd: null, networkScope: null, permissionRoots: [], availableDecisions: ["approve", "deny"] };
     publisher.observe({ type: "agent.approval.requested", request });
-    expect(feed().status.message).toBe("Approve command: npm test -- --token=[redacted] — Verify the mascot changes");
+    expect(feed().status.message).toBe("Run npm test -- --token=[redacted]? — Verify the mascot changes");
     publisher.update(conversation("chat", "waiting-for-input"));
     const secret = input();
     secret.questions[0] = { ...secret.questions[0]!, isSecret: true, question: "PRIVATE SECRET PROMPT" };
@@ -523,14 +523,22 @@ describe("mascot message helpers", () => {
     expect(mascotResultLine("## Only a heading")).toBeNull();
   });
 
-  it("names a command approval's target only for commands and never a file approval's raw detail", async () => {
+  it("asks to run a command approval's command in the same words for every provider and adds a short plain detail otherwise", async () => {
     const { mascotApprovalLine } = await import("../../src/server/runtime/mascot-message");
     expect(mascotApprovalLine({ kind: "command", title: "OpenCode wants to use bash", command: null, detail: "npm test", reason: null }))
-      .toBe("OpenCode wants to use bash: npm test");
-    expect(mascotApprovalLine({ kind: "file-change", title: "Approve file changes", command: null, detail: "Allow changes under /Users/someone/project", reason: null }))
+      .toBe("Run npm test?");
+    expect(mascotApprovalLine({ kind: "command", title: "Run command?", command: "git push origin main", detail: null, reason: "Publish the branch" }))
+      .toBe("Run git push origin main? — Publish the branch");
+    expect(mascotApprovalLine({ kind: "file-change", title: "Approve file changes", command: null, detail: "Allow changes under /Users/someone/project/src", reason: null }))
+      .toBe("Approve file changes — Allow changes under src");
+    expect(mascotApprovalLine({ kind: "file-change", title: "Approve file changes", command: null, detail: "Files:\nupdate: /Users/someone/project/a.ts", reason: null }))
       .toBe("Approve file changes");
+    expect(mascotApprovalLine({ kind: "permissions", title: "Claude wants to use WebFetch", command: null, detail: "{\"url\":\"https://example.com\"}", reason: null }))
+      .toBe("Claude wants to use WebFetch");
+    expect(mascotApprovalLine({ kind: "permissions", title: "Allow network access?", command: null, detail: "Reach https://example.com/api from C:\\Users\\me\\tools", reason: null }))
+      .toBe("Allow network access? — Reach https://example.com/api from tools");
     expect(mascotApprovalLine({ kind: "command", title: "Cursor requested permission", command: null, detail: "{\"input\":{\"command\":\"git push\"}}", reason: null }))
-      .toBe("Cursor requested permission: git push");
+      .toBe("Run git push?");
     expect(mascotApprovalLine({ kind: "command", title: "Run", command: null, detail: "{broken", reason: null })).toBe("Run");
   });
 });

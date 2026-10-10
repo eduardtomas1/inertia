@@ -179,8 +179,14 @@ function approvalTarget(request: Pick<AgentApprovalRequest, "kind" | "command" |
   return detail.includes("\n") ? null : mascotCommand(detail);
 }
 
+function approvalDetail(detail: string | null): string | null {
+  const text = detail?.trim() ?? "";
+  if (!text || text.includes("\n") || /^[[{]/u.test(text)) return null;
+  return sanitizeProviderActivityDetail(text.replace(/(^|\s)(?:[A-Za-z]:)?(?:[\\/][^\s\\/]+)*[\\/]([^\s\\/]+)[\\/]?/gu, "$1$2"), { maxChars: 4_096 });
+}
+
 export function mascotApprovalLine(request: Pick<AgentApprovalRequest, "kind" | "title" | "command" | "detail" | "reason">): string {
   const target = approvalTarget(request);
-  const action = target ? `${request.title}: ${target}` : request.title;
-  return mascotPreview([action, request.reason].filter(Boolean).join(" — ")) ?? "Review the request in the chat.";
+  const parts = target ? [`Run ${target}?`, request.reason] : [request.title, request.reason ?? approvalDetail(request.detail)];
+  return mascotPreview(parts.filter(Boolean).join(" — ")) ?? "Review the request in the chat.";
 }

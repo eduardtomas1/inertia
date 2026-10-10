@@ -19,6 +19,22 @@ function setup(extra: Partial<React.ComponentProps<typeof ProjectSettings>> = {}
   return { ...view, request, props };
 }
 describe("project settings", () => {
+  it("keeps only the consequence lines and names colour choices with tooltips instead of native titles", () => {
+    const { container } = setup();
+    for (const text of [
+      "A symbol, or a small image stored only on this device.",
+      "Its chats inherit the colour.",
+      "First in the project filter and project choosers.",
+      "Import Codex and Claude Code conversations started in this checkout.",
+    ]) expect(screen.queryByText(text)).toBeNull();
+    for (const text of ["Existing chats keep their model.", "Existing checkouts are never moved.", "Named commands you run from the workspace. Saving never runs them."]) {
+      expect(screen.getByText(text)).toBeVisible();
+    }
+    const swatches = within(screen.getByRole("radiogroup", { name: "Project colour" })).getAllByRole("radio");
+    expect(swatches.length).toBeGreaterThan(1);
+    expect(container.querySelectorAll(".project-swatches [title], .project-emphasis-picker [title], .project-color-well[title]")).toHaveLength(0);
+    expect(screen.getByRole("radio", { name: "Default" })).toBeVisible();
+  });
   it("saves against the original project revision, without a machine selector or automatic command execution", async () => {
     const { request } = setup();
     expect(screen.queryByText("All machines")).not.toBeInTheDocument();

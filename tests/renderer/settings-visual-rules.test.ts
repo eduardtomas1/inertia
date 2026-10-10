@@ -32,6 +32,41 @@ describe("completion sound choices", () => {
   });
 });
 
+describe("project appearance controls", () => {
+  const controls = "../../src/renderer/src/components/ProjectAppearanceControls.css";
+  const panel = "../../src/renderer/src/components/ProjectCustomizePanel.css";
+  const projectSettings = "../../src/renderer/src/components/ProjectSettings.css";
+
+  it("marks the chosen emphasis and icon like other settings choices", () => {
+    const emphasis = rule(controls, ".project-emphasis-picker > .project-emphasis-option[aria-checked=\"true\"]");
+    expect(emphasis).toContain("background: var(--fill-strong);");
+    expect(emphasis).toContain("font-weight: 500;");
+    expect(rule(controls, ".project-emphasis-picker")).not.toMatch(/border:|background:/u);
+    const icon = rule(controls, ".project-icon-choices > .project-icon-choice[aria-checked=\"true\"]");
+    expect(icon).toContain("background: var(--fill-strong);");
+    expect(icon).not.toContain("border-color");
+  });
+
+  it("keeps swatches still on hover and dims them with the shared opacity", () => {
+    expect(source(controls)).not.toMatch(/scale\(1\.08\)|opacity: \.5/u);
+    expect(rule(controls, ".project-swatch:disabled")).toContain("opacity: var(--disabled-opacity);");
+    expect(rule(controls, ".project-color-well")).toContain("height: var(--control-height-small);");
+  });
+
+  it("draws the project chooser as a secondary control and quiet dividers", () => {
+    const chooser = rule(projectSettings, ".project-chooser");
+    expect(chooser).toContain("border: 1px solid var(--line);");
+    expect(chooser).toContain("background: transparent;");
+    expect(source(projectSettings)).not.toMatch(/border-top: 1px solid var\(--line\);/u);
+  });
+
+  it("fades the customise panel in and labels its sections at chrome size", () => {
+    expect(source(panel)).not.toContain("translateX");
+    expect(rule(panel, ".project-customize-section h3")).toContain("font-size: var(--text-sm);");
+    expect(source(panel)).not.toMatch(/\b(?:11|7|5|3|25|26|30)px/u);
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

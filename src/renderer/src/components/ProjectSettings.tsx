@@ -115,7 +115,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         disabled={disabled || !request} failure={saveFailure}
         validate={(name) => name ? null : "Enter a project name."}
         onSave={(name) => send(update({ name }))} />
-      <SettingRow id="project-icon" title="Project icon" description="A symbol, or a small image stored only on this device." notice={notice("project-icon")}>
+      <SettingRow id="project-icon" title="Project icon" notice={notice("project-icon")}>
         <div className="project-setting-control">
           <div className="project-icon-controls"><ProjectIcon project={project} size={16} />
             <button ref={icons.ref} type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} aria-expanded={icons.open} onClick={guarded(icons.toggle)}>Choose icon</button>
@@ -130,7 +130,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
             onClick={guarded(() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); icons.close(); })}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={16} /></button>)}</div>}
         </div>
       </SettingRow>
-      <SettingRow id="project-colour" title="Project colour" description="Its chats inherit the colour." notice={notice("project-colour")}>
+      <SettingRow id="project-colour" title="Project colour" notice={notice("project-colour")}>
         <div className="project-setting-control">
           <ProjectColorPicker value={preferences.color} disabled={unavailable} inactive={saving} onChange={(color) => setAppearance("project-colour", { color })} />
         </div>
@@ -138,7 +138,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
       <SettingRow id="project-colour-emphasis" title="Colour shows on" notice={notice("project-colour-emphasis")}>
         <ProjectEmphasisPicker value={preferences.colorEmphasis} disabled={unavailable} inactive={saving} onChange={(colorEmphasis) => setAppearance("project-colour-emphasis", { colorEmphasis })} />
       </SettingRow>
-      <SettingRow id="project-pin" title="Pin to top" description="First in the project filter and project choosers." notice={notice("project-pin")}>
+      <SettingRow id="project-pin" title="Pin to top" notice={notice("project-pin")}>
         <Switch label="Pin to top of project lists" checked={preferences.pinned} disabled={unavailable} inactive={saving} onChange={(pinned) => setAppearance("project-pin", { pinned })} />
       </SettingRow>
     </SettingsGroup>
@@ -171,7 +171,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         onSave={(text) => send(update({ preferences: { ...preferences, claudeMaxBudgetUsd: text === "" ? null : Number(text) } }))} />
     </SettingsGroup>
     <SettingsGroup title="Checkout">
-      <SettingRow id="project-cli-import" title="CLI conversations" description="Import Codex and Claude Code conversations started in this checkout.">
+      <SettingRow id="project-cli-import" title="CLI conversations">
         <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => setCliImportOpen(true))}>Import conversations…</button>
       </SettingRow>
       {cliImportOpen && request && <Suspense fallback={null}><CliConversationImportDialog key={project.id} project={project} request={request} disabled={disabled} onClose={() => setCliImportOpen(false)} onOpenConversation={onOpenConversation} /></Suspense>}

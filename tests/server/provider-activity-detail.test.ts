@@ -57,7 +57,7 @@ describe("provider activity detail boundary", () => {
     const detail = sanitizeProviderActivityDetail([
       "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG aws s3 ls",
       "PGPASSWORD=hunter2 psql -h db",
-      "GITHUB_TOKEN='tok en' NPM_KEY=\"quoted value\" gh pr list",
+      "GITHUB_TOKEN='tok en' NPM_API_KEY=\"quoted value\" gh pr list",
       "MY_PASS=letmein BUILD_ID=42 PATH_HINT=/opt/bin",
       "curl -u admin:s3cr3tpass https://example.com --user ci:other",
       "mysql --password hunter3 -h db && mysqldump -u root -phunter4 shop",
@@ -66,7 +66,7 @@ describe("provider activity detail boundary", () => {
     expect(detail).toBe([
       "[redacted] aws s3 ls",
       "PGPASSWORD=[redacted] psql -h db",
-      "GITHUB_TOKEN=[redacted] NPM_KEY=[redacted] gh pr list",
+      "GITHUB_TOKEN=[redacted] NPM_API_KEY=[redacted] gh pr list",
       "MY_PASS=[redacted] BUILD_ID=42 PATH_HINT=/opt/bin",
       "curl -u admin:[redacted] https://example.com --user ci:[redacted]",
       "mysql --password=[redacted] -h db && mysqldump -u root -p[redacted] shop",
@@ -75,6 +75,31 @@ describe("provider activity detail boundary", () => {
     for (const secret of ["wJalrXUtnFEMI", "hunter2", "tok en", "quoted value", "letmein", "s3cr3tpass", "other", "hunter3", "hunter4"]) {
       expect(detail).not.toContain(secret);
     }
+  });
+
+  it("redacts registry, cache and cloud credentials given as command arguments but keeps look-alike names and numeric ids", () => {
+    const detail = sanitizeProviderActivityDetail([
+      "docker login -u bob -p hunter2 registry.example.com",
+      "vercel deploy --token abcdefghijkl123 --prod",
+      "sshpass -p hunter3 ssh deploy@host",
+      "redis-cli -a hunter4 ping",
+      "aws configure set aws_secret_access_key wJalrXUtnFEMI/K7MDENG",
+      "npm config set //registry.npmjs.org/:_authToken npm_abcdefghijklmnopqrstuvwxyz0123",
+      "TOKENIZERS_PARALLELISM=false MONKEY=1 BYPASS_CACHE=1 SORT_KEY=name npm test",
+      "SECRET_KEY=topsecret DB_PASSWD=hunter5 STRIPE_API_KEY=sk_live_value CLIENT_CREDENTIALS=creds npm start",
+      "docker run -u 1000:1000 node:22 npm test",
+    ].join("\n"));
+    expect(detail).toBe([
+      "docker login -u bob -p [redacted] registry.example.com",
+      "vercel deploy --token=[redacted] --prod",
+      "sshpass -p [redacted] ssh deploy@host",
+      "redis-cli -a [redacted] ping",
+      "aws configure set aws_secret_access_key [redacted]",
+      "npm config set //registry.npmjs.org/:_authToken [redacted]",
+      "TOKENIZERS_PARALLELISM=false MONKEY=1 BYPASS_CACHE=1 SORT_KEY=name npm test",
+      "SECRET_KEY=[redacted] DB_PASSWD=[redacted] STRIPE_API_KEY=[redacted] CLIENT_CREDENTIALS=[redacted] npm start",
+      "docker run -u 1000:1000 node:22 npm test",
+    ].join("\n"));
   });
 
   it("extracts only official text-shaped results and never stringifies arbitrary payloads", () => {

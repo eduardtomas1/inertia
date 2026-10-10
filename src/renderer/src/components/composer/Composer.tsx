@@ -44,7 +44,7 @@ import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
-import { composerAttachmentActions } from "./composerAttachmentActions";
+import { composerAttachmentActions, DOCUMENT_FOLLOW_UP_UNSUPPORTED } from "./composerAttachmentActions";
 import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
@@ -454,6 +454,10 @@ export const Composer = memo(function Composer({
       setAttachmentError("Send or remove the queued message first.");
       return;
     }
+    if (documentBlocksFollowUp) {
+      setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -677,10 +681,15 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
+  const documentBlocksFollowUp = running && !attachmentsAreImages;
   const queuedMessageCount = useRuntimeQueueLength(conversation.id);
   const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
   const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
+    if (documentBlocksFollowUp) {
+      setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
+      return;
+    }
     if (!canQueue || queueingRef.current || conversationContext.isReferencing()) return;
     queueingRef.current = true;
     try { await queueDraft(stopTurnId); } finally { queueingRef.current = false; }
@@ -995,7 +1004,7 @@ export const Composer = memo(function Composer({
           onNavigatePromptHistory={promptHistoryController.navigate}
           onImportAttachments={importAttachments}
           onSubmit={submit}
-          canQueue={canQueue}
+          canQueue={canQueue || documentBlocksFollowUp}
           onQueue={() => void queueCurrentMessage()}
           running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
           stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}

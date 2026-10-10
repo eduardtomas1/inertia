@@ -749,7 +749,7 @@ export function ChatWorkspace({
   useLayoutEffect(() => {
     const host = composerRegionRef.current?.querySelector<HTMLElement>(".composer-notice-slot") ?? null;
     setComposerNoticeHost((current) => current === host ? current : host);
-  });
+  }, [conversation, detailLoading, loading, project]);
 
   const noteReaderIntent = useCallback((): void => {
     clearPendingFinalAnswerNavigation();

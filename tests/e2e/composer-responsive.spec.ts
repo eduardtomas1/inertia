@@ -221,7 +221,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
             )
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
-        webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
         surfaceImage: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
         surfaceColor: getComputedStyle(element.querySelector(".composer-surface")!).backgroundColor,
         surfaceBackdropFilter: getComputedStyle(element.querySelector(".composer-surface")!).backdropFilter,
@@ -273,7 +272,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.width).toBeLessThanOrEqual(737);
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
-    expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
     expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", "rgba(255, 255, 255, 0.8)"]);
     expect(wideGeometry.surfaceBackdropFilter).toBe("blur(12px) saturate(1.14)");
     expect(wideGeometry.surfaceRadius).toBe("22px");

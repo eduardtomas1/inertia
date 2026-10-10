@@ -180,14 +180,11 @@ export function AddProjectDialog({
                 type="button"
                 onClick={() => setSource(item.id)}
               >
-                <item.icon size={16} />
-                <span>
-                  <strong>{item.title}</strong>
-                  <small>{item.detail}</small>
-                </span>
+                <item.icon size={16} aria-hidden="true" />
+                <span>{item.title}</span>
               </button>
             ))}
-            {!sources.length && <p>No matching sources</p>}
+            {!sources.length && <p className="add-project-empty">No matching sources</p>}
           </div>
         </>
       ) : (
@@ -243,10 +240,11 @@ export function AddProjectDialog({
               />
               <button
                 type="button"
+                className="secondary-button"
                 disabled={busy}
                 onClick={() => void chooseFolder()}
               >
-                <FolderOpen size={14} />
+                <FolderOpen size={14} aria-hidden="true" />
                 Browse
               </button>
             </div>

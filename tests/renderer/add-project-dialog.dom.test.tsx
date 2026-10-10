@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AddProjectDialog } from "../../src/renderer/src/components/AddProjectDialog";
+import { readSourceText } from "../helpers/source-text";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -136,5 +137,18 @@ describe("add project dialog", () => {
     view.unmount();
     expect(trigger).toHaveFocus();
     trigger.remove();
+  });
+  it("lists sources as single-line rows and browses with the secondary button", () => {
+    render(<AddProjectDialog onImport={vi.fn()} onClose={vi.fn()} />);
+    const local = screen.getByRole("button", { name: "Local folder" });
+    expect(local.querySelector("small, strong")).toBeNull();
+    expect(screen.queryByText("Open a project from your computer")).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search project sources" }), { target: { value: "gitlab" } });
+    expect(screen.getByRole("button", { name: "Clone repository" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clone repository" }));
+    expect(screen.getByRole("button", { name: "Browse" })).toHaveClass("secondary-button");
+    const css = readSourceText("src/renderer/src/components/AddProjectDialog.css");
+    expect(css).toMatch(/\.add-project-sources > button \{[^}]*min-height: 36px;[^}]*border-radius: var\(--radius-xs\);/u);
+    expect(css).not.toMatch(/--input-bg|height: 37px|translateY/u);
   });
 });

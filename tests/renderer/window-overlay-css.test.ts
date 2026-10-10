@@ -29,6 +29,7 @@ describe("Windows title bar overlay clearance", () => {
     expect(css).toMatch(/\.platform-win32 \.workspace-frame\.has-right-panel > \.workspace-header \{\n  margin-right: var\(--workspace-panel-width\);\n\}/u);
     expect(css).toMatch(/\.platform-win32 \.workspace-body\.has-tools \{\n  padding-right: var\(--workspace-panel-width\);\n\}/u);
     expect(css).toMatch(/\.platform-win32 \.workspace-body > \.workspace-panel\.is-inline \{\n  width: var\(--workspace-panel-width\);\n\}/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-body > \.workspace-panel\.is-sheet \{\n  width: max\(min\(448px, max\(320px, 42vw\)\), calc\(300px \+ var\(--titlebar-overlay-inset\)\)\);\n  max-width: calc\(100% - 24px\);\n\}/u);
     expect(readSourceText(new URL("../../src/renderer/src/hooks/useWorkspaceLayout.ts", import.meta.url))).toContain("export const TOOLS_MIN_WIDTH = 300;");
   });
 

@@ -705,6 +705,11 @@ button:disabled,
   width: var(--workspace-panel-width);
 }
 
+.platform-win32 .workspace-body > .workspace-panel.is-sheet {
+  width: max(min(448px, max(320px, 42vw)), calc(300px + var(--titlebar-overlay-inset)));
+  max-width: calc(100% - 24px);
+}
+
 :root[data-platform="win32"] .database-recovery-notice {
   top: calc(env(titlebar-area-height, 48px) + 8px);
 }

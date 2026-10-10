@@ -443,7 +443,9 @@ export class MascotMain {
     if (this.canPosition || !window || window.isDestroyed()) return;
     const { width, height } = this.fitted();
     const bounds = window.getBounds();
-    if (bounds.width !== width || bounds.height !== height) window.setSize(width, height);
+    if (bounds.width !== width || bounds.height !== height) {
+      window.setBounds({ x: bounds.x, y: bounds.y + bounds.height - height, width, height });
+    }
   }
 
   private applyShape(): void {

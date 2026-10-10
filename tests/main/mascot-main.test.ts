@@ -734,16 +734,17 @@ describe("mascot window ownership", () => {
     vi.stubGlobal("process", { ...process, platform: "linux", env: { ...process.env, WAYLAND_DISPLAY: "wayland-0" } });
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
-    const overlay = harness.windows[1] as WindowDouble & { setSize: ReturnType<typeof vi.fn>; setShape: ReturnType<typeof vi.fn> };
+    const overlay = harness.windows[1] as WindowDouble & { bounds: Rectangle; setBounds: ReturnType<typeof vi.fn>; setShape: ReturnType<typeof vi.fn> };
     expect(harness.options[1]).toMatchObject({ width: 240, height: 155 });
     expect(harness.options[1]).not.toHaveProperty("x");
+    const bottom = overlay.bounds.y + overlay.bounds.height;
     await app.invoke(MASCOT_IPC.action, ["bubble", 192], overlay);
-    expect(overlay.setSize).toHaveBeenLastCalledWith(240, 316);
+    expect(overlay.bounds).toEqual({ x: 0, y: bottom - 316, width: 240, height: 316 });
     await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
-    expect(overlay.setSize).toHaveBeenLastCalledWith(240, 240);
-    const calls = overlay.setSize.mock.calls.length;
+    expect(overlay.bounds).toEqual({ x: 0, y: bottom - 240, width: 240, height: 240 });
+    const calls = overlay.setBounds.mock.calls.length;
     await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
-    expect(overlay.setSize).toHaveBeenCalledTimes(calls);
+    expect(overlay.setBounds).toHaveBeenCalledTimes(calls);
     expect(overlay.setShape).not.toHaveBeenCalled();
   });
 
@@ -751,10 +752,11 @@ describe("mascot window ownership", () => {
     vi.stubGlobal("process", { ...process, platform: "win32" });
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
-    const overlay = harness.windows[1] as WindowDouble & { setSize: ReturnType<typeof vi.fn> };
+    const overlay = harness.windows[1] as WindowDouble & { bounds: Rectangle };
     expect(harness.options[1]).toMatchObject({ width: 240, height: 316 });
+    const before = { ...overlay.bounds };
     await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
-    expect(overlay.setSize).not.toHaveBeenCalled();
+    expect(overlay.bounds).toEqual(before);
   });
 });
 

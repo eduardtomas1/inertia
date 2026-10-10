@@ -254,11 +254,11 @@ export function ProjectSettings(props: Props): React.JSX.Element {
     </SettingRow>
     {chooserOpen && <ProjectSearchDialog projects={props.projects} selectedId={selectedId} includeAll label="Choose project" trigger={chooser.current} onClose={() => setChooserOpen(false)} onSelect={setSelectedId} />}
     {!selected ? <SettingsGroup title="All projects">
-      <SettingRadioGroup id="project-grouping" title="Group projects" description="Uses Git identity and normalized paths, never display names."
+      <SettingRadioGroup id="project-grouping" title="Group projects"
         value={props.settings.projectGrouping} disabled={props.disabled}
         options={(Object.keys(groupingOptions) as AppSettings["projectGrouping"][]).map((value) => ({ value, label: groupingOptions[value] }))}
         onChange={(projectGrouping) => props.onUpdateSettings({ projectGrouping })} />
-      <SettingSwitch id="compact-sidebar" title="Compact sidebar" description="Less spacing in project navigation." checked={props.settings.compactSidebar} disabled={props.disabled}
+      <SettingSwitch id="compact-sidebar" title="Compact sidebar" checked={props.settings.compactSidebar} disabled={props.disabled}
         onChange={(compactSidebar) => props.onUpdateSettings({ compactSidebar })} />
     </SettingsGroup>
       : <ProjectEditor key={selected.id} {...props} project={selected} onRemoved={() => setSelectedId(null)} />}

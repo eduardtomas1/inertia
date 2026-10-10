@@ -474,20 +474,39 @@ describe("compact Work sidebar", () => {
     const stream = view.container.querySelector(".activity-thread-stream")!;
     const order = () => [...stream.querySelectorAll(".work-project-name, .activity-thread-title")]
       .map((element) => element.textContent);
-    expect(order()).toEqual(["Studio", "Studio newest", "Studio yesterday", "Docs", "Docs middle"]);
+    expect(order()).toEqual(["Studio", "Studio newest", "Docs", "Docs middle", "Studio", "Studio yesterday"]);
     expect(stream.querySelectorAll(".work-project-group [tabindex], .work-project-group button")).toHaveLength(0);
     const first = screen.getByRole("button", { name: /^Studio newest,/u });
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowDown" });
-    expect(screen.getByRole("button", { name: /^Studio yesterday,/u })).toHaveFocus();
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     expect(screen.getByRole("button", { name: /^Docs middle,/u })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Studio yesterday,/u })).toHaveFocus();
     expect(screen.getByRole("button", { name: /^Docs middle,/u }).closest(".activity-thread"))
-      .toHaveAttribute("aria-posinset", "3");
+      .toHaveAttribute("aria-posinset", "2");
 
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
     fireEvent.click(screen.getByRole("option", { name: /Studio/u }));
     expect(order()).toEqual(["Studio newest", "Studio yesterday"]);
+  });
+
+  it("orders project groups by their best-ranked chat and continues a group across Recent and Yesterday", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
+    const studioNewest = conversation("studio-newest", "Studio newest", new Date(2026, 7, 11, 11));
+    const docsPinned = conversation("docs-pinned", "Docs pinned", new Date(2026, 7, 11, 8), {
+      projectId: docsProject.id,
+      pinnedAt: new Date(2026, 7, 11, 8).toISOString(),
+    });
+    const docsYesterday = conversation("docs-yesterday", "Docs yesterday", new Date(2026, 7, 10, 9), { projectId: docsProject.id });
+    const studioYesterday = conversation("studio-yesterday", "Studio yesterday", new Date(2026, 7, 10, 10));
+    const view = renderSidebar([studioNewest, docsPinned, docsYesterday, studioYesterday], vi.fn(), [], {
+      projects: [project, docsProject],
+    });
+    const stream = view.container.querySelector(".activity-thread-stream")!;
+    expect([...stream.querySelectorAll(".work-project-name, .activity-thread-title")].map((element) => element.textContent))
+      .toEqual(["Docs", "Docs pinned", "Studio", "Studio newest", "Studio yesterday", "Docs", "Docs yesterday"]);
   });
 
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {

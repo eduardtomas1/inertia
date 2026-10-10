@@ -100,6 +100,7 @@ export function useSidebarWorkIndex({
     const next: WorkIndexItem[] = [];
     let threadPosition = 0;
     let span: Array<{ conversation: Conversation; sectionId: SidebarWorkSectionId }> = [];
+    let previousProjectId: string | null = null;
     const flushSpan = (): void => {
       const grouped = groupByProject && span.length > 0 && !span[0]!.sectionId.startsWith("no-project");
       const projectOrder = new Map<string, number>();
@@ -112,7 +113,6 @@ export function useSidebarWorkIndex({
           || left.index - right.index
         )).map(({ entry }) => entry)
         : span;
-      let previousProjectId: string | null = null;
       for (const { conversation, sectionId } of ordered) {
         if (grouped && conversation.projectId !== previousProjectId) {
           previousProjectId = conversation.projectId;
@@ -140,8 +140,9 @@ export function useSidebarWorkIndex({
       const expanded = !collapsible
         || searchActive
         || expandedSections.has(section.id);
+      flushSpan();
       if (section.id !== "recent" && section.id !== "yesterday") {
-        flushSpan();
+        previousProjectId = null;
         next.push({
           id: `section:${section.id}`,
           kind: "section",
@@ -160,6 +161,7 @@ export function useSidebarWorkIndex({
       }
       if (pageId && visibleThreads.length < section.threads.length) {
         flushSpan();
+        previousProjectId = null;
         next.push({
           id: `show-more:${pageId}`,
           kind: "show-more",

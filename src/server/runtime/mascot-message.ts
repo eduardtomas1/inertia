@@ -5,13 +5,17 @@ const COMMAND_LIMIT = 60;
 const SKIPPED = /^(?:Patch updated|Plan updated|Plan completed|Hook · |Claude hook|Claude tool summary)/u;
 const GENERIC = /^(?:Run command|Cursor tool|Kimi Code tool|Dynamic tool|MCP tool|File change|Command|Tool|Activity)$/iu;
 const PHRASES: Array<[RegExp, string, string]> = [
+  [/todo ?read|read todos/u, "Reading the plan", "Read the plan"],
+  [/todo|plan|task ?(?:create|update)/u, "Updating the plan", "Updated the plan"],
+  [/task ?list/u, "Listing tasks", "Listed tasks"],
+  [/list ?mcp ?resources/u, "Listing resources", "Listed resources"],
+  [/notebook ?read/u, "Reading files", "Read files"],
   [/web|url|fetch|brows|http/u, "Browsing the web", "Browsed the web"],
   [/edit|write|replace|patch|notebook|create|file change|apply/u, "Editing files", "Edited files"],
   [/grep|search|find|glob|list|ls$/u, "Searching the code", "Searched the code"],
   [/read|view|open|cat$/u, "Reading files", "Read files"],
   [/command|bash|shell|exec|terminal|run/u, "Running a command", "Ran a command"],
   [/task|agent|delegat/u, "Delegating work", "Delegated work"],
-  [/todo|plan/u, "Updating the plan", "Updated the plan"],
 ];
 
 function cut(text: string, length: number): string {

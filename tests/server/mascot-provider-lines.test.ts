@@ -226,6 +226,48 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     turn.expectNoBareLabel();
   });
 
+  it("every provider's plan, task-list, resource and notebook tools read as what they do", () => {
+    const claude = mascotTurn("claude");
+    const projector = new ClaudeMessageProjector({
+      emitter: claude.emitter, text: new CappedProviderBuffer(1024 * 1024), usesNativeAnthropic: false,
+      usage: new ClaudeUsageLedger(false), contextUsage: () => undefined, acceptContextUsage: () => undefined, refreshContextUsage: () => undefined,
+    });
+    const claudeLine = (name: string, input: Record<string, unknown>): string | null => {
+      projector.observe({
+        type: "assistant", uuid: `assistant-${name}`, session_id: "session", parent_tool_use_id: null,
+        message: { id: `api-${name}`, type: "message", role: "assistant", model: "claude-test", content: [{ type: "tool_use", id: name, name, input }],
+          stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } },
+      } as unknown as SDKMessage, false);
+      return claude.line();
+    };
+    expect(claudeLine("TodoWrite", { todos: [{ content: "Ship", status: "in_progress", activeForm: "Shipping" }] })).toBe("Updating the plan");
+    expect(claudeLine("NotebookRead", { notebook_path: `${WORKSPACE}/analysis.ipynb` })).toBe("Reading files");
+    expect(claudeLine("TaskCreate", { subject: "Ship the mascot" })).toBe("Updating the plan");
+    expect(claudeLine("TaskList", {})).toBe("Listing tasks");
+    expect(claudeLine("ListMcpResourcesTool", {})).toBe("Listing resources");
+
+    const opencode = mascotTurn("opencode");
+    const state = createOpenCodeEventState();
+    const usage = { maxTokens: null, currentContextTokens: null, messages: new Map(), totalProcessedTokens: 0, unknownTotalMessages: 0, last: null, compactsAutomatically: null };
+    const tool = (name: string): string | null => {
+      handleOpenCodePart({ messageID: "assistant", type: "tool", id: `p-${name}`, callID: name, tool: name, state: { status: "running", input: {} } },
+        new Map(), new CappedProviderBuffer(1024), opencode.emitter, usage, state);
+      return opencode.line();
+    };
+    expect(tool("todowrite")).toBe("Updating the plan");
+    expect(tool("todoread")).toBe("Reading the plan");
+
+    const kimi = mascotTurn("kimi");
+    kimi.emitter.activity("tool", "started", "SetTodoList", { activityId: "kimi-todo" });
+    expect(kimi.line()).toBe("Updating the plan");
+
+    const antigravity = mascotTurn("antigravity");
+    for (const event of parseAntigravityLine(JSON.stringify({ event: "step_update", step_update: { tool_name: "write_todos", step_index: 1, state: "RUNNING" } })) ?? []) {
+      if (event.kind === "tool") antigravity.emitter.activity("tool", event.phase, event.label, { activityId: `antigravity:chat-run:${event.id}` });
+    }
+    expect(antigravity.line()).toBe("Updating the plan");
+  });
+
   it("Antigravity: raw step tool names become plain words and the real error is kept", () => {
     const turn = mascotTurn("antigravity");
     const step = (value: Record<string, unknown>): void => {

@@ -194,7 +194,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
         </div>
         <IconButton label="Scan again" className={busy === "scan" ? "is-scanning" : undefined} aria-disabled={scanUnavailable}
           onClick={() => { if (!scanUnavailable) void refresh(); }}>
-          <RefreshCw size={16} aria-hidden="true" />
+          {busy === "scan" ? <LoadingMark size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
         </IconButton>
       </div>
       <div className="cli-import-body">
@@ -229,14 +229,13 @@ export function CliConversationImportDialog({ project, request, disabled = false
                 return <div key={item.id} role="listitem" className="cli-import-cell" style={{ "--cli-import-index": Math.min(index, 10) } as React.CSSProperties}>
                   <button type="button" id={cardId(item.id)} className="cli-import-card" aria-label={accessibleName(item)}
                     aria-disabled={disabled} onClick={() => void open(item.id)}>
-                    <ProviderBrandIcon providerId={item.providerId} size={56} decorative className="cli-import-card-watermark" />
                     <span className="cli-import-card-title">{item.title}</span>
                     <span className="cli-import-mini" aria-hidden="true">
                       <span className="cli-import-mini-user">{item.opening.user}</span>
                       {item.opening.assistant && <span className="cli-import-mini-reply">{item.opening.assistant}</span>}
                     </span>
                     <span className="cli-import-card-meta">
-                      <ProviderBrandIcon providerId={item.providerId} size={16} decorative />
+                      <ProviderBrandIcon providerId={item.providerId} size={14} decorative />
                       <time dateTime={item.updatedAt}>{cardLabel(new Date(item.updatedAt))}</time>
                       {item.importedConversationId && <span>Imported</span>}
                     </span>

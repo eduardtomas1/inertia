@@ -63,28 +63,30 @@
 }
 
 .cli-import-dialog .cli-import-filter button {
-  min-height: var(--ui-control-height);
-  padding: 0 5px;
+  min-height: var(--control-height-small);
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
   font: inherit;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
-.cli-import-dialog .cli-import-filter button:hover,
+.cli-import-dialog .cli-import-filter button:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
 .cli-import-dialog .cli-import-filter button[aria-pressed="true"] {
   color: var(--text);
+  background: var(--fill-strong);
+  font-weight: 500;
 }
 
 .cli-import-search > .icon-button {
   flex: 0 0 auto;
-}
-
-.cli-import-search > .icon-button.is-scanning svg {
-  animation: spin 750ms linear infinite;
 }
 
 .cli-import-body {
@@ -108,7 +110,7 @@
   flex: 0 0 auto;
   margin: 0;
   padding: 10px 16px 14px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-chrome);
@@ -135,7 +137,7 @@
 .cli-import-cell {
   display: grid;
   min-width: 0;
-  animation: view-swap-workspace var(--dur) var(--ease) both;
+  animation: dialog-veil-in var(--dur) var(--ease-fade) both;
   animation-delay: calc(var(--cli-import-index, 0) * var(--stagger));
 }
 
@@ -145,45 +147,33 @@
   min-width: 0;
   grid-template-rows: auto 1fr auto;
   gap: 10px;
-  padding: 14px 14px 12px;
+  padding: 12px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-sm);
   color: var(--text);
-  background: var(--surface);
+  background: transparent;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease);
 }
 
 .cli-import-card:hover:not([aria-disabled="true"]) {
-  border-color: var(--line-strong);
-  box-shadow: none;
-  transform: translateY(-2px);
+  background: var(--fill);
 }
 
 .cli-import-dialog .cli-import-card[aria-disabled="true"] {
   cursor: default;
-  opacity: 1;
-}
-
-.cli-import-card-watermark.provider-brand-icon {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  opacity: 0.14;
-  pointer-events: none;
 }
 
 .cli-import-card-title {
   position: relative;
   display: -webkit-box;
   min-width: 0;
-  padding-right: 52px;
   overflow: hidden;
-  font-size: var(--text-base);
-  font-weight: 400;
+  font-size: var(--text-sm);
+  font-weight: 500;
   line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
@@ -194,7 +184,7 @@
   position: relative;
   display: grid;
   min-width: 0;
-  height: 7.5em;
+  max-height: 6em;
   align-content: start;
   gap: 6px;
   overflow: hidden;
@@ -203,30 +193,21 @@
   line-height: var(--leading-chrome);
 }
 
-.cli-import-mini::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 3em;
-  background: linear-gradient(to bottom, transparent, var(--surface));
-  content: "";
-}
-
 .cli-import-mini > span {
   min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+.cli-import-mini > span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .cli-import-mini-user {
-  width: fit-content;
-  max-width: 88%;
-  justify-self: end;
-  padding: 5px 8px;
-  border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--fill);
 }
 
 .cli-import-card-meta {
@@ -319,15 +300,15 @@
   width: fit-content;
   max-width: var(--user-request-max-width);
   justify-self: end;
-  padding: 11px 13px 10px;
-  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
   background: var(--fill);
 }
 
 .cli-import-message p {
   margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
+  color: var(--text);
+  font-size: var(--text-base);
   line-height: var(--leading-prose);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -345,7 +326,7 @@
   justify-content: flex-end;
   gap: 16px;
   padding: 12px 16px 16px 52px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .cli-import-continuation,
@@ -378,8 +359,7 @@
 @media (prefers-reduced-motion: reduce) {
   .cli-import-dialog,
   .cli-import-cell,
-  .cli-import-open,
-  .cli-import-search > .icon-button.is-scanning svg {
+  .cli-import-open {
     animation: none;
   }
 
@@ -388,15 +368,10 @@
   .cli-import-card {
     transition: none;
   }
-
-  .cli-import-card:hover:not([aria-disabled="true"]) {
-    transform: none;
-  }
 }
 
 @media (forced-colors: active) {
-  .cli-import-message.is-user,
-  .cli-import-mini-user {
+  .cli-import-message.is-user {
     border: 1px solid CanvasText;
   }
 

@@ -4920,15 +4920,25 @@ button.turn-agents-line:hover {
 }
 
 .panel-tab-row[data-overflow-start] {
-  mask-image: linear-gradient(to right, transparent, black 24px);
+  mask-image: linear-gradient(to right, transparent var(--tab-row-clip-start, 0px), black var(--tab-row-clip-start, 0px));
 }
 
 .panel-tab-row[data-overflow-end] {
-  mask-image: linear-gradient(to left, transparent, black 24px);
+  mask-image: linear-gradient(to left, transparent var(--tab-row-clip-end, 0px), black var(--tab-row-clip-end, 0px));
 }
 
 .panel-tab-row[data-overflow-start][data-overflow-end] {
-  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(
+    to right,
+    transparent var(--tab-row-clip-start, 0px),
+    black var(--tab-row-clip-start, 0px),
+    black calc(100% - var(--tab-row-clip-end, 0px)),
+    transparent calc(100% - var(--tab-row-clip-end, 0px))
+  );
+}
+
+.workspace-panel-tablist:not([data-overflow-start], [data-overflow-end]) + .workspace-panel-overflow-anchor {
+  display: none;
 }
 
 .panel-tab {
@@ -5041,17 +5051,20 @@ button.turn-agents-line:hover {
   color: var(--text-muted);
 }
 
-.workspace-panel-add-anchor {
+.workspace-panel-add-anchor,
+.workspace-panel-overflow-anchor {
   position: relative;
   flex: 0 0 auto;
 }
 
-.workspace-panel-add.icon-button {
+.workspace-panel-add.icon-button,
+.workspace-panel-overflow.icon-button {
   width: var(--control-height-small);
   height: var(--control-height-small);
 }
 
-.workspace-panel-add[aria-expanded="true"] {
+.workspace-panel-add[aria-expanded="true"],
+.workspace-panel-overflow[aria-expanded="true"] {
   color: var(--text);
   background: var(--fill-strong);
 }

@@ -49,6 +49,16 @@ export function usePanelTabRow<K extends string>({
     if (!list) return;
     list.toggleAttribute("data-overflow-start", list.scrollLeft > 1);
     list.toggleAttribute("data-overflow-end", list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+    const bounds = list.getBoundingClientRect();
+    let clipStart = 0;
+    let clipEnd = 0;
+    for (const tab of tabElements(list)) {
+      const box = tab.getBoundingClientRect();
+      if (box.left < bounds.left - 0.5 && box.right > bounds.left) clipStart = box.right - bounds.left;
+      if (box.right > bounds.right + 0.5 && box.left < bounds.right) clipEnd = bounds.right - box.left;
+    }
+    list.style.setProperty("--tab-row-clip-start", `${clipStart}px`);
+    list.style.setProperty("--tab-row-clip-end", `${clipEnd}px`);
   }, []);
 
   const revealActive = useCallback(() => {

@@ -9,7 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { Plus, X } from "lucide-react";
+import { Check, ChevronDown, Plus, X } from "lucide-react";
 import { surfaceIcons } from "./workspacePanelIcons";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
@@ -117,7 +117,7 @@ export function WorkspacePanel({
     ...(onMoveSurface ? { onMove: moveSurface } : {}),
   });
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
-    useDismissibleMenu<"add">();
+    useDismissibleMenu<"add" | "tabs">();
   const wasVisibleRef = useRef(visible);
   useLayoutEffect(() => {
     const opened = visible && !wasVisibleRef.current;
@@ -316,6 +316,49 @@ export function WorkspacePanel({
                 </div>
               );
             })}
+          </div>
+        )}
+        {visibleSurfaces.length > 0 && (
+          <div className="workspace-panel-overflow-anchor no-drag">
+            <IconButton
+              ref={(node) => setMenuTrigger("tabs", node)}
+              className="workspace-panel-overflow"
+              label="All tabs"
+              aria-haspopup="menu"
+              aria-expanded={menu === "tabs"}
+              aria-controls={`${panelId}-tabs-menu`}
+              onClick={() => toggleMenu("tabs")}
+            >
+              <ChevronDown size={14} aria-hidden="true" />
+            </IconButton>
+            {menu === "tabs" && (
+              <div
+                ref={(node) => setMenuPopover("tabs", node)}
+                id={`${panelId}-tabs-menu`}
+                className="header-popover workspace-panel-add-menu"
+                role="menu"
+                aria-label="Panel tabs"
+                onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]')}
+              >
+                {visibleSurfaces.map((surface) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={surface}
+                    aria-current={surface === selected || undefined}
+                    onClick={() => {
+                      dismissMenu("selection");
+                      onActivateSurface(surface);
+                    }}
+                  >
+                    {surfaceIcons[surface]}
+                    <span>{RIGHT_PANEL_SURFACE_META[surface].label}</span>
+                    {surface === selected && <Check size={14} aria-hidden="true" />}
+                  </button>
+                ))}
+                <FocusFirstMenuItem menuId={`${panelId}-tabs-menu`} />
+              </div>
+            )}
           </div>
         )}
         {visibleSurfaces.length > 0 && (

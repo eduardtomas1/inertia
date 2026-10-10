@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -110,6 +110,57 @@ describe("workspace panel tab row", () => {
 
     expect(onMove).not.toHaveBeenCalled();
     expect(tabNames()).toEqual(["changes", "preview", "terminal"]);
+  });
+
+  it("hides a tab the row cuts at either edge instead of fading part of it", () => {
+    render(<Host initial={state("terminal", "changes", "files", "preview", "terminal")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    Object.defineProperty(list, "clientWidth", { configurable: true, value: 250 });
+    Object.defineProperty(list, "scrollWidth", { configurable: true, value: 400 });
+    list.scrollLeft = 130;
+    stubTabBoxes(list, 100, 250);
+    fireEvent.scroll(list);
+
+    expect(list).toHaveAttribute("data-overflow-start");
+    expect(list).toHaveAttribute("data-overflow-end");
+    expect(list.style.getPropertyValue("--tab-row-clip-start")).toBe("70px");
+    expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("80px");
+
+    list.scrollLeft = 150;
+    fireEvent.scroll(list);
+    expect(list).not.toHaveAttribute("data-overflow-end");
+    expect(list.style.getPropertyValue("--tab-row-clip-start")).toBe("50px");
+    expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("0px");
+  });
+
+  it("lists every tab behind one control, marks the active one and returns focus to it", async () => {
+    render(<Host initial={state("terminal", "changes", "preview", "terminal")} />);
+    const trigger = screen.getByRole("button", { name: "All tabs" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "Panel tabs" });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Changes", "Browser", "Terminal"]);
+    expect(items.map((item) => item.getAttribute("aria-current"))).toEqual([null, null, "true"]);
+    await waitFor(() => expect(items[0]).toHaveFocus());
+    fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.click(items[1]!);
+
+    expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("menu", { name: "Panel tabs" }), { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("shows the all-tabs control only while the tab row overflows", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toContain(".workspace-panel-tablist:not([data-overflow-start], [data-overflow-end]) + .workspace-panel-overflow-anchor {\n  display: none;\n}");
+    expect(css).toContain(".panel-tab-row[data-overflow-start] {\n  mask-image: linear-gradient(to right, transparent var(--tab-row-clip-start, 0px), black var(--tab-row-clip-start, 0px));\n}");
   });
 
   it("cancels a drag with Escape and keeps the order", () => {

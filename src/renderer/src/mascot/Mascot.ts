@@ -35,7 +35,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const more = select(".mascot-more");
   const announcer = select(".mascot-announce");
   const options = new Map<string, HTMLButtonElement>();
-  const rows = new Map<string, HTMLButtonElement>();
+  const rowButtons = new Map<string, HTMLButtonElement>();
   let announced = "";
   let reported = 0;
   const media = matchMedia("(prefers-reduced-motion: reduce)");
@@ -53,20 +53,24 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   let gesture: MascotGesture = [0, 0];
   let choosing = false;
 
+  const chatButton = (className: string, parts: readonly string[], click: () => void): HTMLButtonElement => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = className;
+    row.append(...parts.map((name) => {
+      const part = document.createElement("span");
+      part.className = name;
+      return part;
+    }));
+    row.addEventListener("click", click, eventOptions);
+    return row;
+  };
   const option = (key: string): HTMLButtonElement => {
     let row = options.get(key);
     if (!row) {
-      row = document.createElement("button");
-      row.type = "button";
-      row.className = "mascot-option";
+      row = chatButton("mascot-option", ["mascot-dot", "mascot-option-title", "mascot-option-project", "mascot-option-state"], () => choose(key || null));
       row.dataset.key = key;
-      row.append(...["mascot-dot", "mascot-option-title", "mascot-option-project", "mascot-option-state"].map((name) => {
-        const part = document.createElement("span");
-        part.className = name;
-        return part;
-      }));
       row.firstElementChild!.setAttribute("aria-hidden", "true");
-      row.addEventListener("click", () => choose(key || null), eventOptions);
       options.set(key, row);
     }
     return row;
@@ -100,17 +104,13 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     const choices = mascotChatChoices(chats);
     const items = chats.map((chat, index) => {
       const key = chat.conversationId!;
-      let row = rows.get(key);
+      let row = rowButtons.get(key);
       if (!row) {
-        row = document.createElement("button");
-        row.type = "button";
-        row.className = "mascot-row";
-        row.append(document.createElement("span"), document.createElement("span"));
-        row.addEventListener("click", () => {
+        row = chatButton("mascot-row", ["", ""], () => {
           const target = snapshot.rows?.find((candidate) => candidate.conversationId === key);
           if (target) perform("open-chat", target);
-        }, eventOptions);
-        rows.set(key, row);
+        });
+        rowButtons.set(key, row);
       }
       const [name, state] = row.children as unknown as [HTMLElement, HTMLElement];
       const word = `${mascotShortLabel[chat.phase].toLowerCase()}${chat.steps ? ` ${chat.steps.completed}/${chat.steps.total}` : ""}`;
@@ -120,7 +120,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
       row.setAttribute("aria-label", `Open ${name.textContent}, ${word}`);
       return row;
     });
-    for (const key of rows.keys()) if (!chats.some(({ conversationId }) => conversationId === key)) rows.delete(key);
+    for (const key of rowButtons.keys()) if (!chats.some(({ conversationId }) => conversationId === key)) rowButtons.delete(key);
     items.forEach((row, index) => { if (rowList.children[index] !== row) rowList.insertBefore(row, rowList.children[index] ?? null); });
     while (rowList.children.length > items.length + 1) rowList.children[items.length]!.remove();
     more.textContent = others > chats.length ? `${others - chats.length} more` : "";
@@ -163,7 +163,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     const exact = Boolean(snapshot.counts) || chats.length < MASCOT_CHAT_LIMIT;
     const total = snapshot.counts?.chats ?? chats.length;
     const attention = snapshot.counts?.attention ?? chats.filter((chat) => mascotTone(chat.phase) === "attention").length;
-    const others = Math.max(0, attention - (status.conversationId && mascotTone(status.phase) === "attention" ? 1 : 0));
+    const otherAttention = Math.max(0, attention - (status.conversationId && mascotTone(status.phase) === "attention" ? 1 : 0));
     const amount = (count: number): string => count > 99 ? "99+" : `${count}${exact ? "" : "+"}`;
     const counted = (count: number, one: string, many: string): string => `${amount(count)} ${count === 1 && exact ? one : many}`;
     const plan = mascotTone(status.phase) === "live" ? status.steps : null;
@@ -181,13 +181,13 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
       reported = height;
       void bridge.action("bubble", height).catch(() => { reported = 0; });
     }
-    const attentionNow = mascotTone(status.phase) === "attention";
-    const announcement = [label.textContent, status.conversationId ? title.textContent : "", attentionNow ? status.message : ""].filter(Boolean).join(". ");
-    const key = `${status.phase}\u0000${status.conversationId}\u0000${attentionNow ? status.message : ""}\u0000${Boolean(status.quietSince)}`;
+    const spoken = ["attention", "done", "problem"].includes(mascotTone(status.phase)) ? status.message ?? "" : "";
+    const announcement = [label.textContent, status.conversationId ? title.textContent : "", spoken].filter(Boolean).join(". ");
+    const key = `${status.phase}\u0000${status.conversationId}\u0000${spoken}\u0000${Boolean(status.quietSince)}`;
     if (key !== announced) { announced = key; announcer.textContent = announcement; }
     const pickerFocused = document.activeElement === picker;
     picker.hidden = !choosing && !pinned && chats.every((chat) => chat.conversationId === status.conversationId);
-    picker.dataset.attention = String(others > 0);
+    picker.dataset.attention = String(otherAttention > 0);
     pickerLabel.textContent = pinned ? "Pinned" : "Auto";
     picker.title = "Choose which chat the mascot shows";
     picker.setAttribute("aria-label", `Show chat: ${pinned ? `pinned to ${title.textContent}` : "most urgent"}. ${counted(total, "chat", "chats")}${attention ? `, ${counted(attention, "needs", "need")} you` : ""}`);

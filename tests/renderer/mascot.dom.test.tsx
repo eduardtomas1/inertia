@@ -409,7 +409,7 @@ describe("mascot rows, words and announcements", () => {
     }
   });
 
-  it("announces state changes and needs-you messages but not every activity update", async () => {
+  it("announces state changes with the message that needs you, the result or the failure, but not every activity update", async () => {
     const app = fixture();
     renderMascot();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
@@ -429,12 +429,14 @@ describe("mascot rows, words and announcements", () => {
     await say("waiting-for-input", { message: "Which port should the server use?" });
     await say("waiting-for-input", { message: "Should I also fix the retry?" });
     await say("completed", { message: "Fixed the race." });
+    await say("failed", { message: "npm test failed" });
     observer.disconnect();
     expect(heard).toEqual([
       "Working. Fix login",
       "Your input needed. Fix login. Which port should the server use?",
       "Your input needed. Fix login. Should I also fix the retry?",
-      "Work complete. Fix login",
+      "Work complete. Fix login. Fixed the race.",
+      "Something went wrong. Fix login. npm test failed",
     ]);
   });
 });

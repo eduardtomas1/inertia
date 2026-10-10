@@ -12,8 +12,8 @@ import {
 } from "./mascot-message";
 
 const MINUTE = 60_000;
-export const MASCOT_QUIET_AFTER_MS = 10 * MINUTE;
-export const MASCOT_DWELL_MS = 1_500;
+const MASCOT_QUIET_AFTER_MS = 10 * MINUTE;
+const MASCOT_DWELL_MS = 1_500;
 const LIFETIME: Record<number, number> = { 4: 24 * 60 * MINUTE, 3: 60 * MINUTE, 2: 7 * 24 * 60 * MINUTE };
 const LONGEST_WAKE = 2_147_483_647;
 
@@ -269,7 +269,7 @@ export class MascotStatusPublisher {
     return now - entry.changedAt < LIFETIME[tier]! ? tier : 0;
   }
 
-  private line(entry: Candidate): { text: string | null; weight: number } {
+  private wanted(entry: Candidate): { text: string | null; weight: number } {
     const { phase } = entry.status;
     if (isMascotAttention(phase)) {
       return { text: [...entry.requests.values()].find((request) => request.phase === phase)?.message ?? null, weight: 4 };
@@ -281,7 +281,7 @@ export class MascotStatusPublisher {
   }
 
   private display(entry: Candidate, activeCount: number, now: number): MascotStatus {
-    const next = this.line(entry);
+    const next = this.wanted(entry);
     const current = entry.line;
     if (next.text !== current.text) {
       const elapsed = now - current.at;

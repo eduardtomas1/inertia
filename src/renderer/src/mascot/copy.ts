@@ -1,4 +1,4 @@
-import type { MascotPhase } from "../../../shared/mascot";
+import { mascotTier, type MascotPhase } from "../../../shared/mascot";
 
 export function mascotActionLabel(phase: MascotPhase): string {
   if (phase === "waiting-for-input") return "Answer in chat ↗";
@@ -27,12 +27,10 @@ export const mascotShortLabel: Record<MascotPhase, string> = {
 
 export type MascotTone = "attention" | "live" | "done" | "problem" | "quiet";
 
+const TONES: readonly MascotTone[] = ["quiet", "live", "done", "problem", "attention"];
+
 export function mascotTone(phase: MascotPhase): MascotTone {
-  if (phase === "waiting-for-input" || phase === "waiting-for-approval") return "attention";
-  if (phase === "completed") return "done";
-  if (phase === "failed" || phase === "interrupted") return "problem";
-  if (phase === "idle" || phase === "unavailable" || phase === "cancelled") return "quiet";
-  return "live";
+  return TONES[mascotTier(phase)]!;
 }
 
 export function mascotElapsed(since: string, now: number, live: boolean): string {

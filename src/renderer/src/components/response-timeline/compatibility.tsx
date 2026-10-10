@@ -24,6 +24,12 @@ import {
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
+const LEGACY_MESSAGE_LABELS: Record<ChatMessage["role"], string> = {
+  user: "Your request",
+  assistant: "Assistant answer",
+  system: "Agent system notice",
+};
+
 function legacyExchanges(messages: ChatMessage[]): ChatMessage[][] {
   const exchanges: ChatMessage[][] = [];
   let current: ChatMessage[] = [];
@@ -109,7 +115,7 @@ function CompatibilityDisclosure({
               return (
                 <div className="legacy-exchange" key={exchange[0]!.id}>
                   {exchange.map((message) => (
-                    <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
+                    <article className={clsx("message", `is-${message.role}`)} key={message.id} aria-label={LEGACY_MESSAGE_LABELS[message.role]} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
                       {message.role === "system"
                         ? <div className="message-meta"><span>System</span>{props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}</div>
                         : message.privateConnectDeviceId && <div className="message-meta"><MessageOrigin message={message} /></div>}

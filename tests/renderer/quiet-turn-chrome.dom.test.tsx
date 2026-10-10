@@ -310,6 +310,22 @@ describe("quiet turn chrome", () => {
     );
   });
 
+  it("names each recovered legacy message by its speaker the way turn messages are named", () => {
+    const turnless = (id: string, role: ChatMessage["role"], content: string, createdAt: string): ChatMessage => (
+      { id, conversationId, turnId: null, role, content, attachments: [], createdAt }
+    );
+    const { container } = timeline([], undefined, false, [
+      turnless("legacy-named-request", "user", "Recovered request", "2026-09-01T08:00:00.000Z"),
+      turnless("legacy-named-answer", "assistant", "Recovered answer", "2026-09-01T08:00:30.000Z"),
+      turnless("legacy-named-notice", "system", "Recovered notice", "2026-09-01T08:00:40.000Z"),
+    ]);
+    const history = container.querySelector<HTMLElement>(".orphan-run-flow")!;
+
+    expect(within(history).getByRole("article", { name: "Your request" })).toHaveTextContent("Recovered request");
+    expect(within(history).getByRole("article", { name: "Assistant answer" })).toHaveTextContent("Recovered answer");
+    expect(within(history).getByRole("article", { name: "Agent system notice" })).toHaveTextContent("Recovered notice");
+  });
+
   it("keeps recovered legacy history in the same column as the turns so its footer lines up", () => {
     const css = readSourceText("src/renderer/src/styles.css");
     expect(css).toContain(".orphan-run-flow {\n  max-width: var(--final-answer-max-width);\n");

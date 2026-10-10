@@ -224,7 +224,7 @@ export class TurnStreamProjection {
     }
     const correctedSegment = finalText.startsWith(completedPrefix)
       ? finalText.slice(completedPrefix.length)
-      : finalText;
+      : normalizedPrefix(normalizedResult, MAX_ASSISTANT_TEXT);
     active.assistantText = `${completedPrefix}${correctedSegment}`;
     active.assistantSegmentText = correctedSegment;
     active.assistantStream.replacePending(correctedSegment);

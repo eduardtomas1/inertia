@@ -45,4 +45,11 @@ describe("markdown block chrome", () => {
       .toBeGreaterThan(html.indexOf("</table>"));
     expect(html).not.toContain("<span>Table</span>");
   });
+
+  it("paints the sticky table header with the surface the markdown sits on", () => {
+    expect(block(".response-table-scroll th")).toContain("background: var(--markdown-surface, var(--bg));");
+    expect(block(".response-details")).toContain("--markdown-surface: var(--surface);");
+    expect(block(".file-preview-markdown")).toContain("--markdown-surface: var(--surface-raised);");
+    expect(css).toMatch(/\n\.plan-document \{[^}\n]*--markdown-surface: var\(--surface\);[^}\n]*\}/u);
+  });
 });

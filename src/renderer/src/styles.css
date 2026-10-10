@@ -6526,6 +6526,7 @@ button.turn-agents-line:hover {
   font-weight: 500;
 }
 .file-preview-markdown {
+  --markdown-surface: var(--surface-raised);
   min-width: 0;
   min-height: 0;
   flex: 1;
@@ -6655,7 +6656,7 @@ button.turn-agents-line:hover {
 .plan-scroll { min-height: 0; flex: 1; overflow-y: auto; }
 .plan-summary { margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-prose); }
 .plan-document-shell { padding: 14px 16px 8px; border-bottom: 1px solid var(--line); }
-.plan-document { position: relative; font-size: var(--text-sm); }
+.plan-document { --markdown-surface: var(--surface); position: relative; font-size: var(--text-sm); }
 .plan-document.is-collapsed { max-height: 16em; overflow: hidden; }
 .plan-document.is-collapsed::after { position: absolute; inset: auto 0 0; height: 5em; background: linear-gradient(transparent, var(--surface)); content: ""; pointer-events: none; }
 .plan-document .response-markdown,
@@ -11008,11 +11009,12 @@ button.sent-attachment-open:hover {
   z-index: 1;
   top: 0;
   color: var(--text);
-  background: var(--bg);
+  background: var(--markdown-surface, var(--bg));
   font-weight: 600;
 }
 
 .response-details {
+  --markdown-surface: var(--surface);
   max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--line);

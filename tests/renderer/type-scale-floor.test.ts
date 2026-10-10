@@ -28,4 +28,11 @@ describe("type scale floor", () => {
     const smallest = Math.min(...sizes.map((size) => pixels(code!, size)));
     expect(smallest).toBeGreaterThanOrEqual(12);
   });
+
+  it("sizes inline code in plan steps as code, not as a heading", () => {
+    const rule = /\n\.plan-step-title code \{(?<body>[^}]*)\}/u.exec(styles)?.groups?.body;
+    expect(rule).toBeDefined();
+    expect(rule).toContain("font-size: var(--text-code);");
+    expect(rule).not.toContain("letter-spacing");
+  });
 });

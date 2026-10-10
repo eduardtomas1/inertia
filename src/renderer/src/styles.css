@@ -6720,7 +6720,7 @@ button.turn-agents-line:hover {
 .plan-step.is-in-progress .plan-step-title,
 .plan-step.is-active .plan-step-title { display: block; }
 .plan-step-title strong { color: var(--text); font-weight: 600; }
-.plan-step-title code { padding: 0 4px; border-radius: var(--radius-xs); background: var(--fill); font-family: var(--font-mono); font-size: var(--text-xl); letter-spacing: var(--tracking-heading); }
+.plan-step-title code { padding: 0 4px; border-radius: var(--radius-xs); background: var(--fill); font-family: var(--font-mono); font-size: var(--text-code); }
 .plan-step.is-completed .plan-step-title { color: var(--text-muted); }
 .plan-step-number, .plan-step-detail, .plan-step-status { color: var(--text-muted); font-size: var(--text-xs); }
 .plan-step-status { flex: 0 0 auto; padding-top: 3px; }

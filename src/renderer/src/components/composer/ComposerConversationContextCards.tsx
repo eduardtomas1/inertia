@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import type {
   AgentConversationContextRequest,
   ConversationContextPacket,
@@ -14,6 +15,7 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "../conversation-context/types";
+import { IconButton } from "../ui";
 
 export function ChatReferenceConfirmation({ source, onConfirm }: {
   source: ConversationContextSourceOption;
@@ -161,7 +163,9 @@ function ContextPreview({
         event.stopPropagation();
         dismiss();
       }}>
-      <button type="button" onClick={dismiss}>Close preview</button>
+      <IconButton label="Close preview" className="composer-context-preview-close" onClick={dismiss}>
+        <X size={14} />
+      </IconButton>
       {content
         ? (
           <>
@@ -170,9 +174,9 @@ function ContextPreview({
               <small>{content.detail}</small>
               {(content.omissions?.intermediateAgentUpdates ?? 0) > 0 && (
                 <small>
-                  {content.omissions!.intermediateAgentUpdates} intermediate agent{" "}
+                  {content.omissions!.intermediateAgentUpdates} agent{" "}
                   {content.omissions!.intermediateAgentUpdates === 1 ? "update" : "updates"}
-                  {" "}left out so more turns fit.
+                  {" "}left out
                 </small>
               )}
             </header>
@@ -183,7 +187,7 @@ function ContextPreview({
                   <li data-role={excerpt.role}>
                     <span>{excerpt.role === "user" ? "You" : "Agent"}</span>
                     <p>{excerpt.content}</p>
-                    {excerpt.truncated && <small>Message shortened to fit the shared context.</small>}
+                    {excerpt.truncated && <small>Shortened</small>}
                     {excerpt.attachments && excerpt.attachments.length > 0 && (
                       <small>
                         {excerpt.attachments.map(({ name }) => name).join(", ")}
@@ -205,7 +209,7 @@ function ContextPreview({
           ? (
             <>
               <p role="alert">{error}</p>
-              <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+              <button type="button" className="secondary-button" onClick={() => setAttempt((value) => value + 1)}>
                 Retry preview
               </button>
             </>
@@ -390,16 +394,17 @@ export function ConversationContextRequestCard({
         <div>
           <button
             type="button"
+            className="primary-button"
             disabled={pending || response !== null || !source || (differentWorkspace && !acknowledged)}
             onClick={() => respond(true)}
           >
             Share chat
           </button>
-          <button type="button" disabled={pending || response !== null} onClick={() => respond(false)}>
+          <button type="button" className="secondary-button" disabled={pending || response !== null} onClick={() => respond(false)}>
             Decline
           </button>
           {source && (
-            <button type="button" aria-expanded={previewing} onClick={() => setPreviewing((open) => !open)}>
+            <button type="button" className="secondary-button" aria-expanded={previewing} onClick={() => setPreviewing((open) => !open)}>
               Preview
             </button>
           )}

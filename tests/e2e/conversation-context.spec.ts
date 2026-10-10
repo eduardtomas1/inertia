@@ -434,7 +434,7 @@ test("references this chat beside two other chats and keeps what was sent", asyn
 
   await importerChip.click();
   await expect(preview.getByText(/earlier messages omitted/u)).toBeVisible();
-  await expect(preview.getByText(/intermediate agent updates left out so more turns fit/u)).toBeVisible();
+  await expect(preview.getByText(/agent updates left out$/u)).toBeVisible();
   await expect(preview.locator("li").first()).toContainText("Plan the importer rollout");
   await capture("importer-preview");
   await closePreview.click();

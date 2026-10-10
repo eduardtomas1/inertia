@@ -1,4 +1,4 @@
-import { MessagesSquare, X } from "lucide-react";
+import { ChevronDown, MessagesSquare, X } from "lucide-react";
 import type { ConversationContextPacketSummary } from "@shared/contracts";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import "./ConversationContextPacketStrip.css";
@@ -50,7 +50,7 @@ export function ConversationContextPacketStrip({
                     : ""}
                 </small>
               </span>
-              <span aria-hidden="true">↗</span>
+              <ChevronDown className="p-x" size={14} aria-hidden="true" />
             </button>
             <button
               type="button"

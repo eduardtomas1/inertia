@@ -178,7 +178,7 @@ export function UserRequestLayer({
                   </strong>
                   <small>
                     {packet.sourceState === "deleted"
-                      ? "Source deleted · immutable sent excerpt"
+                      ? "Source deleted"
                       : own
                         ? count
                         : `${packet.sourceProjectName} · ${count}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}

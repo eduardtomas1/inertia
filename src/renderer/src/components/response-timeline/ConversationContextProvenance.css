@@ -1,6 +1,6 @@
 .sent-context {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   margin-top: 8px;
 }
 
@@ -9,14 +9,16 @@
   display: grid;
   width: fit-content;
   max-width: min(100%, 440px);
-  padding: 7px 9px;
+  min-height: 28px;
+  padding: 0 8px;
+  margin-inline: -8px;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--accent-strong);
-  background: var(--fill);
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
 }
 
 .sent-context > button {
@@ -27,22 +29,22 @@
 
 .sent-context > button:hover,
 .sent-context > button[aria-expanded="true"] {
-  background: var(--fill-strong);
+  background: var(--fill);
 }
 
 .turn-user-request > .composer-context-preview {
-  margin-top: 6px;
-}
-
-.sent-context > [data-source-state="deleted"] {
-  border-style: dashed;
-  color: var(--text-muted);
+  margin-top: 8px;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: transparent;
 }
 
 .sent-context > * > span {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .sent-context strong,
@@ -53,12 +55,15 @@
 }
 
 .sent-context strong {
-  color: var(--text-muted);
+  flex: 0 1 auto;
+  color: var(--text);
   font-size: var(--text-sm);
   font-weight: 500;
 }
 
 .sent-context small {
+  min-width: 0;
+  flex: 1 1 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
 }

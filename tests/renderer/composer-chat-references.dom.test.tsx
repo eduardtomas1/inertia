@@ -161,7 +161,10 @@ describe("composer chat references", () => {
     await user.click(screen.getByRole("button", { name: "Retry preview" }));
     await screen.findByText(sourceOption.conversationTitle);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Close preview" }));
+    const close = screen.getByRole("button", { name: "Close preview" });
+    expect(close).not.toHaveTextContent("Close preview");
+    expect(close.querySelector("svg.lucide-x")).not.toBeNull();
+    await user.click(close);
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
@@ -251,7 +254,8 @@ describe("composer chat references", () => {
     await screen.findByText("Loading the exact shared excerpt…");
     await act(async () => responses[0]!.resolve(event("Initial larger selection", 22)));
     expect(screen.getByText("Initial larger selection")).toBeVisible();
-    expect(screen.getByText("Message shortened to fit the shared context.")).toBeVisible();
+    expect(screen.getByText("Shortened")).toBeVisible();
+    expect(screen.queryByText(/Message shortened to fit/u)).toBeNull();
     view.rerender(preview(["first", "second"]));
     expect(screen.queryByText("Initial larger selection")).not.toBeInTheDocument();
     await act(async () => responses[1]!.resolve(event("Actual smaller selection", 11)));
@@ -525,7 +529,8 @@ describe("composer chat references", () => {
       "12 earlier messages omitted",
       expect.stringContaining("Phase one shipped."),
     ]);
-    expect(screen.getByText("3 intermediate agent updates left out so more turns fit.")).toBeVisible();
+    expect(screen.getByText("3 agent updates left out")).toBeVisible();
+    expect(screen.queryByText(/so more turns fit/u)).toBeNull();
   });
 
   it("focuses an opened preview, closes it on Escape and returns focus to its reference", async () => {

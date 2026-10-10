@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
 import { TooltipButton } from "../../src/renderer/src/components/TooltipButton";
+import { readSourceText } from "../helpers/source-text";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -126,6 +127,49 @@ describe("text button tooltip", () => {
       expect(open("Go back").style.top).toBe("30px");
     } finally {
       spy.mockRestore();
+    }
+  });
+
+  it("wraps a long hint onto more lines and places the taller box on whole pixels inside the window", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    const start = css.indexOf("\n.tooltip {\n");
+    const block = css.slice(start, css.indexOf("\n}", start + 1));
+    expect(block).toContain("white-space: normal;");
+    expect(block).toContain("overflow-wrap: anywhere;");
+    expect(block).toContain("max-width: min(280px, calc(100vw - 16px));");
+    expect(block).not.toContain("ellipsis");
+    expect(block).not.toContain("nowrap");
+
+    const root = document.documentElement;
+    Object.defineProperty(root, "clientWidth", { configurable: true, value: 760 });
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 600 });
+    const rect = (left: number, top: number, width: number, height: number) => ({
+      top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}),
+    });
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute("role") === "tooltip" ? rect(0, 0, 279.5, 51.4) : rect(700.3, 560.2, 28, 28);
+    });
+    try {
+      render(
+        <TooltipButton tooltip="Stop the active run before restoring a checkpoint from this turn" aria-label="Restore">R</TooltipButton>,
+      );
+      fireEvent.pointerEnter(screen.getByRole("button", { name: "Restore" }), { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+      });
+      const tooltip = screen.getByRole("tooltip", { hidden: true });
+      const left = Number.parseFloat(tooltip.style.left);
+      const top = Number.parseFloat(tooltip.style.top);
+      expect(Number.isInteger(left)).toBe(true);
+      expect(Number.isInteger(top)).toBe(true);
+      expect(left).toBeGreaterThanOrEqual(8);
+      expect(left + 279.5).toBeLessThanOrEqual(752);
+      expect(top).toBeGreaterThanOrEqual(8);
+      expect(top + 51.4).toBeLessThanOrEqual(560.2 - 4);
+    } finally {
+      spy.mockRestore();
+      delete (root as { clientWidth?: number }).clientWidth;
+      delete (root as { clientHeight?: number }).clientHeight;
     }
   });
 });

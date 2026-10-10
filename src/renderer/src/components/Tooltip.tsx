@@ -137,15 +137,15 @@ export function Tooltip({
     if (!element || !trigger || !box) return;
     const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
     const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-    const centered = trigger.left + trigger.width / 2 - box.width / 2;
+    const centered = Math.round(trigger.left + trigger.width / 2 - box.width / 2);
     const left = Math.min(
       Math.max(VIEWPORT_PADDING, centered),
-      Math.max(VIEWPORT_PADDING, viewportWidth - VIEWPORT_PADDING - box.width),
+      Math.max(VIEWPORT_PADDING, Math.floor(viewportWidth - VIEWPORT_PADDING - box.width)),
     );
-    const below = trigger.bottom + TOOLTIP_GAP;
+    const below = Math.ceil(trigger.bottom + TOOLTIP_GAP);
     const prefersAbove = element.closest('[data-tooltip-placement="above"]') !== null;
     const top = prefersAbove || below + box.height > viewportHeight - VIEWPORT_PADDING
-      ? Math.max(VIEWPORT_PADDING, trigger.top - TOOLTIP_GAP - box.height)
+      ? Math.max(VIEWPORT_PADDING, Math.floor(trigger.top - TOOLTIP_GAP - box.height))
       : below;
     setPosition({ top, left });
   }, [anchor, label, shortcut]);

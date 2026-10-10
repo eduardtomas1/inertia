@@ -9,7 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { Check, ChevronDown, Plus, X } from "lucide-react";
+import { ChevronDown, Plus, X } from "lucide-react";
 import { surfaceIcons } from "./workspacePanelIcons";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
@@ -65,6 +65,9 @@ const RightPanelLauncher = lazy(async () => ({
 }));
 const AddSurfaceMenuItems = lazy(async () => ({
   default: (await loadWorkspacePanelLauncher()).AddSurfaceMenuItems,
+}));
+const TabListMenuItems = lazy(async () => ({
+  default: (await loadWorkspacePanelLauncher()).TabListMenuItems,
 }));
 
 function surfaceActions(
@@ -327,6 +330,8 @@ export function WorkspacePanel({
               aria-haspopup="menu"
               aria-expanded={menu === "tabs"}
               aria-controls={`${panelId}-tabs-menu`}
+              onFocus={() => void loadWorkspacePanelLauncher()}
+              onPointerEnter={() => void loadWorkspacePanelLauncher()}
               onClick={() => toggleMenu("tabs")}
             >
               <ChevronDown size={14} aria-hidden="true" />
@@ -340,23 +345,17 @@ export function WorkspacePanel({
                 aria-label="Panel tabs"
                 onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]')}
               >
-                {visibleSurfaces.map((surface) => (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    key={surface}
-                    aria-current={surface === selected || undefined}
-                    onClick={() => {
+                <Suspense fallback={<p className="header-menu-hint-text" role="status">Loading…</p>}>
+                  <TabListMenuItems
+                    surfaces={visibleSurfaces}
+                    active={selected}
+                    onSelect={(surface) => {
                       dismissMenu("selection");
                       onActivateSurface(surface);
                     }}
-                  >
-                    {surfaceIcons[surface]}
-                    <span>{RIGHT_PANEL_SURFACE_META[surface].label}</span>
-                    {surface === selected && <Check size={14} aria-hidden="true" />}
-                  </button>
-                ))}
-                <FocusFirstMenuItem menuId={`${panelId}-tabs-menu`} />
+                  />
+                  <FocusFirstMenuItem menuId={`${panelId}-tabs-menu`} />
+                </Suspense>
               </div>
             )}
           </div>

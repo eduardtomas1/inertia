@@ -509,6 +509,25 @@ describe("compact Work sidebar", () => {
       .toEqual(["Docs", "Docs pinned", "Studio", "Studio newest", "Studio yesterday", "Docs", "Docs yesterday"]);
   });
 
+  it("counts only the projects of listed active chats before showing project headers", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
+    const notesProject: Project = { ...project, id: "project-notes", name: "Notes", path: "/workspace/notes" };
+    const studio = conversation("studio-active", "Studio active", new Date(2026, 7, 11, 11));
+    const docsDone = conversation("docs-done", "Docs done", new Date(2026, 7, 11, 10), {
+      projectId: docsProject.id,
+      settledAt: new Date(2026, 7, 11, 10).toISOString(),
+    });
+    const notesSnoozed = conversation("notes-snoozed", "Notes snoozed", new Date(2026, 7, 11, 9), {
+      projectId: notesProject.id,
+      snoozedUntil: new Date(2026, 7, 12, 9).toISOString(),
+    });
+    const view = renderSidebar([studio, docsDone, notesSnoozed], vi.fn(), [], { projects: [project, docsProject, notesProject] });
+    expect(screen.getByRole("button", { name: /^Studio active,/u })).toBeInTheDocument();
+    expect(view.container.querySelectorAll(".work-project-name")).toHaveLength(0);
+  });
+
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

@@ -360,9 +360,9 @@ function SidebarView({
     [activityThreads, snoozeNow, scratchProjectIds],
   );
   const workSearchActive = Boolean(query.trim());
-  const workGroupedByProject = useMemo(() => !scopedProjectId && new Set(activityThreads
-    .map(({ conversation }) => conversation.projectId)
-    .filter((projectId) => !scratchProjectIds.has(projectId))).size > 1, [activityThreads, scopedProjectId, scratchProjectIds]);
+  const workGroupedByProject = useMemo(() => !scopedProjectId && new Set(workSections
+    .filter(({ id }) => id === "recent" || id === "yesterday" || id === "earlier")
+    .flatMap(({ threads }) => threads.map(({ conversation }) => conversation.projectId))).size > 1, [scopedProjectId, workSections]);
   const snapshotProjects = snapshot?.projects;
   const backendDefaults = snapshot?.backendDefaults;
   const backendProfiles = snapshot?.backendProfiles;

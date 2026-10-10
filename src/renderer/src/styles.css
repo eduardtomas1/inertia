@@ -11271,8 +11271,6 @@ button.sent-attachment-open:hover {
 }
 
 .workspace-panel-badge,
-.terminal-project,
-.panel-heading-copy span,
 .panel-stats {
   font-size: var(--text-xs);
 }
@@ -11287,7 +11285,7 @@ button.sent-attachment-open:hover {
 
 .change-file-button,
 .file-entry {
-  min-height: max(36px, calc(var(--ui-control-height) + 6px));
+  min-height: max(36px, calc(var(--ui-control-height) + 4px));
   font-size: var(--text-sm);
 }
 
@@ -11324,14 +11322,18 @@ button.sent-attachment-open:hover {
   font-size: var(--text-xs) !important;
 }
 
-.diff-review-toolbar,
+.diff-review-toolbar {
+  min-height: calc(var(--ui-control-height) + 8px);
+  font-size: var(--text-sm);
+}
+
 .diff-review-toolbar select,
 .diff-file-review-heading button,
 .diff-hunk-actions button,
 .diff-review-note > button,
 .diff-selection-actions > button,
 .diff-selection-popover .primary-button {
-  min-height: var(--ui-control-height);
+  min-height: var(--control-height-small);
   font-size: var(--text-sm);
 }
 
@@ -11339,8 +11341,8 @@ button.sent-attachment-open:hover {
 .diff-review-note .icon-button,
 .diff-selection-answer > header .icon-button,
 .diff-selection-actions .icon-button {
-  width: var(--ui-control-height);
-  height: var(--ui-control-height);
+  width: var(--control-height-small);
+  height: var(--control-height-small);
 }
 
 .settings-card-note {

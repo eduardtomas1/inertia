@@ -123,3 +123,13 @@ describe("browser panel", () => {
     expect(evidence).not.toContain("browser-evidence-entry-icon");
   });
 });
+
+describe("interface scale layer", () => {
+  it("scales the review controls from the small control height and leaves the toolbar count at chrome size", () => {
+    const scale = css.slice(css.indexOf(" * Interface scale is a semantic layer"));
+    expect(block(".diff-review-toolbar", scale)).toContain("min-height: calc(var(--ui-control-height) + 8px);");
+    expect(block(".diff-review-toolbar select,\n.diff-file-review-heading button,\n.diff-hunk-actions button,\n.diff-review-note > button,\n.diff-selection-actions > button,\n.diff-selection-popover .primary-button", scale)).toContain("min-height: var(--control-height-small);");
+    expect(block(".change-file-button,\n.file-entry", scale)).toContain("min-height: max(36px, calc(var(--ui-control-height) + 4px));");
+    expect(scale).not.toContain(".panel-heading-copy span,");
+  });
+});

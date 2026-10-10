@@ -38,6 +38,7 @@ interface WorkspaceGitOptions {
   run: AppRuntimeActions["run"];
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
+  onBranchChanged?: () => void;
 }
 
 export interface WorkspaceGitLoadOptions {
@@ -88,6 +89,7 @@ export function useWorkspaceGit({
   loadStatusOnMount,
   loadWorkspaceOnMount,
   statusOnly = false,
+  onBranchChanged,
 }: WorkspaceGitOptions) {
   const [gitStatus, setGitStatus] = useState<GitStatusSnapshot | null>(null);
   const [gitDiff, setGitDiff] = useState<GitDiffSnapshot | null>(null);
@@ -560,7 +562,8 @@ export function useWorkspaceGit({
         ...(type === "git.branch.switch" && remote ? { remote } : {}),
       },
     } as CommandWithoutId, { reportError: false });
-  }, [conversation?.id, gitStatus, project, run]);
+    onBranchChanged?.();
+  }, [conversation?.id, gitStatus, onBranchChanged, project, run]);
 
   const mutateRemote = useCallback(async (type: "git.fetch" | "git.pull" | "git.push"): Promise<void> => {
     if (!project) return;

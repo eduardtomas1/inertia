@@ -239,6 +239,7 @@ export function useSplitWorkspaceScene({
     subscribe: connection.subscribe,
     setActionError,
     setActiveTool: layout.setActiveTool,
+    onBranchChanged: onTerminal,
     loadGitStatusOnMount: Boolean(splitConversation && splitProject),
     loadGitOnMount:
       layout.activeTool === "changes"

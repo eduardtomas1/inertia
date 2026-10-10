@@ -275,4 +275,59 @@ describe("remote Git workspace scope", () => {
     });
     expect(hook.result.current.workspaceLoadError).toBeNull();
   });
+
+  it("tells the other panes to refresh Git once a branch switch succeeds", async () => {
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "git.refresh") {
+        return Promise.resolve(result({
+          kind: "git.status",
+          status: {
+            isRepository: true,
+            authorityRef: "66666666-6666-4666-8666-666666666666",
+            root: "/alpha",
+            branch: "main",
+            upstream: null,
+            ahead: 0,
+            behind: 0,
+            hasRemote: false,
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    const run = vi.fn()
+      .mockResolvedValueOnce(result({ kind: "git.action", message: "Switched to feature." }))
+      .mockRejectedValueOnce(new Error("Switch failed."));
+    const onBranchChanged = vi.fn();
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: true,
+      loadWorkspaceOnMount: false,
+      project: alpha,
+      conversation: alphaChat,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run,
+      subscribe: noopSubscribe,
+      setActionError,
+      onBranchChanged,
+    }));
+    await waitFor(() => expect(hook.result.current.gitStatus?.branch).toBe("main"));
+
+    await act(async () => {
+      await hook.result.current.mutateBranch("git.branch.switch", "feature");
+    });
+    expect(onBranchChanged).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await expect(hook.result.current.mutateBranch("git.branch.switch", "broken")).rejects.toThrow("Switch failed.");
+    });
+    expect(onBranchChanged).toHaveBeenCalledOnce();
+  });
 });

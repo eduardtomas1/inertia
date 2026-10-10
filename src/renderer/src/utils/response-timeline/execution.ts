@@ -107,6 +107,67 @@ export type TurnExecutionStreamEntry =
       activities: AgentActivity[];
     };
 
+export type TurnWorkStreamEntry =
+  | TurnExecutionStreamEntry
+  | {
+      kind: "html-render";
+      id: string;
+      createdAt: string;
+      message: ChatMessage;
+    };
+
+export function withHtmlRenders(
+  stream: TurnExecutionStreamEntry[],
+  renders: ChatMessage[],
+): TurnWorkStreamEntry[] {
+  if (renders.length === 0) return stream;
+  const pending = renders.map((message) => ({
+    kind: "html-render" as const,
+    id: `html-render:${message.id}`,
+    createdAt: message.createdAt,
+    message,
+  }));
+  const merged: TurnWorkStreamEntry[] = [];
+  for (const entry of stream) {
+    while (pending.length > 0 && timestamp(pending[0]!.createdAt) <= timestamp(entry.createdAt)) {
+      merged.push(pending.shift()!);
+    }
+    merged.push(entry);
+  }
+  return [...merged, ...pending];
+}
+
+export interface LiveTextFollowUps {
+  segment: number;
+  known: string[];
+  held: string[];
+}
+
+export function trackLiveTextFollowUps(
+  tracked: LiveTextFollowUps | null,
+  turn: Pick<ResponseTurn, "followUpMessages" | "commentaryMessages">,
+): LiveTextFollowUps {
+  const ids = turn.followUpMessages.map(({ id }) => id);
+  const segment = turn.commentaryMessages.length;
+  if (tracked?.segment !== segment) return { segment, known: ids, held: [] };
+  const fresh = ids.filter((id) => !tracked.known.includes(id));
+  return fresh.length === 0
+    ? tracked
+    : { segment, known: [...tracked.known, ...fresh], held: [...tracked.held, ...fresh] };
+}
+
+export function withLiveCommentary(
+  stream: TurnWorkStreamEntry[],
+  live: Extract<TurnExecutionStreamEntry, { kind: "commentary" }>,
+  heldFollowUpIds: string[],
+): TurnWorkStreamEntry[] {
+  const held = stream.findIndex((entry) =>
+    entry.kind === "follow-up" && heldFollowUpIds.includes(entry.id));
+  return held < 0
+    ? [...stream, live]
+    : [...stream.slice(0, held), live, ...stream.slice(held)];
+}
+
 export function followUpAnswers(
   turn: Pick<ResponseTurn, "followUpMessages" | "commentaryMessages">,
 ): Set<ChatMessage> {

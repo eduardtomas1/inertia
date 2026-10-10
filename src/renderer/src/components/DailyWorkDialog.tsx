@@ -361,9 +361,9 @@ export function DailyWorkDialog({
                           <strong>{conversation.title}</strong>
                           <span className="daily-work-conversation-meta">
                             <small>{conversation.projectName} · {conversation.turnCount} {conversation.turnCount === 1 ? "turn" : "turns"}</small>
-                            {conversation.running && <em className="daily-work-badge is-running">Running</em>}
+                            {conversation.running && <span className="daily-work-conversation-state">Running</span>}
                             {conversation.createdToday && (
-                              <em className="daily-work-badge is-new">Created this day</em>
+                              <span className="daily-work-conversation-state">Created this day</span>
                             )}
                           </span>
                         </span>

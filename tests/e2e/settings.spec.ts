@@ -476,10 +476,10 @@ test("persists composer usage modes without losing the followed transcript", asy
   await expect(compactTrigger).toHaveAccessibleName(
     "Open usage and context. Context window 15% remaining, near limit.",
   );
-  await expect(compactTrigger).toHaveAttribute(
-    "title",
-    "Context window 15% remaining, near limit.",
-  );
+  await compactTrigger.hover();
+  await expect(page.locator('[role="tooltip"]')).toHaveText("Context window 15% remaining, near limit.");
+  await page.mouse.move(1, 1);
+  await expect(page.locator('[role="tooltip"]')).toHaveCount(0);
   await expect(compactTrigger).toHaveAttribute("aria-expanded", "false");
   const ringGeometry = await compact.locator(".usage-popover-trigger .usage-context-ring").evaluate((ring) => {
     const bounds = ring.getBoundingClientRect();

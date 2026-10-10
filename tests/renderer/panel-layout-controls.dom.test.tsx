@@ -122,26 +122,27 @@ describe("corner panel controls and header meter", () => {
     expect(props.onToggleRightPanel).toHaveBeenCalledOnce();
   });
 
-  it("names unavailable toggles only through the shared tooltip, without a second native title", () => {
-    render(<PanelLayoutControls {...controls({ terminalAvailable: false, rightPanelAvailable: false })} />);
-    for (const name of ["Terminal is unavailable", "Right panel is unavailable"]) {
-      const toggle = screen.getByRole("button", { name });
+  it("explains unavailable toggles with the shared tooltip and no second native one", () => {
+    render(<PanelLayoutControls {...controls({ usage: null, terminalAvailable: false, rightPanelAvailable: false })} />);
+    const terminal = screen.getByRole("button", { name: "Terminal is unavailable" });
+    const panel = screen.getByRole("button", { name: "Right panel is unavailable" });
+    for (const toggle of [terminal, panel]) {
       expect(toggle).toBeDisabled();
       expect(toggle).not.toHaveAttribute("title");
-      vi.useFakeTimers();
-      try {
-        fireEvent.pointerEnter(toggle, { pointerType: "mouse" });
-        act(() => {
-          vi.advanceTimersByTime(500);
-        });
-        expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(name);
-        fireEvent.pointerLeave(toggle, { pointerType: "mouse" });
-        act(() => {
-          vi.advanceTimersByTime(1_000);
-        });
-      } finally {
-        vi.useRealTimers();
-      }
+    }
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(panel, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Right panel is unavailable");
+      fireEvent.pointerLeave(panel, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

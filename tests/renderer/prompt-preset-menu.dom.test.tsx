@@ -201,9 +201,11 @@ describe("PromptPresetMenu", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Prompt presets, 2 saved",
     }));
-    fireEvent.click(await screen.findByRole("button", {
+    const edit = await screen.findByRole("button", {
       name: "Edit prompt preset: Route audit",
-    }));
+    });
+    expect(edit).not.toHaveAttribute("title");
+    fireEvent.click(edit);
     const routeToggle = screen.getByRole("checkbox", {
       name: /Bound to saved model route/u,
     });
@@ -228,7 +230,13 @@ describe("PromptPresetMenu", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: "Edit prompt preset: Route audit",
     }));
-    fireEvent.click(screen.getByRole("button", { name: "Move Route audit up" }));
+    const moveUp = screen.getByRole("button", { name: "Move Route audit up" });
+    const moveDown = screen.getByRole("button", { name: "Move Route audit down" });
+    for (const control of [moveUp, moveDown]) expect(control).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(moveUp, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent)).toContain("Move up"));
+    fireEvent.pointerLeave(moveUp, { pointerType: "mouse" });
+    fireEvent.click(moveUp);
     await waitFor(() => expect(onReorder).toHaveBeenCalledWith([
       presets[1]!.id,
       presets[0]!.id,

@@ -421,6 +421,98 @@ describe("assistant rows around an accepted follow-up", () => {
     }
   });
 
+  const end = async (runtime: TurnControllerTestRuntime, ending: "completed" | "cancelled" | "failed") => {
+    if (ending === "cancelled") runtime.controller.cancel(runtime.conversationId);
+    runtime.provider.resolve({ status: ending });
+    await flushTurnControllerTestPromises();
+  };
+  const terminalAnswer = (runtime: TurnControllerTestRuntime, turnId: string) => {
+    const id = runtime.store.agentTurn(turnId).terminalAssistantMessageId;
+    return id ? runtime.store.message(id).content : null;
+  };
+
+  it.each(["completed", "cancelled", "failed"] as const)("leaves a follow-up unanswered when the turn ends %s before any reply", async (ending) => {
+    const { runtime, turnId } = await running();
+    try {
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Answer to the first task." });
+      await followUp(runtime, "Also rename the file.");
+      await end(runtime, ending);
+      expect(runtime.store.agentTurn(turnId).status).toBe(ending);
+      expect(terminalAnswer(runtime, turnId)).toBeNull();
+      expect(rows(runtime, turnId)).toEqual(["assistant:Answer to the first task.", "user:Also rename the file."]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it.each(["completed", "cancelled", "failed"] as const)("leaves a follow-up unanswered when a Claude turn ends %s while the earlier answer is still open", async (ending) => {
+    const { runtime, turnId } = await running(true);
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first" });
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: " task." });
+      await end(runtime, ending);
+      expect(terminalAnswer(runtime, turnId)).toBeNull();
+      expect(rows(runtime, turnId)).toEqual(["assistant:Answer to the first task.", "user:Also rename the file."]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("keeps the reply written after a Claude answer ends as the terminal answer", async () => {
+    const { runtime, turnId } = await running(true);
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first" });
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: " task." });
+      flushStreams(runtime);
+      runtime.provider.emit({ ...identity, type: "text-boundary" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
+      await end(runtime, "completed");
+      expect(terminalAnswer(runtime, turnId)).toBe("Renamed it.");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("answers only the first of two follow-ups when the turn ends after the first reply", async () => {
+    const { runtime, turnId } = await running();
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
+      await followUp(runtime, "And update the imports.");
+      await end(runtime, "completed");
+      expect(terminalAnswer(runtime, turnId)).toBeNull();
+      expect(rows(runtime, turnId)).toEqual([
+        "assistant:Answer to the first task.",
+        "user:Also rename the file.",
+        "assistant:Renamed it.",
+        "user:And update the imports.",
+      ]);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("keeps the reply to the second of two follow-ups as the terminal answer", async () => {
+    const { runtime, turnId } = await running();
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      await followUp(runtime, "Also rename the file.");
+      await followUp(runtime, "And update the imports.");
+      runtime.provider.emit({ ...identity, type: "text", text: "Did both." });
+      await end(runtime, "completed");
+      expect(terminalAnswer(runtime, turnId)).toBe("Did both.");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("keeps a Claude answer that is still streaming before the follow-up until Claude ends that answer", async () => {
     const { runtime, turnId } = await running(true);
     try {

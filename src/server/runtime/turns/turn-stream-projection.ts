@@ -123,6 +123,12 @@ export class TurnStreamProjection {
     }
   }
 
+  terminalAssistantMessageId(active: ActiveTurn): string | null {
+    const boundary = active.pendingFollowUpBoundary ?? active.followUpBoundary;
+    const latest = active.latestAssistantMessageId;
+    return boundary && boundary.messageId === latest ? null : latest;
+  }
+
   private commitFollowUpBoundary(
     active: ActiveTurn,
     at: string,

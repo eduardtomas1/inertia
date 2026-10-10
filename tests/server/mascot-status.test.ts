@@ -6,7 +6,7 @@ import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStat
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
-import { mascotCommentaryLine, mascotPreview, mascotResultLine } from "../../src/server/runtime/mascot-message";
+import { mascotActivityLine, mascotCommentaryLine, mascotPreview, mascotResultLine } from "../../src/server/runtime/mascot-message";
 
 const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
 const MINUTE = 60_000;
@@ -598,6 +598,25 @@ describe("mascot lines from long or structured text", () => {
     expect(mascotResultLine("Sure! I've updated the ranking so failures show first.")).toBe("Sure! I've updated the ranking so failures show first.");
     expect(mascotResultLine("Fixed ranking\nAdded tests")).toBe("Fixed ranking");
     expect(mascotCommentaryLine("I looked at the publisher and the feed. Done.")).toBe("I looked at the publisher and the feed. Done.");
+  });
+});
+
+describe("mascot failure lines", () => {
+  it("says which command failed and what could not be done for everything else", () => {
+    const failed = (kind: AgentActivity["kind"], title: string, detail: string | null = null): string | null =>
+      mascotActivityLine({ kind, title, detail, status: "failed" });
+    expect(failed("command", "Interrupted · Command", "Command:\nnpm test")).toBe("npm test failed");
+    expect(failed("command", "npm run lint")).toBe("npm run lint failed");
+    expect(failed("command", "Run checks")).toBe("Could not run checks");
+    expect(failed("command", "Shell")).toBe("A command failed");
+    expect(failed("file", "File change", "Files:\nupdate: /work/src/a.ts\nadd: /work/src/b.ts")).toBe("Could not edit a.ts and 1 more");
+    expect(failed("tool", "Search the web", "Query:\nelectron setShape macOS")).toBe("Could not search the web: electron setShape macOS");
+    expect(failed("tool", "Read File", "Path:\n/work/src/x.ts")).toBe("Could not read file: x.ts");
+    expect(failed("tool", "Edit README.md")).toBe("Could not edit README.md");
+    expect(failed("tool", "Edit file")).toBe("Could not edit file");
+    expect(failed("tool", "Grep")).toBe("Could not search the code");
+    expect(failed("tool", "TodoWrite")).toBe("Could not update the plan");
+    expect(failed("tool", "WebFetch")).toBe("Could not browse the web");
   });
 });
 

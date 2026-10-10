@@ -4,18 +4,18 @@ import { sanitizeProviderActivityDetail } from "../provider/activity-detail";
 const COMMAND_LIMIT = 60;
 const SKIPPED = /^(?:Patch updated|Plan updated|Plan completed|Hook · |Claude hook|Claude tool summary)/u;
 const GENERIC = /^(?:Run command|Cursor tool|Kimi Code tool|Dynamic tool|MCP tool|File change|Command|Tool|Activity)$/iu;
-const PHRASES: Array<[RegExp, string, string]> = [
-  [/todo ?read|read todos/u, "Reading the plan", "Read the plan"],
-  [/todo|plan|task ?(?:create|update)/u, "Updating the plan", "Updated the plan"],
-  [/task ?list/u, "Listing tasks", "Listed tasks"],
-  [/list ?mcp ?resources/u, "Listing resources", "Listed resources"],
-  [/notebook ?read/u, "Reading files", "Read files"],
-  [/web|url|fetch|brows|http/u, "Browsing the web", "Browsed the web"],
-  [/edit|write|replace|patch|notebook|create|file change|apply/u, "Editing files", "Edited files"],
-  [/grep|search|find|glob|list|ls$/u, "Searching the code", "Searched the code"],
-  [/read|view|open|cat$/u, "Reading files", "Read files"],
-  [/command|bash|shell|exec|terminal|run/u, "Running a command", "Ran a command"],
-  [/task|agent|delegat/u, "Delegating work", "Delegated work"],
+const PHRASES: Array<[RegExp, string, string, string]> = [
+  [/todo ?read|read todos/u, "Reading the plan", "Read the plan", "Could not read the plan"],
+  [/todo|plan|task ?(?:create|update)/u, "Updating the plan", "Updated the plan", "Could not update the plan"],
+  [/task ?list/u, "Listing tasks", "Listed tasks", "Could not list tasks"],
+  [/list ?mcp ?resources/u, "Listing resources", "Listed resources", "Could not list resources"],
+  [/notebook ?read/u, "Reading files", "Read files", "Could not read files"],
+  [/web|url|fetch|brows|http/u, "Browsing the web", "Browsed the web", "Could not browse the web"],
+  [/edit|write|replace|patch|notebook|create|file change|apply/u, "Editing files", "Edited files", "Could not edit files"],
+  [/grep|search|find|glob|list|ls$/u, "Searching the code", "Searched the code", "Could not search the code"],
+  [/read|view|open|cat$/u, "Reading files", "Read files", "Could not read files"],
+  [/command|bash|shell|exec|terminal|run/u, "Running a command", "Ran a command", "A command failed"],
+  [/task|agent|delegat/u, "Delegating work", "Delegated work", "Could not delegate work"],
 ];
 
 function cut(text: string, length: number): string {
@@ -129,8 +129,12 @@ function files(detail: string): string[] {
   return named ? [named] : [];
 }
 
-function tense(state: AgentActivity["status"], running: string, done: string, subject: string): string | null {
-  return mascotPreview(state === "failed" ? `${running === "Running" ? "" : `${running} `}${subject} failed` : `${state === "completed" ? done : running} ${subject}`);
+function imperative(title: string): string {
+  return /^\p{Lu}\p{Ll}*(?:\s+\p{Lu}\p{Ll}*)*$/u.test(title) ? title.toLowerCase() : title.replace(/^\p{Lu}(?=\p{Ll})/u, (first) => first.toLowerCase());
+}
+
+function tense(state: AgentActivity["status"], running: string, done: string, failed: string): string | null {
+  return mascotPreview(state === "failed" ? failed : state === "completed" ? done : running);
 }
 
 export function mascotActivityLine(activity: Pick<AgentActivity, "kind" | "title" | "detail" | "status">): string | null {
@@ -142,27 +146,29 @@ export function mascotActivityLine(activity: Pick<AgentActivity, "kind" | "title
   const state = activity.status;
   const raw = section(detail, "Command");
   const command = raw ? mascotCommand(raw) : null;
-  if (command) return tense(state, "Running", "Ran", command);
+  if (command) return tense(state, `Running ${command}`, `Ran ${command}`, `${command} failed`);
   const changed = files(detail);
-  if (changed.length) return tense(state, "Editing", "Edited", `${fileName(changed[0]!)}${changed.length > 1 ? ` and ${changed.length - 1} more` : ""}`);
+  if (changed.length) {
+    const subject = `${fileName(changed[0]!)}${changed.length > 1 ? ` and ${changed.length - 1} more` : ""}`;
+    return tense(state, `Editing ${subject}`, `Edited ${subject}`, `Could not edit ${subject}`);
+  }
   const name = title.toLowerCase().replace(/^mcp(?: · |__)/u, "mcp ").replace(/[_·/\s]+/gu, " ").trim();
   const tool = /^(?:mcp|tool) (.+)$/u.exec(name);
-  if (tool && name !== "mcp tool") return tense(state, "Using", "Used", tool[1]!);
+  if (tool && name !== "mcp tool") return tense(state, `Using ${tool[1]}`, `Used ${tool[1]}`, `Could not use ${tool[1]}`);
   const path = section(detail, "Path");
   const target = section(detail, "Query") ?? section(detail, "URL") ?? section(detail, "Pattern");
   const human = /\s/u.test(title) && !GENERIC.test(title);
   if (human && (path || target)) {
     const shown = path ? fileName(path.split("\n")[0]!) : mascotCommand(target!.split("\n")[0]!);
-    if (shown) return mascotPreview(`${title}: ${shown}${state === "failed" ? " failed" : ""}`);
+    if (shown) return tense(state, `${title}: ${shown}`, `${title}: ${shown}`, `Could not ${imperative(title)}: ${shown}`);
   }
-  if (human && /^\p{Lu}/u.test(title)) return mascotPreview(state === "failed" ? `${title} failed` : title);
+  if (human && /^\p{Lu}/u.test(title)) return tense(state, title, title, `Could not ${imperative(title)}`);
   if (human && activity.kind === "command") {
     const shown = mascotCommand(title);
-    if (shown) return tense(state, "Running", "Ran", shown);
+    if (shown) return tense(state, `Running ${shown}`, `Ran ${shown}`, `${shown} failed`);
   }
   const phrase = PHRASES.find(([pattern]) => pattern.test(name));
-  if (!phrase) return null;
-  return state === "failed" ? `${phrase[1]} failed` : phrase[state === "completed" ? 2 : 1];
+  return phrase ? tense(state, phrase[1], phrase[2], phrase[3]) : null;
 }
 
 function approvalTarget(request: Pick<AgentApprovalRequest, "kind" | "command" | "detail" | "reason">): string | null {

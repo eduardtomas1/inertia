@@ -283,7 +283,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     step({ tool_name: "run_command", step_index: 3, state: "RUNNING" });
     expect(turn.line()).toBe("Running a command");
     step({ tool_name: "run_command", step_index: 4, tool_info: { error: { type: "CommandFailed", message: "exit status 1" } } });
-    expect(turn.line()).toBe("Running a command failed");
+    expect(turn.line()).toBe("A command failed");
     const failure = antigravityResultFailure({ status: "ERROR", conversationId: null, response: "", error: "Gemini API returned 429: resource exhausted", usage: null }, WORKSPACE)!;
     turn.fail(failure.message);
     expect(turn.line()).toMatch(/429/u);

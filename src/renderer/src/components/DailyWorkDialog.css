@@ -279,15 +279,16 @@
 
 .daily-work-provider-section > div {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
-  gap: 0 24px;
   margin-top: 9px;
 }
 
 .daily-work-provider-summary {
   display: grid;
-  gap: 10px;
-  padding: 12px 0 11px;
+  min-height: 56px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(72px, 140px);
+  align-items: center;
+  gap: 24px;
+  padding: 10px 8px;
   border: 0;
   border-top: 1px solid var(--line-soft);
   border-radius: 0;
@@ -296,22 +297,24 @@
 
 .daily-work-provider-summary header,
 .daily-work-provider-summary header > span,
-.daily-work-provider-summary > div,
 .daily-work-conversations > header {
   display: flex;
   align-items: center;
 }
 
-.daily-work-provider-summary header {
-  justify-content: space-between;
-  gap: 10px;
-}
+.daily-work-provider-summary header { min-width: 0; }
 
 .daily-work-provider-summary header > span {
   min-width: 0;
   gap: 7px;
   font-size: var(--text-sm);
   font-weight: 500;
+}
+
+.daily-work-provider-portion {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
 }
 
 .daily-work-provider-share {
@@ -321,6 +324,8 @@
 }
 
 .daily-work-provider-summary > div {
+  display: grid;
+  grid-template-columns: repeat(3, 92px);
   gap: 16px;
   align-items: baseline;
 }
@@ -552,6 +557,14 @@
   }
   .daily-work-totals article:nth-child(2) { border-right: 0; }
   .daily-work-skeleton-band > i:nth-child(2) { border-right: 0; }
+  .daily-work-provider-summary {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 140px);
+    row-gap: 9px;
+  }
+  .daily-work-provider-summary > div {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
   .daily-work-conversation-card {
     grid-template-columns: auto minmax(0, 1fr) auto;
     row-gap: 9px;

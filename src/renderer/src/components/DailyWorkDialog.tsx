@@ -115,7 +115,6 @@ function ProviderSummary({
     <article className="daily-work-provider-summary" data-provider={provider.providerId}>
       <header>
         <span><ProviderMark providerId={provider.providerId} />{provider.providerLabel}</span>
-        {share !== null && <b className="daily-work-provider-share">{formatShare(share)}</b>}
       </header>
       <div>
         <span>
@@ -131,13 +130,16 @@ function ProviderSummary({
           <small>{provider.turnCount === 1 ? "turn" : "turns"}</small>
         </span>
       </div>
-      <span
-        className={share === null
-          ? "daily-work-provider-meter is-unavailable"
-          : "daily-work-provider-meter"}
-        aria-hidden="true"
-      >
-        {share !== null && <i style={{ width: `${share * 100}%` }} />}
+      <span className="daily-work-provider-portion">
+        {share !== null && <b className="daily-work-provider-share">{formatShare(share)}</b>}
+        <span
+          className={share === null
+            ? "daily-work-provider-meter is-unavailable"
+            : "daily-work-provider-meter"}
+          aria-hidden="true"
+        >
+          {share !== null && <i style={{ width: `${share * 100}%` }} />}
+        </span>
       </span>
     </article>
   );

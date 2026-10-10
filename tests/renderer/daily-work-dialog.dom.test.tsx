@@ -204,6 +204,26 @@ describe("DailyWorkDialog", () => {
     }
   });
 
+  it("lists provider summaries as full-width rows with one soft rule between them", async () => {
+    loadStyles();
+    const view = renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+    await within(dialog).findByRole("heading", { name: "By provider" });
+
+    const rows = [...view.container.querySelectorAll(".daily-work-provider-summary")];
+    expect(rows).toHaveLength(2);
+    expect(declared(rows[0]!.parentElement!, "grid-template-columns")).toBeUndefined();
+    for (const row of rows) {
+      expect(declared(row, "grid-template-columns")).toBe("minmax(0, 1fr) auto minmax(72px, 140px)");
+      expect(declared(row, "align-items")).toBe("center");
+      expect(declared(row, "border-bottom")).toBe("0px");
+      expect(row.querySelector("header")).toHaveTextContent(/^(Codex|Claude)$/u);
+      const meter = row.querySelector(".daily-work-provider-meter")!;
+      expect(meter.parentElement).not.toBe(row);
+      expect(meter.parentElement).toHaveClass("daily-work-provider-portion");
+    }
+  });
+
   it("renders each provider's settled token share against the day total", async () => {
     const shared = dashboard();
     shared.totals.processedTokens = metric(4_000, 2, 2);

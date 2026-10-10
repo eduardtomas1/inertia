@@ -497,11 +497,10 @@ test("persists composer usage modes without losing the followed transcript", asy
       strokeWidth: value ? getComputedStyle(value).strokeWidth : null,
     };
   });
-  expect(ringGeometry.width).toBeGreaterThanOrEqual(23);
-  expect(ringGeometry.width).toBeLessThanOrEqual(31);
+  expect(ringGeometry.width).toBe(20);
   expect(ringGeometry.height).toBe(ringGeometry.width);
   expect(ringGeometry.animations).toBe(0);
-  expect(ringGeometry.strokeWidth).toBe("1.65px");
+  expect(ringGeometry.strokeWidth).toBe("3px");
   expect(ringGeometry.width).toBeLessThan(ringGeometry.sendWidth);
   const contextRingScreenshot = testInfo.outputPath(
     "context-ring-near-limit-1440x920.png",
@@ -632,7 +631,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     const controlBounds = control.getBoundingClientRect();
     const toolbar = control.closest<HTMLElement>(".composer-toolbar");
     const toolbarBounds = toolbar?.getBoundingClientRect();
-    const railBounds = control.closest(".composer-primary-rail")?.getBoundingClientRect();
+    const railBounds = control.closest(".composer-end")?.getBoundingClientRect();
     return {
       inToolbar: Boolean(toolbar),
       controlRight: controlBounds.right,

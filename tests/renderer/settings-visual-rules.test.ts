@@ -19,6 +19,19 @@ const settings = "../../src/renderer/src/components/settings/settings.css";
 const search = "../../src/renderer/src/components/settings/SettingsSearch.css";
 const styles = "../../src/renderer/src/styles.css";
 
+describe("completion sound choices", () => {
+  const sound = "../../src/renderer/src/components/notifications/CompletionSoundSettings.css";
+
+  it("fills hover lighter than the selected sound and draws no ring", () => {
+    expect(rule(sound, ".completion-sound-choice")).toContain("background: transparent;");
+    expect(rule(sound, ".completion-sound-choice:hover:not(:disabled)")).toContain("background: var(--fill);");
+    const active = rule(sound, ".completion-sound-choice.is-active");
+    expect(active).toContain("background: var(--fill-strong);");
+    expect(active).toContain("font-weight: 500;");
+    expect(source(sound)).not.toMatch(/var\(--line\)\b|box-shadow/u);
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

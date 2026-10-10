@@ -54,7 +54,7 @@ interface Candidate {
   activity: { text: string; at: string } | null;
   outcome: string | null;
   line: Line;
-  requests: Map<string, { phase: MascotStatus["phase"]; message: string; progress: string | null }>;
+  requests: Map<string, { phase: MascotStatus["phase"]; message: string; progress: string | null; at: number }>;
 }
 
 const settledRequests: Candidate["requests"] = new Map();
@@ -155,13 +155,15 @@ export class MascotStatusPublisher {
         const first = event.request.questions[0];
         const message = first?.isSecret ? "Sensitive information is needed. Answer privately in the chat."
           : mascotPreview(first?.question) ?? "Choose which conversation context to share in the chat.";
-        requests.set(`input:${event.request.id}`, { phase: "waiting-for-input", message,
+        requests.set(`input:${event.request.id}`, { phase: "waiting-for-input", message, at: this.clock.now(),
           progress: event.request.questions.length > 1 ? `${event.request.questions.length} questions to answer` : null });
         break;
       }
       case "agent.approval.requested":
         if (!live) return;
-        requests.set(`approval:${event.request.id}`, { phase: "waiting-for-approval", message: mascotApprovalLine(event.request), progress: null });
+        requests.set(`approval:${event.request.id}`, {
+          phase: "waiting-for-approval", message: mascotApprovalLine(event.request), progress: null, at: this.clock.now(),
+        });
         break;
       case "agent.input.resolved": requests.delete(`input:${event.requestId}`); break;
       case "agent.approval.resolved": requests.delete(`approval:${event.requestId}`); break;
@@ -290,7 +292,8 @@ export class MascotStatusPublisher {
     const request = isMascotAttention(entry.status.phase)
       ? [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase) : undefined;
     const status: MascotStatus = { ...entry.status, activeCount, message: entry.line.text,
-      ...(isMascotAttention(entry.status.phase) ? { progress: request?.progress ?? null } : {}),
+      ...(isMascotAttention(entry.status.phase)
+        ? { progress: request?.progress ?? null, since: new Date(request?.at ?? entry.changedAt).toISOString() } : {}),
       quietSince: this.quiet(entry, now) ? new Date(entry.heardAt).toISOString() : null,
     };
     return parseMascotStatus(status) ? status : { ...status, chatTitle: null, projectName: null, message: null, progress: null };

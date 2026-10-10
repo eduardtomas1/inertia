@@ -38,7 +38,7 @@ describe("authoritative mascot status", () => {
     const status = {
       phase, projectId: "project", conversationId: "chat", runId: "chat-run", turnId: "chat-turn",
       chatTitle: "Chat chat", projectName: null, message: null, progress: null, steps: null,
-      since: terminal ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z", quietSince: null,
+      since: terminal || phase.startsWith("waiting-") ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z", quietSince: null,
       activeCount: terminal ? 0 : 1,
     };
     const shown = phase !== "cancelled";
@@ -401,6 +401,19 @@ describe("mascot bubble words", () => {
     publisher.observe({ type: "agent.input.requested", request: secret });
     expect(feed().status).toMatchObject({ message: "Sensitive information is needed. Answer privately in the chat.", progress: "2 questions to answer" });
     expect(JSON.stringify(feed())).not.toContain("PRIVATE");
+  });
+
+  it("times a question or approval from when it arrived rather than from the start of the turn", () => {
+    let shell = conversation("chat", "running", { requestedAt: "2026-09-06T09:00:00.000Z", updatedAt: "2026-09-06T10:10:00.000Z" });
+    const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    expect(feed().status.since).toBe("2026-09-06T09:00:00.000Z");
+    clock.advance(5 * MINUTE);
+    shell = conversation("chat", "waiting-for-input", { requestedAt: "2026-09-06T09:00:00.000Z", updatedAt: "2026-09-06T10:34:00.000Z" });
+    publisher.observe({ type: "agent.input.requested", request: input() });
+    expect(feed().status).toMatchObject({ phase: "waiting-for-input", since: "2026-09-06T10:35:00.000Z" });
+    publisher.replace([conversation("other", "waiting-for-approval", { requestedAt: "2026-09-06T08:00:00.000Z", updatedAt: "2026-09-06T10:20:00.000Z" })]);
+    expect(feed().status).toMatchObject({ conversationId: "other", since: "2026-09-06T10:20:00.000Z" });
   });
 
   it("keeps questions actionable through background updates and clears only the resolved request", () => {

@@ -1,12 +1,5 @@
 import { writeClipboardText } from "../utils/clipboard";
-import {
-  Check,
-  Folder,
-  KeyRound,
-  Scale,
-  ShieldCheck,
-  TriangleAlert,
-} from "lucide-react";
+import { ChevronDown, TriangleAlert } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -51,7 +44,7 @@ import {
 } from "../utils/duoRecoveryCommands";
 import { ModelChooser } from "./ModelChooser";
 import { DialogShell } from "./DialogShell";
-import { LoadingMark } from "./ui";
+import { LoadingMark, Switch } from "./ui";
 import "./MultiSpawnDialog.css";
 
 export interface MultiSpawnDialogProps {
@@ -148,20 +141,16 @@ function MultiSpawnSideEditor({
       aria-labelledby={`multi-spawn-side-heading-${index}`}
     >
       <header>
-        <span className="multi-spawn-side-number">
-          {isJudge ? <Scale size={14} /> : index + 1}
-        </span>
         <span>
-          <strong id={`multi-spawn-side-heading-${index}`}>
+          <h3 id={`multi-spawn-side-heading-${index}`}>
             {index === 0 ? "Route A" : index === 1 ? "Route B" : "Judge route"}
-          </strong>
-          <small>
+          </h3>
+          <span>
             {routeState.selected.harnessLabel} ·{" "}
             {routeState.selected.backendProfileName}
-          </small>
+          </span>
         </span>
         <span className={`multi-spawn-readiness ${ready ? "is-ready" : ""}`}>
-          {ready ? <Check size={14} /> : <KeyRound size={14} />}
           {ready ? "Ready" : routeState.statusBadge}
         </span>
       </header>
@@ -187,7 +176,7 @@ function MultiSpawnSideEditor({
           />
         </label>
         <label className="multi-spawn-field" htmlFor={projectId}>
-          <span><Folder size={14} /> Project</span>
+          <span>Project</span>
           <select
             id={projectId}
             aria-label={`${chatLabel} project`}
@@ -245,7 +234,7 @@ function MultiSpawnSideEditor({
           </select>
         </label>
         <label className="multi-spawn-field" htmlFor={accessId}>
-          <span><ShieldCheck size={14} /> Access</span>
+          <span>Access</span>
           <select
             id={accessId}
             aria-label={`${chatLabel} access`}
@@ -269,10 +258,10 @@ function MultiSpawnSideEditor({
         <div className="multi-spawn-route-warning" role="status">
           <span>
             <strong>{routeState.statusTitle}</strong>
-            <small>{routeState.statusDetail}</small>
+            <span>{routeState.statusDetail}</span>
           </span>
           {routeState.repairAction && routeState.providerId && (
-            <button type="button" disabled={disabled} onClick={onRepair}>
+            <button type="button" className="secondary-button" disabled={disabled} onClick={onRepair}>
               Open setup
             </button>
           )}
@@ -578,8 +567,6 @@ export function MultiSpawnDialog({
       bodyClassName="multi-spawn-dialog-body is-flush"
       titleId="multi-spawn-title"
       title="Launch a duo"
-      description="Send one brief to two independent agents with separate routes and permissions."
-      descriptionId="multi-spawn-description"
       closeLabel="Close multi-spawn"
       closeDisabled={cancelling}
       onClose={onClose}
@@ -596,13 +583,7 @@ export function MultiSpawnDialog({
               rememberPreset: event.currentTarget.checked,
             })}
           />
-          <span>
-            <strong>Save this pairing</strong>
-            <small>
-              Saves names, routes, reasoning, access, and the compare toggle
-              locally — never prompts or projects.
-            </small>
-          </span>
+          <span>Save this pairing</span>
         </label>
       )}
       footer={<>
@@ -677,37 +658,37 @@ export function MultiSpawnDialog({
         className={`multi-spawn-comparison${draft.comparison.enabled ? " is-enabled" : ""}`}
         aria-labelledby="multi-spawn-comparison-title"
       >
-        <label className="multi-spawn-comparison-toggle">
-          <input
-            type="checkbox"
-            aria-label="Compare with a third model"
+        <div className="multi-spawn-comparison-toggle">
+          <Switch
+            label="Compare with a third model"
             checked={draft.comparison.enabled}
             disabled={busy}
-            onChange={(event) => setDraft({
+            onChange={(enabled) => setDraft({
               ...draft,
               comparison: {
                 ...draft.comparison,
-                enabled: event.currentTarget.checked,
+                enabled,
               },
             })}
           />
           <span>
-            <strong id="multi-spawn-comparison-title">
+            <h3 id="multi-spawn-comparison-title">
               Add an independent judge
-            </strong>
-            <small>
+            </h3>
+            <span>
               Runs after both agents finish and receives bounded results only.
-            </small>
+            </span>
           </span>
-        </label>
+        </div>
 
         {draft.comparison.enabled && (
           <div className="multi-spawn-comparison-body">
             <details className="multi-spawn-judge-config">
               <summary>
-                <strong>Independent judge</strong>
+                <span>Independent judge</span>
                 <span className="multi-spawn-judge-config-action">
                   Configure judge
+                  <ChevronDown size={14} aria-hidden="true" />
                 </span>
               </summary>
               <MultiSpawnSideEditor
@@ -808,10 +789,7 @@ export function MultiSpawnDialog({
                   className="multi-spawn-comparison-status"
                   aria-label="Third-model comparison status"
                 >
-                  <span>
-                    <Scale size={14} />
-                    <strong>Separate third-model judge</strong>
-                  </span>
+                  <h3>Separate third-model judge</h3>
                   <dl>
                     <div>
                       <dt>State</dt>

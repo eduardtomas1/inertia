@@ -177,8 +177,8 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     .selectOption({ label: "Companion" });
   await dialog.getByRole("combobox", { name: "Chat 2 access" })
     .selectOption("full");
-  await dialog.getByRole("checkbox", { name: "Compare with a third model" })
-    .check();
+  await dialog.getByRole("switch", { name: "Compare with a third model" })
+    .click();
   const judgeConfiguration = dialog.locator(".multi-spawn-judge-config");
   await expect(judgeConfiguration).not.toHaveAttribute("open", "");
   await judgeConfiguration.getByText("Configure judge", { exact: true }).click();

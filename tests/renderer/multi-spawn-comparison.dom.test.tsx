@@ -122,6 +122,34 @@ describe("Duo third-model comparison dialog", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.useRealTimers());
 
+  it("lays both routes out as plain columns with one title row and a switch for the judge", () => {
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Launch a duo" });
+    expect(dialog.querySelector(".dialog-shell-header")?.querySelectorAll("svg")).toHaveLength(1);
+    expect(dialog).not.toHaveTextContent("Send one brief to two independent agents");
+    expect(dialog).not.toHaveTextContent("never prompts or projects");
+    expect(dialog.querySelectorAll(".multi-spawn-side-number, .multi-spawn-side svg")).toHaveLength(0);
+    expect(screen.getByRole("heading", { level: 3, name: "Route A" })).toBeInTheDocument();
+    expect(screen.getAllByText("Ready", { exact: true })).toHaveLength(2);
+    const judge = screen.getByRole("switch", { name: "Compare with a third model" });
+    expect(judge).toHaveClass("switch-control");
+    fireEvent.click(judge);
+    expect(judge).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Configure judge").querySelector("svg.lucide-chevron-down")).not.toBeNull();
+  });
+
   it("makes the lock explicit and collects an independent judge route", async () => {
     const onSubmit = vi.fn(async (_draft: MultiSpawnDraft) => undefined);
     render(
@@ -138,7 +166,7 @@ describe("Duo third-model comparison dialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox", {
+    fireEvent.click(screen.getByRole("switch", {
       name: "Compare with a third model",
     }));
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(3);

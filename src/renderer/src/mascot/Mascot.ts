@@ -4,7 +4,7 @@ import {
 } from "../../../shared/mascot";
 import { mascotChatChoices } from "../../../shared/mascot-choices";
 import { mascotArtwork, readMascotAssets } from "./assets";
-import { mascotActionLabel, mascotElapsed, mascotRowState, mascotShortLabel, mascotTone } from "./copy";
+import { mascotActionLabel, mascotElapsed, mascotShortLabel, mascotTone } from "./copy";
 
 declare global { interface Window { mascot: MascotBridge } }
 
@@ -113,7 +113,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
         rows.set(key, row);
       }
       const [name, state] = row.children as unknown as [HTMLElement, HTMLElement];
-      const word = mascotRowState(chat);
+      const word = `${mascotShortLabel[chat.phase].toLowerCase()}${chat.steps ? ` ${chat.steps.completed}/${chat.steps.total}` : ""}`;
       name.textContent = choices[index]!.title;
       state.textContent = `· ${word}`;
       row.dataset.tone = mascotTone(chat.phase);

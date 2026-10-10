@@ -1,12 +1,4 @@
-import type { MascotPhase, MascotStatus } from "../../../shared/mascot";
-
-export function mascotRowState({ phase, steps }: MascotStatus): string {
-  const tone = mascotTone(phase);
-  if (tone === "attention") return "needs you";
-  if (tone === "done") return "done";
-  if (tone === "problem") return phase === "failed" ? "failed" : "stopped";
-  return steps ? `working ${steps.completed}/${steps.total}` : "working";
-}
+import type { MascotPhase } from "../../../shared/mascot";
 
 export function mascotActionLabel(phase: MascotPhase): string {
   if (phase === "waiting-for-input") return "Answer in chat ↗";
@@ -25,7 +17,7 @@ export const mascotShortLabel: Record<MascotPhase, string> = {
   delegated: "Delegated",
   retrying: "Retrying",
   "waiting-for-input": "Needs you",
-  "waiting-for-approval": "Approval",
+  "waiting-for-approval": "Needs you",
   cancelling: "Stopping",
   completed: "Done",
   failed: "Failed",

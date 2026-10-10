@@ -344,6 +344,23 @@ describe("mascot rows, words and announcements", () => {
     expect(view.container.querySelector<HTMLElement>(".mascot-status")!.style.height).toBe("116px");
   });
 
+  it("names each row's state with the chooser's words", async () => {
+    const app = fixture();
+    renderMascot();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    const shown = chat("shown", "waiting-for-input");
+    const rows = (["waiting-for-approval", "queued", "starting", "delegated", "retrying", "cancelling"] as const)
+      .map((phase) => chat(phase, phase, { chatTitle: phase }));
+    app.list(shown, [shown, ...rows], null, { chats: 7, attention: 2, others: 6 }, rows.slice(0, 5));
+    expect(within(screen.getByRole("group", { name: "Other chats" })).getAllByRole("button").map((row) => row.textContent)).toEqual([
+      "waiting-for-approval· needs you", "queued· queued", "starting· starting", "delegated· delegated", "retrying· retrying",
+    ]);
+    app.list(shown, [shown, ...rows], null, { chats: 7, attention: 2, others: 6 }, rows.slice(1));
+    expect(within(screen.getByRole("group", { name: "Other chats" })).getAllByRole("button").at(-1)).toHaveTextContent("cancelling· stopping");
+    fireEvent.click(screen.getByRole("button", { name: /Show chat/ }));
+    expect(screen.getByRole("button", { name: "waiting-for-approval, Inertia, Needs you" })).toBeTruthy();
+  });
+
   it("reports the drawn bubble height once per change, including the chooser opened from idle", async () => {
     const app = fixture();
     renderMascot();

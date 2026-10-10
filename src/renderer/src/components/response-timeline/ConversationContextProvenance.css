@@ -27,7 +27,7 @@
 
 .sent-context > button:hover,
 .sent-context > button[aria-expanded="true"] {
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .turn-user-request > .composer-context-preview {

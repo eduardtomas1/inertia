@@ -6,7 +6,7 @@ import {
   CircleAlert,
   MessageSquarePlus,
   MessagesSquare,
-  RefreshCw,
+  Plus,
   X,
 } from "lucide-react";
 import clsx from "clsx";
@@ -34,6 +34,7 @@ import {
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { TooltipButton } from "../TooltipButton";
+import { LoadingMark } from "../ui";
 import {
   RouteRepairIcon,
   routeRepairLabel,
@@ -333,7 +334,7 @@ export function ComposerInputZone({
               routeReadiness.transient ? "is-checking" : "is-attention",
             )}>
               {routeReadiness.transient && (
-                <RefreshCw size={14} className="is-spinning" aria-hidden="true" />
+                <LoadingMark size={14} aria-hidden="true" />
               )}
               {routeReadiness.badge}
             </span>
@@ -369,7 +370,7 @@ export function ComposerInputZone({
             className="composer-context"
             aria-label={`Selected ${contextKind} context`}
           >
-            <MessageSquarePlus size={14} />
+            <MessageSquarePlus size={14} aria-hidden="true" />
             <span>
               <strong>
                 {reviewNoteContext
@@ -400,11 +401,13 @@ export function ComposerInputZone({
               aria-pressed={previewContextSelected}
               onClick={onTogglePreviewContext}
             >
+              {previewContextSelected
+                ? <Check size={14} aria-hidden="true" />
+                : <Plus size={14} aria-hidden="true" />}
               <span>
                 <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
                 <small>{previewContextUrl}</small>
               </span>
-              <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
             </button>
             <TooltipButton
               type="button"

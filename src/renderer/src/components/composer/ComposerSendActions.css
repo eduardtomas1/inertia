@@ -1,9 +1,5 @@
 .send-button[data-motion-state="sending"] .composer-send-motion-icon {
-  animation: composer-send-motion-spin 760ms linear infinite;
-}
-
-@keyframes composer-send-motion-spin {
-  to { transform: rotate(360deg); }
+  animation: spin 800ms linear infinite;
 }
 
 .app-shell[data-document-visible="false"]

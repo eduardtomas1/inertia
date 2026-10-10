@@ -89,12 +89,10 @@
 
 .composer-compact-notice-icon {
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   place-items: center;
-  border-radius: var(--radius-xs);
   color: var(--text-muted);
-  background: var(--fill);
 }
 
 .composer-compact-notice-state {
@@ -111,30 +109,3 @@
 .composer-compact-notice.is-error .composer-compact-notice-state {
   color: var(--danger);
 }
-
-.composer-status-dots {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.composer-status-dots i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: composer-status-dot 1.1s ease-in-out infinite;
-}
-
-.composer-status-dots i:nth-child(2) { animation-delay: var(--dur-fast); }
-.composer-status-dots i:nth-child(3) { animation-delay: var(--dur); }
-
-@keyframes composer-status-dot {
-  0%, 70%, 100% { opacity: 0.28; transform: translateY(0); }
-  35% { opacity: 1; transform: translateY(-1px); }
-}
-
-.app-shell[data-document-visible="false"] .composer-status-dots i {
-  animation-play-state: paused;
-}
-

@@ -42,6 +42,7 @@ import { conversationContextMismatch } from "../../lib/newConversation";
 import { layoutStorage } from "../../utils/layoutStorage";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
+import { TooltipText } from "../TooltipText";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
 import {
@@ -453,19 +454,15 @@ export function ComposerToolbar({
                 aria-label="Add context"
               >
                 {selectedProvider?.agentThreadManagement && (
-                  <span
-                    className={clsx(
-                      "composer-pill composer-action-control",
-                      selectedProvider.agentThreadManagement.state === "supported"
-                        ? "is-active"
-                        : undefined,
-                    )}
+                  <TooltipText
+                    className="composer-tools-status composer-action-control"
+                    data-state={selectedProvider.agentThreadManagement.state}
                     aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
-                    title={selectedProvider.agentThreadManagement.detail}
+                    tooltip={selectedProvider.agentThreadManagement.detail}
                   >
                     <MessagesSquare size={16} aria-hidden="true" />
                     <span>Chat tools</span>
-                  </span>
+                  </TooltipText>
                 )}
                 {promptPresetsEnabled && (
                   <Suspense fallback={null}>
@@ -568,7 +565,7 @@ export function ComposerToolbar({
       </div>
       <div className="composer-end">
         {attachmentImporting && (
-          <span className="provider-status is-ready" role="status">
+          <span className="provider-status" role="status">
             <LoadingMark size={14} aria-hidden="true" />
             <span>Adding attachments…</span>
           </span>

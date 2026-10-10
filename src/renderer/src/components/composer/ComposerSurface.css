@@ -251,6 +251,16 @@
   padding: 0;
   border: 0;
 }
+.composer-shell .composer-tools-status {
+  display: inline-flex;
+  height: var(--composer-tool-size);
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
 .composer-shell .composer-tools .icon-button {
   width: var(--composer-tool-size);
   height: var(--composer-tool-size);

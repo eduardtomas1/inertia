@@ -189,6 +189,33 @@ describe("UsageIndicator", () => {
     expect(html).not.toContain('data-context-ring-state="refreshing"');
   });
 
+  it("draws the trigger without context data as a plain 16px ring in the icon stroke instead of a dashed placeholder", () => {
+    const html = render(null, [], freshState, "compact");
+    expect(html).toContain('data-context-ring-state="unavailable"');
+    expect(html).not.toContain("usage-context-ring-label");
+    expect(html).not.toContain("—");
+    expect(render(null, [], freshState, "expanded")).not.toContain("usage-trigger-value");
+
+    const css = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    ).replace(/\r\n?/gu, "\n");
+    expect(css).toContain([
+      ".usage-popover-trigger .usage-context-ring.is-unavailable {",
+      "  width: 16px;",
+      "  height: 16px;",
+      "}",
+    ].join("\n"));
+    expect(css).toContain([
+      ".usage-popover-trigger .usage-context-ring.is-unavailable .usage-context-ring-track {",
+      "  stroke: currentcolor;",
+      "  stroke-width: 1.75;",
+      "  vector-effect: none;",
+      "}",
+    ].join("\n"));
+    expect(css).not.toMatch(/\.usage-context-ring\.is-unavailable \.usage-context-ring-track \{[^}]*stroke-dasharray/u);
+  });
+
   it("removes the context ring transition for reduced motion", () => {
     const css = readFileSync(
       new URL("../../src/renderer/src/styles.css", import.meta.url),

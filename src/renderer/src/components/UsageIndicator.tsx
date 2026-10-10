@@ -213,7 +213,7 @@ function ContextRing({
           />
         )}
       </svg>
-      <span className="usage-context-ring-label">{value === null ? "—" : value}</span>
+      {value !== null && <span className="usage-context-ring-label">{value}</span>}
       {quotaRefreshing && <span className="usage-quota-refresh-indicator" />}
     </span>
   );
@@ -336,7 +336,7 @@ export function UsageIndicator({
           onClick={() => setOpen((current) => !current)}
         >
           <ContextRing context={context} quotaRefreshing={quotaRefreshing} />
-          {behavior.showAdjacentValue && (
+          {behavior.showAdjacentValue && ringState !== "unavailable" && (
             <span className="usage-trigger-value" aria-hidden="true">{context.valueLabel}</span>
           )}
         </TooltipButton>

@@ -101,6 +101,16 @@ describe("devices and integrations", () => {
   });
 });
 
+describe("data section", () => {
+  it("separates storage rows like every other settings row", () => {
+    const data = "../../src/renderer/src/components/settings/sections/DataSettings.css";
+    const row = rule(data, ".attachment-storage-setting > .setting-row");
+    expect(row).toContain("border-top: 1px solid var(--line-soft);");
+    expect(row).not.toContain("margin-top");
+    expect(source(data)).not.toMatch(/solid var\(--line\);|11px/u);
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

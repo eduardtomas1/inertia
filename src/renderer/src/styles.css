@@ -4044,7 +4044,7 @@ button.turn-agents-line:hover {
   font-size: var(--text-xs);
 }
 
-@container (max-width: 620px) {
+@container (max-width: 560px) {
   .composer-action-control,
   .composer-provider-control,
   .composer-setting-family {

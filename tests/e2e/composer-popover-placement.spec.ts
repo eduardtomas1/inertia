@@ -330,7 +330,7 @@ test("keeps every composer utility popover inside both split panes", async (
   await capture(testInfo, "pr-221-popover-bottom-left-scratch");
   await page.keyboard.press("Escape");
 
-  await app.resizeWindow(1_880, 720);
+  await app.resizeWindow(1_440, 720);
   await separator.focus();
   await separator.press("Enter");
   await expect(separator).toHaveAttribute("aria-valuenow", "50");
@@ -396,7 +396,7 @@ test("keeps every composer utility popover inside both split panes", async (
   await expect(speedMenu.getByRole("menuitemradio").first()).toBeFocused();
   await expectContained(secondaryRootSurface);
   await expectContained(speedMenu);
-  await app.resizeWindow(1_840, 680);
+  await app.resizeWindow(1_400, 680);
   await expectContained(secondaryRootSurface);
   await expectContained(speedMenu);
   await capture(testInfo, "pr-221-popover-center-right-response-speed");

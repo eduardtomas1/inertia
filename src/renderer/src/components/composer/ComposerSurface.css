@@ -380,7 +380,7 @@
 }
 .composer-shell .composer-checkout-strip {
   position: relative;
-  z-index: 2;
+  z-index: 0;
   display: flex;
   width: calc(100% - 2 * var(--composer-drawer-inset));
   height: 32px;
@@ -497,6 +497,15 @@
   flex: 0 0 auto;
   margin-inline: 5px;
   color: var(--text-muted);
+}
+@container (max-width: 620px) {
+  .composer-shell .composer-access-control .composer-setting-value,
+  .composer-shell .composer-mode-control .composer-setting-value {
+    display: none;
+  }
+  .composer-shell .composer-setting-control::before {
+    display: none;
+  }
 }
 @container conversation-workspace (max-width: 639px) {
   .composer-shell .composer-input-zone {

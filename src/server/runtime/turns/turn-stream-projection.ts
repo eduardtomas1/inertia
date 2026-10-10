@@ -91,11 +91,8 @@ export class TurnStreamProjection {
     return closed;
   }
 
-  prepareFollowUp(
-    active: ActiveTurn,
-    keepAnswerOpen: boolean,
-  ): { deferred: boolean; after: string | null } {
-    const deferred = keepAnswerOpen && Boolean(active.assistantSegmentText);
+  prepareFollowUp(active: ActiveTurn): { deferred: boolean; after: string | null } {
+    const deferred = Boolean(active.assistantSegmentText);
     if (deferred) this.flush(active, "assistant");
     else this.closeAssistantSegment(active);
     const latest = active.latestAssistantMessageId

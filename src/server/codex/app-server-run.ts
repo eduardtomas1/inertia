@@ -772,7 +772,9 @@ export function startCodexAppServerRun(
           ...input.imagePaths.map((path) => ({ type: "localImage", path })),
         ],
         expectedTurnId,
-      }, undefined, false);
+      }, (result) => {
+        if (result?.turnId === expectedTurnId) events.deferAnswerBoundary();
+      }, false);
       // Capture ownership before awaiting: completion can share the response's
       // stdout batch, but only this exact provider turn can acknowledge input.
       if (receipt.turnId === expectedTurnId) return true;

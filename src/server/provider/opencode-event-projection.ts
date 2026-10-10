@@ -50,6 +50,8 @@ export interface OpenCodeEventState {
   parts: Map<string, OpenCodeTrackedPart>;
   pendingDeltas: Map<string, string>;
   activities: Map<string, OpenCodeTrackedActivity>;
+  openTextMessageId: string | null;
+  answerBoundaryMessageId: string | null;
 }
 
 export function createOpenCodeEventState(): OpenCodeEventState {
@@ -62,7 +64,47 @@ export function createOpenCodeEventState(): OpenCodeEventState {
     parts: new Map(),
     pendingDeltas: new Map(),
     activities: new Map(),
+    openTextMessageId: null,
+    answerBoundaryMessageId: null,
   };
+}
+
+export function deferOpenCodeAnswerBoundary(
+  state: OpenCodeEventState,
+  emitter: AgentHarnessEmitter,
+): void {
+  if (state.openTextMessageId) {
+    state.answerBoundaryMessageId = state.openTextMessageId;
+  } else {
+    emitter.textBoundary();
+  }
+}
+
+export function endOpenCodeAssistantText(
+  messageId: string,
+  state: OpenCodeEventState,
+  emitter: AgentHarnessEmitter,
+): void {
+  if (state.openTextMessageId === messageId) state.openTextMessageId = null;
+  if (state.answerBoundaryMessageId !== messageId) return;
+  state.answerBoundaryMessageId = null;
+  emitter.textBoundary();
+}
+
+function noteOpenCodeAssistantText(
+  partId: string,
+  state: OpenCodeEventState,
+  emitter: AgentHarnessEmitter,
+): void {
+  const messageId = state.parts.get(partId)?.messageId ?? null;
+  if (
+    state.answerBoundaryMessageId
+    && state.answerBoundaryMessageId !== messageId
+  ) {
+    state.answerBoundaryMessageId = null;
+    emitter.textBoundary();
+  }
+  state.openTextMessageId = messageId;
 }
 
 export function rememberOpenCodeMessageRole(
@@ -593,6 +635,7 @@ function appendOpenCodePartSnapshot(
   emittedParts.set(partId, next);
   if (!extendsPrevious) {
     if (type === "text") {
+      noteOpenCodeAssistantText(partId, state, emitter);
       emitter.textSnapshot(
         partId,
         openCodeCanonicalResult(emittedParts, state).text,
@@ -604,6 +647,7 @@ function appendOpenCodePartSnapshot(
   if (type === "reasoning") {
     emitter.rich({ type: "reasoning-summary", text: delta });
   } else {
+    noteOpenCodeAssistantText(partId, state, emitter);
     emitOpenCodeText(delta, partId, resultText, emitter.text);
   }
 }
@@ -624,6 +668,7 @@ function appendOpenCodePartText(
   if (type === "reasoning") {
     emitter.rich({ type: "reasoning-summary", text: delta });
   } else {
+    noteOpenCodeAssistantText(partId, state, emitter);
     emitOpenCodeText(delta, partId, resultText, emitter.text);
   }
 }

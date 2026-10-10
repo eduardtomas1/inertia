@@ -307,9 +307,9 @@ describe("assistant rows around an accepted follow-up", () => {
       callback();
     }
   };
-  const running = async (claude = false) => {
-    const runtime = await createTurnControllerTestRuntime({}, claude
-      ? { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) }
+  const running = async (providerId?: "claude" | "opencode") => {
+    const runtime = await createTurnControllerTestRuntime({}, providerId
+      ? { modelSelection: providerNativeModelSelection({ providerId, modelId: "provider-default" }) }
       : {});
     const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First task" });
     runtime.controller.start(queued.turn.id);
@@ -321,6 +321,9 @@ describe("assistant rows around an accepted follow-up", () => {
     try {
       return await runtime.controller.steer(lease, { content, imagePaths: [] });
     } finally { lease.release(); }
+  };
+  const answerEnded = (runtime: TurnControllerTestRuntime): void => {
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text-boundary" });
   };
   const rows = (runtime: TurnControllerTestRuntime, turnId: string) =>
     runtime.store.conversationDetail(runtime.conversationId)!.messages
@@ -334,6 +337,7 @@ describe("assistant rows around an accepted follow-up", () => {
     const { runtime, turnId } = await running();
     try {
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Answer to the first task." });
+      answerEnded(runtime);
       const result = await followUp(runtime, "Also rename the file.");
       expect(result.kind).toBe("accepted");
       expect(persistedCommentary(runtime.events)).toEqual(["Answer to the first task."]);
@@ -363,6 +367,7 @@ describe("assistant rows around an accepted follow-up", () => {
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: earlier });
+      answerEnded(runtime);
       const accepted = await followUp(runtime, "Also rename the file.") as { message: ChatMessage };
       runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
       flushStreams(runtime);
@@ -387,6 +392,7 @@ describe("assistant rows around an accepted follow-up", () => {
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Answer. " });
+      answerEnded(runtime);
       await followUp(runtime, "Also rename the file.");
       runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
       flushStreams(runtime);
@@ -401,7 +407,7 @@ describe("assistant rows around an accepted follow-up", () => {
   });
 
   it("keeps a Claude answer written after an empty correction while the follow-up waits for its boundary", async () => {
-    const { runtime, turnId } = await running(true);
+    const { runtime, turnId } = await running("claude");
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Draft" });
@@ -446,7 +452,7 @@ describe("assistant rows around an accepted follow-up", () => {
   });
 
   it.each(["completed", "cancelled", "failed"] as const)("leaves a follow-up unanswered when a Claude turn ends %s while the earlier answer is still open", async (ending) => {
-    const { runtime, turnId } = await running(true);
+    const { runtime, turnId } = await running("claude");
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first" });
@@ -461,7 +467,7 @@ describe("assistant rows around an accepted follow-up", () => {
   });
 
   it("keeps the reply written after a Claude answer ends as the terminal answer", async () => {
-    const { runtime, turnId } = await running(true);
+    const { runtime, turnId } = await running("claude");
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first" });
@@ -482,8 +488,10 @@ describe("assistant rows around an accepted follow-up", () => {
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      answerEnded(runtime);
       await followUp(runtime, "Also rename the file.");
       runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
+      answerEnded(runtime);
       await followUp(runtime, "And update the imports.");
       await end(runtime, "completed");
       expect(terminalAnswer(runtime, turnId)).toBeNull();
@@ -503,6 +511,7 @@ describe("assistant rows around an accepted follow-up", () => {
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      answerEnded(runtime);
       await followUp(runtime, "Also rename the file.");
       await followUp(runtime, "And update the imports.");
       runtime.provider.emit({ ...identity, type: "text", text: "Did both." });
@@ -513,8 +522,31 @@ describe("assistant rows around an accepted follow-up", () => {
     }
   });
 
+  it.each([undefined, "opencode"] as const)("keeps an answer still streaming before a follow-up whole until the provider ends it (%s)", async (providerId) => {
+    const { runtime, turnId } = await running(providerId);
+    try {
+      expect(runtime.store.agentTurn(turnId).harnessId).toBe(providerId ? "opencode-sdk" : "codex-app-server");
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer to the fir" });
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: "st task." });
+      flushStreams(runtime);
+      runtime.provider.emit({ ...identity, type: "text-boundary" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Renamed it." });
+      await end(runtime, "completed");
+      expect(rows(runtime, turnId)).toEqual([
+        "assistant:Answer to the first task.",
+        "user:Also rename the file.",
+        "assistant:Renamed it.",
+      ]);
+      expect(terminalAnswer(runtime, turnId)).toBe("Renamed it.");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("keeps a Claude answer that is still streaming before the follow-up until Claude ends that answer", async () => {
-    const { runtime, turnId } = await running(true);
+    const { runtime, turnId } = await running("claude");
     try {
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "text", text: "Answer to the first" });

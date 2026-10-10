@@ -132,3 +132,39 @@ describe("Codex follow-up delivery uncertainty", () => {
     });
   });
 });
+
+describe("Codex answer boundary around an accepted follow-up", () => {
+  it.each([
+    ["open", ["text:Answer to the fir", "text:st task.", "boundary", "text:Renamed it."]],
+    ["ended", ["text:Answer to the fir", "boundary", "text:Renamed it."]],
+    ["unfinished", ["text:Answer to the fir", "text:st task.", "boundary", "text:Renamed it."]],
+  ] as const)("ends the answer that was %s when the follow-up was accepted before the reply", async (state, expected) => {
+    const roots: string[] = [];
+    const fake = fakeAppServer(roots);
+    const stream: string[] = [];
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      cwd: fake.root,
+      environment: {
+        ...process.env,
+        INERTIA_APP_SERVER_CAPTURE: fake.capturePath,
+        INERTIA_APP_SERVER_SCENARIO: `steer-answer-${state}`,
+      },
+      prompt: "Answer, then take a follow-up.",
+      access: "full",
+      planMode: false,
+      onText: (text) => { stream.push(`text:${text}`); },
+      onTextBoundary: () => { stream.push("boundary"); },
+    });
+    try {
+      await waitFor("the answer to start streaming", () => stream.length > 0);
+      await expect(run.steer!({ content: "Also rename the file.", imagePaths: [] })).resolves.toBe(true);
+      await expect(run.result).resolves.toMatchObject({ status: "completed" });
+      expect(stream).toEqual(expected);
+    } finally {
+      run.cancel(true);
+      await run.result;
+      await Promise.all(roots.map(removePortableFixture));
+    }
+  });
+});

@@ -69,6 +69,7 @@ export interface CodexAppServerOptions {
   /** Test seam for the owned App Server process-tree lifecycle. */
   terminateProcessTree?: ProcessTreeTerminator;
   onText?: (text: string) => void;
+  onTextBoundary?: () => void;
   onActivity?: (
     kind: "system" | "turn" | "tool" | "command" | "reasoning",
     phase: "started" | "completed" | "failed" | "info",

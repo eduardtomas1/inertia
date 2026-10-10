@@ -46,6 +46,7 @@ import {
   handleCodexAuxiliaryServerRequest,
 } from "./app-server-requests";
 import {
+  endCodexAnswerBeforeText,
   handleCodexHook,
   handleCodexItem,
   type CodexItemActivity,
@@ -136,6 +137,7 @@ export class CodexAppServerEvents {
   private readonly pendingInputs = new Map<string, PendingInput>();
   private readonly pendingServerRequestIds = new Set<string>();
   private readonly deltaItems = new Set<string>();
+  private readonly answerBoundaryItems = new Set<string>();
   private readonly outputItems = new Set<string>();
   private readonly commandOutput = new CodexCommandOutput();
   private readonly reasoningDeltaItems = new Set<string>();
@@ -221,6 +223,11 @@ export class CodexAppServerEvents {
     });
   }
 
+  deferAnswerBoundary(): void {
+    for (const itemId of this.deltaItems) this.answerBoundaryItems.add(itemId);
+    if (this.answerBoundaryItems.size === 0) this.host.options.onTextBoundary?.();
+  }
+
   dispose(): void {
     this.approvalAuthority.clear();
     this.subagentContinuation.dispose();
@@ -232,6 +239,7 @@ export class CodexAppServerEvents {
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
     this.deltaItems.clear();
+    this.answerBoundaryItems.clear();
     this.outputItems.clear();
     this.commandOutput.clear();
     this.reasoningDeltaItems.clear();
@@ -727,6 +735,7 @@ export class CodexAppServerEvents {
       if (!delta) return;
       const itemId = boundedText(params.itemId, 512);
       if (itemId && !this.trackStreamItem(this.deltaItems, itemId)) return;
+      endCodexAnswerBeforeText(this.answerBoundaryItems, itemId, this.host.options);
       this.host.resultText.append(delta);
       this.host.options.onText?.(delta);
       return;
@@ -763,6 +772,7 @@ export class CodexAppServerEvents {
         },
         {
           deltaItems: this.deltaItems,
+          answerBoundaryItems: this.answerBoundaryItems,
           outputItems: this.outputItems,
           commandOutput: this.commandOutput,
           reasoningDeltaItems: this.reasoningDeltaItems,
@@ -950,6 +960,7 @@ export class CodexAppServerEvents {
         this.completeParentTurn("failed", 1);
       }
       this.deltaItems.clear();
+    this.answerBoundaryItems.clear();
       this.outputItems.clear();
       this.commandOutput.clear();
       this.reasoningDeltaItems.clear();

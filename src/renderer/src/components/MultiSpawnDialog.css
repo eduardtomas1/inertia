@@ -274,7 +274,7 @@
   left: 50%;
   width: min(600px, calc(100vw - 64px));
   height: min(420px, calc(100dvh - 48px));
-  transform: translate(-50%, -50%);
+  translate: -50% -50%;
 }
 
 .multi-spawn-route-warning {

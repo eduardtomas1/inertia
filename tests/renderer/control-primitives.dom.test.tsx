@@ -170,6 +170,14 @@ describe("popover primitives", () => {
     expect(allCss).not.toMatch(/composer-popover-in|workspace-popover-in|palette-panel-in var\(--dur-fast\) var\(--ease\) both;\n\}/u);
   });
 
+  it("offsets the duo dialog's model picker with translate so the shared scale entrance cannot move it", () => {
+    const multiSpawn = readSourceText("src/renderer/src/components/MultiSpawnDialog.css");
+    const rule = /\n\.multi-spawn-route \.model-chooser-palette \{(?<body>[^}]*)\}/u.exec(multiSpawn)?.groups?.body;
+    expect(whereRule(".model-chooser-palette")?.body).toContain("animation: popover-in var(--dur) var(--ease) both;");
+    expect(rule).toContain("translate: -50% -50%;");
+    expect(rule).not.toContain("transform:");
+  });
+
   it("gives menu items one 28px row and highlights keyboard and pointer focus with the same fill and no ring", () => {
     const item = whereRule(".project-menu button", ":is(button)");
     expect(item?.body).toContain("  min-height: var(--menu-item-height);");

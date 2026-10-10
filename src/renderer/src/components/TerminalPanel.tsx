@@ -404,7 +404,6 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
           {tabs.map((tab) => (
             <div role="presentation" className={tab.id === activeId ? "panel-tab terminal-tab is-active" : "panel-tab terminal-tab"} data-tab-key={tab.id} key={tab.id}>
               <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
-                title={`${tab.label} · ${props.projectName}`}
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>

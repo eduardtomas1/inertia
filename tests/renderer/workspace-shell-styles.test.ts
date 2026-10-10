@@ -133,3 +133,33 @@ describe("interface scale layer", () => {
     expect(scale).not.toContain(".panel-heading-copy span,");
   });
 });
+
+describe("terminal", () => {
+  it("shows overlay and empty-state glyphs plain, without an accent tile", () => {
+    const tile = block(".palette-empty > svg:first-child,\n.sidebar-empty > svg:first-child,\n.terminal-overlay > svg:first-child");
+    expect(tile).toContain("color: var(--text-muted);");
+    expect(tile).not.toContain("border");
+    expect(tile).not.toContain("accent");
+    expect(block(".terminal-overlay")).toContain("font-size: var(--text-sm);");
+  });
+
+  it("keeps split headers on the grid with a quiet title", () => {
+    expect(block(".terminal-header")).toContain("min-height: 40px;");
+    expect(block(".terminal-title")).toContain("font-weight: 400;");
+    expect(css).not.toContain(".terminal-project");
+  });
+
+  it("draws the resume bar and its picker on neutral tokens", () => {
+    const bar = block(".terminal-resume-status");
+    expect(bar).not.toContain("background");
+    expect(block(".terminal-resume-status > svg")).toContain("color: var(--text-muted);");
+    expect(block(".terminal-resume-trigger:disabled")).toContain("opacity: var(--disabled-opacity);");
+    expect(block(".terminal-resume-trigger")).toContain("height: var(--control-height-small);");
+    expect(block(".terminal-resume-popover")).toContain("width: min(380px, calc(100% - 16px));");
+    expect(block(".terminal-resume-popover")).not.toContain("padding: 0;");
+    expect(block('.resume-picker-list button[data-active="true"]')).toContain("background: var(--fill-strong);");
+    expect(block('.resume-picker-list button[data-selected="true"] .resume-picker-option-copy strong')).not.toContain("accent");
+    expect(block(".resume-picker-list code")).not.toContain("background");
+    expect(css).not.toContain(".resume-picker-footer {");
+  });
+});

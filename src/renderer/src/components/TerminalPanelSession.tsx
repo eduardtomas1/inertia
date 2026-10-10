@@ -1038,16 +1038,14 @@ export function TerminalSession({
       ) : (
         <div className="terminal-header">
           <div className="terminal-title">
-            <TerminalIcon size={16} />
             <span>Terminal</span>
-            <span className="terminal-project">{projectName}</span>
           </div>
           <div className="terminal-actions">
             <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={14} /></IconButton>
             <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
               <RotateCcw size={14} />
             </IconButton>
-            <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
+            <IconButton label="Close terminal" onClick={onClose}><X size={14} /></IconButton>
           </div>
         </div>
       )}

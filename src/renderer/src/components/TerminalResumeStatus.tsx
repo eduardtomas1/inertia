@@ -106,7 +106,7 @@ export function TerminalResumeStatus({
         {displayedResume ? (
           <>
             <span>{displayedResume.providerLabel} session</span>
-            <code title={displayedResume.sessionId}>{displayedResume.sessionId}</code>
+            <code>{displayedResume.sessionId}</code>
           </>
         ) : (
           <span>{availability.reason}</span>

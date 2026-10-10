@@ -351,13 +351,13 @@ describe("visual contrast system", () => {
 
   it("pauses maximum reasoning composer frames while hidden and stops them for reduced motion", () => {
     expect(css).toMatch(
-      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after,[\s\S]*?\.composer-ultra-glow\s*\{[^}]*animation-play-state:\s*paused;/u,
+      /\.app-shell\[data-document-visible="false"\][\s\S]*?\.composer\[data-maximum-reasoning="true"\] > \.composer-box::after,[\s\S]*?\.composer-ultra-glow\s*\{[^}]*animation-play-state:\s*paused;/u,
     );
     expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\]::after\s*\{[^}]*animation:\s*none;/u,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] > \.composer-box::after\s*\{[^}]*animation:\s*none;/u,
     );
     expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] > \.composer-ultra-glow\s*\{[^}]*display:\s*none;/u,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer\[data-maximum-reasoning="true"\] \.composer-ultra-glow\s*\{[^}]*display:\s*none;/u,
     );
   });
 });
@@ -570,14 +570,16 @@ describe("composer primary action contrast", () => {
     expect(cascades.find(({ state }) => state.name === "send ready")?.color)
       .toBe("var(--accent-text)");
     expect(cascades.find(({ state }) => state.name === "stop ready")?.color)
+      .toBe("var(--accent-text)");
+    expect(cascades.find(({ state }) => state.name === "stop ready")?.background)
       .toBe("var(--danger)");
   });
 
-  it("draws disabled send as a neutral circle instead of a faded accent", () => {
+  it("draws disabled send as the accent circle at 64% opacity", () => {
     const disabled = cascades.find(({ state }) => state.name === "send disabled")!;
     const ready = cascades.find(({ state }) => state.name === "send ready")!;
     expect([disabled.background, disabled.color, disabled.opacity])
-      .toEqual(["var(--fill-strong)", "var(--text-muted)", "1"]);
+      .toEqual(["var(--accent)", "var(--accent-text)", "0.64"]);
     expect(ready.background).toBe("var(--accent)");
   });
 

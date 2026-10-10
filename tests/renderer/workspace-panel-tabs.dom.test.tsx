@@ -139,7 +139,7 @@ describe("workspace panel tab row", () => {
     trigger.focus();
     fireEvent.click(trigger);
     const menu = screen.getByRole("menu", { name: "Panel tabs" });
-    const items = await within(menu).findAllByRole("menuitem");
+    const items = within(menu).getAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual(["Changes", "Browser", "Terminal"]);
     expect(items.map((item) => item.getAttribute("aria-current"))).toEqual([null, null, "true"]);
     await waitFor(() => expect(items[0]).toHaveFocus());

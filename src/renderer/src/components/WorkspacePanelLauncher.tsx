@@ -11,7 +11,6 @@ import { surfaceIcons } from "./workspacePanelIcons";
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import {
-  RIGHT_PANEL_SURFACE_META,
   surfaceShortcutActionForKey,
   surfaceShortcutTargetsTypingContext,
 } from "../utils/rightPanelSurfaces";
@@ -190,34 +189,6 @@ export function AddSurfaceMenuItems({
           </span>
           {openSurfaces.includes(action.surface) && <Check size={14} aria-hidden="true" />}
           <kbd>{action.shortcut}</kbd>
-        </button>
-      ))}
-    </>
-  );
-}
-
-export function TabListMenuItems({
-  surfaces,
-  active,
-  onSelect,
-}: {
-  surfaces: readonly WorkspacePanelTab[];
-  active: WorkspacePanelTab | null;
-  onSelect: (surface: WorkspacePanelTab) => void;
-}): React.JSX.Element {
-  return (
-    <>
-      {surfaces.map((surface) => (
-        <button
-          type="button"
-          role="menuitem"
-          key={surface}
-          aria-current={surface === active || undefined}
-          onClick={() => onSelect(surface)}
-        >
-          {surfaceIcons[surface]}
-          <span>{RIGHT_PANEL_SURFACE_META[surface].label}</span>
-          {surface === active && <Check size={14} aria-hidden="true" />}
         </button>
       ))}
     </>

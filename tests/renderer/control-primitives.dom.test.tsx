@@ -104,7 +104,9 @@ describe("focus ring", () => {
     const restated = [...outside.matchAll(/[^{}]*:focus-visible[^{}]*\{[^}]*outline: 2px solid var\(--(?:accent|text)\)/gu)];
     expect(restated.map((match) => match[0].trim())).toEqual([]);
     const offsets = [...outside.matchAll(/outline-offset:\s*(-?\d+)px/gu)].map((match) => match[1]);
-    expect(new Set(offsets)).toEqual(new Set(["2", "-2"]));
+    expect(new Set(offsets)).toEqual(new Set(["2", "-2", "6"]));
+    const turnOffsets = [...outside.matchAll(/([^{}]*)\{[^}]*outline-offset:\s*6px/gu)].map((match) => match[1]!.trim());
+    expect(turnOffsets).toEqual([".response-turn:focus-visible"]);
   });
 });
 

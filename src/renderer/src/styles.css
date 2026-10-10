@@ -7553,12 +7553,12 @@ button.turn-agents-line:hover {
   align-items: center;
   gap: 9px;
   padding: 0 10px 0 15px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   color: var(--text-muted);
 }
 
 .palette-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: var(--text-sm); }
-.palette-search:focus-within { border-bottom-color: var(--focus-ring); color: var(--text); }
+.palette-search:focus-within { color: var(--text); }
 .palette-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; border-bottom: 1px solid var(--line); }
 .palette-actions button { display: flex; min-width: 0; height: 36px; align-items: center; gap: 7px; padding: 0 9px; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--surface); font-size: var(--text-xs); }
 .palette-actions button:hover { color: var(--text); background: var(--fill); }

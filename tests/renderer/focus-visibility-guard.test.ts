@@ -97,6 +97,7 @@ const PROGRAMMATIC_CONTAINERS = new Map([
   [".html-render-dialog", "dialog surface focused on open; its controls carry the ring"],
   [".project-customize-loading", "transient loading placeholder focused while the panel loads"],
   [".multi-spawn-prompt-zone textarea", "field focus is the shared accent border"],
+  [".palette-search input", "the palette's only field, focused while it is open; the caret and the search icon's text colour mark focus"],
   [".working-orb-canvas", "decorative canvas without pointer events or a tab stop"],
 ]);
 

@@ -15,6 +15,7 @@ interface FamilySpec {
   neutralHue: number;
   accentHue: number;
   neutralTint: number;
+  auroraHues: readonly number[];
   chromaScale?: number;
   mute?: number;
   seed?: { l: number; c: number };
@@ -108,6 +109,8 @@ export const ARCHITECTURE = {
     activeChromaScale: 0.55,
     ultraSweepL: 0.560,
     ultraSweepChroma: 0.100,
+    auroraL: 0.780,
+    auroraChroma: 0.130,
   },
   dark: {
     ladder: {
@@ -146,15 +149,17 @@ export const ARCHITECTURE = {
     activeChromaScale: 0.55,
     ultraSweepL: 0.800,
     ultraSweepChroma: 0.090,
+    auroraL: 0.640,
+    auroraChroma: 0.160,
   },
 };
 
 export const FAMILY_SPECS = {
-  inertia: { neutralHue: 286, accentHue: 283, neutralTint: 1.0 },
-  grove: { neutralHue: 152, accentHue: 157, neutralTint: 3.2 },
-  ocean: { neutralHue: 232, accentHue: 235, neutralTint: 3.2 },
-  ember: { neutralHue: 44, accentHue: 32, neutralTint: 3.2 },
-  iris: { neutralHue: 294, accentHue: 292, neutralTint: 3.2 },
+  inertia: { neutralHue: 286, accentHue: 283, neutralTint: 1.0, auroraHues: [283, 236, 322] },
+  grove: { neutralHue: 152, accentHue: 157, neutralTint: 3.2, auroraHues: [157, 192, 132] },
+  ocean: { neutralHue: 232, accentHue: 235, neutralTint: 3.2, auroraHues: [235, 266, 198] },
+  ember: { neutralHue: 44, accentHue: 32, neutralTint: 3.2, auroraHues: [32, 58, 356] },
+  iris: { neutralHue: 294, accentHue: 292, neutralTint: 3.2, auroraHues: [292, 262, 332] },
 };
 
 export const BASE_NEUTRAL_CHROMA = { light: 0.004, dark: 0.005 };
@@ -335,6 +340,11 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
       c: maxChromaAt(arch.ultraSweepL, SEMANTIC_HUES.info, arch.ultraSweepChroma),
       h: SEMANTIC_HUES.info,
     })],
+    ...spec.auroraHues.map((auroraHue, index): readonly [string, string] => [`aurora-${index + 1}`, oklchToHex({
+      l: arch.auroraL,
+      c: maxChromaAt(arch.auroraL, auroraHue, (arch.auroraChroma * chromaScale)) * mute,
+      h: auroraHue,
+    })]),
   ];
 }
 
@@ -352,5 +362,6 @@ export function buildCustomPaletteTokens(hex: string, appearance: PaletteAppeara
     chromaScale,
     mute,
     seed: { l, c: c < 0.004 ? 0 : c },
+    auroraHues: [h, (h + 325) % 360, (h + 35) % 360],
   }, appearance);
 }

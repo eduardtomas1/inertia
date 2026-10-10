@@ -56,6 +56,9 @@
   --popover-offset: 4px;
   --raised-edge: transparent;
   --ultra-sweep: #2a7da6;
+  --aurora-1: #adaefb;
+  --aurora-2: #60c3fb;
+  --aurora-3: #de9be9;
   --text-faint: color-mix(in srgb, var(--text-muted) 93%, var(--surface));
   --text-xs: 12px;
   --text-sm: 13px;
@@ -234,6 +237,9 @@
   --terminal-fg: #e4e4eb;
   --terminal-selection: #2f304a;
   --ultra-sweep: #82c8ef;
+  --aurora-1: #817ce9;
+  --aurora-2: #1f97d0;
+  --aurora-3: #b867c5;
 }
 
 * {

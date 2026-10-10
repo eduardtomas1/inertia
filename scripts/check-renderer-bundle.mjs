@@ -82,9 +82,9 @@ const budgets = {
   // platform; keep only narrow cross-platform headroom.
   entryCss: 250.9 * kibibyte,
   // The eagerly preloaded five-theme syntax and status palette is kept
-  // separate from the generated entry stylesheet and measures 8,123 bytes.
+  // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
-  colorThemesCss: 8 * kibibyte + 120,
+  colorThemesCss: 8 * kibibyte + 120 + 552,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
@@ -180,7 +180,7 @@ const budgets = {
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
   // The Providers description in Agents settings adds 97 core bytes
   // (2,266,291 measured).
-  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 510 + 458 + 5_332 + 131 + 304 + 125 + 13 + 565 + 332 + 1_151 + 2_016 + 372 + 558 + 381 + 310 + 90 - 5 + 2_639 - 692 + 1_407 + 588 + 647 + 3_053 + 361 + 951 + 243 + 604 + 998 - 1_861 - 7_587 + 468 + 3_790 + 1_002 + 1_144 - 39 + 579 + 1_949 + 234 + 568 + 2_057 + 1_316 + 1_236,
+  coreJavaScript: 2_067.1 * kibibyte + 1_186 + 2_633 + 1_156 + 722 + 16_500 + 13_884 + 3_963 + 164 + 1_017 + 2_310 + 571 - 2_900 + 300 + 2_239 + 3_609 + 129 + 1_792 + 12_766 + 369 + 333 + 48 + 235 + 628 + 32_876 + 12_879 + 1_664 + 106 + 261 + 4_238 + 5_813 + 214 + 193 + 27_444 + 142 + 97 + 510 + 458 + 5_332 + 131 + 304 + 125 + 13 + 565 + 332 + 1_151 + 2_016 + 372 + 558 + 381 + 310 + 90 - 5 + 2_639 - 692 + 1_407 + 588 + 647 + 3_053 + 361 + 951 + 243 + 604 + 998 - 1_861 - 7_587 + 468 + 3_790 + 1_002 + 1_144 - 39 + 579 + 1_949 + 234 + 568 + 2_057 + 1_316 + 1_236 + 927,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

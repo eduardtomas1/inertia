@@ -664,6 +664,12 @@ button:disabled,
   --composer-bottom-breathing-room: 20px;
 }
 
+@property --titlebar-overlay-inset {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 .app-shell.platform-win32 {
   --composer-bottom-breathing-room: 20px;
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));

@@ -1,4 +1,5 @@
 import type { AgentActivity, AgentApprovalRequest } from "../../shared/contracts/agent";
+import { commandDisplayText, hostToolActivityTitle } from "../../shared/activity-display";
 import { sanitizeProviderActivityDetail } from "../provider/activity-detail";
 
 const COMMAND_LIMIT = 60;
@@ -101,11 +102,8 @@ function bounded(text: string, limit: number): string {
 }
 
 export function mascotCommand(value: string): string | null {
-  let text = value.slice(0, 4_096).replace(/\s+/gu, " ").trim();
-  const wrapped = /^(?:\S*\/)?(?:ba|z|da|k|fi)?sh\s+-l?c\s+(['"])(.*)\1$/u.exec(text);
-  if (wrapped) text = wrapped[2]!.trim();
-  text = (sanitizeProviderActivityDetail(text, { maxChars: 4_096 }) ?? "").replace(/\s+/gu, " ").trim()
-    .replace(/^cd \S+ && /u, "").replace(/<workspace>\//gu, "").replace(/<workspace>/gu, ".");
+  const text = (sanitizeProviderActivityDetail(commandDisplayText(cut(value, 4_096)), { maxChars: 4_096 }) ?? "")
+    .replace(/\s+/gu, " ").trim().replace(/<workspace>\//gu, "").replace(/<workspace>/gu, ".");
   return mascotPreview(bounded(text, COMMAND_LIMIT), COMMAND_LIMIT);
 }
 
@@ -152,9 +150,14 @@ export function mascotActivityLine(activity: Pick<AgentActivity, "kind" | "title
     const subject = `${fileName(changed[0]!)}${changed.length > 1 ? ` and ${changed.length - 1} more` : ""}`;
     return tense(state, `Editing ${subject}`, `Edited ${subject}`, `Could not edit ${subject}`);
   }
-  const name = title.toLowerCase().replace(/^mcp(?: · |__)/u, "mcp ").replace(/[_·/\s]+/gu, " ").trim();
-  const tool = /^(?:mcp|tool) (.+)$/u.exec(name);
-  if (tool && name !== "mcp tool") return tense(state, `Using ${tool[1]}`, `Used ${tool[1]}`, `Could not use ${tool[1]}`);
+  const host = hostToolActivityTitle({ kind: activity.kind, title, status: state });
+  if (host) return host;
+  const used = /^mcp__(.+?)__(.+)$/u.exec(title) ?? /^MCP · ([^/]+)\/(.+)$/u.exec(title) ?? /^Tool · ()(.+)$/u.exec(title);
+  if (used) {
+    const subject = `${used[1] ? `${used[1]}: ` : ""}${used[2]}`;
+    return tense(state, `Using ${subject}`, `Used ${subject}`, `Could not use ${subject}`);
+  }
+  const name = title.toLowerCase().replace(/[_·/\s]+/gu, " ").trim();
   const path = section(detail, "Path");
   const target = section(detail, "Query") ?? section(detail, "URL") ?? section(detail, "Pattern");
   const human = /\s/u.test(title) && !GENERIC.test(title);

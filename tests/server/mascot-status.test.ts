@@ -6,7 +6,7 @@ import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStat
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
-import { mascotActivityLine, mascotCommentaryLine, mascotPreview, mascotResultLine } from "../../src/server/runtime/mascot-message";
+import { mascotActivityLine, mascotCommand, mascotCommentaryLine, mascotPreview, mascotResultLine } from "../../src/server/runtime/mascot-message";
 
 const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
 const MINUTE = 60_000;
@@ -611,6 +611,26 @@ describe("mascot lines from long or structured text", () => {
     expect(mascotResultLine("Sure! I've updated the ranking so failures show first.")).toBe("Sure! I've updated the ranking so failures show first.");
     expect(mascotResultLine("Fixed ranking\nAdded tests")).toBe("Fixed ranking");
     expect(mascotCommentaryLine("I looked at the publisher and the feed. Done.")).toBe("I looked at the publisher and the feed. Done.");
+  });
+});
+
+describe("mascot tools and commands read as in the work log", () => {
+  it("names an MCP tool with its server and an Inertia host tool in the work log's words", () => {
+    const line = (title: string, status: AgentActivity["status"] = "running"): string | null => mascotActivityLine({ kind: "tool", title, detail: null, status });
+    expect(line("mcp__github__search_issues")).toBe("Using github: search_issues");
+    expect(line("MCP · github/search_issues", "completed")).toBe("Used github: search_issues");
+    expect(line("MCP · github/search_issues", "failed")).toBe("Could not use github: search_issues");
+    expect(line("Tool · search_docs")).toBe("Using search_docs");
+    expect(line("mcp__inertia-chat-manager__inertia_render_html")).toBe("Rendering a page");
+    expect(line("inertia-chat-manager_inertia_render_html", "completed")).toBe("Rendered a page");
+    expect(line("inertia_render_html", "failed")).toBe("Could not render a page");
+  });
+
+  it("shows the command the work log shows for heredocs, a leading cd into a quoted path and escaped quotes", () => {
+    expect(mascotCommand("/bin/bash -lc \"python3 -B - <<'PY'\nfrom pathlib import Path\nPY\"")).toBe("python3 -B - <<'PY'");
+    expect(mascotCommand("cd \"/workspace/project dir\" && npm test")).toBe("npm test");
+    expect(mascotCommand("/bin/zsh -lc 'echo '\"'\"'hi'\"'\"''")).toBe("echo 'hi'");
+    expect(mascotCommand("set -euo pipefail\nexport CI=1\nnpm run check")).toBe("npm run check");
   });
 });
 

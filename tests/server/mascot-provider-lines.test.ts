@@ -166,7 +166,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     assistant([{ type: "tool_use", id: "bash", name: "Bash", input: { command: "npm test -- tests/server/mascot-status.test.ts" } }]);
     expect(turn.line()).toBe("Running npm test -- tests/server/mascot-status.test.ts");
     assistant([{ type: "tool_use", id: "search", name: "mcp__github__search_issues", input: { query: "mascot" } }]);
-    expect(turn.line()).toBe("Using github search issues");
+    expect(turn.line()).toBe("Using github: search_issues");
     assistant([
       { type: "text", text: "Found the stale preview in the publisher. I'm updating it to keep the agent's words." },
       { type: "tool_use", id: "edit", name: "Edit", input: { file_path: `${WORKSPACE}/src/server/runtime/mascot-status.ts` } },
@@ -177,7 +177,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     turn.resume();
     turn.fail("Claude Code process exited with code 1: ENOENT: no such file or directory, open 'package.json'");
     expect(turn.line()).toBe("Claude Code process exited with code 1: ENOENT: no such file or directory, open 'package.json'");
-    expect(turn.lines.slice(0, 3)).toEqual(["Reading files", "Running npm test -- tests/server/mascot-status.test.ts", "Using github search issues"]);
+    expect(turn.lines.slice(0, 3)).toEqual(["Reading files", "Running npm test -- tests/server/mascot-status.test.ts", "Using github: search_issues"]);
     turn.expectNoBareLabel();
   });
 

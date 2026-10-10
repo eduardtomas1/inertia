@@ -10,6 +10,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { ConversationContextTurnReads } from "../../src/server/persistence/conversation-context-turn-reads";
 import type { ConversationRow } from "../../src/server/persistence/rows";
 import type { Conversation } from "../../src/shared/contracts";
+import type { TurnSessionRecovery } from "../../src/shared/continuation-reason-codes";
 
 const roots: string[] = [];
 
@@ -25,7 +26,12 @@ async function fixture() {
   const databasePath = join(root, "inertia.sqlite");
   const store = new RuntimeStore(databasePath, workspace);
   const project = store.createProject("Billing", workspace);
-  const begin = (conversation: Conversation, content: string, packetIds?: string[]) => store.beginAgentTurn({
+  const begin = (
+    conversation: Conversation,
+    content: string,
+    packetIds?: string[],
+    sessionRecovery?: TurnSessionRecovery,
+  ) => store.beginAgentTurn({
     id: randomUUID(),
     conversationId: conversation.id,
     runId: randomUUID(),
@@ -44,6 +50,7 @@ async function fixture() {
     configurationRevision: conversation.modelSelection.backendConfigurationRevision,
     association: "authoritative",
     ...(packetIds ? { conversationContextPacketIds: packetIds, contextRequestId: randomUUID() } : {}),
+    ...(sessionRecovery ? { sessionRecovery } : {}),
   }).turn;
   const target = store.createConversation(project.id, "Current work", { activate: false });
   const source = store.createConversation(project.id, "Export fix", { activate: false });
@@ -90,6 +97,73 @@ describe("ConversationContextTurnReads", () => {
       } finally {
         unchanged.database.close();
         moved.database.close();
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each([
+    ["is read without asking on a retry after the referencing turn failed to start", "failed", undefined, "referenced"],
+    ["is read without asking after a handoff restores the referencing message", "completed", { restoredMessageCount: 2, omittedMessageCount: 0 }, "referenced"],
+    ["still asks in a later turn that only resumes the provider session", "completed", undefined, null],
+  ] as const)("a chat this chat referenced earlier %s", async (_case, ending, sessionRecovery, expected) => {
+    const { begin, databasePath, source, store, target, turn, workspace } = await fixture();
+    try {
+      const settledAt = new Date().toISOString();
+      store.settleAgentTurn(turn.id, {
+        status: ending,
+        terminalReason: ending === "failed" ? "turn-start-failed" : "provider-completed",
+        startedAt: settledAt,
+        completedAt: settledAt,
+        updatedAt: settledAt,
+      });
+      const next = begin(target, "Try again.", undefined, sessionRecovery);
+      const { database, reads } = readsWithPaths(databasePath, () => workspace);
+      try {
+        expect(reads.access({
+          targetConversationId: target.id,
+          targetTurnId: next.id,
+          targetUserMessageId: next.userMessageId,
+          sourceConversationId: source.id,
+        })).toBe(expected);
+      } finally {
+        database.close();
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still asks before reading a chat this chat never sent as a reference", async () => {
+    const { begin, databasePath, store, target, turn, workspace } = await fixture();
+    try {
+      const other = store.createConversation(target.projectId, "Unrelated", { activate: false });
+      begin(other, "Other work.");
+      store.contextPackets.create({
+        sourceConversationId: other.id,
+        targetConversationId: target.id,
+        acknowledgedWorkspaceDifference: false,
+      });
+      const settledAt = new Date().toISOString();
+      store.settleAgentTurn(turn.id, {
+        status: "completed",
+        terminalReason: "provider-completed",
+        startedAt: settledAt,
+        completedAt: settledAt,
+        updatedAt: settledAt,
+      });
+      const next = begin(target, "Continue.", undefined, { restoredMessageCount: 2, omittedMessageCount: 0 });
+      const { database, reads } = readsWithPaths(databasePath, () => workspace);
+      try {
+        expect(reads.access({
+          targetConversationId: target.id,
+          targetTurnId: next.id,
+          targetUserMessageId: next.userMessageId,
+          sourceConversationId: other.id,
+        })).toBeNull();
+      } finally {
+        database.close();
       }
     } finally {
       store.close();

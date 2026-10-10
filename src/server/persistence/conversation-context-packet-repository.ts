@@ -39,7 +39,10 @@ import {
   type ConversationContextDelivery,
   type ConversationContextTransport,
 } from "./conversation-context-transport";
-import { ConversationContextTurnReads } from "./conversation-context-turn-reads";
+import {
+  ConversationContextTurnReads,
+  UNREACHED_TURN_LOOKBACK,
+} from "./conversation-context-turn-reads";
 import {
   parseExcerpts,
   parseSupplement,
@@ -84,7 +87,6 @@ type ConversationContextPacketListRow = Omit<ConversationContextPacketRow, "exce
 
 const AGENT_CONTEXT_RESULT_BUDGET_BYTES = 28 * 1024;
 const REFERENCE_FILES_BYTES = 2 * 1024;
-const UNREACHED_TURN_LOOKBACK = 16;
 
 export type ConversationContextReplay =
   | MessageSendAcceptance

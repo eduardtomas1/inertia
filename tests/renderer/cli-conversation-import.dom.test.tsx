@@ -90,6 +90,7 @@ describe("CLI import dialog", () => {
     expect(commands(request, "conversation.cli.import")).toBe(1);
     expect(request).toHaveBeenLastCalledWith({ type: "conversation.cli.import", payload: { projectId: project.id, candidateId: candidates[0]!.id, revision: "a".repeat(64) } });
     expect(button).toHaveTextContent("Importing…");
+    expect(button.querySelector('svg.loading-mark[aria-hidden="true"]')).not.toBeNull();
     expect(button).toHaveAttribute("aria-disabled", "true");
     expect(button).toHaveFocus();
     fireEvent.keyDown(button, { key: "Escape" });

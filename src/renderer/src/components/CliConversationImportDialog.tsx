@@ -7,7 +7,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { diagnosticErrorReference } from "../utils/diagnosticNavigation";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
-import { IconButton } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import "./CliConversationImportDialog.css";
 
@@ -218,7 +218,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
               {status && <p className="cli-import-status" role={error ? "alert" : "status"}>{status}</p>}
               {preview && <button type="button" className={openedId || !alreadyImported ? "primary-button" : "secondary-button"}
                 aria-disabled={openedId ? false : importUnavailable} aria-keyshortcuts={importShortcut} onClick={runAction}>
-                {openedId ? <ArrowRight size={14} aria-hidden="true" /> : busy === "import" ? <span className="loading-mark" aria-hidden="true" /> : alreadyImported ? <Check size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
+                {openedId ? <ArrowRight size={14} aria-hidden="true" /> : busy === "import" ? <LoadingMark size={14} aria-hidden="true" /> : alreadyImported ? <Check size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
                 {openedId ? "Open chat" : busy === "import" ? "Importing…" : alreadyImported ? "Already imported" : "Import conversation"}
               </button>}
             </div>

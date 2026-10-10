@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentActivity, SubagentTrace } from "../../src/shared/contracts/agent";
 import { DEFAULT_WORKING_INDICATOR, type WorkingIndicatorSettings as Settings } from "../../src/shared/working-indicator";
 import { AgentPixelGrid } from "../../src/renderer/src/components/AgentPixelGrid";
+import { ContextCompactionIcon } from "../../src/renderer/src/components/ContextCompactionIcon";
 import { SubagentStatusMark } from "../../src/renderer/src/components/SubagentStatusMark";
 import { ActivityRow, ReasoningSummary } from "../../src/renderer/src/components/response-timeline/activity";
 import { AgentPixelLoader } from "../../src/renderer/src/components/response-timeline/layers";
@@ -13,6 +14,7 @@ import { WorkingIndicatorSettings } from "../../src/renderer/src/components/work
 import { usePublishLiveAgentPhase } from "../../src/renderer/src/components/working-indicator/liveAgentPhases";
 import { sharedOrbLoop } from "../../src/renderer/src/components/working-indicator/orbEnvironment";
 import type { ActiveAgentPhase } from "../../src/renderer/src/utils/response-timeline/active-state";
+import { readSourceText } from "../helpers/source-text";
 
 const ALL_PHASES: readonly ActiveAgentPhase[] = [
   "compacting", "queued", "starting", "thinking", "searching", "coding", "command", "tool",
@@ -53,6 +55,38 @@ describe("working indicator placements", () => {
     );
     expect(cue.container.querySelector('.agent-pixel-loader[data-rhythm="orbit"]')).not.toBeNull();
     expect(cue.container.querySelector(".working-orb")).toBeNull();
+  });
+
+  it("pulses the compaction icon only while compaction runs, never on a finished composer notice", () => {
+    const sheet = document.createElement("style");
+    sheet.textContent = readSourceText("src/renderer/src/components/ContextCompactionIcon.css");
+    document.head.append(sheet);
+    try {
+      const view = render(
+        <>
+          <div data-state="running"><ContextCompactionIcon /></div>
+          {["working", "success", "error"].map((kind) => (
+            <div className={`composer-compact-notice is-${kind}`} data-state={kind} key={kind}>
+              <ContextCompactionIcon />
+            </div>
+          ))}
+        </>,
+      );
+      const animation = (state: string): string | undefined => {
+        const group = view.container.querySelector(`[data-state="${state}"] .context-compaction-icon > g`)!;
+        return [...sheet.sheet!.cssRules]
+          .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && group.matches(rule.selectorText))
+          .map((rule) => rule.style.getPropertyValue("animation"))
+          .filter(Boolean)
+          .at(-1);
+      };
+      expect(animation("running")).toContain("context-compaction-pulse");
+      expect(animation("working")).toBe("none");
+      expect(animation("success")).toBe("none");
+      expect(animation("error")).toBe("none");
+    } finally {
+      sheet.remove();
+    }
   });
 
   it("normalises corrupt provider settings to Classic", () => {

@@ -59,6 +59,12 @@ const removed: Record<string, { section: SettingsSection; anchor: string; gone: 
       "Also closes Settings. This shortcut is fixed.",
     ],
   },
+  help: {
+    section: "help",
+    anchor: "Welcome guide",
+    gone: ["A quick tour of split view, the Work tab, Duo, review and limits."],
+    kept: ["Checks run quietly after launch; downloads and installs remain manual."],
+  },
   projects: {
     section: "projects",
     anchor: "Compact sidebar",

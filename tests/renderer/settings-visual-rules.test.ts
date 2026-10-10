@@ -111,6 +111,16 @@ describe("data section", () => {
   });
 });
 
+describe("help section", () => {
+  it("keeps diagnostics dividers quiet and the issue report fields on the shared input", () => {
+    const diagnostics = "../../src/renderer/src/components/DiagnosticsSettings.css";
+    expect(source(diagnostics)).not.toMatch(/solid var\(--line\);|\b13px\b/u);
+    expect(rule(diagnostics, ".diagnostics-section-label")).toContain("font-weight: 500;");
+    const issue = "../../src/renderer/src/components/IssueReportSettings.css";
+    expect(source(issue)).not.toMatch(/padding: 7px 10px|11px|\bh4\b/u);
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

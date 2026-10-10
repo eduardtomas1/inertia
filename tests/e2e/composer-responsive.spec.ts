@@ -406,7 +406,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       await setting.trigger.click();
       await expect(setting.menu).toBeVisible();
       await page.locator(".workspace-header").click({
-        position: { x: 12, y: 12 },
+        position: { x: 12, y: 4 },
       });
       await expect(setting.menu).toBeHidden();
       await expect(setting.trigger).toBeFocused();
@@ -637,7 +637,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await splitMore.click();
     await expect(splitMoreMenu).toBeVisible();
     await page.locator(".workspace-header").click({
-      position: { x: 12, y: 12 },
+      position: { x: 12, y: 4 },
     });
     await expect(splitMoreMenu).toBeHidden();
     await expect(splitMore).toBeFocused();

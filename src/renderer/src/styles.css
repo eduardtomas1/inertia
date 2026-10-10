@@ -681,6 +681,22 @@ button:disabled,
   right: calc(12px + var(--titlebar-overlay-inset));
 }
 
+.platform-win32 .workspace-frame {
+  --workspace-panel-width: max(var(--workspace-tools-width), calc(300px + var(--titlebar-overlay-inset)));
+}
+
+.platform-win32 .workspace-frame.has-right-panel > .workspace-header {
+  margin-right: var(--workspace-panel-width);
+}
+
+.platform-win32 .workspace-body.has-tools {
+  padding-right: var(--workspace-panel-width);
+}
+
+.platform-win32 .workspace-body > .workspace-panel.is-inline {
+  width: var(--workspace-panel-width);
+}
+
 :root[data-platform="win32"] .database-recovery-notice {
   top: calc(env(titlebar-area-height, 48px) + 8px);
 }

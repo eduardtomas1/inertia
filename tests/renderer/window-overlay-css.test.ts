@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
-const read = (path: string) => readFileSync(new URL(`../../src/renderer/src/${path}`, import.meta.url), "utf8");
+import { readSourceText } from "../helpers/source-text";
+
+const read = (path: string) => readSourceText(new URL(`../../src/renderer/src/${path}`, import.meta.url));
 const css = read("styles.css");
 const detachedCss = read("detached-chat.css");
 
@@ -21,6 +21,14 @@ describe("Windows title bar overlay clearance", () => {
     expect(css).toMatch(/\.platform-win32 \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n  padding-right: calc\(var\(--workspace-corner-controls-width, 0px\) \+ 16px \+ var\(--titlebar-overlay-inset\)\);/u);
     expect(css).toMatch(/\.platform-win32 \.workspace-corner-controls \{\n  right: calc\(12px \+ var\(--titlebar-overlay-inset\)\);/u);
     expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \.detached-chat-header \{\n  padding-right: calc\(8px \+ var\(--titlebar-overlay-inset\)\);/u);
+  });
+
+  it("keeps the right panel's 300px minimum beside the caption buttons", () => {
+    expect(css).toMatch(/\.platform-win32 \.workspace-frame \{\n  --workspace-panel-width: max\(var\(--workspace-tools-width\), calc\(300px \+ var\(--titlebar-overlay-inset\)\)\);\n\}/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-frame\.has-right-panel > \.workspace-header \{\n  margin-right: var\(--workspace-panel-width\);\n\}/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-body\.has-tools \{\n  padding-right: var\(--workspace-panel-width\);\n\}/u);
+    expect(css).toMatch(/\.platform-win32 \.workspace-body > \.workspace-panel\.is-inline \{\n  width: var\(--workspace-panel-width\);\n\}/u);
+    expect(readSourceText(new URL("../../src/renderer/src/hooks/useWorkspaceLayout.ts", import.meta.url))).toContain("export const TOOLS_MIN_WIDTH = 300;");
   });
 
   it("keeps the recovery notice and every dialog below the caption buttons", () => {

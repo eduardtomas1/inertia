@@ -235,7 +235,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
 
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
-  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 4 } });
   await expect(modelChooser).toBeHidden();
   await expect(modelTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(modelTrigger).toBeFocused();

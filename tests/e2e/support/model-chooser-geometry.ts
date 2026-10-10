@@ -9,7 +9,7 @@ export async function expectModelChooserPlacement(
   await expect(chooser).toHaveAttribute("data-composer-popover-positioned", "true");
   // Native windows can be shorter than requested: hosted macOS runners
   // clamp 920px requests to 684px. Assert the independent fit calculation
-  // against settled renderer geometry, including the 8px gap and padding.
+  // against settled renderer geometry, including the 4px gap and 8px padding.
   let lastGeometry: unknown;
   try {
     await expect.poll(async () => {

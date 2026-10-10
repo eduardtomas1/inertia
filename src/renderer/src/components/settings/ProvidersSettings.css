@@ -63,7 +63,7 @@
 }
 
 .provider-settings-list-row.is-selected {
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .provider-settings-list-row > :first-child {

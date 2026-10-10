@@ -42,7 +42,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   const selection = onSelectNoProject && projects.some((project) => project.id === selectedId && project.workspaceKind === "scratch") ? "no-project" : selectedId;
   const items = [
     ...(includeAll ? [{ id: null, name: "All projects", path: "" }] : []),
-    ...(onSelectNoProject ? [{ id: "no-project", name: "No project", path: "", detail: "Start in a separate local folder" }] : []),
+    ...(onSelectNoProject ? [{ id: "no-project", name: "No project", path: "" }] : []),
     ...pinnedFirst(projects.filter((project) => project.workspaceKind !== "scratch")),
   ].filter((project) => `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle));
   const active = activeId === undefined ? items[0] : items.find((project) => project.id === activeId)
@@ -133,7 +133,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
               }
               if (event.key === "Enter" && active) { event.preventDefault(); choose(active.id); }
             }} />
-          <IconButton label="Close project search" onClick={onClose}><X size={14} /></IconButton>
+          <IconButton label="Close project search" onClick={onClose}><X size={16} /></IconButton>
         </div>
         <div className="palette-results" id={`${id}-results`} role="listbox" aria-label="Projects">
           <div className="palette-group">
@@ -142,11 +142,11 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
               <div className="project-search-row" key={project.id ?? "all"} role="presentation">
                 <button type="button" id={`${id}-${index}`} role="option"
                   aria-label={"color" in project && project.preferences?.pinned ? `${project.name}, pinned` : project.name}
-                  aria-describedby={project.path || "detail" in project ? `${id}-${index}-path` : undefined}
+                  aria-describedby={project.path ? `${id}-${index}-path` : undefined}
                   aria-selected={project.id === selection} className={index === activeIndex ? "is-active" : undefined}
                   onPointerMove={() => setActiveId(project.id)} onClick={() => choose(project.id)}>
                   {"color" in project ? <ProjectIcon project={project} size={14} /> : project.id === "no-project" ? <MessageSquare size={14} aria-hidden="true" className="project-all-icon" /> : <Folder size={14} aria-hidden="true" className="project-all-icon" />}
-                  <span><strong><ProjectName project={"color" in project ? project : undefined}>{project.name}</ProjectName></strong>{(project.path || "detail" in project) && <small id={`${id}-${index}-path`}>{"detail" in project ? project.detail : project.path}</small>}</span>
+                  <span><strong><ProjectName project={"color" in project ? project : undefined}>{project.name}</ProjectName></strong>{project.path && <small id={`${id}-${index}-path`}>{project.path}</small>}</span>
                   {"color" in project && project.preferences?.pinned && <Pin size={14} aria-hidden="true" className="project-search-pin" />}
                   {project.id === selection && <Check size={14} aria-hidden="true" />}
                 </button>
@@ -163,7 +163,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
               </div>
             ))}
           </div>
-          {!items.length && <div className="palette-empty"><Search size={16} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>}
+          {!items.length && <p className="palette-empty">No matching projects</p>}
         </div>
         </>}
       </section>

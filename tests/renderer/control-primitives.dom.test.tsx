@@ -134,7 +134,7 @@ describe("field primitives", () => {
 });
 
 describe("popover primitives", () => {
-  const surfaces = [".project-menu", ".conversation-menu", ".header-popover", ".composer-popover", ".command-palette", ".thread-submenu"];
+  const surfaces = [".project-menu", ".conversation-menu", ".header-popover", ".composer-popover", ".thread-submenu"];
   const allCss = [
     css,
     readSourceText("src/renderer/src/components/sidebar/thread-actions.css"),
@@ -168,6 +168,8 @@ describe("popover primitives", () => {
       expect(allCss, surface).not.toMatch(new RegExp(String.raw`(?:^|\n)[^{}\n]*${escaped} \{[^}]*(?:box-shadow|border-radius|background):`, "u"));
     }
     expect(css).toMatch(/@keyframes popover-in \{\n  from \{\n    opacity: 0;\n    transform: scale\(0\.98\);\n  \}\n\}/u);
+    expect(base?.list.split("|")).not.toContain(".command-palette");
+    expect(whereRule(".dialog-shell")?.list.split("|")).toContain(".command-palette");
     expect(allCss).not.toMatch(/composer-popover-in|workspace-popover-in|palette-panel-in var\(--dur-fast\) var\(--ease\) both;\n\}/u);
   });
 

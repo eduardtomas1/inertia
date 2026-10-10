@@ -117,15 +117,15 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
       ...(projects.length > 0
-        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={14} />, shortcut: newThreadShortcut, run: onNewThread }]
+        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", icon: <SquarePen size={14} />, shortcut: newThreadShortcut, run: onNewThread }]
         : []),
       ...(projects.length > 1
-        ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={14} />, view: "new-chat" as const }]
+        ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", icon: <SquarePen size={14} />, view: "new-chat" as const }]
         : []),
-      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <SquarePen size={14} />, run: onNewThreadWithoutProject }] : []),
-      { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={14} />, run: onAddProject },
-      { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, chats, agents and data", icon: <Settings size={14} />, run: onOpenSettings },
-      { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={14} />, run: openHelpGuide },
+      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", icon: <SquarePen size={14} />, run: onNewThreadWithoutProject }] : []),
+      { id: "action:add-project", group: "Actions", label: "Add project", icon: <FolderPlus size={14} />, run: onAddProject },
+      { id: "action:settings", group: "Actions", label: "Open settings", icon: <Settings size={14} />, run: onOpenSettings },
+      { id: "action:help", group: "Actions", label: "Open help", icon: <CircleHelp size={14} />, run: openHelpGuide },
     ];
     const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={14} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
@@ -264,7 +264,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
             aria-expanded="true"
             autoComplete="off"
           />
-          <IconButton label="Close search" onClick={closePalette}><X size={14} /></IconButton>
+          <IconButton label="Close search" onClick={closePalette}><X size={16} /></IconButton>
         </div>
         <div className="palette-results">
           <div id="palette-results" role="listbox" aria-label={choosingProject ? "Projects" : "Search results"}>
@@ -285,10 +285,9 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
           {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}
           {search.result?.hasMore && <div className="palette-search-status" role="status">More message matches are available. Refine your search to find them.</div>}
           {items.length === 0 && (choosingProject
-            ? <div className="palette-empty"><Search size={16} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>
-            : !search.loading && !search.error && !search.result?.incomplete && <div className="palette-empty"><Search size={16} /><strong>No matches</strong><span>Try a message phrase, project, chat, or command name.</span></div>)}
+            ? <p className="palette-empty">No matching projects</p>
+            : !search.loading && !search.error && !search.result?.incomplete && <p className="palette-empty">No matches</p>)}
         </div>
-        <footer className="palette-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> {choosingProject ? "Start chat" : "Open"}</span><span><kbd>Esc</kbd> {choosingProject && initialView === "search" ? "Back" : "Close"}</span></footer>
       </section>
     </div>
   );

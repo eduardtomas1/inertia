@@ -155,6 +155,15 @@ describe("ProviderAuthDialog keyboard focus", () => {
     expect(terminalInput()).toHaveFocus();
   });
 
+  it("shows the title and terminal without an icon tile or instruction line", async () => {
+    renderDialog();
+    await waitFor(() => expect(screen.getByText("Waiting for sign-in")).toBeInTheDocument());
+    const dialog = screen.getByRole("dialog", { name: `Connect ${provider.label}` });
+    expect(dialog.querySelector(".provider-auth-mark")).toBeNull();
+    expect(dialog).not.toHaveAttribute("aria-describedby");
+    expect(dialog).not.toHaveTextContent("Finish the official provider sign-in");
+  });
+
   it("returns focus to the sign-in terminal when the window restores focus behind the dialog", async () => {
     const { behind } = renderDialog();
     await waitFor(() => expect(screen.getByText("Waiting for sign-in")).toBeInTheDocument());

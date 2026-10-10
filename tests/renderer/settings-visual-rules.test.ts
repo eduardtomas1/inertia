@@ -121,6 +121,14 @@ describe("help section", () => {
   });
 });
 
+describe("provider auth dialog contents", () => {
+  it("keeps accent off the status icon and the finished state", () => {
+    expect(source("../../src/renderer/src/components/ProviderAuthDialog.css")).not.toMatch(/var\(--accent|font-weight: 600/u);
+    expect(rule(styles, ".provider-auth-state.is-finished")).toContain("color: var(--status-completed);");
+    expect(source(styles)).not.toContain(".provider-auth-mark");
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

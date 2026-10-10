@@ -4,19 +4,16 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
-  border-top: 1px solid var(--line);
-  background: var(--fill);
-}
-.provider-auth-browser-assist.is-failed {
+  border-top: 1px solid var(--line-soft);
   background: var(--fill);
 }
 .provider-auth-browser-copy,
 .provider-auth-browser-actions { display: flex; align-items: center; gap: 8px; }
-.provider-auth-browser-copy { min-width: 0; color: var(--accent-strong); }
+.provider-auth-browser-copy { min-width: 0; color: var(--text-muted); }
 .provider-auth-browser-assist.is-failed .provider-auth-browser-copy { color: var(--warning); }
 .provider-auth-browser-copy > svg { flex: 0 0 auto; }
 .provider-auth-browser-copy > span { display: grid; min-width: 0; gap: 2px; }
-.provider-auth-browser-copy strong { color: var(--text); font-size: var(--text-xs); font-weight: 600; }
+.provider-auth-browser-copy strong { color: var(--text); font-size: var(--text-sm); font-weight: 500; }
 .provider-auth-browser-copy small { color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-chrome); }
 .provider-auth-browser-actions { flex: 0 0 auto; }
 .provider-auth-browser-actions .secondary-button { min-height: var(--control-height-small); padding: 0 10px; }

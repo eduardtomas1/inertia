@@ -10013,6 +10013,10 @@ button.sent-attachment-open:hover {
   min-width: 0;
 }
 
+.turn-work-log.is-settled:is([data-settled-work-status="failed"], [data-settled-work-status="limited"]) {
+  margin-bottom: 4px;
+}
+
 .turn-work-log.is-settled .turn-settled-summary {
   display: flex;
   width: 100%;

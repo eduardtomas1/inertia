@@ -450,4 +450,11 @@ describe("Quiet Ledger settled work summary", () => {
 
     expect(summaryRule).toContain("min-height: 26px");
   });
+
+  it("separates a failure row from the answer below it by one more 4px step than other settled layers", () => {
+    expect(styles.replace(/\r\n?/gu, "\n")).toContain(
+      '.turn-work-log.is-settled:is([data-settled-work-status="failed"], [data-settled-work-status="limited"]) {\n  margin-bottom: 4px;\n}',
+    );
+    expect(styles).toMatch(/\.response-turn:not\(\.is-active\) > \.agent-run-flow:not\(\.is-quiet-settled\) \{\s*margin-bottom: var\(--settled-layer-spacing\);/u);
+  });
 });

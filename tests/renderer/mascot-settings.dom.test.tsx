@@ -208,3 +208,21 @@ describe("mascot animation setting", () => {
     expect(within(motion).queryByText("Saved")).toBeNull();
   });
 });
+
+describe("mascot hidden for the session", () => {
+  it("offers a plain Unhide button only while the enabled mascot is hidden and says how hiding works", async () => {
+    const bridge = install();
+    let changed = (_snapshot: MascotSnapshot): void => undefined;
+    bridge.onChanged.mockImplementation(((listener: (snapshot: MascotSnapshot) => void) => { changed = listener; return () => undefined; }) as never);
+    bridge.snapshot.mockResolvedValue({ preferences: { enabled: true, motion: true }, status: emptyMascotStatus(), hidden: true });
+    render(<MascotSettings />);
+    const button = await screen.findByRole("button", { name: "Unhide" });
+    expect(screen.queryAllByRole("button", { name: /Show mascot/u })).toEqual([]);
+    expect(screen.getByRole("switch", { name: "Show mascot" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/Right-click to pause it, or hide it until you show it again\./u)).toBeTruthy();
+    fireEvent.click(button);
+    expect(bridge.action).toHaveBeenCalledWith("show");
+    changed({ preferences: { enabled: true, motion: true }, status: emptyMascotStatus() });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Unhide" })).toBeNull());
+  });
+});

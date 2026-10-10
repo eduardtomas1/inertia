@@ -32,7 +32,7 @@ import type {
 } from "./runtime/agent-browser-broker-client.js";
 
 export interface RuntimeOptions {
-  onMascotStatus?: (status: import("../shared/mascot").MascotStatus, chats: import("../shared/mascot").MascotStatus[], focus: string | null, counts: import("../shared/mascot").MascotCounts | null, request: number | null) => void;
+  onMascotStatus?: (feed: import("../shared/mascot-feed").MascotFeed) => void;
   onIncident?: IncidentSink;
   dataDirectory: string;
   defaultWorkspacePath: string;

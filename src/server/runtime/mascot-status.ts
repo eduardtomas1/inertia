@@ -1,57 +1,60 @@
 import type { RuntimeMutationEvent } from "../../shared/contracts/events";
-import type { ConversationShell, Project } from "../../shared/contracts/app";
+import type { ConversationShell, Project, WorkspaceRun } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
 import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
-import { emptyMascotStatus, MASCOT_CHAT_LIMIT, type MascotCounts, type MascotStatus } from "../../shared/mascot";
+import {
+  emptyMascotStatus, isLiveMascotPhase, isMascotAttention, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, mascotTier, parseMascotStatus,
+  type MascotStatus,
+} from "../../shared/mascot";
+import type { MascotFeed } from "../../shared/mascot-feed";
+import {
+  mascotActivityLine, mascotApprovalLine, mascotCommentaryLine, mascotPreview, mascotResultLine,
+} from "./mascot-message";
+
+const MINUTE = 60_000;
+const MASCOT_QUIET_AFTER_MS = 10 * MINUTE;
+const MASCOT_DWELL_MS = 1_500;
+const LIFETIME: Record<number, number> = { 4: 24 * 60 * MINUTE, 3: 60 * MINUTE, 2: 7 * 24 * 60 * MINUTE };
+const LONGEST_WAKE = 2_147_483_647;
+
+export interface MascotClock {
+  now(): number;
+  wake(delay: number, task: () => void): () => void;
+}
+
+const systemClock: MascotClock = {
+  now: () => Date.now(),
+  wake: (delay, task) => {
+    const timer = setTimeout(task, delay);
+    timer.unref?.();
+    return () => clearTimeout(timer);
+  },
+};
 
 function timestamp(value: string | null | undefined): string | null {
   const time = value ? Date.parse(value) : Number.NaN;
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
 }
 
-function candidate(conversation: ConversationShell, projectName: string | null): { status: MascotStatus; seen: boolean } | null {
-  const turn = conversation.latestTurn;
-  if (conversation.archivedAt || !turn) return null;
-  const phase = agentRunStateForTurn(turn);
-  const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(phase);
-  return {
-    seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt),
-    status: {
-      phase,
-      projectId: conversation.projectId,
-      conversationId: conversation.id,
-      runId: turn.runId,
-      turnId: turn.id,
-      activeCount: terminal ? 0 : 1,
-      chatTitle: preview(conversation.title, 96), projectName: preview(projectName, 64),
-      message: null, progress: null, steps: null,
-      since: timestamp(terminal ? turn.completedAt ?? turn.updatedAt : turn.startedAt ?? turn.requestedAt),
-    },
-  };
+interface Line {
+  text: string | null;
+  weight: number;
+  at: number;
 }
 
-function priority(status: MascotStatus): number {
-  if (status.phase === "waiting-for-input" || status.phase === "waiting-for-approval") return 4;
-  if (status.activeCount) return 3;
-  if (status.phase === "failed" || status.phase === "interrupted") return 2;
-  return 1;
-}
-
-function preview(value: string | null | undefined, limit = 280): string | null {
-  const text = (value ?? "").slice(0, 4_096)
-    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/`([^`]+)`|\*\*([^*]+)\*\*/gu, (_match, code: string | undefined, bold: string | undefined) => code ?? bold ?? "")
-    .replace(/^#{1,6}\s+/u, "")
-    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
-    .replace(/[\s\x00-\x1f\x7f]+/gu, " ").trim();
-  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text || null;
-}
 interface Candidate {
   status: MascotStatus;
   seen: boolean;
   at: string;
-  activityAt: string;
-  requests: Map<string, { phase: MascotStatus["phase"]; message: string; progress: string | null }>;
+  changedAt: number;
+  heardAt: number;
+  tier: number;
+  commentary: { text: string; at: string } | null;
+  step: string | null;
+  activity: { text: string; at: string } | null;
+  outcome: string | null;
+  line: Line;
+  requests: Map<string, { phase: MascotStatus["phase"]; message: string; progress: string | null; at: number }>;
 }
 
 const settledRequests: Candidate["requests"] = new Map();
@@ -64,24 +67,43 @@ export function keepBest<T>(best: T[], entry: T, limit: number, compare: (left: 
   if (best.length > limit) best.pop();
 }
 
+function rank(left: Candidate, right: Candidate): number {
+  if (left.tier !== right.tier) return right.tier - left.tier;
+  if (left.at !== right.at) return left.at > right.at ? -1 : 1;
+  return left.status.conversationId! < right.status.conversationId! ? -1 : 1;
+}
+
 /** Event-driven previews, scoped to the authoritative turn; never retains a transcript. */
 export class MascotStatusPublisher {
   private readonly conversations = new Map<string, Candidate>();
   private projects = new Map<string, string | null>();
+  private seenRuns = new Set<string>();
   private focused: string | null = null;
+  private shown: string | null = null;
   private request: number | null = null;
   private pending = false;
+  private closed = false;
   private last = "";
+  private wakeAt = Number.POSITIVE_INFINITY;
+  private nextWake = Number.POSITIVE_INFINITY;
+  private cancelWake: (() => void) | null = null;
   constructor(
-    private readonly publish?: (status: MascotStatus, chats: MascotStatus[], focus: string | null, counts: MascotCounts, request: number | null) => void,
+    private readonly publish?: (feed: MascotFeed) => void,
     private readonly lookup?: (id: string) => ConversationShell | null,
     private readonly projectName?: (id: string) => string | null,
     private readonly schedule: (task: () => void) => void = (task) => queueMicrotask(task),
+    private readonly clock: MascotClock = systemClock,
   ) {}
 
-  replace(conversations: readonly ConversationShell[], projects: readonly Pick<Project, "id" | "name">[] = []): void {
+  replace(
+    conversations: readonly ConversationShell[],
+    projects: readonly Pick<Project, "id" | "name">[] = [],
+    runs: readonly Pick<WorkspaceRun, "id" | "status" | "attentionState">[] = [],
+  ): void {
     if (!this.publish) return;
     this.projects = new Map(projects.map(({ id, name }) => [id, name]));
+    this.seenRuns = new Set(runs.filter(({ status, attentionState }) => status !== "running" && status !== "waiting"
+      && attentionState !== "unseen").map(({ id }) => id));
     const ids = new Set(conversations.map(({ id }) => id));
     for (const id of this.conversations.keys()) if (!ids.has(id)) this.conversations.delete(id);
     for (const conversation of conversations) this.store(conversation);
@@ -103,6 +125,15 @@ export class MascotStatusPublisher {
   observe(event: RuntimeMutationEvent): void {
     if (!this.publish) return;
     if (event.type === "conversation.shell.updated") { this.update(event.conversation); return; }
+    if (event.type === "agent.text" || event.type === "agent.reasoning" || event.type === "agent.subagent.updated") {
+      const owner = event.type === "agent.subagent.updated" ? event.trace : event;
+      const entry = this.conversations.get(owner.conversationId);
+      if (!entry || entry.status.turnId !== owner.turnId || entry.status.runId !== owner.runId) return;
+      const quiet = this.quiet(entry, this.clock.now());
+      entry.heardAt = this.clock.now();
+      if (quiet) this.emit();
+      return;
+    }
     const owner = event.type === "agent.activity" ? event.activity
       : event.type === "agent.commentary.persisted" ? event.message
       : event.type === "agent.plan.updated" ? event.plan
@@ -117,52 +148,55 @@ export class MascotStatusPublisher {
       || ("runId" in owner && owner.runId !== entry.status.runId)) return;
     const { status, requests } = entry;
     const live = status.activeCount > 0;
+    if (live) entry.heardAt = this.clock.now();
     switch (event.type) {
       case "agent.input.requested": {
         if (!live) return;
         const first = event.request.questions[0];
         const message = first?.isSecret ? "Sensitive information is needed. Answer privately in the chat."
-          : preview(first?.question) ?? "Choose which conversation context to share in the chat.";
-        requests.set(`input:${event.request.id}`, { phase: "waiting-for-input", message,
+          : mascotPreview(first?.question) ?? "Choose which conversation context to share in the chat.";
+        requests.set(`input:${event.request.id}`, { phase: "waiting-for-input", message, at: this.clock.now(),
           progress: event.request.questions.length > 1 ? `${event.request.questions.length} questions to answer` : null });
         break;
       }
       case "agent.approval.requested":
         if (!live) return;
-        requests.set(`approval:${event.request.id}`, { phase: "waiting-for-approval",
-          message: preview([event.request.title, event.request.reason].filter(Boolean).join(" — ")) ?? "Review the requested permission in the chat.", progress: null });
+        requests.set(`approval:${event.request.id}`, {
+          phase: "waiting-for-approval", message: mascotApprovalLine(event.request), progress: null, at: this.clock.now(),
+        });
         break;
       case "agent.input.resolved": requests.delete(`input:${event.requestId}`); break;
       case "agent.approval.resolved": requests.delete(`approval:${event.requestId}`); break;
-      case "agent.activity":
-        if (!live || status.phase.startsWith("waiting-") || event.activity.kind === "reasoning"
-          || isTurnCheckpointUnavailableActivity(event.activity)
-          || event.activity.createdAt < entry.activityAt) return;
-        entry.activityAt = event.activity.createdAt;
-        status.message = preview(`${event.activity.status === "completed" ? "Finished: " : event.activity.status === "failed" ? "Failed: " : ""}${event.activity.title}`);
+      case "agent.activity": {
+        if (!live || isTurnCheckpointUnavailableActivity(event.activity)
+          || (entry.activity && event.activity.createdAt < entry.activity.at)) return;
+        const text = mascotActivityLine(event.activity);
+        if (text) entry.activity = { text, at: event.activity.createdAt };
         break;
-      case "agent.commentary.persisted":
-        if (!live || event.message.role !== "assistant" || event.message.createdAt < entry.activityAt) return;
-        entry.activityAt = event.message.createdAt;
-        status.message = preview(event.message.content);
+      }
+      case "agent.commentary.persisted": {
+        if (!live || event.message.role !== "assistant"
+          || (entry.commentary && event.message.createdAt < entry.commentary.at)) return;
+        const text = mascotCommentaryLine(event.message.content);
+        if (text) entry.commentary = { text, at: event.message.createdAt };
         break;
-      case "agent.plan.updated":
+      }
+      case "agent.plan.updated": {
         if (!live) return;
-      {
         const completed = event.plan.steps.filter(({ status: stepStatus }) => stepStatus === "completed").length;
         const total = Math.min(event.plan.steps.length, 1_000);
         status.steps = total ? { completed: Math.min(completed, total), total } : null;
         status.progress = total ? `${completed} of ${event.plan.steps.length} steps complete` : null;
-      }
-        status.message = preview(event.plan.steps.find(({ status: stepStatus }) => stepStatus === "inProgress")?.step) ?? status.message;
+        entry.step = mascotPreview(event.plan.steps.find(({ status: stepStatus }) => stepStatus === "inProgress")?.step);
         break;
+      }
       case "agent.completed":
       case "agent.failed": {
         if (status.phase !== event.status) return;
         const final = event.terminalAssistantMessage;
-        status.message = event.type === "agent.failed" ? preview(event.message)
+        entry.outcome = event.type === "agent.failed" ? mascotPreview(event.message)
           : event.status === "completed" && final?.conversationId === status.conversationId
-            && final.turnId === status.turnId && final.role === "assistant" ? preview(final.content) : null;
+            && final.turnId === status.turnId && final.role === "assistant" ? mascotResultLine(final.content) : null;
         status.progress = null;
         status.steps = null;
         requests.clear();
@@ -177,25 +211,46 @@ export class MascotStatusPublisher {
   private store(conversation: ConversationShell): void {
     const { projectId } = conversation;
     if (!this.projects.has(projectId)) this.projects.set(projectId, this.projectName?.(projectId) ?? null);
-    const next = candidate(conversation, this.projects.get(projectId) ?? null);
-    if (!next) { this.conversations.delete(conversation.id); return; }
-    const { status, seen } = next;
+    const turn = conversation.latestTurn;
+    if (conversation.archivedAt || !turn) { this.conversations.delete(conversation.id); return; }
+    const phase = agentRunStateForTurn(turn);
+    const terminal = !isLiveMascotPhase(phase);
     const previous = this.conversations.get(conversation.id);
-    const sameTurn = previous?.status.turnId === status.turnId && previous.status.runId === status.runId;
-    const keep = sameTurn && (status.activeCount > 0 || previous.status.phase === status.phase);
+    const sameTurn = previous?.status.turnId === turn.id && previous.status.runId === turn.runId;
+    const keep = sameTurn && (!terminal || previous.status.phase === phase);
+    const now = this.clock.now();
+    const changed = Date.parse(terminal ? turn.completedAt ?? turn.updatedAt : turn.updatedAt);
     this.conversations.set(conversation.id, {
-      status: { ...status, message: keep ? previous.status.message : null, progress: keep ? previous.status.progress : null,
-        steps: keep ? previous.status.steps : null },
-      seen,
+      status: {
+        phase, projectId, conversationId: conversation.id, runId: turn.runId, turnId: turn.id, activeCount: terminal ? 0 : 1,
+        chatTitle: mascotPreview(conversation.title, 96), projectName: mascotPreview(this.projects.get(projectId), 64),
+        message: null, progress: keep ? previous.status.progress : null, steps: keep ? previous.status.steps : null,
+        since: timestamp(terminal ? turn.completedAt ?? turn.updatedAt : turn.startedAt ?? turn.requestedAt), quietSince: null,
+      },
+      seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt || this.seenRuns.has(turn.runId)),
       // Activity updates must not bounce between live chats.
-      at: status.activeCount ? conversation.latestTurn!.requestedAt : conversation.latestTurn!.updatedAt,
-      activityAt: keep ? previous.activityAt : "",
-      requests: !status.activeCount ? settledRequests : sameTurn && previous.status.activeCount ? previous.requests : new Map(),
+      at: terminal ? turn.updatedAt : turn.requestedAt,
+      changedAt: sameTurn && previous.status.phase === phase ? previous.changedAt : Number.isFinite(changed) ? changed : now,
+      heardAt: sameTurn && previous.status.phase === phase ? previous.heardAt : now,
+      tier: 0,
+      commentary: keep ? previous.commentary : null,
+      step: keep ? previous.step : null,
+      activity: keep ? previous.activity : null,
+      outcome: keep ? previous.outcome : null,
+      line: sameTurn ? previous.line : { text: null, weight: 0, at: 0 },
+      requests: terminal ? settledRequests : sameTurn && previous.status.activeCount ? previous.requests : new Map(),
     });
   }
 
+  close(): void {
+    this.closed = true;
+    this.cancelWake?.();
+    this.cancelWake = null;
+    this.wakeAt = Number.POSITIVE_INFINITY;
+  }
+
   private emit(): void {
-    if (!this.publish || this.pending) return;
+    if (!this.publish || this.pending || this.closed) return;
     this.pending = true;
     this.schedule(() => {
       this.pending = false;
@@ -203,42 +258,114 @@ export class MascotStatusPublisher {
     });
   }
 
+  private quiet(entry: Candidate, now: number): boolean {
+    return entry.status.activeCount > 0 && !isMascotAttention(entry.status.phase) && now - entry.heardAt >= MASCOT_QUIET_AFTER_MS;
+  }
+
+  private tier(entry: Candidate, now: number): number {
+    const tier = mascotTier(entry.status.phase);
+    if (tier === 1) return 1;
+    if (tier === 0 || (tier < 4 && entry.seen)) return 0;
+    return now - entry.changedAt < LIFETIME[tier]! ? tier : 0;
+  }
+
+  private wanted(entry: Candidate): { text: string | null; weight: number } {
+    const { phase } = entry.status;
+    if (isMascotAttention(phase)) {
+      return { text: [...entry.requests.values()].find((request) => request.phase === phase)?.message ?? null, weight: 4 };
+    }
+    if (!isLiveMascotPhase(phase)) return { text: entry.outcome, weight: 4 };
+    if (entry.commentary) return { text: entry.commentary.text, weight: 3 };
+    if (entry.step) return { text: entry.step, weight: 2 };
+    return { text: entry.activity?.text ?? null, weight: entry.activity ? 1 : 0 };
+  }
+
+  private display(entry: Candidate, activeCount: number, now: number): MascotStatus {
+    const next = this.wanted(entry);
+    const current = entry.line;
+    if (next.text !== current.text) {
+      const elapsed = now - current.at;
+      const hold = next.weight < 4 && next.weight <= current.weight && current.text !== null && elapsed >= 0 && elapsed < MASCOT_DWELL_MS;
+      if (hold) this.wakeAtMost(current.at + MASCOT_DWELL_MS);
+      else entry.line = { text: next.text, weight: next.weight, at: now };
+    }
+    const request = isMascotAttention(entry.status.phase)
+      ? [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase) : undefined;
+    const status: MascotStatus = { ...entry.status, activeCount, message: entry.line.text,
+      ...(isMascotAttention(entry.status.phase)
+        ? { progress: request?.progress ?? null, since: new Date(request?.at ?? entry.changedAt).toISOString() } : {}),
+      quietSince: this.quiet(entry, now) ? new Date(entry.heardAt).toISOString() : null,
+    };
+    return parseMascotStatus(status) ? status : { ...status, chatTitle: null, projectName: null, message: null, progress: null };
+  }
+
+  private wakeAtMost(at: number): void {
+    if (at < this.nextWake) this.nextWake = at;
+  }
+
   private flush(): void {
+    if (this.closed) return;
+    const now = this.clock.now();
+    this.nextWake = Number.POSITIVE_INFINITY;
     let activeCount = 0;
     let attention = 0;
+    let eligible = 0;
     let focused: Candidate | undefined;
     const listed: Candidate[] = [];
+    const ranked: Candidate[] = [];
     for (const entry of this.conversations.values()) {
+      entry.tier = this.tier(entry, now);
       activeCount += entry.status.activeCount;
-      if (priority(entry.status) === 4) attention += 1;
+      if (entry.tier === 4) attention += 1;
+      if (entry.tier > 1) this.wakeAtMost(entry.changedAt + LIFETIME[entry.tier]!);
+      else if (entry.tier === 1 && !this.quiet(entry, now) && !isMascotAttention(entry.status.phase)) this.wakeAtMost(entry.heardAt + MASCOT_QUIET_AFTER_MS);
+      if (entry.tier > 0) { eligible += 1; keepBest(ranked, entry, MASCOT_ROW_LIMIT + 1, rank); }
       if (entry.status.conversationId === this.focused) focused = entry;
       keepBest(listed, entry, MASCOT_CHAT_LIMIT, rank);
     }
-    const display = (entry: Candidate): MascotStatus => {
-      const request = [...entry.requests.values()].find(({ phase }) => phase === entry.status.phase);
-      return { ...entry.status, activeCount,
-        ...(request ? { message: request.message, progress: request.progress }
-          : entry.status.phase.startsWith("waiting-") ? { message: null, progress: null } : {}),
-      };
-    };
-    const selected = listed[0] && !listed[0].seen ? listed[0] : undefined;
-    const status = selected ? display(selected) : emptyMascotStatus();
+    const previous = this.shown === null ? undefined : this.conversations.get(this.shown);
+    const best = ranked[0];
+    const shown = previous && previous.tier > 0 && (!best || best.tier <= previous.tier) ? previous : best;
+    this.shown = shown?.status.conversationId ?? null;
+    if (shown && listed[0] !== shown) {
+      const index = listed.indexOf(shown);
+      listed.splice(index < 0 ? MASCOT_CHAT_LIMIT - 1 : index, 1);
+      listed.unshift(shown);
+    }
     if (focused && !listed.includes(focused)) listed.splice(MASCOT_CHAT_LIMIT - 1, 1, focused);
-    const chats = listed.map(display);
     if (!focused) this.focused = null;
-    const focus = this.focused;
-    const counts = { chats: this.conversations.size, attention };
-    const serialized = JSON.stringify([status, chats, focus, counts, this.request]);
+    const excluded = focused ?? shown;
+    const rows = ranked.filter((entry) => entry !== excluded).slice(0, MASCOT_ROW_LIMIT);
+    const shownStatuses = new Map<Candidate, MascotStatus>();
+    const show = (entry: Candidate): MascotStatus => {
+      let value = shownStatuses.get(entry);
+      if (!value) shownStatuses.set(entry, value = this.display(entry, activeCount, now));
+      return value;
+    };
+    const status = shown ? show(shown) : { ...emptyMascotStatus(), activeCount };
+    const feed: MascotFeed = {
+      status, chats: listed.map(show), rows: rows.map(show),
+      focus: this.focused,
+      counts: { chats: this.conversations.size, attention, others: eligible - Number(Boolean(excluded && excluded.tier > 0)) },
+      request: this.request,
+    };
+    this.rewake(now);
+    const serialized = JSON.stringify(feed);
     if (serialized === this.last) return;
     this.last = serialized;
-    this.publish?.(status, chats, focus, counts, this.request);
+    this.publish?.(feed);
   }
-}
 
-function rank(left: Candidate, right: Candidate): number {
-  if (left.seen !== right.seen) return left.seen ? 1 : -1;
-  const priorities = priority(right.status) - priority(left.status);
-  if (priorities) return priorities;
-  if (left.at !== right.at) return left.at > right.at ? -1 : 1;
-  return left.status.conversationId! < right.status.conversationId! ? -1 : 1;
+  private rewake(now: number): void {
+    const at = this.nextWake;
+    if (at === this.wakeAt) return;
+    this.cancelWake?.();
+    this.cancelWake = null;
+    this.wakeAt = at;
+    if (Number.isFinite(at)) this.cancelWake = this.clock.wake(Math.min(LONGEST_WAKE, Math.max(0, at - now)), () => {
+      this.cancelWake = null;
+      this.wakeAt = Number.POSITIVE_INFINITY;
+      this.emit();
+    });
+  }
 }

@@ -6,7 +6,7 @@ const MASCOT_IPC = { snapshot: "inertia:mascot-snapshot", configure: "inertia:ma
 
 const bridge: MascotBridge = {
   snapshot: () => ipcRenderer.invoke(MASCOT_IPC.snapshot) as Promise<MascotSnapshot>,
-  action: (action, expected) => (action === "open-chat" || action === "pin" || action === "pickup" || action === "drop"
+  action: (action, expected) => (action === "open-chat" || action === "pin" || action === "pickup" || action === "drop" || action === "bubble"
     ? ipcRenderer.invoke(MASCOT_IPC.action, action, expected)
     : ipcRenderer.invoke(MASCOT_IPC.action, action)) as Promise<void>,
   onChanged: (listener) => {

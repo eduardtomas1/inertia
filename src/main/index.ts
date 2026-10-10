@@ -785,6 +785,7 @@ async function createMainWindow(): Promise<void> {
       await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
     },
     spriteOrigin: `${releaseChannel.protocolScheme}://${APP_HOST}/`, focusChat: (conversationId, request) => runtimeSupervisor?.focusMascotChat(conversationId, request),
+    feedRejected: () => runtimeDiagnostics?.record("mascot.feed-rejected"),
   });
   mascotMain.attach();
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
@@ -817,7 +818,7 @@ async function createMainWindow(): Promise<void> {
   window.once("ready-to-show", () => window.show());
   detachedChatClose.coordinateMainWindowClose(window, detachedChatMain, saveWindowState);
   window.on("closed", () => {
-    mascotMain?.suspend();
+    mascotMain?.mainWindowClosed();
     unregisterHealthRenderer();
     previewBroker.close();
     if (mainWindow === window) {
@@ -1090,7 +1091,7 @@ async function bootstrap(): Promise<void> {
       }));
       return child;
     },
-    onMascotStatus: (status, chats, focus, counts, request) => mascotMain?.observe(status, chats, focus, counts, request),
+    onMascotStatus: (feed) => feed ? mascotMain?.observe(feed) : mascotMain?.reject(),
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {

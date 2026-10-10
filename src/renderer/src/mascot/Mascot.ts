@@ -1,10 +1,10 @@
 import {
-  emptyMascotStatus, isLiveMascotPhase, MASCOT_CHAT_LIMIT, MASCOT_LABELS,
+  emptyMascotStatus, isLiveMascotPhase, MASCOT_CHAT_LIMIT, MASCOT_COMPACT_HEIGHT, MASCOT_LABELS, mascotBubbleHeight,
   type MascotAction, type MascotBridge, type MascotGesture, type MascotSnapshot, type MascotStatus,
 } from "../../../shared/mascot";
 import { mascotChatChoices } from "../../../shared/mascot-choices";
 import { mascotArtwork, readMascotAssets } from "./assets";
-import { mascotActionLabel, mascotElapsed, mascotFallback, mascotShortLabel, mascotTone } from "./copy";
+import { mascotActionLabel, mascotElapsed, mascotShortLabel, mascotTone } from "./copy";
 
 declare global { interface Window { mascot: MascotBridge } }
 
@@ -31,7 +31,13 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const pickerLabel = select(".mascot-picker-label");
   const chooser = select(".mascot-chooser");
   const list = select(".mascot-chats");
+  const rowList = select(".mascot-rows");
+  const more = select(".mascot-more");
+  const announcer = select(".mascot-announce");
   const options = new Map<string, HTMLButtonElement>();
+  const rowButtons = new Map<string, HTMLButtonElement>();
+  let announced = "";
+  let reported = 0;
   const media = matchMedia("(prefers-reduced-motion: reduce)");
   const listeners = new AbortController();
   const eventOptions = { signal: listeners.signal };
@@ -47,20 +53,24 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   let gesture: MascotGesture = [0, 0];
   let choosing = false;
 
+  const chatButton = (className: string, parts: readonly string[], click: () => void): HTMLButtonElement => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = className;
+    row.append(...parts.map((name) => {
+      const part = document.createElement("span");
+      part.className = name;
+      return part;
+    }));
+    row.addEventListener("click", click, eventOptions);
+    return row;
+  };
   const option = (key: string): HTMLButtonElement => {
     let row = options.get(key);
     if (!row) {
-      row = document.createElement("button");
-      row.type = "button";
-      row.className = "mascot-option";
+      row = chatButton("mascot-option", ["mascot-dot", "mascot-option-title", "mascot-option-project", "mascot-option-state"], () => choose(key || null));
       row.dataset.key = key;
-      row.append(...["mascot-dot", "mascot-option-title", "mascot-option-project", "mascot-option-state"].map((name) => {
-        const part = document.createElement("span");
-        part.className = name;
-        return part;
-      }));
       row.firstElementChild!.setAttribute("aria-hidden", "true");
-      row.addEventListener("click", () => choose(key || null), eventOptions);
       options.set(key, row);
     }
     return row;
@@ -90,6 +100,34 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     if (target && document.activeElement !== target) target.focus({ preventScroll: true });
   };
 
+  const renderRows = (chats: readonly MascotStatus[], others: number): void => {
+    const choices = mascotChatChoices(chats);
+    const items = chats.map((chat, index) => {
+      const key = chat.conversationId!;
+      let row = rowButtons.get(key);
+      if (!row) {
+        row = chatButton("mascot-row", ["", ""], () => {
+          const target = snapshot.rows?.find((candidate) => candidate.conversationId === key);
+          if (target) perform("open-chat", target);
+        });
+        rowButtons.set(key, row);
+      }
+      const [name, state] = row.children as unknown as [HTMLElement, HTMLElement];
+      const word = `${mascotShortLabel[chat.phase].toLowerCase()}${chat.steps ? ` ${chat.steps.completed}/${chat.steps.total}` : ""}`;
+      name.textContent = choices[index]!.title;
+      state.textContent = `· ${word}`;
+      row.dataset.tone = mascotTone(chat.phase);
+      row.setAttribute("aria-label", `Open ${name.textContent}, ${word}`);
+      return row;
+    });
+    for (const key of rowButtons.keys()) if (!chats.some(({ conversationId }) => conversationId === key)) rowButtons.delete(key);
+    items.forEach((row, index) => { if (rowList.children[index] !== row) rowList.insertBefore(row, rowList.children[index] ?? null); });
+    while (rowList.children.length > items.length + 1) rowList.children[items.length]!.remove();
+    more.textContent = others > chats.length ? `${others - chats.length} more` : "";
+    more.hidden = !more.textContent;
+    rowList.hidden = !items.length;
+  };
+
   const render = (): void => {
     const { status, preferences } = snapshot;
     const chats = snapshot.chats ?? [];
@@ -113,36 +151,50 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     main.dataset.phase = status.phase;
     main.dataset.tone = mascotTone(status.phase);
     main.dataset.pinned = String(Boolean(pinned));
-    label.textContent = MASCOT_LABELS[status.phase];
+    main.dataset.artwork = mascotArtwork(status.phase);
+    main.dataset.compact = String(!status.conversationId && !choosing);
+    label.textContent = status.quietSince ? `No updates for ${mascotElapsed(status.quietSince, Date.now(), true)}` : MASCOT_LABELS[status.phase];
     time.textContent = status.since ? mascotElapsed(status.since, Date.now(), live) : "";
     button.disabled = !status.conversationId;
     project.textContent = status.projectName ?? "";
     title.textContent = status.chatTitle ?? "Inertia";
-    message.textContent = status.message ?? mascotFallback[status.phase];
+    message.textContent = status.message ?? "";
     actionLabel.textContent = status.conversationId ? mascotActionLabel(status.phase) : "";
     const exact = Boolean(snapshot.counts) || chats.length < MASCOT_CHAT_LIMIT;
     const total = snapshot.counts?.chats ?? chats.length;
     const attention = snapshot.counts?.attention ?? chats.filter((chat) => mascotTone(chat.phase) === "attention").length;
-    const others = Math.max(0, attention - (status.conversationId && mascotTone(status.phase) === "attention" ? 1 : 0));
+    const otherAttention = Math.max(0, attention - (status.conversationId && mascotTone(status.phase) === "attention" ? 1 : 0));
     const amount = (count: number): string => count > 99 ? "99+" : `${count}${exact ? "" : "+"}`;
     const counted = (count: number, one: string, many: string): string => `${amount(count)} ${count === 1 && exact ? one : many}`;
     const plan = mascotTone(status.phase) === "live" ? status.steps : null;
     steps.hidden = !plan;
     if (plan) stepsFill.style.setProperty("--mascot-steps", String(plan.completed / plan.total));
-    detail.textContent = plan ? `${plan.completed} of ${plan.total} steps`
-      : status.progress ?? (others ? `${counted(others, "other chat needs", "other chats need")} you`
-        : status.activeCount > 1 ? `${status.activeCount} active chats` : "");
+    detail.textContent = plan ? `${plan.completed} of ${plan.total} steps` : status.progress ?? "";
     button.setAttribute("aria-label", [label.textContent, time.textContent, title.textContent, project.textContent, message.textContent, detail.textContent, actionLabel.textContent].filter(Boolean).join(". "));
-    button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${status.activeCount > 1 ? `${status.activeCount} active chats. ` : ""}${actionLabel.textContent}`;
+    button.title = `${[title.textContent, project.textContent].filter(Boolean).join(" — ")}\n${message.textContent}\n${actionLabel.textContent}`;
+    const shownRows = snapshot.rows ?? [];
+    const otherCount = snapshot.counts?.others ?? shownRows.length;
+    renderRows(shownRows, otherCount);
+    const height = main.dataset.compact === "true" ? MASCOT_COMPACT_HEIGHT : mascotBubbleHeight(shownRows.length, otherCount);
+    bubble.style.height = `${height}px`;
+    if (height !== reported && active) {
+      reported = height;
+      void bridge.action("bubble", height).catch(() => { reported = 0; });
+    }
+    const spoken = ["attention", "done", "problem"].includes(mascotTone(status.phase)) ? status.message ?? "" : "";
+    const announcement = [label.textContent, status.conversationId ? title.textContent : "", spoken].filter(Boolean).join(". ");
+    const key = `${status.phase}\u0000${status.conversationId}\u0000${spoken}\u0000${Boolean(status.quietSince)}`;
+    if (key !== announced) { announced = key; announcer.textContent = announcement; }
     const pickerFocused = document.activeElement === picker;
     picker.hidden = !choosing && !pinned && chats.every((chat) => chat.conversationId === status.conversationId);
-    picker.dataset.attention = String(others > 0);
+    picker.dataset.attention = String(otherAttention > 0);
     pickerLabel.textContent = pinned ? "Pinned" : "Auto";
     picker.title = "Choose which chat the mascot shows";
     picker.setAttribute("aria-label", `Show chat: ${pinned ? `pinned to ${title.textContent}` : "most urgent"}. ${counted(total, "chat", "chats")}${attention ? `, ${counted(attention, "needs", "need")} you` : ""}`);
     picker.setAttribute("aria-expanded", String(choosing));
     bubble.dataset.view = choosing ? "chats" : "status";
     button.hidden = choosing;
+    rowList.hidden ||= choosing;
     chooser.hidden = !choosing;
     if (pickerFocused && picker.hidden) (button.disabled ? main : button).focus({ preventScroll: true });
     if (choosing) renderChats(chats, pinned);
@@ -167,8 +219,10 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     snapshot = value;
     render();
   };
-  const perform = (action: MascotAction): void => {
-    const expected = action === "open-chat" ? snapshot.status : action === "drop" ? gesture : undefined;
+  const perform = (
+    action: MascotAction,
+    expected: MascotStatus | MascotGesture | undefined = action === "open-chat" ? snapshot.status : action === "drop" ? gesture : undefined,
+  ): void => {
     const operation = expected ? bridge.action(action, expected) : bridge.action(action);
     void operation.catch(() => { if (active) label.textContent = "Open Inertia to continue"; });
   };
@@ -212,7 +266,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const blur = (): void => { delete main.dataset.keyboardFocus; drop(); };
   const key = (event: KeyboardEvent): void => {
     const actions: Record<string, MascotAction> = {
-      ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", Escape: "hide",
+      ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
     };
     if (choosing && ["ArrowUp", "ArrowDown", "Escape"].includes(event.key)) {
       event.preventDefault();
@@ -223,6 +277,12 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
         ? event.key === "ArrowUp" ? rows.length - 1 : 0
         : (index + (event.key === "ArrowUp" ? rows.length - 1 : 1)) % rows.length;
       rows[next]?.focus({ preventScroll: true });
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      delete main.dataset.keyboardFocus;
+      (document.activeElement as HTMLElement | null)?.blur();
       return;
     }
     const action = actions[event.key];

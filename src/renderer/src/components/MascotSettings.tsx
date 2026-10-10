@@ -91,6 +91,9 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
           <span className="setting-title"><strong>Show mascot</strong><RowStatus notice={showAction.notice} /></span>
           <small>A tiny companion above your windows, showing live chat status.</small>
         </span>
+        {snapshot?.hidden && <button className="secondary-button" type="button" onClick={() => {
+          void bridge.action("show").catch(() => setError("Could not show the mascot."));
+        }}>Unhide</button>}
         <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure(showAction, { enabled: value })} />
       </div>
       <div className="setting-row" data-setting-id="mascot-motion">
@@ -107,7 +110,7 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
         <button className="secondary-button" type="button" disabled={snapshot.placement === "system"} onClick={() => {
           void bridge.action("reset-position").catch(() => setError("Could not reset the position."));
         }}>Reset position</button>
-        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : "Drag to move, or focus and use arrow keys. "}Escape hides it. Right-click for animation and hide controls. Reduced motion uses still artwork.</small>
+        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : "Drag to move, or focus and use arrow keys. "}Right-click to pause it, or hide it until you show it again. Reduced motion uses still artwork.</small>
       </div>}
       {snapshot && <section className="mascot-sprites" aria-labelledby="mascot-sprites-heading">
         <div className="mascot-sprites-heading">

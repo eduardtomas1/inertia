@@ -103,6 +103,9 @@ test("keeps provider commands in a full-width floating command surface", async (
   await expect(commandList.getByRole("option", { name: /\/resume/u })).toBeVisible();
   await expect(commandList.getByRole("option", { name: /\/compact/u })).toBeVisible();
   await expect(commandList.locator('[aria-selected="true"]')).toHaveCount(1);
+  await expect.poll(() => commandMenu.evaluate((element) =>
+    element.getAnimations().every((animation) => animation.playState === "finished"),
+  )).toBe(true);
 
   const composerBox = await composer.boundingBox();
   const commandBox = await commandMenu.boundingBox();
@@ -113,7 +116,7 @@ test("keeps provider commands in a full-width floating command surface", async (
   expect(composerBox!.y - (commandBox!.y + commandBox!.height))
     .toBeGreaterThanOrEqual(7);
   expect(await commandMenu.evaluate((element) =>
-    getComputedStyle(element).borderRadius)).toBe("20px");
+    getComputedStyle(element).borderRadius)).toBe("10px");
 
   const goalCommand = commandList.getByRole("option", { name: /\/goal/u });
   await expect(goalCommand).toBeEnabled();

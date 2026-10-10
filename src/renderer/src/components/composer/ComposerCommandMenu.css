@@ -2,21 +2,20 @@
   position: absolute;
   z-index: 35;
   right: 0;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + var(--popover-offset));
   left: 0;
 }
 
 .composer-command-menu {
   width: 100%;
-  padding: 0;
   overflow: hidden;
 }
 
 .composer-command-list {
   max-height: min(312px, calc(100dvh - 190px));
-  padding: 12px 8px;
+  padding: 0;
   overflow-y: auto;
-  scroll-padding-block: 20px;
+  scroll-padding-block: 4px;
 }
 
 .composer-command-section [role="group"] {
@@ -24,17 +23,9 @@
   gap: 1px;
 }
 
-.composer-command-group-label {
-  padding: 2px 8px 5px;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  line-height: var(--leading-heading);
-}
-
 .composer-command-separator {
   height: 1px;
-  margin: 8px 8px 9px;
+  margin: 4px -4px;
   background: var(--line-soft);
 }
 
@@ -62,14 +53,10 @@
 }
 
 .composer-command-empty {
-  padding: 22px 12px;
+  padding: 8px;
   color: var(--text-muted);
   font-size: var(--text-sm);
   text-align: center;
-}
-
-.composer-resume-menu > .composer-command-group-label {
-  padding: 12px 16px 7px;
 }
 
 .composer-resume-menu .resume-picker-footer {

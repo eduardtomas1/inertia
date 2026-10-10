@@ -4,6 +4,7 @@ import { declarationsFor, parseCssRules, readRendererCss } from "./css-rules";
 
 const source = readRendererCss(
   "styles.css",
+  "components/composer/ComposerSurface.css",
   "components/composer/ComposerCommandMenu.css",
   "components/composer/ComposerSendActions.css",
 );
@@ -53,5 +54,13 @@ describe("composer context rows", () => {
     const layer = declarationsFor(rules, ".composer-more-layer");
     expect(layer.get("bottom")).toBe("calc(100% + var(--popover-offset))");
     expect(declarationsFor(rules, ".composer-more-drilldown-header").get("border-bottom")).toBe("1px solid var(--line-soft)");
+  });
+
+  it("opens the slash menu on the popover base: 4px offset and padding, label-free groups", () => {
+    expect(declarationsFor(rules, ".composer-command-layer").get("bottom")).toBe("calc(100% + var(--popover-offset))");
+    expect(declarationsFor(rules, ".composer-command-menu").has("padding")).toBe(false);
+    expect(declarationsFor(rules, ".composer-command-list").get("padding")).toBe("0");
+    expect(declarationsFor(rules, ".composer-command-separator").get("margin")).toBe("4px -4px");
+    expect(source).not.toContain("composer-command-group-label");
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Plug, SquareSlash } from "lucide-react";
 
 import "./ComposerCommandMenu.css";
@@ -30,7 +30,6 @@ export function ComposerCommandMenu({
   onActiveItemChange,
   onSelect,
 }: ComposerCommandMenuProps): React.JSX.Element {
-  const reactId = useId();
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -85,16 +84,12 @@ export function ComposerCommandMenu({
             const sectionItems = items.filter((item) =>
               item.section === section.id);
             if (sectionItems.length === 0) return null;
-            const labelId = `${reactId}-${section.id}-label`;
             return (
               <div className="composer-command-section" key={section.id}>
                 {sectionIndex > 0 && (
                   <div className="composer-command-separator" aria-hidden="true" />
                 )}
-                <div className="composer-command-group-label" id={labelId}>
-                  {section.label}
-                </div>
-                <div role="group" aria-labelledby={labelId}>
+                <div role="group" aria-label={section.label}>
                   {sectionItems.map(renderItem)}
                 </div>
               </div>

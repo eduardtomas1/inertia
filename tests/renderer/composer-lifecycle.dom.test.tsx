@@ -940,8 +940,10 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/" } });
     const commands = await screen.findByRole("listbox", { name: "Composer commands" });
-    expect(commands).toHaveTextContent("Built-in");
-    expect(commands).toHaveTextContent("Provider");
+    expect(within(commands).getByRole("group", { name: "Built-in" })).toBeInTheDocument();
+    expect(within(commands).getByRole("group", { name: "Provider" })).toBeInTheDocument();
+    expect(commands).not.toHaveTextContent("Built-in");
+    expect(commands.querySelector(".composer-command-group-label")).toBeNull();
     expect(commands).toHaveTextContent("/goal");
     expect(commands).toHaveTextContent("/compact");
     expect(commands).toHaveTextContent("/resume");

@@ -17,6 +17,23 @@ function normalizeSelector(selector: string): string {
   return selector.replace(/\s+/gu, " ").trim();
 }
 
+function splitSelectors(head: string): string[] {
+  const selectors: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < head.length; index += 1) {
+    const character = head[index];
+    if (character === "(" || character === "[") depth += 1;
+    if (character === ")" || character === "]") depth -= 1;
+    if (character === "," && depth === 0) {
+      selectors.push(normalizeSelector(head.slice(start, index)));
+      start = index + 1;
+    }
+  }
+  selectors.push(normalizeSelector(head.slice(start)));
+  return selectors;
+}
+
 function parseDeclarations(body: string): Map<string, string> {
   const declarations = new Map<string, string>();
   for (const part of body.split(";")) {
@@ -53,7 +70,7 @@ export function parseCssRules(source: string): CssRule[] {
       } else {
         rules.push({
           context,
-          selectors: head.split(",").map(normalizeSelector),
+          selectors: splitSelectors(head),
           declarations: parseDeclarations(body),
         });
       }

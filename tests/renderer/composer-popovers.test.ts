@@ -152,8 +152,8 @@ describe("Composer popover state", () => {
         bottom: layout.top + layout.height * scale,
         left: visualLeft,
       },
-      width: layout.width,
-      height: layout.height,
+      scaleX: scale,
+      scaleY: scale,
       originX,
       originY: 0,
     })).toEqual({

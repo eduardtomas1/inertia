@@ -156,37 +156,39 @@ export function composerPopoverBoundary(element: Element): PopoverRect {
 
 export function unscaledPopoverRect({
   rect,
-  width,
-  height,
+  scaleX,
+  scaleY,
   originX,
   originY,
 }: {
   rect: PopoverRect;
-  width: number;
-  height: number;
+  scaleX: number;
+  scaleY: number;
   originX: number;
   originY: number;
 }): PopoverRect {
-  const scaleX = width > 0 ? (rect.right - rect.left) / width : 1;
-  const scaleY = height > 0 ? (rect.bottom - rect.top) / height : 1;
   const left = rect.left - originX * (1 - scaleX);
   const top = rect.top - originY * (1 - scaleY);
   return {
     top,
-    right: left + (width > 0 ? width : rect.right - rect.left),
-    bottom: top + (height > 0 ? height : rect.bottom - rect.top),
+    right: left + (rect.right - rect.left) / scaleX,
+    bottom: top + (rect.bottom - rect.top) / scaleY,
     left,
   };
 }
 
 function layoutRect(element: HTMLElement): PopoverRect & PopoverSize {
-  const [originX = 0, originY = 0] = getComputedStyle(element).transformOrigin
+  const style = getComputedStyle(element);
+  const [originX = 0, originY = 0] = style.transformOrigin
     .split(" ")
     .map((value) => Number.parseFloat(value) || 0);
+  const matrix = style.transform && style.transform !== "none"
+    ? new DOMMatrixReadOnly(style.transform)
+    : null;
   const rect = unscaledPopoverRect({
     rect: element.getBoundingClientRect(),
-    width: element.offsetWidth,
-    height: element.offsetHeight,
+    scaleX: matrix?.a || 1,
+    scaleY: matrix?.d || 1,
     originX,
     originY,
   });

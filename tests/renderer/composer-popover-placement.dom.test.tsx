@@ -248,6 +248,35 @@ describe("composer popover DOM placement", () => {
     expect(popover.dataset.composerPopoverPositioned).toBe("true");
   });
 
+  it("lands a content-sized popover with a fractional width exactly on its placement", () => {
+    document.body.innerHTML = `<div class="chat-workspace"><button>Model</button><div class="composer-popover"></div></div>`;
+    const workspace = document.querySelector<HTMLElement>(".chat-workspace")!;
+    const trigger = document.querySelector<HTMLButtonElement>("button")!;
+    const popover = document.querySelector<HTMLElement>(".composer-popover")!;
+    popover.style.transformOrigin = "180.58px 0px";
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1_200);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue(rect({ top: 0, left: 0, right: 1_200, bottom: 800 }));
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect({ top: 600, left: 300, right: 400, bottom: 632 }));
+    vi.spyOn(popover, "getBoundingClientRect").mockImplementation(() => {
+      const [shiftX = 0, shiftY = 0] = popover.style.translate
+        .match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/gu)
+        ?.map(Number) ?? [];
+      return rect({ top: 100 + shiftY, right: 461.16 + shiftX, bottom: 220 + shiftY, left: 100 + shiftX });
+    });
+    Object.defineProperties(popover, {
+      offsetWidth: { configurable: true, value: 361 },
+      offsetHeight: { configurable: true, value: 120 },
+      clientHeight: { configurable: true, value: 120 },
+      scrollHeight: { configurable: true, value: 120 },
+    });
+
+    const placement = positionComposerPopover(trigger, popover);
+
+    expect(popover.getBoundingClientRect().left).toBe(placement.left);
+    expect(popover.getBoundingClientRect().top).toBe(placement.top);
+  });
+
   it("keeps an explicitly opened section through later hover and pointer leave", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useComposerMenus());

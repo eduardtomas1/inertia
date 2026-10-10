@@ -9,42 +9,39 @@
 @keyframes beautiful-pop-in { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
 @keyframes beautiful-spin { to { transform: rotate(1turn); } }
 
-.agent-input-questions { display: grid; gap: 7px; margin-top: 7px; }
-.agent-input-question { min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; animation: beautiful-fade-up var(--dur-slow) var(--ease) both; }
+.agent-input-question { animation: beautiful-fade-in var(--dur-slow) var(--ease-fade) both; }
 .agent-input-question[hidden] { display: none; }
-.agent-input-question:disabled { opacity: .72; }
-.agent-input-options label { transition: background var(--dur-fast) var(--ease), border-color var(--dur) var(--ease); }
+.agent-input-options label { transition: background var(--dur-fast) var(--ease); }
 .agent-input-options input {
-  display: grid; width: 15px; height: 15px; flex: 0 0 auto; place-content: center;
+  display: grid; width: 16px; height: 16px; flex: 0 0 auto; place-content: center;
   margin: 1px 0 0; border: 1px solid var(--line-strong); border-radius: 50%;
-  appearance: none; -webkit-appearance: none; background: var(--surface-raised);
-  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  appearance: none; -webkit-appearance: none; background: transparent;
+  transition: border-color var(--dur) var(--ease);
 }
 .agent-input-options input[type="checkbox"] { border-radius: var(--radius-xs); }
 .agent-input-options input::before {
-  width: 7px; height: 7px; border-radius: inherit; background: var(--status-input);
-  content: ""; transform: scale(0); transition: transform var(--dur) var(--ease);
+  width: 8px; height: 8px; border-radius: inherit; background: var(--text);
+  content: ""; opacity: 0; transition: opacity var(--dur-fast) var(--ease-fade);
 }
-.agent-input-options input:checked { border-color: var(--line-strong); }
-.agent-input-options input:checked::before { transform: scale(1); }
+.agent-input-options input:checked { border-color: var(--text); }
+.agent-input-options input:checked::before { opacity: 1; }
 .agent-input-footer,
 .agent-input-pager,
 .agent-input-page-dots { display: flex; align-items: center; }
-.agent-input-footer { justify-content: space-between; gap: 10px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
+.agent-input-footer { justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .agent-input-footer .agent-request-actions { margin-top: 0; }
-.agent-input-footer .primary-button { display: inline-flex; align-items: center; gap: 4px; }
-.agent-input-pager { gap: 5px; }
+.agent-input-pager { gap: 4px; }
 .agent-input-page-dots { gap: 4px; }
 .agent-input-page-arrow,
 .agent-input-page-dots > button { display: grid; place-items: center; color: var(--text-muted); background: transparent; }
-.agent-input-page-arrow { width: 25px; height: 25px; border-radius: var(--radius-xs); transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.agent-input-page-arrow { width: 28px; height: 28px; border-radius: var(--radius-xs); transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .agent-input-page-arrow:hover:not(:disabled) { color: var(--text); background: var(--fill); }
 .agent-input-page-dots > button {
-  width: 7px; height: 7px; padding: 0; border: 1.5px solid var(--line-strong); border-radius: 50%; background: transparent;
-  transition: width var(--dur-slow) var(--ease), height var(--dur-slow) var(--ease), background-color var(--dur-slow) var(--ease), border-color var(--dur-slow) var(--ease), border-width var(--dur-slow) var(--ease);
+  width: 8px; height: 8px; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: transparent;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.agent-input-page-dots > button[data-answered="true"] { border-width: 0; background: var(--status-input); }
-.agent-input-page-dots > button[aria-current="true"] { width: 9px; height: 9px; border: 2.5px solid var(--line-strong); background: transparent; }
+.agent-input-page-dots > button[data-answered="true"] { border-color: var(--text-muted); background: var(--text-muted); }
+.agent-input-page-dots > button[aria-current="true"] { border-color: var(--text); }
 
 .composer-suggestion-menu { transform-origin: bottom center; }
 .composer-attachment {

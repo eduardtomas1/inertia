@@ -261,9 +261,8 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(approvalCard).toContainText(
       "Approve the focused renderer verification",
     );
-    await expect(approvalCard).toContainText(
-      "Codex paused for your review.",
-    );
+    await expect(approvalCard.getByLabel("Command awaiting approval"))
+      .toBeVisible();
     const approveOnce = approvalCard.getByRole("button", {
       name: "Approve once",
     });

@@ -248,19 +248,14 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modelTrigger).toBeFocused();
 
   await modelTrigger.click();
-  const modeTrigger = page.getByRole("button", { name: "Choose work mode" });
-  const modeMenu = page.getByRole("menu", { name: "Work mode" });
-  await modeTrigger.click();
-  await expect(modelChooser).toBeHidden();
-  await expect(modeMenu).toBeVisible();
-  await expect(modeTrigger).toBeFocused();
-
+  const modeTrigger = page.getByRole("button", { name: /^Work mode: /u });
   const currentMode = await modeTrigger.locator("span").first().textContent();
   const nextMode = currentMode === "Build" ? "Plan" : "Build";
-  await modeMenu.getByRole("menuitemradio", { name: new RegExp(`^${nextMode}`) }).click();
-  await expect(modeMenu).toBeHidden();
+  await modeTrigger.click();
+  await expect(modelChooser).toBeHidden();
   await expect(modeTrigger).toBeFocused();
   await expect(modeTrigger.locator("span").first()).toHaveText(nextMode);
+  await expect(modeTrigger).toHaveAccessibleName(`Work mode: ${nextMode}. Switch to ${currentMode}.`);
 
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
   const currentBranch = (await execFileAsync(

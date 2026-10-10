@@ -1,15 +1,11 @@
 import {
   ChevronDown,
-  ChevronRight,
   Hammer,
   ListChecks,
   ShieldCheck,
 } from "lucide-react";
 import clsx from "clsx";
-import type {
-  Conversation,
-  InteractionMode,
-} from "@shared/contracts";
+import type { Conversation } from "@shared/contracts";
 import {
   accessOptions,
   menuId,
@@ -178,11 +174,6 @@ export function ComposerSettings({
             onClick={() => toggleMenu("speed")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("speed", event)}
           >
-            <ChevronRight
-              className="composer-setting-icon"
-              size={14}
-              aria-hidden="true"
-            />
             <span className="composer-setting-value">{responseSpeedLabel}</span>
             <ChevronDown
               className="composer-setting-chevron"
@@ -231,7 +222,7 @@ export function ComposerSettings({
         >
           <ShieldCheck
             className="composer-setting-icon"
-            size={14}
+            size={16}
             aria-hidden="true"
           />
           <span className="composer-setting-value">{access.label}</span>
@@ -277,74 +268,36 @@ export function ComposerSettings({
           </div>
         )}
       </div>
-      <div className="popover-anchor composer-setting-control composer-mode-control">
+      <div className="composer-setting-control composer-mode-control">
         <button
-          ref={(node) => setMenuTrigger("mode", node)}
           type="button"
-          className={clsx(
-            "composer-pill composer-setting-trigger",
-            menu === "mode" && "is-active",
-          )}
-          aria-label={`Choose work mode. Current mode: ${
+          className="composer-pill composer-setting-trigger"
+          aria-label={`Work mode: ${
             conversation.interactionMode === "build" ? "Build" : "Plan"
+          }. Switch to ${
+            conversation.interactionMode === "build" ? "Plan" : "Build"
           }.`}
-          aria-haspopup="menu"
-          aria-controls={menuId("mode")}
-          aria-expanded={menu === "mode"}
-          disabled={disabled || running || conversationUpdatePending}
+          data-interaction-mode={conversation.interactionMode}
+          aria-disabled={conversationUpdatePending || undefined}
+          disabled={disabled || running}
           data-composer-setting="mode"
-          onClick={() => toggleMenu("mode")}
-          onKeyDown={(event) =>
-            handleComposerMenuTriggerKeyDown("mode", event)}
+          onClick={() => {
+            if (conversationUpdatePending) return;
+            dismissMenu("context-change");
+            void onUpdateConversation({
+              interactionMode: conversation.interactionMode === "build" ? "plan" : "build",
+            }).catch(() => undefined);
+          }}
         >
           <ModeIcon
             className="composer-setting-icon"
-            size={14}
+            size={16}
             aria-hidden="true"
           />
           <span className="composer-setting-value">
             {conversation.interactionMode === "build" ? "Build" : "Plan"}
           </span>
-          <ChevronDown
-            className="composer-setting-chevron"
-            size={14}
-            aria-hidden="true"
-          />
         </button>
-        {menu === "mode" && (
-          <div
-            ref={(node) => setMenuPopover("mode", node)}
-            id={menuId("mode")}
-            className="composer-popover composer-setting-popover option-popover composer-mode-popover"
-            role="menu"
-            aria-label="Work mode"
-            onKeyDown={handleComposerMenuNavigation}
-          >
-            <div className="popover-title">Mode</div>
-            {(["build", "plan"] as InteractionMode[]).map((mode) => (
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={conversation.interactionMode === mode}
-                key={mode}
-                disabled={conversationUpdatePending}
-                onClick={() => {
-                  void onUpdateConversation({ interactionMode: mode }).then(
-                    () => dismissMenu("selection"),
-                    () => undefined,
-                  );
-                }}
-              >
-                <span>
-                  <strong>{mode === "build" ? "Build" : "Plan"}</strong>
-                </span>
-                {conversation.interactionMode === mode && (
-                  <span className="option-check" />
-                )}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

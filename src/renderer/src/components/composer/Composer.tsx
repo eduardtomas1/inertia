@@ -2,6 +2,7 @@ import { isMaximumReasoning } from "../../utils/maxReasoning";
 import "./ComposerSurface.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
+import { ArrowLeftRight } from "lucide-react";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
@@ -36,7 +37,7 @@ import {
   type PromptStashEntry,
 } from "../../utils/promptStash";
 import { ComposerInputZone } from "./ComposerInputZone";
-import { ComposerToolbar } from "./ComposerToolbar";
+import { ComposerCheckoutStrip, ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
 import { useRuntimeQueueLength } from "./runtimeQueueEvents";
 import { useComposerMenus } from "./useComposerMenus";
@@ -951,181 +952,194 @@ export const Composer = memo(function Composer({
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
-        <span className="composer-surface" aria-hidden="true" />
-        <span className="composer-ultra-glow" aria-hidden="true" />
-        <div className="composer-queue-slot" />
-        {limitResetRow}
-        {goal && (
-          <Suspense fallback={null}>
-            <ChatGoalControl
-              {...goal}
-              open={commandSurface === "goal"}
-              onDismiss={dismissCommandSurface}
-            />
-          </Suspense>
-        )}
-        {commandSurface === "resume" && resumeOptions && resumeOptions.length > 0 && (
-          <Suspense fallback={null}>
-            <ChatResumeControl
-              options={resumeOptions}
-              open
-              onDismiss={dismissCommandSurface}
-              onResume={(resumeConversationId) => {
-                onResumeConversation?.(resumeConversationId);
-                onOpenResume();
-              }}
-            />
-          </Suspense>
-        )}
-        {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
-        <ComposerInputZone
-          contextCards={<>{conversationContextHandoffEnabled && (
-            <>
-              <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
-              <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />
-              <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
-            </>
-          )}</>}
-          routeReadiness={routeReadiness}
-          routeRepairing={routeRepairing}
-          disabled={disabled || conversationUpdatePending}
-          onRunRouteRepair={runRouteRepair}
-          promptContext={promptContext}
-          onClearPromptContext={clearPromptContext}
-          previewContextUrl={visiblePreviewContextUrl}
-          previewContextSelected={previewContextSelected}
-          onTogglePreviewContext={togglePreviewContext}
-          onDismissPreviewContext={dismissPreviewContext}
-          attachments={attachments} attachmentsDisabled={attachmentImporting || submitting} pendingAttachmentIds={pendingAttachmentIds}
-          onRemoveAttachment={removeAttachment}
-          textareaRef={textareaRef}
-          message={message}
-          onMessageChange={promptHistoryController.onMessageChange}
-          onNavigatePromptHistory={promptHistoryController.navigate}
-          onImportAttachments={importAttachments}
-          onSubmit={submit}
-          canQueue={canQueue || documentBlocksFollowUp}
-          onQueue={() => void queueCurrentMessage()}
-          running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
-          stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
-          submissionPending={submissionPending}
-          followUpPending={followUpPending}
-          typedMessageLimit={typedMessageLimit}
-          messageFits={messageFits}
-          onMentionQuery={onMentionQuery}
-          conversationId={conversation.id}
-          mentionResults={mentionResults}
-          chatSuggestions={conversationContext.chatSuggestions} thisChatTitle={conversationContext.thisChatTitle}
-          onAddFileReference={addFileReference}
-          onReferenceChat={conversationContext.referenceChat} onReferenceThisChat={conversationContext.referenceThisChat}
-          {...skillCompletion}
-          acceptSkill={insertSkill}
-          dismissSkills={() => dismissMenu("context-change")}
-          slashMatch={slashMatch}
-          onCompactCommand={() => void compact({ kind: "compact" })}
-          compactUnavailableReason={compactUnavailableReason}
-          compactNotice={compactNotice}
-          handoffNotice={handoffNotice}
-          goalAvailable={Boolean(goal)}
-          onOpenGoal={() => {
-            updateMessage("");
-            setCommandSurface("goal");
-          }}
-          onOpenResume={() => {
-            updateMessage("");
-            // Only the in-chat picker can offer a choice. With nothing
-            // resumable to choose between, fall back to opening the terminal so
-            // its own banner explains why.
-            if (resumeOptions && resumeOptions.length > 0) setCommandSurface("resume");
-            else onOpenResume();
-          }}
-          onUpdateConversation={updateConversation}
-        />
-        <ComposerToolbar
-          actions={actions}
-          disabled={disabled}
-          running={running}
-          attachmentCount={attachments.length}
-          attachmentDisabled={disabled || sending || submitting || attachmentImporting}
-          attachmentImporting={attachmentImporting}
-          onChooseAttachments={chooseAttachments} imageInputUnavailableReason={imageInputUnavailableReason}
-          onRunAction={onRunAction}
-          skills={skills}
-          skillsCapability={skillsCapability}
-          skillsLoading={skillsLoading}
-          skillsError={skillsError}
-          skillQuery={skillCompletion.skillQuery}
-          skillListboxId={skillCompletion.skillListboxId}
-          activeSkillId={skillCompletion.activeSkill?.id ?? null}
-          onListSkills={onListSkills}
-          onInsertSkill={insertSkill}
-          promptPresets={promptPresets}
-          promptPresetsEnabled={promptPresetsEnabled}
-          promptStashEnabled={promptStashEnabled}
-          currentPrompt={message}
-          onApplyPromptPreset={applyPromptPreset}
-          onPromptPresetCommand={onPromptPresetCommand}
-          promptStash={promptStash}
-          canStashPrompt={Boolean(message.trim()) && attachments.length === 0}
-          promptStashBlockedReason={
-            attachments.length > 0
-              ? "Remove attachments before stashing text"
-              : message.trim()
-                ? null
-                : "Type a prompt to stash"
-          }
-          promptRestoreBlockedReason={(entry) => {
-            if (attachments.length > 0) {
-              return "Remove attachments before restoring another prompt";
+        <div className="composer-banners">
+          <div className="composer-notice-slot" />
+          <div className="composer-queue-slot" />
+          {limitResetRow}
+          {handoffNotice && (
+            <div className="composer-handoff-notice" role="status">
+              <ArrowLeftRight size={14} aria-hidden="true" />
+              <span>{handoffNotice}</span>
+            </div>
+          )}
+        </div>
+        <div className="composer-box">
+          <span className="composer-surface" aria-hidden="true" />
+          <span className="composer-ultra-glow" aria-hidden="true" />
+          {goal && (
+            <Suspense fallback={null}>
+              <ChatGoalControl
+                {...goal}
+                open={commandSurface === "goal"}
+                onDismiss={dismissCommandSurface}
+              />
+            </Suspense>
+          )}
+          {commandSurface === "resume" && resumeOptions && resumeOptions.length > 0 && (
+            <Suspense fallback={null}>
+              <ChatResumeControl
+                options={resumeOptions}
+                open
+                onDismiss={dismissCommandSurface}
+                onResume={(resumeConversationId) => {
+                  onResumeConversation?.(resumeConversationId);
+                  onOpenResume();
+                }}
+              />
+            </Suspense>
+          )}
+          {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
+          <ComposerInputZone
+            contextCards={<>{conversationContextHandoffEnabled && (
+              <>
+                <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
+                <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />
+                <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
+              </>
+            )}</>}
+            routeReadiness={routeReadiness}
+            routeRepairing={routeRepairing}
+            disabled={disabled || conversationUpdatePending}
+            onRunRouteRepair={runRouteRepair}
+            promptContext={promptContext}
+            onClearPromptContext={clearPromptContext}
+            previewContextUrl={visiblePreviewContextUrl}
+            previewContextSelected={previewContextSelected}
+            onTogglePreviewContext={togglePreviewContext}
+            onDismissPreviewContext={dismissPreviewContext}
+            attachments={attachments} attachmentsDisabled={attachmentImporting || submitting} pendingAttachmentIds={pendingAttachmentIds}
+            onRemoveAttachment={removeAttachment}
+            textareaRef={textareaRef}
+            message={message}
+            onMessageChange={promptHistoryController.onMessageChange}
+            onNavigatePromptHistory={promptHistoryController.navigate}
+            onImportAttachments={importAttachments}
+            onSubmit={submit}
+            canQueue={canQueue || documentBlocksFollowUp}
+            onQueue={() => void queueCurrentMessage()}
+            running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
+            stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
+            submissionPending={submissionPending}
+            followUpPending={followUpPending}
+            typedMessageLimit={typedMessageLimit}
+            messageFits={messageFits}
+            onMentionQuery={onMentionQuery}
+            conversationId={conversation.id}
+            mentionResults={mentionResults}
+            chatSuggestions={conversationContext.chatSuggestions} thisChatTitle={conversationContext.thisChatTitle}
+            onAddFileReference={addFileReference}
+            onReferenceChat={conversationContext.referenceChat} onReferenceThisChat={conversationContext.referenceThisChat}
+            {...skillCompletion}
+            acceptSkill={insertSkill}
+            dismissSkills={() => dismissMenu("context-change")}
+            slashMatch={slashMatch}
+            onCompactCommand={() => void compact({ kind: "compact" })}
+            compactUnavailableReason={compactUnavailableReason}
+            compactNotice={compactNotice}
+            goalAvailable={Boolean(goal)}
+            onOpenGoal={() => {
+              updateMessage("");
+              setCommandSurface("goal");
+            }}
+            onOpenResume={() => {
+              updateMessage("");
+              // Only the in-chat picker can offer a choice. With nothing
+              // resumable to choose between, fall back to opening the terminal so
+              // its own banner explains why.
+              if (resumeOptions && resumeOptions.length > 0) setCommandSurface("resume");
+              else onOpenResume();
+            }}
+            onUpdateConversation={updateConversation}
+          />
+          <ComposerToolbar
+            actions={actions}
+            disabled={disabled}
+            running={running}
+            attachmentCount={attachments.length}
+            attachmentDisabled={disabled || sending || submitting || attachmentImporting}
+            attachmentImporting={attachmentImporting}
+            onChooseAttachments={chooseAttachments} imageInputUnavailableReason={imageInputUnavailableReason}
+            onRunAction={onRunAction}
+            skills={skills}
+            skillsCapability={skillsCapability}
+            skillsLoading={skillsLoading}
+            skillsError={skillsError}
+            skillQuery={skillCompletion.skillQuery}
+            skillListboxId={skillCompletion.skillListboxId}
+            activeSkillId={skillCompletion.activeSkill?.id ?? null}
+            onListSkills={onListSkills}
+            onInsertSkill={insertSkill}
+            promptPresets={promptPresets}
+            promptPresetsEnabled={promptPresetsEnabled}
+            promptStashEnabled={promptStashEnabled}
+            currentPrompt={message}
+            onApplyPromptPreset={applyPromptPreset}
+            onPromptPresetCommand={onPromptPresetCommand}
+            promptStash={promptStash}
+            canStashPrompt={Boolean(message.trim()) && attachments.length === 0}
+            promptStashBlockedReason={
+              attachments.length > 0
+                ? "Remove attachments before stashing text"
+                : message.trim()
+                  ? null
+                  : "Type a prompt to stash"
             }
-            return promptStashRestoreBlockedReason(
-              conversation.modelSelection,
-              entry.route,
-            );
-          }}
-          onStashPrompt={stashCurrentPrompt}
-          onRestorePrompt={restoreStashedPrompt}
-          onRemoveStashedPrompt={(entryId) =>
-            updatePromptStash((current) =>
-              removePromptStashEntry(current, entryId))}
-          onSetPromptRecurrence={(entryId, recurrence) =>
-            updatePromptStash((current) =>
-              setPromptStashRecurrence(current, entryId, recurrence))}
-          modelRoutes={modelRoutes}
-          selectedModelRoute={selectedModelRoute}
-          onChooseModelRoute={chooseModelRoute}
-          selectedModel={selectedModel}
-          selectedReasoning={selectedReasoning}
-          reasoningLabel={reasoningLabel}
-          selectedFastMode={selectedFastMode}
-          onUpdateReasoningEffort={updateReasoningEffort}
-          onUpdateFastMode={updateFastMode}
+            promptRestoreBlockedReason={(entry) => {
+              if (attachments.length > 0) {
+                return "Remove attachments before restoring another prompt";
+              }
+              return promptStashRestoreBlockedReason(
+                conversation.modelSelection,
+                entry.route,
+              );
+            }}
+            onStashPrompt={stashCurrentPrompt}
+            onRestorePrompt={restoreStashedPrompt}
+            onRemoveStashedPrompt={(entryId) =>
+              updatePromptStash((current) =>
+                removePromptStashEntry(current, entryId))}
+            onSetPromptRecurrence={(entryId, recurrence) =>
+              updatePromptStash((current) =>
+                setPromptStashRecurrence(current, entryId, recurrence))}
+            modelRoutes={modelRoutes}
+            selectedModelRoute={selectedModelRoute}
+            onChooseModelRoute={chooseModelRoute}
+            selectedModel={selectedModel}
+            selectedReasoning={selectedReasoning}
+            reasoningLabel={reasoningLabel}
+            selectedFastMode={selectedFastMode}
+            onUpdateReasoningEffort={updateReasoningEffort}
+            onUpdateFastMode={updateFastMode}
+            conversation={conversation}
+            onUpdateConversation={updateConversation}
+            conversationUpdatePending={conversationUpdatePending}
+            conversationUpdateError={conversationUpdateError}
+            menuController={menuController}
+            selectedProvider={selectedProvider}
+            selectedBackendProfile={selectedBackendProfile}
+            selectedIdentityLabel={selectedIdentityLabel}
+            usage={usage}
+            usageDisplayMode={usageDisplayMode}
+            latestTurn={latestTurn}
+            onUsageDisplayModeChange={onUsageDisplayModeChange}
+            primaryAction={visiblePrimaryAction}
+            canSendQueuedNow={!disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
+            queuedTurnId={latestKnownTurn?.id ?? null}
+            queuedTurnStatus={latestKnownTurn?.status ?? null}
+            queuedTurnAuthoritative={queuedTurnAuthoritative}
+            onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
+            onQueueCommand={onQueueCommand}
+            onReleaseAttachment={onReleaseAttachment}
+            onSubmit={submit}
+            onStop={stop}
+          />
+        </div>
+        <ComposerCheckoutStrip
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
           scratchWorkspace={scratchWorkspace}
           newChatProjectPicker={newChatProjectPicker}
-          onUpdateConversation={updateConversation}
-          conversationUpdatePending={conversationUpdatePending}
-          conversationUpdateError={conversationUpdateError}
-          menuController={menuController}
-          selectedProvider={selectedProvider}
-          selectedBackendProfile={selectedBackendProfile}
-          selectedIdentityLabel={selectedIdentityLabel}
-          usage={usage}
-          usageDisplayMode={usageDisplayMode}
-          latestTurn={latestTurn}
-          onUsageDisplayModeChange={onUsageDisplayModeChange}
-          primaryAction={visiblePrimaryAction}
-          canSendQueuedNow={!disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
-          queuedTurnId={latestKnownTurn?.id ?? null}
-          queuedTurnStatus={latestKnownTurn?.status ?? null}
-          queuedTurnAuthoritative={queuedTurnAuthoritative}
-          onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
-          onQueueCommand={onQueueCommand}
-          onReleaseAttachment={onReleaseAttachment}
-          onSubmit={submit}
-          onStop={stop}
         />
       </section>
     </div>

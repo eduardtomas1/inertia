@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
@@ -83,6 +83,8 @@ describe("composer shell", () => {
     );
     const quiet = screen.getByRole("group", { name: "Chat checkout context" });
     expect(quiet).toHaveClass("is-branch-only");
+    expect(quiet.previousElementSibling).toHaveClass("composer-box");
+    expect(screen.getByRole("group", { name: "Composer controls" }).contains(quiet)).toBe(false);
     expect(quiet).not.toHaveTextContent("Current checkout");
     fireEvent.click(await within(quiet).findByRole("button", { name: "Branch main" }));
     expect(within(quiet).getByRole("button", { name: "Branch main" })).toHaveAttribute("aria-expanded", "true");
@@ -134,13 +136,43 @@ describe("composer shell", () => {
     expect(window.localStorage.getItem("inertia:composer-tools:v1")).toBe("closed");
   });
 
+  it("closes More tools with Escape and returns focus to its toggle", async () => {
+    render(<Composer {...composerProps(conversation("tools-escape-chat"))} />);
+    const toggle = screen.getByRole("button", { name: "More tools" });
+    fireEvent.click(toggle);
+    const tray = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    const presets = await within(tray).findByRole("button", { name: /^Prompt presets/u });
+    presets.focus();
+    fireEvent.keyDown(presets, { key: "Escape" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(tray).not.toBeVisible();
+    expect(toggle).toHaveFocus();
+    expect(window.localStorage.getItem("inertia:composer-tools:v1")).toBe("closed");
+  });
+
+  it("switches Build and Plan with one toggle that keeps focus", async () => {
+    const onUpdateConversation = vi.fn(() => Promise.resolve());
+    const current = conversation("mode-toggle-chat");
+    const view = render(<Composer {...composerProps(current, { onUpdateConversation })} />);
+    const toggle = screen.getByRole("button", { name: "Work mode: Build. Switch to Plan." });
+    expect(toggle).not.toHaveAttribute("aria-haspopup");
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(onUpdateConversation).toHaveBeenCalledWith({ interactionMode: "plan" });
+    expect(toggle).toHaveFocus();
+    expect(toggle).not.toBeDisabled();
+    await waitFor(() => expect(toggle).not.toHaveAttribute("aria-disabled"));
+    view.rerender(<Composer {...composerProps({ ...current, interactionMode: "plan" }, { onUpdateConversation })} />);
+    expect(screen.getByRole("button", { name: "Work mode: Plan. Switch to Build." })).toHaveFocus();
+  });
+
   it("offers no More tools toggle when the composer has no extra tools", () => {
     render(<Composer {...composerProps(conversation("no-tools-chat"), { promptPresetsEnabled: false, promptStashEnabled: false })} />);
     expect(screen.queryByRole("button", { name: "More tools" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send message" })).toBeVisible();
   });
 
-  it("renders queued messages as plain rows at the top of the composer", async () => {
+  it("renders queued messages as plain rows in the banner above the composer box", async () => {
     const current = conversation("queued-chat");
     window.localStorage.setItem(
       `inertia:queued-prompts:v2:${current.id}`,
@@ -150,7 +182,10 @@ describe("composer shell", () => {
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     const composer = screen.getByRole("region", { name: "Message composer" });
     expect(queue.parentElement).toHaveClass("composer-queue-slot");
-    expect(queue.parentElement?.parentElement).toBe(composer);
+    const banners = queue.parentElement?.parentElement;
+    expect(banners).toHaveClass("composer-banners");
+    expect(banners?.parentElement).toBe(composer);
+    expect(banners?.nextElementSibling).toHaveClass("composer-box");
     expect(queue.compareDocumentPosition(screen.getByRole("textbox", { name: "Message" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(queue).getByRole("listitem")).toHaveTextContent(/^Run the release checksQueued$/u);
     expect(within(queue).getByRole("button", { name: "Send queued message now" })).toHaveTextContent("");

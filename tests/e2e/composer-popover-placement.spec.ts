@@ -330,7 +330,7 @@ test("keeps every composer utility popover inside both split panes", async (
   await capture(testInfo, "pr-221-popover-bottom-left-scratch");
   await page.keyboard.press("Escape");
 
-  await app.resizeWindow(1_880, 720);
+  await app.resizeWindow(1_440, 720);
   await separator.focus();
   await separator.press("Enter");
   await expect(separator).toHaveAttribute("aria-valuenow", "50");
@@ -347,19 +347,14 @@ test("keeps every composer utility popover inside both split panes", async (
   const primaryRootSurface = primary.locator(".composer-more-popover");
   await expect(primaryRoot).toBeVisible();
   await expectContained(primaryRoot);
-  await expect(primaryLayer).toHaveAttribute(
-    "data-composer-submenu-side",
-    /^(left|right)$/u,
-  );
+  await expect(primaryLayer).toHaveAttribute("data-composer-submenu-side", "");
   const reasoningItem = primaryRoot.getByRole("menuitem", {
     name: /^Reasoning\b/u,
   });
   await expect(reasoningItem).toBeEnabled();
   await reasoningItem.focus();
   await reasoningItem.press("ArrowRight");
-  const reasoningMenu = primary.locator(
-    '.composer-more-submenu[aria-label="Reasoning options"]',
-  );
+  const reasoningMenu = primary.getByRole("menu", { name: "Reasoning options" });
   await expect(reasoningMenu).toBeVisible();
   await expect(reasoningMenu.getByRole("menuitemradio").first()).toBeFocused();
   await expectContained(primaryRootSurface);
@@ -378,10 +373,7 @@ test("keeps every composer utility popover inside both split panes", async (
   });
   const secondaryLayer = secondary.locator(".composer-more-layer");
   const secondaryRootSurface = secondary.locator(".composer-more-popover");
-  await expect(secondaryLayer).toHaveAttribute(
-    "data-composer-submenu-side",
-    /^(left|right)$/u,
-  );
+  await expect(secondaryLayer).toHaveAttribute("data-composer-submenu-side", "");
   const speedItem = secondaryRoot.getByRole("menuitem", {
     name: /^Response speed\b/u,
   });
@@ -396,7 +388,7 @@ test("keeps every composer utility popover inside both split panes", async (
   await expect(speedMenu.getByRole("menuitemradio").first()).toBeFocused();
   await expectContained(secondaryRootSurface);
   await expectContained(speedMenu);
-  await app.resizeWindow(1_840, 680);
+  await app.resizeWindow(1_400, 680);
   await expectContained(secondaryRootSurface);
   await expectContained(speedMenu);
   await capture(testInfo, "pr-221-popover-center-right-response-speed");

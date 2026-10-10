@@ -99,6 +99,14 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
     await act(async () => { await Promise.resolve(); });
     expect(onSendQueued).not.toHaveBeenCalled();
     expect(screen.getByText("Send unconfirmed")).toBeInTheDocument();
+    expect(screen.getByText("Send unconfirmed")).not.toHaveAttribute("title");
+    vi.useFakeTimers();
+    fireEvent.pointerEnter(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("A previous send did not confirm");
+    fireEvent.pointerLeave(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
+    act(() => { vi.advanceTimersByTime(500); });
+    vi.useRealTimers();
 
     // An explicit send is the reconciliation the label asks for.
     fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));

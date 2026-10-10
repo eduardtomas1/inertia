@@ -5,6 +5,7 @@ import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages"
 import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "./runtimeQueueClient";
 import { setRuntimeQueueLength } from "./runtimeQueueEvents";
 import { IconButton } from "../ui";
+import { TooltipText } from "../TooltipText";
 
 const pendingLoads = new WeakMap<QueueCommandRunner, Map<string, Promise<MessageQueueResult>>>();
 function loadQueue(run: QueueCommandRunner, conversationId: string): Promise<MessageQueueResult> {
@@ -82,7 +83,9 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
     <div className={`composer-queue-item${first.attachments.length ? " has-media" : ""}`} role="listitem">
       <span className="composer-queue-copy" title={first.content}>{first.content}</span>
       {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={14} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
-      <small className="composer-queue-count" title={first.error ?? undefined}>{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>
+      {!dispatching && first.state === "blocked" && first.error
+        ? <TooltipText className="composer-queue-count" tooltip={first.error}>Needs attention</TooltipText>
+        : <small className="composer-queue-count">{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>}
       <IconButton label="Send now" aria-label="Send queued message now" className="composer-queue-send" disabled={busy || dispatching || running || !canSend} onClick={() => void mutate("message.queue.send")}><ArrowUp size={14} aria-hidden="true" /></IconButton>
       <IconButton label="Remove" aria-label="Remove queued message" className="composer-queue-remove" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></IconButton>
     </div>

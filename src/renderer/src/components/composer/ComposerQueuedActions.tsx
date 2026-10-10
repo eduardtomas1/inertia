@@ -7,6 +7,7 @@ import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
 import { IconButton } from "../ui";
+import { TooltipText } from "../TooltipText";
 import { RuntimeComposerQueuedActions } from "./RuntimeComposerQueuedActions";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
@@ -214,28 +215,30 @@ function LegacyComposerQueuedActions({
           {queued.content}
         </span>
         {queued.attachments.length > 0 && (
-          <span
+          <TooltipText
             className="composer-queue-media"
-            title={queued.attachments.map(({ name }) => name).join("\n")}
+            tooltip={queued.attachments.map(({ name }) => name).join(", ")}
           >
             <Paperclip size={14} aria-hidden="true" />
             {queued.attachments.length === 1
               ? "1 image"
               : `${queued.attachments.length} images`}
-          </span>
+          </TooltipText>
         )}
-        <small
-          className="composer-queue-count"
-          title={unconfirmed
-            ? "A previous send did not confirm. Check the transcript before sending again."
-            : undefined}
-        >
-          {sending
-            ? "Sending…"
-            : unconfirmed
-            ? "Send unconfirmed"
-            : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
-        </small>
+        {unconfirmed && !sending ? (
+          <TooltipText
+            className="composer-queue-count"
+            tooltip="A previous send did not confirm. Check the transcript before sending again."
+          >
+            Send unconfirmed
+          </TooltipText>
+        ) : (
+          <small className="composer-queue-count">
+            {sending
+              ? "Sending…"
+              : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+          </small>
+        )}
         <IconButton
           label="Send now"
           aria-label="Send queued message now"

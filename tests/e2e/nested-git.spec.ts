@@ -154,8 +154,6 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   const workspaceFrame = page.locator(".workspace-frame");
   const previousToolsWidth = await workspaceFrame.evaluate((element) =>
     element.style.getPropertyValue("--workspace-tools-width"));
-  const toolsMinimumWidth = 300 + await page.locator(".app-shell").evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).getPropertyValue("--titlebar-overlay-inset")));
   await workspaceFrame.evaluate((element) => {
     element.style.setProperty("--workspace-tools-width", "300px");
   });
@@ -163,7 +161,7 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
     .evaluate((element) => ({
       fits: element.scrollWidth <= element.clientWidth + 1,
       width: element.clientWidth,
-    }))).toEqual({ fits: true, width: Math.round(toolsMinimumWidth) });
+    }))).toEqual({ fits: true, width: 300 });
   const repositoryTypography = await changes.evaluate((element) => {
     const root = getComputedStyle(document.documentElement);
     const scope = element.querySelector<HTMLElement>(

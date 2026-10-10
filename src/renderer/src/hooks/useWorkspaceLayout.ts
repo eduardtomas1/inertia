@@ -50,14 +50,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function toolsMinimumWidth(platform: string, captionInset: number): number {
-  return platform === "win32" && captionInset > 0
-    ? TOOLS_MIN_WIDTH + captionInset
-    : TOOLS_MIN_WIDTH;
-}
-
-function readCaptionInset(element: Element): number {
-  return Number.parseFloat(getComputedStyle(element).getPropertyValue("--titlebar-overlay-inset"));
+export function toolsMinimumWidth(): number {
+  return TOOLS_MIN_WIDTH;
 }
 
 function useResizeObserverTarget<T extends Element>(
@@ -245,7 +239,7 @@ export function useWorkspaceLayout(
   const [toolsWidth, setToolsWidth] = useState(persistedToolsWidth);
   const [toolsHeight, setToolsHeight] = useState(persistedToolsHeight);
   const [shellWidth, setShellWidth] = useState(() => window.innerWidth);
-  const [toolsMinWidth, setToolsMinWidth] = useState(TOOLS_MIN_WIDTH);
+  const toolsMinWidth = toolsMinimumWidth();
   const [workspaceBodySize, setWorkspaceBodySize] = useState(() => ({
     width: Math.max(0, window.innerWidth - 300),
     height: Math.max(0, window.innerHeight - 80),
@@ -323,7 +317,6 @@ export function useWorkspaceLayout(
 
   useResizeObserverTarget(appShellRef, (entry) => {
     setShellWidth(entry.contentRect.width);
-    setToolsMinWidth(toolsMinimumWidth(window.inertia?.getPlatform() ?? "unknown", readCaptionInset(entry.target)));
   });
 
   useResizeObserverTarget(workspaceBodyRef, (entry) => {

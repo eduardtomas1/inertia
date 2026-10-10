@@ -255,15 +255,11 @@ describe("workspace startup surface", () => {
     expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
   });
 
-  it("adds the caption inset to the panel minimum only on Windows", () => {
-    expect(toolsMinimumWidth("win32", 138)).toBe(438);
-    expect(toolsMinimumWidth("win32", Number.NaN)).toBe(300);
-    expect(toolsMinimumWidth("win32", -4)).toBe(300);
-    expect(toolsMinimumWidth("darwin", 138)).toBe(300);
-    expect(toolsMinimumWidth("linux", 138)).toBe(300);
+  it("keeps the panel minimum at 300px on every platform", () => {
+    expect(toolsMinimumWidth()).toBe(300);
   });
 
-  it("keeps the usable panel and the chat at their minimums beside the Windows caption buttons", async () => {
+  it("keeps the panel inline beside the Windows caption buttons until the chat drops below 360px", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "win32" },
@@ -277,18 +273,17 @@ describe("workspace startup surface", () => {
         expect(resizeObservers.some(({ targets }) => targets.has(body))).toBe(true));
       const shellObserver = resizeObservers.find(({ targets }) => targets.has(shell))!;
       const bodyObserver = resizeObservers.find(({ targets }) => targets.has(body))!;
-      expect(screen.getByLabelText("Tool minimum")).toHaveTextContent("300");
 
       shell.style.setProperty("--titlebar-overlay-inset", "138px");
       act(() => shellObserver.emit(shell, 1600, 800));
-      expect(screen.getByLabelText("Tool minimum")).toHaveTextContent("438");
+      expect(screen.getByLabelText("Tool minimum")).toHaveTextContent("300");
       fireEvent.click(screen.getByRole("button", { name: "Resize to 360" }));
-      expect(screen.getByLabelText("Tool width")).toHaveTextContent("438");
+      expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
 
-      act(() => bodyObserver.emit(body, 805, 800));
+      act(() => bodyObserver.emit(body, 667, 800));
       expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
-      expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("438");
-      act(() => bodyObserver.emit(body, 804, 800));
+      expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("300");
+      act(() => bodyObserver.emit(body, 666, 800));
       expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("sheet");
     } finally {
       Reflect.deleteProperty(window, "inertia");

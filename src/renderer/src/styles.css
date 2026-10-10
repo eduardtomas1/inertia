@@ -673,12 +673,6 @@ button:disabled,
   --composer-bottom-breathing-room: 20px;
 }
 
-@property --titlebar-overlay-inset {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
-}
-
 .app-shell.platform-win32 {
   --composer-bottom-breathing-room: 20px;
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
@@ -694,27 +688,6 @@ button:disabled,
 
 .platform-win32 .workspace-corner-controls {
   right: calc(12px + var(--titlebar-overlay-inset));
-}
-
-.platform-win32 .workspace-frame {
-  --workspace-panel-width: max(var(--workspace-tools-width), calc(300px + var(--titlebar-overlay-inset)));
-}
-
-.platform-win32 .workspace-frame.has-right-panel > .workspace-header {
-  margin-right: var(--workspace-panel-width);
-}
-
-.platform-win32 .workspace-body.has-tools {
-  padding-right: var(--workspace-panel-width);
-}
-
-.platform-win32 .workspace-body > .workspace-panel.is-inline {
-  width: var(--workspace-panel-width);
-}
-
-.platform-win32 .workspace-body > .workspace-panel.is-sheet {
-  width: max(min(448px, max(320px, 42vw)), calc(300px + var(--titlebar-overlay-inset)));
-  max-width: calc(100% - 24px);
 }
 
 :root[data-platform="win32"] .database-recovery-notice {

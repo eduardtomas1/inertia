@@ -124,6 +124,7 @@ describe("composer shell", () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(tray).toBeVisible();
+    expect(toggle.nextElementSibling).toBe(tray);
     await waitFor(() => expect(within(tray).getByRole("button", { name: /^Prompt presets/u })).toBeVisible());
     view.unmount();
 

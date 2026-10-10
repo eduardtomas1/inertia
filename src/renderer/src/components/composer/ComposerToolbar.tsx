@@ -408,6 +408,20 @@ export function ComposerToolbar({
             onInsert={onInsertSkill}
           />
         </Suspense>
+        {hasTools && <IconButton
+          label="More tools"
+          className="composer-tools-toggle"
+          aria-expanded={toolsVisible}
+          aria-controls={toolsId}
+          onClick={() => {
+            const next = !toolsVisible;
+            if (!next && menu !== null && COMPOSER_TOOL_MENUS.has(menu)) dismissMenu("context-change");
+            setToolsOpen(next);
+            layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, next ? "open" : "closed");
+          }}
+        >
+          <Ellipsis size={16} />
+        </IconButton>}
         <div id={toolsId} className="composer-more-tools" hidden={!hasTools || !toolsVisible}>
         <div
           className="composer-tools"
@@ -525,20 +539,6 @@ export function ComposerToolbar({
         ) : null}
         </div>
         </div>
-        {hasTools && <IconButton
-          label="More tools"
-          className="composer-tools-toggle"
-          aria-expanded={toolsVisible}
-          aria-controls={toolsId}
-          onClick={() => {
-            const next = !toolsVisible;
-            if (!next && menu !== null && COMPOSER_TOOL_MENUS.has(menu)) dismissMenu("context-change");
-            setToolsOpen(next);
-            layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, next ? "open" : "closed");
-          }}
-        >
-          <Ellipsis size={16} />
-        </IconButton>}
         <div
           className="composer-actions"
           role="group"

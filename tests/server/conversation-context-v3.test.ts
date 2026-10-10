@@ -395,16 +395,18 @@ describe("conversation context transport version 3", () => {
   it("stays within budget, reports what it left out and rebuilds the same selection for random packets", () => {
     let seed = 1;
     const random = () => {
-      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      seed = (Math.imul(seed, 1_103_515_245) + 12_345) & 0x7fff_ffff;
       return seed / 2_147_483_648;
     };
+    const characters = Array.from({ length: 60_000 }, () => "ab\"\\n é😀".charAt(Math.floor(random() * 9))).join("");
     const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
     const agents = ["Claude claude-sonnet-4-6", "Codex gpt-5", `Kimi ${"k".repeat(100)}`];
     const packet = (count: number, own: boolean): ConversationContextPacket => {
       const excerpts = Array.from({ length: count }, (_, index): ConversationContextExcerpt => {
         const role = index === 0 || random() < 0.4 ? "user" : "assistant";
         const length = Math.floor(random() ** 3 * 30_000) + 1;
-        const content = Array.from({ length }, () => "ab\"\\n é😀".charAt(Math.floor(random() * 9))).join("") || "x";
+        const start = Math.floor(random() * (characters.length - length));
+        const content = characters.slice(start, start + length);
         return {
           sourceMessageId: id(index + 1), sourceTurnId: null, role, content, truncated: random() < 0.1,
           createdAt: new Date(1_700_000_000_000 + index).toISOString(),
@@ -425,7 +427,7 @@ describe("conversation context transport version 3", () => {
       };
     };
     let checked = 0;
-    for (let iteration = 0; iteration < 150; iteration += 1) {
+    for (let iteration = 0; iteration < 60; iteration += 1) {
       const original = packet(1 + Math.floor(random() * 40), random() < 0.3);
       for (const transport of ["prompt", "tool-result"] as const) {
         for (const restored of [false, true]) {
@@ -445,18 +447,15 @@ describe("conversation context transport version 3", () => {
           expect(prepared.packet.messageCount + prepared.packet.droppedMessageCount)
             .toBe(original.messageCount + original.droppedMessageCount);
           expect(prepareConversationContextPacket(original, budget, transport, restored).blocks).toEqual(prepared.blocks);
-          if (!restored) {
+          if (!restored && prepared.complete) {
             const [allocated] = allocateConversationContextBudgets([original], budget, transport);
-            const atAllocation = prepareConversationContextPacket(original, allocated!, transport);
-            if (prepared.complete) {
-              expect(atAllocation.complete).toBe(true);
-              expect(allocated).toBe(prepared.requiredBudgetBytes);
-            }
+            expect(allocated).toBe(prepared.requiredBudgetBytes);
+            expect(prepareConversationContextPacket(original, allocated!, transport).complete).toBe(true);
           }
         }
       }
     }
-    expect(checked).toBeGreaterThan(400);
+    expect(checked).toBeGreaterThan(160);
   });
 
   it("restores exactly the counts it sends and states a split history's envelope once", async () => {

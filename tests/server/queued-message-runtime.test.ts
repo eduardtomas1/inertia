@@ -596,6 +596,7 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       const initial = startRunning(f);
       const identity = turnControllerTestIdentity(f);
       f.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      f.provider.emit({ ...identity, type: "text-boundary" });
       const requestId = await f.followUp("Also rename the file.");
       expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.accepted", disposition: "follow-up" } });
       f.provider.emit({ ...identity, type: "text", text: "Renamed it." });

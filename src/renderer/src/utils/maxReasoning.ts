@@ -13,5 +13,6 @@ export function isMaximumReasoning(
   const levels = model.reasoningOptions.map(({ value }) => normalize(value));
   const highest = LEVELS.filter((value) => levels.includes(value)).at(-1);
   return highest !== undefined
+    && LEVELS.indexOf(highest) >= LEVELS.indexOf("high")
     && normalize(selected ?? model.defaultReasoningEffort) === highest;
 }

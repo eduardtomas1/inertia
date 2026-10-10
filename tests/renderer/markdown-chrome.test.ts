@@ -52,4 +52,11 @@ describe("markdown block chrome", () => {
     expect(block(".file-preview-markdown")).toContain("--markdown-surface: var(--surface-raised);");
     expect(css).toMatch(/\n\.plan-document \{[^}\n]*--markdown-surface: var\(--surface\);[^}\n]*\}/u);
   });
+
+  it("draws the focus ring inside the code and table buttons that the clipped blocks would cut", () => {
+    const inset = /\n:is\((?<list>[^{}]*)\):focus-visible \{\n  outline-offset: -2px;\n\}/u.exec(css)?.groups?.list ?? "";
+    const selectors = inset.split(",").map((selector) => selector.trim());
+    expect(selectors).toContain(".response-code-block > header button");
+    expect(selectors).toContain(".response-table-toolbar button");
+  });
 });

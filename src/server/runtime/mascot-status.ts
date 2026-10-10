@@ -15,6 +15,7 @@ const MINUTE = 60_000;
 export const MASCOT_QUIET_AFTER_MS = 10 * MINUTE;
 export const MASCOT_DWELL_MS = 1_500;
 const LIFETIME: Record<number, number> = { 4: 24 * 60 * MINUTE, 3: 60 * MINUTE, 2: 7 * 24 * 60 * MINUTE };
+const LONGEST_WAKE = 2_147_483_647;
 
 export interface MascotClock {
   now(): number;
@@ -274,7 +275,8 @@ export class MascotStatusPublisher {
     const next = this.line(entry);
     const current = entry.line;
     if (next.text !== current.text) {
-      const hold = next.weight < 4 && next.weight <= current.weight && current.text !== null && now - current.at < MASCOT_DWELL_MS;
+      const elapsed = now - current.at;
+      const hold = next.weight < 4 && next.weight <= current.weight && current.text !== null && elapsed >= 0 && elapsed < MASCOT_DWELL_MS;
       if (hold) this.wakeAtMost(current.at + MASCOT_DWELL_MS);
       else entry.line = { text: next.text, weight: next.weight, at: now };
     }
@@ -350,7 +352,7 @@ export class MascotStatusPublisher {
     this.cancelWake?.();
     this.cancelWake = null;
     this.wakeAt = at;
-    if (Number.isFinite(at)) this.cancelWake = this.clock.wake(Math.max(0, at - now), () => {
+    if (Number.isFinite(at)) this.cancelWake = this.clock.wake(Math.min(LONGEST_WAKE, Math.max(0, at - now)), () => {
       this.cancelWake = null;
       this.wakeAt = Number.POSITIVE_INFINITY;
       this.emit();

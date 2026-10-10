@@ -358,6 +358,16 @@ describe("mascot bubble words", () => {
     expect(feed().status.message).toBe(input().questions[0]!.question);
   });
 
+  it("lets a newer message through at once after the clock was set back", () => {
+    const shell = conversation("chat", "running");
+    const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    publisher.observe(did({ id: "one", title: "npm test", detail: "Command:\nnpm test", createdAt: "2026-09-06T10:00:01.000Z" }));
+    clock.advance(-60 * MINUTE);
+    publisher.observe(did({ id: "two", title: "Command", detail: "Command:\nnpm run lint", createdAt: "2026-09-06T10:00:02.000Z" }));
+    expect(feed().status.message).toBe("Running npm run lint");
+  });
+
   it("names the approval's command and reason and keeps question text", () => {
     const { publisher, feed } = mascotPublisher();
     publisher.replace([conversation("chat", "waiting-for-approval")]);
@@ -452,6 +462,19 @@ describe("mascot bubble words", () => {
     clock.advance(8 * 24 * 60 * MINUTE);
     expect(publish).toHaveBeenCalledTimes(published);
     expect(clock.pending()).toBe(0);
+  });
+
+  it("never asks for a wake beyond the longest timer delay when a result is stamped far in the future", () => {
+    const clock = mascotTestClock();
+    const delays: number[] = [];
+    const { publisher, feed } = mascotPublisher({ clock: { ...clock, wake: (delay, task) => { delays.push(delay); return clock.wake(delay, task); } } });
+    const future = new Date(clock.now() + 30 * 24 * 60 * MINUTE).toISOString();
+    publisher.replace([conversation("done", "completed", { updatedAt: future, completedAt: future })]);
+    expect(feed().status.conversationId).toBe("done");
+    expect(delays).toEqual([2_147_483_647]);
+    clock.advance(2_147_483_647);
+    expect(delays).toHaveLength(2);
+    expect(delays.every((delay) => delay > 0 && delay <= 2_147_483_647)).toBe(true);
   });
 
   it("does not arm a timer from a flush that was already queued when it closed", async () => {

@@ -11202,7 +11202,6 @@ button.sent-attachment-open:hover {
     scroll-behavior: auto;
   }
 
-  .model-chooser-header::after,
   .model-source-rail-glyph,
   .model-source-rail-mark {
     transition: none;
@@ -11811,18 +11810,6 @@ button.sent-attachment-open:hover {
   border-bottom: 1px solid var(--line-soft);
 }
 
-.model-chooser-header::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 1px;
-  background: var(--accent-strong);
-  opacity: 0;
-  content: "";
-  transition: opacity var(--dur-fast) var(--ease);
-}
-
 .model-chooser-header label {
   display: grid;
   width: 22px;
@@ -11842,10 +11829,6 @@ button.sent-attachment-open:hover {
   color: var(--text);
   background: transparent;
   font-size: var(--text-sm);
-}
-
-.model-chooser-header:focus-within::after {
-  opacity: 0.72;
 }
 
 .model-chooser-body {

@@ -29,6 +29,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   [91, "app_state", ["muted_custom_colors"]],
   [92, "agent_turns", ["origin"]],
   [93, "messages", ["html_render_json"]],
+  [95, "conversation_context_packets", ["supplement_json"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -69,6 +70,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [87, ["usage_limit_resume_plans", "usage_limited_turns"]],
   [92, ["cli_conversation_imports"]],
   [93, ["html_renders"]],
+  [94, ["agent_context_reads"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -80,5 +82,7 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [92, "agent_turns_provider_session_after_idx"],
     [93, "html_renders_conversation_idx"],
     [93, "html_renders_turn_idx"],
+    [94, "agent_context_reads_identity_idx"],
+    [94, "agent_context_reads_target_idx"],
   ],
 };

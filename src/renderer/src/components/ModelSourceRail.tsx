@@ -1,7 +1,7 @@
 import {
-  Bot,
   CloudCog,
-  Star,
+  Pin,
+  Plug,
   type LucideIcon,
 } from "lucide-react";
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -38,13 +38,13 @@ export type ModelSourceRailGlyph =
 export function modelSourceRailItemGlyph(
   item: ModelSourceRailItem,
 ): ModelSourceRailGlyph {
-  if (item.filter.kind === "favorites") return { kind: "icon", Icon: Star };
+  if (item.filter.kind === "favorites") return { kind: "icon", Icon: Pin };
   if (item.filter.kind === "provider") {
     return { kind: "provider", providerId: item.filter.providerId };
   }
   return {
     kind: "icon",
-    Icon: item.filter.kind === "custom" ? CloudCog : Bot,
+    Icon: item.filter.kind === "custom" ? CloudCog : Plug,
   };
 }
 
@@ -142,7 +142,7 @@ export function ModelSourceRail({
                         decorative
                       />
                     )
-                  : <glyph.Icon size={15} strokeWidth={1.8} aria-hidden="true" />}
+                  : <glyph.Icon size={14} aria-hidden="true" />}
               </span>
               <span className="model-source-rail-mark" aria-hidden="true" />
             </button>

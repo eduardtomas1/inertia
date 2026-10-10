@@ -12,14 +12,16 @@ const css = ["styles.css", "sidebar-work-index.css", "components/sidebar/thread-
 
 describe("sidebar index presentation contracts", () => {
   it("keeps a visible keyboard focus outline on Work rows", () => {
-    expect(css).toMatch(/\.activity-thread-select:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su);
+    expect(css).toMatch(/^:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/mu);
+    expect(css).toMatch(/^:is\([^{]*\.activity-thread-select,[^{]*\):focus-visible\s*\{\s*outline-offset:\s*-2px;/mu);
+    expect(css).not.toMatch(/\.activity-thread-select:focus-visible\s*\{[^}]*outline:\s*(?:0|none)/su);
   });
 
   it("keeps the trailing action hit target stable during press feedback", () => {
     expect(css).toMatch(/\.activity-thread-trailing\s*\{[^}]*pointer-events:\s*none;/su);
     expect(css).not.toContain(".activity-thread-menu-button");
-    expect(css).toMatch(/\.thread-inline-actions\s*\{[^}]*position:\s*absolute;[^}]*top:\s*7px;[^}]*right:\s*8px;/su);
-    expect(css).toMatch(/\.thread-inline-actions button\s*\{[^}]*height:\s*23px;/su);
+    expect(css).toMatch(/\.thread-inline-actions\s*\{[^}]*position:\s*absolute;[^}]*top:\s*4px;[^}]*right:\s*4px;/su);
+    expect(css).toMatch(/\.thread-inline-actions \.icon-button\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/su);
     expect(css).not.toMatch(/\.thread-inline-actions[^{}]*\{[^}]*transform:/su);
   });
 
@@ -42,7 +44,7 @@ describe("sidebar index presentation contracts", () => {
     expect(orbitRule).toContain("animation-duration: 950ms");
     // The shorthand would reset animation-play-state and beat the hidden-document pause.
     expect(orbitRule).not.toMatch(/(^|[\s;])animation:/u);
-    expect(arrivalRule).toContain("work-status-arrival 420ms");
+    expect(arrivalRule).toContain("work-status-arrival var(--dur-slow)");
     expect(arrivalRule).not.toContain("infinite");
   });
 

@@ -17,9 +17,9 @@
   min-width: 0;
   margin: 0;
   padding: 8px clamp(16px, 3vw, 30px);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
   color: var(--text-muted);
-  background: var(--surface-strong);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.4;
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }

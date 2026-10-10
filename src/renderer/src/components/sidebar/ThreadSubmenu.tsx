@@ -41,7 +41,7 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
         if (event.key !== "ArrowRight") return;
         event.preventDefault(); event.stopPropagation(); setOpen(true);
         requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
-      }}>{icon}<span>{label}</span><ChevronRight size={13} className="thread-submenu-chevron" /></button>
+      }}>{icon}<span>{label}</span><ChevronRight size={14} className="thread-submenu-chevron" /></button>
     {open && <div ref={popup} role="menu" aria-label={label} className="thread-submenu"
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft") {

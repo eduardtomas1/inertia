@@ -13,6 +13,7 @@ import type { GitStatusSnapshot } from "@shared/contracts";
 
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
+import { TooltipButton } from "../TooltipButton";
 import {
   resolveQuickAction,
   type GitQuickAction,
@@ -178,13 +179,13 @@ export function GitActionsControl({
         role="group"
         aria-label="Git actions"
       >
-        <button
+        <TooltipButton
           type="button"
           className="header-split-primary"
           aria-label={quickAction.label}
           aria-disabled={quickAction.disabled || undefined}
           aria-describedby={quickActionDisabledReason ? hintId : undefined}
-          title={quickActionDisabledReason ?? quickAction.hint ?? quickAction.label}
+          tooltip={quickActionDisabledReason ?? quickAction.hint ?? quickAction.label}
           onFocus={() => {
             if (quickAction.kind === "commit") void loadCommitDialog();
           }}
@@ -195,13 +196,13 @@ export function GitActionsControl({
         >
           <GitQuickActionIcon quickAction={quickAction} />
           <span className="header-split-label">{quickAction.label}</span>
-        </button>
-        <button
+        </TooltipButton>
+        <TooltipButton
           ref={(node) => setMenuTrigger("git", node)}
           type="button"
           className="header-split-chevron"
           aria-label="More Git actions"
-          title="More Git actions"
+          tooltip="More Git actions"
           aria-expanded={menu === "git"}
           aria-haspopup="menu"
           aria-controls="workspace-header-git-menu"
@@ -213,7 +214,7 @@ export function GitActionsControl({
           }}
         >
           <ChevronDown size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       </div>
       {quickActionDisabledReason && (
         <span id={hintId} className="visually-hidden">{quickActionDisabledReason}</span>

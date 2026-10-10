@@ -4,6 +4,7 @@ import { BrowserWindow, nativeImage } from "electron";
 
 import type { BrowserEvidenceImage } from "../shared/browser-evidence.js";
 import type { BrowserEvidenceImageInspectionHandle } from "./browser-evidence-image-approval.js";
+import { closesSecondaryWindow } from "./preview-keyboard.js";
 
 function inspectionDocument(dataUrl: string): string {
   return `<!doctype html>
@@ -58,6 +59,11 @@ export async function showBrowserEvidenceImageWindow(
   inspector.webContents.session.on("will-download", (event) => event.preventDefault());
   inspector.webContents.on("will-navigate", (event) => event.preventDefault());
   inspector.webContents.on("context-menu", (event) => event.preventDefault());
+  inspector.webContents.on("before-input-event", (event, input) => {
+    if (!closesSecondaryWindow(input, process.platform)) return;
+    event.preventDefault();
+    inspector.close();
+  });
   const document = inspectionDocument(decoded.toDataURL());
   try {
     await inspector.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(document)}`);

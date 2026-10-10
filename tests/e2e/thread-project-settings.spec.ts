@@ -1,9 +1,10 @@
 // @inertia-e2e-resource primary-display
-import { expect, test, type Locator, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { defaultProjectPreferences, type ProjectPreferences } from "../../src/shared/project-preferences";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app: AppFixture;
@@ -35,6 +36,22 @@ async function createThreadFixture(withSavedAction = false, defaultAccessMode: P
       } finally { store.close(); }
     },
   });
+}
+
+async function openProjectActions(page: Page): Promise<Locator> {
+  const actionGroup = page.getByRole("group", { name: "Project actions", exact: true });
+  const runAction = actionGroup.getByRole("button", { name: "Run Check workspace", exact: true });
+  const overflow = page.getByRole("button", { name: "More header actions", exact: true });
+  await expect(runAction.or(overflow)).toBeVisible();
+  if (await runAction.isVisible()) {
+    await actionGroup.getByRole("button", { name: "Project action options", exact: true }).click();
+    return page.getByRole("menu", { name: "Project actions", exact: true });
+  }
+  await overflow.click();
+  const headerMenu = page.getByRole("menu", { name: "Header actions", exact: true });
+  await expect(headerMenu.getByRole("menuitem", { name: "Run Check workspace", exact: true })).toBeVisible();
+  await headerMenu.getByRole("menuitem", { name: "Project actions", exact: true }).click();
+  return headerMenu.getByRole("group", { name: "Project actions", exact: true });
 }
 
 test.beforeAll(async () => {
@@ -159,6 +176,7 @@ test("scratch prompts belong only to their original chat, including after restar
   await expect(owner).toHaveAttribute("aria-current", "page");
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("Review the authentication tests before the next change.");
+  await openComposerTools(page);
   await page.getByRole("button", { name: "Scratch prompts", exact: true }).click();
   await page.getByRole("menuitem", { name: /Save current prompt/u }).click();
   await page.getByRole("button", { name: "Scratch prompts, 1 saved", exact: true }).click();
@@ -190,10 +208,7 @@ test("runs a saved action only on explicit selection through the real terminal",
   await page.locator(`[data-work-focus-id="thread:${threadId}"]`).click();
   await expect(page.locator(".header-title-wrap h1")).toHaveText("Review authentication flow");
   await app.resizeWindow(1000, 700);
-  const actionGroup = page.getByRole("group", { name: "Project actions", exact: true });
-  await expect(actionGroup.getByRole("button", { name: "Run Check workspace", exact: true })).toBeVisible();
-  await actionGroup.getByRole("button", { name: "Project action options", exact: true }).click();
-  const menu = page.getByRole("menu", { name: "Project actions", exact: true });
+  const menu = await openProjectActions(page);
   await expect(menu.getByRole("menuitem", { name: /Check workspace/u })).toBeVisible();
   await capture(info, "saved-project-action-menu-dark");
   await menu.getByRole("menuitem", { name: /Check workspace/u }).click();

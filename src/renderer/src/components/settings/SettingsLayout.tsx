@@ -31,10 +31,12 @@ export function SettingsGroup({
   description,
   icon: Icon,
   notice,
+  titleHidden = false,
   className,
   children,
 }: {
   title: string;
+  titleHidden?: boolean;
   headingId?: string;
   settingId?: string;
   description?: ReactNode;
@@ -48,11 +50,11 @@ export function SettingsGroup({
   return (
     <section className={clsx("settings-card", className)} aria-labelledby={headingId} data-setting-id={settingId}>
       <div className="settings-card-heading">
-        {Icon && <div><Icon size={18} aria-hidden="true" /></div>}
+        {Icon && <div><Icon size={16} aria-hidden="true" /></div>}
         <span>
           {notice === undefined
-            ? <h3 id={headingId}>{title}</h3>
-            : <span className="setting-title"><h3 id={headingId}>{title}</h3><SettingStatus notice={notice} /></span>}
+            ? <h3 id={headingId} className={clsx(titleHidden && "visually-hidden")}>{title}</h3>
+            : <span className="setting-title"><h3 id={headingId} className={clsx(titleHidden && "visually-hidden")}>{title}</h3><SettingStatus notice={notice} /></span>}
           {description && <p>{description}</p>}
         </span>
       </div>
@@ -187,7 +189,7 @@ export function SettingDisclosure({
   return (
     <details className={clsx("setting-disclosure", className)} open={defaultOpen || undefined}>
       <summary aria-controls={contentId}>
-        <ChevronDown size={13} aria-hidden="true" className="setting-disclosure-chevron" />
+        <ChevronDown size={14} aria-hidden="true" className="setting-disclosure-chevron" />
         {summary}
       </summary>
       <div id={contentId} className="setting-disclosure-content">{children}</div>

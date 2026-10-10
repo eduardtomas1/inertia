@@ -99,38 +99,50 @@ function themeTokens(
   return resolvedHexTokens(declarations);
 }
 
+function inkWeight(name: "fill" | "fill-strong"): number {
+  const pattern = new RegExp(`--${name}:\\s*color-mix\\(in srgb, var\\(--text\\) (?<weight>[\\d.]+)%, transparent\\)`, "u");
+  return Number.parseFloat(pattern.exec(cssBlock(":root"))?.groups?.weight ?? "0") / 100;
+}
+
+function paintedBackgrounds(tokens: Map<string, string>): Map<string, string> {
+  const painted = new Map<string, string>();
+  for (const surface of ["bg", "surface", "surface-raised"]) {
+    const base = tokens.get(surface)!;
+    painted.set(surface, base);
+    for (const fill of ["fill", "fill-strong"] as const) {
+      painted.set(`${fill} on ${surface}`, blend(tokens.get("text")!, base, inkWeight(fill)));
+    }
+  }
+  return painted;
+}
+
 const themeCases = COLOR_THEME_IDS.flatMap((colorTheme) =>
   (["light", "dark"] as const).map((theme) => [colorTheme, theme] as const));
 
 describe("visual contrast system", () => {
   it.each(themeCases)("keeps the %s %s palette readable", (colorTheme, theme) => {
     const tokens = themeTokens(theme, colorTheme);
-    const surfaces = [
-      "app-bg",
-      "surface",
-      "surface-strong",
-      "surface-muted",
-      "surface-hover",
-    ];
-    for (const foregroundName of ["text", "text-soft", "text-muted", "status-idle"]) {
-      for (const backgroundName of surfaces) {
+    const painted = paintedBackgrounds(tokens);
+    expect(painted.size).toBe(9);
+    for (const foregroundName of ["text", "text-muted", "status-idle"]) {
+      for (const [backgroundName, background] of painted) {
         expect(contrast(
           tokens.get(foregroundName)!,
-          tokens.get(backgroundName)!,
-        ), `${colorTheme} ${theme} --${foregroundName} on --${backgroundName}`)
+          background,
+        ), `${colorTheme} ${theme} --${foregroundName} on ${backgroundName}`)
           .toBeGreaterThanOrEqual(4.5);
       }
     }
-    for (const backgroundName of surfaces) {
+    for (const [backgroundName, background] of painted) {
       expect(contrast(
         tokens.get("accent")!,
-        tokens.get(backgroundName)!,
-      ), `${colorTheme} ${theme} --accent on --${backgroundName}`)
+        background,
+      ), `${colorTheme} ${theme} --accent on ${backgroundName}`)
         .toBeGreaterThanOrEqual(3);
       expect(contrast(
         tokens.get("danger")!,
-        tokens.get(backgroundName)!,
-      ), `${colorTheme} ${theme} --danger on --${backgroundName}`)
+        background,
+      ), `${colorTheme} ${theme} --danger on ${backgroundName}`)
         .toBeGreaterThanOrEqual(4.5);
     }
     for (const foregroundName of [
@@ -142,11 +154,11 @@ describe("visual contrast system", () => {
       "status-failed",
       "status-completed",
     ]) {
-      for (const backgroundName of ["surface", "surface-strong", "surface-muted"]) {
+      for (const [backgroundName, background] of painted) {
         expect(contrast(
           tokens.get(foregroundName)!,
-          tokens.get(backgroundName)!,
-        ), `${colorTheme} ${theme} --${foregroundName} on --${backgroundName}`)
+          background,
+        ), `${colorTheme} ${theme} --${foregroundName} on ${backgroundName}`)
           .toBeGreaterThanOrEqual(4.5);
       }
     }
@@ -155,7 +167,8 @@ describe("visual contrast system", () => {
     expect(contrast(tokens.get("danger")!, tokens.get("danger-soft")!))
       .toBeGreaterThanOrEqual(4.5);
 
-    const codeSurface = tokens.get("code-surface")!;
+    const codeSurfaces = ["fill on bg", "fill on surface", "fill on surface-raised"]
+      .map((name) => [name, painted.get(name)!] as const);
     for (const foregroundName of [
       "syntax-keyword",
       "syntax-string",
@@ -166,9 +179,11 @@ describe("visual contrast system", () => {
       "syntax-meta",
       "syntax-deletion",
     ]) {
-      expect(contrast(tokens.get(foregroundName)!, codeSurface),
-        `${colorTheme} ${theme} --${foregroundName} on --code-surface`)
-        .toBeGreaterThanOrEqual(4.5);
+      for (const [codeName, codeSurface] of codeSurfaces) {
+        expect(contrast(tokens.get(foregroundName)!, codeSurface),
+          `${colorTheme} ${theme} --${foregroundName} on ${codeName}`)
+          .toBeGreaterThanOrEqual(4.5);
+      }
     }
 
     const root = cssBlock(":root");
@@ -208,15 +223,9 @@ describe("visual contrast system", () => {
     "keeps %s primary, secondary, metadata, and semantic text readable",
     (theme) => {
       const tokens = themeTokens(theme);
-      const surfaces = [
-        "app-bg",
-        "surface",
-        "surface-strong",
-        "surface-muted",
-      ] as const;
+      const painted = paintedBackgrounds(tokens);
       const readableText = [
         "text",
-        "text-soft",
         "text-muted",
         "accent",
         "accent-strong",
@@ -230,14 +239,12 @@ describe("visual contrast system", () => {
       ] as const;
 
       for (const foregroundName of readableText) {
-        for (const backgroundName of surfaces) {
+        for (const [backgroundName, background] of painted) {
           const foreground = tokens.get(foregroundName);
-          const background = tokens.get(backgroundName);
           expect(foreground, `missing --${foregroundName}`).toBeDefined();
-          expect(background, `missing --${backgroundName}`).toBeDefined();
           expect(
-            contrast(foreground!, background!),
-            `${theme} --${foregroundName} on --${backgroundName}`,
+            contrast(foreground!, background),
+            `${theme} --${foregroundName} on ${backgroundName}`,
           ).toBeGreaterThanOrEqual(4.5);
         }
       }
@@ -247,27 +254,47 @@ describe("visual contrast system", () => {
         `${theme} accent text on accent action`,
       ).toBeGreaterThanOrEqual(4.5);
 
-      for (const backgroundName of surfaces) {
+      for (const [backgroundName, background] of painted) {
         expect(
-          contrast(tokens.get("accent")!, tokens.get(backgroundName)!),
-          `${theme} focus ring on --${backgroundName}`,
+          contrast(tokens.get("accent")!, background),
+          `${theme} focus ring on ${backgroundName}`,
         ).toBeGreaterThanOrEqual(3);
       }
     },
   );
 
-  it("keeps a visible focus outline on the new branch input", () => {
+  it("marks focused answer inputs and the file editor with the accent focus ring", () => {
+    const focusRule = (selector: string): string => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      return new RegExp(`(?:^|\\n)${escaped}\\s*\\{(?<body>[^}]*)\\}`, "u").exec(css)?.groups?.body ?? "";
+    };
     expect(css).toMatch(
-      /\.new-branch-form input:focus-visible\s*[,{][\s\S]*?outline:\s*2px solid var\(--focus-ring\)/u,
+      /^:is\([^{]*\.agent-input-text,[^{]*\):focus,[^{]*\{\s*outline: none;\s*border-color: var\(--accent\);/mu,
     );
+    expect(focusRule(".file-editor-dialog textarea:focus-visible"))
+      .toMatch(/box-shadow:\s*inset 0 0 0 2px var\(--focus-ring\)/u);
+    for (const theme of ["light", "dark"] as const) {
+      const tokens = themeTokens(theme);
+      for (const [backgroundName, background] of paintedBackgrounds(tokens)) {
+        expect(contrast(tokens.get("focus-ring") ?? tokens.get("accent")!, background),
+          `${theme} focus ring on ${backgroundName}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it("moves the new branch input border to the accent on focus", () => {
+    expect(css).toMatch(
+      /^:is\([^{]*\.new-branch-form input,[^{]*\):focus,[^{]*\{\s*outline: none;\s*border-color: var\(--accent\);/mu,
+    );
+    expect(css).toMatch(/\.new-branch-form input \{[^}]*border: 1px solid var\(--line\);/u);
   });
 
   it.each(["light", "dark"] as const)(
-    "keeps the %s syntax palette readable on its dedicated code surface",
+    "keeps the %s syntax palette readable on the code fill",
     (theme) => {
       const tokens = themeTokens(theme);
-      const codeSurface = tokens.get("code-surface");
-      expect(codeSurface, "missing --code-surface").toBeDefined();
+      const codeSurface = paintedBackgrounds(tokens).get("fill on bg");
+      expect(codeSurface, "missing --fill on --bg").toBeDefined();
 
       for (const foregroundName of [
         "syntax-keyword",
@@ -283,7 +310,7 @@ describe("visual contrast system", () => {
         expect(foreground, `missing --${foregroundName}`).toBeDefined();
         expect(
           contrast(foreground!, codeSurface!),
-          `${theme} --${foregroundName} on --code-surface`,
+          `${theme} --${foregroundName} on --fill over --bg`,
         ).toBeGreaterThanOrEqual(4.5);
       }
     },
@@ -310,12 +337,16 @@ describe("visual contrast system", () => {
     expect(css).toMatch(
       /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
     );
-    expect(css).toMatch(
-      /\.message-scroll:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--focus-ring\)/su,
-    );
-    expect(css).toMatch(
-      /\.workspace-repository-file:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/su,
-    );
+    for (const row of [".message-scroll", ".workspace-repository-file"]) {
+      expect(css).toMatch(new RegExp(
+        String.raw`^:is\([^{]*${row.replace(".", String.raw`\.`)},[^{]*\):focus-visible\s*\{\s*outline-offset:\s*-2px;`,
+        "mu",
+      ));
+      expect(css).not.toMatch(new RegExp(
+        String.raw`${row.replace(".", String.raw`\.`)}:focus-visible\s*\{[^}]*outline:\s*(?:0|none)`,
+        "su",
+      ));
+    }
   });
 
   it("pauses maximum reasoning composer frames while hidden and stops them for reduced motion", () => {
@@ -542,12 +573,23 @@ describe("composer primary action contrast", () => {
       .toBe("var(--danger)");
   });
 
+  it("draws disabled send as a neutral circle instead of a faded accent", () => {
+    const disabled = cascades.find(({ state }) => state.name === "send disabled")!;
+    const ready = cascades.find(({ state }) => state.name === "send ready")!;
+    expect([disabled.background, disabled.color, disabled.opacity])
+      .toEqual(["var(--fill-strong)", "var(--text-muted)", "1"]);
+    expect(ready.background).toBe("var(--accent)");
+  });
+
   it.each(themeCases)(
     "keeps the %s %s send and stop icons visible in every state",
     (colorTheme, theme) => {
       const tokens = themeTokens(theme, colorTheme);
-      const composerSurface = tokens.get("composer-surface");
-      expect(composerSurface, "missing --composer-surface").toBeDefined();
+      const composerSurface = tokens.get("surface-raised");
+      expect(composerSurface, "missing --surface-raised").toBeDefined();
+      for (const fill of ["fill", "fill-strong"] as const) {
+        tokens.set(fill, blend(tokens.get("text")!, composerSurface!, inkWeight(fill)));
+      }
       for (const { state, color, background, opacity } of cascades) {
         const label = `${colorTheme} ${theme} ${state.name}: ${color} on ${background}`;
         const foreground = color ? resolveColor(color, tokens) : undefined;

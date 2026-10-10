@@ -13,7 +13,7 @@ export type { CheckoutBranchControlModel } from "./checkoutBranchControlModel";
 
 const CheckoutBranchMenuButton = lazy(() => import("./CheckoutBranchMenuButton"));
 
-const CheckoutBranchControlContext = createContext<CheckoutBranchControlModel | null>(null);
+export const CheckoutBranchControlContext = createContext<CheckoutBranchControlModel | null>(null);
 
 export function CheckoutBranchControlProvider({
   value,
@@ -32,7 +32,7 @@ export function CheckoutBranchControlProvider({
 function StaticCheckoutBranch({ branch }: { branch: string }): React.JSX.Element {
   return (
     <span className="composer-checkout-branch" title={branch}>
-      <GitBranch size={12} aria-hidden="true" />
+      <GitBranch size={14} aria-hidden="true" />
       <code translate="no">{branch}</code>
     </span>
   );

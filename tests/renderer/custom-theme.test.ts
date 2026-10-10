@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildCustomPaletteTokens, buildPaletteTokens, PALETTE_FAMILIES } from "../../src/shared/theme/color-theme-spec";
+import { buildCustomPaletteTokens, buildPaletteTokens, FILL_INK, inkOver, PALETTE_FAMILIES } from "../../src/shared/theme/color-theme-spec";
 import { contrastRatio, hexToOklch, oklchToHex } from "../../src/shared/theme/color-palette";
 import { cacheCustomColor, cachedCustomColor, CUSTOM_COLOR_CACHE_KEY } from "../../src/renderer/src/utils/customTheme";
 
@@ -16,7 +16,7 @@ describe("custom appearance palettes", () => {
       for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "surface-muted", "surface-hover"]) {
         expect(Math.abs(hexToOklch(palette[role]!).l - hexToOklch(builtIn[role]!).l)).toBeLessThan(0.006);
         expect(contrastRatio(palette.text!, palette[role]!)).toBeGreaterThanOrEqual(7);
-        for (const text of ["text-soft", "text-muted", "danger", "warning", "status-completed", "status-input"]) {
+        for (const text of ["text-muted", "danger", "warning", "status-completed", "status-input"]) {
           expect(contrastRatio(palette[text]!, palette[role]!), `${color} ${text} on ${role}`).toBeGreaterThanOrEqual(4.5);
         }
       }
@@ -27,7 +27,7 @@ describe("custom appearance palettes", () => {
   it.each(modes)("keeps grayscale choices neutral in %s mode", (mode) => {
     for (const color of ["#000000", "#ffffff", "#808080"]) {
       const palette = Object.fromEntries(buildCustomPaletteTokens(color, mode));
-      for (const role of ["app-bg", "accent", "accent-soft", "message-action", "aurora-1"]) {
+      for (const role of ["app-bg", "accent", "accent-soft"]) {
         expect(hexToOklch(palette[role]!).c).toBeLessThan(0.001);
       }
     }
@@ -36,9 +36,9 @@ describe("custom appearance palettes", () => {
   it("keeps the preset palettes byte-identical and pins the vivid custom palettes", () => {
     const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
     expect(digest(PALETTE_FAMILIES.flatMap((family) => modes.map((mode) => [family, mode, buildPaletteTokens(family, mode)]))))
-      .toBe("5e888df5b571fb4c5d686f8bffedd73c2307619344e5b81fb99fc83ac391dbef");
+      .toBe("7c1924ea5dd8e8a22e6b68c8949df441e0047823326255dc156637522bf1f026");
     expect(digest([...colors, "#0d9488", "#f97316"].flatMap((color) => modes.map((mode) => [color, mode, buildCustomPaletteTokens(color, mode)]))))
-      .toBe("586bd35d799541be0f4de82b2ee78a76ad3960837f4ffd4520ba1ab865339a6b");
+      .toBe("1542431ee0c69b37df6a1ea29f0b7efbd2bad84408566dcd013ba01925706f1d");
   });
 
   it.each(modes)("uses the picked colour as the %s accent and moves it only as far as contrast requires", (mode) => {
@@ -81,7 +81,7 @@ describe("custom appearance palettes", () => {
       for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "accent-soft", "terminal-bg"]) {
         expect(Math.abs(hexToOklch(muted[role]!).l - hexToOklch(vivid[role]!).l), `${color} ${role} lightness`).toBeLessThan(0.006);
       }
-      for (const role of ["app-bg", "surface", "accent-soft", "message-action", "terminal-selection", "aurora-1"]) {
+      for (const role of ["app-bg", "surface", "accent-soft", "terminal-selection"]) {
         expect(hexToOklch(muted[role]!).c, `${color} ${role} chroma`).toBeLessThanOrEqual(hexToOklch(vivid[role]!).c * 0.55 + 0.002);
       }
       for (const role of ["accent", "accent-hover", "accent-strong"]) {
@@ -99,7 +99,7 @@ describe("custom appearance palettes", () => {
         const label = `${color}${muted ? " muted" : ""}`;
         for (const role of ["app-bg", "sidebar-bg", "surface", "surface-strong", "surface-muted", "surface-hover"]) {
           expect(contrastRatio(palette.text!, palette[role]!), `${label} text on ${role}`).toBeGreaterThanOrEqual(7);
-          for (const text of ["text-soft", "text-muted"]) {
+          for (const text of ["text-muted"]) {
             expect(contrastRatio(palette[text]!, palette[role]!), `${label} ${text} on ${role}`).toBeGreaterThanOrEqual(4.5);
           }
         }
@@ -112,8 +112,12 @@ describe("custom appearance palettes", () => {
         expect(contrastRatio(palette["terminal-fg"]!, palette["terminal-bg"]!), `${label} terminal`).toBeGreaterThanOrEqual(7);
         expect(contrastRatio(palette["terminal-fg"]!, palette["terminal-selection"]!), `${label} terminal selection`).toBeGreaterThanOrEqual(4.5);
         expect(contrastRatio(palette.accent!, palette["terminal-bg"]!), `${label} terminal cursor`).toBeGreaterThanOrEqual(3);
-        for (const syntax of ["syntax-keyword", "syntax-string", "syntax-function", "syntax-comment"]) {
-          expect(contrastRatio(palette[syntax]!, palette["code-surface"]!), `${label} ${syntax}`).toBeGreaterThanOrEqual(4.5);
+        const raised = mode === "light" ? palette["surface-strong"]! : palette["surface-muted"]!;
+        for (const background of [palette.surface!, palette["surface-strong"]!, raised]) {
+          const code = inkOver(palette.text!, background, FILL_INK);
+          for (const syntax of ["syntax-keyword", "syntax-string", "syntax-function", "syntax-comment"]) {
+            expect(contrastRatio(palette[syntax]!, code), `${label} ${syntax} on ${code}`).toBeGreaterThanOrEqual(4.5);
+          }
         }
       }
     }

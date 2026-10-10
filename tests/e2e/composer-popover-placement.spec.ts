@@ -12,6 +12,7 @@ import {
   PROMPT_STASH_CHANGED_EVENT,
   promptStashStorageKey,
 } from "../../src/renderer/src/utils/promptStash";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 const codexAppServerSource = `
@@ -295,6 +296,7 @@ test("keeps every composer utility popover inside both split panes", async (
       subtree: true,
     });
   });
+  await openComposerTools(page);
   await primary.getByRole("button", {
     name: /^Scratch prompts/u,
   }).click();

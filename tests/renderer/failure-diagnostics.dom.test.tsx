@@ -164,14 +164,31 @@ afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
 });
 
+async function failureSummary(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const summary = document.querySelector<HTMLElement>(".turn-settled-summary");
+    expect(summary).not.toBeNull();
+    return summary!;
+  });
+}
+
+async function openFailureDetails(): Promise<HTMLElement> {
+  const summary = await failureSummary();
+  fireEvent.click(summary);
+  await waitFor(() => expect(summary).toHaveAttribute("aria-expanded", "true"));
+  return summary;
+}
+
 describe("turn failure diagnostics", () => {
-  it.each(["Technical details", "Run details"])("claims navigation only when %s is activated", async (name) => {
+  it.each(["Details", "Run details"])("claims navigation only when %s is activated", async (name) => {
     const before = vi.fn(() => toggle.getAttribute("aria-expanded"));
     const turn = name === "Run details"
       ? { ...failedTurn(), status: "completed" as const, terminalReason: "provider-completed", terminalAssistantMessageId: "final-answer" }
       : failedTurn();
     renderFailure(turn, undefined, before);
-    const toggle = await screen.findByRole("button", { name });
+    const toggle = name === "Run details"
+      ? await screen.findByRole("button", { name })
+      : await failureSummary();
     fireEvent.pointerDown(toggle);
     expect(before).not.toHaveBeenCalled();
     fireEvent.pointerCancel(toggle);
@@ -181,15 +198,29 @@ describe("turn failure diagnostics", () => {
     fireEvent.click(toggle);
     expect(before).toHaveBeenCalledOnce();
     expect(before).toHaveReturnedWith("false");
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "true"));
+  });
+
+  it("says the failure once, in the work row, with the details folded behind it", async () => {
+    renderFailure();
+
+    const summary = await failureSummary();
+    expect(summary).toHaveTextContent(
+      "Failed after 10s · The provider connection closed before the turn completed.Details",
+    );
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Run failed")).toBeNull();
+    expect(document.querySelector("[data-turn-failure-diagnostics]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy diagnostics" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Technical details" })).toBeNull();
+    expect(document.body.textContent?.match(/The provider connection closed before the turn completed\./gu))
+      .toHaveLength(1);
   });
 
   it("keeps scrubbed details unmounted until the accessible disclosure opens", async () => {
     renderFailure();
 
-    expect(await screen.findByText("Run failed")).toBeTruthy();
-    expect(screen.getByText("The provider connection closed before the turn completed.")).toBeTruthy();
-    const toggle = await screen.findByRole("button", { name: "Technical details" });
+    const toggle = await failureSummary();
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     const panelId = toggle.getAttribute("aria-controls")!;
     expect(panelId).toBeTruthy();
@@ -201,10 +232,10 @@ describe("turn failure diagnostics", () => {
     fireEvent.keyDown(toggle, { key: "Enter" });
     fireEvent.click(toggle);
 
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(document.getElementById(panelId)?.classList.contains("turn-failure-detail")).toBe(true);
+    await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("true"));
+    expect(await screen.findByRole("heading", { name: "Execution" })).toBeTruthy();
+    expect(document.getElementById(panelId)?.querySelector(".turn-failure-detail")).not.toBeNull();
     expect(document.activeElement).toBe(toggle);
-    expect(screen.getByRole("heading", { name: "Execution" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Provider & process" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Error cause" })).toBeTruthy();
     expect(screen.getByText(/at connect \(<workspace>\/src\/rpc\.ts/u)).toBeTruthy();
@@ -227,6 +258,7 @@ describe("turn failure diagnostics", () => {
       value: { copyText } as unknown as typeof window.inertia,
     });
     renderFailure();
+    await openFailureDetails();
 
     fireEvent.click(await screen.findByRole("button", { name: "Copy diagnostics" }));
     await waitFor(() => expect(copyText).toHaveBeenCalledOnce());
@@ -259,19 +291,17 @@ describe("turn failure diagnostics", () => {
     };
     renderFailure(failedTurn(), failureActivity(), undefined, [second]);
 
-    const toggles = await screen.findAllByRole("button", { name: "Technical details" });
-    expect(toggles).toHaveLength(2);
-    toggles.forEach((toggle) => fireEvent.click(toggle));
+    const summary = await openFailureDetails();
+    expect(summary).toHaveTextContent("The provider process exited during cleanup.");
+    expect(await screen.findAllByRole("button", { name: "Copy diagnostics" })).toHaveLength(2);
     const sections = [...document.querySelectorAll<HTMLElement>("[data-turn-failure-diagnostics]")];
     expect(sections).toHaveLength(2);
     const ids = sections.flatMap((section) => [...section.querySelectorAll("[id]")].map(({ id }) => id));
     expect(new Set(ids).size).toBe(ids.length);
-    sections.forEach((section, index) => {
+    sections.forEach((section) => {
       const heading = document.getElementById(section.getAttribute("aria-labelledby")!);
-      const panel = document.getElementById(toggles[index]!.getAttribute("aria-controls")!);
-      expect(section.contains(toggles[index]!)).toBe(true);
       expect(heading && section.contains(heading)).toBe(true);
-      expect(panel && section.contains(panel)).toBe(true);
+      expect(section.querySelector(".turn-failure-detail")).not.toBeNull();
     });
     expect(sections[0]!.textContent).toContain("The provider connection closed before the turn completed.");
     expect(sections[1]!.textContent).toContain("The provider process exited during cleanup.");
@@ -284,6 +314,7 @@ describe("turn failure diagnostics", () => {
       value: { copyText } as unknown as typeof window.inertia,
     });
     renderFailure();
+    await openFailureDetails();
 
     const copy = await screen.findByRole("button", { name: "Copy diagnostics" });
     fireEvent.click(copy);
@@ -310,6 +341,7 @@ describe("turn failure diagnostics", () => {
       value: { copyText } as unknown as typeof window.inertia,
     });
     renderFailure(turn);
+    if (name === "Copy diagnostics") await openFailureDetails();
 
     const copy = await screen.findByRole("button", { name });
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
@@ -321,7 +353,7 @@ describe("turn failure diagnostics", () => {
 
     copyText.mockResolvedValue(true);
     fireEvent.click(copy);
-    await waitFor(() => expect(copy).toHaveTextContent("Copied"));
+    await waitFor(() => expect(copy).toHaveAccessibleName(/copied/iu));
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 

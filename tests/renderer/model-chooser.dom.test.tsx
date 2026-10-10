@@ -181,7 +181,7 @@ describe("model chooser active route", () => {
         scrollHeight: { configurable: true, value: 241 },
       });
       await waitFor(() => expect(chooser).toHaveAttribute("data-popover-vertical", "above"));
-      expect(chooser.style.maxHeight).toBe("748px");
+      expect(chooser.style.maxHeight).toBe("752px");
       expect(screen.getByRole("combobox")).toHaveFocus();
 
       // Every observed box keeps its size. Only the workspace class changes,
@@ -196,8 +196,8 @@ describe("model chooser active route", () => {
         callback(16);
       }
       expect(chooser).toHaveAttribute("data-popover-vertical", "below");
-      expect(chooser.style.maxHeight).toBe("411.46875px");
-      expect(chooser.getBoundingClientRect().top).toBe(491.53125);
+      expect(chooser.style.maxHeight).toBe("415.46875px");
+      expect(chooser.getBoundingClientRect().top).toBe(488);
       expect(screen.getByRole("combobox")).toHaveFocus();
       expect(pendingFrames.size).toBe(0);
 
@@ -269,7 +269,7 @@ describe("model chooser active route", () => {
     const initial = render(<ModelChooser routes={[fastRoute]} selectedRoute={fastRoute}
       configuration={{ accessMode: "full", interactionMode: "plan", fastMode: true }} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^Pin Team Alpha on .+$/u }));
     initial.unmount();
 
     const normalRoute: ComposerModelRoute = { ...fastRoute, responseSpeed: "Standard",
@@ -296,7 +296,7 @@ describe("model chooser active route", () => {
     const initial = render(<ModelChooser routes={[route]} selectedRoute={route}
       configuration={{ accessMode: "full", interactionMode: "plan" }} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^Pin Team Alpha on .+$/u }));
     initial.unmount();
 
     const onSelect = vi.fn();

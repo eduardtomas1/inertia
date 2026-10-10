@@ -4,16 +4,12 @@ import { resolve } from "node:path";
 import type Database from "better-sqlite3";
 
 import {
-  MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE,
-  MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES,
   MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES,
   MAX_CONVERSATION_CONTEXT_MESSAGES,
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
   MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
   MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES,
-  MAX_CONVERSATION_CONTEXT_TOTAL_BYTES,
   MAX_CONVERSATION_CONTEXT_TURN_BYTES,
-  type ConversationContextExcerpt,
   type ConversationContextPacket,
   type ConversationContextPacketSummary,
   type ConversationContextSourceTranscript,
@@ -30,6 +26,7 @@ import { conversationContextSourceRows } from "./conversation-context-source";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel as workspaceLabel,
+  finalAnswerExcerptBytes,
   scrubAndBoundExcerpt,
   scrubConversationContextMetadata as scrubMetadata,
 } from "./conversation-context-excerpts";
@@ -42,6 +39,14 @@ import {
   type ConversationContextDelivery,
   type ConversationContextTransport,
 } from "./conversation-context-transport";
+import { ConversationContextTurnReads } from "./conversation-context-turn-reads";
+import {
+  parseExcerpts,
+  parseSupplement,
+  type StoredPacketExcerpts,
+} from "./conversation-context-packet-codec";
+import { changedFileLines } from "./provider-handoff-files";
+import { finalTurnCommands } from "./turn-context-facts";
 import type { CreateMessageOptions } from "./types";
 
 interface ConversationContextPacketRow {
@@ -64,7 +69,8 @@ interface ConversationContextPacketRow {
   consumed_request_id: string | null;
   consumed_at: string | null;
   dropped_message_count: number;
-  transport_version: 1 | 2;
+  transport_version: 1 | 2 | 3;
+  supplement_json: string | null;
   delivered_budget_bytes: number | null;
   delivered_message_count: number | null;
   delivered_character_count: number | null;
@@ -77,6 +83,8 @@ type ConversationContextPacketListRow = Omit<ConversationContextPacketRow, "exce
 };
 
 const AGENT_CONTEXT_RESULT_BUDGET_BYTES = 28 * 1024;
+const REFERENCE_FILES_BYTES = 2 * 1024;
+const UNREACHED_TURN_LOOKBACK = 16;
 
 export type ConversationContextReplay =
   | MessageSendAcceptance
@@ -156,110 +164,6 @@ function byteLength(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-const ATTACHMENT_REFERENCE_KEYS = ["id", "mimeType", "name", "size"]
-  .sort()
-  .join("\0");
-
-function isAttachmentReferenceList(value: unknown): boolean {
-  if (
-    !Array.isArray(value)
-    || value.length < 1
-    || value.length > MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE
-  ) return false;
-  const ids = new Set<string>();
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-    const attachment = entry as Record<string, unknown>;
-    if (
-      Object.keys(attachment).sort().join("\0") !== ATTACHMENT_REFERENCE_KEYS
-      || typeof attachment.id !== "string"
-      || attachment.id.length < 1
-      || ids.has(attachment.id)
-      || typeof attachment.name !== "string"
-      || attachment.name.length < 1
-      || typeof attachment.mimeType !== "string"
-      || attachment.mimeType.length < 1
-      || typeof attachment.size !== "number"
-      || !Number.isSafeInteger(attachment.size)
-      || attachment.size < 1
-    ) return false;
-    ids.add(attachment.id);
-  }
-  return true;
-}
-
-function parseExcerpts(row: ConversationContextPacketRow): ConversationContextExcerpt[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(row.excerpts_json);
-  } catch {
-    throw new Error("The saved chat context is malformed.");
-  }
-  if (!Array.isArray(parsed) || parsed.length !== row.message_count) {
-    throw new Error("The saved chat context no longer matches its provenance.");
-  }
-  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-  let totalBytes = 0;
-  let totalCharacters = 0;
-  const messageIds = new Set<string>();
-  for (const value of parsed) {
-    if (
-      !value
-      || typeof value !== "object"
-      || Array.isArray(value)
-    ) {
-      throw new Error("The saved chat context contains a malformed excerpt.");
-    }
-    const excerpt = value as Record<string, unknown>;
-    const keys = Object.keys(excerpt).sort();
-    const expectedKeys = [
-      "content",
-      "createdAt",
-      "role",
-      "sourceMessageId",
-      "sourceTurnId",
-      "truncated",
-      ...(excerpt.attachments === undefined ? [] : ["attachments"]),
-    ];
-    if (
-      keys.join("\0") !== expectedKeys.sort().join("\0")
-      || (
-        excerpt.attachments !== undefined
-        && !isAttachmentReferenceList(excerpt.attachments)
-      )
-      || typeof excerpt.sourceMessageId !== "string"
-      || !uuid.test(excerpt.sourceMessageId)
-      || messageIds.has(excerpt.sourceMessageId)
-      || (
-        excerpt.sourceTurnId !== null
-        && (typeof excerpt.sourceTurnId !== "string" || !uuid.test(excerpt.sourceTurnId))
-      )
-      || (excerpt.role !== "user" && excerpt.role !== "assistant")
-      || typeof excerpt.content !== "string"
-      || excerpt.content.length < 1
-      || typeof excerpt.truncated !== "boolean"
-      || typeof excerpt.createdAt !== "string"
-      || !Number.isFinite(Date.parse(excerpt.createdAt))
-    ) {
-      throw new Error("The saved chat context contains a malformed excerpt.");
-    }
-    const excerptBytes = byteLength(excerpt.content);
-    if (excerptBytes > MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES) {
-      throw new Error("The saved chat context exceeds the excerpt size limit.");
-    }
-    messageIds.add(excerpt.sourceMessageId);
-    totalBytes += excerptBytes;
-    totalCharacters += excerpt.content.length;
-  }
-  if (
-    totalBytes > MAX_CONVERSATION_CONTEXT_TOTAL_BYTES
-    || totalCharacters !== row.character_count
-  ) {
-    throw new Error("The saved chat context no longer matches its size provenance.");
-  }
-  return parsed as ConversationContextExcerpt[];
-}
-
 function summaryFromRow(
   row: Omit<ConversationContextPacketRow, "excerpts_json">,
   sourceAvailable: boolean,
@@ -290,7 +194,12 @@ function packetFromRow(
   row: ConversationContextPacketRow,
   sourceAvailable: boolean,
 ): ConversationContextPacket {
-  return { ...summaryFromRow(row, sourceAvailable), excerpts: parseExcerpts(row) };
+  const supplement = parseSupplement(row);
+  return {
+    ...summaryFromRow(row, sourceAvailable),
+    excerpts: parseExcerpts(row),
+    ...(supplement ? { supplement } : {}),
+  };
 }
 
 function deliveredSummary(
@@ -335,12 +244,12 @@ const PACKET_SUMMARY_COLUMNS = `
   packet.consumed_request_id, packet.consumed_at, packet.dropped_message_count,
   packet.transport_version, packet.delivered_budget_bytes,
   packet.delivered_message_count, packet.delivered_character_count,
-  packet.delivered_omitted_count`;
+  packet.delivered_omitted_count, packet.supplement_json`;
 
 function summaryFromPacket(
   packet: ConversationContextPacket,
 ): ConversationContextPacketSummary {
-  const { excerpts: _excerpts, omissions: _omissions, ...summary } = packet;
+  const { excerpts: _excerpts, omissions: _omissions, supplement: _supplement, ...summary } = packet;
   return summary;
 }
 
@@ -428,10 +337,100 @@ export function claimConversationContextPackets(
   }
 }
 
+function sentCopy(
+  database: Database.Database,
+  row: ConversationContextPacketRow & { source_available: 0 | 1 },
+  packet = packetFromRow(row, row.source_available === 1),
+): { packet: ConversationContextPacket; blocks: MaterializedConversationContext[] } {
+  const agentRequested = database.prepare(`
+    SELECT 1 FROM agent_context_requests
+    WHERE packet_id = ? AND target_conversation_id = ? AND status = 'completed'
+  `).get(row.id, row.target_conversation_id) !== undefined;
+  if (row.transport_version !== 1) {
+    const delivered = prepareConversationContextPacket(
+      packet,
+      row.delivered_budget_bytes ?? 0,
+      agentRequested ? "tool-result" : "prompt",
+      false,
+      row.transport_version,
+    );
+    const expected = deliveredSummary(row, row.source_available === 1);
+    if (
+      delivered.packet.messageCount !== expected.messageCount
+      || delivered.packet.characterCount !== expected.characterCount
+      || delivered.packet.droppedMessageCount !== expected.droppedMessageCount
+    ) {
+      throw new Error("The saved chat context no longer matches its provenance.");
+    }
+    return delivered;
+  }
+  // Sent receipts use their immutable request cohort, never today's drafts.
+  const cohort = database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM conversation_context_packets
+    WHERE target_conversation_id = ? AND consumed_request_id IS (
+      SELECT consumed_request_id FROM conversation_context_packets WHERE id = ?
+    )
+  `).get(row.target_conversation_id, row.id) as { count: number };
+  return prepareLegacyConversationContextPacket(
+    packet,
+    agentRequested ? AGENT_CONTEXT_RESULT_BUDGET_BYTES : conversationContextTransportBudget(cohort.count),
+    agentRequested ? "tool-result" : "prompt",
+  );
+}
+
+export interface SentConversationContextReference {
+  messageId: string;
+  title: string;
+  sentBlocks(): MaterializedConversationContext[] | null;
+}
+
+export function sentConversationContextReferences(
+  database: Database.Database,
+  targetConversationId: string,
+  messageIds: readonly string[],
+): SentConversationContextReference[] {
+  if (messageIds.length === 0) return [];
+  const rows = database.prepare(`
+    SELECT packet.*,
+      EXISTS(
+        SELECT 1 FROM conversations source
+        WHERE source.id = packet.source_conversation_id
+      ) AS source_available
+    FROM conversation_context_packets packet
+    WHERE packet.target_conversation_id = ?
+      AND packet.source_conversation_id <> packet.target_conversation_id
+      AND packet.consumed_message_id IN (SELECT value FROM json_each(?))
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_context_requests request
+        WHERE request.target_conversation_id = packet.target_conversation_id
+          AND request.packet_id = packet.id
+      )
+    ORDER BY packet.consumed_at ASC, packet.id ASC
+  `).all(targetConversationId, JSON.stringify(messageIds)) as Array<
+    ConversationContextPacketRow & { source_available: 0 | 1 }
+  >;
+  return rows.map((row) => ({
+    messageId: row.consumed_message_id!,
+    title: row.source_conversation_title,
+    sentBlocks: () => {
+      try {
+        return sentCopy(database, row).blocks;
+      } catch {
+        return null;
+      }
+    },
+  }));
+}
+
 export class ConversationContextPacketRepository {
+  readonly turnReads: ConversationContextTurnReads;
+
   constructor(
     private readonly context: ConversationContextPacketPersistenceContext,
-  ) {}
+  ) {
+    this.turnReads = new ConversationContextTurnReads(context);
+  }
 
   create(input: CreateConversationContextPacketInput): ConversationContextPacket {
     return this.insert(input, null);
@@ -532,6 +531,9 @@ export class ConversationContextPacketRepository {
       this.context.database,
       source.id,
       selectedIds,
+      undefined,
+      undefined,
+      consumption ? finalAnswerExcerptBytes(consumption.budgetBytes) : undefined,
     );
     if (!collected) throw new Error("That chat has no shareable messages yet.");
     const { excerpts, droppedMessageCount } = collected;
@@ -552,6 +554,21 @@ export class ConversationContextPacketRepository {
       (total, excerpt) => total + excerpt.content.length,
       0,
     );
+    const files = ownConversation || selectedIds
+      ? null
+      : changedFileLines(this.context.database, source.id, null, REFERENCE_FILES_BYTES);
+    const commands = finalTurnCommands(this.context.database, excerpts);
+    const supplement = { ...files, ...(commands.length > 0 ? { commands } : {}) };
+    const supplementJson = Object.keys(supplement).length > 0 ? JSON.stringify(supplement) : null;
+    const stored: StoredPacketExcerpts & { supplement_json: string | null } = {
+      excerpts_json: excerptsJson,
+      message_count: excerpts.length,
+      character_count: characterCount,
+      supplement_json: supplementJson,
+      transport_version: CONVERSATION_CONTEXT_TRANSPORT_VERSION,
+    };
+    parseExcerpts(stored);
+    parseSupplement(stored);
     const packet: ConversationContextPacket = {
       id,
       sourceConversationId: source.id,
@@ -572,6 +589,7 @@ export class ConversationContextPacketRepository {
       consumedAt: consumption?.consumedAt ?? null,
       sourceState: "available",
       excerpts,
+      ...(supplementJson === null ? {} : { supplement }),
     };
     const delivery = consumption
       ? deliveryFor(
@@ -593,8 +611,8 @@ export class ConversationContextPacketRepository {
         consumed_message_id, consumed_request_id, consumed_at,
         dropped_message_count, transport_version, delivered_budget_bytes,
         delivered_message_count, delivered_character_count,
-        delivered_omitted_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        delivered_omitted_count, supplement_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       packet.sourceConversationId,
@@ -620,6 +638,7 @@ export class ConversationContextPacketRepository {
       delivery?.messageCount ?? null,
       delivery?.characterCount ?? null,
       delivery?.omittedMessageCount ?? null,
+      supplementJson,
     );
     return this.get(id, target.id);
   }
@@ -886,39 +905,7 @@ export class ConversationContextPacketRepository {
       return this.previewDrafts(this.draftPackets(targetConversationId))
         .find(({ id }) => id === packetId)!;
     }
-    const agentRequested = this.context.database.prepare(`
-      SELECT 1 FROM agent_context_requests
-      WHERE packet_id = ? AND target_conversation_id = ? AND status = 'completed'
-    `).get(packetId, targetConversationId) !== undefined;
-    if (row.transport_version !== 1) {
-      const delivered = prepareConversationContextPacket(
-        packet,
-        row.delivered_budget_bytes ?? 0,
-        agentRequested ? "tool-result" : "prompt",
-      ).packet;
-      const expected = deliveredSummary(row, row.source_available === 1);
-      if (
-        delivered.messageCount !== expected.messageCount
-        || delivered.characterCount !== expected.characterCount
-        || delivered.droppedMessageCount !== expected.droppedMessageCount
-      ) {
-        throw new Error("The saved chat context no longer matches its provenance.");
-      }
-      return delivered;
-    }
-    // Sent receipts use their immutable request cohort, never today's drafts.
-    const cohort = this.context.database.prepare(`
-      SELECT COUNT(*) AS count
-      FROM conversation_context_packets
-      WHERE target_conversation_id = ? AND consumed_request_id IS (
-        SELECT consumed_request_id FROM conversation_context_packets WHERE id = ?
-      )
-    `).get(targetConversationId, packetId) as { count: number };
-    return prepareLegacyConversationContextPacket(
-      packet,
-      agentRequested ? AGENT_CONTEXT_RESULT_BUDGET_BYTES : conversationContextTransportBudget(cohort.count),
-      agentRequested ? "tool-result" : "prompt",
-    ).packet;
+    return sentCopy(this.context.database, row, packet).packet;
   }
 
   deleteDraft(packetId: string, targetConversationId: string): void {
@@ -986,14 +973,32 @@ export class ConversationContextPacketRepository {
     };
   }
 
-  includesOwnConversation(targetConversationId: string, packetIds: readonly string[]): boolean {
-    if (packetIds.length === 0) return false;
-    return this.context.database.prepare(`
-      SELECT 1 FROM conversation_context_packets
+  ownConversationPacketId(targetConversationId: string, packetIds: readonly string[]): string | null {
+    if (packetIds.length === 0) return null;
+    const row = this.context.database.prepare(`
+      SELECT id FROM conversation_context_packets
       WHERE target_conversation_id = ? AND source_conversation_id = target_conversation_id
         AND id IN (${packetIds.map(() => "?").join(", ")})
       LIMIT 1
-    `).get(targetConversationId, ...packetIds) !== undefined;
+    `).get(targetConversationId, ...packetIds) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  unreachedReferences(targetConversationId: string): SentConversationContextReference[] {
+    const turns = this.context.database.prepare(`
+      SELECT user_message_id, terminal_reason FROM agent_turns
+      WHERE conversation_id = ?
+      ORDER BY requested_at DESC, id DESC
+      LIMIT ?
+    `).all(targetConversationId, UNREACHED_TURN_LOOKBACK) as Array<{
+      user_message_id: string | null;
+      terminal_reason: string | null;
+    }>;
+    const reached = turns.findIndex(({ terminal_reason }) => terminal_reason !== "turn-start-failed");
+    const messageIds = turns.slice(0, reached === -1 ? turns.length : reached)
+      .flatMap(({ user_message_id }) => user_message_id ? [user_message_id] : []);
+    return sentConversationContextReferences(this.context.database, targetConversationId, messageIds)
+      .slice(-MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN);
   }
 
   assertSendable(targetConversationId: string, packetIds: readonly string[]): void {

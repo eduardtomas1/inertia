@@ -8,6 +8,7 @@ import {
 import {
   calculateComposerPopoverPlacement,
   calculateComposerSubmenuSide,
+  unscaledPopoverRect,
 } from "../../src/renderer/src/utils/composerPopoverPlacement";
 
 type Menu = "provider" | "reasoning" | "mode" | "access" | "action";
@@ -109,7 +110,7 @@ describe("Composer popover state", () => {
       boundary,
       popover: { width: 260, height: 200 },
     });
-    expect(below).toMatchObject({ vertical: "below", top: 80 });
+    expect(below).toMatchObject({ vertical: "below", top: 76 });
 
     const constrained = calculateComposerPopoverPlacement({
       trigger: { top: 300, right: 472, bottom: 332, left: 440 },
@@ -119,7 +120,47 @@ describe("Composer popover state", () => {
     expect(constrained).toMatchObject({
       vertical: "above",
       top: 8,
-      maxHeight: 284,
+      maxHeight: 288,
+    });
+  });
+
+  it("places popovers on whole pixels that stay inside a fractional boundary", () => {
+    const boundary = { top: 81.2, right: 1_179.99, bottom: 640, left: 914.4 };
+    const popover = { width: 249.6, height: 421.4 };
+    const placement = calculateComposerPopoverPlacement({
+      trigger: { top: 560.3, right: 1_160.7, bottom: 590.3, left: 1_130.7 },
+      boundary,
+      popover,
+    });
+    expect(Number.isInteger(placement.left)).toBe(true);
+    expect(Number.isInteger(placement.top)).toBe(true);
+    expect(placement.left).toBeGreaterThanOrEqual(boundary.left + 8);
+    expect(placement.left + Math.min(popover.width, placement.maxWidth)).toBeLessThanOrEqual(boundary.right - 8);
+    expect(placement.top).toBeGreaterThanOrEqual(boundary.top + 8);
+    expect(placement.top + Math.min(popover.height, placement.maxHeight)).toBeLessThanOrEqual(boundary.bottom - 8);
+  });
+
+  it("measures a popover by its layout box while its entrance scale runs", () => {
+    const layout = { left: 922, top: 89, width: 250, height: 420 };
+    const scale = 0.98;
+    const originX = layout.width / 2;
+    const visualLeft = layout.left + originX * (1 - scale);
+    expect(unscaledPopoverRect({
+      rect: {
+        top: layout.top,
+        right: visualLeft + layout.width * scale,
+        bottom: layout.top + layout.height * scale,
+        left: visualLeft,
+      },
+      width: layout.width,
+      height: layout.height,
+      originX,
+      originY: 0,
+    })).toEqual({
+      top: layout.top,
+      right: layout.left + layout.width,
+      bottom: layout.top + layout.height,
+      left: layout.left,
     });
   });
 });

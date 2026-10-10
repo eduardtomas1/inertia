@@ -1,6 +1,6 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Clock3, EyeOff, X } from "lucide-react";
+import { Clock, EyeOff, X } from "lucide-react";
 
 import type {
   ProviderMetadataFieldState,
@@ -449,7 +449,7 @@ export function UsageIndicator({
                             <span style={{ width: `${remaining}%` }} />
                           </span>
                         )}
-                        {reset && <small><Clock3 size={11} aria-hidden="true" />{reset}</small>}
+                        {reset && <small><Clock size={14} aria-hidden="true" />{reset}</small>}
                       </div>
                     );
                   })}
@@ -487,7 +487,7 @@ export function UsageIndicator({
               className="usage-hide-button"
               onClick={() => onModeChange("hidden")}
             >
-              <EyeOff size={13} aria-hidden="true" />
+              <EyeOff size={14} aria-hidden="true" />
               Hide usage
             </button>
           </footer>

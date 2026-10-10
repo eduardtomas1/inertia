@@ -17,15 +17,15 @@
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-small);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--surface-muted);
-  font-size: var(--ui-font-secondary);
+  background: var(--fill);
+  font-size: var(--text-sm);
 }
 
 .project-chooser:hover {
-  background: var(--surface-hover);
+  background: var(--fill);
 }
 
 .project-chooser > span {
@@ -67,14 +67,14 @@
   width: 32px;
   height: 32px;
   place-items: center;
-  border-radius: var(--radius-small);
-  color: var(--text-soft);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
   background: transparent;
 }
 
 .project-icon-grid > button:hover {
   color: var(--text);
-  background: var(--surface-hover);
+  background: var(--fill);
 }
 
 .project-setting-control > .project-color-picker {
@@ -101,7 +101,7 @@
 
 .project-actions-setting + .project-settings-advanced,
 .setting-row + .project-actions-setting {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .project-actions-list {
@@ -116,7 +116,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .project-actions-list li > span {
@@ -128,15 +128,15 @@
 
 .project-actions-list strong {
   color: var(--text);
-  font-size: var(--ui-font-secondary);
-  font-weight: 560;
+  font-size: var(--text-sm);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 .project-actions-list code {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
@@ -145,16 +145,16 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   padding: 12px 0 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .project-action-form label {
   display: grid;
   min-width: 0;
   gap: 6px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  font-weight: 560;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .project-action-form .project-action-arguments {
@@ -170,9 +170,9 @@
 
 .project-action-form small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
 }
 
 .project-action-buttons {
@@ -229,20 +229,20 @@
   gap: 6px;
   margin-top: 10px;
   padding: 11px 12px;
-  border-radius: var(--radius-medium);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--fill);
 }
 
 .project-remove-confirm strong {
-  font-size: var(--ui-font-secondary);
-  font-weight: 620;
+  font-size: var(--text-sm);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 .project-remove-confirm small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .project-remove-confirm > div {
@@ -251,10 +251,6 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
-}
-
-.project-remove-confirm .secondary-button.is-danger {
-  color: var(--danger);
 }
 
 @media (forced-colors: active) {

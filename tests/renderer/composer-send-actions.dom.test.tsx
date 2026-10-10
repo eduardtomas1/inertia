@@ -53,7 +53,7 @@ describe("composer morphing send actions", () => {
     },
   );
 
-  it("keeps one primary control mounted across intent, send, and Stop states", () => {
+  it("keeps one primary control mounted across send and Stop states", () => {
     const view = render(
       <ComposerSendActions {...idle} primaryAction="send-ready" />,
     );
@@ -61,9 +61,10 @@ describe("composer morphing send actions", () => {
     expect(primary.querySelector("[data-icon-state]"))
       .toHaveAttribute("data-icon-state", "send");
 
-    fireEvent.pointerEnter(primary);
+    expect(primary).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(primary, { pointerType: "mouse" });
     expect(primary.querySelector("[data-icon-state]"))
-      .toHaveAttribute("data-icon-state", "send-intent");
+      .toHaveAttribute("data-icon-state", "send");
 
     view.rerender(
       <ComposerSendActions {...idle} primaryAction="submitting" />,

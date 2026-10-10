@@ -173,6 +173,10 @@ export class TurnController {
       now: () => this.now(),
       activeForConversation: (conversationId) =>
         this.activeByConversation.get(conversationId),
+      answerBoundary: {
+        prepare: (active, keepAnswerOpen) => this.streams.prepareFollowUp(active, keepAnswerOpen),
+        record: (active, createdAt, deferred) => this.streams.recordFollowUp(active, createdAt, deferred),
+      },
     });
     this.timeouts = new TurnTimeoutCoordinator({
       scheduler: this.scheduler,
@@ -205,6 +209,7 @@ export class TurnController {
       onPersistenceFailure,
     });
     this.artifacts = new TurnArtifactSequencer({
+      store: this.store,
       hooks: this.hooks,
       barriers: this.gitArtifactBarriers,
     });

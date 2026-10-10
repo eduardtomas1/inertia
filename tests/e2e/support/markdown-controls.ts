@@ -7,6 +7,7 @@ import {
 } from "@playwright/test";
 
 const TARGET_REVEAL_RETRY_INTERVAL_MS = 50;
+const CODE_COPY_NAME = /^(?:Copy|Copying|Copied|Copy failed)$/u;
 
 type TargetRevealEvidence = {
   mounted: boolean;
@@ -143,8 +144,8 @@ export async function verifyDesktopMarkdownControls(input: {
   const codeBlocks = completedTurn.locator(".response-code-block");
   await expect(codeBlocks).toHaveCount(2);
   const firstWrap = codeBlocks.nth(0).getByRole("button", { name: "Wrap" });
-  const firstCopy = codeBlocks.nth(0).locator('button[title="Copy code"]');
-  const secondCopy = codeBlocks.nth(1).locator('button[title="Copy code"]');
+  const firstCopy = codeBlocks.nth(0).getByRole("button", { name: CODE_COPY_NAME });
+  const secondCopy = codeBlocks.nth(1).getByRole("button", { name: CODE_COPY_NAME });
   await firstWrap.evaluate((button) => {
     button.scrollIntoView({ block: "center", inline: "nearest" });
   });
@@ -291,6 +292,33 @@ export async function verifyDesktopMarkdownControls(input: {
   await expect(firstCopy).toHaveText("Copy");
   await expect.poll(() => electronApp.evaluate(({ clipboard }) =>
     clipboard.readText())).toBe('{"route":"secondary","verified":true}');
+  await completedTurn.locator('[data-turn-layer="final-answer"]').evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  });
+  await electronApp.evaluate(({ clipboard }) => clipboard.writeText("Selection copy pending"));
+  await electronApp.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows()
+    .find((window) => window.webContents.getURL() === url)!.webContents.copy(), page.url());
+  await expect.poll(() => electronApp.evaluate(({ clipboard }) => clipboard.readText()))
+    .toContain("Historical attribution comes from the persisted route");
+  const selectionCopy = await electronApp.evaluate(async ({ clipboard }) => {
+    const [item] = await clipboard.read();
+    return {
+      html: await (await item!.getType("text/html")).text(),
+      text: await clipboard.readText(),
+    };
+  });
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  const copiedQuoteBorder = await page.evaluate((html) => new DOMParser()
+    .parseFromString(html, "text/html")
+    .querySelector("blockquote")?.style.borderLeftWidth ?? null, selectionCopy.html);
+  expect(["", "0px"]).toContain(copiedQuoteBorder);
+  expect(selectionCopy.html).not.toContain('node="');
+  for (const label of ["Codex · OpenAI", "Markdown", "CSV", "Wrap", "Copy"]) {
+    expect(selectionCopy.text).not.toContain(label);
+  }
 }
 
 /** Opening details in a tall narrow turn must retain its next disclosure. */
@@ -333,7 +361,7 @@ export async function verifyNarrowDesktopMarkdownControls(input: {
   );
   await electronApp.evaluate(({ clipboard }) =>
     clipboard.writeText("narrow-sentinel"));
-  await codeBlocks.nth(1).locator('button[title="Copy code"]').click();
+  await codeBlocks.nth(1).getByRole("button", { name: CODE_COPY_NAME }).click();
   await expect.poll(() => electronApp.evaluate(({ clipboard }) =>
     clipboard.readText())).toBe('{"route":"secondary","verified":true}');
   const tableToolbar = completedTurn.locator(".response-table-toolbar").first();

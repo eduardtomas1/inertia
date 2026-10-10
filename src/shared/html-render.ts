@@ -30,22 +30,22 @@ export interface HtmlRenderTheme {
  * styles against stable names while the app keeps its own vocabulary.
  */
 export const HTML_RENDER_THEME_VARIABLES: ReadonlyArray<readonly [alias: string, appToken: string]> = [
-  ["--background", "--conversation-canvas-surface"],
+  ["--background", "--bg"],
   ["--foreground", "--text"],
-  ["--muted", "--surface-muted"],
+  ["--muted", "--fill-solid"],
   ["--muted-foreground", "--text-muted"],
   ["--card", "--surface"],
   ["--card-foreground", "--text"],
-  ["--border", "--border"],
+  ["--border", "--line-solid"],
   ["--accent", "--accent"],
   ["--accent-foreground", "--accent-text"],
   ["--accent-strong", "--accent-strong"],
   ["--destructive", "--danger"],
   ["--warning", "--warning"],
-  ["--success", "--success"],
+  ["--success", "--status-completed"],
   ["--info", "--blue"],
-  ["--code-background", "--code-surface"],
-  ["--radius", "--radius-content"],
+  ["--code-background", "--fill-solid"],
+  ["--radius", "--radius-sm"],
   ["--font-sans", "--font-sans"],
   ["--font-mono", "--font-mono"],
 ];

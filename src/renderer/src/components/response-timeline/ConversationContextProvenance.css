@@ -4,7 +4,8 @@
   margin-top: 8px;
 }
 
-.sent-context > span {
+.sent-context > span,
+.sent-context > button {
   display: grid;
   width: fit-content;
   max-width: min(100%, 440px);
@@ -12,18 +13,33 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 22%, transparent);
+  background: var(--fill);
 }
 
-.sent-context > span[data-source-state="deleted"] {
+.sent-context > button {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sent-context > button:hover,
+.sent-context > button[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+.turn-user-request > .composer-context-preview {
+  margin-top: 6px;
+}
+
+.sent-context > [data-source-state="deleted"] {
   border-style: dashed;
   color: var(--text-muted);
 }
 
-.sent-context > span > span {
+.sent-context > * > span {
   display: grid;
   min-width: 0;
   gap: 2px;
@@ -37,12 +53,12 @@
 }
 
 .sent-context strong {
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 620;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .sent-context small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-xs);
 }

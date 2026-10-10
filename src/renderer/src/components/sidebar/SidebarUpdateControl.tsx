@@ -195,7 +195,7 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
       <footer className="update-detail-actions">
         {presentation.action !== "none" && <button type="button" className="secondary-button" disabled={disabled} onClick={activate}>{presentation.actionLabel}</button>}
         {status?.state === "downloading" && <button type="button" className="secondary-button" disabled={cancelling} onClick={() => { void cancel(); }}>{cancelling ? "Cancelling…" : "Cancel download"}</button>}
-        {status?.releaseUrl && presentation.action !== "release" && <button type="button" className="text-button" onClick={() => { void run("release"); }} disabled={openingRelease}>Release notes <ExternalLink size={12} aria-hidden="true" /></button>}
+        {status?.releaseUrl && presentation.action !== "release" && <button type="button" className="text-button" onClick={() => { void run("release"); }} disabled={openingRelease}>Release notes <ExternalLink size={14} aria-hidden="true" /></button>}
       </footer>
     </div>}
     {confirmation && <UpdateRestartConfirmation version={confirmation} ready={readyToConfirm}

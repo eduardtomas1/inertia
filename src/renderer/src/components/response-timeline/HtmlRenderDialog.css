@@ -8,11 +8,6 @@
   max-height: min(90dvh, calc(100dvh - clamp(16px, 6vw, 56px)));
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: clamp(12px, 2vw, 18px);
-  color: var(--text);
-  background: var(--conversation-canvas-surface);
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.38);
 }
 
 .html-render-dialog:focus {
@@ -27,8 +22,8 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  font-size: calc(var(--ui-font-main) + var(--platform-readability-adjustment));
-  font-weight: 640;
+  font-size: var(--text-base);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -57,6 +52,6 @@
 
 @media (max-width: 560px) {
   .html-render-dialog {
-    border-radius: 12px;
+    border-radius: var(--radius-sm);
   }
 }

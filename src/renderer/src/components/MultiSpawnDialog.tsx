@@ -1,11 +1,10 @@
 import { writeClipboardText } from "../utils/clipboard";
 import {
-  Brain,
   Check,
+  Columns2,
   Folder,
   KeyRound,
   Scale,
-  Share2,
   ShieldCheck,
   TriangleAlert,
   X,
@@ -151,7 +150,7 @@ function MultiSpawnSideEditor({
     >
       <header>
         <span className="multi-spawn-side-number">
-          {isJudge ? <Scale size={13} /> : index + 1}
+          {isJudge ? <Scale size={14} /> : index + 1}
         </span>
         <span>
           <strong id={`multi-spawn-side-heading-${index}`}>
@@ -163,7 +162,7 @@ function MultiSpawnSideEditor({
           </small>
         </span>
         <span className={`multi-spawn-readiness ${ready ? "is-ready" : ""}`}>
-          {ready ? <Check size={11} /> : <KeyRound size={11} />}
+          {ready ? <Check size={14} /> : <KeyRound size={14} />}
           {ready ? "Ready" : routeState.statusBadge}
         </span>
       </header>
@@ -189,7 +188,7 @@ function MultiSpawnSideEditor({
           />
         </label>
         <label className="multi-spawn-field" htmlFor={projectId}>
-          <span><Folder size={11} /> Project</span>
+          <span><Folder size={14} /> Project</span>
           <select
             id={projectId}
             aria-label={`${chatLabel} project`}
@@ -224,7 +223,7 @@ function MultiSpawnSideEditor({
 
       <div className="multi-spawn-field-grid is-compact">
         <label className="multi-spawn-field" htmlFor={reasoningId}>
-          <span><Brain size={11} /> Reasoning</span>
+          <span>Reasoning</span>
           <select
             id={reasoningId}
             aria-label={`${chatLabel} reasoning`}
@@ -247,7 +246,7 @@ function MultiSpawnSideEditor({
           </select>
         </label>
         <label className="multi-spawn-field" htmlFor={accessId}>
-          <span><ShieldCheck size={11} /> Access</span>
+          <span><ShieldCheck size={14} /> Access</span>
           <select
             id={accessId}
             aria-label={`${chatLabel} access`}
@@ -590,7 +589,7 @@ export function MultiSpawnDialog({
       >
         <header className="multi-spawn-dialog-header">
           <span className="multi-spawn-dialog-mark">
-            <Share2 size={17} strokeWidth={1.75} />
+            <Columns2 size={16} />
           </span>
           <span>
             <h2 id="multi-spawn-title">Launch a duo</h2>
@@ -699,7 +698,7 @@ export function MultiSpawnDialog({
               </details>
               {judgeSharesSourceCheckout && (
                 <div className="multi-spawn-judge-risk" role="status">
-                  <TriangleAlert size={15} />
+                  <TriangleAlert size={14} />
                   <span>
                     <strong>Judge can edit a source checkout</strong>
                     Full access can modify this checkout. Choose Supervised to

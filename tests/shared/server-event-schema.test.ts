@@ -1185,6 +1185,37 @@ describe("server event conversation discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
 
+  it("accepts recorded context reads and rejects malformed ones", () => {
+    const read = {
+      targetMessageId: "message-1",
+      targetTurnId: "turn-1",
+      sourceConversationId: "conversation-2",
+      sourceConversationTitle: "Export fix",
+      sourceState: "available",
+      access: "referenced",
+      listedTurns: true,
+      turnIds: ["turn-9"],
+      firstReadAt: "2030-01-01T00:00:00.000Z",
+      lastReadAt: "2030-01-01T00:00:01.000Z",
+    };
+    const ready = (contextReads: unknown) => event({
+      kind: "conversation.detail",
+      conversationId: conversation.id,
+      state: "ready",
+      detail: { ...conversationDetail, contextReads },
+    });
+    expect(() => parseServerEvent(ready([read]))).not.toThrow();
+    for (const malformed of [
+      { ...read, access: "anyone" },
+      { ...read, sourceState: "gone" },
+      { ...read, listedTurns: "yes" },
+      { ...read, turnIds: [7] },
+      { ...read, sourceConversationId: null },
+    ]) {
+      expect(() => parseServerEvent(ready([malformed]))).toThrow("Malformed server event");
+    }
+  });
+
   it("rejects a ready detail whose outer conversation identity disagrees", () => {
     expect(() => parseServerEvent(event({
       kind: "conversation.detail",
@@ -1750,6 +1781,8 @@ describe("server event remaining discriminant and identity boundary", () => {
     };
     expect(parseServerEvent(replacement)).toBeTruthy();
     expect(parseServerEvent({ ...replacement, message: null })).toBeTruthy();
+    expect(parseServerEvent({ ...replacement, after: "2026-07-28T12:00:32.000Z" })).toBeTruthy();
+    expect(() => parseServerEvent({ ...replacement, after: 5 })).toThrow("Malformed server event");
     expect(() => parseServerEvent({
       ...replacement,
       message: { ...assistantMessage, role: "user" },

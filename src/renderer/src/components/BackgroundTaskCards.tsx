@@ -72,7 +72,7 @@ function StopButton({
       disabled={stopping}
       onClick={onStop}
     >
-      <Square size={10} aria-hidden="true" />
+      <Square size={14} aria-hidden="true" />
     </button>
   );
 }
@@ -289,7 +289,7 @@ export const AgentCard = memo(function AgentCard({
           onClick={() => onToggle(trace.id)}
         >
           View transcript
-          <ChevronDown size={12} aria-hidden="true" />
+          <ChevronDown size={14} aria-hidden="true" />
         </button>
       </p>
       {expanded && (

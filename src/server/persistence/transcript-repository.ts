@@ -1,6 +1,6 @@
-import { byteLength } from "./bounded-message-text";
-import { readContinuationHistory } from "./continuation-history";
-import { providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
+import { readContinuationHistory, type ContinuationHistory } from "./continuation-history";
+import type { ContinuationRouteFilter } from "./conversation-context-source";
+import { contextBlockPromptBytes, providerHandoffBlockBytes, providerHandoffFilesBlock } from "./provider-handoff-files";
 import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
@@ -54,7 +54,7 @@ export class TranscriptRepository {
     capacityBytes: number,
     capturedAt: string,
     excludedMessageId?: string,
-    route?: Parameters<typeof readContinuationHistory>[5],
+    route?: ContinuationRouteFilter,
   ): ReturnType<typeof readContinuationHistory> {
     const history = readContinuationHistory(
       this.context.database,
@@ -64,10 +64,30 @@ export class TranscriptRepository {
       excludedMessageId,
       route,
     );
-    if (route?.handoff === undefined || !history || history.blocks.length === 0) return history;
+    return history && route ? this.withChangedFiles(history, conversationId, capacityBytes, route) : history;
+  }
+
+  referencedContinuationHistory(
+    conversationId: string,
+    capacityBytes: number,
+    route: ContinuationRouteFilter,
+    delivered: Pick<ContinuationHistory, "messageCount" | "omittedMessageCount">,
+  ): ContinuationHistory {
+    return this.withChangedFiles({ blocks: [], ...delivered }, conversationId, capacityBytes, route);
+  }
+
+  private withChangedFiles(
+    history: ContinuationHistory,
+    conversationId: string,
+    capacityBytes: number,
+    route: ContinuationRouteFilter,
+  ): ContinuationHistory {
+    if (history.messageCount === 0) return history;
     const files = providerHandoffFilesBlock(this.context.database, conversationId, route);
     if (!files) return history;
-    const usedBytes = history.blocks.reduce((total, { content }) => total + byteLength(JSON.stringify(content)), 0);
+    const usedBytes = history.blocks.reduce((total, block) => total + (block.optional
+      ? providerHandoffBlockBytes(block)
+      : contextBlockPromptBytes(block)), 0);
     return usedBytes + providerHandoffBlockBytes(files) <= capacityBytes
       ? { ...history, blocks: [...history.blocks, files] }
       : history;
@@ -252,6 +272,7 @@ export class TranscriptRepository {
     turnId: string,
     retainedMessageId: string | null,
     content: string,
+    after: string | null = null,
   ): void {
     if (!retainedMessageId && content) {
       throw new Error("A non-empty assistant snapshot requires a message.");
@@ -260,17 +281,18 @@ export class TranscriptRepository {
       const turn = this.context.requireAgentTurn(turnId);
       if (retainedMessageId) {
         const retained = this.context.database.prepare(`
-          SELECT id, turn_id, role
+          SELECT id, turn_id, role, created_at
           FROM messages
           WHERE id = ?
         `).get(retainedMessageId) as Pick<
           MessageRow,
-          "id" | "turn_id" | "role"
+          "id" | "turn_id" | "role" | "created_at"
         > | undefined;
         if (
           !retained
           || retained.turn_id !== turnId
           || retained.role !== "assistant"
+          || (after !== null && Date.parse(retained.created_at) <= Date.parse(after))
         ) {
           throw new Error(
             "The retained assistant message does not belong to this turn.",
@@ -289,7 +311,8 @@ export class TranscriptRepository {
         WHERE conversation_id = ? AND turn_id = ?
           AND role = 'assistant'
           AND (? IS NULL OR id <> ?)
-      `).run(turn.conversation_id, turnId, retainedMessageId, retainedMessageId);
+          AND (? IS NULL OR created_at > ?)
+      `).run(turn.conversation_id, turnId, retainedMessageId, retainedMessageId, after, after);
     })();
   }
 

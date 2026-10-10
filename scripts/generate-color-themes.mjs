@@ -11,6 +11,12 @@ const STYLES = "src/renderer/src/styles.css";
 const FAMILY_THEMES = "src/renderer/public/color-themes.css";
 const THEME_LIBRARY = "src/renderer/src/components/ThemeLibrary.css";
 
+const UNPAINTED_TOKENS = new Set(["app-bg", "sidebar-bg", "surface-hover"]);
+
+export function paintedPaletteTokens(family, appearance) {
+  return buildPaletteTokens(family, appearance).filter(([name]) => !UNPAINTED_TOKENS.has(name));
+}
+
 export function paletteSelector(family, appearance) {
   if (family === "inertia") {
     return appearance === "light" ? ":root" : ':root[data-theme="dark"]';
@@ -25,12 +31,11 @@ export function swatchSelector(family, appearance) {
 export function buildSwatchTokens(family, appearance) {
   const tokens = Object.fromEntries(buildPaletteTokens(family, appearance));
   return [
-    ["theme-preview-canvas", tokens["app-bg"]],
-    ["theme-preview-sidebar", tokens["sidebar-bg"]],
+    ["theme-preview-canvas", tokens["surface-strong"]],
+    ["theme-preview-sidebar", tokens.surface],
     ["theme-preview-surface", tokens["surface-strong"]],
     ["theme-preview-accent", tokens.accent],
     ["theme-preview-accent-soft", tokens["accent-soft"]],
-    ["theme-preview-message-action", tokens["message-action"]],
   ];
 }
 
@@ -59,7 +64,7 @@ export function renderFiles(read) {
 
   for (const family of PALETTE_FAMILIES) {
     for (const appearance of PALETTE_APPEARANCES) {
-      const tokens = buildPaletteTokens(family, appearance);
+      const tokens = paintedPaletteTokens(family, appearance);
       const selector = paletteSelector(family, appearance);
       if (family === "inertia") {
         styles = replaceTokensInBlock(styles, selector, tokens);
@@ -81,7 +86,7 @@ export function renderFiles(read) {
 }
 
 export function windowBackground(appearance) {
-  return Object.fromEntries(buildPaletteTokens("inertia", appearance))["app-bg"];
+  return Object.fromEntries(buildPaletteTokens("inertia", appearance))["surface-strong"];
 }
 
 function main() {

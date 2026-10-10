@@ -64,6 +64,10 @@ export function htmlRenderContextLine(title: string): string {
   return `[page: ${title}]`;
 }
 
+export function htmlRenderProviderNote(title: string): string {
+  return `${htmlRenderContextLine(title)} (rendered page; content not available here)`;
+}
+
 /** Fallback text for clients that predate visual replies. */
 export function htmlRenderPlaceholderText(title: string): string {
   return `Rendered page: ${title}`;

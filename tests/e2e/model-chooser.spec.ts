@@ -17,6 +17,7 @@ import type { AppFixture } from "./support/app-fixture";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";
 import { seedModelChooserNativeMetadata } from "./support/model-catalog-fixture";
 import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
+import { expectComposerBranch } from "./support/composer-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -118,7 +119,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const modelResultsAx = await modelResults.ariaSnapshot();
   expect(modelResultsAx).toContain('- grid "Model results"');
   expect(modelResultsAx).toContain('- row "');
-  expect(modelResultsAx).toContain('- button "Add ');
+  expect(modelResultsAx).toContain('- button "Pin ');
   await expect(modelResults.locator(
     ".model-chooser-row.is-active .model-chooser-row-option",
   )).toHaveAttribute("aria-current", "true");
@@ -195,14 +196,14 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await captureChooserScenario("anchored-model-chooser-1440x720");
 
   const firstFavorite = modelResults.getByRole("button", {
-    name: /^Add .+ to favorites$/u,
+    name: /^Pin .+ on .+$/u,
   }).first();
   await firstFavorite.click();
   await expect(modelResults.getByRole("button", {
-    name: /^Remove .+ from favorites$/u,
+    name: /^Unpin .+ on .+$/u,
   }).first()).toHaveAttribute("aria-pressed", "true");
   const favoritesSource = modelChooser.getByRole("button", {
-    name: /^Favorites, 1 model$/u,
+    name: /^Pinned, 1 model$/u,
   });
   await expect(favoritesSource).toBeVisible();
   await favoritesSource.click();
@@ -234,7 +235,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
 
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
-  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 4 } });
   await expect(modelChooser).toBeHidden();
   await expect(modelTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(modelTrigger).toBeFocused();
@@ -358,10 +359,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     timeout: 10_000,
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  })).toBeVisible();
+  await expectComposerBranch(page, currentBranch);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {
@@ -396,10 +394,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   }, MODEL_FAVORITES_STORAGE_KEY);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  })).toBeVisible();
+  await expectComposerBranch(page, currentBranch);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {
@@ -613,7 +608,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const catalogAx = await modelResults.ariaSnapshot();
   expect(catalogAx).toContain('- grid "Model results"');
   expect(catalogAx).toMatch(/- '?row "/u);
-  expect(catalogAx).toContain('- button "Add Catalog Model');
+  expect(catalogAx).toContain('- button "Pin Catalog Model');
   await searchModels.press("Escape");
   await expect(modelChooser).toBeHidden();
   await resizeWindow(1440, 720);

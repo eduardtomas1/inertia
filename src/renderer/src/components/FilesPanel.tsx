@@ -15,11 +15,10 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
-  AlertCircle,
+  CircleAlert,
   Code2,
-  Eye,
   ExternalLink,
-  FileSearch,
+  Eye,
   FolderTree,
   Pencil,
   RefreshCw,
@@ -56,6 +55,7 @@ import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
 import { projectPathContextMenu } from "../utils/contextMenu";
+import { rememberedExpandedFolders, rememberExpandedFolders } from "../utils/filesPanelExpandedFolders";
 import { useStableActions } from "../hooks/useStableController";
 import { buildFileTreeGitIndex, type FileTreeGitState } from "../utils/fileTreeGit";
 import { directoryChain, freshWorkspaceDirectoryPages, visibleDirectoryEntries } from "../utils/workspaceDirectoryPages";
@@ -110,15 +110,15 @@ export function MarkdownPreviewSurface({
   })), [attempt, loader]);
   const failure = (
     <div className={`${FILE_PREVIEW_CLASS}-markdown-failure`} role="alert">
-      <AlertCircle size={20} aria-hidden="true" />
+      <CircleAlert size={16} aria-hidden="true" />
       <strong>Preview failed</strong>
       <div>
         <button type="button" onClick={() => setAttempt((value) => value + 1)}>
-          <RefreshCw size={12} aria-hidden="true" />
+          <RefreshCw size={14} aria-hidden="true" />
           Retry
         </button>
         <button type="button" onClick={onShowSource}>
-          <Code2 size={12} aria-hidden="true" />
+          <Code2 size={14} aria-hidden="true" />
           Source
         </button>
       </div>
@@ -244,8 +244,12 @@ export function FilesPanel({
   const directoryPagesRef = useRef(directoryPages);
   const rootInputRef = useRef({ entries, entriesTruncated });
   const directoryGeneration = useRef(0);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
+  const expandedFoldersKey = `${projectId}:${conversationId ?? "project"}`;
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
+    () => rememberedExpandedFolders(expandedFoldersKey),
+  );
   const expandedPathsRef = useRef(expandedPaths);
+  const restoredExpandedPathsRef = useRef(false);
   const [loadingDirectories, setLoadingDirectories] = useState<Set<string>>(() => new Set());
   const [directoryErrors, setDirectoryErrors] = useState<Map<string, string>>(() => new Map());
   const [query, setQuery] = useState("");
@@ -628,6 +632,18 @@ export function FilesPanel({
     }
   }, [entries, entriesTruncated, loadDirectory, selectedPath]);
 
+  useEffect(() => {
+    if (restoredExpandedPathsRef.current) return;
+    restoredExpandedPathsRef.current = true;
+    for (const path of expandedPathsRef.current) {
+      if (!directoryPagesRef.current.has(path)) void loadDirectory(path);
+    }
+  }, [loadDirectory]);
+
+  useEffect(() => {
+    rememberExpandedFolders(expandedFoldersKey, expandedPaths);
+  }, [expandedFoldersKey, expandedPaths]);
+
   const updateQuery = useCallback((value: string): void => {
     ++searchGeneration.current;
     markWorkspaceFileSearchEdit(projectId, conversationId);
@@ -848,7 +864,7 @@ export function FilesPanel({
         fileExplorerOpen && "is-explorer-open",
       )}>
         <div className="file-search-wrap" hidden={!fileExplorerOpen}>
-          <Search size={15} aria-hidden="true" />
+          <Search size={14} aria-hidden="true" />
           <input
             type="search"
             ref={searchInputRef}
@@ -889,12 +905,11 @@ export function FilesPanel({
             </div>
           ) : hasRootFailure || hasSearchFailure ? (
             <div className={`${PANEL_EMPTY_CLASS} compact ${FILE_PANEL_ERROR_CLASS}`} role="alert">
-              <AlertCircle size={20} aria-hidden="true" />
+              <CircleAlert size={16} aria-hidden="true" />
               <p>{searchActive ? search.error : error}</p>
             </div>
           ) : rows.length === 0 ? (
             <div className={`${PANEL_EMPTY_CLASS} compact`}>
-              <FileSearch size={20} aria-hidden="true" />
               <p>{searchActive ? "No matches." : "Empty project."}</p>
             </div>
           ) : null}
@@ -945,7 +960,7 @@ export function FilesPanel({
             </div>
             <div className={`${FILE_PREVIEW_CLASS}-metadata`}>
               {selectedPath && <FileGitBadge index={gitIndex} path={selectedPath} />}
-              {previewLanguage && (
+              {previewLanguage && !markdownPreview && (
                 <span
                   className={FILE_LANGUAGE_CLASS}
                   data-language-family={previewLanguage.family}
@@ -977,7 +992,7 @@ export function FilesPanel({
                       view: "preview",
                     })}
                   >
-                    <Eye size={11} aria-hidden="true" />
+                    <Eye size={14} aria-hidden="true" />
                     <span>Preview</span>
                   </button>
                   <button
@@ -989,7 +1004,7 @@ export function FilesPanel({
                       view: "source",
                     })}
                   >
-                    <Code2 size={11} aria-hidden="true" />
+                    <Code2 size={14} aria-hidden="true" />
                     <span>Source</span>
                   </button>
                 </div>
@@ -1032,7 +1047,7 @@ export function FilesPanel({
             </div>
           ) : previewError && selectedPath ? (
             <div className={`${PANEL_EMPTY_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">
-              <AlertCircle size={22} aria-hidden="true" />
+              <CircleAlert size={16} aria-hidden="true" />
               <h3>Preview failed: {workspacePathName(selectedPath)}</h3>
               <p>{previewError}</p>
             </div>
@@ -1133,7 +1148,6 @@ export function FilesPanel({
             </>
           ) : (
             <div className={PANEL_EMPTY_CLASS}>
-              <FileSearch size={22} aria-hidden="true" />
               <p>Select a file.</p>
             </div>
           )}

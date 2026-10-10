@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -36,6 +37,7 @@ import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
 import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
+import { TooltipButton } from "./TooltipButton";
 import { IconButton } from "./ui";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
@@ -81,6 +83,7 @@ type WorkspaceHeaderProps = {
   isServerConversation?: boolean;
   view: AppView;
   sidebarCollapsed: boolean;
+  sidebarShortcut?: string;
   compact?: boolean;
   gitStatus: GitStatusSnapshot | null;
   gitNotice?: string | null;
@@ -124,6 +127,7 @@ export function WorkspaceHeader({
   isServerConversation = Boolean(conversation),
   view,
   sidebarCollapsed,
+  sidebarShortcut,
   compact = false,
   gitStatus,
   gitNotice = null,
@@ -162,6 +166,7 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps): React.JSX.Element {
   const headerRef = useRef<HTMLElement>(null);
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const titleHintId = useId();
   const [headerWidth, setHeaderWidth] = useState(Number.POSITIVE_INFINITY);
   const collapsed = headerActionsCollapsed({ containerWidth: headerWidth, compact });
   const [titleAnchor, setTitleAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -309,23 +314,23 @@ export function WorkspaceHeader({
   return (
     <header ref={headerRef} className="workspace-header drag-region">
       <div className="header-leading no-drag">
-        <IconButton label="Toggle project navigation" className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
-          {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+        <IconButton label="Toggle project navigation" shortcut={sidebarShortcut} className="menu-button" aria-pressed={!sidebarCollapsed} onClick={onOpenSidebar}>
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </IconButton>
         <nav className="header-breadcrumb" aria-label="Chat breadcrumb">
           {showProjectCrumb && (
             <>
               {onCreateConversationInProject ? (
-                <button
+                <TooltipButton
                   type="button"
                   className="header-breadcrumb-project"
                   aria-label={newChatInProjectLabel}
-                  title={newChatInProjectLabel}
+                  tooltip={newChatInProjectLabel}
                   onClick={onCreateConversationInProject}
                 >
                   <ProjectIcon project={project} size={14} />
                   <ProjectName project={project}>{project.name}</ProjectName>
-                </button>
+                </TooltipButton>
               ) : (
                 <span className="header-breadcrumb-project">
                   <ProjectIcon project={project} size={14} />
@@ -353,14 +358,15 @@ export function WorkspaceHeader({
             ) : (
               <h1>
                 {titleMenuAvailable ? (
-                  <button
+                  <TooltipButton
                     ref={(node) => {
                       titleButtonRef.current = node;
                       setMenuTrigger("title", node);
                     }}
                     type="button"
                     className="header-title-button"
-                    title="Chat actions · double-click to rename"
+                    tooltip="Chat actions · double-click to rename"
+                    aria-describedby={titleHintId}
                     aria-haspopup="menu"
                     aria-expanded={menu === "title"}
                     aria-controls={conversation ? `conversation-actions-${conversation.id}` : undefined}
@@ -379,12 +385,15 @@ export function WorkspaceHeader({
                     }}
                   >
                     <span className="header-title-text">{title}</span>
-                    <ChevronDown size={13} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
-                  </button>
+                    <ChevronDown size={14} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
+                  </TooltipButton>
                 ) : (
                   <span className="header-title-text">{title}</span>
                 )}
               </h1>
+            )}
+            {titleMenuAvailable && !renaming && (
+              <span id={titleHintId} className="visually-hidden">Chat actions · double-click to rename</span>
             )}
           </div>
         </nav>
@@ -450,9 +459,9 @@ export function WorkspaceHeader({
           </div>
         )}
         {view === "settings" ? (
-          <IconButton label="Close settings" onClick={onCloseSettings}><Settings size={17} /></IconButton>
+          <IconButton label="Close settings" onClick={onCloseSettings}><Settings size={16} /></IconButton>
         ) : view !== "workspace" ? (
-          <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={17} /></IconButton>
+          <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={16} /></IconButton>
         ) : null}
       </div>
       {menu === "title" && ConversationActionsMenu && conversation && conversationMenu && (

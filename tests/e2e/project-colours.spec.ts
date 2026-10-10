@@ -18,8 +18,8 @@ async function color(locator: Locator): Promise<string> {
   return locator.evaluate((element) => getComputedStyle(element).color);
 }
 
-function projectRows(page: Page, name: string): Locator {
-  return page.locator(".activity-thread-projectline").filter({ has: page.locator(".activity-thread-project-meta", { hasText: new RegExp(`^${name}$`, "u") }) });
+function projectHeaders(page: Page, name: string): Locator {
+  return page.locator(".work-project-group > h3").filter({ has: page.locator(".work-project-name", { hasText: new RegExp(`^${name}$`, "u") }) });
 }
 
 function storedPreferences() {
@@ -49,10 +49,10 @@ test.afterAll(async () => { await app?.close(); });
 test("colours a project from the filter menu, updates every surface and window live, and keeps it after restart", async () => {
   test.setTimeout(90_000);
   const page = app.page;
-  const rows = projectRows(page, "Munich - Etendo");
-  const otherRows = projectRows(page, "Atlas billing");
-  await expect(rows).toHaveCount(2);
-  const untintedName = await color(otherRows.first().locator(".activity-thread-project-meta"));
+  const rows = projectHeaders(page, "Munich - Etendo");
+  const otherRows = projectHeaders(page, "Atlas billing");
+  await expect(rows).toHaveCount(1);
+  const untintedName = await color(otherRows.first().locator(".work-project-name"));
 
   await page.locator(".workspace-header .header-title-button").click();
   const opened = app.electronApp.waitForEvent("window");
@@ -69,16 +69,13 @@ test("colours a project from the filter menu, updates every surface and window l
   await expect(colours.getByRole("radio", { name: "Default" })).toBeFocused();
   await colours.getByRole("radio", { name: "Teal" }).click();
   await expect(rows.first().locator("svg.project-icon-symbol")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.teal.dark));
-  await expect(rows.nth(1).locator("svg.project-icon-symbol")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.teal.dark));
-  expect(await color(rows.first().locator(".activity-thread-project-meta"))).toBe(untintedName);
+  expect(await color(rows.first().locator(".work-project-name"))).toBe(untintedName);
   await page.keyboard.press("ArrowRight");
   await expect(colours.getByRole("radio", { name: "Blue" })).toBeFocused();
   await expect(rows.first().locator("svg.project-icon-symbol")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
   await panel.getByRole("radio", { name: "Icon and name" }).click();
-  for (const row of [rows.first(), rows.nth(1)]) {
-    await expect(row.locator(".activity-thread-project-meta")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
-  }
-  expect(await color(otherRows.first().locator(".activity-thread-project-meta"))).toBe(untintedName);
+  await expect(rows.first().locator(".work-project-name")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
+  expect(await color(otherRows.first().locator(".work-project-name"))).toBe(untintedName);
   await expect(page.locator(".header-breadcrumb-project .project-name-tinted")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
   await expect(popup.locator(".detached-chat-project .project-name-tinted")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
   await expect(popup.locator(".detached-chat-project svg")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
@@ -90,7 +87,7 @@ test("colours a project from the filter menu, updates every surface and window l
   expect(storedPreferences()).toMatchObject({ color: { kind: "palette", name: "blue" }, colorEmphasis: "icon-and-name" });
 
   await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
-  await expect(rows.first().locator(".activity-thread-project-meta")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.light));
+  await expect(rows.first().locator(".work-project-name")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.light));
   await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
 
   await trigger.click();
@@ -102,9 +99,9 @@ test("colours a project from the filter menu, updates every surface and window l
 
   await app.restart();
   const restarted = app.page;
-  const restartedRows = projectRows(restarted, "Munich - Etendo");
-  await expect(restartedRows).toHaveCount(2);
-  await expect(restartedRows.first().locator(".activity-thread-project-meta")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
+  const restartedRows = projectHeaders(restarted, "Munich - Etendo");
+  await expect(restartedRows).toHaveCount(1);
+  await expect(restartedRows.first().locator(".work-project-name")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
   await expect(restarted.locator(".header-breadcrumb-project svg")).toHaveCSS("color", rgb(PROJECT_COLOR_PALETTE.blue.dark));
   expect(app.rendererErrors).toEqual([]);
 });
@@ -120,7 +117,7 @@ test("pins a project to the top of the filter and applies a typed custom colour"
   await expect(panel.getByRole("radio", { name: "Custom #ff7a00" })).toHaveAttribute("aria-checked", "true");
   await panel.getByRole("switch", { name: "Pin to top of project lists" }).click();
   await expect(panel.getByRole("switch", { name: "Pin to top of project lists" })).toHaveAttribute("aria-checked", "true");
-  await expect(projectRows(page, "Atlas billing").first().locator("svg.project-icon-symbol")).toHaveCSS("color", rgb(adaptProjectColor("#ff7a00", "dark")));
+  await expect(projectHeaders(page, "Atlas billing").first().locator("svg.project-icon-symbol")).toHaveCSS("color", rgb(adaptProjectColor("#ff7a00", "dark")));
   await panel.getByRole("button", { name: "Back to projects" }).click();
   await expect(page.getByRole("option").nth(1)).toHaveAccessibleName("Atlas billing, pinned");
   await page.keyboard.press("Escape");

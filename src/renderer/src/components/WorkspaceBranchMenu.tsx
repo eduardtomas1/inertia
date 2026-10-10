@@ -1,4 +1,4 @@
-import { GitBranch, MessageSquarePlus } from "lucide-react";
+import { GitBranch, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project } from "@shared/contracts";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -89,7 +89,7 @@ export default function WorkspaceBranchMenu({
           <div className="header-popover-title">Start another chat</div>
           {availableChatActions.map(([, label, action]) => (
             <button type="button" role="menuitem" disabled={locked} key={label} onClick={() => { onClose(); action(); }}>
-              <MessageSquarePlus size={13} /><span>{label}</span>
+              <SquarePen size={14} /><span>{label}</span>
             </button>
           ))}
         </div>

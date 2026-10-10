@@ -9,6 +9,7 @@ import { PanelBottom, PanelRight } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../../utils/environmentSummary";
 import { activeBackgroundTasksLabel } from "../../utils/backgroundTaskRuns";
+import { IconButton } from "../ui";
 
 const HeaderUsageMeter = lazy(async () => ({
   default: (await import("./HeaderUsageMeter")).HeaderUsageMeter,
@@ -61,9 +62,6 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   const tasksLabel = activeBackgroundTaskCount > 0
     ? activeBackgroundTasksLabel(activeBackgroundTaskCount)
     : null;
-  const terminalLabel = terminalAvailable
-    ? `Toggle terminal${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-    : terminalUnavailableLabel;
   const rightPanelLabel = rightPanelAvailable
     ? `Toggle right panel${tasksLabel ? `, ${tasksLabel}` : ""}`
     : rightPanelUnavailableLabel;
@@ -78,32 +76,31 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           <HeaderUsageMeter usage={usage} onOpenUsage={onOpenUsage} />
         </Suspense>
       )}
-      <button
-        type="button"
+      <IconButton
         className="corner-toggle"
-        aria-label={terminalAvailable ? "Toggle terminal" : terminalLabel}
-        title={terminalLabel}
+        label={terminalAvailable ? "Toggle terminal" : terminalUnavailableLabel}
+        shortcut={terminalAvailable ? terminalShortcutLabel ?? undefined : undefined}
+        title={terminalAvailable ? undefined : terminalUnavailableLabel}
         aria-pressed={terminalOpen}
         disabled={!terminalAvailable}
         onClick={onToggleTerminal}
       >
-        <PanelBottom size={15} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
+        <PanelBottom size={16} aria-hidden="true" />
+      </IconButton>
+      <IconButton
         className="corner-toggle"
-        aria-label={rightPanelLabel}
-        title={rightPanelLabel}
+        label={rightPanelLabel}
+        title={rightPanelAvailable ? undefined : rightPanelLabel}
         aria-pressed={rightPanelOpen}
         disabled={!rightPanelAvailable}
         data-right-panel-toggle
         onClick={onToggleRightPanel}
       >
-        <PanelRight size={15} aria-hidden="true" />
+        <PanelRight size={16} aria-hidden="true" />
         {activeBackgroundTaskCount > 0 && (
-          <span className="corner-toggle-badge" aria-hidden="true">{activeBackgroundTaskCount}</span>
+          <span className="corner-toggle-count" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}
-      </button>
+      </IconButton>
     </div>
   );
 });

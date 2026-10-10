@@ -1043,9 +1043,9 @@ export function TerminalSession({
             <span className="terminal-project">{projectName}</span>
           </div>
           <div className="terminal-actions">
-            <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={15} /></IconButton>
+            <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={14} /></IconButton>
             <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
-              <RotateCcw size={15} />
+              <RotateCcw size={14} />
             </IconButton>
             <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
           </div>
@@ -1088,7 +1088,7 @@ export function TerminalSession({
               <><LoadingMark label="Starting terminal" /><span>Starting terminal…</span></>
             ) : (
               <>
-                <TerminalSquare size={19} />
+                <TerminalSquare size={16} />
                 <span>{status !== "online" ? "Terminal will return when the local service reconnects." : sessionError ?? "Terminal session ended."}</span>
                 {status === "online" && (
                   <button type="button" className="secondary-button" onClick={restartTerminal}>Start again</button>

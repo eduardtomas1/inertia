@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useMemo,
@@ -29,10 +30,12 @@ import type {
 } from "@shared/contracts";
 import type { DesktopWindowContext } from "@shared/desktop";
 import { detachedChatWindowTitle } from "@shared/desktop-window-title";
+import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import { installWindowCloseShortcut } from "./utils/globalShortcuts";
 import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
 import "./detached-chat.css";
@@ -137,13 +140,13 @@ export function DetachedContextHandoffNotice({
       role="status"
       aria-live="polite"
     >
-      <MessagesSquare size={15} aria-hidden="true" />
+      <MessagesSquare size={14} aria-hidden="true" />
       <span>
         <strong>Agent requested chat context</strong>
         <small>Review this request in the main window.</small>
       </span>
       <button type="button" onClick={onReturnToMain}>
-        <PanelTopOpen size={13} aria-hidden="true" />
+        <PanelTopOpen size={14} aria-hidden="true" />
         Return to main
       </button>
     </div>
@@ -310,6 +313,15 @@ export default function DetachedChatApp({
       setActionError(publicError(error, "This window could not be closed."));
     });
   }, [conversationId]);
+  const closeWindowRef = useRef(closeWindow);
+  useEffect(() => {
+    closeWindowRef.current = closeWindow;
+  }, [closeWindow]);
+  useEffect(() => installWindowCloseShortcut(
+    window,
+    window.inertia?.getPlatform?.() ?? "unknown",
+    () => closeWindowRef.current(),
+  ), []);
   const toggleAlwaysOnTop = useCallback(() => {
     if (pinning) return;
     setPinning(true);
@@ -509,13 +521,14 @@ export default function DetachedChatApp({
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <div
-      className="detached-chat-shell"
+      className={`detached-chat-shell platform-${window.inertia?.getPlatform?.() ?? "unknown"}`}
       data-interface-scale={settings.interfaceScale}
+      style={{ "--mac-titlebar-brand-safe-inset": `${MAC_BRAND_SAFE_INSET}px` } as CSSProperties}
     >
       <header className="detached-chat-header drag-region">
         <div className="detached-chat-title">
           <span className="detached-chat-project">
-            {project && <ProjectIcon project={project} size={12} />}
+            {project && <ProjectIcon project={project} size={14} />}
             <ProjectName project={project}>{project?.name ?? "Inertia"}</ProjectName>
           </span>
           <h1>{conversation?.title ?? "Detached chat"}</h1>
@@ -530,8 +543,8 @@ export default function DetachedChatApp({
             onClick={toggleAlwaysOnTop}
           >
             {windowContext.alwaysOnTop
-              ? <PinOff size={15} />
-              : <Pin size={15} />}
+              ? <PinOff size={14} />
+              : <Pin size={14} />}
           </IconButton>
           <IconButton label="Return chat to main window" onClick={dockInMain}>
             <PanelTopOpen size={16} />

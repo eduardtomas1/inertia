@@ -311,3 +311,61 @@ export async function inspectRepositoryStatusAndHead(
   };
   return { status, hasCurrentHead };
 }
+
+export interface GitChangeCounts {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+export async function repositoryChangeCounts(
+  repositoryPath: string,
+  options: Omit<GitStatusOptions, "scan"> = {},
+): Promise<GitChangeCounts> {
+  const root = await repositoryRoot(repositoryPath, options);
+  const [statusInspection, headInspection] = await Promise.allSettled([
+    runGitInspection(
+      root,
+      ["status", "--porcelain=v2", "-z", "--untracked-files=all"],
+      {
+        deadlineAt: options.deadlineAt,
+        signal: options.signal,
+        maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+        truncateOutput: true,
+        failureMessage: "Unable to read the repository status.",
+      },
+    ),
+    hasHead(root, options),
+  ]);
+  const [statusResult, hasCurrentHead] = gitInspectionSettlementValues([
+    statusInspection,
+    headInspection,
+  ]);
+  const files = parsePorcelain(statusResult.stdout).files;
+  const stats = parseNumstat((await runGitInspection(
+    root,
+    [
+      "diff",
+      "--numstat",
+      "-z",
+      "--no-ext-diff",
+      "--no-textconv",
+      ...(hasCurrentHead ? ["HEAD"] : ["--cached"]),
+      "--",
+    ],
+    {
+      deadlineAt: options.deadlineAt,
+      signal: options.signal,
+      maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+      truncateOutput: true,
+      failureMessage: "Unable to calculate repository change totals.",
+    },
+  )).stdout);
+  let insertions = 0;
+  let deletions = 0;
+  for (const file of files) {
+    insertions += stats.get(file.path)?.insertions ?? 0;
+    deletions += stats.get(file.path)?.deletions ?? 0;
+  }
+  return { filesChanged: files.length, insertions, deletions };
+}

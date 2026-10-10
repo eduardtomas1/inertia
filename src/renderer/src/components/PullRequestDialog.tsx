@@ -149,7 +149,6 @@ export function PullRequestDialog({
         }}
       >
         <header>
-          <span className="dialog-icon"><GitPullRequest size={18} /></span>
           <div>
             <h2 id="pull-request-dialog-title">{integrated ? "Create GitHub pull request" : `Open ${forgeLabel} ${forge === "gitlab" ? "merge" : "pull"} request`}</h2>
             <p>{integrated ? "Uses your local GitHub CLI sign-in. Nothing is sent through Inertia infrastructure." : `Continue in ${forgeLabel} using the current branch and selected Git remote.`}</p>
@@ -207,10 +206,10 @@ export function PullRequestDialog({
         <footer>
           {createdUrl ? <>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => { void copyCreatedPullRequest(); }}>Copy link</button>
-            <button ref={primaryActionRef} type="button" className="primary-button dialog-primary" disabled={busy} onClick={() => { void openCreatedPullRequest(); }}><GitPullRequest size={15} /><span>Try opening GitHub</span></button>
+            <button ref={primaryActionRef} type="button" className="primary-button dialog-primary" disabled={busy} onClick={() => { void openCreatedPullRequest(); }}><GitPullRequest size={14} /><span>Try opening GitHub</span></button>
           </> : <>
             {integrated && <button type="button" className="secondary-button" disabled={busy} onClick={() => { void openBrowser(); }}>Open browser flow</button>}
-            <button ref={primaryActionRef} type="button" className="primary-button dialog-primary" disabled={(integrated && !title.trim()) || busy} onClick={() => { void (integrated ? submit() : openBrowser()); }}>{busy ? <LoadingMark label={integrated ? "Creating pull request" : "Opening browser flow"} /> : <GitPullRequest size={15} />}<span>{integrated ? "Create pull request" : `Open in ${forgeLabel}`}</span></button>
+            <button ref={primaryActionRef} type="button" className="primary-button dialog-primary" disabled={(integrated && !title.trim()) || busy} onClick={() => { void (integrated ? submit() : openBrowser()); }}>{busy ? <LoadingMark label={integrated ? "Creating pull request" : "Opening browser flow"} /> : <GitPullRequest size={14} />}<span>{integrated ? "Create pull request" : `Open in ${forgeLabel}`}</span></button>
           </>}
         </footer>
       </section>

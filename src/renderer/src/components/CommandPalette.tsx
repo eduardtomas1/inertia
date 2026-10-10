@@ -1,4 +1,4 @@
-import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, MessageSquarePlus, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, CircleHelp, FolderPlus, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -117,19 +117,19 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   const allItems = useMemo(() => {
     const actions: PaletteItem[] = [
       ...(projects.length > 0
-        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={15} />, shortcut: newThreadShortcut, run: onNewThread }]
+        ? [{ id: "action:new-thread", group: "Actions" as const, label: "New chat", detail: "Start work in the current project", icon: <SquarePen size={14} />, shortcut: newThreadShortcut, run: onNewThread }]
         : []),
       ...(projects.length > 1
-        ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={15} />, view: "new-chat" as const }]
+        ? [{ id: "action:new-thread-in", group: "Actions" as const, label: "New chat in…", detail: "Choose the project to work on", icon: <SquarePen size={14} />, view: "new-chat" as const }]
         : []),
-      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <MessageSquarePlus size={15} />, run: onNewThreadWithoutProject }] : []),
-      { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={15} />, run: onAddProject },
-      { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, chats, agents and data", icon: <Settings size={15} />, run: onOpenSettings },
-      { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={15} />, run: openHelpGuide },
+      ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", detail: "A separate local folder for this chat", icon: <SquarePen size={14} />, run: onNewThreadWithoutProject }] : []),
+      { id: "action:add-project", group: "Actions", label: "Add project", detail: "Choose a local folder", icon: <FolderPlus size={14} />, run: onAddProject },
+      { id: "action:settings", group: "Actions", label: "Open settings", detail: "Appearance, chats, agents and data", icon: <Settings size={14} />, run: onOpenSettings },
+      { id: "action:help", group: "Actions", label: "Open help", detail: "Features, shortcuts, and troubleshooting", icon: <CircleHelp size={14} />, run: openHelpGuide },
     ];
-    const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={15} />, run: () => onSelectProject(project) }));
+    const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={14} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
-    const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={15} />, run: () => onSelectConversation(thread) }));
+    const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={14} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
   }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onSelectConversation, onSelectProject, projects]);
   const settingsItems = useMemo<PaletteItem[]>(() => {
@@ -141,7 +141,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
       if (project && !projectId) return [];
       const target: SettingsTarget = { section: row.sectionId, anchor: row.id, ...(project ? { projectId } : {}) };
       return [{ id: `settings:${row.id}`, group: "Settings" as const, label: row.title, detail: label,
-        keywords: row.keywords.join(" "), icon: <Settings size={15} />, run: () => onOpenSettings(target) }];
+        keywords: row.keywords.join(" "), icon: <Settings size={14} />, run: () => onOpenSettings(target) }];
     }));
   }, [currentProjectId, onOpenSettings, projects]);
   const messageItems = useMemo<PaletteItem[]>(() => {
@@ -152,19 +152,19 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
       if (!conversation || !project) return [];
       return [{ id: `message:${hit.messageId}`, group: "Messages" as const, label: conversation.title,
         detail: `${project.name} · ${hit.role === "user" ? "Your message" : "Agent answer"}`,
-        icon: <MessageSquare size={15} />, match: hit }];
+        icon: <MessageSquare size={14} />, match: hit }];
     });
   }, [search.result, conversations, projects, onSelectMessage]);
   const projectChoices = useMemo<PaletteItem[]>(() => {
     const current = projects.find(({ id }) => id === currentProjectId);
     const choices: PaletteItem[] = (current ? [current, ...projects.filter((project) => project !== current)] : projects).filter((project) => project.workspaceKind !== "scratch").map((project) => ({
       id: `new-thread-in:${project.id}`, group: "Projects" as const, label: project.name, detail: project.path,
-      icon: <ProjectIcon project={project} size={15} />, shortcut: project === current ? "Current" : undefined,
+      icon: <ProjectIcon project={project} size={14} />, shortcut: project === current ? "Current" : undefined,
       run: () => onNewThreadIn(project),
     }));
     if (onNewThreadWithoutProject) choices.splice(current && current.workspaceKind !== "scratch" ? 1 : 0, 0, {
       id: "new-thread-in:none", group: "Projects", label: "No project", detail: "Start in a separate local folder",
-      icon: <MessageSquare size={15} />, run: onNewThreadWithoutProject,
+      icon: <MessageSquare size={14} />, run: onNewThreadWithoutProject,
     });
     return choices;
   }, [currentProjectId, onNewThreadIn, onNewThreadWithoutProject, projects]);
@@ -238,7 +238,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         }}
       >
         <div className="palette-search">
-          {choosingProject ? <SquarePen size={17} aria-hidden="true" /> : <Search size={17} />}
+          {choosingProject ? <SquarePen size={16} aria-hidden="true" /> : <Search size={16} />}
           <input
             ref={searchRef}
             value={query}
@@ -264,7 +264,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
             aria-expanded="true"
             autoComplete="off"
           />
-          <IconButton label="Close search" onClick={closePalette}><X size={15} /></IconButton>
+          <IconButton label="Close search" onClick={closePalette}><X size={14} /></IconButton>
         </div>
         <div className="palette-results">
           <div id="palette-results" role="listbox" aria-label={choosingProject ? "Projects" : "Search results"}>
@@ -285,8 +285,8 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
           {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}
           {search.result?.hasMore && <div className="palette-search-status" role="status">More message matches are available. Refine your search to find them.</div>}
           {items.length === 0 && (choosingProject
-            ? <div className="palette-empty"><Search size={18} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>
-            : !search.loading && !search.error && !search.result?.incomplete && <div className="palette-empty"><Search size={18} /><strong>No matches</strong><span>Try a message phrase, project, chat, or command name.</span></div>)}
+            ? <div className="palette-empty"><Search size={16} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>
+            : !search.loading && !search.error && !search.result?.incomplete && <div className="palette-empty"><Search size={16} /><strong>No matches</strong><span>Try a message phrase, project, chat, or command name.</span></div>)}
         </div>
         <footer className="palette-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> {choosingProject ? "Start chat" : "Open"}</span><span><kbd>Esc</kbd> {choosingProject && initialView === "search" ? "Back" : "Close"}</span></footer>
       </section>

@@ -618,7 +618,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     await expect(followUp).resolves.toBe(true);
     const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as { captured: Array<{ method: string; path: string; body?: Record<string, unknown> }> };
     expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(false);
-    expect(captured.some(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
+    expect(captured.filter(({ method, path }) => method === "GET" && path === "/session/opencode-lifecycle-session")).toHaveLength(1);
     expect(captured.some(({ method, path }) => method !== "GET" && path === "/session/opencode-lifecycle-session")).toBe(true);
     expect(captured.find(({ path }) =>
       path === "/api/session/opencode-lifecycle-session/prompt")?.body)
@@ -631,7 +631,33 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       });
   });
 
-  it.each(["new", "resumed"] as const)("rejects a foreign active session read before prompting a %s session", async (mode) => {
+  it("prompts a new session from its creation response without reading it again", async () => {
+    const root = portableFixtureRoot("OpenCode created session");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(
+      root, capturePath, "idle-after-admission", 0, "foreign-session",
+    ));
+    const run = createOpenCodeSdkHarness().start({
+      executable: command, environment: process.env,
+      providerNativeToolsAvailable: true,
+      input: nativeProviderRunInput({
+        providerId: "opencode", conversationId: "created-session",
+        cwd: root, prompt: "Use the created session.",
+        interactionMode: "build", access: "supervised",
+      }),
+    });
+    await run.result;
+    const { captured } = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ method: string; path: string }>;
+    };
+    expect(captured.some(({ method, path }) => method === "POST" && path === "/session")).toBe(true);
+    expect(captured.some(({ method, path }) => method === "GET" && path.startsWith("/session/"))).toBe(false);
+    expect(captured.some(({ path }) => path.endsWith("/prompt_async"))).toBe(true);
+  });
+
+  it("rejects a foreign active session read before prompting a resumed session", async () => {
     const root = portableFixtureRoot("OpenCode session attestation");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -643,10 +669,10 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       executable: command, environment: process.env,
       providerNativeToolsAvailable: true,
       input: nativeProviderRunInput({
-        providerId: "opencode", conversationId: `attestation-${mode}`,
+        providerId: "opencode", conversationId: "attestation-resumed",
         cwd: root, prompt: "Preserve exact session ownership.",
         interactionMode: "build", access: "supervised",
-        ...(mode === "resumed" ? { sessionId: "opencode-lifecycle-session" } : {}),
+        sessionId: "opencode-lifecycle-session",
       }),
     });
     await expect(run.result).resolves.toMatchObject({ status: "failed", cleanupConfirmed: true });

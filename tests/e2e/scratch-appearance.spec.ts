@@ -40,7 +40,7 @@ async function expectSidebarGeometry(page: Page): Promise<void> {
       document.querySelector(selector)?.getBoundingClientRect().left ?? null;
     return {
       heading: left(".work-thread-section.is-no-project > h2 > span"),
-      rowText: left("[data-work-section='no-project'] .activity-thread-projectline"),
+      rowText: left("[data-work-section='no-project'] .activity-thread-title"),
       projectDone: left("[data-work-focus-id='section:done']"),
       noProjectDone: left("[data-work-focus-id='section:no-project-done']"),
       noProjectSnoozed: left("[data-work-focus-id='section:no-project-snoozed']"),
@@ -53,7 +53,8 @@ async function expectSidebarGeometry(page: Page): Promise<void> {
   const rows = page.locator("[data-work-section^='no-project'] .activity-thread-select");
   await expect(rows.first()).toBeVisible();
   for (const row of await rows.all()) {
-    await expect(row.locator(".activity-thread-projectline")).toContainText("Chat folder");
+    await expect(row.locator(".activity-thread-title")).toBeVisible();
+    await expect(row).not.toContainText("Chat folder");
     await expect(row).not.toContainText("Local workspace");
   }
 }
@@ -129,7 +130,7 @@ test("shows project-free chats, the selector and the palette entries in both the
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(page.getByRole("heading", { name: "Plan a relaxed weekend", level: 1 })).toBeVisible();
     await expect(page.getByRole("heading", { name: "No project 4", exact: true })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveText("Chat folder");
+    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
     await expandSection(page, "done");
     await expandSection(page, "no-project-done");
     await expandSection(page, "no-project-snoozed");

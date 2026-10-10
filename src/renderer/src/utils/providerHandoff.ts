@@ -32,12 +32,14 @@ function routeLabel(
   return route.model ? `${provider} · ${route.model}` : provider;
 }
 
-function restoredDetail(recovery: ProviderHandoffItem["sessionRecovery"]): string | null {
+function carriedDetail(recovery: ProviderHandoffItem["sessionRecovery"]): string | null {
   if (!recovery) return null;
-  const { restoredMessageCount: restored, omittedMessageCount: omitted } = recovery;
-  if (restored === 0) return "earlier messages were not restored";
-  const noun = restored === 1 ? "message" : "messages";
-  return `${restored} earlier ${noun} restored${omitted > 0 ? ` · ${omitted} omitted` : ""}`;
+  const { restoredMessageCount: carried, omittedMessageCount: omitted } = recovery;
+  const leftBehind = omitted + (recovery.withheldMessageCount ?? 0);
+  const outcome = carried === 0
+    ? "nothing carried"
+    : `${carried} earlier ${carried === 1 ? "message" : "messages"} carried`;
+  return leftBehind > 0 ? `${outcome} · ${leftBehind} left behind` : outcome;
 }
 
 export function providerHandoffText(
@@ -46,7 +48,7 @@ export function providerHandoffText(
 ): ProviderHandoffText {
   const from = routeLabel(handoff.from, labels);
   const to = routeLabel(handoff.to, labels);
-  const detail = restoredDetail(handoff.sessionRecovery);
+  const detail = carriedDetail(handoff.sessionRecovery);
   return {
     from,
     to,

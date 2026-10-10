@@ -306,7 +306,7 @@ describe("useDetachedChatWindows", () => {
 });
 
 describe("DetachedConversationPlaceholder", () => {
-  it("focuses a live detached window and explains that its work continues", () => {
+  it("focuses a live detached window from one line and one button", () => {
     const onActivate = vi.fn();
     render(
       <DetachedConversationPlaceholder
@@ -316,8 +316,9 @@ describe("DetachedConversationPlaceholder", () => {
       />,
     );
 
-    expect(screen.getByText("Chat window active")).toBeVisible();
-    expect(screen.getByText(/work continues independently/iu)).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Chat window active" })).toBeVisible();
+    const placeholder = screen.getByRole("region", { name: "Detached chat: Long-running refactor" });
+    expect(placeholder).toHaveTextContent(/^Chat window activeFocus chat window$/u);
     fireEvent.click(screen.getByRole("button", { name: "Focus chat window" }));
 
     expect(onActivate).toHaveBeenCalledOnce();
@@ -333,13 +334,9 @@ describe("DetachedConversationPlaceholder", () => {
       />,
     );
 
-    expect(screen.getByText("Chat window closed")).toBeVisible();
-    expect(screen.getByText(
-      /Closing the window left this workspace unchanged/iu,
-    )).toBeVisible();
-    expect(screen.getByText(
-      /Any active work keeps running in the background/iu,
-    )).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Chat window closed" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Detached chat: Long-running refactor" }))
+      .toHaveTextContent(/^Chat window closedOpen chat here$/u);
     expect(onActivate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Open chat here" }));
 

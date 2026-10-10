@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import {
-  Download,
-  RefreshCw,
-  GitBranch,
   ArrowDown,
   ArrowUp,
+  CloudDownload,
+  CloudUpload,
+  GitBranch,
   GitCommitHorizontal,
   GitPullRequest,
-  Upload,
+  RefreshCw,
 } from "lucide-react";
 
 import type { GitStatusSnapshot } from "@shared/contracts";
@@ -32,7 +32,7 @@ type WorkspaceGitActionMenuProps = {
   onOpenBranches?: () => void;
 };
 
-const actionIcons = { fetch: RefreshCw, commit: GitCommitHorizontal, pull: Download, push: Upload, "pull-request": GitPullRequest };
+const actionIcons = { fetch: RefreshCw, commit: GitCommitHorizontal, pull: CloudDownload, push: CloudUpload, "pull-request": GitPullRequest };
 
 export default function WorkspaceGitActionMenu({
   status,
@@ -109,11 +109,11 @@ export default function WorkspaceGitActionMenu({
       onKeyDown={navigateMenuItems}
     >
       <div className="git-overview">
-        <div className="git-overview-heading"><GitBranch size={15} /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
+        <div className="git-overview-heading"><GitBranch size={14} /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
         <span className="git-overview-upstream" title={status.upstream ?? undefined}>{status.upstream ? `Tracking ${status.upstream}` : status.hasRemote ? "Publish this branch to set an upstream" : "Local repository · no remote"}</span>
         <div className="git-overview-counts">
-          <span><ArrowUp size={12} />{status.upstream ? status.ahead : "—"} outgoing</span>
-          <span><ArrowDown size={12} />{status.upstream ? status.behind : "—"} incoming</span>
+          <span><ArrowUp size={14} />{status.upstream ? status.ahead : "—"} outgoing</span>
+          <span><ArrowDown size={14} />{status.upstream ? status.behind : "—"} incoming</span>
         </div>
         <div className="git-overview-summary" role="status">{busy ? "Git operation in progress…" : gitSyncSummary(status)}</div>
       </div>

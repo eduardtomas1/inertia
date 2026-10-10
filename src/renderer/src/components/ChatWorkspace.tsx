@@ -14,13 +14,9 @@ import {
 } from "react";
 import {
   ArrowDown,
-  ArrowRight,
-  Code2,
   FolderPlus,
   MessageCircleQuestion,
-  MessageSquarePlus,
-  ShieldCheck,
-  TerminalSquare,
+  SquarePen,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -98,7 +94,7 @@ import type {
   FinalAnswerAutoScrollEvent,
   ResponseTimelineProps,
 } from "./response-timeline/types";
-import { LoadingMark } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
 
@@ -884,13 +880,9 @@ export function ChatWorkspace({
     return (
       <Root className="chat-workspace welcome-workspace">
         <section className="welcome-card" aria-labelledby="welcome-title">
-          <div className="welcome-mark"><img src="./inertia-logo.png" alt="" /></div>
-          <span className="welcome-kicker">A calmer place to build</span>
           <h2 id="welcome-title">Bring a project into focus.</h2>
-          <p>Inertia keeps conversations, your project, and a real local terminal together—without turning the workspace into noise.</p>
-          <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span><ArrowRight size={15} /></button>
-          <button type="button" className="secondary-button welcome-scratch-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>Start without a project</span></button>
-          <div className="welcome-features"><div><Code2 size={17} /><span>Project-aware</span></div><div><TerminalSquare size={17} /><span>Local terminal</span></div><div><ShieldCheck size={17} /><span>Local by default</span></div></div>
+          <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span></button>
+          <button type="button" className="subtle-button" onClick={onCreateConversation}><span>Start without a project</span></button>
         </section>
       </Root>
     );
@@ -900,12 +892,8 @@ export function ChatWorkspace({
     return (
       <Root className="chat-workspace welcome-workspace">
         <section className="project-welcome" aria-labelledby="project-welcome-title">
-          <span className="project-welcome-icon"><MessageSquarePlus size={22} /></span>
-          <span className="welcome-kicker">{project.name}</span>
           <h2 id="project-welcome-title">Start with a clear chat.</h2>
-          <p>Create a chat for the next feature, question, or focused pass through this project.</p>
-          <button type="button" className="primary-button" onClick={onCreateConversation}><MessageSquarePlus size={16} /><span>New chat</span></button>
-          <code className="project-path-display">{project.path}</code>
+          <button type="button" className="primary-button" onClick={onCreateConversation}><SquarePen size={16} /><span>New chat</span></button>
         </section>
       </Root>
     );
@@ -984,6 +972,7 @@ export function ChatWorkspace({
               turns={ownedTurns}
               messages={ownedMessages}
               contextPackets={contextPackets}
+              onConversationContextCommand={onConversationContextCommand}
               activities={ownedActivities}
               subagents={ownedSubagents}
               reasonings={ownedReasonings}
@@ -1036,7 +1025,7 @@ export function ChatWorkspace({
         </div>
       </div>
 
-      {showJump && <div className="timeline-follow-controls"><button type="button" onClick={() => scrollToLatest("auto")}><ArrowDown size={14} />Jump to latest</button></div>}
+      {showJump && <div className="timeline-follow-controls"><IconButton label="Jump to latest" onClick={() => scrollToLatest("auto")}><ArrowDown size={16} /></IconButton></div>}
 
       <div ref={composerRegionRef} className="composer-region">
         {pendingInputRequest && (

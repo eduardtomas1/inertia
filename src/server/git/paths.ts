@@ -1,6 +1,8 @@
 import { lstat, realpath, stat } from "node:fs/promises";
 import {
+  dirname,
   isAbsolute,
+  join,
   relative,
   resolve,
   sep,
@@ -150,6 +152,41 @@ async function awaitPathInspection<T>(
       }),
     );
   });
+}
+
+async function entryMayExist(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== "ENOENT" && code !== "ENOTDIR";
+  }
+}
+
+export async function mayBeInsideGitRepository(
+  path: string,
+  options: GitPathInspectionOptions = {},
+): Promise<boolean> {
+  try {
+    let directory = await awaitPathInspection(
+      async () => await realpath(resolve(path)),
+      options,
+    );
+    for (;;) {
+      const current = directory;
+      if (await awaitPathInspection(
+        async () => await entryMayExist(join(current, ".git"))
+          || await entryMayExist(join(current, "HEAD")),
+        options,
+      )) return true;
+      const parent = dirname(current);
+      if (parent === current) return false;
+      directory = parent;
+    }
+  } catch {
+    return true;
+  }
 }
 
 async function requireDirectory(

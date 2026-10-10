@@ -250,35 +250,11 @@ heap samples do not establish long-session retention behavior.
 
 ## Follow-up: the sidebar aurora
 
-The decorative light behind the sidebar brand is the only motion that would
-otherwise run for the whole session, so it does not follow the ordinary
-foreground rule of animating at the display refresh rate. Its CSS animations
-stay paused, and `SidebarAurora.tsx` advances their time on a 125 ms interval
-while the document is visible and focused. The lights move about one pixel per
-update, which reads as continuous drift on soft gradients while producing
-8 frames a second instead of one per refresh. Nothing is masked, so the
-compositor needs no extra render pass, and the keyframes change only transform
-and opacity.
-
-Measured on Windows 11 with a 101 Hz display, Electron 44, an idle focused
-window with a seeded conversation, three five-second samples of cumulative
-process CPU as a percentage of one core:
-
-| Idle sidebar | GPU process | Renderer |
-| --- | ---: | ---: |
-| No aurora | 0.1% | 0.2% |
-| Aurora, focused | 1.6% | 1.3% |
-| Aurora, visible but unfocused | 0.1% | 0.0% |
-| Same art animated at the display refresh rate behind a mask | 18.1% | 6.4% |
-
-Unfocused windows hold the light exactly in place: the interval is cleared
-through `useDocumentActivity`, and the animation times are unchanged across a
-five-second unfocused sample. Hidden windows also stop through the existing
-`background-motion.css` rule. Reduced motion removes the animations entirely
-and leaves the composed first frame. `renderer-background.spec.ts` asserts the
-advancing foreground times and the frozen unfocused times, and
-`tests/renderer/sidebar-aurora.test.ts` keeps the motion contract (paused
-layers, compositor-only keyframes, no mask or filter, seamless tiles).
+The decorative light that once drifted behind the sidebar brand has been
+removed together with its component and tests, so the idle sidebar runs no
+session-long motion. Measured on Windows 11 with a 101 Hz display before the
+removal, an idle focused window without it cost 0.1% of one core in the GPU
+process and 0.2% in the renderer.
 
 ## Issue #248 acceptance audit
 

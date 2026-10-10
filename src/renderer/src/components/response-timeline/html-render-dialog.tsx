@@ -8,6 +8,7 @@ import {
   type HtmlRenderReference,
 } from "@shared/html-render";
 import { useHtmlRenderTheme } from "../../hooks/useHtmlRenderTheme";
+import { TooltipButton } from "../TooltipButton";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../../utils/modalFocus";
 import { htmlRenderUrl } from "../../utils/htmlRenderUrl";
@@ -81,16 +82,15 @@ export function HtmlRenderDialog({
       >
         <header className="attachment-preview-header">
           <strong id={titleId} className="html-render-dialog-title">{reference.title}</strong>
-          <button
+          <TooltipButton
             ref={closeRef}
-            type="button"
             className="attachment-preview-close"
             aria-label={`Close ${reference.title}`}
-            title="Close"
+            tooltip="Close"
             onClick={onClose}
           >
             <X size={16} aria-hidden="true" />
-          </button>
+          </TooltipButton>
         </header>
         <iframe
           ref={frameRef}

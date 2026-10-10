@@ -13,11 +13,11 @@ export function SelectionReviewAnswerCard({
   return (
     <aside className="diff-selection-answer" aria-label="Agent answer about selected lines">
       <header>
-        <span><CircleHelp size={13} /><strong>Agent answer</strong></span>
+        <span><CircleHelp size={14} /><strong>Agent answer</strong></span>
         <small>
           {answer.modelSelection.backendProfileDisplayName} · {model} · {answer.selectedLineCount} selected {answer.selectedLineCount === 1 ? "line" : "lines"}
         </small>
-        {onDismiss && <IconButton label="Dismiss selection answer" onClick={onDismiss}><X size={12} /></IconButton>}
+        {onDismiss && <IconButton label="Dismiss selection answer" onClick={onDismiss}><X size={14} /></IconButton>}
       </header>
       <blockquote>{answer.question}</blockquote>
       <div className="diff-selection-answer-body">{answer.answer}</div>

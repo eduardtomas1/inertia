@@ -1,4 +1,3 @@
-import { Compass } from "lucide-react";
 
 import type {
   Conversation,
@@ -71,7 +70,7 @@ export function HelpSettings({
           className="runtime-log-setting"
           title="Welcome guide"
           description="A quick tour of split view, the Work tab, Duo, review and limits."
-          actions={<button type="button" className="secondary-button" onClick={openWelcomeGuide}><Compass size={14} aria-hidden="true" />Show welcome guide</button>}
+          actions={<button type="button" className="secondary-button" onClick={openWelcomeGuide}>Show welcome guide</button>}
         />
       </SettingsGroup>
       <AppUpdateSettings {...appUpdate} />

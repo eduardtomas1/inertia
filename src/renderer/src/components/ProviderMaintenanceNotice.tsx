@@ -1,9 +1,8 @@
 import {
-  CheckCircle2,
   CircleAlert,
+  CircleCheck,
   Download,
   ExternalLink,
-  LoaderCircle,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -13,7 +12,7 @@ import type {
   ProviderMaintenanceOperation,
   ProviderMaintenanceStatus,
 } from "@shared/contracts";
-import { IconButton } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 
 const DISMISSED_UPDATES_KEY = "inertia:provider-updates-dismissed:v1";
 const DISMISSED_OPERATIONS_KEY =
@@ -199,11 +198,11 @@ export function ProviderMaintenanceNotice({
     }
   };
   const Icon = activeOperation
-    ? LoaderCircle
+    ? LoadingMark
     : displayOperation?.status === "failed"
       ? CircleAlert
       : displayOperation
-        ? CheckCircle2
+        ? CircleCheck
         : Download;
   const title = displayOperation
     ? operationLabel(displayOperation)
@@ -226,11 +225,7 @@ export function ProviderMaintenanceNotice({
       aria-live="polite"
       aria-busy={activeOperation}
     >
-      <Icon
-        size={13}
-        className={activeOperation ? "is-spinning" : undefined}
-        aria-hidden="true"
-      />
+      <Icon size={14} aria-hidden="true" />
       <span>
         <strong>{title}</strong>
         {detail && <small>{detail}</small>}
@@ -264,7 +259,7 @@ export function ProviderMaintenanceNotice({
               void run(onUpdate);
             }}
           >
-            <Download size={11} aria-hidden="true" />
+            <Download size={14} aria-hidden="true" />
             {managedActionAvailable ? "Check & update" : "Update"}
           </button>
         ) : (updateAvailable || showStatus)
@@ -274,7 +269,7 @@ export function ProviderMaintenanceNotice({
               disabled={disabled}
               onClick={() => onOpenInstructions(status.instructionsUrl)}
             >
-              <ExternalLink size={11} aria-hidden="true" />
+              <ExternalLink size={14} aria-hidden="true" />
               Instructions
             </button>
           ) : !displayOperation && !showStatus ? (
@@ -283,7 +278,7 @@ export function ProviderMaintenanceNotice({
               disabled={disabled}
               onClick={() => void run(onRefresh)}
             >
-              <RefreshCw size={11} aria-hidden="true" />
+              <RefreshCw size={14} aria-hidden="true" />
               Check
             </button>
           ) : null}
@@ -293,13 +288,13 @@ export function ProviderMaintenanceNotice({
             disabled={disabled}
             onClick={() => void run(onRefresh)}
           >
-            <RefreshCw size={11} aria-hidden="true" />
+            <RefreshCw size={14} aria-hidden="true" />
             Check
           </button>
         )}
         {dismissible && !activeOperation && (
           <IconButton label={`Dismiss ${providerLabel} update notice`} onClick={dismiss}>
-            <X size={12} />
+            <X size={14} />
           </IconButton>
         )}
       </span>

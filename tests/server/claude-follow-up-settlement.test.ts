@@ -156,6 +156,56 @@ describe("Claude accepted follow-up settlement", () => {
     },
   );
 
+  it("ends the earlier answer before the follow-up reply and keeps it ahead of a later correction", async () => {
+    const root = portableFixtureRoot("Claude follow-up answer boundary");
+    roots.push(root);
+    let ready!: () => void;
+    const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+    const assistant = (uuid: string, text: string, supersedes?: string[]) => ({
+      type: "assistant", uuid, session_id: CLAUDE_PROTOCOL_SESSION_ID, parent_tool_use_id: null,
+      message: { id: `api-${uuid}`, type: "message", role: "assistant", model: "claude-test",
+        content: [{ type: "text", text }], stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 } },
+      ...(supersedes ? { supersedes } : {}),
+    }) as unknown as SDKMessage;
+    const events: AgentHarnessEvent[] = [];
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+        const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        const initial = (await iterator.next()).value!;
+        yield assistant("earlier", "Earlier answer.");
+        ready();
+        const followUp = (await iterator.next()).value!;
+        yield assistant("tail", " Tail.");
+        yield { ...claudeSuccessResult("Earlier answer. Tail.", "completed"), user_message_uuid: initial.uuid } as SDKMessage;
+        yield assistant("draft", "Draft reply.");
+        yield assistant("final", "Final reply.", ["draft"]);
+        yield { ...claudeSuccessResult("Final reply.", "completed"), user_message_uuid: followUp.uuid } as SDKMessage;
+      })()),
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({ providerId: "claude", conversationId: "follow-up-answer-boundary",
+        cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+      executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+      callbacks: { onEvent: (event) => events.push(event) },
+    });
+    await initialConsumed;
+    if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+    await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+      .resolves.toBe(true);
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(events.flatMap((event) => event.type === "text" ? [`text:${event.text}`]
+      : event.type === "text-boundary" ? ["boundary"]
+        : event.type === "text-snapshot" ? [`snapshot:${event.text}`] : [])).toEqual([
+      "text:Earlier answer.",
+      "text: Tail.",
+      "boundary",
+      "text:Draft reply.",
+      "text:Final reply.",
+      "snapshot:Earlier answer. Tail.Final reply.",
+    ]);
+  });
+
   it("does not treat a background notification's empty result as the follow-up answer", async () => {
     const root = portableFixtureRoot("Claude follow-up notification acknowledgement");
     roots.push(root);

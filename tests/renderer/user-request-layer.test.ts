@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { sessionRecoveryDetail } from "../../src/renderer/src/utils/sessionRecovery";
+import type { ConversationContextCommandRunner } from "../../src/renderer/src/components/conversation-context/types";
 import type {
   AgentActivity,
   AgentTurn,
@@ -90,6 +91,7 @@ function renderRequest(
     contextPackets?: ConversationContextPacketSummary[];
     turn?: Partial<AgentTurn>;
     activities?: AgentActivity[];
+    onConversationContextCommand?: ConversationContextCommandRunner;
   } = {},
 ): string {
   const currentTurn = { ...turn(options.checkpoint?.id ?? null), ...options.turn };
@@ -134,6 +136,7 @@ function renderRequest(
     onCompareTurnArtifacts: () => undefined,
     onOpenTurnFile: () => undefined,
     onStop: () => undefined,
+    onConversationContextCommand: options.onConversationContextCommand,
   }));
 }
 
@@ -225,7 +228,8 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain('class="message is-user turn-user-request"');
     expect(html).toContain('data-turn-layer="user-request"');
     expect(html).toContain('data-request-layout="content"');
-    expect(html).toMatch(new RegExp(`<time dateTime="${requestedAt}" title="[^"]+ 2026 at [^"]+">Jul 23, 10:00\\sAM</time>`, "u"));
+    expect(html).not.toContain("<time");
+    expect(html).not.toContain("<span>You</span>");
     expect(html).toContain('class="message-revert"');
     expect(html).toContain('disabled=""');
     expect(html).toContain('aria-label="Request attachments"');
@@ -238,6 +242,24 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).not.toContain("/workspace/reference.png");
     expect(html.indexOf("reference.png"))
       .toBeGreaterThan(html.indexOf("Please inspect this reference."));
+  });
+
+  it("moves the request time into the turn footer when the turn ends without an answer", () => {
+    const html = renderRequest("Run the checks.", {
+      turn: {
+        status: "failed",
+        terminalReason: "provider-failed",
+        completedAt: "2026-07-23T10:00:02.000Z",
+      },
+    });
+    const request = html.slice(
+      html.indexOf('data-turn-layer="user-request"'),
+      html.indexOf("</article>"),
+    );
+
+    expect(request).not.toContain("<time");
+    expect(html).toMatch(/<footer class="turn-meta"[^>]*>[\s\S]*<time dateTime="2026-07-23T10:00:02.000Z"/u);
+    expect(html).toContain('data-turn-status="failed">Failed</span>');
   });
 
   it("labels historical documents truthfully without exposing their private path", () => {
@@ -339,14 +361,11 @@ describe("Quiet Ledger user request layer", () => {
     })).toBe("2 earlier messages restored · 1 omitted · Earlier messages from another model endpoint were not restored");
   });
 
-  it("names a harness change as a provider change only when the provider changed", () => {
-    const turn = {
-      continuationReasonCode: "harness-changed" as const,
+  it("names a same-provider harness change", () => {
+    expect(sessionRecoveryDetail({
+      continuationReasonCode: "harness-changed",
       sessionRecovery: { restoredMessageCount: 3, omittedMessageCount: 0 },
-    };
-    expect(sessionRecoveryDetail(turn, true)).toBe("Provider changed · 3 earlier messages restored");
-    expect(sessionRecoveryDetail(turn, false)).toBe("Agent harness changed · 3 earlier messages restored");
-    expect(sessionRecoveryDetail(turn)).toBe("Agent harness changed · 3 earlier messages restored");
+    })).toBe("Agent harness changed · 3 earlier messages restored");
   });
 
   it("renders reloaded context provenance and states a deleted source truthfully", () => {
@@ -406,6 +425,37 @@ describe("Quiet Ledger user request layer", () => {
     expect(html).toContain("Earlier messages from this chat");
     expect(html).toContain("40 messages · 12 omitted");
     expect(html).not.toContain("Context from Importer plan");
+  });
+
+  it("makes each sent reference a collapsed button when its preview can be loaded", () => {
+    const packet: ConversationContextPacketSummary = {
+      id: "33333333-3333-4333-8333-333333333333",
+      sourceConversationId: "44444444-4444-4444-8444-444444444444",
+      targetConversationId: conversationId,
+      sourceProjectId: "55555555-5555-4555-8555-555555555555",
+      targetProjectId: "55555555-5555-4555-8555-555555555555",
+      sourceConversationTitle: "Architecture decisions",
+      sourceProjectName: "Inertia",
+      sourceWorkspaceLabel: "Project checkout · main",
+      targetWorkspaceLabel: "Project checkout · main",
+      workspaceRelation: "same-workspace",
+      note: null,
+      messageCount: 2,
+      characterCount: 128,
+      droppedMessageCount: 0,
+      createdAt: requestedAt,
+      consumedMessageId: "user-1",
+      consumedAt: requestedAt,
+      sourceState: "available",
+    };
+    const openable = renderRequest("Use the decision.", {
+      contextPackets: [packet],
+      onConversationContextCommand: async () => ({ type: "request.ok", requestId: "preview" }),
+    });
+    expect(openable).toMatch(/<button type="button" data-source-state="available" aria-expanded="false">.*Context from Architecture decisions.*<\/button>/u);
+    const readOnly = renderRequest("Use the decision.", { contextPackets: [packet] });
+    expect(readOnly).toContain("Context from Architecture decisions");
+    expect(readOnly).not.toContain('aria-expanded="false">');
   });
 
 });

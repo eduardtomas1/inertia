@@ -97,7 +97,7 @@ export function ReviewedScreenshotControl({ conversationId, disabled = false }: 
           if (event.key === "Escape") { event.stopPropagation(); close(); }
           else trapModalFocus(event, event.currentTarget);
         }}>
-        <header><h2 id="screenshot-review-title">Review screenshot</h2><button type="button" ref={closeButton} aria-label="Cancel screenshot" onClick={close}><X size={18} /></button></header>
+        <header><h2 id="screenshot-review-title">Review screenshot</h2><button type="button" ref={closeButton} aria-label="Cancel screenshot" onClick={close}><X size={16} /></button></header>
         <p className="snapshot-note">Automatic masking is not verified. Check the image, crop it or mask sensitive areas before attaching. Nothing is sent automatically.</p>
         {pending && <p role="status">{review ? "Preparing screenshot…" : "Choose a source in the system picker if it opens…"}</p>}
         {error && <p role="alert" className="snapshot-alert">{error}</p>}

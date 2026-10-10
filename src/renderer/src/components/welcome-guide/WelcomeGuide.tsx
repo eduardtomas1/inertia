@@ -153,7 +153,7 @@ export function WelcomeGuide({
             <ul className="welcome-guide-agents" aria-label="Agents on this computer">
               {readiness.map(([provider, state], index) => (
                 <li key={provider.id} data-state={state} style={order(index)}>
-                  <ProviderBrandIcon providerId={provider.id} decorative size={18} />
+                  <ProviderBrandIcon providerId={provider.id} decorative size={16} />
                   <strong>{provider.label}</strong>
                   <small>{PROVIDER_READINESS_LABELS[state]}</small>
                   {state !== "ready" && (
@@ -177,7 +177,7 @@ export function WelcomeGuide({
       {stepIndex === 3 && (
         <>
           <div className="welcome-guide-hero">
-            <span className="welcome-guide-check" aria-hidden="true"><Check size={22} /></span>
+            <span className="welcome-guide-check" aria-hidden="true"><Check size={16} /></span>
             <h2 id={headingId}>You're ready to start</h2>
             <p>
               {readyCount > 0
@@ -186,7 +186,7 @@ export function WelcomeGuide({
             </p>
           </div>
           <button type="button" className="welcome-guide-project" onClick={onAddProject}>
-            <FolderPlus size={18} aria-hidden="true" />
+            <FolderPlus size={16} aria-hidden="true" />
             <span><strong>Add a project</strong><small>Open a local folder or clone a repository.</small></span>
             <ArrowRight size={16} aria-hidden="true" />
           </button>
@@ -251,7 +251,7 @@ export function WelcomeGuide({
           )}
           <button ref={primary} type="button" className="welcome-guide-primary" onClick={advance}>
             {WELCOME_STEPS[step]!.primary}
-            <ArrowRight size={15} aria-hidden="true" />
+            <ArrowRight size={14} aria-hidden="true" />
           </button>
         </span>
       </footer>

@@ -250,6 +250,37 @@ describe("bounded structured turn request context", () => {
       .not.toContain("Keep the existing fallback");
   });
 
+  it("embeds a structured chat packet as an object, escaped once, and keeps its digest in the manifest", async () => {
+    const cwd = await workspace();
+    const packetContent = JSON.stringify({ messages: [["agent", "Use \"quotes\" and C:\\repo\nnext line"]] });
+    const result = assembleTurnRequest({
+      cwd,
+      visibleContent: "Implement the approved decision.",
+      conversationContexts: () => ({
+        blocks: [{
+          packetId: "11111111-1111-4111-8111-111111111111",
+          label: "Chat context · Architecture notes · 1 message",
+          content: packetContent,
+          blockIndex: 0,
+          blockCount: 1,
+          structured: true,
+        }],
+        deliveries: [],
+      }),
+    });
+
+    expect(result.executionPrompt).toContain(
+      `{"kind":"attachment","label":"Chat context · Architecture notes · 1 message","content":${packetContent}}`,
+    );
+    expect(result.executionPrompt).not.toContain(JSON.stringify(packetContent));
+    expect(result.executionPrompt).not.toContain("sha256:");
+    expect(result.persistence.manifest.references).toEqual([
+      expect.objectContaining({ kind: "attachment", byteSize: Buffer.byteLength(packetContent), truncated: false }),
+    ]);
+    expect(result.persistence.blobs.map(({ content }) => content)).toEqual([packetContent]);
+    expect(result.persistence.manifest.assembledPayloadBytes).toBe(Buffer.byteLength(result.executionPrompt));
+  });
+
   it("deduplicates identical context bodies by content address without dropping references", async () => {
     const cwd = await workspace();
     const result = assembleTurnRequest({
@@ -578,6 +609,34 @@ describe("restored history respects the selected request's capacity", () => {
       cwd, visibleContent: "Continue.",
       restoredHistory: () => ({ blocks: [files], messageCount: 0, omittedMessageCount: 0 }),
     }).persistence.manifest.contextReferenceCount).toBe(0);
+  });
+
+  it("adds an earlier reference's sent copy only in the room the request leaves, newest first", async () => {
+    const cwd = await workspace();
+    const block = (packetId: string, size: number) => ({
+      packetId, label: `Chat context · ${packetId.slice(0, 4)} · 1 message`,
+      content: JSON.stringify({ text: "r".repeat(size) }), blockIndex: 0, blockCount: 1,
+    });
+    const older = block("11111111-1111-4111-8111-111111111111", 1_000);
+    const newer = block("22222222-2222-4222-8222-222222222222", 60_000);
+    const labels = (request: AssembleTurnRequestInput) => assembleTurnRequest(request)
+      .persistence.manifest.references.map(({ label }) => label);
+
+    expect(labels({ cwd, visibleContent: "Try again.", carriedConversationContexts: [older, newer] }))
+      .toEqual([older.label, newer.label]);
+    const crowded = (roomBytes: number): AssembleTurnRequestInput => {
+      const request: AssembleTurnRequestInput = {
+        cwd, visibleContent: "x",
+        context: {
+          terminalContexts: Array.from({ length: 3 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "y".repeat(60_000) })),
+        },
+      };
+      const used = assembleTurnRequest(request).persistence.manifest.assembledPayloadBytes;
+      return { ...request, visibleContent: "x".repeat(1 + MAX_EXECUTION_PAYLOAD_BYTES - used - roomBytes) };
+    };
+    expect(labels({ ...crowded(30_000), carriedConversationContexts: [older, newer] }))
+      .toEqual([...labels(crowded(30_000)), older.label]);
+    expect(labels({ ...crowded(500), carriedConversationContexts: [older, newer] })).toEqual(labels(crowded(500)));
   });
 
   it("offers only the capacity left beside a large selected request", async () => {

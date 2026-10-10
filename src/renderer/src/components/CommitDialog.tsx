@@ -1,4 +1,4 @@
-import { GitCommitHorizontal, Upload, X } from "lucide-react";
+import { CloudUpload, GitCommitHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DiffReviewState,
@@ -267,7 +267,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
           trapModalFocus(event, event.currentTarget);
         }}
       >
-        <header><span className="dialog-icon"><GitCommitHorizontal size={18} /></span><div><h2 id="commit-dialog-title">Commit changes</h2><p><strong>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")}</strong> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></p></div><IconButton label="Close commit dialog" onClick={onClose} disabled={locked}><X size={16} /></IconButton></header>
+        <header><div><h2 id="commit-dialog-title">Commit changes</h2><p><strong>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")}</strong> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></p></div><IconButton label="Close commit dialog" onClick={onClose} disabled={locked}><X size={16} /></IconButton></header>
         <div className="commit-path-heading">
           <span>Paths to stage and commit</span>
           <button type="button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths(status?.files.map((file) => file.path) ?? [])}>All</button>
@@ -294,8 +294,8 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
         {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
         <label><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(false); }} /></label>
         <footer>
-          <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={15} />}<span>Commit</span></button>
-          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <Upload size={15} />}<span>Commit & push</span></button>
+          <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={14} />}<span>Commit</span></button>
+          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <CloudUpload size={14} />}<span>Commit & push</span></button>
         </footer>
       </section>
     </div>

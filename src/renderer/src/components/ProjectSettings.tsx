@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ChevronDown, Folders, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Folder, Plus, Trash2 } from "lucide-react";
 import type { AppSettings, Conversation, Project, ProviderInfo, ModelBackendDefault, ModelBackendProfileView, ModelSelection } from "@shared/contracts";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { SettingsTarget } from "../lib/settingsTarget";
@@ -12,7 +12,7 @@ import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { ProjectColorPicker, ProjectEmphasisPicker } from "./ProjectAppearanceControls";
 import { ProjectModelDefault } from "./ProjectModelDefault";
 import { readProjectIcon } from "./project-settings-image";
-import { Switch } from "./ui";
+import { IconButton, Switch } from "./ui";
 import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./settings/SettingsLayout";
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { FULL_ACCESS_CAUTION } from "./settings/accessCaution";
@@ -117,7 +117,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         onSave={(name) => send(update({ name }))} />
       <SettingRow id="project-icon" title="Project icon" description="A symbol, or a small image stored only on this device." notice={notice("project-icon")}>
         <div className="project-setting-control">
-          <div className="project-icon-controls"><ProjectIcon project={project} size={20} />
+          <div className="project-icon-controls"><ProjectIcon project={project} size={16} />
             <button ref={icons.ref} type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} aria-expanded={icons.open} onClick={guarded(icons.toggle)}>Choose icon</button>
             <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => fileInput.current?.click())}>Choose file</button>
             {preferences.icon && <button type="button" className="secondary-button" disabled={unavailable} aria-disabled={busy} onClick={guarded(() => void setPreference("project-icon", "icon", null))}>Reset</button>}
@@ -127,7 +127,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
             }} />
           </div>
           {icons.open && <div className="project-icon-grid" role="group" aria-label="Project icons">{PROJECT_ICON_NAMES.map((icon) => <button type="button" key={icon} aria-label={`${icon} icon`} disabled={unavailable} aria-disabled={busy}
-            onClick={guarded(() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); icons.close(); })}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={18} /></button>)}</div>}
+            onClick={guarded(() => { void setPreference("project-icon", "icon", { kind: "symbol", name: icon }); icons.close(); })}><ProjectIcon project={{ preferences: { ...preferences, icon: { kind: "symbol", name: icon } } }} size={16} /></button>)}</div>}
         </div>
       </SettingRow>
       <SettingRow id="project-colour" title="Project colour" description="Its chats inherit the colour." notice={notice("project-colour")}>
@@ -189,8 +189,8 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         </SettingRow>
         {preferences.actions.length > 0 && <ul className="project-actions-list" aria-label="Project actions">{preferences.actions.map((projectAction) => <li key={projectAction.id}>
           <span><strong>{projectAction.name}</strong><code>{[projectAction.executable, ...projectAction.args].join(" ")}</code></span>
-          <button type="button" className="icon-button" aria-label={`Remove ${projectAction.name}`} title={`Remove ${projectAction.name}`} disabled={unavailable} aria-disabled={busy}
-            onClick={guarded(() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id)))}><Trash2 size={14} aria-hidden="true" /></button>
+          <IconButton label={`Remove ${projectAction.name}`} disabled={unavailable} aria-disabled={busy}
+            onClick={guarded(() => void setPreference("project-actions", "actions", preferences.actions.filter(({ id }) => id !== projectAction.id)))}><Trash2 size={14} aria-hidden="true" /></IconButton>
         </li>)}</ul>}
         {actionForm.open && <form className="project-action-form" aria-label="New action" onSubmit={(event) => {
           event.preventDefault();
@@ -247,7 +247,7 @@ export function ProjectSettings(props: Props): React.JSX.Element {
       description={selectedId && !selected ? "This project is no longer available. Choose another project." : undefined}>
       <button ref={chooser} type="button" className="project-chooser" aria-label="Choose project" title={selected?.name}
         aria-haspopup="dialog" aria-expanded={chooserOpen} onClick={() => setChooserOpen(!chooserOpen)}>
-        {selected ? <ProjectIcon project={selected} /> : <Folders size={15} aria-hidden="true" />}
+        {selected ? <ProjectIcon project={selected} /> : <Folder size={14} aria-hidden="true" />}
         <ProjectName project={selected}>{selected?.name ?? "All projects"}</ProjectName>
         <ChevronDown size={14} aria-hidden="true" />
       </button>

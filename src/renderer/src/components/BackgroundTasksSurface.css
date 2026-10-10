@@ -23,7 +23,7 @@
 .background-tasks-label {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .background-task-card {
@@ -34,8 +34,8 @@
   column-gap: 10px;
   row-gap: 3px;
   padding: 11px 12px;
-  border-radius: var(--radius-medium);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--fill);
 }
 
 .background-task-body {
@@ -52,9 +52,9 @@
 
 .background-task-title {
   color: var(--text);
-  font-size: calc(var(--ui-font-secondary) + 2px);
+  font-size: var(--text-base);
   font-weight: 500;
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -68,8 +68,8 @@
   row-gap: 2px;
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
@@ -79,7 +79,7 @@
 }
 
 .background-task-value {
-  color: var(--text-soft);
+  color: var(--text-muted);
 }
 
 .background-task-danger {
@@ -93,9 +93,9 @@
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--text) 7%, transparent);
+  background: var(--fill-strong);
 }
 
 .background-tasks-dismiss {
@@ -104,7 +104,7 @@
 
 .background-task-stop:hover:not(:disabled) {
   color: var(--text);
-  background: color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--fill-strong);
 }
 
 .background-task-stop:disabled {
@@ -116,10 +116,10 @@
   justify-self: start;
   padding: 0;
   border: 0;
-  color: var(--text-soft);
+  color: var(--text-muted);
   background: none;
   font: inherit;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
   text-underline-offset: 2px;
@@ -133,9 +133,7 @@
 .background-task-stop:focus-visible,
 .background-task-link:focus-visible,
 .background-tasks-finished-toggle:focus-visible {
-  border-radius: var(--radius-small);
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .background-task-line {
@@ -159,7 +157,7 @@
 }
 
 .background-task-transcript-toggle svg {
-  transition: transform var(--motion-fast) var(--motion-ease);
+  transition: transform var(--dur-fast) var(--ease);
 }
 
 .background-task-transcript-toggle[aria-expanded="true"] svg {
@@ -174,8 +172,8 @@
   gap: 4px;
   padding-top: 4px;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   font-variant-numeric: tabular-nums;
 }
 
@@ -215,13 +213,13 @@
   color: var(--text-muted);
   background: none;
   font: inherit;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
 .background-tasks-finished-toggle svg {
-  transition: transform var(--motion-fast) var(--motion-ease);
+  transition: transform var(--dur-fast) var(--ease);
 }
 
 .background-tasks-finished-toggle[aria-expanded="true"] svg {

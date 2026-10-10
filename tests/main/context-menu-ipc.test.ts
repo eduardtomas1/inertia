@@ -114,6 +114,32 @@ describe("surface context menu IPC", () => {
   });
 
   it.each([
+    ["darwin", { Copy: "Cmd+C", Paste: "Cmd+V" }],
+    ["win32", { Paste: "Ctrl+V" }],
+    ["linux", {}],
+  ] as const)("prints the %s shortcuts that really perform terminal copy and paste", async (platform, expected) => {
+    const { show } = fixture({ platform });
+    const result = show({ kind: "terminal", hasSelection: true, clearable: false, anchor });
+    await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    const accelerators = Object.fromEntries(template()
+      .filter((item) => item.accelerator)
+      .map((item) => [item.label, item.accelerator]));
+    expect(accelerators).toEqual(expected);
+    expect(template().filter((item) => item.accelerator).every((item) => item.registerAccelerator === false)).toBe(true);
+    dismiss();
+    await expect(result).resolves.toBeNull();
+  });
+
+  it("prints the copy shortcut on selected transcript text", async () => {
+    const { show } = fixture({ platform: "win32" });
+    const result = show({ kind: "message", conversationId, role: "assistant", hasSelection: true, anchor });
+    await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    expect(template()[0]).toMatchObject({ role: "copy", label: "Copy", accelerator: "CmdOrCtrl+C", registerAccelerator: false });
+    dismiss();
+    await expect(result).resolves.toBeNull();
+  });
+
+  it.each([
     ["win32", "Reveal in File Explorer"],
     ["linux", "Reveal in file manager"],
   ] as const)("names the reveal action for %s", async (platform, label) => {

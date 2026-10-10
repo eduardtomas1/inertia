@@ -1,5 +1,4 @@
 import {
-  BrainCircuit,
   RotateCcw,
   TriangleAlert,
 } from "lucide-react";
@@ -111,7 +110,7 @@ function CompatibilityDisclosure({
             ))}
             {compatibility.reasonings.map((reasoning) => (
               <div className="turn-reasoning-detail" key={reasoning.id}>
-                <span><BrainCircuit size={13} aria-hidden="true" />Recovered reasoning</span>
+                <span>Recovered reasoning</span>
                 <p>{reasoning.content}</p>
               </div>
             ))}

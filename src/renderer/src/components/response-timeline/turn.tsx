@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -10,7 +11,12 @@ import clsx from "clsx";
 import type { SubagentTrace } from "@shared/contracts";
 import { activeWorkIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { sameTurnAgentStatus } from "../../utils/turnAgentStatus";
-import type { ResponseTurn } from "../../utils/responseTimeline";
+import {
+  answerTailCommentary,
+  type ResponseTurn,
+  type TurnExecutionStreamEntry,
+} from "../../utils/responseTimeline";
+import { CommentaryRow } from "./activity";
 import {
   AgentExecutionLayer,
   FinalAnswerDocument,
@@ -22,6 +28,33 @@ import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
 const TURN_SETTLEMENT_TRANSITION_MS = 160;
+
+type CommentaryEntry = Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
+
+function TurnAnswerTail({
+  entries,
+  props,
+}: {
+  entries: CommentaryEntry[];
+  props: ResponseTimelineProps;
+}): React.JSX.Element | null {
+  if (entries.length === 0) return null;
+  return (
+    <div className="turn-answer-tail" data-turn-layer="answer-tail">
+      {entries.map((entry) => (
+        <CommentaryRow
+          key={entry.id}
+          entry={entry}
+          projectRoot={props.projectRoot}
+          projectId={props.projectId}
+          conversationId={props.conversationId}
+          defaultCodeWrap={props.defaultCodeWrap}
+          onOpenProjectFile={props.onOpenTurnFile}
+        />
+      ))}
+    </div>
+  );
+}
 
 function TurnTimelineComponent({
   turn,
@@ -38,9 +71,48 @@ function TurnTimelineComponent({
   onBeforeToggle?: (turnId: string) => void;
   onAfterToggle?: (turnId: string) => void;
 }): React.JSX.Element {
-  const liveContent = turn.isActive && !turn.terminalAssistantMessage
+  const streamedText = turn.isActive && !turn.terminalAssistantMessage
     ? props.streamingText
     : "";
+  const streamedTextLive = props.streamingChannel === "text";
+  const tailCommentary = useMemo(() => answerTailCommentary(turn), [turn]);
+  const railTurn = useMemo(() => tailCommentary?.length
+    ? {
+        ...turn,
+        commentaryMessages: turn.commentaryMessages.filter((message) =>
+          !tailCommentary.includes(message)),
+      }
+    : turn, [tailCommentary, turn]);
+  const liveContent = tailCommentary ? "" : streamedText;
+  const tailEntries = useMemo<CommentaryEntry[]>(() => {
+    if (!tailCommentary) return [];
+    const saved = tailCommentary.map((message): CommentaryEntry => ({
+      kind: "commentary",
+      id: message.id,
+      createdAt: message.createdAt,
+      message,
+      content: message.content,
+      streaming: false,
+    }));
+    return streamedText
+      ? [...saved, {
+          kind: "commentary",
+          id: `live-commentary:${turn.id}`,
+          createdAt: turn.agentTurn.updatedAt,
+          message: null,
+          content: streamedText,
+          streaming: streamedTextLive,
+        }]
+      : saved;
+  }, [
+    streamedText,
+    streamedTextLive,
+    tailCommentary,
+    turn.agentTurn.updatedAt,
+    turn.id,
+  ]);
+  const answerTailVisible = tailEntries.length > 0;
+  const answerTailWasVisible = useRef(false);
   const reasoningContent = turn.isActive
     ? props.streamingReasoning || turn.reasoning?.content || ""
     : turn.reasoning?.content || "";
@@ -67,6 +139,9 @@ function TurnTimelineComponent({
   );
 
   useLayoutEffect(() => {
+    if (turn.isActive) answerTailWasVisible.current = answerTailVisible;
+  }, [answerTailVisible, turn.isActive]);
+  useLayoutEffect(() => {
     const announcement = turnCompletionAnnouncement(wasActive.current, turn, providerLabel);
     if (announcement) {
       setCompletionAnnouncement(announcement);
@@ -74,11 +149,13 @@ function TurnTimelineComponent({
         // Task 12 deliberately never renders a final document while active.
         // A terminal row already present in the settlement snapshot is still
         // newly visible and receives the restrained document reveal.
-        revealAnswer: Boolean(turn.terminalAssistantMessage?.content),
+        revealAnswer: Boolean(turn.terminalAssistantMessage?.content)
+          && !answerTailWasVisible.current,
       });
     } else if (
       settlingTransition
       && !settlingTransition.revealAnswer
+      && !answerTailWasVisible.current
       && !turn.isActive
       && turn.terminalAssistantMessage?.content
     ) {
@@ -132,7 +209,7 @@ function TurnTimelineComponent({
       ) : (
         <>
           <AgentExecutionLayer
-            turn={turn}
+            turn={railTurn}
             props={props}
             subagents={subagents ?? []}
             providerLabel={providerLabel}
@@ -145,6 +222,8 @@ function TurnTimelineComponent({
           />
 
           <TurnHtmlRenders turn={turn} />
+
+          <TurnAnswerTail entries={tailEntries} props={props} />
 
           <FinalAnswerDocument
             turn={turn}
@@ -207,6 +286,7 @@ export function sameTurnTimelineProps(
     && left.onOpenTurnFile === right.onOpenTurnFile
     && left.onStop === right.onStop
     && left.onOpenSurface === right.onOpenSurface
+    && left.onConversationContextCommand === right.onConversationContextCommand
     && left.turns === right.turns
     && left.contextPackets === right.contextPackets
     && left.omittedTurnIds === right.omittedTurnIds

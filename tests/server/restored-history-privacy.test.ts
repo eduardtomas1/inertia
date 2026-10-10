@@ -137,7 +137,8 @@ describe("restored history attachments", () => {
     store.createMessage(conversation.id, "Read them.", "assistant", [], null, "2030-01-01T00:00:01.000Z");
     const content = restored(store, conversation.id).blocks.map((block) => block.content).join("\n");
     expect(content).toContain("notes.txt");
-    expect(content).toContain("1234");
+    expect(content).toContain("notes.txt (text/plain)");
+    expect(content).not.toContain("11111111-1111-4111-8111-111111111111");
     expect(content).not.toContain("PRIVATE_PATH_SENTINEL");
     expect(content).not.toContain(workspace);
   });

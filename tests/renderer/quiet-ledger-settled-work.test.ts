@@ -330,7 +330,8 @@ describe("Quiet Ledger settled work summary", () => {
     expect(html).toContain('class="turn-settled-summary" aria-expanded="false"');
     expect(html).toContain('aria-controls="turn-work-details-rendered"');
     expect(html).toContain('id="turn-work-details-rendered"');
-    expect(html).toContain(">Details</small>");
+    expect(html).not.toContain(">Details</small>");
+    expect(html).toContain("lucide-chevron-right turn-work-chevron");
 
     const detailsStart = html.indexOf("<details");
     const detailsEnd = html.indexOf("</details>", detailsStart);
@@ -361,9 +362,10 @@ describe("Quiet Ledger settled work summary", () => {
     expect(html).not.toContain('class="turn-execution-rail is-settled"');
     expect(html).not.toContain("turn-settled-summary");
     expect(html).not.toContain("Completed without tool activity");
-    expect(html.match(/class="turn-duration">Worked 1m 42s/g)).toHaveLength(1);
+    expect(html.match(/class="turn-duration" data-turn-status="completed">Worked 1m 42s/g)).toHaveLength(1);
     expect(html.match(/Worked for 1m 42s/g) ?? []).toHaveLength(0);
-    expect(html).toContain('data-turn-status="completed">Completed');
+    expect(html.match(/data-turn-status=/g)).toHaveLength(1);
+    expect(html).not.toContain(">Completed<");
     expect(html).toContain('aria-controls="turn-run-details-no-detail-render"');
     expect(html).toContain('data-turn-layer="final-answer"');
   });
@@ -404,7 +406,7 @@ describe("Quiet Ledger settled work summary", () => {
     expect(html.match(/turn-agent-execution is-quiet-settled/g)).toHaveLength(3);
     expect(html).not.toContain("turn-settled-summary");
     expect(html).not.toContain("Worked for");
-    expect(html.match(/class="turn-duration">Worked 1m 42s/g)).toHaveLength(3);
+    expect(html.match(/class="turn-duration" data-turn-status="completed">Worked 1m 42s/g)).toHaveLength(3);
     expect(html).not.toContain(">Execution transcript<");
   });
 

@@ -32,7 +32,7 @@ export function AppearanceSettings({
   };
   return (
     <>
-      <SettingsGroup title="Theme" headingId="appearance-heading" notice={themeAction.notice}>
+      <SettingsGroup title="Theme" titleHidden headingId="appearance-heading" notice={themeAction.notice}>
         <ThemeLibrary settings={settings} disabled={disabled} onUpdate={updateTheme} />
         <SettingSwitch
           id="muted-custom-colours"

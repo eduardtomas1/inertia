@@ -102,18 +102,32 @@ async function switchThumbContrast(page: Page): Promise<number> {
     canvas.width = 1;
     canvas.height = 1;
     const context = canvas.getContext("2d", { willReadFrequently: true })!;
-    const luminance = (color: string): number => {
+    const painted = (element: Element): string[] => {
+      const layers: string[] = [];
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        const color = getComputedStyle(node).backgroundColor;
+        layers.unshift(color);
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        if (context.getImageData(0, 0, 1, 1).data[3] === 255) break;
+      }
+      return layers;
+    };
+    const luminance = (layers: string[]): number => {
       context.clearRect(0, 0, 1, 1);
-      context.fillStyle = color;
-      context.fillRect(0, 0, 1, 1);
+      for (const color of layers) {
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+      }
       const [red, green, blue] = [...context.getImageData(0, 0, 1, 1).data].map((value) => {
         const channel = value / 255;
         return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
       });
       return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
     };
-    const track = luminance(getComputedStyle(control).backgroundColor);
-    const thumb = luminance(getComputedStyle(control.querySelector(".switch-thumb")!).backgroundColor);
+    const track = luminance(painted(control));
+    const thumb = luminance(painted(control.querySelector(".switch-thumb")!));
     return (Math.max(track, thumb) + 0.05) / (Math.min(track, thumb) + 0.05);
   });
 }
@@ -139,7 +153,7 @@ test("reads recent events plainly across themes and window sizes", async ({ brow
   await expect(page.getByRole("group", { name: "Process health" })).toContainText("Memory");
   const fields = await page.locator(".diagnostics-filters").evaluate((filters) => {
     const probe = document.createElement("span");
-    probe.style.background = "var(--surface-muted)";
+    probe.style.background = "var(--fill)";
     filters.append(probe);
     const surface = getComputedStyle(probe).backgroundColor;
     probe.remove();

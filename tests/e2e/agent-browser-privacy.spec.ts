@@ -64,7 +64,7 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
   });
   const nativePreviewUrl = `${app.previewUrl}primary-project`;
   await address.fill(nativePreviewUrl);
-  await workspaceTools.getByRole("button", { name: "Go", exact: true }).click();
+  await address.press("Enter");
   await expect.poll(() => app.nativePreviewIsVisible(nativePreviewUrl)).toBe(true);
 
   await workspaceTools.getByRole("button", { name: "Open browser page" }).click();
@@ -72,7 +72,7 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
     .toHaveCount(2);
   const sourceUrl = `${app.previewUrl}agent-browser-page`;
   await address.fill(sourceUrl);
-  await workspaceTools.getByRole("button", { name: "Go", exact: true }).click();
+  await address.press("Enter");
   await expect.poll(() => app.electronApp.evaluate(
     ({ webContents }, url) => webContents.getAllWebContents().some(
       (contents) => contents.getURL() === url

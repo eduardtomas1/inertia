@@ -1,14 +1,14 @@
 import { memo, type ComponentType } from "react";
 import {
   Bell,
-  Bot,
+  CircleHelp,
   Database,
   FolderOpen,
   Keyboard,
-  LifeBuoy,
   MessagesSquare,
   MonitorSmartphone,
   Palette,
+  Plug,
   type LucideIcon,
 } from "lucide-react";
 
@@ -146,7 +146,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   }),
   defineSection({
     ...settingsSectionRows("agents"),
-    icon: Bot,
+    icon: Plug,
     contentClassName: "is-providers",
     load: sectionAfter(AgentsSettings, () => Promise.all([loadModelBackendsSettings(), loadLifecycleIntegritySettings()])),
     prefetch: [],
@@ -208,7 +208,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   }),
   defineSection({
     ...settingsSectionRows("help"),
-    icon: LifeBuoy,
+    icon: CircleHelp,
     contentClassName: "is-diagnostics",
     load: sectionAfter(HelpSettings, loadHelpSections),
     prefetch: [],

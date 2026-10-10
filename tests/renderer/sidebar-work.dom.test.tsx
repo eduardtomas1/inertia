@@ -211,11 +211,11 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
     const freeRow = screen.getByRole("button", { name: /^Weekend plans,/ });
     expect(freeRow.closest("[data-work-section]")).toHaveAttribute("data-work-section", "no-project");
-    expect(freeRow.querySelector(".activity-thread-projectline")).toHaveTextContent(/^Chat folder/u);
-    expect(freeRow.querySelector(".work-thread-meta")).toHaveTextContent(/^$/u);
+    expect(freeRow.querySelector(".activity-thread-title")).toHaveTextContent(/^Weekend plans$/u);
+    expect(freeRow).not.toHaveTextContent("Chat folder");
     expect(freeRow).toHaveAccessibleName(/, No project,/u);
-    expect(screen.getByRole("button", { name: /^Build the app,/ }).querySelector(".work-thread-meta"))
-      .toHaveTextContent("acme-monorepo/apps/studio");
+    expect(screen.getByRole("button", { name: /^Build the app,/ }))
+      .toHaveAccessibleName(/, Repository acme-monorepo\/apps\/studio,/u);
     expect(screen.getByRole("button", { name: /^Build the app,/ }).closest("[data-work-section]"))
       .toHaveAttribute("data-work-section", "recent");
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
@@ -318,7 +318,7 @@ describe("compact Work sidebar", () => {
     const footerButtons = within(view.container.querySelector(".sidebar-footer")!)
       .getAllByRole("button");
 
-    expect(footerButtons.map((button) => button.textContent)).toEqual([
+    expect(footerButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Daily work",
       "Usage",
       "Settings",
@@ -350,11 +350,11 @@ describe("compact Work sidebar", () => {
     };
     const row = conversation("web", "Ship the web app", new Date(), { projectId: windowsProject.id });
     renderSidebar([row], undefined, [], { projects: [windowsProject] });
-    expect(screen.getByRole("button", { name: /^Ship the web app,/ }).querySelector(".work-thread-meta"))
-      .toHaveTextContent("MyMonorepo/packages/Web");
+    expect(screen.getByRole("button", { name: /^Ship the web app,/ }))
+      .toHaveAccessibleName(/, Repository MyMonorepo\/packages\/Web,/u);
   });
 
-  it("shows chronological rows with provider, project, repository, and branch metadata", () => {
+  it("shows chronological one-line rows that name provider, project, repository, and branch", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
     const recent = conversation(
@@ -403,12 +403,9 @@ describe("compact Work sidebar", () => {
     });
     expect(recentRow).toHaveAttribute("aria-current", "page");
     expect(recentRow).toHaveAccessibleName(expect.stringContaining("OpenAI"));
-    expect(recentRow).toHaveTextContent("Studio");
     expect(recentRow).toHaveAccessibleName(expect.stringContaining("acme-monorepo/apps/studio"));
-    expect(recentRow).toHaveTextContent("codex/compact-work-tab");
-    expect(recentRow.querySelector(
-      '[data-provider-id="codex"][data-provider-brand="openai"][data-provider-icon-kind="official"]',
-    )).not.toBeNull();
+    expect(recentRow).toHaveTextContent(/^Polish compact Work rows3h$/u);
+    expect(recentRow.querySelector("[data-provider-id]")).toBeNull();
 
     const yesterdayRow = screen.getByRole("button", {
       name: "Review provider metadata, Anthropic, Studio, Repository acme-monorepo/apps/studio, Branch main, Completed, New completion",
@@ -431,6 +428,104 @@ describe("compact Work sidebar", () => {
     fireEvent.click(recentRow);
     expect(view.onSelectConversation).toHaveBeenCalledWith(recent);
     expect(view.onViewChange).toHaveBeenCalledBefore(view.onSelectConversation);
+  });
+
+  it("lays a row out as one line: title, then the relative time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    renderSidebar([conversation("one-line", "Trim the hot path", new Date(2026, 7, 11, 10), { branch: "perf/hot-path" })]);
+    const row = screen.getByRole("button", { name: /^Trim the hot path,/u });
+    expect([...row.children].map((child) => child.className)).toEqual([
+      "activity-thread-title",
+      "activity-thread-trailing",
+    ]);
+    expect(row.querySelector(".activity-thread-title")).toHaveTextContent(/^Trim the hot path$/u);
+    expect(row.querySelector(".activity-thread-trailing time")).toHaveTextContent(/^2h$/u);
+    expect(row).not.toHaveTextContent("perf/hot-path");
+    expect(row).not.toHaveTextContent("Local workspace");
+    expect(row).toHaveAccessibleName(/, Branch perf\/hot-path,/u);
+  });
+
+  it("shows the provider mark only when a chat's provider differs from its project's default", () => {
+    const ordinary = conversation("default-provider", "Default provider chat", new Date());
+    const other = conversation("other-provider", "Other provider chat", new Date(), {
+      providerId: "claude",
+      modelSelection: providerNativeModelSelection({ providerId: "claude" }),
+    });
+    const view = renderSidebar([ordinary, other]);
+    const ordinaryRow = () => screen.getByRole("button", { name: /^Default provider chat,/u });
+    const otherRow = () => screen.getByRole("button", { name: /^Other provider chat,/u });
+    expect(ordinaryRow().querySelector(".activity-thread-provider")).toBeNull();
+    expect(otherRow().querySelector('.activity-thread-provider [data-provider-id="claude"]')).not.toBeNull();
+    const claudeDefault = snapshot([ordinary, other]);
+    view.rerenderSnapshot({ ...claudeDefault, settings: { ...claudeDefault.settings, defaultProvider: "claude" } });
+    expect(ordinaryRow().querySelector('.activity-thread-provider [data-provider-id="codex"]')).not.toBeNull();
+    expect(otherRow().querySelector(".activity-thread-provider")).toBeNull();
+  });
+
+  it("groups rows under quiet project headers only while several projects are listed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
+    const studioNewest = conversation("studio-newest", "Studio newest", new Date(2026, 7, 11, 11));
+    const docsMiddle = conversation("docs-middle", "Docs middle", new Date(2026, 7, 11, 10), { projectId: docsProject.id });
+    const studioYesterday = conversation("studio-yesterday", "Studio yesterday", new Date(2026, 7, 10, 9));
+    const view = renderSidebar([studioNewest, docsMiddle, studioYesterday], vi.fn(), [], { projects: [project, docsProject] });
+    const stream = view.container.querySelector(".activity-thread-stream")!;
+    const order = () => [...stream.querySelectorAll(".work-project-name, .activity-thread-title")]
+      .map((element) => element.textContent);
+    expect(order()).toEqual(["Studio", "Studio newest", "Docs", "Docs middle", "Studio", "Studio yesterday"]);
+    expect(stream.querySelectorAll(".work-project-group [tabindex], .work-project-group button")).toHaveLength(0);
+    const first = screen.getByRole("button", { name: /^Studio newest,/u });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Docs middle,/u })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Studio yesterday,/u })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Docs middle,/u }).closest(".activity-thread"))
+      .toHaveAttribute("aria-posinset", "2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    fireEvent.click(screen.getByRole("option", { name: /Studio/u }));
+    expect(order()).toEqual(["Studio newest", "Studio yesterday"]);
+  });
+
+  it("orders project groups by their best-ranked chat and continues a group across Recent and Yesterday", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
+    const studioNewest = conversation("studio-newest", "Studio newest", new Date(2026, 7, 11, 11));
+    const docsPinned = conversation("docs-pinned", "Docs pinned", new Date(2026, 7, 11, 8), {
+      projectId: docsProject.id,
+      pinnedAt: new Date(2026, 7, 11, 8).toISOString(),
+    });
+    const docsYesterday = conversation("docs-yesterday", "Docs yesterday", new Date(2026, 7, 10, 9), { projectId: docsProject.id });
+    const studioYesterday = conversation("studio-yesterday", "Studio yesterday", new Date(2026, 7, 10, 10));
+    const view = renderSidebar([studioNewest, docsPinned, docsYesterday, studioYesterday], vi.fn(), [], {
+      projects: [project, docsProject],
+    });
+    const stream = view.container.querySelector(".activity-thread-stream")!;
+    expect([...stream.querySelectorAll(".work-project-name, .activity-thread-title")].map((element) => element.textContent))
+      .toEqual(["Docs", "Docs pinned", "Studio", "Studio newest", "Studio yesterday", "Docs", "Docs yesterday"]);
+  });
+
+  it("counts only the projects of listed active chats before showing project headers", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
+    const notesProject: Project = { ...project, id: "project-notes", name: "Notes", path: "/workspace/notes" };
+    const studio = conversation("studio-active", "Studio active", new Date(2026, 7, 11, 11));
+    const docsDone = conversation("docs-done", "Docs done", new Date(2026, 7, 11, 10), {
+      projectId: docsProject.id,
+      settledAt: new Date(2026, 7, 11, 10).toISOString(),
+    });
+    const notesSnoozed = conversation("notes-snoozed", "Notes snoozed", new Date(2026, 7, 11, 9), {
+      projectId: notesProject.id,
+      snoozedUntil: new Date(2026, 7, 12, 9).toISOString(),
+    });
+    const view = renderSidebar([studio, docsDone, notesSnoozed], vi.fn(), [], { projects: [project, docsProject, notesProject] });
+    expect(screen.getByRole("button", { name: /^Studio active,/u })).toBeInTheDocument();
+    expect(view.container.querySelectorAll(".work-project-name")).toHaveLength(0);
   });
 
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {
@@ -1317,7 +1412,7 @@ describe("compact Work sidebar", () => {
     const row = screen.getByRole("button", {
       name: "Recover detached work, OpenAI, Unknown project, Idle",
     });
-    expect(row).toHaveTextContent("Unknown project");
+    expect(row).toHaveTextContent(/^Recover detached work/u);
 
     const search = screen.getByRole("searchbox");
     fireEvent.change(search, { target: { value: "Unknown project" } });
@@ -1335,9 +1430,8 @@ describe("compact Work sidebar", () => {
       ["input", "needs-input", "input", "lucide-message-circle-question-mark"],
       ["failed", "failed", null, "lucide-circle-x"],
       ["completed", "completed", null, "lucide-circle-check"],
-      ["idle", "idle", null, "lucide-minus"],
     ] as const;
-    renderSidebar(statusCases.map(([id, status, attentionKind]) => conversation(
+    renderSidebar([...statusCases, ["idle", "idle", null, null] as const].map(([id, status, attentionKind]) => conversation(
       id,
       `${id} task`,
       new Date(2026, 7, 11, 9),
@@ -1349,6 +1443,9 @@ describe("compact Work sidebar", () => {
       expect(cue).not.toBeNull();
       expect(cue?.querySelector(`.${iconClass}`)).not.toBeNull();
     }
+    const idleTime = screen.getByText("idle task").closest(".activity-thread")?.querySelector(".activity-thread-trailing time");
+    expect(idleTime).not.toBeNull();
+    expect(idleTime?.querySelector("svg")).toBeNull();
   });
 
   it("labels a chat stopped by a usage limit as Limited with its own icon", () => {
@@ -1358,7 +1455,7 @@ describe("compact Work sidebar", () => {
     const latestTurn = { id: "limited-turn", status: "failed", usageLimited: true } as unknown as NonNullable<ConversationShell["latestTurn"]>;
     renderSidebar([{ ...failed, latestTurn }]);
     const cue = document.querySelector('[data-work-status="limited"]');
-    expect(cue?.querySelector(".lucide-clock-3, .lucide-clock3")).not.toBeNull();
+    expect(cue?.querySelector(".lucide-clock")).not.toBeNull();
     expect(cue?.closest(".activity-thread-status-label")).toHaveTextContent("Limited");
     expect(screen.getByRole("button", { name: /Limited task.*Limited$/u })).toBeVisible();
   });

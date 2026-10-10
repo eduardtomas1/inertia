@@ -34,8 +34,8 @@
 .project-search-popover .project-search-dialog {
   width: 100%;
   max-height: min(420px, var(--project-popup-height, 70vh));
-  border-radius: 8px;
-  animation: workspace-popover-in 150ms var(--motion-ease);
+  border-radius: var(--radius-xs);
+  animation: popover-in var(--dur) var(--ease) both;
 }
 .project-search-popover .palette-search { min-height: 42px; padding-left: 11px; }
 .project-search-popover .palette-group > span { display: none; }

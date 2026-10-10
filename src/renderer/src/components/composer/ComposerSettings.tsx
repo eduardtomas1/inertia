@@ -1,5 +1,4 @@
 import {
-  Brain,
   ChevronDown,
   ChevronRight,
   Hammer,
@@ -113,16 +112,10 @@ export function ComposerSettings({
             onClick={() => toggleMenu("reasoning")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
           >
-            <Brain
-              className="composer-setting-icon"
-              size={13}
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
             <span className="composer-setting-value">{reasoningLabel}</span>
             <ChevronDown
               className="composer-setting-chevron"
-              size={11}
+              size={14}
               aria-hidden="true"
             />
           </button>
@@ -157,7 +150,6 @@ export function ComposerSettings({
                         ? " · Default"
                         : ""}
                     </strong>
-                    <small>{option.description}</small>
                   </span>
                   {selectedReasoning === option.value && (
                     <span className="option-check" />
@@ -188,14 +180,13 @@ export function ComposerSettings({
           >
             <ChevronRight
               className="composer-setting-icon"
-              size={13}
-              strokeWidth={1.8}
+              size={14}
               aria-hidden="true"
             />
             <span className="composer-setting-value">{responseSpeedLabel}</span>
             <ChevronDown
               className="composer-setting-chevron"
-              size={11}
+              size={14}
               aria-hidden="true"
             />
           </button>
@@ -240,14 +231,13 @@ export function ComposerSettings({
         >
           <ShieldCheck
             className="composer-setting-icon"
-            size={13}
-            strokeWidth={1.8}
+            size={14}
             aria-hidden="true"
           />
           <span className="composer-setting-value">{access.label}</span>
           <ChevronDown
             className="composer-setting-chevron"
-            size={11}
+            size={14}
             aria-hidden="true"
           />
         </button>
@@ -309,8 +299,7 @@ export function ComposerSettings({
         >
           <ModeIcon
             className="composer-setting-icon"
-            size={13}
-            strokeWidth={1.8}
+            size={14}
             aria-hidden="true"
           />
           <span className="composer-setting-value">
@@ -318,7 +307,7 @@ export function ComposerSettings({
           </span>
           <ChevronDown
             className="composer-setting-chevron"
-            size={11}
+            size={14}
             aria-hidden="true"
           />
         </button>
@@ -348,11 +337,6 @@ export function ComposerSettings({
               >
                 <span>
                   <strong>{mode === "build" ? "Build" : "Plan"}</strong>
-                  <small>
-                    {mode === "build"
-                      ? "Work directly in the project"
-                      : "Inspect and propose steps first"}
-                  </small>
                 </span>
                 {conversation.interactionMode === mode && (
                   <span className="option-check" />

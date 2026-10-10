@@ -18,6 +18,8 @@ import "../sidebar-work-index.css";
 const WORK_INDEX_VIRTUALIZATION_THRESHOLD = 60;
 const WORK_INDEX_INITIAL_HEIGHT = 720;
 const WORK_INDEX_OVERSCAN = 8;
+export const WORK_ROW_HEIGHT = 32;
+export const WORK_ROW_COMPACT_HEIGHT = 28;
 
 export const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
   "earlier",
@@ -43,6 +45,11 @@ export type WorkIndexItem =
       sectionId: SidebarWorkSectionId;
     }
   | {
+      id: `project:${string}`;
+      kind: "project";
+      projectId: string;
+    }
+  | {
       id: "show-more:done" | "show-more:no-project-done";
       kind: "show-more";
       sectionId: PaginatedWorkSectionId;
@@ -64,6 +71,7 @@ interface SidebarWorkIndexOptions {
   doneVisible: Readonly<Record<PaginatedWorkSectionId, number>>;
   enabled: boolean;
   expandedSections: ReadonlySet<SidebarWorkSectionId>;
+  groupByProject: boolean;
   motionEnabled: boolean;
   navigationRef: RefObject<HTMLDivElement | null>;
   searchActive: boolean;
@@ -76,6 +84,7 @@ export function useSidebarWorkIndex({
   doneVisible,
   enabled,
   expandedSections,
+  groupByProject,
   motionEnabled,
   navigationRef,
   searchActive,
@@ -90,6 +99,40 @@ export function useSidebarWorkIndex({
   const items = useMemo<WorkIndexItem[]>(() => {
     const next: WorkIndexItem[] = [];
     let threadPosition = 0;
+    let span: Array<{ conversation: Conversation; sectionId: SidebarWorkSectionId }> = [];
+    let previousProjectId: string | null = null;
+    const flushSpan = (): void => {
+      const grouped = groupByProject && span.length > 0 && !span[0]!.sectionId.startsWith("no-project");
+      const projectOrder = new Map<string, number>();
+      for (const { conversation } of span) {
+        if (!projectOrder.has(conversation.projectId)) projectOrder.set(conversation.projectId, projectOrder.size);
+      }
+      const ordered = grouped
+        ? span.map((entry, index) => ({ entry, index })).sort((left, right) => (
+          projectOrder.get(left.entry.conversation.projectId)! - projectOrder.get(right.entry.conversation.projectId)!
+          || left.index - right.index
+        )).map(({ entry }) => entry)
+        : span;
+      for (const { conversation, sectionId } of ordered) {
+        if (grouped && conversation.projectId !== previousProjectId) {
+          previousProjectId = conversation.projectId;
+          next.push({
+            id: `project:${ordered[0]!.sectionId}:${conversation.projectId}`,
+            kind: "project",
+            projectId: conversation.projectId,
+          });
+        }
+        threadPosition += 1;
+        next.push({
+          id: `thread:${conversation.id}`,
+          kind: "thread",
+          conversation,
+          position: threadPosition,
+          sectionId,
+        });
+      }
+      span = [];
+    };
     for (const section of sections) {
       if ((section.totalCount ?? section.threads.length) === 0) continue;
       const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
@@ -97,29 +140,28 @@ export function useSidebarWorkIndex({
       const expanded = !collapsible
         || searchActive
         || expandedSections.has(section.id);
-      if (section.id !== "recent" && section.id !== "yesterday") next.push({
-        id: `section:${section.id}`,
-        kind: "section",
-        section,
-        expanded,
-        disclosure,
-      });
+      flushSpan();
+      if (section.id !== "recent" && section.id !== "yesterday") {
+        previousProjectId = null;
+        next.push({
+          id: `section:${section.id}`,
+          kind: "section",
+          section,
+          expanded,
+          disclosure,
+        });
+      }
       if (!expanded) continue;
       const pageId = section.id === "done" || section.id === "no-project-done" ? section.id : null;
       const visibleThreads = pageId
         ? section.threads.slice(0, doneVisible[pageId])
         : section.threads;
       for (const { conversation } of visibleThreads) {
-        threadPosition += 1;
-        next.push({
-          id: `thread:${conversation.id}`,
-          kind: "thread",
-          conversation,
-          position: threadPosition,
-          sectionId: section.id,
-        });
+        span.push({ conversation, sectionId: section.id });
       }
       if (pageId && visibleThreads.length < section.threads.length) {
+        flushSpan();
+        previousProjectId = null;
         next.push({
           id: `show-more:${pageId}`,
           kind: "show-more",
@@ -128,8 +170,9 @@ export function useSidebarWorkIndex({
         });
       }
     }
+    flushSpan();
     return next;
-  }, [doneVisible, expandedSections, searchActive, sections]);
+  }, [doneVisible, expandedSections, groupByProject, searchActive, sections]);
   const {
     focusOrder,
     indexByIdentity,
@@ -146,7 +189,7 @@ export function useSidebarWorkIndex({
         visible.add(item.conversation.id);
         navigation.push(item.id);
         focus.push(item.id);
-      } else if (item.kind !== "section" || item.disclosure) {
+      } else if (item.kind === "show-more" || (item.kind === "section" && item.disclosure)) {
         navigation.push(item.id);
         focus.push(item.id);
       }
@@ -161,9 +204,8 @@ export function useSidebarWorkIndex({
   const virtualized = items.length >= WORK_INDEX_VIRTUALIZATION_THRESHOLD;
   const estimateSize = useCallback((index: number): number => {
     const item = items[index];
-    if (item?.kind === "section") return 26;
-    if (item?.kind === "show-more") return 35;
-    return compact ? 70 : 84;
+    if (item?.kind === "thread") return compact ? WORK_ROW_COMPACT_HEIGHT : WORK_ROW_HEIGHT;
+    return WORK_ROW_HEIGHT;
   }, [compact, items]);
   const { offsets, totalSize } = useMemo(() => {
     const nextOffsets: number[] = [];

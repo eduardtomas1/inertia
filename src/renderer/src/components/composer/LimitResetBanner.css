@@ -16,10 +16,10 @@
   gap: 2px 8px;
   margin: 0 var(--composer-drawer-inset);
   padding: 3px 4px 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--composer-border));
+  border: 1px solid var(--line-strong);
   border-bottom: 0;
-  border-radius: var(--radius-content) var(--radius-content) 0 0;
-  background: color-mix(in srgb, var(--warning) 8%, var(--composer-surface));
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--fill);
 }
 
 .limit-reset-icon {
@@ -32,7 +32,7 @@
 }
 
 .limit-reset[data-state="limited"] {
-  border-color: var(--composer-border);
+  border-color: var(--line-soft);
   background: transparent;
 }
 
@@ -48,22 +48,22 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 6px;
-  font-size: var(--ui-font-secondary);
-  line-height: 1.4;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }
 
 .limit-reset-copy strong {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--text);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .limit-reset-copy time {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -82,20 +82,20 @@
   min-height: calc(var(--control-height-small) - 4px);
   padding: 0 8px;
   border-color: transparent;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   color: var(--text);
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  font-size: var(--ui-font-secondary);
-  font-weight: 600;
+  background: var(--fill-strong);
+  font-size: var(--text-sm);
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .limit-reset-action.secondary-button:hover:not([aria-disabled="true"]) {
-  background: color-mix(in srgb, var(--text) 11%, transparent);
+  background: var(--fill-strong);
 }
 
 .limit-reset-action[aria-disabled="true"] {
-  cursor: not-allowed;
+  cursor: default;
   opacity: var(--disabled-opacity);
 }
 
@@ -105,9 +105,9 @@
   margin: 0 0 3px;
   padding-left: 22px;
   overflow-wrap: anywhere;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.4;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }
 
 .limit-reset-message[role="alert"] {
@@ -117,9 +117,9 @@
 @media (prefers-reduced-motion: no-preference) {
   .limit-reset-action.secondary-button {
     transition:
-      background var(--motion-fast) var(--motion-ease),
-      color var(--motion-fast) var(--motion-ease),
-      transform var(--motion-fast) var(--motion-ease);
+      background var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease),
+      transform var(--dur-fast) var(--ease);
   }
 
   .limit-reset-action.secondary-button:active:not([aria-disabled="true"]) {

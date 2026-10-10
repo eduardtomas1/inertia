@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import { Bot, Box } from "lucide-react";
+import { Plug, SquareSlash } from "lucide-react";
 
 import "./ComposerCommandMenu.css";
 
@@ -42,7 +42,7 @@ export function ComposerCommandMenu({
 
   const renderItem = (item: ComposerCommandMenuItem): React.JSX.Element => {
     const active = item.id === activeItemId;
-    const Icon = item.section === "provider" ? Box : Bot;
+    const Icon = item.section === "provider" ? Plug : SquareSlash;
     return (
       <button
         key={item.id}

@@ -16,19 +16,19 @@ export function SidebarConversationMarks({
   return (
     <>
       {pinned ? (
-        <Pin className="conversation-pin" size={10} aria-label="Pinned thread" />
+        <Pin className="conversation-pin" size={14} aria-label="Pinned thread" />
       ) : null}
       {detached ? (
         <PictureInPicture2
           className="conversation-detached-mark"
-          size={11}
+          size={14}
           aria-label="Open in a separate chat window"
         />
       ) : null}
       {split ? (
         <Columns2
           className="conversation-split-mark"
-          size={11}
+          size={14}
           aria-label="Open in split view"
         />
       ) : null}

@@ -1,10 +1,11 @@
 import clsx from "clsx";
 import { useId, useState, type ComponentProps } from "react";
-import { AlertCircle, Check, ChevronDown, Circle, CircleSlash, Copy, ListChecks, LoaderCircle, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, ListChecks, Play, RotateCcw } from "lucide-react";
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
 import { ResponseMarkdown } from "./ResponseMarkdown";
+import { IconButton, LoadingMark } from "./ui";
 
 export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked" | "cancelled";
 
@@ -34,8 +35,8 @@ export type PlanPanelProps = {
 
 function StepIcon({ status }: { status: PlanStepStatus }): React.JSX.Element {
   if (status === "completed") return <Check size={14} aria-hidden="true" />;
-  if (status === "in-progress") return <LoaderCircle size={15} aria-hidden="true" />;
-  if (status === "blocked") return <AlertCircle size={15} aria-hidden="true" />;
+  if (status === "in-progress") return <LoadingMark size={14} aria-hidden="true" />;
+  if (status === "blocked") return <CircleAlert size={14} aria-hidden="true" />;
   if (status === "cancelled") return <CircleSlash size={14} aria-hidden="true" />;
   return <Circle size={14} aria-hidden="true" />;
 }
@@ -82,7 +83,7 @@ export function PlanPanel({
     <section className="plan-panel" aria-label="Implementation plan">
       <header className="panel-toolbar plan-toolbar">
         <div className="panel-heading">
-          <ListChecks size={17} aria-hidden="true" />
+          <ListChecks size={16} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
             <span>{completed} of {steps.length} complete</span>
@@ -90,16 +91,15 @@ export function PlanPanel({
         </div>
         <div className="plan-toolbar-actions">
           {document?.trim() && (
-            <button
-              type="button"
+            <IconButton
               className="plan-copy-button"
+              label={planCopy.error ?? (planCopy.copied ? "Copied plan" : "Copy plan")}
               aria-label={planCopy.copied ? "Copied plan" : "Copy plan"}
-              title={planCopy.error ?? (planCopy.copied ? "Copied plan" : "Copy plan")}
               disabled={planCopy.pending}
               onClick={() => void planCopy.copy(document.trim())}
             >
               {planCopy.copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-            </button>
+            </IconButton>
           )}
           <span className="plan-percent" aria-label={`${progress}% complete`}>{progress}%</span>
         </div>
@@ -126,7 +126,7 @@ export function PlanPanel({
                 onClick={() => setExpanded((value) => !value)}
               >
                 <span>{expanded ? "Show less" : "Show full plan"}</span>
-                <ChevronDown size={13} aria-hidden="true" />
+                <ChevronDown size={14} aria-hidden="true" />
               </button>
             )}
           </div>
@@ -134,9 +134,7 @@ export function PlanPanel({
 
         {steps.length === 0 ? !body && (
           <div className="panel-empty plan-empty">
-            <ListChecks size={22} aria-hidden="true" />
             <h3>No plan yet</h3>
-            <p>Switch the agent to Plan mode to build a step-by-step approach.</p>
           </div>
         ) : (
           <>
@@ -190,13 +188,13 @@ export function PlanPanel({
         <footer className="plan-actions">
           {onRefine && (
             <button type="button" className="secondary-button" onClick={onRefine}>
-              <RotateCcw size={15} aria-hidden="true" />
+              <RotateCcw size={14} aria-hidden="true" />
               <span>Refine plan</span>
             </button>
           )}
           {onImplement && (
             <button type="button" className="primary-button" onClick={onImplement} disabled={steps.length === 0}>
-              <Play size={15} aria-hidden="true" />
+              <Play size={14} aria-hidden="true" />
               <span>Implement</span>
             </button>
           )}

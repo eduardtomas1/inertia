@@ -171,8 +171,8 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
       ".workspace-repository-file-copy strong",
     );
     return {
-      expectedMicro: Number.parseFloat(root.getPropertyValue("--ui-font-micro")),
-      expectedSecondary: Number.parseFloat(root.getPropertyValue("--ui-font-secondary")),
+      expectedMicro: Number.parseFloat(root.getPropertyValue("--text-xs")),
+      expectedSecondary: Number.parseFloat(root.getPropertyValue("--text-sm")),
       scope: scope ? Number.parseFloat(getComputedStyle(scope).fontSize) : 0,
       fileName: fileName ? Number.parseFloat(getComputedStyle(fileName).fontSize) : 0,
     };

@@ -191,6 +191,7 @@ function openCodeServer(
   nestedLeak = false,
   sessionResponseLeak = false,
   failDisconnect = false,
+  mcpAddDelayMs = 0,
 ): string {
   const command = portableNodeExecutable(root, failAfterMcp ? "opencode-host-fail" : "opencode-host");
   writeNodeSubcommand(root, "serve", `
@@ -212,11 +213,13 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,"http://127
   ${(leakPath ?? echoPath) ? `fs.writeFileSync(${JSON.stringify(leakPath ?? echoPath)},JSON.stringify({token:secretToken,url:secretUrl}));` : ""}
   ${leakPath ? `process.stderr.write("provider diagnostic "+secretToken+" "+secretUrl+"\\n");` : ""}
   captured.push({kind:"mcp-add",name:parsed?.name,directory:url.searchParams.get("directory"),type:parsed?.config?.type,urlIsLoopback:parsed?.config?.url?.startsWith("http://127.0.0.1:"),hasAuthorization:typeof auth==="string"&&auth.startsWith("Bearer "),oauth:parsed?.config?.oauth,timeout:parsed?.config?.timeout});save();
+  ${mcpAddDelayMs > 0 ? `return setTimeout(()=>{captured.push({kind:"mcp-connected"});save();json(res,{"inertia-chat-manager":{status:"connected"}});},${mcpAddDelayMs});` : ""}
   return json(res,{"inertia-chat-manager":{status:"connected"}});
  }
  if(req.method==="POST"&&url.pathname==="/mcp/inertia-chat-manager/disconnect"){
   captured.push({kind:"mcp-disconnect",directory:url.searchParams.get("directory")});save();return ${failDisconnect ? "json(res,{message:\"disconnect failed\"},500)" : "json(res,true)"};
  }
+ ${mcpAddDelayMs > 0 ? `if(req.method==="GET"&&url.pathname==="/provider"){captured.push({kind:"provider"});save();}` : ""}
  if(req.method==="GET"&&url.pathname==="/provider")return ${failAfterMcp ? "json(res,{message:\"provider failed \"+secretToken+\" \"+secretUrl},500)" : "json(res,{all:[{id:\"fake\",name:\"Fake\",source:\"config\",env:[],options:{},models:{\"model-a\":model}}],default:{fake:\"model-a\"},connected:[\"fake\"]})"};
  if(req.method==="GET"&&url.pathname==="/agent")return json(res,[]);
  if(req.method==="POST"&&url.pathname==="/session"){sessionPermission=parsed?.permission;save();return json(res,${sessionResponseLeak ? `{...session,id:secretToken}` : "session"});}
@@ -588,6 +591,33 @@ describe("provider host-tool injection", { concurrent: false }, () => {
     }
     expect(existsSync(capturePath)).toBe(true);
     expect(await loopbackPortIsOpen(capture.port)).toBe(false);
+  });
+
+  it("discovers OpenCode providers while its bridge connects", async () => {
+    const root = portableFixtureRoot("OpenCode host parallel discovery");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: openCodeServer(root, capturePath, false, undefined, undefined, false, false, false, 300) } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-parallel-discovery",
+      runId: "run-opencode-parallel-discovery",
+      turnId: "turn-opencode-parallel-discovery",
+      cwd: root,
+      prompt: "Use chat tools",
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools });
+    expect(result.status).toBe("completed");
+    const kinds = (JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ kind: string }>;
+    }).captured.map(({ kind }) => kind);
+    expect(kinds.indexOf("provider")).toBeGreaterThanOrEqual(0);
+    expect(kinds.indexOf("provider")).toBeLessThan(kinds.indexOf("mcp-connected"));
+    expect(kinds.indexOf("mcp-connected")).toBeLessThan(kinds.indexOf("prompt"));
   });
 
   it("keeps the run outcome when OpenCode fails to disconnect a bridge on a server that is then stopped", async () => {

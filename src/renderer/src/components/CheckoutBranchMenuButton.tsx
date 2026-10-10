@@ -113,11 +113,11 @@ export default function CheckoutBranchMenuButton({
         }}
       >
         {detached
-          ? <TriangleAlert size={12} aria-hidden="true" />
-          : <GitBranch size={12} aria-hidden="true" />}
+          ? <TriangleAlert size={14} aria-hidden="true" />
+          : <GitBranch size={14} aria-hidden="true" />}
         <code translate="no">{detached ? "Detached HEAD · Create branch" : branch}</code>
         {contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}
-        <ChevronDown size={11} aria-hidden="true" className="checkout-branch-chevron" />
+        <ChevronDown size={14} aria-hidden="true" className="checkout-branch-chevron" />
       </button>
       {menu === "branch" && position && createPortal(
         <div

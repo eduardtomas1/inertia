@@ -102,10 +102,10 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
     { id: "default", label: "Default", content: <span className="project-swatch-fill" aria-hidden="true" />, className: "project-swatch is-default" },
     ...PROJECT_COLOR_NAMES.map((name): RadioOption<ColorChoice> => ({
       id: name, label: PROJECT_COLOR_PALETTE[name].label, style: swatchStyle({ kind: "palette", name }), className: "project-swatch",
-      content: <span className="project-swatch-fill" aria-hidden="true"><Check size={11} strokeWidth={2.6} /></span>,
+      content: <span className="project-swatch-fill" aria-hidden="true"><Check size={14} /></span>,
     })),
     ...(rememberedCustom ? [{ id: "custom" as const, label: `Custom ${rememberedCustom}`, style: swatchStyle({ kind: "custom", value: rememberedCustom }),
-      className: "project-swatch is-custom", content: <span className="project-swatch-fill" aria-hidden="true"><Check size={11} strokeWidth={2.6} /></span> }] : []),
+      className: "project-swatch is-custom", content: <span className="project-swatch-fill" aria-hidden="true"><Check size={14} /></span> }] : []),
   ];
   const selected: ColorChoice = !value ? "default" : value.kind === "palette" ? value.name : "custom";
   const applyDraft = (): void => {
@@ -125,7 +125,7 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
       }} />
     <div className="project-color-custom">
       <label className="project-color-well" title="Pick a custom colour">
-        <Pipette size={13} aria-hidden="true" />
+        <Pipette size={14} aria-hidden="true" />
         <input ref={colorInput} type="color" aria-label="Pick a custom colour" disabled={disabled} aria-disabled={inactive || undefined}
           defaultValue={customValue ?? "#6f76d9"} />
       </label>

@@ -626,6 +626,32 @@ describe("ResponseMarkdown project files", () => {
     );
   });
 
+  it("keeps the Markdown syntax node out of rendered attributes", () => {
+    const { container } = render(
+      <ResponseMarkdown
+        content={[
+          "Read [the docs](https://example.com/docs), [the entry](src/index.ts) and [below](#totals).",
+          "",
+          "<details><summary>More</summary>Hidden detail</details>",
+          "",
+          "## Totals",
+          "",
+          "| Name | Value |",
+          "| --- | --- |",
+          "| route | exact |",
+        ].join("\n")}
+        projectRoot="/workspace"
+        projectId="11111111-1111-4111-8111-111111111111"
+        defaultCodeWrap={false}
+      />,
+    );
+
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(container.querySelector("details")).not.toBeNull();
+    expect(container.querySelectorAll("a")).toHaveLength(3);
+    expect(container.querySelectorAll("[node]")).toHaveLength(0);
+  });
+
   it("reports a failed copy locally and clears it after a successful retry", async () => {
     const copyText = vi.fn()
       .mockResolvedValueOnce(false)

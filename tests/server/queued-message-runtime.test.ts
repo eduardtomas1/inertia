@@ -16,11 +16,15 @@ import {
 import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
 import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller";
 import { join } from "node:path";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 afterEach(cleanupTurnControllerTestDirectories);
-async function fixture(hookOverrides: Partial<TurnControllerHooks> = {}) {
+async function fixture(
+  hookOverrides: Partial<TurnControllerHooks> = {},
+  options: Parameters<typeof createTurnControllerTestRuntime>[1] = {},
+) {
   let queue: ReturnType<typeof createQueuedMessageRuntime> | undefined;
-  const runtime = await createTurnControllerTestRuntime({ onTurnSettled: (turn) => queue?.onTurnSettled(turn), ...hookOverrides });
+  const runtime = await createTurnControllerTestRuntime({ onTurnSettled: (turn) => queue?.onTurnSettled(turn), ...hookOverrides }, options);
   const attachments = await ConversationAttachmentStore.open(runtime.directory);
   const abort = new AbortController();
   const tasks = new Set<Promise<unknown>>();
@@ -570,5 +574,140 @@ describe("durable runtime message queue", () => {
       expect(f.store.queuedMessages.get(f.conversationId, accepted.id)?.state).toBe("accepted");
       expect(f.store.queuedMessages.get(f.conversationId, waiting.id)?.state).toBe("waiting");
     } finally { await f.close(); }
+  });
+});
+
+describe("follow-ups accepted as the agent finishes its answer", () => {
+  type QueueFixture = Awaited<ReturnType<typeof fixture>>;
+  const flushStreams = (f: QueueFixture) => {
+    for (const [id, callback] of f.scheduler.callbacks) {
+      if ((f.scheduler.delays.get(id) ?? 0) >= 1_000) continue;
+      f.scheduler.callbacks.delete(id); f.scheduler.delays.delete(id); callback();
+    }
+  };
+  const turnMessages = (f: QueueFixture, turnId: string) => f.store.conversationDetail(f.conversationId)!.messages
+    .filter((message) => message.turnId === turnId)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+    .map(({ role, content }) => `${role}:${content}`);
+
+  it("keeps the earlier answer and the reply to the follow-up in separate rows around the follow-up", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      const identity = turnControllerTestIdentity(f);
+      f.provider.emit({ ...identity, type: "text", text: "Answer to the first task." });
+      const requestId = await f.followUp("Also rename the file.");
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.accepted", disposition: "follow-up" } });
+      f.provider.emit({ ...identity, type: "text", text: "Renamed it." });
+      flushStreams(f);
+      f.provider.resolve({ status: "completed", text: "Answer to the first task.Renamed it." });
+      await f.drain();
+      expect(turnMessages(f, initial.turn.id)).toEqual([
+        "user:First task",
+        "assistant:Answer to the first task.",
+        "user:Also rename the file.",
+        "assistant:Renamed it.",
+      ]);
+      expect(f.store.message(f.store.agentTurn(initial.turn.id).terminalAssistantMessageId!).content).toBe("Renamed it.");
+    } finally { await f.close(); }
+  });
+
+  it("records a follow-up the provider confirmed as its turn ended in that turn without queueing it", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      let acknowledge!: (accepted: boolean) => void;
+      vi.spyOn(f.provider, "steer").mockImplementation(() => new Promise<boolean>((resolve) => { acknowledge = resolve; }));
+      const requestId = randomUUID();
+      const sending = f.queue.turnInteractionHandler(null as unknown as WebSocket, {
+        type: "message.send", requestId, payload: { conversationId: f.conversationId, content: "Also rename the file.", attachments: [] },
+      });
+      await flushTurnControllerTestPromises();
+      f.provider.resolve({ status: "completed" });
+      acknowledge(true);
+      await expect(sending).resolves.toBe("handled");
+      await f.drain();
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.accepted", turnId: initial.turn.id, disposition: "follow-up" } });
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
+      expect(f.store.conversationDetail(f.conversationId)!.messages
+        .filter((message) => message.content === "Also rename the file.")
+        .map(({ role, turnId }) => ({ role, turnId }))).toEqual([{ role: "user", turnId: initial.turn.id }]);
+      expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it.each([
+    ["codex", "cancelled"],
+    ["codex", "failed"],
+    ["opencode", "cancelled"],
+    ["opencode", "failed"],
+  ] as const)("queues a %s follow-up confirmed as its turn ended %s instead of showing it unanswered", async (providerId, status) => {
+    const f = await fixture({}, providerId === "opencode"
+      ? { modelSelection: providerNativeModelSelection({ providerId: "opencode", modelId: "provider-default" }) }
+      : {});
+    try {
+      const initial = startRunning(f);
+      let acknowledge!: (accepted: boolean) => void;
+      vi.spyOn(f.provider, "steer").mockImplementation(() => new Promise<boolean>((resolve) => { acknowledge = resolve; }));
+      const requestId = randomUUID();
+      const sending = f.queue.turnInteractionHandler(null as unknown as WebSocket, {
+        type: "message.send", requestId, payload: { conversationId: f.conversationId, content: "Also rename the file.", attachments: [] },
+      });
+      await flushTurnControllerTestPromises();
+      expect(f.store.agentTurn(initial.turn.id).harnessId).toBe(providerId === "opencode" ? "opencode-sdk" : "codex-app-server");
+      f.provider.resolve({ status });
+      acknowledge(true);
+      await expect(sending).resolves.toBe("handled");
+      await f.drain();
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, state: "waiting" } } });
+      expect(f.store.agentTurn(initial.turn.id).status).toBe(status);
+      expect(f.store.conversationDetail(f.conversationId)!.messages
+        .some((message) => message.content === "Also rename the file.")).toBe(false);
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("queues a follow-up whose delivery became unknown because its turn ended", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError(true));
+      const requestId = await f.followUp();
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, state: "waiting" } } });
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("keeps an unconfirmed follow-up ambiguous when the queue has no room for it", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      for (let index = 0; index < 3; index += 1) await f.command("message.queue.enqueue", randomUUID());
+      vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError(true));
+      await expect(f.followUp("A fourth message.")).rejects.toMatchObject({
+        delivery: "ambiguous",
+        message: "The provider did not confirm whether it received this follow-up. Check this chat before retrying.",
+      });
+      expect(f.store.queuedMessages.list(f.conversationId)).toHaveLength(3);
+    } finally { await f.close(); }
+  });
+
+  it("keeps a follow-up refused before a failed or cancelled turn held in the queue", async () => {
+    for (const status of ["failed", "cancelled"] as const) {
+      const f = await fixture();
+      try {
+        startRunning(f);
+        f.provider.steerSupported = false;
+        const requestId = await f.followUp();
+        f.provider.resolve({ status });
+        await f.drain();
+        expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("waiting");
+        expect(f.provider.runCount).toBe(1);
+      } finally { await f.close(); }
+    }
   });
 });

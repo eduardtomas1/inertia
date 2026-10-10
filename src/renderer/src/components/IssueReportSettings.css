@@ -8,9 +8,9 @@
   display: grid;
   gap: 6px;
   min-width: 0;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  font-weight: 560;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .issue-report-field :is(input, textarea, select) {
@@ -21,12 +21,12 @@
   padding: 7px 10px;
   border-width: 1px;
   border-style: solid;
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-xs);
   color: var(--text);
   font: inherit;
-  font-weight: 450;
-  line-height: 1.5;
-  transition: border-color var(--motion-fast) var(--motion-ease);
+  font-weight: 400;
+  line-height: var(--leading-chrome);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 
 .issue-report-field textarea {
@@ -36,18 +36,12 @@
 .issue-report-field .issue-report-body {
   height: clamp(200px, 45vh, 420px);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
-  line-height: 1.6;
+  font-size: var(--text-xs);
+  line-height: var(--leading-prose);
 }
 
-.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled, [readonly]) {
-  border-color: var(--interactive-border-hover);
-}
-
-.settings-content .issue-report-field :is(input, textarea, select):focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-  border-color: var(--accent);
+.settings-content .issue-report-field :is(input, textarea, select):hover:not(:disabled, [readonly], :focus) {
+  border-color: var(--line-strong);
 }
 
 .issue-report-field :is(input, textarea, select):disabled {
@@ -55,8 +49,8 @@
 }
 
 .issue-report-field :is(input, textarea)[readonly] {
-  border-color: var(--border);
-  color: var(--text-soft);
+  border-color: var(--line);
+  color: var(--text-muted);
   background: transparent;
 }
 
@@ -69,9 +63,9 @@
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  font-weight: 560;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .issue-report-check input {
@@ -88,8 +82,8 @@
 
 .issue-report-check small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-weight: 450;
+  font-size: var(--text-xs);
+  font-weight: 400;
 }
 
 .issue-report-actions {
@@ -99,10 +93,6 @@
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
-}
-
-.issue-report .issue-report-actions .primary-button {
-  margin: 0;
 }
 
 .issue-report-actions > button {
@@ -117,27 +107,22 @@
   display: grid;
   gap: 8px;
   padding: 11px 12px;
-  border-radius: var(--radius-medium);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--fill);
 }
 
 .issue-report-confirm h4 {
   margin: 0;
   color: var(--text);
-  font-size: var(--ui-font-secondary);
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .issue-report-confirm p {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.5;
-}
-
-.issue-report-confirm:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .issue-report-messages {
@@ -149,8 +134,8 @@
 .issue-report-messages p {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.5;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -163,9 +148,9 @@
   align-items: flex-start;
   gap: 6px;
   margin: 0 0 14px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-micro);
-  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .issue-report-pending {
@@ -173,9 +158,9 @@
   align-items: flex-start;
   gap: 6px;
   margin: 0;
-  color: var(--text-soft);
-  font-size: var(--ui-font-micro);
-  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -188,8 +173,8 @@
 .issue-report-error {
   margin-top: -8px;
   color: var(--danger);
-  font-size: var(--ui-font-micro);
-  line-height: 1.5;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 .issue-report-github svg {
   flex: 0 0 auto;

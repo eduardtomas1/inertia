@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useReducer, useState } from "react";
 import {
-  CheckCircle2,
+  CircleCheck,
   CircleX,
-  Clock3,
+  Clock,
   MessageCircleQuestion,
-  Minus,
   ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
@@ -32,8 +31,8 @@ const SETTLED_CUE_ICONS: Record<SettledCueStatus, LucideIcon> = {
   approval: ShieldAlert,
   input: MessageCircleQuestion,
   failed: CircleX,
-  limited: Clock3,
-  completed: CheckCircle2,
+  limited: Clock,
+  completed: CircleCheck,
 };
 
 /** The label shows whole minutes, so a coarse refresh keeps it current. */
@@ -107,7 +106,6 @@ export function WorkStatusCue({
   if (status === "idle") {
     return (
       <time dateTime={updatedAt} title={formatRelativeTime(updatedAt)}>
-        <span className="activity-idle-icon" data-work-status="idle"><Minus size={10} /></span>
         {formatWorkAge(updatedAt)}
       </time>
     );
@@ -150,7 +148,7 @@ export function WorkStatusCue({
   return (
     <span className="activity-thread-status-label">
       <span data-work-status={status} data-work-arrival={arrived ? "" : undefined}>
-        <Icon size={12} />
+        <Icon size={14} />
       </span>
       {label}
     </span>

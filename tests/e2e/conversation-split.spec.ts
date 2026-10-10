@@ -3,6 +3,7 @@ import { expect, test, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
@@ -105,7 +106,7 @@ async function verifyScopedTools(testInfo: TestInfo) {
   await expect(secondaryCode.locator("pre")).not.toHaveClass(/wraps/u);
   await app.electronApp.evaluate(({ clipboard }) =>
     clipboard.writeText("split-clipboard-sentinel"));
-  await secondaryCode.locator('button[title="Copy code"]').click();
+  await secondaryCode.getByRole("button", { name: "Copy", exact: true }).click();
   await expect.poll(() => app.electronApp.evaluate(({ clipboard }) =>
     clipboard.readText())).toBe('const pane = "secondary";');
   const duplicateIds = await page.locator("[id]").evaluateAll((elements) => {
@@ -172,6 +173,7 @@ async function verifyScopedTools(testInfo: TestInfo) {
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
+  await openComposerTools(page);
   await primary.getByRole("button", { name: "Scratch prompts" }).click();
   await primary.getByRole("menu", { name: "Scratch prompts" })
     .getByRole("menuitem", { name: /Save current prompt/u })
@@ -381,14 +383,13 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
   await primaryPreview.getByRole("textbox", {
     name: "Preview address",
   }).fill(primaryPreviewUrl);
-  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await primaryPreview.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await secondaryPreview.getByRole("textbox", {
     name: "Preview address",
   }).fill(secondaryPreviewUrl);
-  await secondaryPreview.getByRole("button", {
-    name: "Go",
-    exact: true,
-  }).click();
+  await secondaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  }).press("Enter");
   await expect(primaryPreview.getByRole("textbox", {
     name: "Preview address",
   })).toHaveValue(primaryPreviewUrl);
@@ -448,7 +449,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
   await primaryPreview.getByRole("textbox", {
     name: "Preview address",
   }).fill(secondPrimaryPreviewUrl);
-  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await primaryPreview.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await expect.poll(() => app.electronApp.evaluate(
     ({ webContents }, url) => webContents.getAllWebContents().some(
       (contents) => contents.getURL() === url,
@@ -629,7 +630,7 @@ async function verifyScopedBrowsers(testInfo: TestInfo, panes: ScopedPanes) {
     typeDestinationUrl,
   });
   await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
-  await expect(browserTabs).toHaveCount(1);
+  await expect(browserTabs).toHaveCount(0);
   await expect.poll(() => app.nativePreviewIsVisible(primaryPreviewUrl)).toBe(true);
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({

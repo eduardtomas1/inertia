@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../../src/renderer/src/components/composer/Composer";
 import { useComposerPromptStash } from "../../src/renderer/src/components/composer/useComposerPromptStash";
 import { addPromptStashEntry, movePromptStash, promptStashStorageKey, readPromptStash, writePromptStash } from "../../src/renderer/src/utils/promptStash";
-import { composerProps, conversation } from "./composer-fixtures";
+import { composerProps, conversation, openComposerTools } from "./composer-fixtures";
 
 afterEach(async () => {
   await vi.dynamicImportSettled();
@@ -45,6 +45,7 @@ describe("chat-owned prompt stash", () => {
     const second = conversation("stash-other");
     const view = render(<Composer {...composerProps(first)} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "My source-chat draft" } });
+    openComposerTools();
     fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Save current prompt/u }));
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");

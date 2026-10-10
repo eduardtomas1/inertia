@@ -4,7 +4,6 @@ import {
   Copy,
   ExternalLink,
   FolderOpen,
-  FolderSearch,
   PanelLeft,
   Play,
   Plus,
@@ -52,7 +51,7 @@ function RunRow({
           title="Open preview"
           onClick={() => { onDone(); runs.onOpenRunPreview(run); }}
         >
-          <ExternalLink size={12} aria-hidden="true" />
+          <ExternalLink size={14} aria-hidden="true" />
         </button>
       )}
       {run.canAcknowledge && (
@@ -67,7 +66,7 @@ function RunRow({
             runs.onAcknowledgeRun(run);
           }}
         >
-          <Check size={12} aria-hidden="true" />
+          <Check size={14} aria-hidden="true" />
         </button>
       )}
       {run.canDismiss && (
@@ -82,7 +81,7 @@ function RunRow({
             runs.onDismissRun(run);
           }}
         >
-          <Trash2 size={12} aria-hidden="true" />
+          <Trash2 size={14} aria-hidden="true" />
         </button>
       )}
       {run.canStop && (
@@ -97,7 +96,7 @@ function RunRow({
             runs.onStopRun(run);
           }}
         >
-          <Square size={12} aria-hidden="true" />
+          <Square size={14} aria-hidden="true" />
         </button>
       )}
     </div>
@@ -173,7 +172,7 @@ export function ProjectActionMenuItems({
           title={action.command}
           onClick={() => onRun(action)}
         >
-          <Play size={13} aria-hidden="true" />
+          <Play size={14} aria-hidden="true" />
           <span><strong>{action.label}</strong><small>{action.command}</small></span>
         </button>
       ))}
@@ -184,7 +183,7 @@ export function ProjectActionMenuItems({
           className={itemClass}
           onClick={onAdd}
         >
-          <Plus size={13} aria-hidden="true" />
+          <Plus size={14} aria-hidden="true" />
           <span><strong>Add action…</strong></span>
         </button>
       )}
@@ -196,7 +195,7 @@ export type OpenInTarget = "folder" | "file-manager" | "files";
 
 const openInIcons = {
   folder: FolderOpen,
-  "file-manager": FolderSearch,
+  "file-manager": FolderOpen,
   files: PanelLeft,
 } as const;
 
@@ -246,7 +245,7 @@ export function OpenInMenuItems({
             title={disabled ? "Files become available after the first message creates this isolated worktree." : undefined}
             onClick={() => onOpen(target)}
           >
-            <Icon size={13} aria-hidden="true" />
+            <Icon size={14} aria-hidden="true" />
             <span><strong>{labels[target]}</strong></span>
             {target === preferred && <small className="header-menu-hint">Default</small>}
           </button>
@@ -261,7 +260,7 @@ export function OpenInMenuItems({
         title={checkoutPath ?? undefined}
         onClick={() => void copyPath()}
       >
-        <Copy size={13} aria-hidden="true" />
+        <Copy size={14} aria-hidden="true" />
         <span>
           <strong>{copyState === "copied" ? "Path copied" : "Copy path"}</strong>
           {checkoutPath && <small>{checkoutPath}</small>}

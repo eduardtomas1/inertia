@@ -2,7 +2,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
-  Command,
+  Play,
   SlidersHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
@@ -96,7 +96,7 @@ export function ComposerMoreMenu({
             onRunAction(action);
           }}
         >
-          <Command size={14} />
+          <Play size={14} />
           <span>
             <strong>{action.label}</strong>
             <small>{action.command}</small>
@@ -270,12 +270,11 @@ export function ComposerMoreMenu({
           handleComposerMenuTriggerKeyDown("more", event)}
       >
         <SlidersHorizontal
-          size={13}
-          strokeWidth={1.8}
+          size={14}
           aria-hidden="true"
         />
         <span>More</span>
-        <ChevronDown size={11} aria-hidden="true" />
+        <ChevronDown size={14} aria-hidden="true" />
       </button>
       {menu === "more" && (
         <div
@@ -356,7 +355,7 @@ export function ComposerMoreMenu({
                         <strong>{item.label}</strong>
                         <small>{item.value}</small>
                       </span>
-                      <ChevronRight size={13} />
+                      <ChevronRight size={14} />
                     </button>
                   ))}
                 </div>

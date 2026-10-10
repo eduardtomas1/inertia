@@ -164,7 +164,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await captureElement(antigravity, testInfo, `antigravity-mark-settings-${theme.toLowerCase()}`);
   };
 
-  const chooseAntigravityModel = async (name: string): Promise<void> => {
+  const chooseAntigravityModel = async (name: string, placeholder: "Message" | "Follow up"): Promise<void> => {
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     const composer = page.getByRole("region", { name: "Message composer" });
     const chip = composer.getByRole("button", { name: /^Choose model\./u });
@@ -172,7 +172,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
       .toHaveAttribute("data-provider-icon-kind", "official");
     await captureElement(chip, testInfo, `antigravity-mark-chip-${name.endsWith("dark") ? "dark" : "light"}`);
     await expect(composer.getByRole("textbox", { name: "Message" }))
-      .toHaveAttribute("placeholder", "Ask for follow-up changes");
+      .toHaveAttribute("placeholder", placeholder);
     await expect(composer.getByRole("button", {
       name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
     })).toBeEnabled();
@@ -212,12 +212,12 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
   await app.resizeWindow(1440, 920);
   await openAntigravitySettings("Light");
   await capture(page, testInfo, "provider-readiness-light");
-  await chooseAntigravityModel("model-chooser-light");
+  await chooseAntigravityModel("model-chooser-light", "Message");
   await streamTurn("Check how the stream parser handles step updates.", "light");
 
   await openAntigravitySettings("Dark");
   await capture(page, testInfo, "provider-readiness-dark");
-  await chooseAntigravityModel("model-chooser-dark");
+  await chooseAntigravityModel("model-chooser-dark", "Follow up");
   await streamTurn("Confirm non-success results fail the turn.", "dark");
 
   const entries = wire().filter(({ kind }) => kind === "launch");

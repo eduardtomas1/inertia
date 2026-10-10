@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
-test("keeps three-line Work sidebar geometry", async ({
+test("keeps one-line Work sidebar geometry", async ({
   browserName: _browserName,
 }, testInfo) => {
   const app = await createAppFixture({
@@ -95,25 +95,21 @@ test("keeps three-line Work sidebar geometry", async ({
     await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveCount(0);
     const row = sidebar.getByRole("button", { name: /^Polish compact Work rows,/u });
     await expect(row).toBeVisible();
-    const rowBox = await row.boundingBox();
-    expect(rowBox).not.toBeNull();
-    expect(rowBox!.height).toBeGreaterThanOrEqual(78);
-    expect(rowBox!.height).toBeLessThanOrEqual(84);
-    const statusCue = row.locator('[data-work-status="idle"]');
-    await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
-    const statusBox = await statusCue.boundingBox();
-    expect(statusBox).not.toBeNull();
-    expect(statusBox!.width).toBeCloseTo(10, 3);
-    expect(statusBox!.height).toBeCloseTo(10, 3);
-    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]) {
+    const rowHeight = async (): Promise<number> => (await row.boundingBox())?.height ?? 0;
+    expect(await rowHeight()).toBeCloseTo(32, 0);
+    await expect(row.locator(".activity-thread-trailing time")).toBeVisible();
+    await expect(row.locator(".activity-thread-trailing time svg")).toHaveCount(0);
+    await expect(row).not.toContainText("codex/compact-work-tab");
+    await expect(sidebar.locator('.activity-thread-provider [data-provider-id="codex"]')).toHaveCount(0);
+    for (const providerId of ["claude", "cursor", "kimi", "opencode", "antigravity"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();
       await expect(icon).toBeVisible();
       const box = await icon.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.width).toBeCloseTo(15, 3);
-      expect(box!.height).toBeCloseTo(15, 3);
+      expect(box!.width).toBeCloseTo(14, 3);
+      expect(box!.height).toBeCloseTo(14, 3);
       const imageSize = await icon.locator("img").first().evaluate((image) => ({
         naturalWidth: (image as HTMLImageElement).naturalWidth,
         naturalHeight: (image as HTMLImageElement).naturalHeight,
@@ -145,19 +141,14 @@ test("keeps three-line Work sidebar geometry", async ({
     await sidebarHandle.focus();
     await sidebarHandle.press("Home");
     await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "220");
-    const narrowState = await row.locator(".activity-thread-branch-meta")
-      .evaluate((branch) => {
-        const sidebarElement = branch.closest(".sidebar");
-        return {
-          branchDisplay: getComputedStyle(branch).display,
-          sidebarWidth: sidebarElement?.getBoundingClientRect().width,
-        };
-      });
-    expect(narrowState).toMatchObject({
-      branchDisplay: "flex",
-      sidebarWidth: 220,
-    });
-    await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
+    expect(await row.evaluate((element) => (
+      element.closest(".sidebar")?.getBoundingClientRect().width
+    ))).toBe(220);
+    expect(await rowHeight()).toBeCloseTo(32, 0);
+    await expect(row.locator(".activity-thread-trailing time")).toBeVisible();
+    expect(await sidebar.locator(".project-list").evaluate((element) => (
+      element.scrollWidth <= element.clientWidth
+    ))).toBe(true);
     const narrowLightScreenshot = testInfo.outputPath(
       "chat-index-narrow-light-220px.png",
     );
@@ -173,13 +164,13 @@ test("keeps three-line Work sidebar geometry", async ({
     await app.resizeWindow(1440, 900);
     await sidebarHandle.press("End");
     await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "420");
-    await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
+    expect(await rowHeight()).toBeCloseTo(32, 0);
 
     await app.page.evaluate(() => {
       document.documentElement.dataset.theme = "dark";
       document.documentElement.style.colorScheme = "dark";
     });
-    await expect(sidebar.locator(
+    await expect(app.page.locator(
       '.provider-brand-icon[data-provider-id="codex"] .provider-brand-icon-source',
     ).first()).toHaveCSS("filter", "invert(1)");
     await expect(sidebar.locator(

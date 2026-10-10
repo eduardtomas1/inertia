@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import clsx from "clsx";
-import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Sparkles, Square, StickyNote, Trash2, WandSparkles, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Square, StickyNote, Trash2, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLineFingerprint } from "@shared/diff-review";
 import { sourceLanguageForFile } from "@shared/source-language";
@@ -113,6 +113,12 @@ export function changedFileWorkingState(file: ChangedFile): string {
   if (file.staged && file.unstaged) return "staged + unstaged";
   if (file.staged) return "staged";
   return "unstaged";
+}
+
+export function changedFileStatusTitle(file: ChangedFile): string {
+  return file.untracked
+    ? changedFileStatusLabel(file)
+    : `${changedFileStatusLabel(file)}, ${changedFileWorkingState(file)}`;
 }
 
 function actionLabel(action: ReviewAction): string {
@@ -525,27 +531,29 @@ export function ChangesPanel({
       {noteDraft && ReviewNoteDialog && <ReviewNoteDialog draft={noteDraft} onClose={() => setNoteDraft(null)} />}
       <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
-          <GitCompareArrows size={17} aria-hidden="true" />
+          <GitCompareArrows size={16} aria-hidden="true" />
           <div className="panel-heading-copy"><h2>Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
         </div>
         <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>
           <span className="stat-additions">+{toolbarInsertions}</span><span className="stat-deletions">−{toolbarDeletions}</span>
           {lastReversal && onUndoReversal && (
             <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void undoReversal()}>
-              <RotateCcw size={13} />Undo revert
+              <RotateCcw size={14} />Undo revert
             </button>
           )}
           {onGenerateSummary && toolbarFiles > 0 && (
-            <IconButton
-              label={summaryLoading ? "Cancel change summary" : activeSummary ? "Refresh agent summaries" : "Summarize changes"}
+            <button
+              type="button"
+              className="subtle-button"
+              aria-label={summaryLoading ? "Stop summarizing" : "Summarize changes"}
               onClick={() => {
                 const action = summaryLoading ? onCancelSummary?.() : onGenerateSummary();
                 if (action) void action.catch(() => undefined);
               }}
               disabled={Boolean(diffParsingError) || diffBusy || (summaryLoading && !onCancelSummary)}
             >
-              {summaryLoading ? <><LoadingMark label="Summarizing changes" /><Square size={10} /></> : <Sparkles size={15} />}
-            </IconButton>
+              {summaryLoading ? <><LoadingMark aria-hidden="true" />Stop</> : "Summarize"}
+            </button>
           )}
           {questionRunning && !(reviewAction === "ask" && submitting) && onCancelAsk && (
             <button
@@ -554,17 +562,17 @@ export function ChangesPanel({
               disabled={stoppingAsk}
               onClick={requestQuestionStop}
             >
-              {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
+              {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={14} />}
               {stoppingAsk ? "Stopping…" : "Stop asking"}
             </button>
           )}
-          {onRefresh && <IconButton label="Refresh changes" onClick={onRefresh} disabled={diffBusy}>{diffBusy ? <LoadingMark label="Refreshing changes" /> : <RefreshCw size={15} />}</IconButton>}
+          {onRefresh && <IconButton label="Refresh changes" onClick={onRefresh} disabled={diffBusy}>{diffBusy ? <LoadingMark label="Refreshing changes" /> : <RefreshCw size={14} />}</IconButton>}
         </div>
       </header>
 
       {notice}
       {scopeNavigator}
-      {activeSummary && <div className="diff-overall-summary"><Sparkles size={14} /><span><strong>Change summary</strong>{activeSummary.overall}<ClassificationHints hints={activeSummary.classifications} /></span></div>}
+      {activeSummary && <div className="diff-overall-summary"><span><strong>Summary</strong>{activeSummary.overall}<ClassificationHints hints={activeSummary.classifications} /></span></div>}
       {totalHunks > 0 && persistentReview && (
         <div className="diff-review-toolbar">
           <span><strong>{reviewedHunks}/{totalHunks}</strong> hunks reviewed</span>
@@ -586,7 +594,7 @@ export function ChangesPanel({
       )}
 
       {files.length === 0 && !fileNavigator ? (
-        <div className="panel-empty changes-empty"><GitCompareArrows size={22} /><h3>{emptyState?.title ?? "No local changes"}</h3><p>{emptyState?.detail ?? "Edits made in this workspace will appear here."}</p></div>
+        <div className="panel-empty changes-empty"><h3>{emptyState?.title ?? "No local changes"}</h3>{emptyState?.detail && <p>{emptyState.detail}</p>}{onRefresh && <button type="button" className="secondary-button" onClick={onRefresh} disabled={diffBusy}>Refresh</button>}</div>
       ) : (
         <div className="changes-layout">
           {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
@@ -596,13 +604,13 @@ export function ChangesPanel({
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
               const language = sourceLanguageForFile(file.path);
               return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={15} /><span className="change-file-status" title={changedFileStatusLabel(file)}>{changedFileStatusCode(file)}</span></span>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
-                  <span>{changedFileWorkingState(file)}</span>
-                  <span><span className="file-insertions">+{file.insertions}</span> <span className="file-deletions">−{file.deletions}</span></span>
-                  {diffFile && fileReviewed(diffFile) && <Check size={11} aria-label="File reviewed" />}
+                  <span className="file-insertions">+{file.insertions}</span>
+                  <span className="file-deletions">−{file.deletions}</span>
                 </span>
+                {diffFile && fileReviewed(diffFile) && <Check className="change-file-reviewed" size={14} aria-label="File reviewed" />}
               </button>;
             })}
           </nav>}
@@ -616,27 +624,26 @@ export function ChangesPanel({
               }}>
                 <div className="diff-file-review-heading">
                   <span><strong>{selectedFile.path}</strong>{fileSummary && <small>{fileSummary.summary}</small>}<ClassificationHints hints={fileSummary?.classifications} /></span>
-                  {onOpenFile && <button type="button" onClick={() => onOpenFile(selectedFile.path)}><ExternalLink size={12} />Open file</button>}
-                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile)}><Check size={12} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
-                  {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile)}><StickyNote size={12} />Note</button>}
+                  {onOpenFile && <button type="button" onClick={() => onOpenFile(selectedFile.path)}><ExternalLink size={14} />Open file</button>}
+                  {persistentReview && <button type="button" className={clsx(fileReviewed(selectedFile) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile)}><Check size={14} />{fileReviewed(selectedFile) ? "Reviewed" : "Mark file reviewed"}</button>}
+                  {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile)}><StickyNote size={14} />Note</button>}
                 </div>
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId === null).map((note) => (
                   <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
-                    <span><StickyNote size={12} /><strong>File note{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
-                    <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                    <IconButton label={noteControlLabel("Edit", "file note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
+                    <span><StickyNote size={14} /><strong>File note{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
+                    <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={14} />Prompt</button>
+                    <IconButton label={noteControlLabel("Edit", "file note", note)} onClick={() => void editNote(note)}><Pencil size={14} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "file note", note)} onClick={() => void deleteNote(note)}><Trash2 size={14} /></IconButton>
                   </div>
                 ))}
                 {notes.filter((note) => note.path === selectedFile.path && note.hunkId !== null && note.stale && !selectedFile.hunks.some((hunk) => hunk.id === note.hunkId)).map((note) => (
                   <div className="diff-review-note is-stale" key={note.id}>
-                    <span><StickyNote size={12} /><strong>Stale note · target changed</strong><small>{note.body}</small></span>
-                    <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                    <IconButton label={noteControlLabel("Edit", "stale note", note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
+                    <span><StickyNote size={14} /><strong>Stale note · target changed</strong><small>{note.body}</small></span>
+                    <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={14} />Prompt</button>
+                    <IconButton label={noteControlLabel("Edit", "stale note", note)} onClick={() => void editNote(note)}><Pencil size={14} /></IconButton>
+                    <IconButton label={noteControlLabel("Delete", "stale note", note)} onClick={() => void deleteNote(note)}><Trash2 size={14} /></IconButton>
                   </div>
                 ))}
-                <p className="diff-selection-help">Select a line, then Shift-click or press Shift+Enter on another to review a range.</p>
                 {reviewLockReason && <p className="panel-notice diff-review-paused" role="status">{reviewLockMessages[reviewLockReason]}</p>}
                 {!selection && comment && <p className="panel-notice diff-review-held" role="status">The diff changed while it refreshed. Select lines again to continue your draft.</p>}
                 {selectedFile.hunks.map((hunk) => {
@@ -656,20 +663,20 @@ export function ChangesPanel({
                     : null;
                   return <div className="diff-filter-row" inert={!shown} key={hunk.id}><div><section className="diff-hunk" id={`review-${hunk.id}`}>
                     <div className="diff-hunk-header">
-                      <code>{hunk.header}</code>{hunkSummary && <span><Sparkles size={12} />{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
+                      <code>{hunk.header}</code>{hunkSummary && <span>{hunkSummary}<ClassificationHints hints={fileSummary?.hunks.find((item) => item.hunkId === hunk.id)?.classifications} /></span>}
                       <span className="diff-hunk-actions">
-                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile, hunk)}><Check size={11} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
-                        {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={11} />Note</button>}
+                        {persistentReview && <button type="button" className={clsx(hunkReviewed(selectedFile, hunk) && "is-reviewed")} aria-disabled={reviewLocked || undefined} onClick={() => void toggleState(selectedFile, hunk)}><Check size={14} />{hunkReviewed(selectedFile, hunk) ? "Reviewed" : "Mark reviewed"}</button>}
+                        {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => void createScopedNote(selectedFile, hunk)}><StickyNote size={14} />Note</button>}
                       </span>
                     </div>
                     {hunkAnswer && <SelectionReviewAnswerCard answer={hunkAnswer} onDismiss={onDismissSelectionAnswer} />}
                     {hunkNotes.map((note) => (
                       <div className={clsx("diff-review-note", note.stale && "is-stale")} key={note.id}>
-                        <span><StickyNote size={12} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
-                        <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={12} />Prompt</button>
-                        {agentRevision && <button type="button" disabled={note.stale} aria-disabled={reviewLocked || undefined} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><WandSparkles size={12} />Revise</button>}
-                        <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={12} /></IconButton>
-                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => void deleteNote(note)}><Trash2 size={12} /></IconButton>
+                        <span><StickyNote size={14} /><strong>{note.lineIds.length > 0 ? `${note.lineIds.length}-line note` : "Hunk note"}{note.stale ? " · stale" : ""}</strong><small>{note.body}</small></span>
+                        <button type="button" onClick={() => onAddTextToPrompt(notePromptText(note))}><MessageSquarePlus size={14} />Prompt</button>
+                        {agentRevision && <button type="button" disabled={note.stale} aria-disabled={reviewLocked || undefined} onClick={() => void requestNoteRevision(note, selectedFile, hunk)}><Pencil size={14} />Revise</button>}
+                        <IconButton label={noteControlLabel("Edit", hunkNoteKind(note), note)} onClick={() => void editNote(note)}><Pencil size={14} /></IconButton>
+                        <IconButton label={noteControlLabel("Delete", hunkNoteKind(note), note)} onClick={() => void deleteNote(note)}><Trash2 size={14} /></IconButton>
                       </div>
                     ))}
                     {hunk.lines.map((line, index) => <div key={line.id}>
@@ -684,18 +691,19 @@ export function ChangesPanel({
                         }}
                         disabled={line.kind === "meta"}
                         aria-disabled={reviewLocked || undefined}
+                        aria-keyshortcuts="Shift+Enter"
                       >
                         <span className="diff-line-number" aria-hidden="true">{line.oldLineNumber ?? ""}</span><span className="diff-line-number" aria-hidden="true">{line.newLineNumber ?? ""}</span><span className="diff-line-prefix">{line.kind === "addition" ? "+" : line.kind === "deletion" ? "−" : " "}</span><span className="diff-line-content">{line.content || " "}</span>
                       </button>
                       {selected && line.id === lastSelectedId && (
                         <div className="diff-selection-popover">
                           <div className="diff-selection-actions">
-                            <button type="button" disabled={questionRunning} aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("ask")}><CircleHelp size={13} />Ask about</button>
-                            {agentRevision && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("revise")}><WandSparkles size={13} />Request revision</button>}
-                            {selectiveRevert && <button type="button" onClick={() => chooseAction("revert")} disabled={!changedSelection || diff?.truncated} aria-disabled={reviewLocked || undefined}><RotateCcw size={13} />Revert</button>}
-                            {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("note")}><StickyNote size={13} />Note</button>}
-                            <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={13} />Add to prompt</button>
-                            <IconButton label="Clear selection" onClick={clearSelection}><X size={13} /></IconButton>
+                            <button type="button" disabled={questionRunning} aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("ask")}><CircleHelp size={14} />Ask about</button>
+                            {agentRevision && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("revise")}><Pencil size={14} />Request revision</button>}
+                            {selectiveRevert && <button type="button" onClick={() => chooseAction("revert")} disabled={!changedSelection || diff?.truncated} aria-disabled={reviewLocked || undefined}><RotateCcw size={14} />Revert</button>}
+                            {persistentReview && <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => chooseAction("note")}><StickyNote size={14} />Note</button>}
+                            <button type="button" aria-disabled={reviewLocked || undefined} onClick={() => addSelectionToPrompt(selectedFile, hunk, selected)}><MessageSquarePlus size={14} />Add to prompt</button>
+                            <IconButton label="Clear selection" onClick={clearSelection}><X size={14} /></IconButton>
                           </div>
                           {reviewAction && (
                             <form onSubmit={(event) => { event.preventDefault(); void submit(selectedFile, hunk); }}>
@@ -725,7 +733,7 @@ export function ChangesPanel({
                                     disabled={stoppingAsk}
                                     onClick={requestQuestionStop}
                                   >
-                                    {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={12} />}
+                                    {stoppingAsk ? <LoadingMark label="Stopping review question" /> : <Square size={14} />}
                                     {stoppingAsk ? "Stopping…" : "Stop asking"}
                                   </button>
                                 ) : (
@@ -741,7 +749,7 @@ export function ChangesPanel({
                 })}
                 {selectionError && <p className="panel-notice diff-selection-error" role="alert">{selectionError}</p>}
               </div>
-            ) : <div className="panel-empty changes-empty"><FileCode2 size={22} /><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3><p>{selectedPath ? "This file is outside the bounded diff preview. Refresh after reducing the change set." : diffEmptyState?.detail ?? "Choose a changed file to inspect it."}</p></div>}
+            ) : <div className="panel-empty changes-empty"><h3>{selectedPath ? "Diff unavailable" : diffEmptyState?.title ?? "Select a file"}</h3>{selectedPath ? <p>This file is outside the bounded diff preview. Refresh after reducing the change set.</p> : diffEmptyState?.detail && <p>{diffEmptyState.detail}</p>}</div>}
             {diff?.truncated && <p className="panel-notice diff-truncated">This diff is truncated to keep the workspace responsive.</p>}
           </div>
         </div>

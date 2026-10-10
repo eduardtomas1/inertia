@@ -5,12 +5,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { TooltipButton } from "../TooltipButton";
 import type { ChatAttachment } from "@shared/contracts";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
+  arrowUpMorphIcon,
   loaderCircleMorphIcon,
-  sendHorizontalMorphIcon,
-  sendMorphIcon,
   squareMorphIcon,
 } from "../motion/lucideMorphData";
 import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryAction";
@@ -22,10 +22,7 @@ const ComposerQueuedActions = lazy(async () => ({
   default: (await import("./ComposerQueuedActions")).ComposerQueuedActions,
 }));
 
-function primaryPresentation(
-  state: ComposerPrimaryActionState,
-  intent: boolean,
-) {
+function primaryPresentation(state: ComposerPrimaryActionState) {
   if (state === "stop-ready" || state === "stop-pending") {
     return {
       action: "stop" as const,
@@ -60,10 +57,8 @@ function primaryPresentation(
     action: "send" as const,
     busy: false,
     disabled: state === "send-disabled",
-    icon: intent && state === "send-ready"
-      ? sendHorizontalMorphIcon
-      : sendMorphIcon,
-    iconState: intent && state === "send-ready" ? "send-intent" : "send",
+    icon: arrowUpMorphIcon,
+    iconState: "send",
     label: "Send message",
   };
 }
@@ -98,11 +93,11 @@ export function ComposerSendActions({
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }): React.JSX.Element {
-  const [intent, setIntent] = useState(false);
   const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
-    setQueueHost(primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
+    const composer = primaryRef.current?.closest<HTMLElement>(".composer");
+    setQueueHost(composer?.querySelector<HTMLElement>(".composer-queue-slot") ?? composer ?? null);
   }, [conversationId]);
   const focusedElement = document.activeElement;
   const focusedGroup = focusedElement?.closest(".composer-actions");
@@ -114,7 +109,7 @@ export function ComposerSendActions({
     if (group !== focusedGroup || document.activeElement !== document.body) return;
     if (focusedAction === "primary") primaryRef.current?.focus();
   }, [focusedAction, focusedGroup]);
-  const presentation = primaryPresentation(primaryAction, intent);
+  const presentation = primaryPresentation(primaryAction);
   return (
     <>
       <Suspense fallback={null}>
@@ -131,23 +126,17 @@ export function ComposerSendActions({
           onReleaseAttachment={onReleaseAttachment}
         />
       </Suspense>
-      <button
+      <TooltipButton
         ref={primaryRef}
-        type="button"
+        tooltip={presentation.label}
         aria-label={presentation.label}
-        title={presentation.label}
         className={`icon-button send-button${
           presentation.action !== "send" ? " stop-button" : ""
         }${presentation.iconState === "sending" ? " send-button-loading" : ""}`}
         data-composer-action-state={primaryAction}
         data-motion-state={presentation.iconState}
         aria-busy={presentation.busy}
-        onPointerEnter={() => setIntent(true)}
-        onPointerLeave={() => setIntent(false)}
-        onFocus={() => setIntent(true)}
-        onBlur={() => setIntent(false)}
         onClick={() => {
-          setIntent(false);
           if (presentation.action === "stop") void onStop();
           else void onSubmit();
         }}
@@ -159,7 +148,7 @@ export function ComposerSendActions({
           iconState={presentation.iconState}
           size={16}
         />
-      </button>
+      </TooltipButton>
     </>
   );
 }

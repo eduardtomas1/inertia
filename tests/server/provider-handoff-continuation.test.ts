@@ -75,7 +75,7 @@ async function fixture() {
       harnessIdFor: (input: { harnessId: string }) => input.harnessId,
     } as unknown as TurnProviderRuntime,
     hooks: { broadcast: () => undefined, broadcastSnapshot: () => undefined, providerInfo: () => [] },
-    id: () => `handoff-${++sequence}`,
+    id: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     now: tick,
     clock: () => new Date(clock),
   });
@@ -215,8 +215,8 @@ describe("provider handoff continuation", () => {
     expect(prompt).toContain("CLAUDE_REPLY_SENTINEL: the exporter now writes UTF-8.");
     expect(prompt).toContain("Continue on Codex.");
     expect(prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
-    expect(prompt).toContain("inertia-provider-handoff-files");
-    expect(prompt).toContain("src/legacy-export.ts");
+    expect(prompt).toContain('"content":{"files":["A src/export.ts +43 -1","M src/legacy-export.ts +2 -5"]}');
+    expect(prompt).toContain('"moved":"from Claude by the user\'s choice"');
     expect(f.store.turnExecutionManifest(handoff.queued.turn.id)?.references.map(({ label }) => label))
       .toContain(PROVIDER_HANDOFF_FILES_LABEL);
   });
@@ -444,6 +444,78 @@ describe("provider handoff continuation", () => {
     expect(f.store.conversation(f.conversation.id)).toMatchObject({ providerSessionId: null, continuationIdentity: null });
   });
 
+  it("counts a reference to this chat as the handoff's restored history and keeps it for later sessions", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    await f.switchProvider("codex");
+    const packet = f.store.contextPackets.create({
+      sourceConversationId: f.conversation.id,
+      targetConversationId: f.conversation.id,
+      acknowledgedWorkspaceDifference: false,
+    });
+    const resolved = f.resolve({
+      content: "Continue on Codex.",
+      context: { conversationContextPacketIds: [packet.id] },
+      contextRequestId: "22222222-2222-4222-8222-222222222222",
+    });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const prompt = resolved.adopt(queued).active.providerInput.prompt;
+    expect(queued.turn).toMatchObject({
+      continuationReasonCode: "harness-changed",
+      sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
+    });
+    expect(prompt.split("CLAUDE_REPLY_SENTINEL")).toHaveLength(2);
+    expect(prompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(prompt).toContain("src/legacy-export.ts");
+    f.complete(queued.turn.id, "CODEX_DEFAULT_REPLY", "codex-session");
+    f.store.updateConversation(f.conversation.id, { providerSessionId: null, continuationIdentity: null });
+
+    const later = f.begin("Pick it back up on Codex.");
+    expect(later.queued.turn.continuationReasonCode).toBe("missing-continuation-identity");
+    expect(later.queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 6, omittedMessageCount: 0 });
+    expect(later.providerInput.prompt).toContain("CLAUDE_REPLY_SENTINEL");
+    expect(later.providerInput.prompt).toContain("CODEX_DEFAULT_REPLY");
+  });
+
+  it("lists the changed files when a rejected Claude resume restarts on a fresh session", async () => {
+    const f = await fixture();
+    f.seedClaudeHistory();
+    const resolved = f.resolve({ content: "Keep going on Claude." });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    const active = resolved.adopt(queued).active;
+    expect(active.providerInput.sessionId).toBe("claude-session");
+    const fresh = active.freshSessionRequest!(queued.message.id);
+    expect(fresh.sessionRecovery).toEqual({ restoredMessageCount: 4, omittedMessageCount: 0 });
+    expect(fresh.executionPrompt).toContain("CLAUDE_REPLY_SENTINEL");
+    expect(fresh.executionPrompt).toContain(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(fresh.executionPrompt).toContain("src/legacy-export.ts");
+  });
+
+  it("carries a reference used before the switch to the new provider", async () => {
+    const f = await fixture();
+    const source = f.store.createConversation(f.conversation.projectId, "Export encoding", { activate: false });
+    f.store.createMessage(source.id, "REFERENCE_SENTINEL: the writer opened latin1.", "assistant", [], null, f.tick());
+    const packet = f.store.contextPackets.create({
+      sourceConversationId: source.id, targetConversationId: f.conversation.id, acknowledgedWorkspaceDifference: false,
+    });
+    const resolved = f.resolve({
+      content: "Port the encoding fix.",
+      context: { conversationContextPacketIds: [packet.id] },
+      contextRequestId: "33333333-3333-4333-8333-333333333333",
+    });
+    const queued = f.store.beginAgentTurn(resolved.input);
+    expect(resolved.adopt(queued).active.providerInput.prompt).toContain("REFERENCE_SENTINEL");
+    f.complete(queued.turn.id, "Ported the writer change.", "claude-session");
+    await f.switchProvider("codex");
+
+    const handoff = f.begin("Also add the opt-in BOM.");
+    expect(handoff.queued.turn.sessionRecovery).toEqual({ restoredMessageCount: 2, omittedMessageCount: 0 });
+    expect(handoff.providerInput.prompt).toContain("REFERENCE_SENTINEL");
+    expect(handoff.providerInput.prompt).toContain("[referenced chat: Export encoding]");
+    expect(f.store.turnExecutionManifest(handoff.queued.turn.id)?.references.map(({ label }) => label))
+      .toContain("Chat context · Export encoding · 1 message");
+  });
+
   it("hands the chat back to the original provider with the full history", async () => {
     const f = await fixture();
     f.seedClaudeHistory();
@@ -479,14 +551,9 @@ describe("provider handoff files block", () => {
     f.store.createTurnGitArtifact({ turnId: failedCapture.queued.turn.id, status: "failed" });
     const block = f.filesBlock()!;
     expect(block.label).toBe(PROVIDER_HANDOFF_FILES_LABEL);
+    expect(block.structured).toBe(true);
     expect(JSON.parse(block.content)).toEqual({
-      kind: "inertia-provider-handoff-files",
-      about: "Files this chat's earlier turns changed, from the local Git records; paths only, no contents.",
-      files: [
-        { path: "src/export.ts", status: "added", insertions: 43, deletions: 1 },
-        { path: "src/legacy-export.ts", status: "modified", insertions: 2, deletions: 5 },
-      ],
-      omittedFileCount: 0,
+      files: ["A src/export.ts +43 -1", "M src/legacy-export.ts +2 -5"],
     });
   });
 
@@ -510,11 +577,8 @@ describe("provider handoff files block", () => {
     f.complete(edited.queued.turn.id, "Edited it.", "claude-session", [
       changedFile("src/restored.ts", "modified", 1, 1),
     ]);
-    const parsed = JSON.parse(f.filesBlock()!.content) as { files: Array<{ path: string; status: string }> };
-    expect(parsed.files.map(({ path, status }) => ({ path, status }))).toEqual([
-      { path: "src/restored.ts", status: "added" },
-      { path: "src/scratch.ts", status: "deleted" },
-    ]);
+    const parsed = JSON.parse(f.filesBlock()!.content) as { files: string[] };
+    expect(parsed.files).toEqual(["A src/restored.ts +9 -5", "D src/scratch.ts +5 -5"]);
   });
 
   it("never costs the restored messages their place and joins only in the room they leave", async () => {
@@ -552,11 +616,11 @@ describe("provider handoff files block", () => {
       changedFile(`src/generated/${"nested/".repeat(8)}file-${index}.ts`, "added", 1, 0));
     f.complete(turn.queued.turn.id, "Generated the files.", "claude-session", many);
     const block = f.filesBlock()!;
-    const parsed = JSON.parse(block.content) as { files: unknown[]; omittedFileCount: number };
+    const parsed = JSON.parse(block.content) as { files: unknown[]; omittedFiles: number };
     expect(Buffer.byteLength(block.content)).toBeLessThanOrEqual(MAX_PROVIDER_HANDOFF_FILES_BYTES);
     expect(parsed.files.length).toBeGreaterThan(0);
     expect(parsed.files.length).toBeLessThan(MAX_PROVIDER_HANDOFF_FILES);
-    expect(parsed.files.length + parsed.omittedFileCount).toBe(MAX_PROVIDER_HANDOFF_FILES);
+    expect(parsed.files.length + parsed.omittedFiles).toBe(MAX_PROVIDER_HANDOFF_FILES);
   });
 
   describe("usage-limit snooze", () => {

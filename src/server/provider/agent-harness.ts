@@ -21,6 +21,7 @@ import type {
   ProviderStatusEvent,
   ProviderSubagentEvent,
   ProviderTextEvent,
+  ProviderTextBoundaryEvent,
   ProviderTextSnapshotEvent,
   ProviderUsageEvent,
   ProviderHarnessLaunchConfiguration,
@@ -217,6 +218,7 @@ export type AgentHarnessCapabilities =
 export type AgentHarnessCoreEvent =
   | ProviderTextEvent
   | ProviderTextSnapshotEvent
+  | ProviderTextBoundaryEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
@@ -358,6 +360,7 @@ export interface AgentHarnessEmitter {
   ) => void;
   text: (text: string, itemId?: string) => void;
   textSnapshot: (itemId: string, text: string) => void;
+  textBoundary: () => void;
   activity: (
     kind: ProviderActivityEvent["kind"],
     phase: ProviderActivityEvent["phase"],
@@ -412,6 +415,7 @@ export function createAgentHarnessEmitter(
       itemId,
       text,
     }),
+    textBoundary: () => emit({ ...base, type: "text-boundary" }),
     activity: (kind, phase, label, detail = {}) => {
       const safeLabel = label
         .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")

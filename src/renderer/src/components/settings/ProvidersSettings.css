@@ -26,13 +26,13 @@
   grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
   align-items: stretch;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-content);
-  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
 }
 
 .settings-card > .provider-settings-heading + .provider-settings-shell {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .provider-settings-rail {
@@ -40,8 +40,8 @@
   min-width: 0;
   align-content: start;
   margin-bottom: -1px;
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 55%, var(--surface-strong));
+  border-right: 1px solid var(--line);
+  background: var(--surface);
 }
 
 .provider-settings-list-row {
@@ -52,22 +52,18 @@
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
   color: var(--text);
   background: transparent;
   text-align: left;
 }
 
 .provider-settings-list-row:hover:not(.is-selected) {
-  background: color-mix(in srgb, var(--selected-surface) 50%, transparent);
+  background: var(--fill);
 }
 
 .provider-settings-list-row.is-selected {
-  background: var(--selected-surface);
-}
-
-.provider-settings-list-row:focus-visible {
-  outline-offset: -2px;
+  background: var(--fill-strong);
 }
 
 .provider-settings-list-row > :first-child {
@@ -86,8 +82,8 @@
 .provider-settings-list-copy > strong,
 .provider-settings-editor-copy > strong {
   min-width: 0;
-  font-size: var(--ui-font-secondary);
-  font-weight: 620;
+  font-size: var(--text-sm);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
@@ -97,10 +93,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-micro);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
-  line-height: 1.4;
+  line-height: var(--leading-chrome);
 }
 
 .provider-state > svg {
@@ -109,7 +105,7 @@
 }
 
 .provider-state.is-ready > svg {
-  color: var(--success);
+  color: var(--status-completed);
 }
 
 .provider-state.is-attention > svg {
@@ -156,13 +152,13 @@
 }
 
 .provider-settings-editor-copy > strong {
-  font-size: calc(var(--ui-font-secondary) + 2px);
+  font-size: var(--text-base);
 }
 
 .provider-settings-editor-copy > small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
 }
 
@@ -175,7 +171,7 @@
   min-width: 0;
   gap: 2px;
   padding: 0 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 
 .provider-settings-tabs button {
@@ -187,16 +183,12 @@
   padding: 0 10px;
   color: var(--text-muted);
   background: transparent;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .provider-settings-tabs button:hover,
 .provider-settings-tabs button.is-active {
   color: var(--text);
-}
-
-.provider-settings-tabs button:focus-visible {
-  outline-offset: -2px;
 }
 
 .provider-settings-tabs button.is-active::after {
@@ -211,7 +203,7 @@
 
 .provider-settings-tabs button small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -223,7 +215,7 @@
 }
 
 .provider-settings-editor-body > * + * {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 
 .provider-settings-binary-control {
@@ -238,7 +230,7 @@
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-family: var(--font-mono);
   text-overflow: ellipsis;
 }
@@ -254,8 +246,8 @@
   margin: 0;
   padding: 12px 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .provider-settings-maintenance .provider-maintenance-notice {
@@ -292,15 +284,15 @@
 }
 
 .provider-settings-maintenance .provider-maintenance-notice small {
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .provider-settings-maintenance .provider-maintenance-command {
-  color: var(--text-soft);
+  color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -320,7 +312,7 @@
   margin: 4px 0 12px;
   padding: 0;
   list-style: none;
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .provider-settings-facts > div,
@@ -340,7 +332,7 @@
 .provider-settings-features > li > span:last-child {
   min-width: 0;
   margin: 0;
-  color: var(--text-soft);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
@@ -348,8 +340,8 @@
 .provider-settings-privacy-note {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .provider-settings-features-note {
@@ -377,36 +369,36 @@
 
 .provider-settings-model-row strong {
   min-width: 0;
-  font-size: var(--ui-font-secondary);
-  font-weight: 620;
+  font-size: var(--text-sm);
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 .provider-settings-model-row > span small,
 .provider-settings-model-row > small {
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
 }
 
 .provider-settings-model-row code {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--ui-font-micro);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
 .provider-settings-model-row p {
   margin: 0;
-  color: var(--text-soft);
-  font-size: var(--ui-font-micro);
-  line-height: 1.45;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .provider-settings-empty {
   margin: 0;
   padding: 16px;
   color: var(--text-muted);
-  font-size: var(--ui-font-secondary);
+  font-size: var(--text-sm);
 }
 
 .provider-settings-editor-body > .provider-settings-empty {
@@ -421,7 +413,7 @@
   .provider-settings-rail {
     margin-bottom: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--line);
   }
 
   .provider-settings-rail:empty {

@@ -1,4 +1,4 @@
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { CircleAlert, RefreshCw } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -482,7 +482,7 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
               disabled={loading || status !== "online"}
               onClick={() => setRefreshVersion((version) => version + 1)}
             >
-              <RefreshCw size={13} aria-hidden="true" />
+              <RefreshCw size={14} aria-hidden="true" />
             </button>
           </div>
         </header>
@@ -490,7 +490,7 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
         {loading && <UsageSkeleton />}
         {!loading && error && (
           <div className="usage-error" role="alert">
-            <AlertCircle size={17} aria-hidden="true" />
+            <CircleAlert size={16} aria-hidden="true" />
             <span><strong>Usage could not be loaded</strong><small>{error}</small></span>
             <button type="button" onClick={() => setRefreshVersion((version) => version + 1)} disabled={status !== "online"}>Try again</button>
           </div>

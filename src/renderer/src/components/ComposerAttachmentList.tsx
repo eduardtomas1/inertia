@@ -63,10 +63,10 @@ export function ComposerAttachmentList({
                       />
                     )
                   : previewKind === "spreadsheet"
-                    ? <FileSpreadsheet size={19} />
+                    ? <FileSpreadsheet size={16} />
                     : previewKind === "file"
-                      ? <File size={19} />
-                      : <FileText size={19} />}
+                      ? <File size={16} />
+                      : <FileText size={16} />}
               </span>
               <span className="composer-attachment-copy">
                 <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
@@ -101,7 +101,7 @@ export function ComposerAttachmentList({
                 disabled={disabled || pending}
                 onClick={() => onRemove(attachment)}
               >
-                <X size={12} aria-hidden="true" />
+                <X size={14} aria-hidden="true" />
                 <span>Remove</span>
               </button>
             </li>

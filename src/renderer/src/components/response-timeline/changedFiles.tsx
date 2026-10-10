@@ -12,6 +12,7 @@ import {
   type TurnGitArtifactSummary,
 } from "../../utils/responseTimeline";
 import { sourceLanguageForFile } from "@shared/source-language";
+import { TooltipButton } from "../TooltipButton";
 import { useAnchoredDetailsToggle } from "./activity";
 import type { ResponseTimelineProps } from "./types";
 
@@ -39,7 +40,7 @@ export function ChangedFilesSummary({
         data-turn-jump-target="artifact"
         tabIndex={-1}
       >
-        <Files size={13} aria-hidden="true" />
+        <Files size={14} aria-hidden="true" />
         <span><strong>Capturing changes…</strong><small>Git history will appear here when ready.</small></span>
       </div>
     );
@@ -56,7 +57,6 @@ export function ChangedFilesSummary({
         data-turn-jump-target="artifact"
         tabIndex={-1}
       >
-        <TriangleAlert size={13} aria-hidden="true" />
         <span>
           <strong>Turn changes unavailable</strong>
           <small>{artifact.failureReason ?? "No authoritative Git snapshot was captured for this turn."}</small>
@@ -83,7 +83,7 @@ export function ChangedFilesSummary({
         aria-controls={detailsId}
         {...anchorToggleHandlers}
       >
-        <Files size={13} aria-hidden="true" />
+        <Files size={14} aria-hidden="true" />
         <span className="turn-changed-files-summary-copy">
           <strong>{artifact.files.length} {artifact.files.length === 1 ? "file" : "files"} changed</strong>
           <small>
@@ -93,13 +93,13 @@ export function ChangedFilesSummary({
         </span>
         <span className="turn-changed-files-toggle">
           {expanded ? "Hide" : "View"}
-          <ChevronDown size={13} aria-hidden="true" />
+          <ChevronDown size={14} aria-hidden="true" />
         </span>
       </summary>
       <div className="turn-changed-files-body" id={detailsId}>
         {completenessWarning && (
           <p className="turn-changed-files-warning">
-            <TriangleAlert size={12} aria-hidden="true" />
+            <TriangleAlert size={14} aria-hidden="true" />
             <span>{completenessWarning}</span>
           </p>
         )}
@@ -113,28 +113,26 @@ export function ChangedFilesSummary({
                 role="listitem"
                 data-language-family={language.family}
               >
-                <button
-                  type="button"
+                <TooltipButton
                   disabled={!patchAvailable}
-                  title={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
+                  tooltip={patchAvailable ? `Open this turn's diff for ${file.path}` : "The stored patch is unavailable"}
                   onClick={() => props.onOpenTurnDiff(artifact.turnId, file.path)}
                 >
                   <FileCode2
                     className="file-language-icon"
-                    size={13}
+                    size={14}
                     aria-hidden="true"
                   />
                   <code>{file.path}</code>
                   <small>{file.status} · +{file.insertions} −{file.deletions}</small>
-                </button>
-                <button
-                  type="button"
-                  title={`Open ${file.path}`}
+                </TooltipButton>
+                <TooltipButton
+                  tooltip={`Open ${file.path}`}
                   aria-label={`Open ${file.path}`}
                   onClick={() => props.onOpenTurnFile(file.path)}
                 >
-                  <ExternalLink size={12} aria-hidden="true" />
-                </button>
+                  <ExternalLink size={14} aria-hidden="true" />
+                </TooltipButton>
               </span>
             );
           })}
@@ -142,11 +140,11 @@ export function ChangedFilesSummary({
         {artifact.files.length > 12 && <p className="turn-changed-files-overflow">And {artifact.files.length - 12} more files.</p>}
         <div className="turn-changed-files-actions">
           <button type="button" disabled={!patchAvailable} onClick={() => props.onOpenTurnDiff(artifact.turnId)}>
-            <GitCompareArrows size={12} aria-hidden="true" />Open exact turn diff
+            <GitCompareArrows size={14} aria-hidden="true" />Open exact turn diff
           </button>
           {previousTurnId && (
             <button type="button" onClick={() => props.onCompareTurnArtifacts(previousTurnId, artifact.turnId)}>
-              <GitCompareArrows size={12} aria-hidden="true" />Compare with previous turn
+              <GitCompareArrows size={14} aria-hidden="true" />Compare with previous turn
             </button>
           )}
         </div>

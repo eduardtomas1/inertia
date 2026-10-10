@@ -1,4 +1,4 @@
-import { Check, Download, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
+import { Download, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
 import type { UpdateIconState } from "./appUpdatePresentation";
 
 export function UpdateStatusIcon({ state, percent, animate, onIteration }: {
@@ -12,7 +12,7 @@ export function UpdateStatusIcon({ state, percent, animate, onIteration }: {
     </svg><Download size={16} />
   </span>;
   if (state === "downloaded") return <span className="update-status-icon" aria-hidden="true">
-    <RotateCw size={16} /><span className="update-ready-badge"><Check size={8} strokeWidth={3} /></span>
+    <RotateCw size={16} />
   </span>;
   if (state === "available") return <span className="update-status-icon" aria-hidden="true"><Download size={16} /><span className="update-available-dot" /></span>;
   if (state === "attention") return <TriangleAlert size={16} aria-hidden="true" />;

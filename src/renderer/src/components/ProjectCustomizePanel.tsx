@@ -75,7 +75,7 @@ export function ProjectCustomizePanel({ project, headingId, onBack, onUpdate, on
       <h3>Icon</h3>
       <div className="project-customize-icons">
         <ProjectIconPicker preferences={preferences} onChange={(icon) => apply({ icon })} />
-        <button type="button" className="project-customize-action" onClick={() => fileInput.current?.click()}><ImagePlus size={13} aria-hidden="true" />Import image…</button>
+        <button type="button" className="project-customize-action" onClick={() => fileInput.current?.click()}><ImagePlus size={14} aria-hidden="true" />Import image…</button>
         <input ref={fileInput} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
@@ -91,6 +91,6 @@ export function ProjectCustomizePanel({ project, headingId, onBack, onUpdate, on
     </div>
     {error && <p className="project-customize-error" role="alert">{error}</p>}
     {onOpenSettings && <button type="button" className="project-customize-action is-footer" onClick={() => onOpenSettings(project)}>
-      <Settings size={13} aria-hidden="true" />All project settings</button>}
+      <Settings size={14} aria-hidden="true" />All project settings</button>}
   </div>;
 }

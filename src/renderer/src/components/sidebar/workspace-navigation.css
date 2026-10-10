@@ -1,34 +1,49 @@
-.sidebar .sidebar-search-row {
+.sidebar-search-row {
   display: flex;
   align-items: center;
   gap: 2px;
 }
-.sidebar .sidebar-search-wrap {
-  flex: 1;
+.sidebar-search-wrap {
+  position: relative;
+  display: flex;
   min-width: 0;
-  height: 34px;
-  margin: 0;
+  height: 32px;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
   padding: 0 8px;
-  border: 0;
-  border-radius: 7px;
-}
-.sidebar .sidebar-search-wrap input {
-  font-size: 13px;
-}
-.sidebar .sidebar-search-row > .icon-button {
-  width: 28px;
-  height: 30px;
-  flex: 0 0 28px;
-}
-.sidebar .sidebar-search-row .multi-spawn-button {
-  margin: 0;
-  min-width: 28px;
-  min-height: 30px;
-  border: 0;
-  border-radius: 6px;
-  box-shadow: none;
-  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
+  background: transparent;
+}
+.sidebar-search-wrap input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-sm);
+}
+.sidebar-search-wrap input::placeholder {
+  color: var(--text-muted);
+}
+.sidebar-search-wrap input::-webkit-search-cancel-button {
+  display: none;
+}
+.sidebar-search-row > .icon-button,
+.search-clear {
+  width: 28px;
+  height: 28px;
+}
+.sidebar-search-row > .icon-button:not(:disabled):hover {
+  color: var(--text);
+  background: var(--fill);
+}
+.sidebar-project-navigation {
+  position: relative;
+  margin: 4px 0 12px;
 }
 .sidebar-project-scope {
   position: relative;
@@ -39,251 +54,154 @@
 .project-scope-trigger {
   display: flex;
   min-width: 0;
+  height: 32px;
   flex: 1;
   align-items: center;
   gap: 8px;
-  height: 34px;
   padding: 0 8px;
-  border-radius: 7px;
-  background: transparent;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
-  font-size: 13px;
+  background: transparent;
+  font-size: var(--text-sm);
   text-align: left;
+  transition:
+    background-color var(--dur-fast) var(--ease-fade),
+    color var(--dur-fast) var(--ease-fade);
 }
 .project-scope-trigger > span {
-  flex: 1;
   min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .project-scope-trigger:hover,
 .project-scope-trigger[aria-expanded="true"] {
-  background: var(--surface-hover);
   color: var(--text);
+  background: var(--fill);
 }
-.project-scope-trigger:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
+.project-scope-trigger > .lucide-chevron-down {
+  transition: transform var(--dur) var(--ease);
 }
-.sidebar .activity-thread {
-  min-height: 82px;
-  border-radius: 6px;
+.project-scope-trigger[aria-expanded="true"] > .lucide-chevron-down {
+  transform: rotate(180deg);
 }
-.sidebar .activity-thread.is-active {
-  border-color: transparent;
-  box-shadow: none;
-  background: color-mix(in srgb, var(--selected-surface) 65%, transparent);
-}
-.sidebar .activity-thread-select {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 5px;
-  padding: 9px 9px;
-}
-.sidebar .activity-thread-projectline {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  min-height: 16px;
-  color: var(--text-muted);
-}
-.sidebar .activity-project-icon {
-  flex: 0 0 15px;
-}
-.sidebar .activity-thread-project-meta {
-  display: block;
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11.5px;
-}
-.sidebar .activity-thread-title {
-  font-size: 13px;
-  font-weight: 520;
-  letter-spacing: -0.015em;
-}
-.sidebar .activity-thread.is-unread .activity-thread-title {
-  font-weight: 650;
-}
-.sidebar .work-thread-meta {
-  overflow: visible;
-  gap: 8px;
-  font-size: 10.5px;
-  min-height: 16px;
-}
-.sidebar .activity-thread-branch-meta {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-.sidebar .activity-thread-provider {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 17px;
-  height: 16px;
-  flex: 0 0 17px;
-  opacity: 0.72;
-}
-.sidebar .activity-thread-trailing {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  flex: 0 0 auto;
-  font-size: 10px;
-}
-.sidebar .activity-thread-trailing time {
-  font-size: 10px;
-}
-.sidebar .activity-thread-status-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: none;
-  font-size: 10px;
-  font-weight: 550;
-}
-.sidebar .activity-thread-menu-button {
-  top: 3px;
-  bottom: auto;
-  margin: 0;
-  height: 27px;
-}
-.sidebar .activity-thread .conversation-menu {
-  top: 31px;
-}
-.sidebar .work-thread-section > h2 {
-  font-size: 10px;
-  font-weight: 500;
-  opacity: 0.8;
-}
-.sidebar.is-compact .activity-thread {
-  min-height: 68px;
-}
-.sidebar.is-compact .activity-thread-select {
-  gap: 3px;
-  padding-block: 5px;
-}
-.sidebar.is-narrow .activity-thread-branch-meta {
-  display: flex;
-}
-.sidebar.is-wide .activity-thread-title {
-  font-size: 13px;
-}
-.sidebar.is-wide .work-thread-meta {
-  font-size: 10.5px;
-}
-.sidebar .sidebar-utility-footer {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding-top: 8px;
-  border-top-color: color-mix(in srgb, var(--border) 50%, transparent);
-}
-.sidebar-utility-footer .sidebar-destination {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
-  padding: 0;
-  place-items: center;
-  border-radius: 8px;
-}
-.sidebar-utility-footer .sidebar-destination > span {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-}
-.sidebar-utility-footer .sidebar-destination:has(.lucide-settings) {
-  order: -1;
-}
-.sidebar .sidebar-update-button {
-  position: relative;
-  margin-left: auto;
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-}
-@media (forced-colors: active) {
-  .sidebar .activity-thread.is-active {
-    border-color: Highlight;
-    background: Highlight;
-    color: HighlightText;
-  }
-  .sidebar .activity-thread.is-active .activity-thread-projectline {
-    color: HighlightText;
-  }
-}
-
-.sidebar .activity-thread-trailing time {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.sidebar .activity-idle-icon {
-  display: inline-flex;
-  opacity: 0.5;
-}
-
 .sidebar-scope-actions {
   position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
   z-index: 45;
+  top: calc(100% + var(--popover-offset));
+  right: 0;
+  left: 0;
+}
+.project-menu {
+  position: absolute;
+  z-index: 56;
+  top: calc(100% + var(--popover-offset));
+  right: 0;
+  width: 218px;
 }
 .sidebar-scope-actions .project-menu {
   position: static;
   width: 100%;
 }
-
-/* Animate transient surfaces, never recycled virtual rows. */
-.sidebar-scope-actions .project-menu {
-  transform-origin: top center;
-  animation: workspace-popover-in 150ms cubic-bezier(0.22, 1, 0.36, 1);
+.menu-check {
+  width: 14px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  text-align: center;
 }
-.project-scope-trigger {
-  transition:
-    background-color 120ms var(--motion-ease),
-    color 120ms var(--motion-ease);
+.sidebar-project-rename {
+  display: grid;
+  gap: 4px;
+  margin: -8px 0 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
 }
-.project-scope-trigger > .lucide-chevron-down {
-  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+.sidebar-project-rename label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
-.project-scope-trigger[aria-expanded="true"] > .lucide-chevron-down {
-  transform: rotate(180deg);
+.sidebar-project-rename > span {
+  display: flex;
+  gap: 4px;
 }
-@keyframes workspace-popover-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sidebar-scope-actions .project-menu {
-    animation: none;
-  }
-}
-
-.sidebar-project-navigation {
-  position: relative;
-  margin-top: 4px;
-  margin-bottom: 12px;
-}
-
-.sidebar .sidebar-search-row .multi-spawn-button:hover {
-  background: var(--surface-hover);
+.sidebar-project-rename input {
+  min-width: 0;
+  height: 28px;
+  flex: 1;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  outline: 0;
   color: var(--text);
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+}
+.sidebar-project-rename button {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  color: var(--accent-text);
+  background: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.project-list {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.sidebar-loading,
+.sidebar-empty {
+  display: flex;
+  min-height: 96px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.sidebar-footer .sidebar-destination {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  transition:
+    background-color var(--dur-fast) var(--ease-fade),
+    color var(--dur-fast) var(--ease-fade);
+}
+.sidebar-footer .sidebar-destination:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+.sidebar-footer .sidebar-destination.is-active,
+.sidebar-footer .sidebar-destination.is-open {
+  color: var(--text);
+  background: var(--fill-strong);
+}
+.sidebar-footer .sidebar-destination:has(.lucide-settings) {
+  order: -1;
+}
+.sidebar-scrim {
+  display: none;
+}
+.sidebar-footer > .sidebar-update-button {
+  margin-left: auto;
 }

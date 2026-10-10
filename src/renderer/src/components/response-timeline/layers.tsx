@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useLayoutEffect, useMemo, useState } from "react";
 import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
@@ -24,6 +24,7 @@ import {
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { messageContextMenu } from "./messageContextMenu";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { TooltipButton } from "../TooltipButton";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { AgentPixelGrid } from "../AgentPixelGrid";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
@@ -50,6 +51,10 @@ import {
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 import "./ConversationContextProvenance.css";
+
+const SentContextPreview = lazy(async () => ({
+  default: (await import("../composer/ComposerConversationContextCards")).ConversationContextPreviewCard,
+}));
 
 export function AgentPixelLoader({
   animated,
@@ -90,6 +95,7 @@ export function UserRequestLayer({
   const isDocumentLike = turn.userMessage.content.length >= 280;
   const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
   const [expanded, setExpanded] = useState(false);
+  const [openPacketId, setOpenPacketId] = useState<string | null>(null);
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -98,10 +104,16 @@ export function UserRequestLayer({
     setExpanded((current) => !current);
     window.requestAnimationFrame(() => onAfterToggle?.());
   };
+  const togglePacket = (packetId: string): void => {
+    onBeforeToggle?.();
+    setOpenPacketId((current) => current === packetId ? null : packetId);
+    window.requestAnimationFrame(() => onAfterToggle?.());
+  };
+  const onContextCommand = props.onConversationContextCommand;
   const contextPackets = props.contextPackets?.filter(
     ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
   ) ?? [];
-  const sessionRecovery = sessionRecoveryDetail(turn.agentTurn, turn.providerChanged === true);
+  const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
@@ -114,13 +126,13 @@ export function UserRequestLayer({
       tabIndex={-1}
       {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
-      <div className="message-meta">
-        <span>You</span>
-        <MessageOrigin message={turn.userMessage} />
-        {props.showTimestamps && <time dateTime={turn.userMessage.createdAt} title={formatFullDateTime(turn.userMessage.createdAt)}>{formatMessageTime(turn.userMessage.createdAt)}</time>}
-        {turn.checkpoint && <button type="button" className="message-revert" title={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={11} />Revert</button>}
-        {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
-      </div>
+      {(turn.userMessage.privateConnectDeviceId || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
+        <div className="message-meta">
+          <MessageOrigin message={turn.userMessage} />
+          {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
+          {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
+        </div>
+      )}
       <div
         className={clsx("message-body", collapsible && !expanded && "is-collapsed")}
         data-request-content={collapsible ? "collapsible" : "complete"}
@@ -144,7 +156,7 @@ export function UserRequestLayer({
       {sessionRecovery && (
         <div className="sent-context" aria-label="Provider session">
           <span data-session-recovery="">
-            <MessagesSquare size={13} aria-hidden="true" />
+            <MessagesSquare size={14} aria-hidden="true" />
             <span>
               <strong>New provider session</strong>
               <small title={sessionRecovery}>{sessionRecovery}</small>
@@ -157,9 +169,9 @@ export function UserRequestLayer({
           {contextPackets.map((packet) => {
             const own = isOwnConversationContext(packet);
             const count = `${packet.messageCount} ${packet.messageCount === 1 ? "message" : "messages"}${packet.droppedMessageCount > 0 ? ` · ${packet.droppedMessageCount} omitted` : ""}`;
-            return (
-              <span key={packet.id} data-source-state={packet.sourceState}>
-                <MessagesSquare size={13} aria-hidden="true" />
+            const receipt = (
+              <>
+                <MessagesSquare size={14} aria-hidden="true" />
                 <span>
                   <strong>
                     {own ? "Earlier messages from this chat" : `Context from ${packet.sourceConversationTitle}`}
@@ -172,10 +184,36 @@ export function UserRequestLayer({
                         : `${packet.sourceProjectName} · ${count}${packet.workspaceRelation === "different-workspace" ? " · different workspace" : ""}`}
                   </small>
                 </span>
+              </>
+            );
+            return onContextCommand ? (
+              <button
+                key={packet.id}
+                type="button"
+                data-source-state={packet.sourceState}
+                aria-expanded={openPacketId === packet.id}
+                onClick={() => togglePacket(packet.id)}
+              >
+                {receipt}
+              </button>
+            ) : (
+              <span key={packet.id} data-source-state={packet.sourceState}>
+                {receipt}
               </span>
             );
           })}
         </div>
+      )}
+      {onContextCommand && openPacketId && contextPackets.some(({ id }) => id === openPacketId) && (
+        <Suspense fallback={null}>
+          <SentContextPreview
+            key={openPacketId}
+            packetId={openPacketId}
+            targetConversationId={props.conversationId}
+            onCommand={onContextCommand}
+            onDismiss={() => togglePacket(openPacketId)}
+          />
+        </Suspense>
       )}
     </article>
   );
@@ -247,9 +285,11 @@ export function AgentExecutionLayer({
                 conversationId={props.conversationId}
               />
               <span className="turn-working-copy">
-                <strong>{activePresentation.label}</strong>
+                <strong className={activePresentation.detail ? "visually-hidden" : undefined}>
+                  {activePresentation.label}
+                </strong>
                 {activePresentation.detail && (
-                  <small className="turn-working-detail-chip" aria-hidden="true">
+                  <small className="turn-working-detail" aria-hidden="true">
                     {activePresentation.detail}
                   </small>
                 )}
@@ -395,15 +435,17 @@ export function FinalAnswerDocument({
       tabIndex={-1}
       {...messageContextMenu(presentation.terminalAnswer, presentation.content)}
     >
-      <header
-        className="final-answer-identity"
-        aria-label="Historical answer identity"
-        data-identity-source="persisted-model-selection"
-      >
-        <span data-final-answer-identity="historical-model-selection">
-          {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
-        </span>
-      </header>
+      {turn.providerChanged && (
+        <header
+          className="final-answer-identity"
+          aria-label="Historical answer identity"
+          data-identity-source="persisted-model-selection"
+        >
+          <span data-final-answer-identity="historical-model-selection">
+            {finalAnswerIdentityLabel(turn.agentTurn.modelSelection)}
+          </span>
+        </header>
+      )}
       <ResponseMarkdown
         content={presentation.content}
         projectRoot={props.projectRoot}
@@ -435,7 +477,19 @@ export function SupportingLedgerLayer({
     () => consolidatesSettledWork ? buildTurnExecutionStream(turn) : [],
     [consolidatesSettledWork, turn],
   );
-  if (turn.isActive) return null;
+  if (turn.isActive) {
+    return props.showTimestamps
+      ? (
+          <section
+            className="turn-supporting-ledger"
+            aria-label="Supporting turn ledger"
+            data-turn-layer="supporting-ledger"
+          >
+            <TurnMetadata turn={turn} terminalAnswer={null} showTimestamp />
+          </section>
+        )
+      : null;
+  }
   const includesReasoning = consolidatesSettledWork
     && props.showThinking
     && Boolean(turn.reasoning?.content);
@@ -445,7 +499,9 @@ export function SupportingLedgerLayer({
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
-  if (!turn.terminalAssistantMessage && !showChangedFiles) return null;
+  const showsFooter = turn.terminalAssistantMessage !== null
+    || turn.agentTurn.status !== "completed";
+  if (!showsFooter && !showChangedFiles) return null;
 
   return (
     <section
@@ -453,7 +509,7 @@ export function SupportingLedgerLayer({
       aria-label="Supporting turn ledger"
       data-turn-layer="supporting-ledger"
     >
-      {turn.terminalAssistantMessage && (
+      {showsFooter && (
         <TurnMetadata
           turn={turn}
           terminalAnswer={turn.terminalAssistantMessage}

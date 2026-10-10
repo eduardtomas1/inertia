@@ -31,7 +31,7 @@ describe("completed-turn spacing", () => {
       .toContain("min-height: 32px");
     expect(cssBlock(".turn-meta-primary {")).toContain("min-height: 28px");
     expect(css).toContain(
-      ".turn-action,\n.timeline-follow-controls button,\n.turn-changed-files > summary,",
+      ".turn-action,\n.turn-changed-files > summary,",
     );
     expect(css).toContain("min-height: var(--ui-control-height)");
   });

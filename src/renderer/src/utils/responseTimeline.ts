@@ -27,6 +27,7 @@ export {
   type ActivityWorkKind,
 } from "./response-timeline/activity-summary";
 export {
+  answerTailCommentary,
   buildResponseTimeline,
   shouldConsolidateSettledWorkIntoRunDetails,
   stabilizeResponseTimeline,
@@ -43,6 +44,7 @@ export {
   turnQueueElapsedMs,
   turnStatusLabel,
   turnTimingLabels,
+  workStatusLabel,
   workSummaryLabel,
 } from "./response-timeline/timing";
 export {

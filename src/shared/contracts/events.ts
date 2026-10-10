@@ -104,6 +104,7 @@ export type RuntimeMutationEvent =
       turnId: string;
       /** Exact durable assistant projection after an authoritative correction. */
       message: ChatMessage | null;
+      after?: string;
     }
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
   | { type: "agent.commentary.persisted"; message: ChatMessage }

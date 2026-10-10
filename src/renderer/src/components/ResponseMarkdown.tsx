@@ -14,11 +14,10 @@ import {
   Check,
   Code2,
   Copy,
+  Database,
   FileCode2,
-  Table2,
-  WrapText,
 } from "lucide-react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type ExtraProps } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -49,6 +48,7 @@ import {
   MarkdownImageSchedulerProvider,
   useMarkdownImageSchedule,
 } from "./markdown/MarkdownImageScheduler";
+import { TooltipButton } from "./TooltipButton";
 
 export const RESPONSE_MARKDOWN_TAG_NAMES = [
   "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
@@ -426,17 +426,17 @@ export function tableAsMarkdown(rows: string[][]): string {
   ].join("\n");
 }
 
-function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.JSX.Element {
+function MarkdownTable({ children, node: _node, ...props }: ComponentProps<"table"> & ExtraProps): React.JSX.Element {
   const { announceCopyFeedback } = useMarkdownRenderContext();
   const rows = useMemo(() => tableRowsFromNode(children), [children]);
   const markdownCopy = useCopiedState();
   const csvCopy = useCopiedState();
   return (
     <div className="response-table-shell">
+      <div className="response-table-scroll"><table {...props}>{children}</table></div>
       <div className="response-table-toolbar">
-        <span><Table2 size={13} />Table</span>
-        <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={12} /> : <Copy size={12} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
-        <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={12} /> : <Copy size={12} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
+        <button type="button" disabled={markdownCopy.pending} onClick={() => void markdownCopy.copy(tableAsMarkdown(rows))}>{markdownCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{markdownCopy.pending ? "Copying Markdown" : markdownCopy.copied ? "Copied Markdown" : "Markdown"}</span></button>
+        <button type="button" disabled={csvCopy.pending} onClick={() => void csvCopy.copy(tableAsCsv(rows))}>{csvCopy.copied ? <Check size={14} /> : <Copy size={14} />}<span>{csvCopy.pending ? "Copying CSV" : csvCopy.copied ? "Copied CSV" : "CSV"}</span></button>
       </div>
       {(markdownCopy.error || csvCopy.error) && (
         <p className="response-copy-error" role="alert">
@@ -452,7 +452,6 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">): React.J
               : ""}
         </span>
       )}
-      <div className="response-table-scroll"><table {...props}>{children}</table></div>
     </div>
   );
 }
@@ -564,7 +563,7 @@ function CodeBlock({
   );
   const fileLabel = (
     <>
-      <HeaderIcon size={13} />
+      <HeaderIcon size={14} />
       {meta.file ?? meta.label}
     </>
   );
@@ -579,10 +578,9 @@ function CodeBlock({
           ? <LocalFileLink path={fileTarget.path} url={fileTarget.url} className="response-code-file-link">{meta.file}</LocalFileLink>
           : fileTarget?.kind === "project" && onOpenProjectFile
           ? (
-              <button
-                type="button"
+              <TooltipButton
                 className="response-code-file-link"
-                title={`Open ${fileTarget.relativePath} in Files`}
+                tooltip={`Open ${fileTarget.relativePath} in Files`}
                 data-language-family={sourceLanguage.family}
                 onClick={() => {
                   if (fileTarget.literalPath) {
@@ -602,7 +600,7 @@ function CodeBlock({
                 }}
               >
                 {fileLabel}
-              </button>
+              </TooltipButton>
             )
           : (
               <span
@@ -611,7 +609,7 @@ function CodeBlock({
               >
                 {meta.file ? fileLabel : (
                   <>
-                    <HeaderIcon size={13} />
+                    <HeaderIcon size={14} />
                     {sourceLanguage.label === "Text"
                       ? meta.label
                       : sourceLanguage.label}
@@ -620,8 +618,8 @@ function CodeBlock({
               </span>
             )}
         <div>
-          <button type="button" aria-pressed={wrap} title={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><WrapText size={13} /><span>Wrap</span></button>
-          <button type="button" title="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={13} /> : <Copy size={13} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></button>
+          <TooltipButton aria-pressed={wrap} tooltip={wrap ? "Disable code wrapping" : "Wrap long code lines"} onClick={() => setWrap((value) => !value)}><span>Wrap</span></TooltipButton>
+          <TooltipButton tooltip="Copy code" disabled={clipboard.pending} onClick={() => void clipboard.copy(code)}>{clipboard.copied ? <Check size={14} /> : <Copy size={14} />}<span>{clipboard.pending ? "Copying" : clipboard.copied ? "Copied" : "Copy"}</span></TooltipButton>
         </div>
       </header>
       {clipboard.error && (
@@ -675,13 +673,14 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
     <a {...props} href={url}
       className={[props.className, "response-project-file-link"].filter(Boolean).join(" ")}
       data-language-family={language.family}
+      data-link-path={path}
       title={props.title ?? "Open local file"}
       onClick={(event) => {
         event.preventDefault();
         setError(false);
         void window.inertia.openExternal(url).catch(() => setError(true));
       }}>
-      <FileCode2 className="response-project-file-icon" size={13} aria-hidden="true" />
+      <FileCode2 className="response-project-file-icon" size={14} aria-hidden="true" />
       <span>{children}</span>
     </a>
     {error && <span className="response-copy-error" role="alert">The local file could not be opened.</span>}
@@ -691,8 +690,9 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
 function MarkdownLink({
   href = "",
   children,
+  node: _node,
   ...props
-}: ComponentProps<"a">): React.JSX.Element {
+}: ComponentProps<"a"> & ExtraProps): React.JSX.Element {
   const {
     projectRoot,
     projectId,
@@ -730,7 +730,7 @@ function MarkdownLink({
           fill="none"
           height="12"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.75"
           viewBox="0 0 24 24"
           width="12"
         >
@@ -749,7 +749,7 @@ function MarkdownLink({
     const projectLinkClass = [props.className, "response-project-file-link"]
       .filter(Boolean)
       .join(" ");
-    const FileIcon = language.id === "sql" ? Table2 : FileCode2;
+    const FileIcon = language.id === "sql" ? Database : FileCode2;
     const openLink = (): void => {
       if (onOpenProjectFile) {
         if (target.headingId) {
@@ -791,6 +791,7 @@ function MarkdownLink({
         {...props}
         className={projectLinkClass}
         data-language-family={language.family}
+        data-link-path={target.relativePath}
         href={href}
         onClick={(event) => {
           event.preventDefault();
@@ -801,7 +802,7 @@ function MarkdownLink({
       >
         <FileIcon
           className="response-project-file-icon"
-          size={13}
+          size={14}
           aria-hidden="true"
         />
         <span>{children}</span>
@@ -852,6 +853,14 @@ function MarkdownImage({
       }, applicationRendererScheme(globalThis.location?.protocol))
     : null;
   const schedule = useMarkdownImageSchedule(trustedSource);
+  const copyAttributes = {
+    "data-markdown-image-alt": unavailableAlt,
+    "data-markdown-image-source": target.kind === "external"
+      ? target.url
+      : target.kind === "project"
+        ? target.relativePath
+        : target.kind === "local" ? target.path : "",
+  };
   const placeholder = (reason: string, overflow = false): React.JSX.Element => {
     const message = unavailableAlt
       ? `${unavailableAlt} (${reason})`
@@ -863,6 +872,7 @@ function MarkdownImage({
         aria-label={unavailableAlt}
         data-markdown-image-overflow={overflow ? "true" : undefined}
         title={title}
+        {...copyAttributes}
       >
         {message}
       </span>
@@ -872,6 +882,7 @@ function MarkdownImage({
         aria-hidden="true"
         data-markdown-image-overflow={overflow ? "true" : undefined}
         title={title}
+        {...copyAttributes}
       >
         {message}
       </span>
@@ -885,6 +896,7 @@ function MarkdownImage({
       ref={schedule.shellRef}
       className="response-markdown-image-shell"
       data-markdown-image-state={schedule.state}
+      {...copyAttributes}
     >
       {schedule.state === "loading" || schedule.state === "loaded" ? (
         <img
@@ -904,17 +916,6 @@ function MarkdownImage({
           : placeholder("image waiting to load")}
     </span>
   );
-}
-
-function MarkdownParagraph(props: ComponentProps<"p">): React.JSX.Element {
-  const { streaming } = useMarkdownRenderContext();
-  return <p {...props}>{streaming
-    ? Children.map(props.children, (child) => typeof child === "string"
-      ? child.split(/(\s+)/u).map((word, index) => /\S/u.test(word)
-        ? <span className="response-stream-word" key={index}>{word}</span>
-        : word)
-      : child)
-    : props.children}</p>;
 }
 
 function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Element {
@@ -938,8 +939,9 @@ function MarkdownCodeBlock({ children }: ComponentProps<"pre">): React.JSX.Eleme
 
 function MarkdownDetails({
   children,
+  node: _node,
   ...props
-}: ComponentProps<"details">): React.JSX.Element {
+}: ComponentProps<"details"> & ExtraProps): React.JSX.Element {
   return <details {...props} className="response-details">{children}</details>;
 }
 
@@ -947,7 +949,6 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["components"]
 > = {
   a: MarkdownLink,
-  p: MarkdownParagraph,
   pre: MarkdownCodeBlock,
   table: MarkdownTable,
   details: MarkdownDetails,

@@ -779,7 +779,7 @@ export function startCodexAppServerRun(
     } catch (error) {
       if (error instanceof CodexRequestRefusedError) return false;
     }
-    throw new ProviderSteerDeliveryUnknownError();
+    throw new ProviderSteerDeliveryUnknownError(settled);
   };
 
   const setGoal = async (

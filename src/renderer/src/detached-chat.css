@@ -8,7 +8,24 @@
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  background: var(--conversation-canvas-surface);
+  background: var(--bg);
+}
+
+.detached-chat-shell.platform-win32 {
+  --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+}
+
+.detached-chat-shell:is(.platform-darwin, .platform-win32) .detached-chat-header {
+  min-height: 48px;
+  padding-block: 0;
+}
+
+.detached-chat-shell.platform-darwin .detached-chat-header {
+  padding-left: var(--mac-titlebar-brand-safe-inset);
+}
+
+.detached-chat-shell.platform-win32 .detached-chat-header {
+  padding-right: calc(8px + var(--titlebar-overlay-inset));
 }
 
 .detached-chat-header {
@@ -16,15 +33,13 @@
   z-index: 20;
   display: flex;
   min-width: 0;
-  min-height: 50px;
+  min-height: 48px;
   align-items: center;
   gap: 12px;
-  padding: 7px 8px 7px 14px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--glass-chrome);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  box-shadow: var(--glass-inset);
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg);
+  box-shadow: none;
 }
 
 .detached-chat-title {
@@ -38,12 +53,10 @@
 .detached-chat-title > span {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  font-weight: 680;
-  letter-spacing: .07em;
-  line-height: 1.1;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  line-height: var(--leading-chrome);
   text-overflow: ellipsis;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -69,10 +82,9 @@
   overflow: hidden;
   margin: 0;
   color: var(--text);
-  font-size: calc(var(--ui-font-secondary) + 1.5px);
-  font-weight: 670;
-  letter-spacing: -.012em;
-  line-height: 1.25;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-chrome);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -86,14 +98,13 @@
 }
 
 .detached-chat-window-actions .icon-button {
-  width: 30px;
-  height: 30px;
+  width: var(--control-height-small);
+  height: var(--control-height-small);
 }
 
 .detached-chat-window-actions .icon-button[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-  color: var(--accent-strong);
-  background: color-mix(in srgb, var(--accent-soft) 52%, transparent);
+  color: var(--text);
+  background: var(--fill-strong);
 }
 
 .detached-chat-content {
@@ -138,10 +149,10 @@
   align-items: center;
   gap: 12px;
   padding: 8px 10px 8px 14px;
-  border-top: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
+  border-top: 1px solid var(--line-strong);
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger-soft) 72%, var(--surface));
-  font-size: var(--ui-font-secondary);
+  background: var(--fill);
+  font-size: var(--text-sm);
 }
 
 .detached-chat-error > span {
@@ -156,10 +167,10 @@
   min-height: 27px;
   flex: 0 0 auto;
   padding: 0 9px;
-  border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--border));
-  border-radius: var(--radius-small);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
   color: var(--danger);
-  background: color-mix(in srgb, var(--surface-strong) 78%, transparent);
-  font-size: var(--ui-font-micro);
-  font-weight: 650;
+  background: var(--surface-raised);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }

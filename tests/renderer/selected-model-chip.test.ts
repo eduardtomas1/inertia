@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createElement, createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { Window } from "happy-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { SelectedModelChip } from "../../src/renderer/src/components/SelectedModelChip";
@@ -197,4 +198,39 @@ describe("selected model chip", () => {
 
     expect(block).toContain(".selected-model-chip:focus-visible");
   });
+
+  it("drops the label for the glyph alone when the composer is too narrow for a readable name", async () => {
+    const styles = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//gu, "");
+    const hidden: string[] = [];
+    for (const match of styles.matchAll(/@container \(max-width: 480px\) \{/gu)) {
+      const start = match.index! + match[0].length;
+      let depth = 1;
+      let end = start;
+      while (depth > 0) {
+        if (styles[end] === "{") depth += 1;
+        if (styles[end] === "}") depth -= 1;
+        end += 1;
+      }
+      for (const [, selectors, body] of styles.slice(start, end - 1).matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
+        if (/display:\s*none/u.test(body!)) hidden.push(selectors!.trim());
+      }
+    }
+    expect(hidden.length).toBeGreaterThan(0);
+    const window = new Window();
+    try {
+      const narrow = (html: string) => {
+        window.document.body.innerHTML = `<div class="model-chooser-anchor">${html}</div>`;
+        const label = window.document.querySelector(".selected-model-chip-label")!;
+        return hidden.some((selector) => [...window.document.querySelectorAll(selector)].includes(label));
+      };
+      expect(narrow(render())).toBe(true);
+      expect(narrow(render(route(), { showSourceGlyph: false }))).toBe(false);
+    } finally {
+      await window.happyDOM.close();
+    }
+  });
 });
+

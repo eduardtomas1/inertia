@@ -155,8 +155,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
 
     const dock = page.getByRole("region", { name: "Message composer" });
     const checkoutStrip = dock.getByRole("group", { name: "Chat checkout context" });
-    if (expectedCheckoutLabel === "Detached HEAD") await expect(checkoutStrip).toContainText(expectedCheckoutLabel);
-    else await expect(checkoutStrip).toHaveCount(0);
+    await expect(checkoutStrip).toContainText(expectedCheckoutLabel);
     await expectComposerEndsAtDock(dock);
     await expectComposerReadinessContained(dock);
     const model = dock.getByRole("button", { name: /^Choose model\./u });
@@ -290,6 +289,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.toolbarGroups).toEqual(["options", "actions"]);
     expect(wideGeometry.checkoutText.includes("Current checkout")).toBe(expectedCheckoutLabel === "Detached HEAD");
+    expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);

@@ -2,7 +2,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
-import { expectGitStatusInHeader } from "./support/composer-tools";
+import { expectComposerBranch } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   capturePageWebSockets,
@@ -744,7 +744,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     // rendered branch result before asking the runtime to prove that every
     // owned process has stopped; recycling during that refresh would be a
     // lifecycle race rather than the reconnect behavior this scenario owns.
-    await expectGitStatusInHeader(page);
+    await expectComposerBranch(page);
 
     const beforeReconnect = await runtimeSnapshot();
     const rendererGenerationBeforeReconnect = await page.locator(".app-shell")

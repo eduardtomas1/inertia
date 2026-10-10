@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
-import { composerCheckoutStripVisible } from "../../src/renderer/src/components/composer/ComposerToolbar";
+import { composerCheckoutStrip } from "../../src/renderer/src/components/composer/ComposerToolbar";
 import type { GitStatusSnapshot, Project } from "../../src/shared/contracts";
 import { composerProps, conversation } from "./composer-fixtures";
 
@@ -58,20 +58,22 @@ describe("composer shell", () => {
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", "Enter sends · Tab queues");
   });
 
-  it("shows the checkout strip only when the checkout differs from the project's own", () => {
+  it("shows the branch as one quiet line and the checkout context only when it differs", async () => {
     const base = {
       showCheckoutContext: true,
       scratchWorkspace: false,
       newChatProjectPicker: false,
       worktreePath: null,
       checkoutDiffers: false,
+      repository: true,
     };
-    expect(composerCheckoutStripVisible(base)).toBe(false);
-    expect(composerCheckoutStripVisible({ ...base, worktreePath: "/work/studio-worktree" })).toBe(true);
-    expect(composerCheckoutStripVisible({ ...base, checkoutDiffers: true })).toBe(true);
-    expect(composerCheckoutStripVisible({ ...base, scratchWorkspace: true, checkoutDiffers: true })).toBe(false);
-    expect(composerCheckoutStripVisible({ ...base, scratchWorkspace: true, newChatProjectPicker: true })).toBe(true);
-    expect(composerCheckoutStripVisible({ ...base, showCheckoutContext: false, worktreePath: "/work/x" })).toBe(false);
+    expect(composerCheckoutStrip(base)).toBe("branch");
+    expect(composerCheckoutStrip({ ...base, repository: false })).toBe("hidden");
+    expect(composerCheckoutStrip({ ...base, worktreePath: "/work/studio-worktree" })).toBe("context");
+    expect(composerCheckoutStrip({ ...base, checkoutDiffers: true })).toBe("context");
+    expect(composerCheckoutStrip({ ...base, scratchWorkspace: true, checkoutDiffers: true })).toBe("hidden");
+    expect(composerCheckoutStrip({ ...base, scratchWorkspace: true, newChatProjectPicker: true })).toBe("context");
+    expect(composerCheckoutStrip({ ...base, showCheckoutContext: false, worktreePath: "/work/x" })).toBe("hidden");
 
     const current = conversation("checkout-chat");
     const view = render(
@@ -79,19 +81,30 @@ describe("composer shell", () => {
         <Composer {...composerProps(current)} />
       </CheckoutBranchControlProvider>,
     );
-    expect(screen.queryByRole("group", { name: "Chat checkout context" })).toBeNull();
+    const quiet = screen.getByRole("group", { name: "Chat checkout context" });
+    expect(quiet).toHaveClass("is-branch-only");
+    expect(quiet).not.toHaveTextContent("Current checkout");
+    fireEvent.click(await within(quiet).findByRole("button", { name: "Branch main" }));
+    expect(within(quiet).getByRole("button", { name: "Branch main" })).toHaveAttribute("aria-expanded", "true");
     view.rerender(
       <CheckoutBranchControlProvider value={checkoutModel("feature/other")}>
         <Composer {...composerProps(current)} />
       </CheckoutBranchControlProvider>,
     );
     expect(screen.getByRole("group", { name: "Chat checkout context" })).toHaveTextContent(/^Current checkout/u);
+    expect(screen.getByRole("group", { name: "Chat checkout context" })).not.toHaveClass("is-branch-only");
     view.rerender(
       <CheckoutBranchControlProvider value={checkoutModel("main")}>
         <Composer {...composerProps({ ...current, worktreePath: "/work/studio-worktree" })} />
       </CheckoutBranchControlProvider>,
     );
     expect(screen.getByRole("group", { name: "Chat checkout context" })).toHaveTextContent(/^Isolated worktree/u);
+    view.rerender(
+      <CheckoutBranchControlProvider value={{ ...checkoutModel("main"), gitStatus: { isRepository: false } as GitStatusSnapshot }}>
+        <Composer {...composerProps(current)} />
+      </CheckoutBranchControlProvider>,
+    );
+    expect(screen.queryByRole("group", { name: "Chat checkout context" })).toBeNull();
   });
 
   it("keeps attach, model, mode, usage, and send in view and puts the rest behind More tools", async () => {

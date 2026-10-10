@@ -195,6 +195,12 @@
   background: transparent;
   font-size: var(--text-sm);
 }
+.composer-shell .composer-checkout-strip.is-branch-only {
+  height: 28px;
+  border-top: 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
 .composer-shell .composer-checkout-location {
   color: inherit;
   font-weight: 400;

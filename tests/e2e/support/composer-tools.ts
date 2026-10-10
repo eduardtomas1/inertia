@@ -9,9 +9,9 @@ export async function openComposerTools(scope: Page | Locator): Promise<void> {
   }
 }
 
-export async function expectGitStatusInHeader(page: Page): Promise<void> {
-  const header = page.locator(".workspace-header");
-  await expect(header.getByRole("group", { name: "Git actions" })
-    .or(header.getByRole("menuitem", { name: "Git actions", includeHidden: true }))
-    .first()).toBeAttached();
+export async function expectComposerBranch(page: Page, branch?: string): Promise<void> {
+  const button = page.getByRole("group", { name: "Chat checkout context" })
+    .getByRole("button", branch ? { name: `Branch ${branch}`, exact: true } : { name: /^Branch /u });
+  await expect(button).toBeVisible();
+  if (branch) await expect(button).toContainText(branch);
 }

@@ -17,7 +17,7 @@ import type { AppFixture } from "./support/app-fixture";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";
 import { seedModelChooserNativeMetadata } from "./support/model-catalog-fixture";
 import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
-import { expectGitStatusInHeader } from "./support/composer-tools";
+import { expectComposerBranch } from "./support/composer-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -359,8 +359,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     timeout: 10_000,
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expectGitStatusInHeader(page);
-  await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
+  await expectComposerBranch(page, currentBranch);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {
@@ -395,8 +394,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   }, MODEL_FAVORITES_STORAGE_KEY);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expectGitStatusInHeader(page);
-  await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
+  await expectComposerBranch(page, currentBranch);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {

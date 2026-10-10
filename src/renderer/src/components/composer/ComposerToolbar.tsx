@@ -78,23 +78,26 @@ const ComposerMoreMenu = lazy(async () => ({
 const COMPOSER_TOOLS_STORAGE_KEY = "inertia:composer-tools:v1";
 const COMPOSER_TOOL_MENUS: ReadonlySet<string> = new Set(["presets", "stash", "action"]);
 
-export function composerCheckoutStripVisible({
+export function composerCheckoutStrip({
   showCheckoutContext,
   scratchWorkspace,
   newChatProjectPicker,
   worktreePath,
   checkoutDiffers,
+  repository,
 }: {
   showCheckoutContext: boolean;
   scratchWorkspace: boolean;
   newChatProjectPicker: boolean;
   worktreePath: string | null;
   checkoutDiffers: boolean;
-}): boolean {
-  if (!showCheckoutContext) return false;
-  if (newChatProjectPicker) return true;
-  if (scratchWorkspace) return false;
-  return Boolean(worktreePath) || checkoutDiffers;
+  repository: boolean;
+}): "hidden" | "branch" | "context" {
+  if (!showCheckoutContext) return "hidden";
+  if (newChatProjectPicker) return "context";
+  if (scratchWorkspace) return "hidden";
+  if (worktreePath || checkoutDiffers) return "context";
+  return repository ? "branch" : "hidden";
 }
 
 export function composerCheckoutBranch(
@@ -274,7 +277,7 @@ export function ComposerToolbar({
   } = menuController;
   const checkoutModel = useContext(CheckoutBranchControlContext);
   const checkoutGitStatus = checkoutModel?.gitStatus ?? null;
-  const checkoutStripVisible = composerCheckoutStripVisible({
+  const checkoutStrip = composerCheckoutStrip({
     showCheckoutContext,
     scratchWorkspace,
     newChatProjectPicker: Boolean(newChatProjectPicker),
@@ -283,6 +286,9 @@ export function ComposerToolbar({
       checkoutGitStatus.branch === null
       || conversationContextMismatch(checkoutModel?.project ?? null, conversation, checkoutGitStatus)
     )),
+    repository: checkoutGitStatus
+      ? checkoutGitStatus.isRepository
+      : Boolean(checkoutModel?.project.repositoryRoot),
   });
   const toolsId = useId();
   const [toolsOpen, setToolsOpen] = useState(() => layoutStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open");
@@ -585,13 +591,13 @@ export function ComposerToolbar({
           />
         </Suspense>
       </div>
-      {checkoutStripVisible && (
+      {checkoutStrip !== "hidden" && (
         <div
-          className="composer-checkout-strip"
+          className={clsx("composer-checkout-strip", checkoutStrip === "branch" && "is-branch-only")}
           role="group"
           aria-label="Chat checkout context"
         >
-          {newChatProjectPicker ? (
+          {checkoutStrip === "branch" ? null : newChatProjectPicker ? (
             <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">

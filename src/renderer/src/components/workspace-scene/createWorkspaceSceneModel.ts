@@ -40,7 +40,6 @@ import { EMPTY_STREAMING_AGENT_SOURCE } from "../../hooks/useStreamingAgentState
 import {
   TOOLS_DEFAULT_WIDTH,
   TOOLS_MIN_HEIGHT,
-  TOOLS_MIN_WIDTH,
   type useWorkspaceLayout,
 } from "../../hooks/useWorkspaceLayout";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
@@ -746,7 +745,7 @@ export function createWorkspaceSceneModel({
       orientation: stackedTools ? "horizontal" : "vertical",
       pane: "after",
       value: stackedTools ? toolsLayout.height : toolsLayout.width,
-      min: stackedTools ? TOOLS_MIN_HEIGHT : TOOLS_MIN_WIDTH,
+      min: stackedTools ? TOOLS_MIN_HEIGHT : toolsLayout.minWidth,
       max: stackedTools ? toolsLayout.maxHeight : toolsLayout.maxWidth,
       defaultValue: stackedTools ? 320 : TOOLS_DEFAULT_WIDTH,
       onChange: stackedTools

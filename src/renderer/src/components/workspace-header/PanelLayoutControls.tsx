@@ -98,7 +98,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       >
         <PanelRight size={16} aria-hidden="true" />
         {activeBackgroundTaskCount > 0 && (
-          <span className="corner-toggle-badge" aria-hidden="true">{activeBackgroundTaskCount}</span>
+          <span className="corner-toggle-count" aria-hidden="true">{activeBackgroundTaskCount}</span>
         )}
       </IconButton>
     </div>

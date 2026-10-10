@@ -58,7 +58,8 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
     await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
     // The reply is still pending: the persisted entry already carries the marker.
     expect(readComposerQueue(conversationId)[0]?.dispatchedAt).toEqual(expect.any(String));
-    expect(screen.getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Sending…");
+    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeDisabled();
+    expect(screen.getByRole("listitem")).toHaveTextContent(/Sending…$/u);
     await act(async () => {
       pending.resolve();
       await pending.promise;
@@ -127,7 +128,8 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
       render(view(onSendQueued));
       await act(async () => { await Promise.resolve(); });
       expect(onSendQueued).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Send now");
+      expect(screen.getByRole("button", { name: "Send queued message now" })).toBeEnabled();
+      expect(screen.getByText("Queued")).toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "localStorage", { configurable: true, value: original });
     }

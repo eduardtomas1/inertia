@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProjectAction } from "../../src/shared/contracts";
 import { Composer } from "../../src/renderer/src/components/Composer";
 
-import { composerProps, conversation } from "./composer-fixtures";
+import { composerProps, conversation, openComposerTools } from "./composer-fixtures";
 
 const actions: ProjectAction[] = [
   { id: "test", label: "Test", command: "npm test", preview: false },
@@ -19,6 +19,7 @@ afterEach(() => {
 describe("composer project actions menu", () => {
   it("opens from the keyboard and moves focus through its actions", async () => {
     render(<Composer {...composerProps(conversation("project-actions-keyboard"), { actions })} />);
+    openComposerTools();
     const trigger = screen.getByRole("button", { name: "Open project actions" });
 
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
@@ -38,6 +39,7 @@ describe("composer project actions menu", () => {
 
   it("opens on the last action with ArrowUp", async () => {
     render(<Composer {...composerProps(conversation("project-actions-keyboard-up"), { actions })} />);
+    openComposerTools();
     const trigger = screen.getByRole("button", { name: "Open project actions" });
 
     fireEvent.keyDown(trigger, { key: "ArrowUp" });

@@ -60,6 +60,20 @@ describe("text button tooltip", () => {
     expect(screen.getByRole("button", { name: "Close" })).not.toHaveAttribute("aria-describedby");
   });
 
+  it("describes its shortcut and leaves a caller's own description alone", () => {
+    render(
+      <div>
+        <TooltipButton tooltip="Open preview" shortcut="⌘P" aria-label="Open preview">P</TooltipButton>
+        <span id="title-hint">Rename with F2</span>
+        <TooltipButton tooltip="Chat actions" aria-describedby="title-hint"><span>Draft</span></TooltipButton>
+      </div>,
+    );
+    expect(screen.getByRole("button", { name: "Open preview" })).toHaveAccessibleDescription("⌘P");
+    const title = screen.getByRole("button", { name: "Draft" });
+    expect(title).toHaveAccessibleDescription("Rename with F2");
+    expect(title.nextElementSibling).toBeNull();
+  });
+
   it("opens the hint over a disabled button", () => {
     render(<TooltipButton tooltip="The stored patch is unavailable" disabled>src/a.ts</TooltipButton>);
     const button = screen.getByRole("button", { name: "src/a.ts" });

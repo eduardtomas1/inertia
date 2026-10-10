@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -36,6 +37,7 @@ import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
 import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
+import { TooltipButton } from "./TooltipButton";
 import { IconButton } from "./ui";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
@@ -164,6 +166,7 @@ export function WorkspaceHeader({
 }: WorkspaceHeaderProps): React.JSX.Element {
   const headerRef = useRef<HTMLElement>(null);
   const titleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const titleHintId = useId();
   const [headerWidth, setHeaderWidth] = useState(Number.POSITIVE_INFINITY);
   const collapsed = headerActionsCollapsed({ containerWidth: headerWidth, compact });
   const [titleAnchor, setTitleAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -318,16 +321,16 @@ export function WorkspaceHeader({
           {showProjectCrumb && (
             <>
               {onCreateConversationInProject ? (
-                <button
+                <TooltipButton
                   type="button"
                   className="header-breadcrumb-project"
                   aria-label={newChatInProjectLabel}
-                  title={newChatInProjectLabel}
+                  tooltip={newChatInProjectLabel}
                   onClick={onCreateConversationInProject}
                 >
                   <ProjectIcon project={project} size={14} />
                   <ProjectName project={project}>{project.name}</ProjectName>
-                </button>
+                </TooltipButton>
               ) : (
                 <span className="header-breadcrumb-project">
                   <ProjectIcon project={project} size={14} />
@@ -355,14 +358,15 @@ export function WorkspaceHeader({
             ) : (
               <h1>
                 {titleMenuAvailable ? (
-                  <button
+                  <TooltipButton
                     ref={(node) => {
                       titleButtonRef.current = node;
                       setMenuTrigger("title", node);
                     }}
                     type="button"
                     className="header-title-button"
-                    title="Chat actions · double-click to rename"
+                    tooltip="Chat actions · double-click to rename"
+                    aria-describedby={titleHintId}
                     aria-haspopup="menu"
                     aria-expanded={menu === "title"}
                     aria-controls={conversation ? `conversation-actions-${conversation.id}` : undefined}
@@ -382,11 +386,14 @@ export function WorkspaceHeader({
                   >
                     <span className="header-title-text">{title}</span>
                     <ChevronDown size={14} aria-hidden="true" data-thread-title-chevron className="header-title-chevron" />
-                  </button>
+                  </TooltipButton>
                 ) : (
                   <span className="header-title-text">{title}</span>
                 )}
               </h1>
+            )}
+            {titleMenuAvailable && !renaming && (
+              <span id={titleHintId} className="visually-hidden">Chat actions · double-click to rename</span>
             )}
           </div>
         </nav>

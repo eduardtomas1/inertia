@@ -33,39 +33,3 @@
 .thread-hover-preview strong { color: var(--text); font-size: var(--text-sm); font-weight: 500; }
 .thread-hover-preview > span { display: flex; align-items: center; gap: 8px; }
 .thread-hover-preview svg { flex-shrink: 0; }
-.sidebar .thread-inline-actions {
-  position: absolute;
-  z-index: 2;
-  top: 7px;
-  right: 8px;
-  display: flex;
-  gap: 1px;
-  visibility: hidden;
-  opacity: 0;
-}
-.sidebar .thread-inline-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 23px;
-  padding: 3px 5px;
-  color: var(--text-muted);
-  background: transparent;
-  border-radius: var(--radius-xs);
-  font-size: var(--text-xs);
-}
-.sidebar .thread-inline-actions button:hover { color: var(--text); background: var(--fill); }
-.sidebar .activity-thread:hover .thread-inline-actions,
-.sidebar .activity-thread:focus-within .thread-inline-actions,
-.sidebar .activity-thread.has-open-menu .thread-inline-actions { visibility: visible; opacity: 1; }
-.sidebar .activity-thread.has-thread-inline-actions:hover .activity-thread-trailing,
-.sidebar .activity-thread.has-thread-inline-actions:focus-within .activity-thread-trailing,
-.sidebar .activity-thread.has-thread-inline-actions.has-open-menu .activity-thread-trailing { display: none; }
-.sidebar .activity-thread.has-thread-inline-actions:hover .activity-thread-projectline,
-.sidebar .activity-thread.has-thread-inline-actions:focus-within .activity-thread-projectline,
-.sidebar .activity-thread.has-thread-inline-actions.has-open-menu .activity-thread-projectline { padding-right: 80px; }
-@media (hover: none) {
-  .sidebar .thread-inline-actions { visibility: visible; opacity: 1; }
-  .sidebar .has-thread-inline-actions .activity-thread-trailing { visibility: hidden; }
-  .sidebar .has-thread-inline-actions .activity-thread-projectline { padding-right: 80px; }
-}

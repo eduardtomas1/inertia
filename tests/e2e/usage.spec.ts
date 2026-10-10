@@ -252,7 +252,8 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   // comparison viewport used for the committed wide screenshots.
   await resizeWindow(1280, 734);
   const usageDestination = page.getByRole("button", { name: "Usage", exact: true });
-  await expect(page.locator(".sidebar-footer .sidebar-destination")).toHaveText([
+  expect(await page.locator(".sidebar-footer .sidebar-destination").evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("aria-label")))).toEqual([
     "Daily work",
     "Usage",
     "Settings",

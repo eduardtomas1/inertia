@@ -3,6 +3,7 @@ import { expect, test, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
@@ -172,6 +173,7 @@ async function verifyScopedTools(testInfo: TestInfo) {
   await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
   await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
 
+  await openComposerTools(page);
   await primary.getByRole("button", { name: "Scratch prompts" }).click();
   await primary.getByRole("menu", { name: "Scratch prompts" })
     .getByRole("menuitem", { name: /Save current prompt/u })

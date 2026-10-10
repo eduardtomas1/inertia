@@ -76,7 +76,9 @@ describe("Quiet Ledger active-to-settled motion", () => {
   });
 
   it("keeps active glyph and settlement motion still for reduced motion", () => {
-    const reducedMotion = cssBlock(css, "@media (prefers-reduced-motion: reduce)");
+    const reducedMotion = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\)/gu)]
+      .map((match) => cssBlock(css.slice(match.index), "@media"))
+      .join("\n");
     const quietLedgerReducedMotion = css.slice(
       css.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
     );

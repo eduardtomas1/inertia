@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import {
@@ -22,9 +20,10 @@ import {
 } from "../../scripts/generate-color-themes.mjs";
 import { WINDOW_BACKGROUND } from "../../src/main/window-appearance";
 import { COLOR_THEME_IDS } from "../../src/shared/contracts";
+import { readSourceText } from "../helpers/source-text";
 
 const repoFile = (path: string): string =>
-  readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+  readSourceText(new URL(`../../${path}`, import.meta.url));
 
 function oklchOf(hex: string): { l: number; c: number; h: number } {
   const decode = (value: number): number => {

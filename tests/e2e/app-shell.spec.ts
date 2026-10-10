@@ -285,7 +285,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     });
     expect(disabledStyle.boxShadow).toBe("none");
     expect(disabledStyle.filter).toBe("none");
-    expect(Number(disabledStyle.opacity)).toBeLessThan(1);
+    expect(disabledStyle.opacity).toBe("1");
 
     await textbox.fill("First line");
     await textbox.press("Shift+Enter");

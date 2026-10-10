@@ -445,6 +445,7 @@ export function useSplitWorkspaceScene({
           ...model.chat,
           sending: sendingConversationIds.has(splitConversation.id),
         },
+        checkoutBranch: model.checkoutBranch,
         resizeHandle: model.resizeHandle,
         tools: model.tools,
       },

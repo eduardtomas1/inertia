@@ -89,7 +89,7 @@ describe("corner panel controls and header meter", () => {
     expect(screen.queryByRole("button", { name: /^Usage:/u })).not.toBeInTheDocument();
   });
 
-  it("toggles the terminal and right panel with pressed state and an active background task badge", () => {
+  it("toggles the terminal and right panel with pressed state and an active background task count", () => {
     const props = controls({ terminalOpen: true, rightPanelOpen: true, activeBackgroundTaskCount: 2 });
     render(<PanelLayoutControls {...props} />);
     const terminal = screen.getByRole("button", { name: "Toggle terminal" });
@@ -116,7 +116,8 @@ describe("corner panel controls and header meter", () => {
 
     const panel = screen.getByRole("button", { name: "Toggle right panel, 2 background tasks active" });
     expect(panel).toHaveAttribute("aria-pressed", "true");
-    expect(panel).toHaveTextContent("2");
+    expect(panel).toHaveTextContent(/^2$/u);
+    expect(panel.querySelector(".corner-toggle-count")).toHaveTextContent("2");
     fireEvent.click(panel);
     expect(props.onToggleRightPanel).toHaveBeenCalledOnce();
   });

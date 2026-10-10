@@ -34,6 +34,7 @@ import {
 } from "../../utils/sidebarModel";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
+import { TooltipButton } from "../TooltipButton";
 import {
   RouteRepairIcon,
   routeRepairLabel,
@@ -79,7 +80,7 @@ export interface ComposerInputZoneProps {
   onQueue: () => void;
   running: boolean;
   stopsBeforeSending: boolean;
-  imageInputUnavailable: boolean;
+  hasHistory: boolean;
   submissionPending: boolean;
   followUpPending: boolean;
   typedMessageLimit: number;
@@ -142,7 +143,7 @@ export function ComposerInputZone({
   onQueue,
   running,
   stopsBeforeSending,
-  imageInputUnavailable,
+  hasHistory,
   submissionPending,
   followUpPending,
   typedMessageLimit,
@@ -408,15 +409,15 @@ export function ComposerInputZone({
               </span>
               <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
             </button>
-            <button
+            <TooltipButton
               type="button"
               className="composer-preview-context-dismiss"
               aria-label={previewDismissLabel}
-              title={previewDismissLabel}
+              tooltip={previewDismissLabel}
               onClick={onDismissPreviewContext}
             >
               <X size={14} />
-            </button>
+            </TooltipButton>
           </div>
         )}
         <ComposerAttachmentList
@@ -580,9 +581,7 @@ export function ComposerInputZone({
             ? "Enter stops and sends · Tab queues"
             : running
             ? "Enter sends · Tab queues"
-            : imageInputUnavailable
-              ? "Ask for follow-up changes"
-              : "Ask for follow-up changes or attach images"}
+            : hasHistory ? "Follow up" : "Message"}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">

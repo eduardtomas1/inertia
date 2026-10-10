@@ -2,6 +2,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
+import { expectComposerBranch } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   capturePageWebSockets,
@@ -317,7 +318,6 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
             ? {
                 requestToAnswer: answer.top - request.bottom,
                 answerToMetadata: metadata.top - answer.bottom,
-                answerHeight: answer.height,
                 metadataHeight: metadata.height,
               }
             : null;
@@ -330,9 +330,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       expect(geometry.requestToAnswer).toBeLessThanOrEqual(17);
       expect(geometry.answerToMetadata).toBeGreaterThanOrEqual(5);
       expect(geometry.answerToMetadata).toBeLessThanOrEqual(13);
-      expect(geometry.metadataHeight).toBeLessThanOrEqual(
-        geometry.answerHeight,
-      );
+      expect(geometry.metadataHeight).toBeCloseTo(33, 0);
     }
     const successfulTurnSeparation = await Promise.all([
       completedTurn.evaluate((element) => {
@@ -496,7 +494,6 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
                 executionToAnswer: answer.top - execution.bottom,
                 answerToMetadata: metadata.top - answer.bottom,
                 metadataHeight: metadata.height,
-                answerHeight: answer.height,
               }
             : null;
         })),
@@ -510,9 +507,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       expect(geometry.executionToAnswer).toBeLessThanOrEqual(17);
       expect(geometry.answerToMetadata).toBeGreaterThanOrEqual(5);
       expect(geometry.answerToMetadata).toBeLessThanOrEqual(13);
-      expect(geometry.metadataHeight).toBeLessThanOrEqual(
-        geometry.answerHeight,
-      );
+      expect(geometry.metadataHeight).toBeCloseTo(33, 0);
     }
     await captureScenario("failed-tool");
     await captureScenario("exception-history-dark-1440x920");
@@ -743,8 +738,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     // rendered branch result before asking the runtime to prove that every
     // owned process has stopped; recycling during that refresh would be a
     // lifecycle race rather than the reconnect behavior this scenario owns.
-    await expect(page.getByRole("group", { name: "Chat checkout context" })
-      .getByRole("button", { name: /^Branch /u })).toHaveCount(1);
+    await expectComposerBranch(page);
 
     const beforeReconnect = await runtimeSnapshot();
     const rendererGenerationBeforeReconnect = await page.locator(".app-shell")

@@ -154,8 +154,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await setWorkspaceTools(false);
 
     const dock = page.getByRole("region", { name: "Message composer" });
-    await expect(dock.getByRole("group", { name: "Chat checkout context" }))
-      .toContainText(expectedCheckoutLabel);
+    const checkoutStrip = dock.getByRole("group", { name: "Chat checkout context" });
+    await expect(checkoutStrip).toContainText(expectedCheckoutLabel);
     await expectComposerEndsAtDock(dock);
     await expectComposerReadinessContained(dock);
     const model = dock.getByRole("button", { name: /^Choose model\./u });
@@ -287,8 +287,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.inputPaddingBlock).toBe("15px 4px");
     expect(wideGeometry.toolbarBorderTop).toBe("0px");
     expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
-    expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
-    expect(wideGeometry.checkoutText).toContain("Current checkout");
+    expect(wideGeometry.toolbarGroups).toEqual(["options", "actions"]);
+    expect(wideGeometry.checkoutText.includes("Current checkout")).toBe(expectedCheckoutLabel === "Detached HEAD");
     expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
@@ -406,7 +406,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       await setting.trigger.click();
       await expect(setting.menu).toBeVisible();
       await page.locator(".workspace-header").click({
-        position: { x: 12, y: 12 },
+        position: { x: 12, y: 4 },
       });
       await expect(setting.menu).toBeHidden();
       await expect(setting.trigger).toBeFocused();
@@ -637,7 +637,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await splitMore.click();
     await expect(splitMoreMenu).toBeVisible();
     await page.locator(".workspace-header").click({
-      position: { x: 12, y: 12 },
+      position: { x: 12, y: 4 },
     });
     await expect(splitMoreMenu).toBeHidden();
     await expect(splitMore).toBeFocused();

@@ -7,7 +7,7 @@
 .theme-library > .setting-copy:not(:first-child) {
   margin-top: 4px;
   padding-top: 14px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .appearance-mode-options {
@@ -20,8 +20,11 @@
 .color-theme-option,
 .custom-theme-color {
   border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.custom-theme-color {
   background: var(--fill);
-  box-shadow: inset 0 0 0 1px transparent;
 }
 
 .appearance-mode-option {
@@ -36,15 +39,23 @@
 .appearance-mode-option:hover:not(:disabled),
 .color-theme-option:hover:not(:has(:disabled)) {
   color: var(--text);
-  background: var(--fill-strong);
+  background: var(--fill);
 }
 
 .appearance-mode-option.is-active,
-.color-theme-option.is-active,
+.color-theme-option.is-active {
+  color: var(--text);
+  background: var(--fill-strong);
+}
+
 .custom-theme-color.is-active {
   color: var(--text);
-  background: var(--fill);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: var(--fill-strong);
+}
+
+.appearance-mode-option.is-active > span:last-child,
+.color-theme-option.is-active .color-theme-option-name {
+  font-weight: 500;
 }
 
 .appearance-mode-option:disabled {
@@ -58,7 +69,7 @@
   justify-content: center;
   gap: 6px;
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .appearance-mode-icon {
@@ -224,7 +235,7 @@
 .color-theme-option-name {
   color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 400;
   pointer-events: none;
 }
 
@@ -462,9 +473,8 @@
   .color-theme-option,
   .custom-theme-color {
     transition:
-      background var(--dur-fast) var(--ease),
-      box-shadow var(--dur-fast) var(--ease),
-      color var(--dur-fast) var(--ease);
+      background-color var(--dur-fast) var(--ease-fade),
+      color var(--dur-fast) var(--ease-fade);
   }
 }
 

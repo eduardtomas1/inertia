@@ -1,62 +1,18 @@
-import { useCallback, useId, useRef, type ComponentPropsWithRef, type ReactNode, type Ref } from "react";
+import { type ComponentPropsWithRef, type ReactNode } from "react";
 import clsx from "clsx";
 
-import { Tooltip, useTooltip } from "./Tooltip";
-
-function assignRef<T>(ref: Ref<T> | undefined, value: T | null): void {
-  if (typeof ref === "function") ref(value);
-  else if (ref) ref.current = value;
-}
+import { TooltipButton } from "./TooltipButton";
 
 export function IconButton({
   label,
-  shortcut,
-  children,
   className,
-  ref,
-  onPointerEnter,
-  onPointerLeave,
-  onPointerDown,
-  onFocus,
-  onBlur,
-  onKeyDown,
   ...props
 }: ComponentPropsWithRef<"button"> & {
   label: string;
   shortcut?: string;
   children: ReactNode;
 }): React.JSX.Element {
-  const button = useRef<HTMLButtonElement | null>(null);
-  const shortcutId = useId();
-  const tooltip = useTooltip(button, {
-    onPointerEnter,
-    onPointerLeave,
-    onPointerDown,
-    onFocus,
-    onBlur,
-    onKeyDown,
-  });
-  const setButton = useCallback((node: HTMLButtonElement | null) => {
-    button.current = node;
-    assignRef(ref, node);
-  }, [ref]);
-  return (
-    <>
-      <button
-        ref={setButton}
-        type="button"
-        aria-label={label}
-        aria-describedby={shortcut ? shortcutId : undefined}
-        className={clsx("icon-button", className)}
-        {...props}
-        {...tooltip.handlers}
-      >
-        {children}
-        {shortcut && <span id={shortcutId} className="visually-hidden">{shortcut}</span>}
-      </button>
-      {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
-    </>
-  );
+  return <TooltipButton tooltip={label} describeTooltip={false} aria-label={label} className={clsx("icon-button", className)} {...props} />;
 }
 
 export function Switch({

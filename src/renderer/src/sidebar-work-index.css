@@ -1,3 +1,9 @@
+.activity-thread-stream {
+  position: relative;
+  display: grid;
+  padding-bottom: 8px;
+}
+
 .activity-thread-stream.is-virtualized {
   display: block;
   min-height: 1px;
@@ -14,11 +20,265 @@
   top: 0;
   left: 0;
   width: 100%;
-  padding-bottom: 2px;
 }
 
-.work-thread-section.is-no-project > h2 {
-  padding-left: 10px;
+.work-thread-section > h2,
+.work-project-group > h3 {
+  display: flex;
+  min-width: 0;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: var(--leading-chrome);
+}
+
+.work-thread-section > h2 > span:last-child,
+.work-thread-section-toggle > span:last-child {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-thread-section-toggle {
+  display: flex;
+  width: calc(100% + 16px);
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-fade);
+}
+
+.work-thread-section-toggle:hover {
+  background: var(--fill);
+}
+
+.work-project-group > h3 > svg,
+.work-project-group > h3 > img {
+  flex: 0 0 auto;
+}
+
+.work-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-thread {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  height: 32px;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-fade);
+}
+
+.activity-thread:hover,
+.activity-thread.is-split:not(.is-active) {
+  background: var(--fill);
+}
+
+.activity-thread.is-active {
+  background: var(--fill-strong);
+}
+
+.activity-thread-select {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+  text-align: left;
+}
+
+.activity-thread-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-weight: 400;
+  white-space: nowrap;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 20px), transparent);
+}
+
+.activity-thread.is-active .activity-thread-title,
+.activity-thread.is-unread .activity-thread-title {
+  font-weight: 500;
+}
+
+.thread-unread-mark {
+  flex: 0 0 auto;
+  color: var(--status-completed);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.activity-thread-select > :is(.conversation-pin, .conversation-detached-mark, .conversation-split-mark),
+.activity-thread-provider {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.activity-thread-trailing {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-thread-trailing time {
+  color: var(--text-faint);
+}
+
+.activity-thread-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--status-idle);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.activity-thread-status-label > [data-work-status] {
+  display: inline-flex;
+}
+
+.activity-thread.status-working .activity-thread-status-label { color: var(--status-working); }
+.activity-thread.status-approval .activity-thread-status-label { color: var(--status-approval); }
+.activity-thread.status-input .activity-thread-status-label { color: var(--status-input); }
+.activity-thread.status-failed .activity-thread-status-label { color: var(--status-failed); }
+.activity-thread.status-limited .activity-thread-status-label { color: var(--warning); }
+.activity-thread.status-completed .activity-thread-status-label { color: var(--status-completed); }
+
+.work-status-separator {
+  opacity: 0.6;
+  font-weight: 400;
+}
+
+.work-status-elapsed {
+  font-weight: 500;
+}
+
+.thread-inline-actions {
+  position: absolute;
+  z-index: 2;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+}
+
+.thread-inline-actions .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.activity-thread:hover .thread-inline-actions,
+.activity-thread:focus-within .thread-inline-actions,
+.activity-thread.has-open-menu .thread-inline-actions {
+  visibility: visible;
+}
+
+.activity-thread.has-thread-inline-actions:is(:hover, :focus-within, .has-open-menu) .activity-thread-trailing {
+  visibility: hidden;
+}
+
+.activity-thread.has-thread-inline-actions:is(:hover, :focus-within, .has-open-menu) .activity-thread-select {
+  padding-right: 60px;
+}
+
+.activity-show-more {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.activity-show-more span {
+  color: var(--text-faint);
+}
+
+.activity-show-more:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.conversation-rename {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.conversation-rename input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  outline: 0;
+  color: var(--text);
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+}
+
+.sidebar.is-compact .activity-thread {
+  height: 28px;
+}
+
+.sidebar.is-compact .thread-inline-actions {
+  top: 2px;
+}
+
+@media (hover: none) {
+  .thread-inline-actions {
+    visibility: visible;
+  }
+
+  .activity-thread.has-thread-inline-actions .activity-thread-trailing {
+    visibility: hidden;
+  }
+
+  .activity-thread.has-thread-inline-actions .activity-thread-select {
+    padding-right: 60px;
+  }
 }
 
 /* Working shows the chat timeline's own 3x3 pixel glyph, so a running thread
@@ -74,85 +334,6 @@
   }
 }
 
-.activity-thread-trailing {
-  display: grid;
-  min-width: 38px;
-  justify-items: end;
-  gap: 1px;
-  pointer-events: none;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: 1;
-  transition:
-    opacity var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
-}
-
-.activity-thread-trailing time {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-
-.activity-thread-status-label {
-  max-width: 58px;
-  overflow: hidden;
-  color: var(--status-idle);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.activity-thread-status-label > [data-work-status] {
-  display: inline-flex;
-}
-
-.activity-thread.status-working .activity-thread-status-label { color: var(--status-working); }
-.activity-thread.status-approval .activity-thread-status-label { color: var(--status-approval); }
-.activity-thread.status-input .activity-thread-status-label { color: var(--status-input); }
-.activity-thread.status-failed .activity-thread-status-label { color: var(--status-failed); }
-.activity-thread.status-limited .activity-thread-status-label { color: var(--warning); }
-.activity-thread.status-completed .activity-thread-status-label { color: var(--status-completed); }
-
-.work-status-separator {
-  opacity: 0.6;
-  font-weight: 400;
-}
-
-.work-status-elapsed {
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Read, idle threads recede so rows that still need the user keep full
-   strength. The weight stays below the sidebar's 520 title weight, and the
-   active and unread rows never recede. */
-.activity-thread.status-idle:not(.is-active, .is-unread) .activity-thread-title {
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.activity-thread:hover .activity-thread-trailing,
-.activity-thread:focus-within .activity-thread-trailing {
-  opacity: 0;
-  transform: translateX(-3px);
-}
-
-.sidebar.is-narrow .activity-thread-select {
-  gap: 7px;
-  grid-template-columns: 18px minmax(0, 1fr) 33px;
-}
-
-.sidebar.is-narrow .activity-thread-provider-label,
-.sidebar.is-narrow .activity-thread-repository-meta,
-.sidebar.is-narrow .activity-thread-branch-meta {
-  display: none;
-}
-
-.sidebar.is-narrow .activity-thread-status-label {
-  max-width: 34px;
-}
-
 /* The narrow slot keeps the elapsed time and drops the word; the pixel glyph
    and its colour still say Working. */
 .sidebar.is-narrow .activity-thread-status-label[data-work-elapsed]
@@ -160,41 +341,9 @@
   display: none;
 }
 
-.work-thread-meta > .activity-thread-repository-meta,
-.work-thread-meta > .activity-thread-branch-meta {
-  display: none;
-}
-
-.sidebar.is-wide .work-thread-meta > .activity-thread-repository-meta,
-.sidebar.is-wide .work-thread-meta > .activity-thread-branch-meta {
-  display: inline-flex;
-}
-
-.work-thread-meta > .activity-thread-project-meta {
-  flex: 1 1 auto;
-}
-
-.sidebar.is-wide .activity-thread-select {
-  padding-right: 9px;
-  padding-left: 9px;
-  grid-template-columns: 19px minmax(0, 1fr) minmax(46px, auto);
-}
-
-.sidebar.is-wide .activity-thread-provider {
-  width: 19px;
-}
-
-.sidebar.is-wide .activity-thread-title {
-  font-size: var(--text-sm);
-}
-
-.sidebar.is-wide .work-thread-meta {
-  font-size: var(--text-xs);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .activity-thread-trailing {
-    animation: none;
+  .activity-thread,
+  .work-thread-section-toggle {
     transition: none;
   }
 
@@ -216,7 +365,7 @@
 
 @media (forced-colors: active) {
   .activity-thread {
-    border-color: transparent;
+    border: 1px solid transparent;
     forced-color-adjust: auto;
   }
 
@@ -228,11 +377,13 @@
   }
 
   .activity-thread.is-active .activity-thread-select,
-  .activity-thread.is-active .work-thread-meta,
   .activity-thread.is-active .activity-thread-trailing,
+  .activity-thread.is-active .activity-thread-trailing time,
   .activity-thread.is-active .activity-thread-status-label,
   .activity-thread.is-active .conversation-pin,
+  .activity-thread.is-active .conversation-detached-mark,
   .activity-thread.is-active .conversation-split-mark,
+  .activity-thread.is-active .activity-thread-provider,
   .activity-thread.is-active .thread-unread-mark {
     color: HighlightText;
   }
@@ -240,13 +391,6 @@
   .activity-thread-select:focus-visible,
   .work-thread-section-toggle:focus-visible {
     outline-color: Highlight;
-  }
-
-  .conversation-unread {
-    border: 1px solid CanvasText;
-    background: Canvas;
-    box-shadow: none;
-    forced-color-adjust: auto;
   }
 
   /* The pixel cells are drawn with background colour, which forced colours

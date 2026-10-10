@@ -880,13 +880,9 @@ export function ChatWorkspace({
     return (
       <Root className="chat-workspace welcome-workspace">
         <section className="welcome-card" aria-labelledby="welcome-title">
-          <div className="welcome-mark"><img src="./inertia-logo.png" alt="" /></div>
-          <span className="welcome-kicker">A calmer place to build</span>
           <h2 id="welcome-title">Bring a project into focus.</h2>
-          <p>Inertia keeps conversations, your project, and a real local terminal together—without turning the workspace into noise.</p>
           <button type="button" className="primary-button" onClick={onAddProject}><FolderPlus size={16} /><span>Add your first project</span></button>
-          <button type="button" className="secondary-button welcome-scratch-button" onClick={onCreateConversation}><SquarePen size={16} /><span>Start without a project</span></button>
-          <div className="welcome-features"><div><span>Project-aware</span></div><div><span>Local terminal</span></div><div><span>Local by default</span></div></div>
+          <button type="button" className="subtle-button" onClick={onCreateConversation}><span>Start without a project</span></button>
         </section>
       </Root>
     );
@@ -896,11 +892,8 @@ export function ChatWorkspace({
     return (
       <Root className="chat-workspace welcome-workspace">
         <section className="project-welcome" aria-labelledby="project-welcome-title">
-          <span className="welcome-kicker">{project.name}</span>
           <h2 id="project-welcome-title">Start with a clear chat.</h2>
-          <p>Create a chat for the next feature, question, or focused pass through this project.</p>
           <button type="button" className="primary-button" onClick={onCreateConversation}><SquarePen size={16} /><span>New chat</span></button>
-          <code className="project-path-display">{project.path}</code>
         </section>
       </Root>
     );

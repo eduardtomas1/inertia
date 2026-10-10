@@ -549,7 +549,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     name: "Close usage and context",
   });
   await closeCompactUsage.focus();
-  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 4 } });
   await expect(compactPopover).toBeHidden();
   await expect(compactTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(compactTrigger).toBeFocused();

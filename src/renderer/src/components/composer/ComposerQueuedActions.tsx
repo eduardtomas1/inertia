@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
+import { ArrowUp, Paperclip, Trash2 } from "lucide-react";
 
 import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
+import { IconButton } from "../ui";
 import { RuntimeComposerQueuedActions } from "./RuntimeComposerQueuedActions";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
@@ -209,7 +210,6 @@ function LegacyComposerQueuedActions({
         }`}
         role="listitem"
       >
-        <CornerDownRight size={16} aria-hidden="true" />
         <span className="composer-queue-copy" title={queued.content}>
           {queued.content}
         </span>
@@ -230,28 +230,30 @@ function LegacyComposerQueuedActions({
             ? "A previous send did not confirm. Check the transcript before sending again."
             : undefined}
         >
-          {unconfirmed
+          {sending
+            ? "Sending…"
+            : unconfirmed
             ? "Send unconfirmed"
             : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
         </small>
-        <button
-          type="button"
-          className="composer-queue-send"
+        <IconButton
+          label="Send now"
           aria-label="Send queued message now"
+          className="composer-queue-send"
           disabled={!canSendQueuedNow || queueSendingId !== null}
           onClick={() => void sendQueued(queued.id, "manual")}
         >
-          {sending ? "Sending…" : "Send now"}
-        </button>
-        <button
-          type="button"
-          className="composer-queue-remove"
+          <ArrowUp size={14} aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          label="Remove"
           aria-label="Remove queued message"
+          className="composer-queue-remove"
           disabled={queueSendingId === queued.id}
           onClick={() => removeQueued(queued.id)}
         >
           <Trash2 size={14} aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

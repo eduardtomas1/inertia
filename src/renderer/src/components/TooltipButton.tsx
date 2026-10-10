@@ -4,6 +4,8 @@ import { Tooltip, useTooltip } from "./Tooltip";
 
 export function TooltipButton({
   tooltip: label,
+  shortcut,
+  describeTooltip = true,
   ref,
   children,
   onPointerEnter,
@@ -15,6 +17,8 @@ export function TooltipButton({
   ...props
 }: ComponentPropsWithRef<"button"> & {
   tooltip: string;
+  shortcut?: string;
+  describeTooltip?: boolean;
 }): React.JSX.Element {
   const button = useRef<HTMLButtonElement | null>(null);
   const descriptionId = useId();
@@ -32,16 +36,17 @@ export function TooltipButton({
     else if (ref) ref.current = node;
   }, [ref]);
   const named = props["aria-label"];
-  const described = label !== (named ?? (typeof children === "string" ? children : undefined));
-  const description = described
-    ? <span id={descriptionId} className="visually-hidden">{label}</span>
+  const hint = describeTooltip && label !== (named ?? (typeof children === "string" ? children : undefined)) ? label : undefined;
+  const describedText = "aria-describedby" in props ? "" : [hint, shortcut].filter(Boolean).join(" ");
+  const description = describedText
+    ? <span id={descriptionId} className="visually-hidden">{describedText}</span>
     : null;
   return (
     <>
       <button
         ref={setButton}
         type="button"
-        aria-describedby={described ? descriptionId : undefined}
+        aria-describedby={description ? descriptionId : undefined}
         {...props}
         {...tooltip.handlers}
       >
@@ -49,7 +54,7 @@ export function TooltipButton({
         {named !== undefined && description}
       </button>
       {named === undefined && description}
-      {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} />}
+      {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
     </>
   );
 }

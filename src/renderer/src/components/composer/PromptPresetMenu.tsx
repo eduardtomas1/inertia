@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import "./PromptPresetMenu.css";
+import { TooltipButton } from "../TooltipButton";
 
 import {
   MAX_PROMPT_PRESETS,
@@ -236,7 +237,7 @@ export function PromptPresetMenu({
 
   return (
     <div className="popover-anchor prompt-presets-control">
-      <button
+      <TooltipButton
         ref={(node) => setMenuTrigger("presets", node)}
         type="button"
         className="icon-button"
@@ -244,13 +245,13 @@ export function PromptPresetMenu({
         aria-haspopup="dialog"
         aria-controls={menuId("presets")}
         aria-expanded={menu === "presets"}
-        title="Prompt presets"
+        tooltip="Prompt presets"
         onClick={() => toggleMenu("presets")}
         onKeyDown={(event) =>
           handleComposerMenuTriggerKeyDown("presets", event)}
       >
         <BookOpenText size={16} />
-      </button>
+      </TooltipButton>
       {menu === "presets" && (
         <div
           ref={(node) => setMenuPopover("presets", node)}

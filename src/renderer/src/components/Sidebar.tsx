@@ -11,18 +11,16 @@ import {
 } from "react";
 import {
   ArrowLeft,
-  Check,
   ChevronDown,
   ChevronRight,
+  CircleCheck,
   Clock,
   Columns2,
-  Folder,
-  FolderGit2,
   FolderOpen,
   Gauge,
-  GitBranch,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Search,
   Settings,
   SquarePen,
@@ -32,6 +30,7 @@ import {
 import clsx from "clsx";
 import type { Conversation, ConversationShell, Project, ProjectGroupingMode } from "@shared/contracts";
 import { canOrganizeThread } from "../../../shared/thread-organization";
+import { effectiveNewChatDefault } from "../../../shared/new-chat-default";
 import { projectRepositoryLimitChoices } from "../../../shared/project-repository-limit";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
@@ -43,6 +42,8 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
   COLLAPSIBLE_WORK_SECTIONS,
+  WORK_ROW_COMPACT_HEIGHT,
+  WORK_ROW_HEIGHT,
   useSidebarWorkIndex,
   type PaginatedWorkSectionId,
   type WorkIndexItem,
@@ -359,6 +360,18 @@ function SidebarView({
     [activityThreads, snoozeNow, scratchProjectIds],
   );
   const workSearchActive = Boolean(query.trim());
+  const workGroupedByProject = useMemo(() => !scopedProjectId && new Set(workSections
+    .filter(({ id }) => id === "recent" || id === "yesterday" || id === "earlier")
+    .flatMap(({ threads }) => threads.map(({ conversation }) => conversation.projectId))).size > 1, [scopedProjectId, workSections]);
+  const snapshotProjects = snapshot?.projects;
+  const backendDefaults = snapshot?.backendDefaults;
+  const backendProfiles = snapshot?.backendProfiles;
+  const providers = snapshot?.providers;
+  const settings = snapshot?.settings;
+  const defaultProviderByProject = useMemo(() => new Map(settings && providers ? (snapshotProjects ?? []).map((project) => [
+    project.id,
+    effectiveNewChatDefault({ backendDefaults, backendProfiles, providers }, settings, project.id).providerId,
+  ]) : []), [backendDefaults, backendProfiles, providers, settings, snapshotProjects]);
   const [
     focusWorkIdentity,
     workFocusOrder,
@@ -377,6 +390,7 @@ function SidebarView({
     doneVisible,
     enabled: true,
     expandedSections: expandedWorkSections,
+    groupByProject: workGroupedByProject,
     motionEnabled: !reducedMotion,
     navigationRef,
     searchActive: workSearchActive,
@@ -714,7 +728,6 @@ function SidebarView({
       ?? agentRequestProviderName(conversation.providerId);
     const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
-    const chatFolder = project?.workspaceKind === "scratch";
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
@@ -789,45 +802,37 @@ function SidebarView({
             }}
             onClick={() => activateConversation(conversation)}
           >
-            <span className="activity-thread-projectline">
-              {chatFolder ? <Folder size={14} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={14} /> : <FolderGit2 size={14} aria-hidden="true" />}
-              {chatFolder ? <span className="activity-thread-project-meta" title={conversation.worktreePath ?? undefined}>Chat folder</span>
-                : <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>}
-              <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
-              <span className="activity-thread-trailing" aria-hidden="true">
-                <WorkStatusCue
-                  conversationId={conversation.id}
-                  status={model.status}
-                  label={statusLabels[model.status]}
-                  updatedAt={conversation.updatedAt}
-                  workingSince={workingSince}
-                  latestTurn={(conversation as Partial<ConversationShell>).latestTurn}
-                />
-              </span>
-            </span>
-            <span className="activity-thread-topline">
-              <span className="activity-thread-title">{conversation.title}</span>
-              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
-            </span>
-            <span className="work-thread-meta">
-              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={14} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{chatFolder ? null : repositoryLabel ?? "Local workspace"}</span>}
-              <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
+            <span className="activity-thread-title">{conversation.title}</span>
+            {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
+            <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
+            {conversation.providerId !== defaultProviderByProject.get(conversation.projectId) && (
+              <span className="activity-thread-provider" aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
+            )}
+            <span className="activity-thread-trailing" aria-hidden="true">
+              <WorkStatusCue
+                conversationId={conversation.id}
+                status={model.status}
+                label={statusLabels[model.status]}
+                updatedAt={conversation.updatedAt}
+                workingSince={workingSince}
+                latestTurn={(conversation as Partial<ConversationShell>).latestTurn}
+              />
             </span>
           </button>
         )}
         {canOrganize && <div className="thread-inline-actions">
-            <button type="button" aria-label={`Snooze ${conversation.title}`} title="Snooze thread"
+            <IconButton label="Snooze thread" aria-label={`Snooze ${conversation.title}`}
               onClick={(event) => {
                 preview.close(); setInitialSubmenu("snooze");
                 const bounds = event.currentTarget.getBoundingClientRect();
                 setMenuAnchor({ x: bounds.right, y: bounds.bottom });
                 if (conversationMenu !== conversation.id) toggleMenu(conversation.id);
-              }}><Clock size={14} /></button>
-            <button type="button" aria-label={`${conversation.settledAt ? "Reopen" : "Settle"} ${conversation.title}`}
-              title={conversation.settledAt ? "Reopen thread" : "Settle thread"}
+              }}><Clock size={14} /></IconButton>
+            <IconButton label={conversation.settledAt ? "Reopen thread" : "Settle thread"}
+              aria-label={`${conversation.settledAt ? "Reopen" : "Settle"} ${conversation.title}`}
               onClick={() => { preview.close(); if (conversation.settledAt) onRestoreConversation(conversation); else onSettleConversation(conversation); }}>
-              <Check size={14} />{conversation.settledAt ? "Reopen" : "Settle"}
-            </button>
+              {conversation.settledAt ? <RotateCcw size={14} /> : <CircleCheck size={14} />}
+            </IconButton>
         </div>}
         {conversationMenu === conversation.id && conversationActions(conversation)}
       </div>
@@ -837,6 +842,17 @@ function SidebarView({
   const renderWorkIndexItem = (item: WorkIndexItem): React.JSX.Element => {
     if (item.kind === "thread") {
       return activityRow(item.conversation, item.position, item.sectionId);
+    }
+    if (item.kind === "project") {
+      const project = projectById.get(item.projectId);
+      return (
+        <div className="work-project-group" role="presentation">
+          <h3 title={project?.path}>
+            <ProjectIcon project={project} size={14} />
+            <ProjectName project={project} className="work-project-name">{workProjectLabel(project)}</ProjectName>
+          </h3>
+        </div>
+      );
     }
     if (item.kind === "show-more") {
       return (
@@ -1021,7 +1037,7 @@ function SidebarView({
                   );
                 }
                 const start = rendered.start
-                  ?? rendered.index * (compact ? 42 : 48);
+                  ?? rendered.index * (compact ? WORK_ROW_COMPACT_HEIGHT : WORK_ROW_HEIGHT);
                 return (
                   <div
                     className="work-index-virtual-item"
@@ -1037,16 +1053,16 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer sidebar-utility-footer">
-          {view !== "workspace" && view !== "home" && <button type="button" className="sidebar-destination" aria-label="Workspace" title="Back to workspace" onClick={() => navigate("workspace")}><ArrowLeft size={16} /><span>Workspace</span></button>}
-          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-label="Daily work" title="Daily work" aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
-            <DailyWorkMark size={16} /><span>Daily work</span>
-          </button>
-          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-label="Usage" title="Usage" aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
-            <Gauge size={16} /><span>Usage</span>
-          </button>
-          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
-            <Settings size={16} /><span>Settings</span>
-          </button>
+          {view !== "workspace" && view !== "home" && <IconButton label="Back to workspace" aria-label="Workspace" className="sidebar-destination" onClick={() => navigate("workspace")}><ArrowLeft size={16} /></IconButton>}
+          <IconButton label="Daily work" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
+            <DailyWorkMark size={16} />
+          </IconButton>
+          <IconButton label="Usage" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
+            <Gauge size={16} />
+          </IconButton>
+          <IconButton label="Settings" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
+            <Settings size={16} />
+          </IconButton>
           <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
             <SidebarUpdateControl controller={appUpdate} />

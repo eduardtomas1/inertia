@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-
 import { fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import { providerNativeBackendProfile } from "../../src/shared/model-routing";
+import { readSourceText } from "../helpers/source-text";
 
 const conversationId = "45454545-4545-4545-8545-454545454545";
 
@@ -115,7 +114,7 @@ let stylesheet: HTMLStyleElement | null = null;
 
 function loadStyles(): void {
   stylesheet = document.createElement("style");
-  stylesheet.textContent = readFileSync("src/renderer/src/styles.css", "utf8");
+  stylesheet.textContent = readSourceText("src/renderer/src/styles.css");
   document.head.append(stylesheet);
 }
 

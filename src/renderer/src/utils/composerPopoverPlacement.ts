@@ -44,12 +44,12 @@ export function intersectPopoverRects(
 }
 
 function insetPopoverRect(bounds: PopoverRect, padding: number): PopoverRect {
-  const left = bounds.left + padding;
-  const top = bounds.top + padding;
+  const left = Math.ceil(bounds.left + padding);
+  const top = Math.ceil(bounds.top + padding);
   return {
     top,
-    right: Math.max(left, bounds.right - padding),
-    bottom: Math.max(top, bounds.bottom - padding),
+    right: Math.max(left, Math.floor(bounds.right - padding)),
+    bottom: Math.max(top, Math.floor(bounds.bottom - padding)),
     left,
   };
 }
@@ -121,8 +121,8 @@ export function calculateComposerPopoverPlacement({
     : trigger.bottom + gap;
 
   return {
-    top: clamp(top, safe.top, safe.bottom - height),
-    left,
+    top: clamp(Math.round(top), safe.top, Math.floor(safe.bottom - height)),
+    left: clamp(Math.round(left), safe.left, Math.floor(safe.right - width)),
     maxWidth,
     maxHeight,
     vertical,
@@ -154,6 +154,45 @@ export function composerPopoverBoundary(element: Element): PopoverRect {
   return intersectPopoverRects(bounds, viewportRect());
 }
 
+export function unscaledPopoverRect({
+  rect,
+  width,
+  height,
+  originX,
+  originY,
+}: {
+  rect: PopoverRect;
+  width: number;
+  height: number;
+  originX: number;
+  originY: number;
+}): PopoverRect {
+  const scaleX = width > 0 ? (rect.right - rect.left) / width : 1;
+  const scaleY = height > 0 ? (rect.bottom - rect.top) / height : 1;
+  const left = rect.left - originX * (1 - scaleX);
+  const top = rect.top - originY * (1 - scaleY);
+  return {
+    top,
+    right: left + (width > 0 ? width : rect.right - rect.left),
+    bottom: top + (height > 0 ? height : rect.bottom - rect.top),
+    left,
+  };
+}
+
+function layoutRect(element: HTMLElement): PopoverRect & PopoverSize {
+  const [originX = 0, originY = 0] = getComputedStyle(element).transformOrigin
+    .split(" ")
+    .map((value) => Number.parseFloat(value) || 0);
+  const rect = unscaledPopoverRect({
+    rect: element.getBoundingClientRect(),
+    width: element.offsetWidth,
+    height: element.offsetHeight,
+    originX,
+    originY,
+  });
+  return { ...rect, width: rect.right - rect.left, height: rect.bottom - rect.top };
+}
+
 function popoverSurface(popover: HTMLElement): HTMLElement {
   if (!popover.classList.contains("composer-more-layer")) return popover;
   return popover.querySelector<HTMLElement>(":scope > .composer-popover")
@@ -172,7 +211,7 @@ export function positionComposerPopover(
   }
 
   const boundary = composerPopoverBoundary(trigger);
-  const initialBounds = surface.getBoundingClientRect();
+  const initialBounds = layoutRect(surface);
   const horizontal = calculateComposerPopoverPlacement({
     trigger: trigger.getBoundingClientRect(),
     boundary,
@@ -182,7 +221,7 @@ export function positionComposerPopover(
   surface.style.maxWidth = `${horizontal.maxWidth}px`;
   surface.style.minWidth = `${constrainedWidth}px`;
 
-  const widthConstrainedBounds = surface.getBoundingClientRect();
+  const widthConstrainedBounds = layoutRect(surface);
   const borderHeight = widthConstrainedBounds.height - surface.clientHeight;
   const naturalHeight = Math.max(
     widthConstrainedBounds.height,
@@ -204,7 +243,7 @@ export function positionComposerPopover(
     `${placement.maxHeight}px`,
   );
 
-  const positionedBounds = surface.getBoundingClientRect();
+  const positionedBounds = layoutRect(surface);
   popover.style.translate = `${placement.left - positionedBounds.left}px ${
     placement.top - positionedBounds.top
   }px`;

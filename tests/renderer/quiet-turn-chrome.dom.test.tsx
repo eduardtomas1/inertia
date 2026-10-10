@@ -245,6 +245,22 @@ describe("quiet turn chrome", () => {
     expect(within(running).queryByRole("button", { name: "Run details" })).toBeNull();
   });
 
+  it("ends a footer that holds only its time without a trailing separator", () => {
+    loadStyles();
+    timeline([turn("turn-running-dot", "codex", "2026-09-01T10:02:00.000Z", {
+      status: "running",
+      terminalReason: null,
+      terminalAssistantMessageId: null,
+      completedAt: null,
+    })], undefined, true);
+    const time = within(turnElement("turn-running-dot")).getByRole("contentinfo").querySelector("time")!;
+    expect(time.nextElementSibling).toBeNull();
+    const separators = [...stylesheet!.sheet!.cssRules]
+      .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && rule.selectorText.endsWith("::after") && rule.style.getPropertyValue("content") === '"·"')
+      .filter((rule) => time.matches(rule.selectorText.replace(/::after$/u, "")));
+    expect(separators).toEqual([]);
+  });
+
   it("adds no footer to a running turn while message timestamps are off", () => {
     timeline([turn("turn-running-quiet", "codex", "2026-09-01T10:02:00.000Z", {
       status: "running",

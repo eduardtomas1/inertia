@@ -37,6 +37,6 @@ export function SyntaxTextarea({ path, value, disabled, editorRef, onChange }: {
       aria-label={`Edit contents of ${path}`} onScroll={synchronizeScroll}
       onCompositionStart={() => setComposition(true)} onCompositionEnd={() => setComposition(false)}
       onChange={(event) => onChange(event.currentTarget.value)} />
-    {highlight?.value === value && highlight.html === null && <span className="syntax-textarea-mode">Plain text · highlighting unavailable or file exceeds preview limits</span>}
+    {highlight?.value === value && highlight.html === null && <span className="syntax-textarea-mode">Plain text</span>}
   </div>;
 }

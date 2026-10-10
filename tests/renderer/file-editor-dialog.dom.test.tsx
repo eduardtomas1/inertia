@@ -33,7 +33,7 @@ describe("FileEditorDialog", () => {
   it("falls back to native plain text for oversized input without truncating the editable content", async () => {
     const content = `// ${"x".repeat(50_001)}`;
     render(<FileEditorDialog file={{ ...file, content }} canSave={() => true} onClose={vi.fn()} onSave={vi.fn()} />);
-    expect(await screen.findByText(/Plain text · highlighting unavailable/u)).toBeVisible();
+    expect(await screen.findByText("Plain text", { exact: true })).toBeVisible();
     expect(screen.getByRole("textbox")).toHaveValue(content);
     expect(document.querySelector(".syntax-textarea")).not.toHaveClass("is-highlighted");
   });
@@ -95,9 +95,11 @@ describe("FileEditorDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This file changed after it was opened",
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This file changed after it was opened");
+    expect(alert).toHaveClass("dialog-error");
+    expect(alert.closest(".dialog-shell-footer")).not.toBeNull();
+    expect(screen.queryByText("Changes are checked against the version you opened.")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });

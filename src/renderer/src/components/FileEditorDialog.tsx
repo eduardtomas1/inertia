@@ -139,7 +139,9 @@ export function FileEditorDialog({
       aria-busy={saving}
       trapFocus={false}
       onKeyDown={trapFocus}
-      footerStart="Changes are checked against the version you opened."
+      footerStart={error || sizeError
+        ? <span className="dialog-error" role="alert">{error ?? sizeError}</span>
+        : "Changes are checked against the version you opened."}
       footer={<>
         <button
           type="button"
@@ -172,11 +174,6 @@ export function FileEditorDialog({
           setError(null);
         }}
       />
-      {(error || sizeError) && (
-        <p className="file-editor-error" role="alert">
-          {error ?? sizeError}
-        </p>
-      )}
     </DialogShell>,
     document.body,
   );

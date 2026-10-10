@@ -74,6 +74,15 @@ describe("text button tooltip", () => {
     expect(title.nextElementSibling).toBeNull();
   });
 
+  it("still describes its hint when a caller passes an undefined description id", () => {
+    render(
+      <TooltipButton tooltip="Push the current branch to origin" aria-label="Push" aria-describedby={undefined}>
+        <span>Push</span>
+      </TooltipButton>,
+    );
+    expect(screen.getByRole("button", { name: "Push" })).toHaveAccessibleDescription("Push the current branch to origin");
+  });
+
   it("opens the hint over a disabled button", () => {
     render(<TooltipButton tooltip="The stored patch is unavailable" disabled>src/a.ts</TooltipButton>);
     const button = screen.getByRole("button", { name: "src/a.ts" });

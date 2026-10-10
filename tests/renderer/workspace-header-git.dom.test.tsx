@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -289,7 +289,9 @@ describe("WorkspaceHeader Git split button", () => {
     await waitFor(() => expect(commit).toHaveFocus());
     expect(commit).toHaveAttribute("aria-disabled", "true");
     expect(commit).not.toBeDisabled();
-    expect(screen.getByText(/^Detached HEAD: create and check out a branch/u)).toBeInTheDocument();
+    expect(within(menu).getByText(/^Detached HEAD: create and check out a branch/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create branch" }))
+      .toHaveAccessibleDescription("Detached HEAD: create and check out a branch before pushing or opening a pull request.");
 
     fireEvent.click(commit);
     expect(props.onCommit).not.toHaveBeenCalled();

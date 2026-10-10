@@ -14,6 +14,7 @@ export function TooltipButton({
   onFocus,
   onBlur,
   onKeyDown,
+  "aria-describedby": describedBy,
   ...props
 }: ComponentPropsWithRef<"button"> & {
   tooltip: string;
@@ -37,7 +38,7 @@ export function TooltipButton({
   }, [ref]);
   const named = props["aria-label"];
   const hint = describeTooltip && label !== (named ?? (typeof children === "string" ? children : undefined)) ? label : undefined;
-  const describedText = "aria-describedby" in props ? "" : [hint, shortcut].filter(Boolean).join(" ");
+  const describedText = describedBy !== undefined ? "" : [hint, shortcut].filter(Boolean).join(" ");
   const description = describedText
     ? <span id={descriptionId} className="visually-hidden">{describedText}</span>
     : null;
@@ -46,7 +47,7 @@ export function TooltipButton({
       <button
         ref={setButton}
         type="button"
-        aria-describedby={description ? descriptionId : undefined}
+        aria-describedby={describedBy ?? (description ? descriptionId : undefined)}
         {...props}
         {...tooltip.handlers}
       >

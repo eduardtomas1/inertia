@@ -45,14 +45,9 @@
 
 .composer-suggestion-menu { transform-origin: bottom center; }
 .composer-attachment {
-  animation: beautiful-fade-up var(--dur-slow) var(--ease) both;
+  animation: beautiful-fade-in var(--dur-slow) var(--ease-fade) both;
   animation-delay: calc(var(--motion-index, 0) * var(--stagger));
 }
-.composer-attachment-copy small {
-  animation: context-source-pop var(--dur-slow) var(--ease) both;
-  animation-delay: calc(var(--dur-slow) + var(--motion-index, 0) * var(--stagger));
-}
-@keyframes context-source-pop { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
 
 .diff-review-filter {
   display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
@@ -255,7 +250,7 @@
 @media (prefers-reduced-motion: reduce) {
   .response-stream-block, .response-markdown.is-streaming:not(.is-plain-stream) > *,
   .agent-input-question,
-  .composer-attachment, .composer-attachment-copy small, .diff-selection-popover,
+  .composer-attachment, .diff-selection-popover,
   .turn-changed-files-body, .turn-changed-files-list > span,
   .turn-work-log details[open] > .turn-work-details,
   .turn-work-log details[open] > div,

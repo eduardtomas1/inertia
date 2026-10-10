@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { declarationsFor, parseCssRules, readRendererCss } from "./css-rules";
 
 const presets = readRendererCss("components/composer/PromptPresetMenu.css");
+const attachments = readRendererCss("components/SnapshotAttachment.css", "components/BeautifulUiMotion.css");
 const base = readRendererCss("styles.css");
-const rules = parseCssRules([base, presets].join("\n"));
+const rules = parseCssRules([base, presets, attachments].join("\n"));
 
 describe("composer tool popovers", () => {
   it("sizes the presets popover from the composer, not the narrow tools tray", () => {
@@ -30,5 +31,16 @@ describe("composer tool popovers", () => {
   it("separates saved scratch prompts with the soft line and gives each row three columns", () => {
     expect(declarationsFor(rules, ".prompt-stash-list").get("border-top")).toBe("1px solid var(--line-soft)");
     expect(declarationsFor(rules, ".prompt-stash-entry").get("grid-template-columns")).toBe("minmax(0, 1fr) auto 28px");
+  });
+
+  it("draws attachment tiles without accent icons, rings, round buttons or scale pops", () => {
+    const preview = declarationsFor(rules, ".composer-attachment-preview");
+    expect(preview.get("color")).toBe("var(--text-muted)");
+    expect(preview.has("box-shadow")).toBe(false);
+    expect(declarationsFor(rules, ".composer-attachment[data-snapshot] .composer-attachment-remove").get("border-radius"))
+      .toBe("var(--radius-xs)");
+    expect(attachments).not.toContain("context-source-pop");
+    expect(attachments).not.toMatch(/snapshot-arrive \{[^}]*scale/u);
+    expect(declarationsFor(rules, ".composer-attachment").get("animation")).toContain("beautiful-fade-in");
   });
 });

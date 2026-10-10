@@ -95,6 +95,7 @@ describe("ModelChooserRow", () => {
       active: true,
       favorite: true,
     }))).toContain('aria-pressed="true"');
+    expect(renderFavorite(row({}, { active: false, favorite: true }))).not.toContain("title=");
   });
 
   it("names only the identity terms that actually vary for a route", () => {

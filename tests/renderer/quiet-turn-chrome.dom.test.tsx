@@ -77,10 +77,18 @@ function messages(agentTurn: AgentTurn, request: string, answer: string): ChatMe
   ];
 }
 
-function timeline(turns: AgentTurn[], providerIdentityLabels?: Record<string, string>, showTimestamps = false) {
+function timeline(
+  turns: AgentTurn[],
+  providerIdentityLabels?: Record<string, string>,
+  showTimestamps = false,
+  extraMessages: ChatMessage[] = [],
+) {
   return render(<ResponseTimeline
     turns={turns}
-    messages={turns.flatMap((agentTurn) => messages(agentTurn, `Request ${agentTurn.id}`, `Answer ${agentTurn.id}`))}
+    messages={[
+      ...extraMessages,
+      ...turns.flatMap((agentTurn) => messages(agentTurn, `Request ${agentTurn.id}`, `Answer ${agentTurn.id}`)),
+    ]}
     activities={[]}
     reasonings={[]}
     plans={[]}
@@ -237,6 +245,22 @@ describe("quiet turn chrome", () => {
     expect(within(running).queryByRole("button", { name: "Run details" })).toBeNull();
   });
 
+  it("ends a footer that holds only its time without a trailing separator", () => {
+    loadStyles();
+    timeline([turn("turn-running-dot", "codex", "2026-09-01T10:02:00.000Z", {
+      status: "running",
+      terminalReason: null,
+      terminalAssistantMessageId: null,
+      completedAt: null,
+    })], undefined, true);
+    const time = within(turnElement("turn-running-dot")).getByRole("contentinfo").querySelector("time")!;
+    expect(time.nextElementSibling).toBeNull();
+    const separators = [...stylesheet!.sheet!.cssRules]
+      .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && rule.selectorText.endsWith("::after") && rule.style.getPropertyValue("content") === '"·"')
+      .filter((rule) => time.matches(rule.selectorText.replace(/::after$/u, "")));
+    expect(separators).toEqual([]);
+  });
+
   it("adds no footer to a running turn while message timestamps are off", () => {
     timeline([turn("turn-running-quiet", "codex", "2026-09-01T10:02:00.000Z", {
       status: "running",
@@ -245,6 +269,59 @@ describe("quiet turn chrome", () => {
       completedAt: null,
     })]);
     expect(within(turnElement("turn-running-quiet")).queryByRole("contentinfo")).toBeNull();
+  });
+
+  it("drops the You and Agent rows from turnless legacy messages and shows their time in a hover footer", () => {
+    loadStyles();
+    const turnless = (id: string, role: "user" | "assistant", content: string, createdAt: string): ChatMessage => (
+      { id, conversationId, turnId: null, role, content, attachments: [], createdAt }
+    );
+    const { container } = timeline([], undefined, true, [
+      turnless("legacy-request-0", "user", "primary reconnect row 00", "2026-09-01T08:00:00.000Z"),
+      turnless("legacy-answer-1", "assistant", "primary reconnect row 01", "2026-09-01T08:00:30.000Z"),
+      turnless("legacy-request-2", "user", "primary reconnect row 02", "2026-09-01T08:01:00.000Z"),
+    ]);
+    const history = container.querySelector<HTMLElement>(".orphan-run-flow")!;
+    const request = history.querySelector<HTMLElement>('[data-message-search-id="legacy-request-0"]')!;
+    const answer = history.querySelector<HTMLElement>('[data-message-search-id="legacy-answer-1"]')!;
+    const unanswered = history.querySelector<HTMLElement>('[data-message-search-id="legacy-request-2"]')!;
+
+    for (const message of [request, answer, unanswered]) {
+      expect(message.querySelector(".message-meta")).toBeNull();
+      expect(message.querySelector("time")).toBeNull();
+    }
+    expect(request).toHaveTextContent(/^primary reconnect row 00$/u);
+    expect(answer).toHaveTextContent(/^primary reconnect row 01$/u);
+    expect(within(history).queryByText("You")).toBeNull();
+    expect(within(history).queryByText("Agent")).toBeNull();
+    expect(history.querySelector(".final-answer-identity")).toBeNull();
+
+    const footers = within(history).getAllByRole("contentinfo", { name: "Message time" });
+    expect(footers.map((footer) => footer.querySelector("time")?.getAttribute("dateTime"))).toEqual([
+      "2026-09-01T08:00:30.000Z",
+      "2026-09-01T08:01:00.000Z",
+    ]);
+    expect(footers[0]!.parentElement).toBe(answer.parentElement);
+    expect(footers[0]!.parentElement).toBe(request.parentElement);
+    const primary = footers[0]!.querySelector<HTMLElement>(".turn-meta-primary")!;
+    expect(getComputedStyle(primary).opacity).toBe("0");
+    expect(stylesheet!.textContent).toMatch(
+      /\n\.legacy-exchange:is\(:hover, :focus-within\) \.turn-meta-primary \{\n {2}opacity: 1;\n\}/u,
+    );
+  });
+
+  it("keeps recovered legacy history in the same column as the turns so its footer lines up", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toContain(".orphan-run-flow {\n  max-width: var(--final-answer-max-width);\n");
+  });
+
+  it("adds no legacy time footer while message timestamps are off", () => {
+    const { container } = timeline([], undefined, false, [
+      { id: "legacy-quiet", conversationId, turnId: null, role: "assistant", content: "Recovered answer", attachments: [], createdAt: "2026-09-01T08:00:00.000Z" },
+    ]);
+    const history = container.querySelector<HTMLElement>(".orphan-run-flow")!;
+    expect(history.querySelector('[data-message-search-id="legacy-quiet"] .message-meta')).toBeNull();
+    expect(within(history).queryByRole("contentinfo")).toBeNull();
   });
 
   it("gives legacy history requests the same bubble as turn requests", () => {

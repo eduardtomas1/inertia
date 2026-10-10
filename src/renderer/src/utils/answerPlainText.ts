@@ -10,6 +10,8 @@ const BLOCKS = new Set([
   "P", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "DIV", "UL", "OL", "TABLE",
 ]);
 const STRUCTURAL = new Set(["UL", "OL", "TABLE", "THEAD", "TBODY", "TFOOT", "TR"]);
+const CODE_BREAK = "\u0000";
+const CODE_LINE = /\u0000(?=[^\u0000])/gu;
 
 function listPrefix(item: HTMLElement): string {
   const list = item.parentElement;
@@ -29,7 +31,7 @@ function listItemText(item: HTMLElement): string {
   let pending = "";
   const flush = (): void => {
     for (const line of pending.split("\n")) {
-      if (line.trim()) lines.push(`${lines.length ? hanging : prefix}${line}`);
+      if (line.trim()) lines.push(`${lines.length ? hanging : prefix}${line.replace(CODE_LINE, `${CODE_BREAK}${hanging}`)}`);
     }
     pending = "";
   };
@@ -68,7 +70,8 @@ function imageText(node: HTMLElement): string {
 
 function plainText(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) {
-    const text = node.textContent ?? "";
+    const content = node.textContent ?? "";
+    const text = node.previousSibling?.nodeName === "BR" ? content.replace(/^\n/u, "") : content;
     return STRUCTURAL.has(node.parentElement?.tagName ?? "") && !text.trim() ? "" : text;
   }
   if (!(node instanceof HTMLElement)) return "";
@@ -82,7 +85,8 @@ function plainText(node: Node): string {
   if (node.tagName === "LI") return listItemText(node);
   const text = [...node.childNodes].map(plainText).join("");
   if (node.tagName === "A") return linkText(node, text);
-  if (node.tagName === "TD" || node.tagName === "TH") return `${text}\t`;
+  if (node.tagName === "PRE") return `\n${text.replaceAll("\n", CODE_BREAK)}\n`;
+  if (node.tagName === "TD" || node.tagName === "TH") return `${text.replace(/\s*\n\s*/gu, " ")}\t`;
   if (node.tagName === "TR") return `${text.replace(/\t$/u, "")}\n`;
   return BLOCKS.has(node.tagName) ? `\n${text}\n` : text;
 }
@@ -93,6 +97,7 @@ export function renderedAnswerText(surface: HTMLElement, fallback: string): stri
   const text = plainText(body)
     .replace(/\n{3,}/gu, "\n\n")
     .replace(/^(?:[ \t]*\n)+/u, "")
-    .replace(/(?:\n[ \t]*)+$/u, "");
+    .replace(/(?:\n[ \t]*)+$/u, "")
+    .replaceAll(CODE_BREAK, "\n");
   return text.trim() ? text : fallback;
 }

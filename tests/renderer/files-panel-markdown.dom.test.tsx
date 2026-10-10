@@ -133,6 +133,9 @@ describe("FilesPanel Markdown preview", () => {
     const viewToggle = screen.getByRole("group", { name: "Markdown" });
     expect(within(viewToggle).getByRole("button", { name: "Preview" }))
       .toHaveAttribute("aria-pressed", "true");
+    for (const view of within(viewToggle).getAllByRole("button")) {
+      expect(view).not.toHaveAttribute("title");
+    }
 
     fireEvent.click(within(viewToggle).getByRole("button", { name: "Source" }));
     expect(screen.getByLabelText("Contents of README.markdown"))

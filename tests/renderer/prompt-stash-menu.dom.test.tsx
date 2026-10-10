@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -50,7 +50,7 @@ function Harness({
 }
 
 describe("PromptStashMenu", () => {
-  it("keeps unavailable actions focusable with their reason and labels deletes per entry", () => {
+  it("keeps unavailable actions focusable with their reason and labels deletes per entry", async () => {
     const onStash = vi.fn();
     const onRestore = vi.fn();
     const onRemove = vi.fn();
@@ -96,6 +96,10 @@ describe("PromptStashMenu", () => {
     const remove = screen.getByRole("menuitem", {
       name: "Delete saved prompt: Inspect the provider route before editing.",
     });
+    expect(remove).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(remove, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent)).toContain("Delete saved prompt"));
+    fireEvent.pointerLeave(remove, { pointerType: "mouse" });
     fireEvent.click(remove);
     expect(onRemove).toHaveBeenCalledWith(entry.id);
   });

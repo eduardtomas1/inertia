@@ -16,6 +16,8 @@ import {
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
+import { trackLiveTextFollowUps, type LiveTextFollowUps } from "../../utils/response-timeline/execution";
+import { layeredHtmlRenders } from "../../utils/response-timeline/model";
 import { CommentaryRow } from "./activity";
 import {
   AgentExecutionLayer,
@@ -28,6 +30,7 @@ import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
 const TURN_SETTLEMENT_TRANSITION_MS = 160;
+const NO_HELD_FOLLOW_UPS: string[] = [];
 
 type CommentaryEntry = Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
 
@@ -76,6 +79,7 @@ function TurnTimelineComponent({
     : "";
   const streamedTextLive = props.streamingChannel === "text";
   const tailCommentary = useMemo(() => answerTailCommentary(turn), [turn]);
+  const layeredRenders = useMemo(() => ({ htmlRenders: layeredHtmlRenders(turn) }), [turn]);
   const railTurn = useMemo(() => tailCommentary?.length
     ? {
         ...turn,
@@ -84,6 +88,14 @@ function TurnTimelineComponent({
       }
     : turn, [tailCommentary, turn]);
   const liveContent = tailCommentary ? "" : streamedText;
+  const liveTextOpen = turn.isActive && Boolean(streamedText);
+  const liveTextFollowUps = useRef<LiveTextFollowUps | null>(null);
+  const heldFollowUpIds = useMemo(() => {
+    liveTextFollowUps.current = liveTextOpen
+      ? trackLiveTextFollowUps(liveTextFollowUps.current, turn)
+      : null;
+    return liveTextFollowUps.current?.held ?? NO_HELD_FOLLOW_UPS;
+  }, [liveTextOpen, turn]);
   const tailEntries = useMemo<CommentaryEntry[]>(() => {
     if (!tailCommentary) return [];
     const saved = tailCommentary.map((message): CommentaryEntry => ({
@@ -93,6 +105,7 @@ function TurnTimelineComponent({
       message,
       content: message.content,
       streaming: false,
+      answer: true,
     }));
     return streamedText
       ? [...saved, {
@@ -102,6 +115,7 @@ function TurnTimelineComponent({
           message: null,
           content: streamedText,
           streaming: streamedTextLive,
+          answer: true,
         }]
       : saved;
   }, [
@@ -215,13 +229,14 @@ function TurnTimelineComponent({
             providerLabel={providerLabel}
             reasoningContent={reasoningContent}
             liveContent={liveContent}
+            heldFollowUpIds={heldFollowUpIds}
             timerStart={timerStart}
             completionAnnouncement={completionAnnouncement}
             onBeforeToggle={handleBeforeToggle}
             onAfterToggle={handleAfterToggle}
           />
 
-          <TurnHtmlRenders turn={turn} />
+          <TurnHtmlRenders turn={layeredRenders} />
 
           <TurnAnswerTail entries={tailEntries} props={props} />
 

@@ -19,6 +19,12 @@ interface StartFinalAnswerAnchorInput {
   onEvent?: (event: FinalAnswerAutoScrollEvent) => void;
 }
 
+export function finalAnswerAnchorTarget(answer: HTMLElement): HTMLElement {
+  return answer.closest("[data-turn-id]")?.querySelector<HTMLElement>(
+    ":scope > [data-turn-layer='html-renders']",
+  ) ?? answer;
+}
+
 export function startFinalAnswerAnchor({
   conversationId,
   answerId,
@@ -89,9 +95,7 @@ export function startFinalAnswerAnchor({
       return;
     }
 
-    const target = answer.closest("[data-turn-id]")?.querySelector<HTMLElement>(
-      ":scope > [data-turn-layer='html-renders']",
-    ) ?? answer;
+    const target = finalAnswerAnchorTarget(answer);
     const viewportBounds = scrollElement.getBoundingClientRect();
     const delta = target.getBoundingClientRect().top - viewportBounds.top - 8;
     if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;

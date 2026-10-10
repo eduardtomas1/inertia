@@ -639,15 +639,16 @@ describe("authoritative response timeline", () => {
     // Running calls remain visible even after falling outside the recent four.
     expect(html.match(/data-folded="false"/g)).toHaveLength(7);
     expect(html).not.toContain('data-folded="true"');
-    expect(html).toContain("Read source");
-    expect(html).toContain("Inspect package");
-    expect(html).toContain("Checking the existing presentation.");
-    expect(html.indexOf("Inspect package")).toBeLessThan(html.indexOf("Checking the existing presentation."));
-    expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Completed command"));
-    expect(html.indexOf("Completed command")).toBeLessThan(html.indexOf("Build failed"));
-    expect(html.indexOf("Build failed")).toBeLessThan(html.indexOf("Unsupported option skipped"));
-    expect(html.indexOf("Unsupported option skipped"))
-      .toBeLessThan(html.lastIndexOf("Run tests"));
+    const text = html.replace(/<[^>]+>/gu, "");
+    expect(text).toContain("Read source");
+    expect(text).toContain("Inspect package");
+    expect(text).toContain("Checking the existing presentation.");
+    expect(text.indexOf("Inspect package")).toBeLessThan(text.indexOf("Checking the existing presentation."));
+    expect(text.indexOf("Checking the existing presentation.")).toBeLessThan(text.indexOf("Completed command"));
+    expect(text.indexOf("Completed command")).toBeLessThan(text.indexOf("Build failed"));
+    expect(text.indexOf("Build failed")).toBeLessThan(text.indexOf("Unsupported option skipped"));
+    expect(text.indexOf("Unsupported option skipped"))
+      .toBeLessThan(text.lastIndexOf("Run tests"));
 
     const detailsStart = html.indexOf('class="turn-work-details"');
     const detailsEnd = html.indexOf("</details>", detailsStart);

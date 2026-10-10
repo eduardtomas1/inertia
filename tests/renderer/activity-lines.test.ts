@@ -31,7 +31,7 @@ describe("Minimal Workstream activity lines", () => {
     expect(html).toContain('data-activity-severity="neutral"');
     expect(html).toContain('data-activity-visibility="recent"');
     expect(html).toContain('data-activity-work="command"');
-    expect(html).toContain('title="Running focused renderer verification"');
+    expect(html).not.toContain("title=");
     expect(html).toContain(
       '<span class="agent-activity-verb">Running</span>',
     );
@@ -66,7 +66,7 @@ describe("Minimal Workstream activity lines", () => {
       }),
     }));
 
-    expect(html).toContain('title="Ran npm test"');
+    expect(html).not.toContain("title=");
     expect(html).toContain('<span class="agent-activity-verb">Ran</span>');
     expect(html).toContain('<span class="agent-activity-target is-command"> npm test</span>');
     expect(html).not.toContain("/bin/bash");

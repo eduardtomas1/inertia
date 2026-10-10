@@ -1,12 +1,17 @@
 /**
  * @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
  */
+import { readFileSync } from "node:fs";
+
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
-import { startFinalAnswerAnchor } from "../../src/renderer/src/components/response-timeline/final-answer-anchor";
+import {
+  finalAnswerAnchorTarget,
+  startFinalAnswerAnchor,
+} from "../../src/renderer/src/components/response-timeline/final-answer-anchor";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 import type {
   AgentActivity,
@@ -252,9 +257,136 @@ describe("the answer after a visual reply", () => {
     render(<ResponseTimeline {...props("running", [page, followUp], ANSWER)} />);
 
     expect(document.querySelector("[data-turn-layer='answer-tail']")).toBeNull();
+    expect(document.querySelector("[data-turn-layer='html-renders']")).toBeNull();
+    const rail = element("[data-active-work-region]");
+    const figure = element("[data-testid='html-render']");
+    const bubble = element("[data-follow-up-message-id='follow-up']");
     const row = element(`[data-assistant-commentary-id='live-commentary:${turnId}']`);
-    expect(element("[data-active-work-region]").contains(row)).toBe(true);
-    expect(precedes(row, element("[data-testid='html-render']"))).toBe(true);
+    expect([figure, bubble, row].every((node) => rail.contains(node))).toBe(true);
+    expect(precedes(figure, bubble)).toBe(true);
+    expect(precedes(bubble, row)).toBe(true);
+  });
+
+  it("styles the tail as the answer it becomes, saved and live", () => {
+    const style = document.createElement("style");
+    style.textContent = [
+      readFileSync("src/renderer/src/styles.css", "utf8"),
+      readFileSync("src/renderer/src/components/response-timeline/HtmlRender.css", "utf8"),
+    ].join("\n");
+    document.head.append(style);
+    const saved = chatMessage("saved-tail", "assistant", "Q3 led.", 6);
+    render(<ResponseTimeline {...props("running", [page, saved], ANSWER)} />);
+
+    const rows = [...element("[data-turn-layer='answer-tail']").querySelectorAll<HTMLElement>(".turn-commentary-row")];
+    expect(rows.map((row) => row.dataset.assistantCommentaryId)).toEqual(["saved-tail", `live-commentary:${turnId}`]);
+    for (const row of rows) {
+      expect(row.classList.contains("is-answer")).toBe(true);
+      expect(getComputedStyle(row).paddingLeft).toBe("0px");
+      expect(getComputedStyle(row).paddingRight).toBe("0px");
+    }
+    style.remove();
+  });
+});
+
+describe("a visual reply around a follow-up", () => {
+  const earlier = chatMessage("earlier", "assistant", "The chart above shows Q3 leading.", 6);
+  const followUp = chatMessage("follow-up", "user", "Now break Q3 down by region.", 7);
+  const reply = chatMessage("answer", "assistant", ANSWER, 8);
+
+  function order(): string[] {
+    return [...turnSection().querySelectorAll<HTMLElement>(
+      "[data-testid='html-render'], [data-follow-up-message-id], [data-assistant-commentary-id], [data-terminal-answer-id]",
+    )].map((node) => node.dataset.followUpMessageId
+      ?? node.dataset.assistantCommentaryId
+      ?? node.dataset.terminalAnswerId
+      ?? "page");
+  }
+
+  it("keeps a page made before the follow-up above it while the reply streams", () => {
+    render(<ResponseTimeline {...props("running", [page, earlier, followUp], ANSWER)} />);
+
+    expect(order()).toEqual(["preamble", "page", "earlier", "follow-up", `live-commentary:${turnId}`]);
+    expect(document.querySelector("[data-turn-layer='html-renders']")).toBeNull();
+    expect(document.querySelector("[data-turn-layer='answer-tail']")).toBeNull();
+  });
+
+  it("settles the page above the follow-up and anchors on the reply", () => {
+    render(<ResponseTimeline {...props("settled", [page, earlier, followUp, reply])} />);
+
+    expect(order()).toEqual(["page", "earlier", "follow-up", "answer"]);
+    expect(document.querySelector("[data-turn-layer='html-renders']")).toBeNull();
+    const final = element("[data-terminal-answer-id='answer']") as HTMLElement;
+    expect(finalAnswerAnchorTarget(final)).toBe(final);
+  });
+
+  it("keeps a page made after the follow-up in the layer the anchor lands on", () => {
+    const early = chatMessage("follow-up", "user", "Make it a chart.", 2);
+    render(<ResponseTimeline {...props("settled", [early, page, answer])} />);
+
+    const layer = element("[data-turn-layer='html-renders']");
+    expect(layer.parentElement).toBe(turnSection());
+    expect(layer.querySelector("[data-testid='html-render']")).not.toBeNull();
+    expect(precedes(element("[data-follow-up-message-id='follow-up']"), layer)).toBe(true);
+    expect(finalAnswerAnchorTarget(element("[data-terminal-answer-id='answer']") as HTMLElement)).toBe(layer);
+  });
+});
+
+describe("live text around a follow-up", () => {
+  const followUp = chatMessage("follow-up", "user", "Also cover the tests.", 5);
+  const FIRST = "Here is the sum";
+  const REST = "Here is the summary of the changes.";
+
+  function liveRow(): Element {
+    return element(`[data-assistant-commentary-id='live-commentary:${turnId}']`);
+  }
+
+  it("keeps the rest of the earlier answer above a follow-up accepted while it streams", () => {
+    const view = render(<ResponseTimeline {...props("running", [], FIRST, [])} />);
+    view.rerender(<ResponseTimeline {...props("running", [followUp], FIRST, [])} />);
+    view.rerender(<ResponseTimeline {...props("running", [followUp], REST, [])} />);
+
+    const bubble = element("[data-follow-up-message-id='follow-up']");
+    expect(liveRow().textContent).toContain(REST);
+    expect(precedes(liveRow(), bubble)).toBe(true);
+
+    const persisted = chatMessage("earlier", "assistant", REST, 4);
+    view.rerender(<ResponseTimeline {...props("running", [persisted, followUp], "", [])} />);
+    const saved = element("[data-assistant-commentary-id='earlier']");
+    expect(precedes(saved, bubble)).toBe(true);
+
+    view.rerender(<ResponseTimeline {...props("running", [persisted, followUp], "Covering the tests.", [])} />);
+    expect(precedes(element("[data-follow-up-message-id='follow-up']"), liveRow())).toBe(true);
+  });
+
+  it("keeps the rest of an answer streaming under a page above a follow-up accepted meanwhile", () => {
+    const late = chatMessage("follow-up", "user", "Also cover the tests.", 7);
+    const view = render(<ResponseTimeline {...props("running", [page], FIRST)} />);
+    expect(document.querySelector("[data-turn-layer='answer-tail']")).not.toBeNull();
+    view.rerender(<ResponseTimeline {...props("running", [page, late], REST)} />);
+
+    const figure = element("[data-testid='html-render']");
+    const bubble = element("[data-follow-up-message-id='follow-up']");
+    expect(precedes(figure, liveRow())).toBe(true);
+    expect(precedes(liveRow(), bubble)).toBe(true);
+
+    const persisted = chatMessage("earlier", "assistant", REST, 6);
+    view.rerender(<ResponseTimeline {...props("running", [page, persisted, late], "")} />);
+    expect(precedes(element("[data-assistant-commentary-id='earlier']"), bubble)).toBe(true);
+  });
+
+  it("streams a reply below the follow-up even when the earlier text is saved in the same update", () => {
+    const view = render(<ResponseTimeline {...props("running", [], FIRST, [])} />);
+    view.rerender(<ResponseTimeline {...props("running", [followUp], REST, [])} />);
+    const persisted = chatMessage("earlier", "assistant", REST, 4);
+    view.rerender(<ResponseTimeline {...props("running", [persisted, followUp], "Covering the tests.", [])} />);
+
+    expect(precedes(element("[data-follow-up-message-id='follow-up']"), liveRow())).toBe(true);
+  });
+
+  it("streams a reply that starts after the follow-up below it", () => {
+    render(<ResponseTimeline {...props("running", [followUp], "Covering the tests.", [])} />);
+
+    expect(precedes(element("[data-follow-up-message-id='follow-up']"), liveRow())).toBe(true);
   });
 });
 

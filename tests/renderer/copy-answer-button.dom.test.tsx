@@ -175,6 +175,19 @@ describe("final answer plain text copy", () => {
     ["nested list under a loose item", "- first\n\n  more\n\n  - nested\n\n- next", "- first\n  more\n  - nested\n- next"],
     ["table opening with an empty cell", "|  | A |\n| --- | --- |\n| x | 1 |", "\tA\nx\t1"],
     ["table ending with an empty cell", "| a | b |\n| --- | --- |\n|  | x |\n| y |  |", "a\tb\n\tx\ny\t"],
+    ["hard line break", "Best,\\\nEduard", "Best,\nEduard"],
+    ["hard line break from trailing spaces", "Best,  \nEduard", "Best,\nEduard"],
+    ["line break inside a table cell", "| a | b |\n| --- | --- |\n| x<br>y | 2 |", "a\tb\nx y\t2"],
+    [
+      "blank lines inside a code block",
+      "```python\ndef a():\n    pass\n\n\ndef b():\n    pass\n```",
+      "def a():\n    pass\n\n\ndef b():\n    pass",
+    ],
+    [
+      "blank lines inside a code block in a list item",
+      "- Run:\n\n  ```sh\n  one\n\n\n  two\n  ```\n- next",
+      "- Run:\n  one\n\n\n  two\n- next",
+    ],
   ])("keeps %s", async (_name, content, expected) => {
     const copied = await renderedCopyOf(content);
     expect(copied).toBe(expected);

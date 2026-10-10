@@ -102,6 +102,7 @@ export function RepositoryScopeActions({
   const menuId = useId();
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"more">();
+  const moreTrigger = useRef<HTMLButtonElement | null>(null);
   const items: RepositoryScopeAction[] = [
     ...actions,
     {
@@ -132,7 +133,10 @@ export function RepositoryScopeActions({
       {compact ? (
         <span className="workspace-repository-more-anchor">
           <IconButton
-            ref={(node) => setMenuTrigger("more", node)}
+            ref={(node) => {
+              moreTrigger.current = node;
+              setMenuTrigger("more", node);
+            }}
             label={`More actions for ${label}`}
             aria-haspopup="menu"
             aria-expanded={menu === "more"}
@@ -160,6 +164,7 @@ export function RepositoryScopeActions({
                   onClick={() => {
                     if (item.disabled) return;
                     dismissMenu("selection");
+                    moreTrigger.current?.focus();
                     item.onSelect();
                   }}
                 >

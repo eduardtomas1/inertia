@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 
+import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RepositoryScopeActions } from "../../src/renderer/src/components/RepositoryScopeActions";
+import { PreMergeConfidenceLauncher } from "../../src/renderer/src/components/PreMergeConfidenceLauncher";
+import { RepositoryScopeActions, type MergeDialogRequest } from "../../src/renderer/src/components/RepositoryScopeActions";
 
 const fitting = { rowClient: 520, rowScroll: 520, actionsClient: 300, actionsScroll: 300 };
 const sizes = { ...fitting };
@@ -118,6 +120,54 @@ describe("Changes repository actions", () => {
     fireEvent.click(fetch);
     expect(onFetch).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu", { name: "More actions for inertia" })).toBeNull();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("returns focus to the More trigger when a dialog opened from the collapsed menu closes", async () => {
+    sizes.rowScroll = 760;
+    function DialogRow(): React.JSX.Element {
+      const [request, setRequest] = useState<MergeDialogRequest | null>(null);
+      return (
+        <div className="scope-row">
+          <RepositoryScopeActions
+            label="inertia"
+            commit={<button type="button">Commit</button>}
+            actions={[]}
+            confidence={{ disabled: false, title: "Compare" }}
+            pullRequest={{ disabled: false }}
+            onRequestMergeDialog={(kind) => setRequest((current) => ({ kind, id: (current?.id ?? 0) + 1 }))}
+          >
+            {(compact) => (
+              <PreMergeConfidenceLauncher
+                projectId="project"
+                conversationId="conversation"
+                repositoryPath="/repository"
+                authorityRef="ref"
+                forge="github"
+                initialTitle="main"
+                pullRequestBusy={false}
+                pullRequestDisabled={false}
+                run={() => new Promise(() => undefined)}
+                buttons={!compact}
+                openRequest={request}
+              />
+            )}
+          </RepositoryScopeActions>
+        </div>
+      );
+    }
+    render(<DialogRow />);
+    const trigger = screen.getByRole("button", { name: "More actions for inertia" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const pullRequest = within(screen.getByRole("menu")).getByRole("menuitem", { name: "PR" });
+    pullRequest.focus();
+    fireEvent.click(pullRequest);
+    const close = await screen.findByRole("button", { name: "Close pull request dialog" });
+    await waitFor(() => expect(document.activeElement?.closest('[role="dialog"]')).not.toBeNull());
+
+    fireEvent.click(close);
+
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 

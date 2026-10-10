@@ -82,3 +82,33 @@ describe("changes panel", () => {
     expect(css).toContain(".panel-heading-copy h2 { margin: 0; font-size: var(--text-sm); font-weight: 500; }");
   });
 });
+
+describe("files panel", () => {
+  const badge = readSourceText("src/renderer/src/components/FileGitBadge.css");
+
+  it("keeps tree rows at the 36px list height and the file language and location in muted text", () => {
+    expect(block(".file-entry-list .file-entry")).toContain("min-height: 36px;");
+    const label = block(".file-language,\n.file-location");
+    expect(label).toContain("color: var(--text-muted);");
+    expect(css).not.toMatch(/\.file-(language|location) \{[^}]*(accent|!important)/u);
+    expect(block(".file-preview-line.is-referenced .file-preview-line-number")).not.toContain("accent");
+  });
+
+  it("presses the explorer toggle and Markdown view on --fill-strong without accent or a framed segment", () => {
+    expect(block('.file-explorer-toggle[aria-pressed="true"]')).toContain("background: var(--fill-strong);");
+    expect(block('.file-explorer-toggle[aria-pressed="true"]')).not.toContain("accent");
+    expect(block('.file-preview-view-toggle button[aria-pressed="true"]')).toContain("background: var(--fill-strong);");
+    expect(block(".file-preview-view-toggle")).not.toContain("border");
+  });
+
+  it("drops the gradient behind Markdown previews and the empty heading rule", () => {
+    expect(block(".file-preview-markdown")).not.toContain("gradient");
+    expect(css).not.toContain(".file-preview-markdown .response-markdown h1:first-child {\n}");
+  });
+
+  it("aligns the preview header and search row on the 4px grid", () => {
+    expect(block(".file-search-wrap")).toContain("height: 40px;");
+    expect(block(".files-layout.is-explorer-open")).toContain("grid-template-rows: 40px minmax(0, 1fr);");
+    expect(badge).toContain("font-weight: 500;");
+  });
+});

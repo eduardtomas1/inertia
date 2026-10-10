@@ -75,7 +75,7 @@ export function buildFileTreeGitIndex(state?: FileTreeGitState): FileTreeGitInde
     if (inspected > FILE_GIT_LIMITS.files) break;
   }
   const notice = limited ? "Git status is partial. Files without badges may still have changes."
-    : repositories.length === 0 ? "No Git repository detected. File browsing remains available."
+    : repositories.length === 0 ? "No Git repository detected."
     : "";
   return { files, directories, notice };
 }

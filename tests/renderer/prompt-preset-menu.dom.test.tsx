@@ -120,8 +120,23 @@ describe("PromptPresetMenu", () => {
     });
     expect(trigger).not.toHaveAttribute("aria-describedby");
     fireEvent.click(trigger);
-    expect(await screen.findByTitle(/speed Standard/u))
+    expect((await screen.findByTitle(/speed Standard/u)).closest("button"))
       .toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("lists presets without a heading or counter and offers one line plus one button when empty", async () => {
+    const view = render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets, 2 saved" }));
+    const dialog = await screen.findByRole("dialog", { name: "Prompt presets" });
+    expect(dialog).not.toHaveTextContent("Reusable text");
+    expect(dialog.querySelector("strong")?.textContent).not.toBe("Prompt presets");
+    expect(within(dialog).getByRole("button", { name: "New" })).toHaveClass("secondary-button");
+    view.unmount();
+    render(<Harness entries={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
+    const empty = await screen.findByRole("dialog", { name: "Prompt presets" });
+    expect(empty).toHaveTextContent(/^No presets yetCreate a preset$/u);
+    expect(empty.querySelectorAll("button")).toHaveLength(1);
   });
 
   it("opens from the keyboard, applies matching text, and explains route blocks", async () => {
@@ -137,7 +152,9 @@ describe("PromptPresetMenu", () => {
       name: "New",
     })).toHaveFocus());
 
-    fireEvent.click(within(dialog).getByTitle("Insert Review lifecycle"));
+    const apply = within(dialog).getByRole("button", { name: /^Review lifecycle/u });
+    expect(apply).not.toHaveAttribute("title");
+    fireEvent.click(apply);
     expect(onApply).toHaveBeenCalledExactlyOnceWith(presets[0]);
     await waitFor(() => expect(screen.queryByRole("dialog", {
       name: "Prompt presets",
@@ -150,14 +167,13 @@ describe("PromptPresetMenu", () => {
       "model gpt-5.6-sol",
       "reasoning high",
     ].join(" · ");
-    const blocked = await screen.findByTitle(
+    const reason = await screen.findByTitle(
       `Available on ${blockedRouteLabel}`,
     );
+    expect(reason).toHaveTextContent(`Available on ${blockedRouteLabel}`);
+    const blocked = reason.closest("button")!;
     expect(blocked).toHaveAttribute("aria-disabled", "true");
-    expect(blocked).toHaveAttribute(
-      "title",
-      `Available on ${blockedRouteLabel}`,
-    );
+    expect(blocked).not.toHaveAttribute("title");
     blocked.focus();
     expect(blocked).toHaveFocus();
     fireEvent.click(blocked);
@@ -269,7 +285,7 @@ describe("PromptPresetMenu", () => {
       "model gpt-5.6-sol",
       "reasoning xhigh",
     ].join(" · ");
-    expect(await screen.findByTitle(`Available on ${storedRouteLabel}`))
+    expect((await screen.findByTitle(`Available on ${storedRouteLabel}`)).closest("button"))
       .toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(screen.getByRole("button", {

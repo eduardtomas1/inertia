@@ -268,25 +268,6 @@ export function PromptPresetMenu({
             handleMoreMenuNavigation(event);
           }}
         >
-          <div className="prompt-presets-heading">
-            <span>
-              <strong>Prompt presets</strong>
-              <small>Reusable text · {presets.length}/{MAX_PROMPT_PRESETS}</small>
-            </span>
-            {!editor && (
-              <button
-                type="button"
-                className="prompt-presets-add"
-                disabled={presets.length >= MAX_PROMPT_PRESETS}
-                onClick={beginCreate}
-              >
-                <Plus size={14} />New
-              </button>
-            )}
-          </div>
-          {!editor && error && (
-            <p className="prompt-preset-error" role="status">{error}</p>
-          )}
           {editor ? (
             <form
               className="prompt-preset-editor"
@@ -340,8 +321,7 @@ export function PromptPresetMenu({
                   </small>
                   {editorRouteDiffers && (
                     <small className="prompt-preset-route-rebind-note">
-                      Saved route differs from this chat. Turn this off, then
-                      on again to bind to the current route.
+                      Saved route differs from this chat
                     </small>
                   )}
                 </span>
@@ -412,6 +392,7 @@ export function PromptPresetMenu({
               <div className="prompt-preset-editor-actions">
                 <button
                   type="button"
+                  className="secondary-button"
                   disabled={pending}
                   onClick={returnToList}
                 >Cancel</button>
@@ -427,22 +408,33 @@ export function PromptPresetMenu({
           ) : (
             <>
               {presets.length > 0 && (
-                <label className="prompt-presets-search">
-                  <Search size={14} />
-                  <input
-                    value={query}
-                    placeholder="Find a preset…"
-                    aria-label="Find a prompt preset"
-                    onChange={(event) => setQuery(event.currentTarget.value)}
-                  />
-                </label>
+                <div className="prompt-presets-heading">
+                  <label className="prompt-presets-search">
+                    <Search size={14} />
+                    <input
+                      value={query}
+                      placeholder="Find a preset…"
+                      aria-label="Find a prompt preset"
+                      onChange={(event) => setQuery(event.currentTarget.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary-button prompt-presets-add"
+                    disabled={presets.length >= MAX_PROMPT_PRESETS}
+                    onClick={beginCreate}
+                  >
+                    <Plus size={14} />New
+                  </button>
+                </div>
+              )}
+              {!editor && error && (
+                <p className="prompt-preset-error" role="status">{error}</p>
               )}
               {presets.length === 0 ? (
                 <div className="prompt-presets-empty">
-                  <BookOpenText size={16} />
-                  <strong>Keep the prompts you reuse</strong>
-                  <span>Presets never send automatically.</span>
-                  <button type="button" onClick={beginCreate}>
+                  <span>No presets yet</span>
+                  <button type="button" className="secondary-button" onClick={beginCreate}>
                     <Plus size={14} />Create a preset
                   </button>
                 </div>
@@ -462,7 +454,6 @@ export function PromptPresetMenu({
                           type="button"
                           className="prompt-preset-use"
                           aria-disabled={routeBlocked}
-                          title={blockedReason ?? `Insert ${preset.name}`}
                           onClick={() => {
                             if (routeBlocked) return;
                             void onApply(preset).then((applied) => {
@@ -478,7 +469,7 @@ export function PromptPresetMenu({
                           <BookOpenText size={14} />
                           <span>
                             <strong>{preset.name}</strong>
-                            <small>{blockedReason ?? preset.body}</small>
+                            <small title={blockedReason ?? preset.body}>{blockedReason ?? preset.body}</small>
                           </span>
                         </button>
                         <TooltipButton

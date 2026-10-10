@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Repeat, Trash2 } from "lucide-react";
 import { lazy, Suspense, useRef } from "react";
 import { COMPOSER_LABELS } from "../../lib/interfaceLabels";
 import { readPromptStash, type PromptStashEntry } from "../../utils/promptStash";
@@ -80,14 +80,10 @@ export function PromptStashMenu({
           aria-label={label}
           onKeyDown={handleMoreMenuNavigation}
         >
-          <div className="popover-title" role="presentation">
-            {label}
-          </div>
           <button
             type="button"
             role="menuitem"
             aria-disabled={!canStash}
-            title={blockedReason ?? "Save this text and model route"}
             onClick={() => {
               if (!canStash) return;
               onStash();
@@ -97,7 +93,7 @@ export function PromptStashMenu({
             <Archive size={14} />
             <span>
               <strong>{COMPOSER_LABELS.saveScratchPrompt}</strong>
-              <small>{blockedReason ?? "Text and route · this chat only"}</small>
+              {blockedReason && <small>{blockedReason}</small>}
             </span>
           </button>
           {entries.length === 0 ? (
@@ -127,7 +123,7 @@ export function PromptStashMenu({
                     type="button"
                     role="menuitem"
                     aria-disabled={restoreReason !== null}
-                    title={restoreReason ?? entry.content}
+                    title={entry.content}
                     onClick={() => {
                       if (restoreReason) return;
                       onRestore(entry);
@@ -157,19 +153,19 @@ export function PromptStashMenu({
                       </small>
                     </span>
                   </button>
-                  <button
-                    type="button"
+                  <TooltipButton
                     role="menuitem"
                     className="prompt-stash-recurrence"
                     aria-label={`${recurrenceLabel}: ${entry.content}`}
-                    title={entry.recurrence
+                    tooltip={entry.recurrence
                       ? `${recurrenceLabel}; activate to ${nextRecurrence ? "change cadence" : "turn off"}`
-                      : "Keep this prompt recurring; it will never run automatically"}
+                      : recurrenceLabel}
+                    describeTooltip={false}
                     onClick={() => onSetRecurrence(entry.id, nextRecurrence)}
                   >
-                    <span aria-hidden="true">↻</span>
+                    <Repeat size={14} aria-hidden="true" />
                     {entry.recurrence && <small>{entry.recurrence === "daily" ? "1d" : "7d"}</small>}
-                  </button>
+                  </TooltipButton>
                   <TooltipButton
                     role="menuitem"
                     className="prompt-stash-remove"

@@ -42,7 +42,7 @@ it.each([true, "reject"])("copies legacy text explicitly without changing either
   fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
   expect(copyText).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole("menuitem", { name: /^Keep my old prompt/u }));
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(outcome === true ? "Copied." : "Could not copy"));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(outcome === true ? /^Copied$/u : "Could not copy"));
   expect(copyText).toHaveBeenCalledExactlyOnceWith(entries[0]!.content);
   expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Unfinished current draft");
   expect(readPromptStash(window.localStorage)).toEqual(entries);

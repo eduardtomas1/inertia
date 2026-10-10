@@ -86,9 +86,10 @@ describe("PromptStashMenu", () => {
       name: /^Inspect the provider route before editing.*This route is not available/u,
     });
     expect(restore).toHaveAttribute("aria-disabled", "true");
+    expect(restore).toHaveTextContent("This route is not available");
     expect(restore).toHaveAttribute(
       "title",
-      "This route is not available",
+      "Inspect the provider route before editing.",
     );
     restore.focus();
     expect(restore).toHaveFocus();
@@ -104,5 +105,20 @@ describe("PromptStashMenu", () => {
     fireEvent.pointerLeave(remove, { pointerType: "mouse" });
     fireEvent.click(remove);
     expect(onRemove).toHaveBeenCalledWith(entry.id);
+  });
+
+  it("drops the menu title, helper hints and text glyphs", () => {
+    render(<Harness onStash={vi.fn()} onRestore={vi.fn()} onRemove={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts, 1 saved" }));
+    const menu = screen.getByRole("menu", { name: "Scratch prompts" });
+    expect(menu.querySelector(".popover-title")).toBeNull();
+    expect(menu).not.toHaveTextContent("Text and route");
+    expect(menu).not.toHaveTextContent("↻");
+    const repeat = screen.getByRole("menuitem", { name: /^Repeat daily:/u });
+    expect(repeat).not.toHaveAttribute("title");
+    expect(repeat.querySelector("svg.lucide-repeat")).not.toBeNull();
+    for (const item of screen.getAllByRole("menuitem")) {
+      expect(item.getAttribute("title") ?? "").not.toMatch(/never run automatically|Save this text/u);
+    }
   });
 });

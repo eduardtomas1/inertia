@@ -24,6 +24,10 @@ function cut(text: string, length: number): string {
   return /[\uD800-\uDBFF]$/u.test(part) ? part.slice(0, -1) : part;
 }
 
+function bounded(text: string, limit: number): string {
+  return text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text;
+}
+
 function wellFormed(text: string): string {
   return text.replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
 }
@@ -95,10 +99,6 @@ export function mascotResultLine(content: string): string | null {
     parts.push(...sentences(mascotPreview(line, 4_096) ?? ""));
   }
   return paired(parts, 0, 1);
-}
-
-function bounded(text: string, limit: number): string {
-  return text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text;
 }
 
 export function mascotCommand(value: string): string | null {

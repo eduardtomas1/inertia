@@ -4,9 +4,7 @@ import { mountMascot } from "../../src/renderer/src/mascot/Mascot";
 import { emptyMascotStatus, type MascotBridge, type MascotCounts, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
 import { MASCOT_SPRITE_STATES, type MascotSprites } from "../../src/shared/mascot-sprites";
 import documentMarkup from "../../src/renderer/mascot.html?raw";
-import { readFileSync } from "node:fs";
 
-const mascotStyles = readFileSync("src/renderer/src/mascot/mascot.css", "utf8").replaceAll("\r\n", "\n");
 const disposals: Array<() => void> = [];
 afterEach(() => { for (const dispose of disposals.splice(0)) dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); Reflect.deleteProperty(window, "mascot"); document.body.replaceChildren(); });
 
@@ -387,7 +385,6 @@ describe("mascot rows, words and announcements", () => {
     expect(bubble.style.height).toBe("31px");
     expect(view.container.querySelector(".mascot-label")).toHaveTextContent("Ready when you are");
     expect(view.container.querySelector(".mascot-message")).toHaveTextContent("");
-    expect(mascotStyles).toContain('.mascot[data-compact="true"] :is(.mascot-chat, .mascot-message, .mascot-footer) { display: none; }');
     app.update("running", true, { since: "2026-09-06T10:00:00.000Z", quietSince: "2026-09-06T10:10:00.000Z" });
     expect(main.dataset.compact).toBe("false");
     expect(bubble.style.height).toBe("116px");
@@ -402,7 +399,6 @@ describe("mascot rows, words and announcements", () => {
     const view = renderMascot();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
     const main = view.container.querySelector("main")!;
-    expect(mascotStyles).toContain('.mascot[data-artwork="thinking"] .mascot-speech-dots { display: none; }');
     for (const [phase, artwork] of [["queued", "thinking"], ["waiting-for-input", "thinking"], ["waiting-for-approval", "thinking"], ["running", "working"], ["completed", "idea"], ["failed", "idle"]] as const) {
       app.update(phase);
       expect(main.dataset.artwork).toBe(artwork);

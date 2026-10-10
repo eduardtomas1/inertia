@@ -133,7 +133,8 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     item("item/completed", { id: "a1", type: "agentMessage", text: words });
     item("item/started", { id: "c2", type: "commandExecution", command: ["npm", "test", "--", "tests/server/mascot-status.test.ts"], status: "inProgress" });
     expect(turn.line()).toBe(words);
-    host.options.onPlan(parseCodexPlan({ plan: [{ step: "Read the publisher", status: "completed" }, { step: "Keep the agent's words", status: "inProgress" }] }).explanation, parseCodexPlan({ plan: [{ step: "Read the publisher", status: "completed" }, { step: "Keep the agent's words", status: "inProgress" }] }).steps as never[]);
+    const plan = parseCodexPlan({ plan: [{ step: "Read the publisher", status: "completed" }, { step: "Keep the agent's words", status: "inProgress" }] });
+    host.options.onPlan(plan.explanation, plan.steps as never[]);
     expect(turn.feed().status).toMatchObject({ message: words, steps: { completed: 1, total: 2 } });
     const approval = parseCodexApprovalRequest("item/commandExecution/requestApproval", {
       command: "rm -rf node_modules/.vite && npm ci", cwd: WORKSPACE, availableDecisions: ["accept", "decline"],

@@ -62,6 +62,8 @@ test("mascot follows three provider chats by priority, lists the others and spea
     }, BARE);
     await expect(mascot).toHaveAttribute("data-compact", "true");
     await expect(overlay.locator(".mascot-label")).toHaveText("Ready when you are");
+    await expect(message).toBeHidden();
+    await expect(overlay.locator(".mascot-footer")).toBeHidden();
     await capture(app, overlay, "idle", info);
 
     const gate = (name: string) => writeFile(join(app.workspaceDirectory, ".git", `mchats-${name}`), "go");
@@ -83,6 +85,8 @@ test("mascot follows three provider chats by priority, lists the others and spea
     await expect(title).toHaveText(TITLES.A);
     await gate("A-1");
     await expect(message).toHaveText("I'll start by reading the mascot status publisher to see which runtime events actually reach the bubble.");
+    await expect(message).toBeVisible();
+    await expect(overlay.locator(".mascot-speech-dots")).toBeVisible();
     await expect(overlay.locator(".mascot-detail")).toHaveText("1 of 4 steps");
     await gate("A-2");
     await expect(message).toHaveText("The publisher overwrites the preview with every tool title, so I'm going to keep the assistant's own words instead.");

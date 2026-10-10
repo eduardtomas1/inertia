@@ -6,7 +6,11 @@ import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStat
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
-import { mascotActivityLine, mascotCommand, mascotCommentaryLine, mascotPreview, mascotResultLine } from "../../src/server/runtime/mascot-message";
+import {
+  mascotActivityLine, mascotApprovalLine, mascotCommand, mascotCommentaryLine, mascotPreview, mascotResultLine,
+} from "../../src/server/runtime/mascot-message";
+import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
+import { codexWebSearchActivity } from "../../src/server/codex/app-server-item-labels";
 
 const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
 const MINUTE = 60_000;
@@ -190,8 +194,7 @@ describe("mascot lifetimes", () => {
     expect(mascotFeedViolation(feed())).toBeNull();
   });
 
-  it("keeps a valid feed with the chat still counted as active after a lone approval expires", async () => {
-    const { parseRuntimeWorkerEvent } = await import("../../src/node/runtime-process-protocol");
+  it("keeps a valid feed with the chat still counted as active after a lone approval expires", () => {
     const { publisher, feed, clock } = mascotPublisher();
     publisher.replace([conversation("chat", "waiting-for-approval", { updatedAt: "2026-09-06T10:30:00.000Z" })]);
     clock.advance(24 * 60 * MINUTE);
@@ -519,7 +522,7 @@ describe("mascot bubble words", () => {
     expect(clock.pending()).toBe(0);
   });
 
-  it("uses the injected clock for every deadline", () => {
+  it("expires a result by the injected clock, not the system clock", () => {
     const clock = mascotTestClock(Date.parse("2026-09-13T10:00:00.000Z"));
     const { publisher, feed } = mascotPublisher({ clock });
     publisher.replace([conversation("old", "completed")]);
@@ -527,17 +530,15 @@ describe("mascot bubble words", () => {
   });
 });
 
-describe("mascot message helpers", () => {
-  it("takes the first prose sentence of a result, skipping headings, fences, rules, tables, quotes and list markers", async () => {
-    const { mascotResultLine } = await import("../../src/server/runtime/mascot-message");
+describe("mascot message lines", () => {
+  it("takes the first prose sentence of a result, skipping headings, fences, rules, tables, quotes and list markers", () => {
     expect(mascotResultLine("```ts\nconst hidden = true;\n```\n\n> **Done.** The tests pass.")).toBe("Done. The tests pass.");
     expect(mascotResultLine("# Title\n---\n| a | b |\n- Fixed the race in `server.ts`. Then more.")).toBe("Fixed the race in server.ts.");
     expect(mascotResultLine("1. Updated the docs")).toBe("Updated the docs");
     expect(mascotResultLine("## Only a heading")).toBeNull();
   });
 
-  it("asks to run a command approval's command in the same words for every provider and adds a short plain detail otherwise", async () => {
-    const { mascotApprovalLine } = await import("../../src/server/runtime/mascot-message");
+  it("asks to run a command approval's command in the same words for every provider and adds a short plain detail otherwise", () => {
     expect(mascotApprovalLine({ kind: "command", title: "OpenCode wants to use bash", command: null, detail: "npm test", reason: null }))
       .toBe("Run npm test?");
     expect(mascotApprovalLine({ kind: "command", title: "Run command?", command: "git push origin main", detail: null, reason: "Publish the branch" }))
@@ -554,11 +555,8 @@ describe("mascot message helpers", () => {
       .toBe("Run git push?");
     expect(mascotApprovalLine({ kind: "command", title: "Run", command: null, detail: "{broken", reason: null })).toBe("Run");
   });
-});
 
-describe("mascot prose", () => {
-  it("keeps code blocks, file contents and image and emphasis markup out of the agent's words", async () => {
-    const { mascotCommentaryLine, mascotResultLine } = await import("../../src/server/runtime/mascot-message");
+  it("keeps code blocks, file contents and image and emphasis markup out of the agent's words", () => {
     expect(mascotCommentaryLine("I'll update the config like this:\n```ts\nconst apiUrl = process.env.URL;\nexport default { apiUrl };\n```")).toBe("I'll update the config like this:");
     expect(mascotCommentaryLine("Here is the file I read.\n```\nDATABASE_URL=postgres://u:pw@host/db\n```")).toBe("Here is the file I read.");
     expect(mascotCommentaryLine("Here is the file I read.\n~~~\nDATABASE_URL=postgres://u:pw@host/db\n~~~\nNext I'll edit it.")).toBe("Here is the file I read. Next I'll edit it.");
@@ -569,9 +567,7 @@ describe("mascot prose", () => {
     expect(mascotResultLine("*Fixed* the _login_ bug in `auth.ts`.")).toBe("Fixed the login bug in auth.ts.");
     expect(mascotResultLine("Renamed load_user_data to fetch_user and 2*3*4 stays.")).toBe("Renamed load_user_data to fetch_user and 2*3*4 stays.");
   });
-});
 
-describe("mascot lines from long or structured text", () => {
   it("takes the agent's latest words from the end of long commentary", () => {
     const sentences = Array.from({ length: 60 }, (_, index) => `Sentence number ${index} explains one more detail about the change I am making.`);
     expect(mascotCommentaryLine(`${sentences.join(" ")} Next I will run the focused tests.`)).toBe("Next I will run the focused tests.");
@@ -612,9 +608,7 @@ describe("mascot lines from long or structured text", () => {
     expect(mascotResultLine("Fixed ranking\nAdded tests")).toBe("Fixed ranking");
     expect(mascotCommentaryLine("I looked at the publisher and the feed. Done.")).toBe("I looked at the publisher and the feed. Done.");
   });
-});
 
-describe("mascot tools and commands read as in the work log", () => {
   it("names an MCP tool with its server and an Inertia host tool in the work log's words", () => {
     const line = (title: string, status: AgentActivity["status"] = "running"): string | null => mascotActivityLine({ kind: "tool", title, detail: null, status });
     expect(line("mcp__github__search_issues")).toBe("Using github: search_issues");
@@ -632,9 +626,7 @@ describe("mascot tools and commands read as in the work log", () => {
     expect(mascotCommand("/bin/zsh -lc 'echo '\"'\"'hi'\"'\"''")).toBe("echo 'hi'");
     expect(mascotCommand("set -euo pipefail\nexport CI=1\nnpm run check")).toBe("npm run check");
   });
-});
 
-describe("mascot failure lines", () => {
   it("says which command failed and what could not be done for everything else", () => {
     const failed = (kind: AgentActivity["kind"], title: string, detail: string | null = null): string | null =>
       mascotActivityLine({ kind, title, detail, status: "failed" });
@@ -651,19 +643,38 @@ describe("mascot failure lines", () => {
     expect(failed("tool", "TodoWrite")).toBe("Could not update the plan");
     expect(failed("tool", "WebFetch")).toBe("Could not browse the web");
   });
-});
 
-describe("mascot activity titles", () => {
-  it("scrubs paths and secrets from provider-authored titles before showing them", async () => {
-    const { mascotActivityLine } = await import("../../src/server/runtime/mascot-message");
+  it("scrubs paths and secrets from provider-authored titles before showing them", () => {
     expect(mascotActivityLine({ kind: "tool", title: "Read /Users/alice/.ssh/id_rsa", detail: null, status: "running" })).toBe("Read <path>");
     expect(mascotActivityLine({ kind: "command", title: "PGPASSWORD=hunter2 psql -h db", detail: null, status: "running" })).toBe("PGPASSWORD=[redacted] psql -h db");
+  });
+
+  it("words each kind of step while it runs and once it is done", () => {
+    const line = (kind: AgentActivity["kind"], title: string, detail: string | null = null, status: AgentActivity["status"] = "running"): string | null =>
+      mascotActivityLine({ kind, title, detail, status });
+    const edits = "Files:\nupdate: /work/src/a.ts\nadd: /work/src/b.ts\ndelete: /work/src/c.ts";
+    expect(line("file", "File change", edits)).toBe("Editing a.ts and 2 more");
+    expect(line("file", "File change", edits, "completed")).toBe("Edited a.ts and 2 more");
+    expect(line("tool", "Task")).toBe("Delegating work");
+    expect(line("tool", "Agent", null, "completed")).toBe("Delegated work");
+    expect(line("tool", "TodoWrite")).toBe("Updating the plan");
+    expect(line("tool", "update_plan", null, "completed")).toBe("Updated the plan");
+    expect(line("tool", "WebFetch")).toBe("Browsing the web");
+    expect(line("tool", "WebSearch", null, "completed")).toBe("Browsed the web");
+    expect(line("tool", "Grep")).toBe("Searching the code");
+    expect(line("tool", "Glob", null, "completed")).toBe("Searched the code");
+    expect(line("command", "Interrupted · Command", "Command:\nnpm test", "completed")).toBe("Ran npm test");
+    const search = codexWebSearchActivity({ action: { type: "search", query: "electron setShape macOS" } } as never);
+    expect(line("tool", search.label, search.detail ?? null)).toBe("Search the web: electron setShape macOS");
+    const page = codexWebSearchActivity({ action: { type: "openPage", url: "https://www.electronjs.org/docs" } } as never);
+    expect(line("tool", page.label, page.detail ?? null, "completed")).toBe("Open web page: https://www.electronjs.org/docs");
+    expect(line("tool", "View image", "Path:\n/Users/me/project/shot.png")).toBe("View image: shot.png");
+    expect(line("tool", "MCP · github/search_issues")).toBe("Using github: search_issues");
   });
 });
 
 describe("mascot text bounds", () => {
-  it("never cuts a character in half when it shortens text, and the boundary rejects a lone surrogate", async () => {
-    const { mascotPreview, mascotCommand } = await import("../../src/server/runtime/mascot-message");
+  it("never cuts a character in half when it shortens text, and the boundary rejects a lone surrogate", () => {
     const preview = mascotPreview(`${"a".repeat(278)}😀😀😀`)!;
     expect(preview).toBe(`${"a".repeat(278)}…`);
     expect(mascotPreview(`${"a".repeat(277)}😀😀😀`)).toBe(`${"a".repeat(277)}😀…`);

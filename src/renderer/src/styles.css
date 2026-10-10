@@ -5857,7 +5857,9 @@ button.turn-agents-line:hover {
 }
 
 .workspace-repository-scope-leading {
-  flex: 1;
+  min-width: calc(14px + 7px + 88px);
+  max-width: 50%;
+  flex: 0 1 auto;
   gap: 7px;
   color: var(--text-muted);
 }
@@ -5870,7 +5872,7 @@ button.turn-agents-line:hover {
 .workspace-repository-scope-leading strong,
 .workspace-repository-scope-leading select {
   overflow: hidden;
-  min-width: 0;
+  min-width: 88px;
   max-width: 360px;
   color: var(--text);
   font-size: var(--text-sm);
@@ -5893,7 +5895,9 @@ button.turn-agents-line:hover {
 }
 
 .workspace-repository-scope-meta {
-  flex: 0 0 auto;
+  min-width: auto;
+  flex: 1 1 auto;
+  justify-content: flex-end;
   gap: 8px;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -5904,9 +5908,16 @@ button.turn-agents-line:hover {
   white-space: nowrap;
 }
 
-.workspace-repository-scope-branch {
+.workspace-repository-scope-meta > .workspace-repository-scope-branch {
+  width: 0;
+  min-width: 72px;
   overflow: hidden;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+}
+
+.workspace-repository-scope-branch > span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
@@ -6172,10 +6183,6 @@ button.turn-agents-line:hover {
     gap: 6px;
     overflow: hidden;
     padding-left: 21px;
-  }
-
-  .workspace-repository-scope-branch {
-    min-width: 24px;
   }
 
   .workspace-repository-scope-actions > :first-child {

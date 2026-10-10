@@ -150,6 +150,45 @@ test("discovers and reviews dirty nested Openbravo repositories without a root G
   });
   await page.screenshot({ animations: "disabled", path: wideLight });
   expect((await page.locator("body").screenshot()).byteLength).toBeGreaterThan(1_000);
+  await expect(changes.getByRole("button", { name: /^More actions for /u })).toBeVisible();
+  expect(await changes.locator(".workspace-repository-scope").evaluate((element) => {
+    const bounds = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
+    const row = element.getBoundingClientRect();
+    const parts = [
+      ".workspace-repository-scope-leading select",
+      ".workspace-repository-scope-status",
+      ".workspace-repository-scope-stats",
+      ".workspace-repository-scope-boundary",
+      ".workspace-repository-scope-actions",
+    ].map(bounds);
+    const branch = element.querySelector<HTMLElement>(".workspace-repository-scope-branch > span");
+    const branchBox = bounds(".workspace-repository-scope-branch");
+    return {
+      width: element.clientWidth,
+      fits: element.scrollWidth <= element.clientWidth + 1,
+      oneLine: parts.every((part) => part.top >= row.top && part.bottom <= row.bottom
+        && Math.abs((part.top + part.bottom) / 2 - (parts[0]!.top + parts[0]!.bottom) / 2) <= 2),
+      inOrder: parts.every((part, index) => index === 0 || parts[index - 1]!.right <= part.left + 1),
+      pickerBesideIcon: bounds(".workspace-repository-scope-leading > svg").right <= parts[0]!.left + 1,
+      pickerReadable: parts[0]!.width >= 88,
+      branchTruncated: branch !== null && branch.scrollWidth > branch.clientWidth,
+      branchVisible: branchBox.width >= 72 && branch !== null && branch.clientWidth > 0
+        && branchBox.left >= parts[0]!.right && branchBox.right <= parts[1]!.left + 1,
+      actionsCompact: element.querySelector(".workspace-repository-scope-actions")!.classList.contains("is-compact"),
+      actionsInside: parts[4]!.right <= row.right + 1,
+    };
+  })).toEqual({
+    width: 520,
+    fits: true,
+    oneLine: true,
+    inOrder: true,
+    pickerBesideIcon: true,
+    pickerReadable: true,
+    branchTruncated: true,
+    branchVisible: true,
+    actionsCompact: true,
+    actionsInside: true,
+  });
 
   const workspaceFrame = page.locator(".workspace-frame");
   const previousToolsWidth = await workspaceFrame.evaluate((element) =>

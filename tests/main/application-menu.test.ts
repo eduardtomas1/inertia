@@ -26,7 +26,7 @@ describe("application menu", () => {
         "editMenu",
         "viewMenu",
         "windowMenu",
-        "help",
+        ...(platform === "darwin" ? ["help"] : []),
       ]);
       expect(all.every((item) => item.role !== undefined || item.type === "separator")).toBe(true);
     },

@@ -232,5 +232,10 @@ describe("selected model chip", () => {
       await window.happyDOM.close();
     }
   });
-});
 
+  it("names the trigger without a native title so the shared tooltip carries the full identity", () => {
+    const html = render();
+    expect(html).not.toContain("title=");
+    expect(html).toContain('aria-label="');
+  });
+});

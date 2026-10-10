@@ -290,11 +290,12 @@ describe("model source rail", () => {
     );
 
     const html = renderRail(items);
+    expect(html).not.toContain("title=");
     expect(html).toContain(
-      'title="Team gateway, custom backend via Claude, 2 models, profile custom:team-a"',
+      'aria-label="Team gateway, custom backend via Claude, 2 models, profile custom:team-a"',
     );
     expect(html).toContain(
-      'title="Team gateway, custom backend via Codex, 1 model, profile custom:team-b"',
+      'aria-label="Team gateway, custom backend via Codex, 1 model, profile custom:team-b"',
     );
     expect(html).toContain('data-provider-brand="openai"');
     expect(html).toContain('data-provider-brand="anthropic"');

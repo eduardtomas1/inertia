@@ -8,6 +8,7 @@ import { Check, Pin } from "lucide-react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { TooltipButton } from "./TooltipButton";
+import { TooltipText } from "./TooltipText";
 import { providerIdForHarness, providerNativeBackendProfile } from "../../../shared/model-routing";
 import { MODEL_SOURCE_PROVIDER_LABELS } from "../utils/modelSourceRail";
 import type { ModelSearchRoute } from "../utils/modelSearch";
@@ -224,14 +225,13 @@ export const ModelChooserRow = memo(function ModelChooserRow({
         data-model-route-key={row.key}
         data-model-source={row.source}
         tabIndex={tabIndex}
-        title={row.disabledReason ?? undefined}
         onClick={select}
       >
         <span className="model-chooser-row-main">
           <span className="model-chooser-row-primary">
             <strong title={row.displayName}>{row.displayName}</strong>
             {row.shortcut && (
-              <kbd title={`Shortcut ${row.shortcut.label}`}>{row.shortcut.label}</kbd>
+              <kbd>{row.shortcut.label}</kbd>
             )}
           </span>
           <span className="model-chooser-row-secondary">
@@ -246,14 +246,14 @@ export const ModelChooserRow = memo(function ModelChooserRow({
             <span title={secondaryIdentity}>{secondaryIdentity}</span>
             {row.source === "custom" && <em>Custom</em>}
             {compatibilityLabel && (
-              <span
+              <TooltipText
                 id={compatibilityId}
                 className={`model-chooser-row-compatibility is-${row.compatibility!.state}`}
-                title={row.compatibility?.explanation ?? undefined}
+                tooltip={row.compatibility?.explanation ?? compatibilityLabel}
                 aria-label={`Selection compatibility: ${compatibilityLabel}${row.compatibility?.explanation ? `. ${row.compatibility.explanation}` : ""}`}
               >
                 {compatibilityLabel}
-              </span>
+              </TooltipText>
             )}
           </span>
           {row.disabledReason && (
@@ -264,7 +264,7 @@ export const ModelChooserRow = memo(function ModelChooserRow({
         </span>
 
         {row.active && (
-          <span className="model-chooser-row-active" title="Active model">
+          <span className="model-chooser-row-active">
             <Check size={14} aria-hidden="true" />
             <span className="visually-hidden">Active model</span>
           </span>

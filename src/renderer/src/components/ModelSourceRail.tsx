@@ -7,6 +7,7 @@ import {
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { TooltipButton } from "./TooltipButton";
 import type { ProviderId } from "../../../shared/contracts";
 import {
   isModelSourceRailActivationKey,
@@ -113,7 +114,7 @@ export function ModelSourceRail({
           const glyph = modelSourceRailItemGlyph(item);
           const accessibleLabel = modelSourceRailItemAccessibleLabel(item);
           return (
-            <button
+            <TooltipButton
               key={item.id}
               type="button"
               className={`model-source-rail-item${selected ? " is-selected" : ""}${item.setupAction ? " is-setup" : ""}`}
@@ -125,7 +126,8 @@ export function ModelSourceRail({
               tabIndex={selectedIndex >= 0
                 ? (selected ? 0 : -1)
                 : (index === firstEnabledIndex ? 0 : -1)}
-              title={accessibleLabel}
+              tooltip={accessibleLabel}
+              describeTooltip={false}
               onClick={() => activate(item)}
               onKeyDown={(event) => {
                 if (!isModelSourceRailActivationKey(event.nativeEvent)) return;
@@ -145,7 +147,7 @@ export function ModelSourceRail({
                   : <glyph.Icon size={14} aria-hidden="true" />}
               </span>
               <span className="model-source-rail-mark" aria-hidden="true" />
-            </button>
+            </TooltipButton>
           );
         })}
       </div>

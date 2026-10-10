@@ -681,12 +681,9 @@ export function ModelChooser({
                 {results.emptyState && (
                   <div className="model-chooser-empty" role="status">
                     <Search size={16} aria-hidden="true" />
-                    <span>
-                      <strong>{results.emptyState.kind === "no-models"
-                        ? "No models yet"
-                        : "No matching models"}</strong>
-                      <small>{results.emptyState.message}</small>
-                    </span>
+                    <span>{results.emptyState.kind === "no-models"
+                      ? "No models yet"
+                      : "No matching models"}</span>
                   </div>
                 )}
               </div>

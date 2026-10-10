@@ -13,6 +13,7 @@ import {
   type SelectedModelChipRoute,
 } from "../utils/selectedModelChip";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { TooltipButton } from "./TooltipButton";
 
 export interface SelectedModelChipProps {
   route: SelectedModelChipRoute;
@@ -42,11 +43,12 @@ export const SelectedModelChip = forwardRef<
   const identity = selectedModelChipIdentity(route);
 
   return (
-    <button
+    <TooltipButton
       ref={ref}
       type="button"
       className={`selected-model-chip${expanded ? " is-open" : ""}`}
-      title={identity.title}
+      tooltip={identity.title}
+      describeTooltip={false}
       aria-label={identity.accessibleName}
       aria-haspopup={ariaHasPopup}
       aria-controls={controlsId}
@@ -69,6 +71,6 @@ export const SelectedModelChip = forwardRef<
         size={14}
         aria-hidden="true"
       />
-    </button>
+    </TooltipButton>
   );
 });

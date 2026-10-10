@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProjectAction } from "../../src/shared/contracts";
 import { Composer } from "../../src/renderer/src/components/Composer";
 
+import { readSourceText } from "../helpers/source-text";
 import { composerProps, conversation, openComposerTools } from "./composer-fixtures";
 
 const actions: ProjectAction[] = [
@@ -46,5 +47,20 @@ describe("composer project actions menu", () => {
     const menu = await screen.findByRole("menu", { name: "Project actions" });
     const items = within(menu).getAllByRole("menuitem");
     await waitFor(() => expect(items[2]).toHaveFocus());
+  });
+
+  it("hides the inline actions control only at widths where the More menu offers it", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    const blocks = [...css.matchAll(/^@container \(max-width: (\d+)px\) \{\n([\s\S]*?)\n\}$/gmu)]
+      .map(([, width, body]) => ({ width: Number(width), body: body! }));
+    const moreWidths = blocks
+      .filter(({ body }) => /\.composer-more-control \{\n\s+display: block;/u.test(body))
+      .map(({ width }) => width);
+    const hiddenWidths = blocks
+      .filter(({ body }) => /\.composer-action-control[^{]*\{\n\s+display: none;/u.test(body))
+      .map(({ width }) => width);
+    expect(moreWidths).toHaveLength(1);
+    expect(hiddenWidths.length).toBeGreaterThan(0);
+    expect(Math.max(...hiddenWidths)).toBeLessThanOrEqual(moreWidths[0]!);
   });
 });

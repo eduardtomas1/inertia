@@ -5,6 +5,7 @@ import { declarationsFor, parseCssRules, readRendererCss } from "./css-rules";
 const source = readRendererCss(
   "styles.css",
   "components/composer/ComposerSurface.css",
+  "components/composer/ComposerSkillsMenu.css",
   "components/composer/ComposerCommandMenu.css",
   "components/composer/ComposerSendActions.css",
 );
@@ -62,5 +63,12 @@ describe("composer context rows", () => {
     expect(declarationsFor(rules, ".composer-command-list").get("padding")).toBe("0");
     expect(declarationsFor(rules, ".composer-command-separator").get("margin")).toBe("4px -4px");
     expect(source).not.toContain("composer-command-group-label");
+  });
+
+  it("highlights the keyboard-active skill with the strong fill and keeps skill names off the accent", () => {
+    expect(declarationsFor(rules, '.composer-skills-list button[aria-selected="true"]').get("background"))
+      .toBe("var(--fill-strong)");
+    expect(declarationsFor(rules, ".composer-skills-list code").get("color")).toBe("var(--text)");
+    expect(source).not.toMatch(/\.composer-skills[^{}]*\{[^}]*--accent-strong/u);
   });
 });

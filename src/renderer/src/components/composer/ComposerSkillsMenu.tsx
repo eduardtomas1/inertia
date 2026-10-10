@@ -5,6 +5,7 @@ import type {
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
 } from "@shared/contracts";
+import { LoadingMark } from "../ui";
 import type { ComposerMenuController } from "./useComposerMenus";
 import "./ComposerSkillsMenu.css";
 
@@ -76,50 +77,50 @@ export function ComposerSkillsMenu({
         ref={(node) => setMenuPopover("skills", node)}
         className="composer-popover composer-skills-popover"
       >
-        <header>
-          <span>
-            <strong>Skills</strong>
-            <small>Choose with ↑ ↓, insert with Tab or Enter.</small>
-          </span>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Refresh skills"
-            disabled={loading}
-            onClick={() => void onList(true).catch(() => undefined)}
-          >
-            <RefreshCw size={14} className={loading ? "is-spinning" : undefined} aria-hidden="true" />
-          </button>
-        </header>
         {error && <p className="composer-skills-error" role="alert">{error}</p>}
-        {loading && <p className="composer-skills-empty" role="status">Discovering skills…</p>}
+        {loading && (
+          <p className="composer-skills-empty" role="status">
+            <LoadingMark size={14} aria-hidden="true" />
+            Discovering skills…
+          </p>
+        )}
         {!error && !loading && visibleSkills.length === 0 && (
           <p className="composer-skills-empty" role="status">
-            {skills.some((skill) => skill.enabled)
-              ? "No skills match. Edit the name or press Escape to keep typing."
-              : "No enabled skills were reported for this project."}
+            {skills.some((skill) => skill.enabled) ? "No skills match" : "No enabled skills"}
           </p>
         )}
         <div id={listboxId} className="composer-skills-list" role="listbox" aria-label="Skill suggestions">
-          {visibleSkills.map((skill) => (
-            <button
-              ref={skill.id === activeSkillId ? activeOption : undefined}
-              id={`${listboxId}-${skill.id}`}
-              type="button"
-              role="option"
-              aria-selected={skill.id === activeSkillId}
-              tabIndex={0}
-              key={skill.id}
-              onClick={() => {
-                onInsert(skill);
-                dismissMenu("context-change");
-              }}
-              title={`Insert $${skill.name}`}
-            >
-              <code translate="no">{`$${skill.name}`}</code>
-              <span><small>{skill.shortDescription ?? skill.description}</small></span>
-            </button>
-          ))}
+          {visibleSkills.map((skill) => {
+            const description = skill.shortDescription ?? skill.description;
+            return (
+              <button
+                ref={skill.id === activeSkillId ? activeOption : undefined}
+                id={`${listboxId}-${skill.id}`}
+                type="button"
+                role="option"
+                aria-selected={skill.id === activeSkillId}
+                tabIndex={0}
+                key={skill.id}
+                onClick={() => {
+                  onInsert(skill);
+                  dismissMenu("context-change");
+                }}
+              >
+                <code translate="no">{`$${skill.name}`}</code>
+                <small title={description}>{description}</small>
+              </button>
+            );
+          })}
+        </div>
+        <div className="composer-skills-footer">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void onList(true).catch(() => undefined)}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            Refresh skills
+          </button>
         </div>
       </div>
     </div>

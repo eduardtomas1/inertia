@@ -38,6 +38,7 @@ export interface ComposerConversationContextController {
   isReferencing(): boolean;
   error: string | null;
   previewPacketId: string | null;
+  previewKey: string | null;
   confirmation: ConversationContextSourceOption | null;
   confirmReference(accepted: boolean): void;
   referenceChat(source: ConversationContextSourceOption): Promise<boolean>;
@@ -71,7 +72,7 @@ export function useComposerConversationContext(input: {
     paused,
     onCommand,
   } = input;
-  const [previewPacketId, setPreviewPacketId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ packetId: string; key: string } | null>(null);
   const pendingRequests = useRef(new Map<string, string | null>());
   const [, refresh] = useReducer((revision: number) => revision + 1, 0);
   const [error, setError] = useState<{ conversationId: string; message: string } | null>(null);
@@ -107,7 +108,7 @@ export function useComposerConversationContext(input: {
   }, [conversationId, referencing, pendingPacketId]);
 
   useEffect(() => {
-    setPreviewPacketId(null);
+    setPreview(null);
     setError(null);
   }, [conversationId, enabled]);
 
@@ -132,9 +133,9 @@ export function useComposerConversationContext(input: {
     return contextSources.filter(({ conversationId: source }) => !referenced.has(source));
   }, [canReferenceChat, contextSources, draftContextPackets]);
 
-  const remove = async (packetId: string): Promise<void> => {
+  const remove = async (packetId: string, keepPreview = false): Promise<void> => {
     if (!enabled || !onCommand) return;
-    setPreviewPacketId((current) => current === packetId ? null : current);
+    if (!keepPreview) setPreview((current) => current?.packetId === packetId ? null : current);
     await onCommand("conversation.context.remove", {
       type: "conversation.context.remove",
       payload: { packetId, targetConversationId: conversationId },
@@ -156,8 +157,8 @@ export function useComposerConversationContext(input: {
     source?: ConversationContextSourceOption,
     acknowledged = false,
     attempts = 1,
-  ): Promise<boolean> => {
-    if (!onCommand) return false;
+  ): Promise<string | null> => {
+    if (!onCommand) return null;
     pendingRequests.current.set(conversationId, null);
     refresh();
     setError(null);
@@ -169,7 +170,7 @@ export function useComposerConversationContext(input: {
         }));
       if (source?.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) {
         pendingRequests.current.delete(conversationId);
-        return false;
+        return null;
       }
       const create = async (remaining: number): Promise<string> => {
         try {
@@ -192,12 +193,13 @@ export function useComposerConversationContext(input: {
           return create(remaining - 1);
         }
       };
-      pendingRequests.current.set(conversationId, await create(attempts));
-      return true;
+      const packetId = await create(attempts);
+      pendingRequests.current.set(conversationId, packetId);
+      return packetId;
     } catch {
       pendingRequests.current.delete(conversationId);
       setError({ conversationId, message: `${label} could not be referenced.` });
-      return false;
+      return null;
     } finally {
       refresh();
     }
@@ -207,12 +209,12 @@ export function useComposerConversationContext(input: {
     source: ConversationContextSourceOption,
   ): Promise<boolean> => {
     if (!canAddReference()) return false;
-    return createReference(source.conversationId, source.conversationTitle, source);
+    return await createReference(source.conversationId, source.conversationTitle, source) !== null;
   };
 
   const referenceThisChat = async (): Promise<boolean> => {
     if (!canAddReference()) return false;
-    return createReference(conversationId, "This chat");
+    return await createReference(conversationId, "This chat") !== null;
   };
 
   const recopying = useRef(new Set<string>());
@@ -233,19 +235,22 @@ export function useComposerConversationContext(input: {
     refresh();
     try {
       if (!await sameRelation(packet)) throw new Error("The confirmed workspace relation changed.");
-      await remove(packet.id);
+      await remove(packet.id, true);
     } catch {
       pendingRequests.current.delete(conversationId);
       refresh();
       return;
     }
-    await createReference(
+    const packetId = await createReference(
       packet.sourceConversationId,
       isOwnConversationContext(packet) ? "This chat" : packet.sourceConversationTitle,
       undefined,
       packet.workspaceRelation === "different-workspace",
       2,
     );
+    setPreview((current) => current?.packetId !== packet.id
+      ? current
+      : packetId ? { ...current, packetId } : null);
   };
   useEffect(() => {
     if (!enabled || !onCommand || paused || referencing) return;
@@ -276,7 +281,8 @@ export function useComposerConversationContext(input: {
     referencing,
     isReferencing,
     error: error?.conversationId === conversationId ? error.message : null,
-    previewPacketId,
+    previewPacketId: preview?.packetId ?? null,
+    previewKey: preview?.key ?? null,
     confirmation: confirmation?.conversationId === conversationId
       && confirmation.workspaceKey === workspaceKey && enabled
       ? confirmation.source : null,
@@ -285,7 +291,7 @@ export function useComposerConversationContext(input: {
     referenceThisChat,
     togglePreview: (packetId) => {
       if (!enabled) return;
-      setPreviewPacketId((current) => current === packetId ? null : packetId);
+      setPreview((current) => current?.packetId === packetId ? null : { packetId, key: packetId });
     },
     dismissError: () => setError(null),
     remove,
@@ -347,7 +353,7 @@ export function ComposerConversationContextPreview({
   return (
     <Suspense fallback={null}>
       <PreviewCard
-        key={`${targetConversationId}/${controller.previewPacketId}`}
+        key={`${targetConversationId}/${controller.previewKey}`}
         packetId={controller.previewPacketId}
         targetConversationId={targetConversationId}
         revision={controller.contextPacketIds.join(",")}

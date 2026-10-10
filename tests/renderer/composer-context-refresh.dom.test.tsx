@@ -131,6 +131,50 @@ describe("stale chat reference drafts", () => {
     expect(onCommand).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps an open preview on the same card and points it at the recopied reference", async () => {
+    const refreshed = draft({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", createdAt: "2026-10-08T10:05:01.000Z", messageCount: 5 });
+    const creation = deferred<ServerEvent>();
+    const onCommand = vi.fn(async (type: string) => type === "conversation.context.create"
+      ? creation.promise
+      : type === "conversation.context.source.load"
+        ? sourceLoaded()
+        : { type: "request.ok", requestId: "remove" } as ServerEvent);
+    const { props, view } = setup({}, onCommand);
+    act(() => view.result.current.togglePreview(draft().id));
+    const openedKey = view.result.current.previewKey;
+    expect(view.result.current.previewPacketId).toBe(draft().id);
+
+    const finished = { ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] };
+    view.rerender(finished);
+    await act(async () => {});
+    view.rerender({ ...finished, contextPackets: [] });
+    expect(view.result.current.previewKey).toBe(openedKey);
+    await act(async () => creation.resolve(created(refreshed)));
+    view.rerender({ ...finished, contextPackets: [refreshed] });
+    await act(async () => {});
+
+    expect(view.result.current.contextPacketIds).toEqual([refreshed.id]);
+    expect(view.result.current.previewPacketId).toBe(refreshed.id);
+    expect(view.result.current.previewKey).toBe(openedKey);
+  });
+
+  it("closes an open preview when the recopy fails", async () => {
+    const onCommand = vi.fn(async (type: string) => {
+      if (type === "conversation.context.create") throw new Error("offline");
+      return type === "conversation.context.source.load"
+        ? sourceLoaded()
+        : { type: "request.ok", requestId: "remove" } as ServerEvent;
+    });
+    const { props, view } = setup({}, onCommand);
+    act(() => view.result.current.togglePreview(draft().id));
+
+    view.rerender({ ...props, contextSources: [{ ...source, latestTurnCompletedAt: "2026-10-08T10:05:00.000Z" }] });
+    await act(async () => {});
+
+    expect(view.result.current.previewPacketId).toBeNull();
+    expect(view.result.current.previewKey).toBeNull();
+  });
+
   it("leaves a reference alone when the source turn finished before the copy", async () => {
     const onCommand = vi.fn();
     const { props, view } = setup({}, onCommand);

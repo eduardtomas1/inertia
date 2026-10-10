@@ -100,7 +100,7 @@ it.each(["primary", "secondary"] as const)("reports the open launcher for the %s
 });
 
 it("marks a split chat's finished run seen only while its window is focused and its latest reply is in view", () => {
-  const request = vi.fn(pendingCommand);
+  const request = vi.fn<(command: { type: string }) => Promise<ServerEvent>>(pendingCommand);
   const run: WorkspaceRun = {
     id: "71717171-7171-4171-8171-717171717171", kind: "agent", projectId: project.id, conversationId: secondary.id, actionId: null,
     label: "Codex", detail: null, status: "succeeded", attentionState: "unseen", canStop: false, port: null, startedAt: now, finishedAt: now,
@@ -116,7 +116,7 @@ it("marks a split chat's finished run seen only while its window is focused and 
   }, { initialProps: { version: 0 } });
   const pane = () => hook.result.current.splitScene!.panes.find((entry) => entry.owner === "secondary")!;
   const marked = () => request.mock.calls.filter(([command]) => command.type === "activity.mark-seen");
-  act(() => pane().scene.chat.onLatestContentVisibilityChange?.(true));
+  act(() => pane().scene!.chat.onLatestContentVisibilityChange?.(true));
   expect(marked()).toEqual([]);
   focused.mockReturnValue(true);
   hook.rerender({ version: 1 });

@@ -6,7 +6,7 @@ import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStat
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
-import { mascotPreview } from "../../src/server/runtime/mascot-message";
+import { mascotCommentaryLine, mascotPreview, mascotResultLine } from "../../src/server/runtime/mascot-message";
 
 const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
 const MINUTE = 60_000;
@@ -517,7 +517,7 @@ describe("mascot bubble words", () => {
 describe("mascot message helpers", () => {
   it("takes the first prose sentence of a result, skipping headings, fences, rules, tables, quotes and list markers", async () => {
     const { mascotResultLine } = await import("../../src/server/runtime/mascot-message");
-    expect(mascotResultLine("```ts\nconst hidden = true;\n```\n\n> **Done.** The tests pass.")).toBe("Done.");
+    expect(mascotResultLine("```ts\nconst hidden = true;\n```\n\n> **Done.** The tests pass.")).toBe("Done. The tests pass.");
     expect(mascotResultLine("# Title\n---\n| a | b |\n- Fixed the race in `server.ts`. Then more.")).toBe("Fixed the race in server.ts.");
     expect(mascotResultLine("1. Updated the docs")).toBe("Updated the docs");
     expect(mascotResultLine("## Only a heading")).toBeNull();
@@ -547,6 +547,49 @@ describe("mascot prose", () => {
     expect(mascotResultLine("![Screenshot of the page](/Users/me/shot.png)\n\nDone.")).toBe("Screenshot of the page");
     expect(mascotResultLine("*Fixed* the _login_ bug in `auth.ts`.")).toBe("Fixed the login bug in auth.ts.");
     expect(mascotResultLine("Renamed load_user_data to fetch_user and 2*3*4 stays.")).toBe("Renamed load_user_data to fetch_user and 2*3*4 stays.");
+  });
+});
+
+describe("mascot lines from long or structured text", () => {
+  it("takes the agent's latest words from the end of long commentary", () => {
+    const sentences = Array.from({ length: 60 }, (_, index) => `Sentence number ${index} explains one more detail about the change I am making.`);
+    expect(mascotCommentaryLine(`${sentences.join(" ")} Next I will run the focused tests.`)).toBe("Next I will run the focused tests.");
+    expect(mascotCommentaryLine(`Intro paragraph.\n\n\`\`\`\n${"code\n".repeat(4_000)}\`\`\`\n\nNext I will run the focused tests.`)).toBe("Next I will run the focused tests.");
+    expect(mascotCommentaryLine(`${"word ".repeat(2_000)}and that was a very long thought. Done.`)).toBe("Done.");
+  });
+
+  it("never runs lines, headings, list items or table rows together into one sentence", () => {
+    expect(mascotCommentaryLine("Next steps:\n- update feed\n- add test")).toBe("add test");
+    expect(mascotCommentaryLine("I found two issues:\n\n1. The ranking flips.\n2. The row is cut.")).toBe("The ranking flips. The row is cut.");
+    expect(mascotCommentaryLine("## Plan\nNext I will run the tests.")).toBe("Next I will run the tests.");
+    expect(mascotCommentaryLine("Checking the table.\n| a | b |\n|---|---|\n| 1 | 2 |")).toBe("Checking the table.");
+    expect(mascotCommentaryLine("I changed the parser\nand the renderer")).toBe("and the renderer");
+  });
+
+  it("does not split a sentence after a common abbreviation", () => {
+    expect(mascotResultLine("Updated the config, e.g. Foo. Then ran the tests.")).toBe("Updated the config, e.g. Foo.");
+    expect(mascotResultLine("Kept the old name, i.e. Parser. Nothing else changed.")).toBe("Kept the old name, i.e. Parser.");
+    expect(mascotCommentaryLine("Fixed the imports, docs, etc. Then ran every check again.")).toBe("Fixed the imports, docs, etc. Then ran every check again.");
+  });
+
+  it("skips a result's bold label, its introduction line and setext headings, and strips comments, folds, strikes and math", () => {
+    expect(mascotResultLine("**Summary**\n\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("Here's what I changed:\n\n- Fixed ranking\n- Added tests")).toBe("Fixed ranking");
+    expect(mascotResultLine("Summary\n=======\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("Summary\n---\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("<!-- generated\nnotes -->\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("<details>\n<summary>\n</summary>\nAll 42 tests pass in the ranking suite.\n</details>")).toBe("All 42 tests pass in the ranking suite.");
+    expect(mascotResultLine("Fixed ~~two~~ three bugs in the ranking.")).toBe("Fixed three bugs in the ranking.");
+    expect(mascotResultLine("$$\nx^2\n$$\nThe formula now renders in the bubble.")).toBe("The formula now renders in the bubble.");
+    expect(mascotResultLine("$$x^2$$\nThe formula now renders in the bubble.")).toBe("The formula now renders in the bubble.");
+    expect(mascotResultLine("Only an introduction:")).toBe("Only an introduction:");
+  });
+
+  it("joins a short first or last sentence with its neighbour the same way for results and commentary", () => {
+    expect(mascotResultLine("Done.\n\nI changed three files: a.ts, b.ts and c.ts.")).toBe("Done. I changed three files: a.ts, b.ts and c.ts.");
+    expect(mascotResultLine("Sure! I've updated the ranking so failures show first.")).toBe("Sure! I've updated the ranking so failures show first.");
+    expect(mascotResultLine("Fixed ranking\nAdded tests")).toBe("Fixed ranking");
+    expect(mascotCommentaryLine("I looked at the publisher and the feed. Done.")).toBe("I looked at the publisher and the feed. Done.");
   });
 });
 

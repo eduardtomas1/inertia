@@ -30,38 +30,66 @@ export function mascotPreview(value: string | null | undefined, limit = 280): st
     .replace(/^#{1,6}\s+/u, "")
     .replace(/[‪-‮⁦-⁩]/gu, "")
     .replace(/[\s\x00-\x1f\x7f]+/gu, " ").trim();
-  return wellFormed(text.length > limit ? `${cut(text, limit - 1).trimEnd()}…` : text) || null;
+  return wellFormed(bounded(text, limit)) || null;
 }
 
+const SENTENCE_BREAK = /(?<=[.!?])(?<!\b(?:[Ee]\.g|[Ii]\.e|etc|vs|cf)\.)\s+(?=[\p{Lu}\p{N}"'(`])/u;
+
 function sentences(text: string): string[] {
-  return text.split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}"'(`])/u).map((part) => part.trim()).filter(Boolean);
+  return text.split(SENTENCE_BREAK).map((part) => part.trim()).filter(Boolean);
 }
 
 function prose(content: string): string[] {
   let fence: string | null = null;
   const lines: string[] = [];
-  for (const line of content.slice(0, 16_384).split("\n")) {
-    const marker = /^\s*(```|~~~)/u.exec(line)?.[1];
-    if (marker) { fence = fence === null ? marker : fence === marker ? null : fence; continue; }
-    if (fence === null && !/^(?: {4}|\t)/u.test(line)) {
-      lines.push(line.trim().replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
-        .replace(/(^|[\s(])[*_](?=[^*_\s])([^*_]*?[^*_\s])[*_](?=[\s).,;:!?]|$)/gu, "$1$2"));
+  for (const raw of content.replace(/<!--[\s\S]*?(?:-->|$)/gu, "").split("\n")) {
+    const marker = /^\s*(```|~~~|\$\$)/u.exec(raw)?.[1];
+    if (marker) {
+      if (fence === marker) fence = null;
+      else if (fence === null && !(marker === "$$" && raw.trim().slice(2).includes("$$"))) fence = marker;
+      continue;
     }
+    if (fence !== null || /^(?: {4}|\t)/u.test(raw)) continue;
+    const line = raw.trim().replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
+      .replace(/(^|[\s(])[*_](?=[^*_\s])([^*_]*?[^*_\s])[*_](?=[\s).,;:!?]|$)/gu, "$1$2")
+      .replace(/~~[^~]*~~|\$\$[^$]*\$\$|<\/?(?:details|summary)\b[^>]*>/giu, "").trim();
+    if (/^(?:=+|-{2,})$/u.test(line) && lines.at(-1)) lines[lines.length - 1] = "";
+    else lines.push(line);
   }
-  return lines;
+  return lines.filter((line) => line && !/^(?:#|[-*_]{3,}$|=+$|\|)/u.test(line))
+    .map((line) => line.replace(/^(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s+)?/u, ""));
+}
+
+function paired(parts: readonly string[], index: number, neighbour: number): string | null {
+  const part = parts[index];
+  const other = parts[neighbour];
+  if (!part) return null;
+  if (part.length >= 24 || !other) return mascotPreview(part);
+  const [first, second] = neighbour < index ? [other, part] : [part, other];
+  return mascotPreview(/[.!?…:]$/u.test(first) ? `${first} ${second}` : part);
 }
 
 export function mascotCommentaryLine(content: string): string | null {
-  const parts = sentences(mascotPreview(prose(content).join("\n"), 4_096) ?? "");
-  const last = parts.at(-1);
-  if (!last) return null;
-  return mascotPreview(last.length < 24 && parts.length > 1 ? `${parts.at(-2)} ${last}` : last);
+  const lines = prose(content.slice(-1_048_576));
+  const parts: string[] = [];
+  for (let index = lines.length - 1; index >= 0 && parts.length < 2; index -= 1) {
+    const line = lines[index]!;
+    const found = sentences(mascotPreview(line.slice(-4_096).replace(/^[\uDC00-\uDFFF]/u, ""), 4_096) ?? "");
+    if (line.length <= 4_096) parts.unshift(...found);
+    else { parts.unshift(...found.slice(1)); break; }
+  }
+  return paired(parts, parts.length - 1, parts.length - 2);
 }
 
 export function mascotResultLine(content: string): string | null {
-  const line = prose(content).find((part) => part && !/^(?:#|[-*_]{3,}$|\|)/u.test(part));
-  const text = mascotPreview(line?.replace(/^(?:>\s*)?(?:(?:[-*+]|\d+[.)])\s+)?/u, ""), 4_096);
-  return text ? mascotPreview(sentences(text)[0]) : null;
+  const lines = prose(content.slice(0, 16_384));
+  const parts: string[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (parts.length > 1) break;
+    if (/^(?:\*\*|__)[^*_]+(?:\*\*|__):?$/u.test(line) || (line.endsWith(":") && index < lines.length - 1)) continue;
+    parts.push(...sentences(mascotPreview(line, 4_096) ?? ""));
+  }
+  return paired(parts, 0, 1);
 }
 
 function bounded(text: string, limit: number): string {

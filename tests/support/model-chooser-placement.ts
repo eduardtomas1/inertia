@@ -37,15 +37,15 @@ export function modelChooserPlacementChecks({
   insideWorkspace: boolean;
 } {
   const viewportBottom = viewportTop + viewportHeight;
-  const availableBelow = Math.min(viewportBottom, workspace.bottom) - anchor.bottom - 16;
+  const availableBelow = Math.min(viewportBottom, workspace.bottom) - anchor.bottom - 12;
   const fitDifference = availableBelow - frame.height;
   return {
     correctSide: vertical === "below"
       ? fitDifference >= -FIT_ROUNDING_TOLERANCE
       : vertical === "above" && fitDifference <= FIT_ROUNDING_TOLERANCE,
     anchored: vertical === "below"
-      ? frame.top >= anchor.bottom + 7.5
-      : vertical === "above" && frame.bottom <= anchor.top - 7.5,
+      ? frame.top >= anchor.bottom + 3.5
+      : vertical === "above" && frame.bottom <= anchor.top - 3.5,
     insideWorkspace: frame.top >= Math.max(viewportTop, workspace.top) + 7.5
       && frame.bottom <= Math.min(viewportBottom, workspace.bottom) - 7.5,
   };

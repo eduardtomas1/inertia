@@ -407,7 +407,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
     }));
-    mascotStatus.replace(conversations, snapshot.projects);
+    mascotStatus.replace(conversations, snapshot.projects, snapshot.runs);
     const runs = snapshot.runs.map((run) => ({
       ...run,
       canStop: canStopWorkspaceRun(run),

@@ -55,7 +55,8 @@ import { useTheme } from "./hooks/useTheme";
 import { transferDraftWorkspacePanel, useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { useSnapshotQueue } from "./hooks/useSnapshotQueue";
-import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
+import { workspaceAttentionObstructed } from "./utils/attentionVisibility";
+import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
 import { type NewConversationLocation } from "./lib/newConversation";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
@@ -150,7 +151,6 @@ export default function App(): React.JSX.Element {
   } = split;
   const splitActive = split.visibleOwners.length > 0;
   const conversationSelectionGenerationRef = useRef(0);
-  const pendingSeenRunsRef = useRef(new Set<string>());
   const settings = useMemo(
     () => connection.snapshot?.settings ?? cachedAppSettings(),
     [connection.snapshot?.settings],
@@ -457,50 +457,23 @@ export default function App(): React.JSX.Element {
     commit,
     projectActions,
   } = workspaceTools;
-  useEffect(() => {
-    const run = visibleConversationRun;
-    if (!run || pendingSeenRunsRef.current.has(run.id)) return;
-    const shouldMark = shouldMarkWorkspaceRunSeen(
-      run,
-      view === "workspace" ? conversation?.id ?? null : null,
-      {
-        documentVisible: document.visibilityState === "visible",
-        documentFocused: document.hasFocus(),
-        workspaceVisible: view === "workspace",
-        latestContentVisible,
-        obstructed: workspaceAttentionObstructed({
-          paletteOpen, commitDialogOpen,
-          dailyWorkOpen,
-          authProviderOpen: authProviderId !== null,
-          multiSpawnOpen: multiSpawn.open,
-          mobileSidebarOpen: mobileNavigation && sidebarOpen,
-          helpOpen,
-        }),
-      },
-    );
-    if (!shouldMark) return;
-    pendingSeenRunsRef.current.add(run.id);
-    void request({
-      type: "activity.mark-seen",
-      payload: { runId: run.id },
-    }).catch(() => undefined).finally(() => {
-      pendingSeenRunsRef.current.delete(run.id);
-    });
-  }, [
-    attentionVisibilityVersion,
-    authProviderId,
-    commitDialogOpen,
+  const attentionObstructed = workspaceAttentionObstructed({
+    paletteOpen, commitDialogOpen,
     dailyWorkOpen,
-    conversation?.id,
+    authProviderOpen: authProviderId !== null,
+    multiSpawnOpen: multiSpawn.open,
+    mobileSidebarOpen: mobileNavigation && sidebarOpen,
     helpOpen,
-    latestContentVisible,
-    mobileNavigation, multiSpawn.open,
-    paletteOpen,
+  });
+  useMarkRunSeen({
     request,
-    sidebarOpen,
-    view,
-    visibleConversationRun,
-  ]);
+    run: visibleConversationRun,
+    conversationId: view === "workspace" ? conversation?.id ?? null : null,
+    workspaceVisible: view === "workspace",
+    latestContentVisible,
+    obstructed: attentionObstructed,
+    refresh: attentionVisibilityVersion,
+  });
 
   // Navigation actions retain their identity across overlay state changes,
   // while dispatching against the latest workspace and draft ownership.
@@ -932,6 +905,8 @@ export default function App(): React.JSX.Element {
       },
       sendingConversationIds,
       onTerminal: () => setGitRefreshVersion((version) => version + 1),
+      attentionObstructed,
+      attentionVisibilityVersion,
     },
     visible: browserWorkspaceVisible,
     conversation,

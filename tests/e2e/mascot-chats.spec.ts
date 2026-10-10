@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { mascotChatsProviderFixture } from "./support/mascot-chats-provider-fixture";
+import { focusAppWindow } from "./support/window-focus";
 
 const TITLES = {
   A: "Refactor the desktop mascot status feed so several running agents can be followed at a glance",
@@ -157,6 +158,15 @@ test("mascot follows three provider chats by priority, lists the others and spea
     await expect(rows).toBeHidden();
     await capture(app, overlay, "result-shown", info);
     await select("C");
+    await expect(mascot).toHaveAttribute("data-phase", "idle");
+    await expect(mascot).toHaveAttribute("data-compact", "true");
+
+    await focusAppWindow(app.electronApp, app.page);
+    await send("[D] Add a one-line summary above the notes.");
+    await expect(mascot).toHaveAttribute("data-phase", "running");
+    await expect(title).toHaveText(TITLES.C);
+    await gate("D-1");
+    await expect(app.page.getByText("Added a one-line summary above the release notes.", { exact: true })).toBeVisible();
     await expect(mascot).toHaveAttribute("data-phase", "idle");
     await expect(mascot).toHaveAttribute("data-compact", "true");
     expect(await overlay.evaluate(() => (window as unknown as { __messages: string[] }).__messages)).toEqual([]);

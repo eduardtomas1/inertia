@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentActivity, AgentApprovalRequest, AgentInputRequest, ChatMessage } from "../../src/shared/contracts/agent";
+import type { WorkspaceRun } from "../../src/shared/contracts/app";
 import { AGENT_RUN_STATES } from "../../src/shared/run-state";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
@@ -118,6 +119,23 @@ describe("authoritative mascot status", () => {
     expect(feed().status).toEqual(emptyMascotStatus());
     publisher.replace([]);
     expect(publish).toHaveBeenLastCalledWith({ status: emptyMascotStatus(), chats: [], rows: [], focus: null, counts: { chats: 0, attention: 0, others: 0 }, request: null });
+  });
+
+  it("counts a finished chat as seen once its run was marked seen where it is shown", () => {
+    const { publisher, feed } = mascotPublisher();
+    const chats = [conversation("done", "completed"), conversation("broken", "failed"), conversation("busy", "running")];
+    const run = (id: string, status: WorkspaceRun["status"], attentionState: WorkspaceRun["attentionState"]) => ({ id, status, attentionState });
+    publisher.replace(chats, [], [run("done-run", "running", "seen"), run("broken-run", "failed", "unseen")]);
+    expect(feed().status.conversationId).toBe("broken");
+    expect(ids(feed().rows)).toEqual(["done", "busy"]);
+    publisher.replace(chats, [], [run("done-run", "succeeded", "seen"), run("broken-run", "failed", "seen")]);
+    expect(feed().status).toMatchObject({ conversationId: "busy", phase: "running" });
+    expect(feed().rows).toEqual([]);
+    publisher.update(conversation("done", "completed"));
+    expect(feed().status.conversationId).toBe("busy");
+    const next = conversation("done", "completed", { turnId: "next-turn" });
+    publisher.update({ ...next, latestTurn: { ...next.latestTurn!, runId: "next-run" } });
+    expect(feed().status).toMatchObject({ conversationId: "done", turnId: "next-turn" });
   });
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {

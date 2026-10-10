@@ -2,6 +2,7 @@ import type { LimitResetCommandRunner } from "../components/composer/limitResetC
 import {
   useCallback,
   useMemo,
+  useState,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -31,6 +32,7 @@ import {
 } from "../lib/runtimeCommands";
 import { requestSubagentFollowUp } from "../utils/subagentFollowUp";
 import type { SplitPaneOwner } from "../utils/splitLayout";
+import { selectConversationWorkspaceRun } from "@shared/attention";
 import { focusWorkspacePreviewAddress } from "../utils/workspacePreviewFocus";
 import {
   useActivityActions,
@@ -46,6 +48,7 @@ import type {
 } from "./useConversationPaneLayout";
 import { useConversationProjection } from "./useConversationProjection";
 import { useConversationWorkspaceOptions } from "./useConversationWorkspaceOptions";
+import { useMarkRunSeen } from "./useMarkRunSeen";
 import { usePlanSteps } from "./usePlanSteps";
 import { useDesktopTools } from "./useDesktopTools";
 import type { useInertiaConnection } from "./useInertiaConnection";
@@ -63,7 +66,6 @@ type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type BackendProfileActions = ReturnType<typeof useBackendProfiles>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
 
-const ignoreLatestContentVisibility = (): void => undefined;
 const unavailableLimitReset: LimitResetCommandRunner = async () => { throw new Error("Reset actions are unavailable."); };
 const unavailableQueue: QueueCommandRunner = async () => { throw new Error("Message queues are unavailable."); };
 const unavailableBackgroundTasks: ConversationBackgroundTasksLoader = async () => { throw new Error("Background tasks are unavailable."); };
@@ -132,6 +134,8 @@ interface UseSplitWorkspaceSceneOptions {
   actions: SplitWorkspaceActions;
   sendingConversationIds: ReadonlySet<string>;
   onTerminal: () => void;
+  attentionObstructed: boolean;
+  attentionVisibilityVersion: number;
 }
 
 /**
@@ -158,8 +162,11 @@ export function useSplitWorkspaceScene({
   actions,
   sendingConversationIds,
   onTerminal,
+  attentionObstructed,
+  attentionVisibilityVersion,
 }: UseSplitWorkspaceSceneOptions): SplitWorkspaceSceneController {
   const busyPrefix = `split:${owner}:`;
+  const [latestContentVisible, setLatestContentVisible] = useState(false);
   const splitProject = useMemo(
     () => splitConversation
       ? snapshotProjects.find(
@@ -180,6 +187,21 @@ export function useSplitWorkspaceScene({
     onOpenPlan: () => undefined,
     onTerminal,
   }));
+  const visibleRun = useMemo(
+    () => splitConversation
+      ? selectConversationWorkspaceRun(splitConversation.id, connection.snapshot?.runs ?? [])
+      : null,
+    [connection.snapshot?.runs, splitConversation],
+  );
+  useMarkRunSeen({
+    request,
+    run: visibleRun,
+    conversationId: splitConversation?.id ?? null,
+    workspaceVisible: visible,
+    latestContentVisible,
+    obstructed: attentionObstructed,
+    refresh: attentionVisibilityVersion,
+  });
   const workflow = useStableController(useAgentWorkflows({
     conversationId: splitConversation?.id ?? null,
     routeIdentity: agentWorkflowRouteIdentity(
@@ -404,7 +426,7 @@ export function useSplitWorkspaceScene({
     workspaceOptions,
     actions: sceneActions,
     setActionError,
-    setLatestContentVisible: ignoreLatestContentVisibility,
+    setLatestContentVisible,
   }), [
     activityActions,
     appUpdate,

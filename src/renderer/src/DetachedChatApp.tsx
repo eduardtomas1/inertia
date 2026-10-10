@@ -64,7 +64,7 @@ import {
 } from "./utils/goalExecution";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { cachedAppSettings } from "./utils/cachedSettings";
-import { shouldMarkWorkspaceRunSeen } from "./utils/attentionVisibility";
+import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 
@@ -164,7 +164,6 @@ export default function DetachedChatApp({
   const [actionError, setActionError] = useState<string | null>(null);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [pinning, setPinning] = useState(false);
-  const pendingSeenRunsRef = useRef(new Set<string>());
   const nativeTitleRef = useRef<string | null>(null);
   const documentPresence = useDocumentPresence();
   const connection = useStableController(useInertiaConnection());
@@ -443,32 +442,15 @@ export default function DetachedChatApp({
     ),
     [connection.snapshot?.runs, conversationId],
   );
-  useEffect(() => {
-    if (
-      !visibleRun
-      || pendingSeenRunsRef.current.has(visibleRun.id)
-      || !shouldMarkWorkspaceRunSeen(visibleRun, conversationId, {
-        documentVisible: document.visibilityState === "visible",
-        documentFocused: document.hasFocus(),
-        workspaceVisible: documentPresence > 0,
-        latestContentVisible,
-        obstructed: false,
-      })
-    ) return;
-    pendingSeenRunsRef.current.add(visibleRun.id);
-    void request({
-      type: "activity.mark-seen",
-      payload: { runId: visibleRun.id },
-    }).catch(() => undefined).finally(() => {
-      pendingSeenRunsRef.current.delete(visibleRun.id);
-    });
-  }, [
-    conversationId,
-    documentPresence,
-    latestContentVisible,
+  useMarkRunSeen({
     request,
-    visibleRun,
-  ]);
+    run: visibleRun,
+    conversationId,
+    workspaceVisible: documentPresence > 0,
+    latestContentVisible,
+    obstructed: false,
+    refresh: documentPresence,
+  });
 
   const workflowState = workflow.state?.conversationId === conversationId
     ? workflow.state

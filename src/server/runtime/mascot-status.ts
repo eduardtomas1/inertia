@@ -1,5 +1,5 @@
 import type { RuntimeMutationEvent } from "../../shared/contracts/events";
-import type { ConversationShell, Project } from "../../shared/contracts/app";
+import type { ConversationShell, Project, WorkspaceRun } from "../../shared/contracts/app";
 import { agentRunStateForTurn } from "../../shared/run-state";
 import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoint";
 import {
@@ -77,6 +77,7 @@ function rank(left: Candidate, right: Candidate): number {
 export class MascotStatusPublisher {
   private readonly conversations = new Map<string, Candidate>();
   private projects = new Map<string, string | null>();
+  private seenRuns = new Set<string>();
   private focused: string | null = null;
   private shown: string | null = null;
   private request: number | null = null;
@@ -94,9 +95,15 @@ export class MascotStatusPublisher {
     private readonly clock: MascotClock = systemClock,
   ) {}
 
-  replace(conversations: readonly ConversationShell[], projects: readonly Pick<Project, "id" | "name">[] = []): void {
+  replace(
+    conversations: readonly ConversationShell[],
+    projects: readonly Pick<Project, "id" | "name">[] = [],
+    runs: readonly Pick<WorkspaceRun, "id" | "status" | "attentionState">[] = [],
+  ): void {
     if (!this.publish) return;
     this.projects = new Map(projects.map(({ id, name }) => [id, name]));
+    this.seenRuns = new Set(runs.filter(({ status, attentionState }) => status !== "running" && status !== "waiting"
+      && attentionState !== "unseen").map(({ id }) => id));
     const ids = new Set(conversations.map(({ id }) => id));
     for (const id of this.conversations.keys()) if (!ids.has(id)) this.conversations.delete(id);
     for (const conversation of conversations) this.store(conversation);
@@ -218,7 +225,7 @@ export class MascotStatusPublisher {
         message: null, progress: keep ? previous.status.progress : null, steps: keep ? previous.status.steps : null,
         since: timestamp(terminal ? turn.completedAt ?? turn.updatedAt : turn.startedAt ?? turn.requestedAt), quietSince: null,
       },
-      seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt),
+      seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt || this.seenRuns.has(turn.runId)),
       // Activity updates must not bounce between live chats.
       at: terminal ? turn.updatedAt : turn.requestedAt,
       changedAt: sameTurn && previous.status.phase === phase ? previous.changedAt : Number.isFinite(changed) ? changed : now,

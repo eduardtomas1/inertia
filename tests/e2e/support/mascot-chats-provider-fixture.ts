@@ -1,4 +1,3 @@
-/** Real Codex App Server transport for three chats, released step by step through test-owned gates. */
 export const mascotChatsProviderFixture = `
 const fs = require("node:fs");
 const path = require("node:path");
@@ -85,6 +84,12 @@ const SCRIPTS = {
     (t) => [
       ["item/completed", { item: cmd("c-cmd2", "git log --oneline v0.0.70..HEAD", "completed", "12 commits") }],
       ["item/completed", { item: { id: "c-final", type: "agentMessage", text: "Release notes drafted in CHANGELOG.md under v0.0.72." } }],
+      ["complete", "completed"],
+    ],
+  ],
+  D: [
+    (t) => [
+      ["item/completed", { item: { id: "d-final", type: "agentMessage", text: "Added a one-line summary above the release notes." } }],
       ["complete", "completed"],
     ],
   ],

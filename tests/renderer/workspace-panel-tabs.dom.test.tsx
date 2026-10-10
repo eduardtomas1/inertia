@@ -77,17 +77,39 @@ describe("workspace panel tab row", () => {
     const changes = list.querySelector<HTMLElement>('[data-tab-key="changes"]')!;
 
     fireEvent.pointerDown(changes, { button: 0, pointerId: 1, clientX: 50 });
-    fireEvent.pointerMove(list, { pointerId: 1, clientX: 52 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 52 });
     expect(list.querySelector(".is-dragging")).toBeNull();
-    fireEvent.pointerMove(list, { pointerId: 1, clientX: 210 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 210 });
     expect(tabNames()).toEqual(["preview", "changes", "terminal"]);
-    fireEvent.pointerMove(list, { pointerId: 1, clientX: 260 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 260 });
     expect(tabNames()).toEqual(["preview", "terminal", "changes"]);
     expect(onMove).not.toHaveBeenCalled();
     fireEvent.pointerUp(list, { pointerId: 1, clientX: 260 });
 
     expect(onMove).toHaveBeenCalledExactlyOnceWith("changes", 2);
     expect(tabNames()).toEqual(["preview", "terminal", "changes"]);
+  });
+
+  it("forgets a press that was released outside the tab list", () => {
+    const onMove = vi.fn();
+    render(<Host initial={state("changes", "changes", "preview", "terminal")} onMove={onMove} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list);
+    const changes = list.querySelector<HTMLElement>('[data-tab-key="changes"]')!;
+
+    fireEvent.pointerDown(changes, { button: 0, pointerId: 1, clientX: 50 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 0, clientX: 210 });
+    expect(list.querySelector(".is-dragging")).toBeNull();
+    fireEvent.pointerUp(list, { pointerId: 1, clientX: 210 });
+
+    fireEvent.pointerDown(changes, { button: 0, pointerId: 1, clientX: 50 });
+    fireEvent.pointerLeave(list, { pointerId: 1, buttons: 1, clientX: 50 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 210 });
+    expect(list.querySelector(".is-dragging")).toBeNull();
+    fireEvent.pointerUp(list, { pointerId: 1, clientX: 210 });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(tabNames()).toEqual(["changes", "preview", "terminal"]);
   });
 
   it("cancels a drag with Escape and keeps the order", () => {
@@ -98,7 +120,7 @@ describe("workspace panel tab row", () => {
     const terminal = list.querySelector<HTMLElement>('[data-tab-key="terminal"]')!;
 
     fireEvent.pointerDown(terminal, { button: 0, pointerId: 4, clientX: 250 });
-    fireEvent.pointerMove(list, { pointerId: 4, clientX: 20 });
+    fireEvent.pointerMove(list, { pointerId: 4, buttons: 1, clientX: 20 });
     expect(tabNames()).toEqual(["terminal", "changes", "preview"]);
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.pointerUp(list, { pointerId: 4, clientX: 20 });

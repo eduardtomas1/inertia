@@ -133,6 +133,10 @@ export function usePanelTabRow<K extends string>({
     onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
       const current = dragRef.current;
       if (!current || current.pointerId !== event.pointerId) return;
+      if ((event.buttons & 1) === 0) {
+        endDrag(false);
+        return;
+      }
       if (!current.started) {
         if (Math.abs(event.clientX - current.startX) < DRAG_THRESHOLD) return;
         current.started = true;
@@ -154,6 +158,9 @@ export function usePanelTabRow<K extends string>({
     },
     onPointerUp: (event: ReactPointerEvent<HTMLElement>) => {
       if (dragRef.current?.pointerId === event.pointerId) endDrag(true);
+    },
+    onPointerLeave: () => {
+      if (dragRef.current && !dragRef.current.started) dragRef.current = null;
     },
     onPointerCancel: () => endDrag(false),
     onLostPointerCapture: () => {

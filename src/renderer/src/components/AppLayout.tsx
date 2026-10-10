@@ -37,7 +37,7 @@ import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
-import { AppStatusOverlays } from "./AppStatusOverlays";
+import { AppStatusOverlays, StatusToastStack } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -516,6 +516,10 @@ export const AppLayout = memo(function AppLayout({
     && headerTools !== null;
   const frameHasInlinePanel = mainPanelOpen && panelPresentation === "inline";
   const frameHasSheetPanel = mainPanelOpen && panelPresentation === "sheet";
+  const dismissVisibleError = (): void => {
+    setActionError(null);
+    connection.clearError();
+  };
   const frameStyle = {
     ...workspaceBodyStyle,
     "--workspace-corner-controls-width": `${cornerControlsVisible ? cornerControlsWidth : 0}px`,
@@ -815,6 +819,12 @@ export const AppLayout = memo(function AppLayout({
                 actions.dropConversationInSplit?.(conversationId, plan)}
             />
           )}
+          <StatusToastStack
+            appUpdate={appUpdate}
+            providerQuotaNotices={providerQuotaNotices}
+            error={visibleError}
+            onDismissError={dismissVisibleError}
+          />
         </div>
       </section>
 
@@ -923,10 +933,6 @@ export const AppLayout = memo(function AppLayout({
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={visibleError}
-        onDismissError={() => {
-          setActionError(null);
-          connection.clearError();
-        }}
         databaseRecoveryNotice={connection.databaseRecoveryNotice}
         onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
         onImportRecovery={async () => {

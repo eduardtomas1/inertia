@@ -12,7 +12,7 @@ describe("Windows title bar overlay clearance", () => {
   });
 
   it("measures the overlay inset from the window controls overlay geometry", () => {
-    expect(css).toMatch(/@property --titlebar-overlay-inset \{\n  syntax: "<length>";\n  inherits: true;\n  initial-value: 0px;\n\}/u);
+    expect(css).not.toContain("@property --titlebar-overlay-inset");
     expect(css).toMatch(/\.app-shell\.platform-win32 \{[^}]*--titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
     expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \{\n  --titlebar-overlay-inset: max\(0px, calc\(100vw - env\(titlebar-area-x, 0px\) - env\(titlebar-area-width, 100vw\)\)\);/u);
   });
@@ -24,12 +24,11 @@ describe("Windows title bar overlay clearance", () => {
     expect(detachedCss).toMatch(/\.detached-chat-shell\.platform-win32 \.detached-chat-header \{\n  padding-right: calc\(8px \+ var\(--titlebar-overlay-inset\)\);/u);
   });
 
-  it("keeps the right panel's 300px minimum beside the caption buttons", () => {
-    expect(css).toMatch(/\.platform-win32 \.workspace-frame \{\n  --workspace-panel-width: max\(var\(--workspace-tools-width\), calc\(300px \+ var\(--titlebar-overlay-inset\)\)\);\n\}/u);
-    expect(css).toMatch(/\.platform-win32 \.workspace-frame\.has-right-panel > \.workspace-header \{\n  margin-right: var\(--workspace-panel-width\);\n\}/u);
-    expect(css).toMatch(/\.platform-win32 \.workspace-body\.has-tools \{\n  padding-right: var\(--workspace-panel-width\);\n\}/u);
-    expect(css).toMatch(/\.platform-win32 \.workspace-body > \.workspace-panel\.is-inline \{\n  width: var\(--workspace-panel-width\);\n\}/u);
-    expect(css).toMatch(/\.platform-win32 \.workspace-body > \.workspace-panel\.is-sheet \{\n  width: max\(min\(448px, max\(320px, 42vw\)\), calc\(300px \+ var\(--titlebar-overlay-inset\)\)\);\n  max-width: calc\(100% - 24px\);\n\}/u);
+  it("keeps the right panel at 300px on Windows and clears the caption buttons only in its tab strip", () => {
+    expect(css).not.toContain("--workspace-panel-width");
+    expect(css).not.toMatch(/\.platform-win32 \.workspace-body > \.workspace-panel\.is-(?:inline|sheet) \{/u);
+    expect(css).not.toMatch(/\.platform-win32 \.workspace-body\.has-tools \{/u);
+    expect(css).not.toMatch(/\.platform-win32 \.workspace-frame\.has-right-panel > \.workspace-header \{/u);
     expect(readSourceText(new URL("../../src/renderer/src/hooks/useWorkspaceLayout.ts", import.meta.url))).toContain("export const TOOLS_MIN_WIDTH = 300;");
   });
 

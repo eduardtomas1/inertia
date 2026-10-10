@@ -149,6 +149,9 @@ test("keeps provider commands in a full-width floating command surface", async (
   await expect(resumeSurface.getByRole("option", {
     name: /Release notes handoff/u,
   })).toBeVisible();
+  await expect.poll(() => resumeSurface.evaluate((element) =>
+    element.getAnimations().every((animation) => animation.playState === "finished"),
+  )).toBe(true);
 
   const resumeBox = await resumeSurface.boundingBox();
   const composerWithResume = await composer.boundingBox();

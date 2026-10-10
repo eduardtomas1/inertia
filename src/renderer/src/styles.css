@@ -662,12 +662,6 @@ button:disabled,
   background: var(--bg);
 }
 
-@property --titlebar-overlay-inset {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
-}
-
 .app-shell.platform-win32 {
   --titlebar-overlay-inset: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
 }
@@ -682,27 +676,6 @@ button:disabled,
 
 .platform-win32 .workspace-corner-controls {
   right: calc(12px + var(--titlebar-overlay-inset));
-}
-
-.platform-win32 .workspace-frame {
-  --workspace-panel-width: max(var(--workspace-tools-width), calc(300px + var(--titlebar-overlay-inset)));
-}
-
-.platform-win32 .workspace-frame.has-right-panel > .workspace-header {
-  margin-right: var(--workspace-panel-width);
-}
-
-.platform-win32 .workspace-body.has-tools {
-  padding-right: var(--workspace-panel-width);
-}
-
-.platform-win32 .workspace-body > .workspace-panel.is-inline {
-  width: var(--workspace-panel-width);
-}
-
-.platform-win32 .workspace-body > .workspace-panel.is-sheet {
-  width: max(min(448px, max(320px, 42vw)), calc(300px + var(--titlebar-overlay-inset)));
-  max-width: calc(100% - 24px);
 }
 
 :root[data-platform="win32"] .database-recovery-notice {
@@ -5867,7 +5840,9 @@ button.turn-agents-line:hover {
 }
 
 .workspace-repository-scope-leading {
-  flex: 1;
+  min-width: calc(14px + 7px + 88px);
+  max-width: 50%;
+  flex: 0 1 auto;
   gap: 7px;
   color: var(--text-muted);
 }
@@ -5880,7 +5855,7 @@ button.turn-agents-line:hover {
 .workspace-repository-scope-leading strong,
 .workspace-repository-scope-leading select {
   overflow: hidden;
-  min-width: 0;
+  min-width: 88px;
   max-width: 360px;
   color: var(--text);
   font-size: var(--text-sm);
@@ -5903,7 +5878,9 @@ button.turn-agents-line:hover {
 }
 
 .workspace-repository-scope-meta {
-  flex: 0 0 auto;
+  min-width: auto;
+  flex: 1 1 auto;
+  justify-content: flex-end;
   gap: 8px;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -5914,9 +5891,16 @@ button.turn-agents-line:hover {
   white-space: nowrap;
 }
 
-.workspace-repository-scope-branch {
+.workspace-repository-scope-meta > .workspace-repository-scope-branch {
+  width: 0;
+  min-width: 72px;
   overflow: hidden;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+}
+
+.workspace-repository-scope-branch > span {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
@@ -6182,10 +6166,6 @@ button.turn-agents-line:hover {
     gap: 6px;
     overflow: hidden;
     padding-left: 21px;
-  }
-
-  .workspace-repository-scope-branch {
-    min-width: 24px;
   }
 
   .workspace-repository-scope-actions > :first-child {
@@ -8322,16 +8302,21 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   background: var(--fill);
 }
 
-.status-overlay-stack {
-  position: fixed;
-  right: 22px;
-  bottom: 20px;
+.workspace-frame > .status-overlay-stack {
+  position: absolute;
+  top: calc(48px + 12px);
+  right: 12px;
   z-index: 100;
   display: flex;
-  width: min(440px, calc(100vw - 44px));
+  width: min(440px, calc(100% - 24px));
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
+}
+
+.workspace-frame.has-right-panel > .status-overlay-stack {
+  right: calc(var(--workspace-tools-width) + 12px);
+  width: min(440px, calc(100% - var(--workspace-tools-width) - 24px));
 }
 
 .provider-quota-notices {
@@ -8571,12 +8556,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
   .database-recovery-notice > button:not(.icon-button) {
     grid-column: 2;
-  }
-
-  .status-overlay-stack {
-    right: 12px;
-    bottom: 12px;
-    width: calc(100vw - 24px);
   }
 
   .app-update-notice {

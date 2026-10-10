@@ -22,7 +22,6 @@ interface AppStatusOverlaysProps {
   appUpdate: ReturnType<typeof useAppUpdate>;
   providerQuotaNotices: ProviderQuotaNoticeController;
   error: string | null;
-  onDismissError: () => void;
   databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
   onDismissDatabaseRecoveryNotice: () => void;
   onImportRecovery: () => Promise<void>;
@@ -34,13 +33,11 @@ export function AppStatusOverlays({
   appUpdate,
   providerQuotaNotices,
   error,
-  onDismissError,
   databaseRecoveryNotice,
   onDismissDatabaseRecoveryNotice,
   onImportRecovery,
   onCopyRecoveryReport,
 }: AppStatusOverlaysProps): React.JSX.Element {
-  const diagnosticError = error ? diagnosticErrorReference(error) : null;
   // Own preview suspension from this always-loaded boundary. The credential
   // dialog itself remains lazy, so waiting for its chunk would briefly leave
   // native preview content above the trusted authentication flow.
@@ -82,34 +79,46 @@ export function AppStatusOverlays({
           />
         </Suspense>
       )}
-      {(appUpdate.error || providerQuotaNotices.notices.length > 0 || error) && (
-        <div className="status-overlay-stack">
-          <ProviderQuotaNotices
-            notices={providerQuotaNotices.notices}
-            stacked
-            onDismiss={providerQuotaNotices.dismiss}
-          />
-          {appUpdate.error && (
-            <div className="error-toast" role="alert">
-              <CircleAlert size={16} />
-              <span>{appUpdate.error}</span>
-              <IconButton label="Dismiss update error" onClick={appUpdate.dismissError}>
-                <X size={14} />
-              </IconButton>
-            </div>
-          )}
-          {error && (
-            <div className="error-toast" role="alert">
-              <CircleAlert size={16} />
-              <span>{diagnosticError?.message}</span>
-              {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "help", anchor: "diagnostics-incidents", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
-              <IconButton label="Dismiss error" onClick={onDismissError}>
-                <X size={14} />
-              </IconButton>
-            </div>
-          )}
+    </>
+  );
+}
+
+export function StatusToastStack({
+  appUpdate,
+  providerQuotaNotices,
+  error,
+  onDismissError,
+}: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error"> & {
+  onDismissError: () => void;
+}): React.JSX.Element | null {
+  if (!appUpdate.error && providerQuotaNotices.notices.length === 0 && !error) return null;
+  const diagnosticError = error ? diagnosticErrorReference(error) : null;
+  return (
+    <div className="status-overlay-stack">
+      <ProviderQuotaNotices
+        notices={providerQuotaNotices.notices}
+        stacked
+        onDismiss={providerQuotaNotices.dismiss}
+      />
+      {appUpdate.error && (
+        <div className="error-toast" role="alert">
+          <CircleAlert size={16} />
+          <span>{appUpdate.error}</span>
+          <IconButton label="Dismiss update error" onClick={appUpdate.dismissError}>
+            <X size={14} />
+          </IconButton>
         </div>
       )}
-    </>
+      {error && (
+        <div className="error-toast" role="alert">
+          <CircleAlert size={16} />
+          <span>{diagnosticError?.message}</span>
+          {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "help", anchor: "diagnostics-incidents", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
+          <IconButton label="Dismiss error" onClick={onDismissError}>
+            <X size={14} />
+          </IconButton>
+        </div>
+      )}
+    </div>
   );
 }

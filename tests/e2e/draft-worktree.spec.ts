@@ -75,7 +75,10 @@ test("keeps the right panel available while an isolated draft worktree materiali
       name: /available after the first message creates this chat's workspace/u,
     });
     await expect(terminalToggle).toBeDisabled();
-    await expect(terminalToggle).toHaveAttribute("title", /available after the first message creates this chat's workspace/u);
+    await terminalToggle.hover();
+    await expect(app.page.locator('[role="tooltip"]')).toHaveText(/available after the first message creates this chat's workspace/u);
+    await app.page.mouse.move(1, 1);
+    await expect(app.page.locator('[role="tooltip"]')).toHaveCount(0);
     for (const surface of ["Changes", "Files", "Browser"]) {
       await expect(launcher.locator('[aria-disabled="true"]').filter({
         hasText: surface,

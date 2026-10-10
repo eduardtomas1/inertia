@@ -663,7 +663,7 @@ export function WorkspaceChangesPanel({
         <span className="workspace-repository-scope-meta">
           {activeRepository.branch && (
             <span className="workspace-repository-scope-branch" title={activeRepository.branch}>
-              <GitBranch size={14} aria-hidden="true" />{activeRepository.branch}
+              <GitBranch size={14} aria-hidden="true" /><span>{activeRepository.branch}</span>
             </span>
           )}
           <span className="workspace-repository-scope-status">

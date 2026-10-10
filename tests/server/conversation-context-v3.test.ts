@@ -392,7 +392,12 @@ describe("conversation context transport version 3", () => {
     ]);
   });
 
-  it("stays within budget, reports what it left out and rebuilds the same selection for random packets", () => {
+  it.each([
+    ["prompt", false],
+    ["prompt", true],
+    ["tool-result", false],
+    ["tool-result", true],
+  ] as const)("stays within budget, reports what it left out and rebuilds the same selection for random packets (transport: %s, restored: %s)", (checkedTransport, checkedRestored) => {
     let seed = 1;
     const random = () => {
       seed = (Math.imul(seed, 1_103_515_245) + 12_345) & 0x7fff_ffff;
@@ -432,6 +437,7 @@ describe("conversation context transport version 3", () => {
       for (const transport of ["prompt", "tool-result"] as const) {
         for (const restored of [false, true]) {
           const budget = 2_000 + Math.floor(random() * 200_000);
+          if (transport !== checkedTransport || restored !== checkedRestored) continue;
           let prepared: ReturnType<typeof prepareConversationContextPacket>;
           try {
             prepared = prepareConversationContextPacket(original, budget, transport, restored);
@@ -455,7 +461,7 @@ describe("conversation context transport version 3", () => {
         }
       }
     }
-    expect(checked).toBeGreaterThan(160);
+    expect(checked).toBeGreaterThan(40);
   });
 
   it("restores exactly the counts it sends and states a split history's envelope once", async () => {

@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { readSourceText } from "../helpers/source-text";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import {
   failureDiagnosticsPresentation,
@@ -355,6 +356,18 @@ describe("turn failure diagnostics", () => {
     fireEvent.click(copy);
     await waitFor(() => expect(copy).toHaveAccessibleName(/copied/iu));
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("stacks the failure facts at the transcript width the row estimate uses", () => {
+    const css = readSourceText("src/renderer/src/components/response-timeline/failureDiagnostics.css");
+    expect(css).toContain(
+      "@container response-transcript (max-width: 664px) {\n  .turn-failure-detail-grid {\n    grid-template-columns: minmax(0, 1fr);",
+    );
+    expect(css).not.toContain("@media (max-width: 700px)");
+    expect(readSourceText("src/renderer/src/utils/response-timeline/virtualization.ts"))
+      .toContain("const factsGrid = availableWidth <= 664");
+    expect(readSourceText("src/renderer/src/styles.css"))
+      .toContain(".response-timeline {\n  width: 100%;\n  min-width: 0;\n  margin: 0 auto;\n  container-name: response-transcript;\n  container-type: inline-size;\n}");
   });
 
   it("defensively bounds legacy detail and copied output", () => {

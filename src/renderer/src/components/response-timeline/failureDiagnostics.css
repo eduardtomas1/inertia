@@ -134,7 +134,7 @@
   line-height: var(--leading-chrome);
 }
 
-@media (max-width: 700px) {
+@container response-transcript (max-width: 664px) {
   .turn-failure-detail-grid {
     grid-template-columns: minmax(0, 1fr);
   }

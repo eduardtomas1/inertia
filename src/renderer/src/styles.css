@@ -9532,6 +9532,14 @@ button.sent-attachment-open:hover {
   margin: 0 auto var(--response-block-gap);
 }
 
+.legacy-exchange {
+  margin-bottom: 28px;
+}
+
+.legacy-exchange > .message:last-of-type {
+  margin-bottom: 0;
+}
+
 .agent-run-flow > .thinking-summary {
   width: 100%;
   margin: 0;
@@ -10066,6 +10074,10 @@ button.sent-attachment-open:hover {
 
 .response-turn:is(:hover, :focus-within) .turn-meta-primary,
 .turn-meta[data-run-details-expanded] .turn-meta-primary {
+  opacity: 1;
+}
+
+.legacy-exchange:is(:hover, :focus-within) .turn-meta-primary {
   opacity: 1;
 }
 

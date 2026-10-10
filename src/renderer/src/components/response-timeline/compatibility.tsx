@@ -3,6 +3,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import clsx from "clsx";
+import type { ChatMessage } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { useMemo, useState } from "react";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
@@ -22,6 +23,19 @@ import {
 } from "./activity";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
+
+function legacyExchanges(messages: ChatMessage[]): ChatMessage[][] {
+  const exchanges: ChatMessage[][] = [];
+  let current: ChatMessage[] = [];
+  for (const message of messages) {
+    current.push(message);
+    if (message.role !== "assistant") continue;
+    exchanges.push(current);
+    current = [];
+  }
+  if (current.length > 0) exchanges.push(current);
+  return exchanges;
+}
 
 export function CompatibilityTimeline({
   compatibility,
@@ -90,15 +104,31 @@ function CompatibilityDisclosure({
                 <span><strong>Malformed turn record</strong><small>{turn.id} · {turnStatusLabel(turn.status)}</small></span>
               </div>
             ))}
-            {compatibility.messages.map((message) => (
-              <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
-                <div className="message-meta"><span>{message.role === "assistant" ? "Agent" : message.role === "user" ? "You" : "System"}</span><MessageOrigin message={message} />{props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}</div>
-                {message.role === "assistant"
-                  ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />
-                  : <div className="message-body">{message.content}</div>}
-                <SentMessageAttachmentList attachments={message.attachments} />
-              </article>
-            ))}
+            {legacyExchanges(compatibility.messages).map((exchange) => {
+              const timed = [...exchange].reverse().find(({ role }) => role !== "system");
+              return (
+                <div className="legacy-exchange" key={exchange[0]!.id}>
+                  {exchange.map((message) => (
+                    <article className={clsx("message", `is-${message.role}`)} key={message.id} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
+                      {message.role === "system"
+                        ? <div className="message-meta"><span>System</span>{props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}</div>
+                        : message.privateConnectDeviceId && <div className="message-meta"><MessageOrigin message={message} /></div>}
+                      {message.role === "assistant"
+                        ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />
+                        : <div className="message-body">{message.content}</div>}
+                      <SentMessageAttachmentList attachments={message.attachments} />
+                    </article>
+                  ))}
+                  {props.showTimestamps && timed && (
+                    <footer className="turn-meta" aria-label="Message time">
+                      <div className="turn-meta-primary">
+                        <time dateTime={timed.createdAt} title={formatFullDateTime(timed.createdAt)}>{formatMessageTime(timed.createdAt)}</time>
+                      </div>
+                    </footer>
+                  )}
+                </div>
+              );
+            })}
             {compatibility.activities.map((activity) => (
               <div
                 className="turn-activity-group"

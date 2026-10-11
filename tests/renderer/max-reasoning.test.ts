@@ -30,5 +30,8 @@ describe("maximum reasoning frame", () => {
     expect(isMaximumReasoning(model(["medium"], "medium"), null)).toBe(false);
     expect(isMaximumReasoning(model(["medium"], "medium"), "medium")).toBe(false);
     expect(isMaximumReasoning(model(["medium", "creative"], "medium"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["high"], "high"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["high"], "high"), "high")).toBe(false);
+    expect(isMaximumReasoning(model(["max"]), "max")).toBe(false);
   });
 });

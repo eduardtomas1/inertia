@@ -288,51 +288,17 @@
 
 /* Shared by transcript and lazy file-preview Markdown; keep these styles deferred. */
 .response-markdown a.response-project-file-link {
-  display: inline-flex;
-  box-sizing: border-box;
-  height: 1.55em;
-  min-width: 0;
-  min-height: 18px;
-  max-width: 100%;
-  align-items: center;
-  gap: 0.36em;
-  padding: 0 0.48em;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  color: var(--text);
-  background: var(--fill);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  line-height: 1;
-  text-decoration: none;
-  vertical-align: middle;
-  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
   word-break: normal;
 }
 
-.response-markdown a.response-project-file-link:hover {
-  border-color: var(--line);
-  background: var(--fill);
-  text-decoration: none;
-}
-
-.response-project-file-link > span {
-  overflow: hidden;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .response-markdown a.response-project-file-link .response-project-file-icon {
-  display: block;
-  width: 1em;
-  height: 1em;
-  flex: 0 0 auto;
-  margin: 0;
-  color: var(--file-language-accent, var(--text-muted));
-  opacity: 0.9;
-  vertical-align: initial;
+  display: inline;
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.24em 0 0;
+  color: var(--text-muted);
+  vertical-align: -0.1em;
 }
 
 .response-markdown a.response-web-link {

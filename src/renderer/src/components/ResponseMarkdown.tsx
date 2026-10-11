@@ -49,6 +49,7 @@ import {
   useMarkdownImageSchedule,
 } from "./markdown/MarkdownImageScheduler";
 import { TooltipButton } from "./TooltipButton";
+import { TooltipText } from "./TooltipText";
 
 export const RESPONSE_MARKDOWN_TAG_NAMES = [
   "a", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt",
@@ -674,7 +675,7 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
       className={[props.className, "response-project-file-link"].filter(Boolean).join(" ")}
       data-language-family={language.family}
       data-link-path={path}
-      title={props.title ?? "Open local file"}
+      title={props.title}
       onClick={(event) => {
         event.preventDefault();
         setError(false);
@@ -725,18 +726,6 @@ function MarkdownLink({
           void window.inertia.openExternal(target.url);
         }}
       >
-        <svg
-          aria-hidden="true"
-          fill="none"
-          height="12"
-          stroke="currentColor"
-          strokeWidth="1.75"
-          viewBox="0 0 24 24"
-          width="12"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
-        </svg>
         {children}
       </a>
     );
@@ -823,7 +812,7 @@ function MarkdownLink({
       heading?.focus({ preventScroll: true });
     }}>{children}</a>;
   }
-  return <span className="response-unsafe-link" title="This link was blocked because its address is invalid or uses an unsafe protocol.">{children}</span>;
+  return <TooltipText className="response-unsafe-link" tooltip="Blocked link">{children}</TooltipText>;
 }
 
 function MarkdownImage({

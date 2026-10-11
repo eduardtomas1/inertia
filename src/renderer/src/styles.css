@@ -10670,7 +10670,7 @@ button.sent-attachment-open:hover {
   max-width: 100%;
   border-radius: var(--radius-xs);
   color: var(--accent-strong);
-  font-weight: 500;
+  font-weight: inherit;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
   text-underline-offset: 2px;
@@ -10833,11 +10833,20 @@ button.sent-attachment-open:hover {
 
 .response-copy-error {
   margin: 0;
-  padding: 7px 10px;
+  padding: 0 14px 4px;
   color: var(--danger);
-  background: var(--fill);
   font-size: var(--text-xs);
   line-height: var(--leading-chrome);
+}
+
+.response-markdown .response-copy-error:not(p) {
+  margin-left: 8px;
+  padding: 0;
+}
+
+.turn-changed-files .file-language-icon,
+.response-code-block > header [data-language-family] > svg {
+  color: var(--text-muted);
 }
 
 .response-code-block pre {

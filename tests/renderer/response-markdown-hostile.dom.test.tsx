@@ -67,15 +67,16 @@ describe("hostile provider markdown", () => {
   it("blocks javascript: links", () => {
     const bridge = inertiaBridge();
     renderMarkdown("[click](javascript:window.inertia.openExternal('x'))");
-    const blocked = screen.getByTitle(/blocked/u);
-    expect(blocked).toBeInTheDocument();
+    const blocked = screen.getByText("click");
+    expect(blocked).toHaveClass("response-unsafe-link");
+    expect(blocked).not.toHaveAttribute("title");
     expect(blocked.tagName.toLowerCase()).toBe("span");
     expect(bridge.openExternal).not.toHaveBeenCalled();
   });
 
   it("blocks data: links", () => {
     renderMarkdown("[click](data:text/html;base64,PHNjcmlwdD4x)");
-    expect(screen.getByTitle(/blocked/u)).toBeInTheDocument();
+    expect(screen.getByText("click")).toHaveClass("response-unsafe-link");
   });
 
   it("opens file: links only after clicking them", () => {

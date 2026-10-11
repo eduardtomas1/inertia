@@ -59,4 +59,17 @@ describe("markdown block chrome", () => {
     expect(selectors).toContain(".response-code-block > header button");
     expect(selectors).toContain(".response-table-toolbar button");
   });
+
+  it("keeps prose links plain: no file chips, globe marks or default hover titles, and muted language marks", () => {
+    const html = render("See [guide](docs/guide.md) and [notes](https://example.com/notes).");
+    expect(html).not.toContain('title="Open local file"');
+    expect(html).not.toMatch(/<a[^>]*response-web-link[^>]*><svg/u);
+    const motion = readFileSync("src/renderer/src/components/BeautifulUiMotion.css", "utf8");
+    const chip = motion.slice(motion.indexOf(".response-markdown a.response-project-file-link {"), motion.indexOf("}", motion.indexOf(".response-markdown a.response-project-file-link {")));
+    expect(chip).not.toMatch(/border:|background:/u);
+    expect(motion).not.toContain("var(--file-language-accent");
+    expect(css).toMatch(/\.turn-changed-files \.file-language-icon,\n\.response-code-block > header \[data-language-family\] > svg \{\n  color: var\(--text-muted\);/u);
+    expect(block(".response-copy-error")).not.toContain("background");
+    expect(block(".response-markdown a")).toContain("font-weight: inherit");
+  });
 });

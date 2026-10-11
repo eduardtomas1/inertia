@@ -2085,11 +2085,10 @@ button.header-breadcrumb-project:hover {
 }
 
 .message.is-system {
-  padding: 11px 13px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  padding: 0;
+  border: 0;
   color: var(--text-muted);
-  background: var(--fill);
+  background: transparent;
 }
 
 .message-attachments {
@@ -9995,7 +9994,6 @@ button.sent-attachment-open:hover {
   max-width: var(--final-answer-max-width);
   margin: var(--settled-footer-spacing) auto 0;
   padding-top: 4px;
-  border-top: 1px solid var(--line-soft);
   color: var(--text-faint);
   font-size: var(--text-sm);
   box-sizing: border-box;

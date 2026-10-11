@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+
 import { declarationsFor, parseCssRules, readRendererCss } from "./css-rules";
 
 const motion = readRendererCss("components/BeautifulUiMotion.css");
@@ -22,5 +24,19 @@ describe("transcript work log chrome", () => {
     expect(group).not.toContain("--status-completed");
     expect(declarationsFor(rules, ".turn-activity-group .agent-activity-disclosure").has("opacity")).toBe(false);
     expect(declarationsFor(rules, ".turn-thinking-label").get("font-weight")).toBe("500");
+  });
+
+  it("leaves finished turns without a resting footer rule and system notices without a card", () => {
+    expect(declarationsFor(rules, ".turn-meta").has("border-top")).toBe(false);
+    const system = declarationsFor(rules, ".message.is-system");
+    expect(system.get("border")).toBe("0");
+    expect(system.get("background")).toBe("transparent");
+  });
+
+  it("shows full dates, missing-checkpoint reasons and remote origins in the shared tooltip", () => {
+    for (const file of ["metadata.tsx", "layers.tsx", "compatibility.tsx", "MessageOrigin.tsx"]) {
+      const source = readFileSync(new URL(`../../src/renderer/src/components/response-timeline/${file}`, import.meta.url), "utf8");
+      expect(source, file).not.toMatch(/title=\{(?:formatFullDateTime|turn\.checkpointUnavailableReason|providerLabel|`Private Connect)/u);
+    }
   });
 });

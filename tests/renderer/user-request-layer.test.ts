@@ -161,7 +161,7 @@ describe("Quiet Ledger user request layer", () => {
     const html = renderRequest("Change the build.", { activities: [checkpointNotice()] });
 
     expect(html).toContain(
-      '<span class="message-checkpoint-missing" title="Checkpoint operation timed out.">No checkpoint for this turn<span class="visually-hidden">: Checkpoint operation timed out.</span></span>',
+      '<span class="message-checkpoint-missing">No checkpoint for this turn<span class="visually-hidden">: Checkpoint operation timed out.</span></span>',
     );
     expect(html.split("No checkpoint for this turn")).toHaveLength(2);
     expect(html).not.toContain('class="message-revert"');
@@ -194,7 +194,7 @@ describe("Quiet Ledger user request layer", () => {
   it("shows the durable remote device origin beside the user request", () => {
     const deviceId = "11111111-1111-4111-8111-111111111111";
     const html = renderRequest("Sent remotely", { privateConnectDeviceId: deviceId });
-    expect(html).toContain(`title="Private Connect device ${deviceId}"`);
+    expect(html).not.toContain("title=");
     expect(html).toContain("Private Connect · 11111111");
     expect(renderRequest("Sent locally")).not.toContain("Private Connect");
   });

@@ -27,6 +27,7 @@ import { shouldShowChangedFilesSummary } from "./changedFiles";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import { checkMorphIcon, copyMorphIcon } from "../motion/lucideMorphData";
 import { TooltipButton } from "../TooltipButton";
+import { TooltipText } from "../TooltipText";
 
 export function CopyAnswerButton({
   content,
@@ -235,7 +236,7 @@ export function TurnMetadata({
     return (
       <footer className="turn-meta" aria-label="Turn time">
         <div className="turn-meta-primary">
-          <time dateTime={time} title={formatFullDateTime(time)}>{formatMessageTime(time)}</time>
+          <TooltipText tooltip={formatFullDateTime(time)}><time dateTime={time}>{formatMessageTime(time)}</time></TooltipText>
         </div>
       </footer>
     );
@@ -251,7 +252,7 @@ export function TurnMetadata({
           <CopyAnswerButton content={terminalAnswer.content} answerId={terminalAnswer.id} ariaLabel="Copy final answer" />
         )}
         {showTimestamp && (
-          <time dateTime={time} title={formatFullDateTime(time)}>{formatMessageTime(time)}</time>
+          <TooltipText tooltip={formatFullDateTime(time)}><time dateTime={time}>{formatMessageTime(time)}</time></TooltipText>
         )}
         {!completed && <span data-turn-status={agentTurn.status}>{presentation.statusLabel}</span>}
         <span className="turn-duration" data-turn-status={completed ? agentTurn.status : undefined}>{presentation.durationLabel}</span>

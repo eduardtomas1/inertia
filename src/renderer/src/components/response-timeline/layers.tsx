@@ -51,6 +51,7 @@ import {
 import { TurnMetadata } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 import "./ConversationContextProvenance.css";
+import { TooltipText } from "../TooltipText";
 
 const SentContextPreview = lazy(async () => ({
   default: (await import("../composer/ComposerConversationContextCards")).ConversationContextPreviewCard,
@@ -130,7 +131,7 @@ export function UserRequestLayer({
         <div className="message-meta">
           <MessageOrigin message={turn.userMessage} />
           {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
-          {turn.checkpointUnavailableReason !== null && <span className="message-checkpoint-missing" title={turn.checkpointUnavailableReason || undefined}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</span>}
+          {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
         </div>
       )}
       <div
@@ -279,7 +280,7 @@ export function AgentExecutionLayer({
           data-active-agent-phase={activePresentation.phase}
           data-work-identity-source="persisted-model-selection"
         >
-          <header className="turn-working-state" title={providerLabel}>
+          <header className="turn-working-state">
             <span className="turn-working-status" role="status" aria-live="polite" aria-atomic="true">
               <AgentPixelLoader
                 animated={activePresentation.animated}
@@ -382,8 +383,7 @@ export function AgentExecutionLayer({
           key={message.id}
         >
           <div className="message-meta">
-            <span>System</span>
-            {props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}
+            {props.showTimestamps && <TooltipText tooltip={formatFullDateTime(message.createdAt)}><time dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time></TooltipText>}
           </div>
           <div className="message-body">{message.content}</div>
         </article>

@@ -23,6 +23,7 @@ import {
 } from "./activity";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
+import { TooltipText } from "../TooltipText";
 
 const LEGACY_MESSAGE_LABELS: Record<ChatMessage["role"], string> = {
   user: "Your request",
@@ -117,7 +118,7 @@ function CompatibilityDisclosure({
                   {exchange.map((message) => (
                     <article className={clsx("message", `is-${message.role}`)} key={message.id} aria-label={LEGACY_MESSAGE_LABELS[message.role]} data-message-search-id={message.id} tabIndex={-1} {...messageContextMenu(message, message.content)}>
                       {message.role === "system"
-                        ? <div className="message-meta"><span>System</span>{props.showTimestamps && <time dateTime={message.createdAt} title={formatFullDateTime(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>}</div>
+                        ? <div className="message-meta"><span>System</span>{props.showTimestamps && <TooltipText tooltip={formatFullDateTime(message.createdAt)}><time dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time></TooltipText>}</div>
                         : message.privateConnectDeviceId && <div className="message-meta"><MessageOrigin message={message} /></div>}
                       {message.role === "assistant"
                         ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />
@@ -128,7 +129,7 @@ function CompatibilityDisclosure({
                   {props.showTimestamps && timed && (
                     <footer className="turn-meta" aria-label="Message time">
                       <div className="turn-meta-primary">
-                        <time dateTime={timed.createdAt} title={formatFullDateTime(timed.createdAt)}>{formatMessageTime(timed.createdAt)}</time>
+                        <TooltipText tooltip={formatFullDateTime(timed.createdAt)}><time dateTime={timed.createdAt}>{formatMessageTime(timed.createdAt)}</time></TooltipText>
                       </div>
                     </footer>
                   )}

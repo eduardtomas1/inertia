@@ -1,4 +1,3 @@
-import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   ChevronRight,
   RefreshCw,
@@ -58,15 +57,6 @@ export function dailyWorkCommand(now = new Date()): DailyWorkCommand {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     },
   };
-}
-
-/** Renders the dashboard day key as a calendar label without re-parsing as UTC. */
-function formatDateLabel(dateKey: string): string {
-  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  }).format(new Date(`${dateKey}T12:00:00`));
 }
 
 /** Share of a settled total, or null when either side is unmeasured. */
@@ -150,7 +140,6 @@ export function DailyWorkDialog({
   onOpenConversation,
 }: DailyWorkDialogProps): React.JSX.Element {
   const titleId = useId();
-  const descriptionId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -173,7 +162,6 @@ export function DailyWorkDialog({
     setRefreshVersion((version) => version + 1);
   };
   const todayKey = localDateKey(new Date());
-  const dateLabel = formatDateLabel(selectedDateKey);
   useNativePreviewSuspension(true);
 
   useEffect(() => {
@@ -220,8 +208,6 @@ export function DailyWorkDialog({
       bodyClassName="daily-work-content"
       titleId={titleId}
       title="Daily work"
-      description={<>Agent work<span className="daily-work-header-date">{dateLabel}</span></>}
-      descriptionId={descriptionId}
       closeLabel="Close daily work"
       closeRef={closeRef}
       onClose={onClose}
@@ -258,16 +244,12 @@ export function DailyWorkDialog({
             <LoadingMark label="Loading daily work" />
             <span>Loading daily work…</span>
           </p>
-          <div className="daily-work-skeleton" aria-hidden="true">
-            <div className="daily-work-skeleton-band"><i /><i /><i /></div>
-            <div className="daily-work-skeleton-rows"><i /><i /><i /><i /></div>
-          </div>
         </div>
       )}
       {!loading && error && (
         <div className="daily-work-error" role="alert">
           <span><strong>Daily work could not be loaded</strong><small>{error}</small></span>
-          <button type="button" onClick={refresh} disabled={status !== "online"}>Try again</button>
+          <button type="button" className="secondary-button" onClick={refresh} disabled={status !== "online"}>Try again</button>
         </div>
       )}
       {!loading && !error && dashboard && (
@@ -279,12 +261,10 @@ export function DailyWorkDialog({
             <article className="is-primary">
               <span>Processed tokens</span>
               <strong><MetricValue metric={dashboard.totals.processedTokens} format={formatCompact} /></strong>
-              <small>Settled only</small>
             </article>
             <article>
               <span>Agent runtime</span>
               <strong><MetricValue metric={dashboard.totals.runtime} format={formatDuration} /></strong>
-              <small>Settled only</small>
             </article>
             <article className="is-conversation-count">
               <span>Conversations</span>
@@ -322,13 +302,10 @@ export function DailyWorkDialog({
           <section className="daily-work-conversations" aria-labelledby="daily-work-conversations-heading">
             <header>
               <h3 id="daily-work-conversations-heading">Conversations</h3>
-              <span>Most recent first</span>
+              {dashboard.conversations.length > 0 && <span className="daily-work-card-metrics" aria-hidden="true"><span>Runtime</span><span>Tokens</span></span>}
             </header>
             {dashboard.conversations.length === 0 ? (
-              <div className="daily-work-empty">
-                <strong>No work recorded</strong>
-                <span>No conversations or settled agent turns were found for this date.</span>
-              </div>
+              <p className="daily-work-empty">No work recorded</p>
             ) : (
               <div className="daily-work-conversation-list">
                 {dashboard.conversations.map((conversation) => (
@@ -340,7 +317,7 @@ export function DailyWorkDialog({
                   >
                     <span className="daily-work-provider-stack" aria-label={conversation.providerIds.join(", ")}>
                       {conversation.providerIds.map((providerId) => (
-                        <ProviderMark providerId={providerId} size={18} key={providerId} />
+                        <ProviderMark providerId={providerId} size={16} key={providerId} />
                       ))}
                     </span>
                     <span className="daily-work-conversation-identity">
@@ -354,14 +331,8 @@ export function DailyWorkDialog({
                       </span>
                     </span>
                     <span className="daily-work-card-metrics">
-                      <span>
-                        <small>Runtime</small>
-                        <strong><MetricValue metric={conversation.runtime} format={formatDuration} /></strong>
-                      </span>
-                      <span>
-                        <small>Tokens</small>
-                        <strong><MetricValue metric={conversation.processedTokens} format={formatCompact} /></strong>
-                      </span>
+                      <span><span className="visually-hidden">Runtime </span><MetricValue metric={conversation.runtime} format={formatDuration} /></span>
+                      <span><span className="visually-hidden">Tokens </span><MetricValue metric={conversation.processedTokens} format={formatCompact} /></span>
                     </span>
                     <ChevronRight className="daily-work-card-chevron" size={14} aria-hidden="true" />
                   </button>

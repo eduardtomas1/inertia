@@ -18,7 +18,7 @@
 /* Matching the base rule's specificity so the dot keeps its heavier stroke:
    `.daily-work-mark > path` would otherwise win and render it at the base width. */
 .daily-work-mark > .daily-work-mark-today {
-  color: var(--daily-work-mark-highlight, var(--accent));
+  color: inherit;
   stroke-width: 3.2;
 }
 

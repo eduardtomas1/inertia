@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, GitBranch, Search, RefreshCw } from "lucide-react";
 import type { GitBranchInfo } from "@shared/contracts";
 import "./workspace-git-menus.css";
+import { IconButton } from "./ui";
 
 export default function WorkspaceBranchList({ branches, busy, loading = false, error, onRefresh, onSwitch, onCreate, onClose }: {
   branches: GitBranchInfo[];
@@ -35,7 +36,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
     else onSwitch(branch.name, branch.remote);
   };
   return <>
-    <label className="git-branch-search"><Search size={14} /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => { queued.current = null; setQuery(event.target.value); }} onBlur={() => { queued.current = null; }} onCompositionStart={() => { queued.current = null; }} onKeyDown={(event) => {
+    <div className="git-branch-search"><Search size={14} aria-hidden="true" /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => { queued.current = null; setQuery(event.target.value); }} onBlur={() => { queued.current = null; }} onCompositionStart={() => { queued.current = null; }} onKeyDown={(event) => {
       if (event.key === "Enter") {
         event.stopPropagation();
         if (event.nativeEvent.isComposing) { queued.current = null; return; }
@@ -46,24 +47,22 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
       }
       queued.current = null;
       if (!["ArrowDown", "ArrowUp", "Escape"].includes(event.key)) event.stopPropagation();
-    }} /></label>
-    <div className="git-branch-load-status">
-      <span role="status">{loading ? "Refreshing branches…" : error ?? `${branches.length} branches`}</span>
-      {onRefresh && <button type="button" aria-label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={14} /></button>}
-    </div>
+    }} />{onRefresh && <IconButton label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={14} /></IconButton>}</div>
+    <p className="git-branch-load-status" role="status">{loading ? "Refreshing branches…" : error ?? ""}</p>
     <div className="git-branch-results" aria-busy={loading} onBlur={() => { queued.current = null; }}>
       {[false, true].map((remote) => {
         const group = visible.filter((branch) => branch.remote === remote);
         if (group.length === 0) return null;
+        const labelled = visible.some((branch) => branch.remote !== remote);
         return <div role="group" aria-label={remote ? "Remote branches" : "Local branches"} key={String(remote)}>
-          <div className="git-menu-section-label">{remote ? "Remote branches" : "Local branches"}<span>{group.length}</span></div>
-          {group.map((branch) => <button type="button" role="menuitemradio" aria-checked={branch.current} disabled={busy || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} title={`${branch.name}${branch.checkedOut && !branch.current ? " · Checked out in another worktree" : branch.remote ? " · Create a local tracking branch" : ""}`} onClick={() => select(branch)}>
+          {labelled && <div className="git-menu-section-label">{remote ? "Remote" : "Local"}</div>}
+          {group.map((branch) => <button type="button" role="menuitemradio" aria-checked={branch.current} disabled={busy || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} title={branch.name} onClick={() => select(branch)}>
             <GitBranch size={14} /><span className="git-branch-name">{branch.name}</span>
             {branch.current ? <Check size={14} aria-label="Current" /> : branch.checkedOut ? <small>In worktree</small> : remote ? <small>Track</small> : null}
           </button>)}
         </div>;
       })}
-      {visible.length === 0 && !loading && !error && <p className="git-branch-empty" role="status">{branches.length === 0 ? "No branches loaded. Refresh the branch list to try again." : "No matching branches."}</p>}
+      {visible.length === 0 && !loading && !error && <p className="git-branch-empty" role="status">{branches.length === 0 ? "No branches loaded." : "No matching branches."}</p>}
     </div>
     <form className="new-branch-form" onSubmit={(event) => {
       event.preventDefault();

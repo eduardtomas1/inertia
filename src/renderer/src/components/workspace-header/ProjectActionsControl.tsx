@@ -173,7 +173,7 @@ export function ProjectActionsControl({
             else addAction();
           }}
         >
-          {primaryAction ? <Play size={14} aria-hidden="true" className="header-run-icon" /> : <Plus size={14} aria-hidden="true" />}
+          {primaryAction ? <Play size={16} aria-hidden="true" className="header-run-icon" /> : <Plus size={16} aria-hidden="true" />}
           <span className="header-split-label">{primaryAction ? primaryAction.label : "Add action"}</span>
         </TooltipButton>
         <TooltipButton

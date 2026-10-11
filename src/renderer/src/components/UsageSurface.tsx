@@ -96,7 +96,7 @@ export function UsageSurface({
                   ? "Refreshing provider limits…"
                   : usage.quota.source === "isolated"
                     ? "Account limits are not shared with this custom backend route."
-                    : "No provider limit windows are available."}
+                    : "No provider limits reported."}
               </p>
             )}
             {onRefreshUsage
@@ -115,7 +115,7 @@ export function UsageSurface({
           </>
         ) : (
           <p className="workspace-surface-empty">
-            Usage is unavailable until this task has a selected provider route.
+            Usage is unavailable.
           </p>
         )}
 

@@ -213,7 +213,8 @@ describe("right panel surface host", () => {
 
     const files = within(launcher).getByText("Files").closest("[aria-disabled]");
     expect(files).toHaveAttribute("aria-disabled", "true");
-    expect(files).toHaveAttribute("title", "Available after the first message creates this isolated worktree.");
+    expect(files).not.toHaveAttribute("title");
+    expect(files).toHaveTextContent("Available after the first message creates this isolated worktree.");
     fireEvent.keyDown(document.body, { key: "f" });
     expect(screen.queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
 

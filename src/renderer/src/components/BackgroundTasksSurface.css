@@ -88,22 +88,22 @@
 
 .background-task-stop {
   display: inline-grid;
-  width: 24px;
-  height: 24px;
+  width: var(--control-height-small);
+  height: var(--control-height-small);
   place-items: center;
   padding: 0;
   border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
-  background: var(--fill-strong);
-}
-
-.background-tasks-dismiss {
-  background: none;
+  background: transparent;
 }
 
 .background-task-stop:hover:not(:disabled) {
   color: var(--text);
+  background: var(--fill);
+}
+
+.background-task-stop:active:not(:disabled) {
   background: var(--fill-strong);
 }
 

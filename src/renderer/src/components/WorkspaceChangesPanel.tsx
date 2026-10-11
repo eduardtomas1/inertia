@@ -46,7 +46,8 @@ import {
   type ChangesPanelProps,
   type DiffSelection,
 } from "./ChangesPanel";
-import { IconButton } from "./ui";
+import { HintButton } from "./HintButton";
+import { TooltipButton } from "./TooltipButton";
 import { projectPathContextMenu } from "../utils/contextMenu";
 import { CommitDialog } from "./CommitDialog";
 import {
@@ -678,36 +679,34 @@ export function WorkspaceChangesPanel({
             </span>
           )}
           {nested && (
-            <span
+            <HintButton
               className="workspace-repository-scope-boundary"
-              title="Review marks, notes, questions, prompt references, and selective revert stay with this nested repository. Agent summaries and revisions remain limited to the project-root checkout because recovery checkpoints cover that root."
+              hint="Review marks, local notes, questions, prompt references, and selective revert keep this repository identity. Agent summaries and revisions remain available only for the project-root repository because their recovery checkpoints cover that root."
             >
               <Info size={14} aria-hidden="true" />Nested repo
-              <span className="sr-only">Review marks, local notes, questions, prompt references, and selective revert keep this repository identity. Agent summaries and revisions remain available only for the project-root repository because their recovery checkpoints cover that root.</span>
-            </span>
+            </HintButton>
           )}
         </span>
         {canRunRepositoryActions && (
           <RepositoryScopeActions
             label={label}
             commit={(
-              <button
-                type="button"
+              <HintButton
                 disabled={
                   commitDiffLoading
                   || !authorityRef
                   || Boolean(commitAction?.disabled)
                   || activeRepository.truncated
                 }
-                title={!authorityRef
+                hint={!authorityRef
                   ? "Refresh this repository before changing it."
                   : activeRepository.truncated
                   ? "Refresh this repository before committing its complete change set."
-                  : commitAction?.detail}
+                  : commitAction?.disabled ? commitAction.detail : undefined}
                 onClick={prepareActiveCommit}
               >
                 <GitCommitHorizontal size={14} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
-              </button>
+              </HintButton>
             )}
             actions={[
               {
@@ -864,18 +863,19 @@ export function WorkspaceChangesPanel({
                     onContextMenu={menu?.onContextMenu}
                     onKeyDown={menu?.onKeyDown}
                   >
-                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
+                    <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true">{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
                     <span className="workspace-repository-file-stats"><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>
-                  <IconButton
-                    label={`Open ${file.path} from ${label}`}
+                  <TooltipButton
+                    className="icon-button"
+                    aria-label={`Open ${file.path} from ${label}`}
+                    tooltip={openPath === null ? "This file is outside the project folder." : `Open ${file.path} from ${label}`}
                     disabled={openPath === null}
-                    {...(openPath === null ? { title: "This file is outside the project folder." } : {})}
                     onClick={() => { if (openPath !== null) onOpenWorkspaceFile(openPath); }}
                   >
                     <ExternalLink size={14} />
-                  </IconButton>
+                  </TooltipButton>
                 </li>
               );
             }),
@@ -890,7 +890,6 @@ export function WorkspaceChangesPanel({
     if (!snapshot || snapshot.files === 0 || !effectiveSelection) return undefined;
     return (
       <div className="changes-file-picker workspace-repository-picker">
-        <span>Reviewing</span>
         <select
           aria-label="Repository and changed file"
           value={workspaceGitIdentity(effectiveSelection)}
@@ -923,7 +922,7 @@ export function WorkspaceChangesPanel({
               ? ` Showing ${snapshot.repositories.length} of ${snapshot.discoveredRepositories} repository roots after scanning ${snapshot.scannedDirectories} folders. Choose a narrower project folder.`
               : snapshot.truncated
                 ? ` Scanned ${snapshot.scannedDirectories} folders; automatic discovery is limited. Choose a closer project folder.`
-              : " Available repository changes are still shown."}
+              : ""}
           </span>
         </div>
       )}

@@ -1,7 +1,5 @@
 import { useEffect, useRef } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   CloudDownload,
   CloudUpload,
   GitBranch,
@@ -20,6 +18,7 @@ import {
   gitMenuWarning,
 } from "../utils/gitActionsControl";
 import { loadCommitDialog } from "./lazySurfaceLoaders";
+import { HintButton } from "./HintButton";
 import "./workspace-git-menus.css";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 
@@ -59,11 +58,11 @@ export default function WorkspaceGitActionMenu({
       {items.map((action) => {
         const Icon = actionIcons[action.id];
         return (
-          <button
-            type="button"
+          <HintButton
             role="menuitem"
             key={action.id}
             aria-disabled={action.disabled || undefined}
+            hint={action.detail}
             onFocus={() => {
               if (action.id === "commit") void loadCommitDialog();
             }}
@@ -72,8 +71,8 @@ export default function WorkspaceGitActionMenu({
             }}
           >
             <Icon size={14} />
-            <span><strong>{action.label}</strong><small>{action.detail}</small></span>
-          </button>
+            <span>{action.label}</span>
+          </HintButton>
         );
       })}
       {onOpenBranches && (
@@ -86,10 +85,7 @@ export default function WorkspaceGitActionMenu({
           }}
         >
           <GitBranch size={14} />
-          <span>
-            <strong>{status.branch ? "Switch branch" : "Create branch"}</strong>
-            <small>{status.branch ? "Check out or create a branch." : "Create and check out a branch here."}</small>
-          </span>
+          <span>{status.branch ? "Switch branch" : "Create branch"}</span>
         </button>
       )}
       {warning && <p className="git-menu-note is-warning">{warning}</p>}
@@ -109,15 +105,17 @@ export default function WorkspaceGitActionMenu({
       onKeyDown={navigateMenuItems}
     >
       <div className="git-overview">
-        <div className="git-overview-heading"><GitBranch size={14} /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
-        <span className="git-overview-upstream" title={status.upstream ?? undefined}>{status.upstream ? `Tracking ${status.upstream}` : status.hasRemote ? "Publish this branch to set an upstream" : "Local repository · no remote"}</span>
-        <div className="git-overview-counts">
-          <span><ArrowUp size={14} />{status.upstream ? status.ahead : "—"} outgoing</span>
-          <span><ArrowDown size={14} />{status.upstream ? status.behind : "—"} incoming</span>
-        </div>
+        <div className="git-overview-heading"><GitBranch size={14} aria-hidden="true" /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
+        {status.upstream && (
+          <div className="git-overview-detail">
+            <span title={status.upstream}>Tracking {status.upstream}</span>
+            <span>{status.ahead} outgoing</span>
+            <span>{status.behind} incoming</span>
+          </div>
+        )}
         <div className="git-overview-summary" role="status">{busy ? "Git operation in progress…" : gitSyncSummary(status)}</div>
       </div>
-      <div className="git-menu-section-label">Changes <span>{status.files.length} {status.files.length === 1 ? "file" : "files"} <b>+{status.insertions}</b> <i>−{status.deletions}</i></span></div>
+      <div role="separator" />
       {actions}
     </div>
   );

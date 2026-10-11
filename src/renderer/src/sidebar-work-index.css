@@ -87,8 +87,7 @@
   transition: background-color var(--dur-fast) var(--ease-fade);
 }
 
-.activity-thread:hover,
-.activity-thread.is-split:not(.is-active) {
+.activity-thread:hover {
   background: var(--fill);
 }
 
@@ -194,16 +193,16 @@
 .thread-inline-actions {
   position: absolute;
   z-index: 2;
-  top: 4px;
-  right: 4px;
+  top: 2px;
+  right: 2px;
   display: flex;
   gap: 2px;
   visibility: hidden;
 }
 
 .thread-inline-actions .icon-button {
-  width: 24px;
-  height: 24px;
+  width: var(--control-height-small);
+  height: var(--control-height-small);
 }
 
 .activity-thread:hover .thread-inline-actions,

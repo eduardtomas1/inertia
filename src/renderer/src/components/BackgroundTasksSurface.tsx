@@ -19,6 +19,7 @@ import { canStopSubagentTrace } from "../utils/subagentDisclosure";
 import { useBackgroundTaskFeed, type BackgroundTasksLoader } from "../hooks/useBackgroundTaskFeed";
 import { removeLegacyDisclosurePreferences } from "../utils/legacyDisclosurePreferences";
 import { AgentCard, CommandCard } from "./BackgroundTaskCards";
+import { TooltipButton } from "./TooltipButton";
 import "./WorkspaceSurfaces.css";
 import "./BackgroundTasksSurface.css";
 
@@ -329,9 +330,9 @@ export function BackgroundTasksSurface({
                 <ChevronRight size={14} aria-hidden="true" />
               </button>
               {dismissible.length > 0 && (
-                <button
-                  type="button"
+                <TooltipButton
                   className="background-task-stop background-tasks-dismiss"
+                  tooltip="Dismiss finished commands"
                   aria-label="Dismiss finished commands"
                   onClick={() => {
                     for (const run of dismissible) onDismissCommand?.(run);
@@ -339,7 +340,7 @@ export function BackgroundTasksSurface({
                   }}
                 >
                   <Trash2 size={14} aria-hidden="true" />
-                </button>
+                </TooltipButton>
               )}
             </div>
             {finishedOpen && (

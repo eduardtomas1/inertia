@@ -253,7 +253,7 @@ describe("provider terminal resume availability", () => {
     expect(providerTerminalResumeAvailability(
       missing,
       readyProvider("codex"),
-    )).toMatchObject({ kind: "unavailable", resume: null });
+    )).toMatchObject({ kind: "unavailable", resume: null, reason: "No resumable Codex CLI session for this chat." });
 
     const invalid = nativeConversation("codex");
     invalid.providerSessionId = "--continue\nleak";

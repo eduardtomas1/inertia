@@ -829,7 +829,7 @@ export const AppLayout = memo(function AppLayout({
       </section>
 
       {commitDialogOpen && (
-        <Suspense fallback={<div role="status">Preparing commit review…</div>}>
+        <Suspense fallback={<LoadingMark label="Preparing commit review" />}>
           <RootCommitDialog
             owner={commitReviewOwner}
             revision={actions.commitReviewRevision}

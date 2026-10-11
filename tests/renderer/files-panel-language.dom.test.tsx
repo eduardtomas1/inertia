@@ -56,8 +56,9 @@ describe("FilesPanel language presentation", () => {
       />,
     );
 
-    expect(screen.getByTitle("Java recognized locally"))
-      .toHaveTextContent("Java");
+    const java = document.querySelector(".file-language");
+    expect(java).toHaveTextContent("Java");
+    expect(java).not.toHaveAttribute("title");
     expect(screen.getByRole("treeitem", { name: "OrderService.java" }))
       .toHaveAttribute("data-language-family", "java");
     expect(screen.getByRole("treeitem", { name: "check.py" }))
@@ -120,8 +121,7 @@ describe("FilesPanel language presentation", () => {
       />,
     );
 
-    expect(screen.getByTitle("Text recognized locally"))
-      .toHaveTextContent("Text");
+    expect(document.querySelector(".file-language")).toHaveTextContent("Text");
     expect(container.querySelector(".file-preview-code .hljs")).toBeNull();
   });
 

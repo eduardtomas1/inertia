@@ -187,8 +187,9 @@ describe("WorkspaceHeader Git split button", () => {
     const more = screen.getByRole("button", { name: "More Git actions" });
     fireEvent.click(more);
     expect(await screen.findByRole("menu", { name: "Git actions" })).toBeInTheDocument();
-    const pullReason = screen.getByText("Commit or stash local changes before pulling.");
-    expect(pullReason.closest("button")).toHaveAttribute("aria-disabled", "true");
+    const pull = screen.getByRole("menuitem", { name: "Pull" });
+    expect(pull).toHaveAttribute("aria-disabled", "true");
+    expect(pull).toHaveAccessibleDescription("Commit or stash local changes before pulling.");
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Git actions" })).not.toBeInTheDocument();

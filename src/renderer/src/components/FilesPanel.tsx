@@ -965,7 +965,6 @@ export function FilesPanel({
                 <span
                   className={FILE_LANGUAGE_CLASS}
                   data-language-family={previewLanguage.family}
-                  title={`${previewLanguage.label} recognized locally`}
                 >
                   {previewLanguage.label}
                 </span>

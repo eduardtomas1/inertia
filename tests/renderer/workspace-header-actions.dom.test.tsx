@@ -94,6 +94,13 @@ describe("workspace header settings control", () => {
     expect(callbacks.onCloseSettings).toHaveBeenCalledOnce();
     expect(callbacks.onOpenSettings).not.toHaveBeenCalled();
   });
+
+  it("shows the settings gear pressed while Settings is open", () => {
+    render(<WorkspaceHeader {...props()} view="settings" />);
+    const close = screen.getByRole("button", { name: "Close settings" });
+    expect(close).toHaveAttribute("aria-pressed", "true");
+    expect(close.querySelector(".lucide-settings")).not.toBeNull();
+  });
 });
 
 describe("workspace header project action ownership", () => {

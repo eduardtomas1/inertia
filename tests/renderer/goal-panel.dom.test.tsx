@@ -203,9 +203,10 @@ describe("GoalPanel", () => {
     expect(screen.getByText("1 of 2 plan steps complete")).toBeInTheDocument();
     expect(screen.getByLabelText("1 delegated task, 1 working")).toBeInTheDocument();
     expect(screen.getByText("Wire truthful controls")).toBeInTheDocument();
-    expect(screen.getByText(
+    expect(screen.queryByText(
       "Latest conversation plan · not linked to this goal",
-    )).toBeInTheDocument();
+    )).toBeNull();
+    expect(document.querySelector(".goal-panel-section-heading svg, .panel-heading > svg")).toBeNull();
   });
 
   it("labels local goals as Inertia-owned and never implies provider injection", () => {
@@ -230,7 +231,7 @@ describe("GoalPanel", () => {
     });
 
     expect(screen.getByText(
-      /Tracked by Inertia only; it is not injected into the provider/u,
+      "Tracked by Inertia only; not shared with the provider.",
     )).toBeInTheDocument();
     expect(screen.getByText(
       "This route does not expose structured skill input.",
@@ -449,7 +450,8 @@ describe("GoalPanel", () => {
     const enabled = screen.getByRole("button", {
       name: /security-review/i,
     });
-    expect(enabled).toHaveAttribute("title", "Insert $security-review in the composer");
+    expect(enabled).not.toHaveAttribute("title");
+    expect(enabled).toHaveAccessibleDescription("Insert $security-review in the composer");
     await user.click(enabled);
     expect(onInsertSkill).toHaveBeenCalledWith(
       expect.objectContaining({ id: "skill-1" }),

@@ -62,7 +62,6 @@ export default function WorkspaceBranchMenu({
       navigateMenuItems(event, '[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)');
       if (event.defaultPrevented) document.activeElement?.scrollIntoView({ block: "nearest" });
     }}>
-      <div className="header-popover-title">Branches</div>
       {contextMismatch && (
         <div className="checkout-context-note" role="status">
           <GitBranch size={14} aria-hidden="true" />
@@ -86,7 +85,6 @@ export default function WorkspaceBranchMenu({
       <WorkspaceBranchList branches={branches} loading={branchesLoading} error={branchesError} onRefresh={onRefreshBranches} busy={locked} onClose={onClose} onSwitch={(name, remote) => { void change(() => onSwitchBranch(name, remote)); }} onCreate={(name) => { void change(() => onCreateBranch(name)); }} />
       {availableChatActions.length > 0 && (
         <div className="new-chat-location-actions">
-          <div className="header-popover-title">Start another chat</div>
           {availableChatActions.map(([, label, action]) => (
             <button type="button" role="menuitem" disabled={locked} key={label} onClick={() => { onClose(); action(); }}>
               <SquarePen size={14} /><span>{label}</span>

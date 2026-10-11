@@ -112,16 +112,7 @@
 }
 .sidebar-project-rename {
   display: grid;
-  gap: 4px;
-  margin: -8px 0 8px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-.sidebar-project-rename label {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
+  margin: -4px 0 8px;
 }
 .sidebar-project-rename > span {
   display: flex;

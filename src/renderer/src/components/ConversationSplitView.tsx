@@ -10,7 +10,7 @@ import {
   Columns2,
   GripVertical,
   PanelBottom,
-  TerminalSquare,
+  Terminal,
   PictureInPicture2,
   Rows2,
   X,
@@ -203,7 +203,7 @@ export function ConversationSplitView({
                   aria-pressed={details.terminalOpen}
                   onClick={details.onToggleTerminal}
                 >
-                  <TerminalSquare size={14} />
+                  <Terminal size={14} />
                 </IconButton>
                 <IconButton
                   label={`${details.toolsOpen ? "Close" : "Open"} tools for ${

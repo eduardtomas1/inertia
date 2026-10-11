@@ -36,7 +36,7 @@
   min-height: 48px;
   align-items: center;
   gap: 12px;
-  padding: 0 8px 0 14px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line-soft);
   background: var(--bg);
   box-shadow: none;
@@ -46,14 +46,15 @@
   display: flex;
   min-width: 0;
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
 }
 
 .detached-chat-title > span {
   overflow: hidden;
+  flex: 0 1 auto;
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: 400;
   line-height: var(--leading-chrome);
   text-overflow: ellipsis;
@@ -63,8 +64,14 @@
 .detached-chat-title > .detached-chat-project {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
+}
+
+.detached-chat-title > .detached-chat-project::after {
+  margin-left: 4px;
+  color: var(--text-faint);
+  content: "/";
 }
 
 .detached-chat-project > span {
@@ -132,7 +139,7 @@
   width: 100%;
   flex: 0 0 auto;
   margin: 0;
-  padding: 7px 9px 7px 12px;
+  padding: 8px 8px 8px 12px;
   border-width: 0 0 1px;
   border-radius: 0;
 }
@@ -148,10 +155,9 @@
   min-width: 0;
   align-items: center;
   gap: 12px;
-  padding: 8px 10px 8px 14px;
-  border-top: 1px solid var(--line-strong);
+  padding: 8px 8px 8px 16px;
+  border-top: 1px solid var(--line-soft);
   color: var(--danger);
-  background: var(--fill);
   font-size: var(--text-sm);
 }
 
@@ -164,13 +170,13 @@
 }
 
 .detached-chat-error > button {
-  min-height: 27px;
+  min-height: var(--control-height-small);
   flex: 0 0 auto;
-  padding: 0 9px;
-  border: 1px solid var(--line-strong);
+  padding: 0 12px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
-  color: var(--danger);
-  background: var(--surface-raised);
-  font-size: var(--text-xs);
-  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }

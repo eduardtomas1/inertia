@@ -282,3 +282,28 @@ describe("header usage meter", () => {
     expect(readSourceText("src/renderer/src/components/workspace-header/HeaderUsageMeter.tsx")).not.toContain("Open Usage for details");
   });
 });
+
+describe("sidebar", () => {
+  const workIndex = readSourceText("src/renderer/src/sidebar-work-index.css");
+  const workbench = readSourceText("src/renderer/src/detached-chat-workbench.css");
+  const navigation = readSourceText("src/renderer/src/components/sidebar/workspace-navigation.css");
+
+  it("hovers the brand on --fill and leaves split and detached rows unfilled at rest", () => {
+    expect(block(".brand-lockup")).toContain("border-radius: var(--radius-xs);");
+    expect(css).toContain(".brand-lockup:hover { background: var(--fill); }");
+    expect(block(".platform-darwin .brand-lockup:hover")).toContain("background: var(--fill);");
+    expect(workIndex).not.toContain(".activity-thread.is-split:not(.is-active)");
+    expect(workbench).not.toContain(".activity-thread.is-detached:not(.is-active) {");
+    expect(block(".thread-inline-actions .icon-button", workIndex)).toContain("width: var(--control-height-small);");
+    const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
+    expect(inset).toContain(".activity-show-more");
+  });
+
+  it("renames a project inline without a framed card", () => {
+    expect(block(".sidebar-project-rename", navigation)).not.toMatch(/border|background/u);
+    const sidebar = readSourceText("src/renderer/src/components/Sidebar.tsx");
+    expect(sidebar).not.toContain('"✓"');
+    expect(sidebar).not.toContain("Opening your workspace…");
+    expect(sidebar).not.toContain("<h3 title={project?.path}>");
+  });
+});

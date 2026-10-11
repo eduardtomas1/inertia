@@ -331,6 +331,7 @@ button:disabled,
   [role="option"],
   [role="tab"],
   [role="treeitem"],
+  .activity-show-more,
   .activity-thread-select,
   .backend-profile-rail-item,
   .composer-setting-popover button,
@@ -897,7 +898,7 @@ textarea {
 }
 
 .platform-darwin .brand-lockup:hover {
-  background: var(--fill-strong);
+  background: var(--fill);
 }
 
 .platform-darwin .brand-lockup::before {
@@ -930,17 +931,17 @@ textarea {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   margin: 0;
-  padding: 3px 7px 3px 3px;
-  border-radius: var(--radius-sm);
+  padding: 4px 8px 4px 4px;
+  border-radius: var(--radius-xs);
   color: var(--text);
   background: transparent;
   text-align: left;
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
-.brand-lockup:hover { background: var(--fill-strong); }
+.brand-lockup:hover { background: var(--fill); }
 .brand-lockup:active { transform: scale(0.98); }
 
 .brand-logo {

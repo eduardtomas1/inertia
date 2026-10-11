@@ -347,8 +347,10 @@ describe("detached chat leaf controls", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Project actions for Inertia",
     }));
-    expect(screen.getByRole("menuitem", { name: "Remove project" }))
-      .toBeDisabled();
+    const remove = screen.getByRole("menuitem", { name: "Remove project" });
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    expect(remove).not.toHaveAttribute("title");
+    expect(remove).toHaveAccessibleDescription("Return this project's detached chats before removing it.");
     fireEvent.click(marker.closest("button")!);
     expect(onSelectConversation).toHaveBeenCalledWith(conversation);
   });

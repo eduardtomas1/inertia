@@ -877,7 +877,6 @@ export function ChatWorkspace({
     return (
       <Root className="chat-workspace centered-state" aria-busy="true">
         <LoadingMark label="Loading workspace" />
-        <p>Preparing your local workspace…</p>
       </Root>
     );
   }

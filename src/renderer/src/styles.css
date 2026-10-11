@@ -1856,7 +1856,7 @@ button.header-breadcrumb-project:hover {
 }
 
 .centered-state {
-  gap: 11px;
+  gap: 12px;
   color: var(--text-muted);
   font-size: var(--text-sm);
 }

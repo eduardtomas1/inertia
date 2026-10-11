@@ -194,3 +194,16 @@ describe("goal panel", () => {
     expect(motion).not.toMatch(/\.goal-panel-subagents > li \{[^}]*border/u);
   });
 });
+
+describe("goal control in the composer", () => {
+  it("drops the accent wash, icon tile, state chip, stripe and boxed current goal", () => {
+    expect(block(".chat-goal-control")).not.toMatch(/gradient|accent/u);
+    expect(block(".chat-goal-inline > header > span > svg")).not.toMatch(/padding|accent|background/u);
+    expect(block(".chat-goal-current")).not.toMatch(/border|background/u);
+    expect(block(".chat-goal-current > span")).not.toMatch(/accent|background/u);
+    expect(block(".chat-goal-notes")).not.toContain("border");
+    expect(block(".chat-goal-actions button:disabled,\n.chat-goal-form > button:disabled,\n.chat-goal-unavailable button:disabled")).toContain("opacity: var(--disabled-opacity);");
+    expect(block(".chat-goal-form > button")).toContain("font-weight: 500;");
+    expect(block(".chat-goal-form > button:not(:disabled):hover")).toContain("background: var(--accent-hover);");
+  });
+});

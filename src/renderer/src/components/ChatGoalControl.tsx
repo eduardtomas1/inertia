@@ -282,7 +282,6 @@ export function ChatGoalControl({
               <Flag size={14} aria-hidden="true" />
               <span>
                 <strong id={headingId}>{label}</strong>
-                <small>{workflow?.goalCapability.label ?? "Workflow unavailable"}</small>
               </span>
             </span>
             <IconButton
@@ -337,7 +336,7 @@ export function ChatGoalControl({
                   && executionStatus === "idle" && (
                     <small role="status">
                       This goal is still active in Codex, but no Inertia run is
-                      connected. Resume it to continue.
+                      connected.
                     </small>
                   )}
               </section>
@@ -347,8 +346,7 @@ export function ChatGoalControl({
                   aria-label="Resume budget-limited goal"
                 >
                   <p>
-                    This budget is exhausted. Raise or remove it before
-                    resuming the goal.
+                    This budget is exhausted.
                   </p>
                   <div className="chat-goal-budget">
                     <label htmlFor={budgetId}>New token budget</label>
@@ -472,7 +470,7 @@ export function ChatGoalControl({
                 <small>
                   {nativeGoal
                     ? "This becomes the native goal for this Codex thread."
-                    : "This stays in Inertia and is never injected into provider context. Inertia does not measure or enforce the local token target."}
+                    : "This stays in Inertia and is never injected into provider context."}
                 </small>
                 {capability?.kind === "inertia-local" && (
                   <p>{capability.reason}</p>

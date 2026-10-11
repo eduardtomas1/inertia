@@ -132,7 +132,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
           };
           return (
             <fieldset className="agent-input-question" key={question.id} disabled={busy}>
-              <legend>{question.question}</legend>
+              <legend>{question.header.trim() && <span className="agent-input-question-header">{question.header}</span>}{question.question}</legend>
               {question.options.length > 0 && (
                 <div className="agent-input-options">
                   {question.options.map((option) => (

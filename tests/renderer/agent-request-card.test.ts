@@ -156,7 +156,7 @@ describe("agent input answers", () => {
     expect(html).not.toContain("will continue after every question is answered");
     expect(html).not.toContain("Input required");
     expect(html).not.toContain("aria-describedby");
-    expect(html).toContain("<legend>Choose a strategy</legend>");
+    expect(html).toMatch(/<legend><span class="agent-input-question-header">[^<]+<\/span>Choose a strategy<\/legend>/u);
     expect(html).toMatch(/<svg[^>]*class="[^"]*lucide-message-circle-question[^"]*agent-request-icon"/u);
     expect(html).toMatch(/aria-label="Previous question"[^>]*><svg[^>]*lucide-chevron-left/u);
     expect(html).toContain('data-agent-request-kind="input"');
@@ -193,6 +193,12 @@ describe("agent input answers", () => {
       .toBe("var(--fill-strong)");
     expect(declarationsFor(rules, ".agent-input-options input::before").get("background")).toBe("var(--text)");
     expect(declarationsFor(rules, ".agent-input-question:disabled").get("opacity")).toBe("var(--disabled-opacity)");
+    const questionHeader = declarationsFor(rules, ".agent-input-question-header");
+    expect(questionHeader.get("font-size")).toBe("var(--text-base)");
+    expect(questionHeader.get("font-weight")).toBe("500");
+    expect(questionHeader.get("color")).toBe("var(--text)");
+    expect(questionHeader.has("text-transform")).toBe(false);
+    expect(questionHeader.has("letter-spacing")).toBe(false);
     expect(declarationsFor(rules, ".agent-input-page-dots > button[data-answered=\"true\"]").get("background"))
       .toBe("var(--text-muted)");
     const css = readRendererCss("styles.css", "components/BeautifulUiMotion.css");

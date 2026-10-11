@@ -2254,11 +2254,20 @@ button.header-breadcrumb-project:hover {
 }
 
 .agent-input-question legend {
+  display: flex;
   max-width: 100%;
+  flex-direction: column;
+  gap: 2px;
   padding: 0;
   color: var(--text);
   font-size: var(--text-base);
   line-height: var(--leading-chrome);
+}
+
+.agent-input-question-header {
+  color: var(--text);
+  font-size: var(--text-base);
+  font-weight: 500;
 }
 
 .agent-input-options {

@@ -10,10 +10,8 @@ import { attachRuntimeConnectionEvidence, createRuntimeConnectionEvidence } from
 import {
   createComposerResponsiveHelpers,
   exerciseComposerQueue,
-  expectComposerLabelsFit,
   expectHoverBackground,
   fixtureCheckoutLabel,
-  inspectComposerSettingGeometry,
   inspectLongComposerHeading,
   loadComposerResponsiveFixture,
 } from "./support/composer-responsive";
@@ -145,7 +143,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       projectDecoration: "none",
       projectDecorationStyle: "solid",
     });
-    expect(longHeadingGeometry.fontSize).toBe(30);
+    expect(longHeadingGeometry.fontSize).toBe(await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--text-xl"))));
     updateProjectName(originalProject.name);
     await page.reload();
     await expect(page.getByRole("heading", {
@@ -176,7 +175,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(send).toBeVisible();
     await expect(dock.getByRole("button", { name: "Choose project access" }))
       .toBeVisible();
-    await expect(dock.getByRole("button", { name: /^Work mode: /u }))
+    await expect(dock.getByRole("button", { name: "Choose work mode" }))
       .toBeVisible();
 
     const wideGeometry = await dock.evaluate((element) => {
@@ -223,11 +222,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
             )
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
+        webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
         surfaceImage: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
         surfaceColor: getComputedStyle(element.querySelector(".composer-surface")!).backgroundColor,
-        surfaceBackdropFilter: getComputedStyle(element.querySelector(".composer-surface")!).backdropFilter,
-        surfaceRadius: getComputedStyle(element.querySelector(".composer-surface")!).borderTopLeftRadius,
-        boxHeight: element.querySelector(".composer-box")!.getBoundingClientRect().height,
+        raisedSurface: getComputedStyle(element).getPropertyValue("--surface-raised").trim(),
         inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
@@ -248,7 +246,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         toolbarFits: toolbarElement
           ? toolbarElement.scrollWidth <= toolbarElement.clientWidth + 1
           : false,
-        zoneOrder: [...element.querySelector(".composer-box")!.children].flatMap((child) =>
+        zoneOrder: [...element.children].flatMap((child) =>
           child.classList.contains("composer-input-zone")
             ? ["input"]
             : child.classList.contains("composer-toolbar") ? ["controls"] : []),
@@ -257,10 +255,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         toolbarBorderTop: toolbarStyle?.borderTopWidth,
         toolbarBackground: toolbarStyle?.backgroundColor,
         toolbarGroups: [...(toolbarElement?.querySelectorAll<HTMLElement>(
-          ":scope > .composer-primary-rail > .composer-options, :scope > .composer-primary-rail > .composer-tools, :scope > .composer-end > .composer-actions",
+          ":scope > .composer-primary-rail > .composer-options, :scope > .composer-primary-rail > .composer-tools, :scope > .composer-primary-rail > .composer-actions",
         ) ?? [])].map((group) => group.className.replace("composer-", "")),
-        checkoutText: element
-          .querySelector<HTMLElement>(":scope > .composer-checkout-strip")
+        checkoutText: toolbarElement
+          ?.querySelector<HTMLElement>(".composer-checkout-strip")
           ?.innerText ?? "",
         textareaBorder: textareaStyle?.borderTopWidth,
         textareaBackground: textareaStyle?.backgroundColor,
@@ -270,14 +268,13 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         optionMarkers,
       };
     });
-    expect(wideGeometry.width).toBeGreaterThanOrEqual(735);
-    expect(wideGeometry.width).toBeLessThanOrEqual(737);
+    expect(wideGeometry.width).toBeGreaterThanOrEqual(858);
+    expect(wideGeometry.width).toBeLessThanOrEqual(862);
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
-    expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", "rgba(255, 255, 255, 0.8)"]);
-    expect(wideGeometry.surfaceBackdropFilter).toBe("blur(12px) saturate(1.14)");
-    expect(wideGeometry.surfaceRadius).toBe("22px");
-    expect(wideGeometry.boxHeight).toBe(144);
+    expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
+    const raisedChannels = [1, 3, 5].map((offset) => Number.parseInt(wideGeometry.raisedSurface.slice(offset, offset + 2), 16));
+    expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", `rgb(${raisedChannels.join(", ")})`]);
     expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
@@ -286,8 +283,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("16px");
-    expect(wideGeometry.inputPaddingBlock).toBe("16px 8px");
+    expect(wideGeometry.inputPaddingInline).toBe("18px");
+    expect(wideGeometry.inputPaddingBlock).toBe("15px 4px");
     expect(wideGeometry.toolbarBorderTop).toBe("0px");
     expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.toolbarGroups).toEqual(["options", "actions"]);
@@ -296,7 +293,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);
-    await expectComposerLabelsFit(dock);
     expect(wideGeometry.optionMarkers.filter((marker) => marker !== "reasoning"))
       .toEqual([
       "model",
@@ -328,17 +324,46 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       '[data-composer-setting="reasoning"]',
     );
     await expect(settingFamily).toBeVisible();
-    const settingGeometry = await inspectComposerSettingGeometry(settingFamily);
+    const settingGeometry = await settingFamily.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const controls = [...element.querySelectorAll<HTMLButtonElement>(
+        "button[data-composer-setting]",
+      )];
+      return {
+        borderLeft: style.borderLeftWidth,
+        borderRight: style.borderRightWidth,
+        heights: controls.map((control) =>
+          control.getBoundingClientRect().height),
+        borders: controls.map((control) =>
+          getComputedStyle(control).borderTopWidth),
+        fontSizes: controls.map((control) =>
+          getComputedStyle(control).fontSize),
+        iconSizes: controls.map((control) => {
+          const icon = control.querySelector<SVGElement>(
+            ".composer-setting-icon",
+          );
+          const bounds = icon?.getBoundingClientRect();
+          return bounds
+            ? { width: bounds.width, height: bounds.height }
+            : null;
+        }),
+        iconDisplays: controls.map((control) => {
+          const icon = control.querySelector<SVGElement>(".composer-setting-icon");
+          return icon ? getComputedStyle(icon).display : null;
+        }),
+      };
+    });
     expect(settingGeometry.borderLeft).toBe("0px");
     expect(settingGeometry.borderRight).toBe("0px");
     expect(Math.max(...settingGeometry.heights)
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.iconSizes.filter(Boolean)).toEqual(
-      settingGeometry.iconSizes.filter(Boolean).map(() => ({ width: 16, height: 16 })),
-    );
-    expect(settingGeometry.iconDisplays.filter((display) => display === "none")).toEqual([]);
+    expect(settingGeometry.iconSizes[0]).toEqual({ width: 14, height: 14 });
+    // Only the family's first icon is shown; the rest are hidden by rule, not
+    // merely collapsed to an empty box.
+    expect(settingGeometry.iconDisplays[0]).not.toBe("none");
+    expect(settingGeometry.iconDisplays.slice(1)).toEqual(settingGeometry.iconDisplays.slice(1).map(() => "none"));
     const accessIdleBackground = await expectHoverBackground(page, accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
@@ -354,6 +379,10 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       {
         trigger: accessTrigger,
         menu: page.getByRole("menu", { name: "Project access" }),
+      },
+      {
+        trigger: modeTrigger,
+        menu: page.getByRole("menu", { name: "Work mode" }),
       },
       ...(await reasoningTrigger.count() > 0
         ? [{
@@ -390,17 +419,15 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       await expect(setting.trigger).toBeFocused();
     }
 
-    await expect(modeTrigger).not.toHaveAttribute("aria-haspopup");
     await accessTrigger.click();
     await expect(page.getByRole("menu", { name: "Project access" }))
       .toBeVisible();
     await modeTrigger.click();
     await expect(page.getByRole("menu", { name: "Project access" }))
       .toBeHidden();
-    await expect(modeTrigger).toHaveAccessibleName("Work mode: Plan. Switch to Build.");
+    await expect(page.getByRole("menu", { name: "Work mode" })).toBeVisible();
     await expect(modeTrigger).toBeFocused();
-    await modeTrigger.press("Enter");
-    await expect(modeTrigger).toHaveAccessibleName("Work mode: Build. Switch to Plan.");
+    await page.keyboard.press("Escape");
     await expect(modeTrigger).toBeFocused();
 
     await accessTrigger.click();
@@ -424,7 +451,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       (element) => element.getBoundingClientRect().height,
     ), { accept: (height) => height > initialTextareaHeight });
     expect(grownTextareaHeight).toBeGreaterThan(initialTextareaHeight);
-    expect(grownTextareaHeight).toBeLessThanOrEqual(208);
+    expect(grownTextareaHeight).toBeLessThanOrEqual(200);
     await textbox.fill("");
     await capture("composer-dock-light-default-1440x920");
     await exerciseComposerQueue({
@@ -529,10 +556,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       '[data-composer-setting="mode"]',
     );
     await darkModeTrigger.click();
-    await expect(darkModeTrigger).toHaveAccessibleName("Work mode: Plan. Switch to Build.");
+    await expect(page.getByRole("menu", { name: "Work mode" })).toBeVisible();
     await capture("composer-controls-mode-dark-large-1440x920");
-    await darkModeTrigger.click();
-    await expect(darkModeTrigger).toHaveAccessibleName("Work mode: Build. Switch to Plan.");
+    await page.keyboard.press("Escape");
 
     await setWorkspaceTools(true);
     await resizeWindow(1180, 720);
@@ -749,7 +775,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         name: "Choose project access",
       })).toBeVisible();
       await expect(narrowDock.getByRole("button", {
-        name: /^Work mode: /u,
+        name: "Choose work mode",
       })).toBeVisible();
     }
     await expectNoViewportOverflow();

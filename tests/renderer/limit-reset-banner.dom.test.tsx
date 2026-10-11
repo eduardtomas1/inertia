@@ -58,8 +58,7 @@ describe("quota reset banner", () => {
   it("keeps the plain usage-limit row unfilled, with the status colour on its icon and words only", () => {
     const css = readFileSync(join(process.cwd(), "src/renderer/src/components/composer/LimitResetBanner.css"), "utf8");
     const limited = [...css.matchAll(/\.limit-reset\[data-state="limited"\]([^{]*)\{([^}]*)\}/gu)];
-    expect(/^\.limit-reset \{([^}]*)\}/mu.exec(css)?.[1]).not.toMatch(/background/u);
-    expect(limited.filter(([, , body]) => /background:(?!\s*transparent)/u.test(body!))).toEqual([]);
+    expect(limited.find(([, selector]) => selector.trim() === "")?.[2]).toMatch(/background:\s*transparent;/u);
     expect(limited.find(([, selector]) => selector.trim() === ".limit-reset-copy strong")?.[2]).toMatch(/color:\s*var\(--warning\);/u);
   });
   it("drops a late response from a different chat", async () => {

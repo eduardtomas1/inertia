@@ -672,7 +672,7 @@
   .usage-metric:last-child { grid-column: 1 / -1; padding-left: 0; border-top: 1px solid var(--line); }
   .usage-notes { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .usage-error { align-items: flex-start; flex-wrap: wrap; }
-  .usage-error button { margin-left: 27px; }
+  .usage-error .secondary-button { margin-left: 27px; }
 }
 
 @media (max-width: 480px) {

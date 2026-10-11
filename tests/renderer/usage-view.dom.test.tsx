@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { readSourceText } from "../helpers/source-text";
+import { declarationsFor, parseCssRules } from "./css-rules";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -340,6 +341,11 @@ describe("UsageView", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  });
+  it("aligns the narrow Try again button under the error text instead of the base right alignment", () => {
+    const rules = parseCssRules(readSourceText("src/renderer/src/components/UsageView.css"));
+    expect(declarationsFor(rules, ".usage-error .secondary-button").get("margin-left")).toBe("auto");
+    expect(declarationsFor(rules, ".usage-error .secondary-button", "@media (max-width: 760px)").get("margin-left")).toBe("27px");
   });
   it("keeps the usage canvas on plain rules with filled segment states and an opacity-only entrance", () => {
     const css = readSourceText("src/renderer/src/components/UsageView.css");

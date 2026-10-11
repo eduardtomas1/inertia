@@ -100,6 +100,7 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
     expect(onSendQueued).not.toHaveBeenCalled();
     expect(screen.getByText("Send unconfirmed")).toBeInTheDocument();
     expect(screen.getByText("Send unconfirmed")).not.toHaveAttribute("title");
+    expect(screen.getByText("A previous send did not confirm. Check the transcript before sending again.")).toHaveClass("visually-hidden");
     vi.useFakeTimers();
     fireEvent.pointerEnter(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
     act(() => { vi.advanceTimersByTime(500); });

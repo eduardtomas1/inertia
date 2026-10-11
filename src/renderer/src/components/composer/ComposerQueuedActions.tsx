@@ -22,6 +22,8 @@ import {
   takeComposerQueuedPrompts,
 } from "./composerQueuedPrompts";
 
+const UNCONFIRMED_SEND_REASON = "A previous send did not confirm. Check the transcript before sending again.";
+
 export { enqueueComposerPrompt };
 export { queueComposerDraft } from "./queueComposerDraft";
 
@@ -226,12 +228,15 @@ function LegacyComposerQueuedActions({
           </TooltipText>
         )}
         {unconfirmed && !sending ? (
-          <TooltipText
-            className="composer-queue-count"
-            tooltip="A previous send did not confirm. Check the transcript before sending again."
-          >
-            Send unconfirmed
-          </TooltipText>
+          <>
+            <TooltipText
+              className="composer-queue-count"
+              tooltip={UNCONFIRMED_SEND_REASON}
+            >
+              Send unconfirmed
+            </TooltipText>
+            <span className="visually-hidden">{UNCONFIRMED_SEND_REASON}</span>
+          </>
         ) : (
           <small className="composer-queue-count">
             {sending

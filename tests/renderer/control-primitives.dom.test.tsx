@@ -244,10 +244,11 @@ describe("dialog primitives", () => {
       "  background: var(--surface-raised);",
       "  box-shadow: var(--shadow-overlay);",
     ].join("\n"));
-    for (const dialog of [".dialog-shell", ".commit-dialog", ".provider-auth-dialog", ".welcome-guide"]) {
+    for (const dialog of [".dialog-shell", ".command-palette", ".provider-auth-dialog", ".welcome-guide"]) {
       expect(base?.list, dialog).toContain(dialog);
     }
-    expect(css).toMatch(/:where\(\n  \.commit-dialog,\n  \.dialog-shell\n\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
+    expect(css).toMatch(/:where\(\n  \.dialog-shell\n\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
+    expect(css).not.toMatch(/\.commit-dialog/u);
     expect(dialogCss).not.toMatch(/\.dialog-icon|--scrim\b|--scrim-strong|backdrop-filter: blur\(5px\)|welcome-guide-open|palette-panel-in|multi-spawn-dialog-mark|attachment-preview-close|limits-dialog-close|daily-work-refresh/u);
     expect(dialogCss).not.toMatch(/(?:dialog|preview|review)[\w-]*\s*\{[^}]*border-radius: var\(--radius-(?:sm|md)\)[^}]*box-shadow: var\(--shadow-overlay\)/u);
   });

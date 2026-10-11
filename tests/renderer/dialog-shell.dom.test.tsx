@@ -85,6 +85,7 @@ describe("dialog shell", () => {
       "CliConversationImportDialog.tsx",
       "CommitDialog.tsx",
       "DailyWorkDialog.tsx",
+      "DiagnosticsClearDialog.tsx",
       "DocumentAttachmentPreview.tsx",
       "FileEditorDialog.tsx",
       "MultiSpawnDialog.tsx",

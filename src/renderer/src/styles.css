@@ -11787,17 +11787,17 @@ button.sent-attachment-open:hover {
   min-width: 0;
   min-height: 32px;
   align-items: center;
-  gap: 7px;
-  padding: 0 9px;
+  gap: 8px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--line-soft);
   color: var(--text-muted);
   background: var(--bg);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 
 .conversation-split-header > span:first-of-type {
   flex: 0 0 auto;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .conversation-split-header > strong {
@@ -11926,9 +11926,9 @@ html[data-chat-drag] * {
   display: grid;
   place-items: center;
   box-sizing: border-box;
-  color: var(--accent-strong);
+  color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--fill);
@@ -11942,8 +11942,8 @@ html[data-chat-drag] * {
   left: 0;
   max-width: 240px;
   overflow: hidden;
-  padding: 5px 9px;
-  border: 1px solid var(--line-strong);
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-xs);
   color: var(--text);
   background: var(--surface-raised);

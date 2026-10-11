@@ -307,3 +307,13 @@ describe("sidebar", () => {
     expect(sidebar).not.toContain("<h3 title={project?.path}>");
   });
 });
+
+describe("split view", () => {
+  it("draws pane headers at chrome size, drop labels without accent and the drag chip on the floating hairline", () => {
+    const header = block(".conversation-split-header");
+    expect(header).toContain("font-size: var(--text-sm);");
+    expect(block(".conversation-split-header > span:first-of-type")).toContain("font-weight: 500;");
+    expect(block(".split-drop-highlight")).not.toContain("accent");
+    expect(block(".chat-drag-chip")).toContain("border: 1px solid var(--line-soft);");
+  });
+});

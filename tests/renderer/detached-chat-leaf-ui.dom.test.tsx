@@ -129,6 +129,8 @@ describe("detached chat leaf controls", () => {
 
   it("focuses an existing window from the conversation menu and blocks split ownership", () => {
     const onOpenConversationInWindow = vi.fn();
+    const onArchiveConversation = vi.fn();
+    const onDeleteConversation = vi.fn();
     render(
       <ConversationActionsMenu
         activeConversationId="33333333-3333-4333-8333-333333333333"
@@ -147,9 +149,9 @@ describe("detached chat leaf controls", () => {
           settled: false,
         }}
         onAcknowledgeRun={noOp}
-        onArchiveConversation={noOp}
+        onArchiveConversation={onArchiveConversation}
         onCloseConversationSplit={noOp}
-        onDeleteConversation={noOp}
+        onDeleteConversation={onDeleteConversation}
         onDismiss={noOp}
         onDismissRun={noOp}
         onOpenConversationInSplit={noOp}
@@ -176,7 +178,11 @@ describe("detached chat leaf controls", () => {
     expect(archive).toHaveAttribute("aria-disabled", "true");
     expect(archive).toHaveAccessibleDescription("Return this chat to the main window before archiving it.");
     fireEvent.click(archive);
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
+    expect(onArchiveConversation).not.toHaveBeenCalled();
+    const remove = screen.getByRole("menuitem", { name: "Delete" });
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(remove);
+    expect(onDeleteConversation).not.toHaveBeenCalled();
   });
 
   it("keeps focusing a detached chat available from the header title menu at the window limit", async () => {
@@ -289,6 +295,7 @@ describe("detached chat leaf controls", () => {
 
   it("marks detached sidebar chats while preserving parent-owned row selection", () => {
     const onSelectConversation = vi.fn();
+    const onRemoveProject = vi.fn();
     const snapshot: AppSnapshot = {
       projects: [project],
       conversations: [conversation],
@@ -337,7 +344,7 @@ describe("detached chat leaf controls", () => {
         onRenameProject={noOp}
         onSetProjectGrouping={noOp}
         onSetProjectGitRepositoryLimit={noOp}
-        onRemoveProject={noOp}
+        onRemoveProject={onRemoveProject}
       />,
     );
 
@@ -352,6 +359,8 @@ describe("detached chat leaf controls", () => {
     expect(remove).toHaveAttribute("aria-disabled", "true");
     expect(remove).not.toHaveAttribute("title");
     expect(remove).toHaveAccessibleDescription("Return this project's detached chats before removing it.");
+    fireEvent.click(remove);
+    expect(onRemoveProject).not.toHaveBeenCalled();
     fireEvent.click(marker.closest("button")!);
     expect(onSelectConversation).toHaveBeenCalledWith(conversation);
   });

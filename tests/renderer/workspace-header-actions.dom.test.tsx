@@ -95,10 +95,10 @@ describe("workspace header settings control", () => {
     expect(callbacks.onOpenSettings).not.toHaveBeenCalled();
   });
 
-  it("shows the settings gear pressed while Settings is open", () => {
+  it("keeps the settings gear as a plain Close settings action while Settings is open", () => {
     render(<WorkspaceHeader {...props()} view="settings" />);
     const close = screen.getByRole("button", { name: "Close settings" });
-    expect(close).toHaveAttribute("aria-pressed", "true");
+    expect(close).not.toHaveAttribute("aria-pressed");
     expect(close.querySelector(".lucide-settings")).not.toBeNull();
   });
 });

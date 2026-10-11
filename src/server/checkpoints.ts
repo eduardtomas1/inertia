@@ -677,6 +677,7 @@ export async function createCheckpoint(
       options.deadlineAt,
       options.signal,
     ).catch(async (error: unknown) => {
+      if (isGitProcessTreeTerminationFailure(error)) throw error;
       await deleteCheckpoint(repositoryPath, ref, conversationId)
         .catch(() => undefined);
       throw error;

@@ -24,7 +24,7 @@ describe("sent context chrome", () => {
     expect(strip).not.toMatch(/--accent-strong|--warning/u);
     const preview = declarationsFor(rules, ".composer-context-preview");
     expect(preview.get("border")).toBe("0");
-    expect(preview.get("background")).toBe("var(--fill)");
+    expect(preview.get("background")).toBe("color-mix(in srgb, var(--text) 4%, var(--surface-raised))");
     const css = readRendererCss("styles.css");
     expect(css).not.toMatch(/\.composer-context-request button:first-child \{[^}]*--accent/u);
     expect(css).not.toMatch(/\.composer-context-request button, \.composer-context-preview button \{/u);

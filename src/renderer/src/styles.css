@@ -7434,7 +7434,7 @@ button.turn-agents-line:hover {
   padding: 8px 12px;
   border: 0;
   border-radius: var(--radius-xs);
-  background: var(--fill);
+  background: color-mix(in srgb, var(--text) 4%, var(--surface-raised));
   gap: 8px;
 }
 .composer-context-preview header, .composer-context-request header { display: flex; min-width: 0; flex-direction: column; gap: 2px; }

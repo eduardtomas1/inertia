@@ -19,25 +19,25 @@
 
 .composer-queue {
   min-width: 0;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .composer-queue-item {
   display: flex;
   min-width: 0;
-  height: 28px;
+  height: 36px;
   align-items: center;
-  gap: 4px;
-  padding: 0 0 0 8px;
+  gap: 8px;
+  padding: 0 10px 0 18px;
   color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: 16px;
+  font-size: var(--text-sm);
 }
 
 .composer-queue-copy {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  color: color-mix(in srgb, var(--text) 80%, transparent);
+  color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -71,7 +71,7 @@
 
 .composer-queue > [role="status"] {
   display: block;
-  padding: 0 8px 4px;
+  padding: 0 18px 8px;
   color: var(--status-failed);
   font-size: var(--text-xs);
 }
@@ -84,6 +84,10 @@
 }
 
 @container (max-width: 480px) {
+  .composer-queue-item {
+    padding-left: 14px;
+  }
+
   .composer-queue-count {
     display: none;
   }

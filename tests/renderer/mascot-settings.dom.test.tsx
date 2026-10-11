@@ -38,13 +38,13 @@ function install() {
 }
 
 describe("mascot custom sprite settings", () => {
-  it("shows the mascot controls without an instruction paragraph", async () => {
+  it("shows the mascot controls with only the hide and menu consequences", async () => {
     const bridge = install();
     await bridge.configure({ enabled: true, motion: true });
     render(<MascotSettings />);
     expect(await screen.findByRole("button", { name: "Move with keyboard" })).toBeVisible();
     expect(document.body).not.toHaveTextContent("Drag to move");
-    expect(document.body).not.toHaveTextContent("Right-click for animation");
+    expect(screen.getByText("Escape hides it. Right-click for animation and hide controls.")).toBeVisible();
   });
 
 
@@ -152,7 +152,7 @@ describe("mascot custom sprite settings", () => {
     const apply = await screen.findByRole("button", { name: "Apply sprites" });
     expect(apply).toHaveClass("primary-button");
     expect(screen.getByRole("button", { name: "Discard preview" })).toHaveClass("secondary-button");
-    expect(section).not.toHaveTextContent("Turn on Show mascot above");
+    expect(section).toHaveTextContent("Turn on Show mascot above to see these sprites on your desktop.");
 
     bridge.importSprites.mockResolvedValueOnce({ status: "invalid", message: "working.png is missing." });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));

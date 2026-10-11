@@ -23,7 +23,7 @@ describe("Theme library", () => {
       expect(screen.getByRole("button", { name: `${option.label} theme` }))
         .toHaveAttribute("aria-pressed", String(option.id === "inertia"));
     }
-    expect(screen.queryByText(/circle for one appearance/u)).toBeNull();
+    expect(screen.getByRole("group", { name: "Colour theme" })).toHaveAccessibleDescription("Pick a circle for one appearance, or the card for both.");
     expect(screen.getByRole("button", { name: "Grove theme" })).toHaveAccessibleDescription("Use Grove for both light and dark");
     expect(screen.getByRole("button", { name: "Use Grove for dark" })).toHaveAccessibleDescription("Use Grove for dark only");
     for (const button of screen.getAllByRole("button")) expect(button).not.toHaveAttribute("title");

@@ -23,7 +23,7 @@ export function NotificationsSettings({
     <>
       <SettingsGroup title="Alerts" headingId="notifications-heading">
         <div className="settings-rows">
-          <SettingSwitch id="desktop-notifications" title="Desktop notifications" checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
+          <SettingSwitch id="desktop-notifications" title="Desktop notifications" description="Completion and attention alerts, without prompt or response text." checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
           <BackgroundNotificationSetting settings={settings} disabled={disabled} onUpdate={onUpdate} />
           <QuotaWarningSettings warnings={settings.quotaWarnings} disabled={disabled} onUpdate={onUpdate} />
         </div>

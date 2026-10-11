@@ -107,7 +107,7 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
         <button className="secondary-button" type="button" disabled={snapshot.placement === "system"} onClick={() => {
           void bridge.action("reset-position").catch(() => setError("Could not reset the position."));
         }}>Reset position</button>
-        {snapshot.placement === "system" && <small>Your Wayland window manager controls mascot placement.</small>}
+        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : ""}Escape hides it. Right-click for animation and hide controls.</small>
       </div>}
       {snapshot && <section className="mascot-sprites" aria-labelledby="mascot-sprites-heading">
         <div className="mascot-sprites-heading">
@@ -155,6 +155,7 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
           </> : <button className="secondary-button" type="button" aria-disabled={held} onClick={resetSprites}>{busy === "reset" ? "Resetting…" : "Reset to default"}</button>}
         </div>}
         {notice && <p role="status" className="settings-card-note">{notice}</p>}
+        {shown && !enabled && <p className="settings-card-note">Turn on Show mascot above to see these sprites on your desktop.</p>}
       </section>}
       {error && <p role="alert" className="settings-card-note">{error}</p>}
     </div>

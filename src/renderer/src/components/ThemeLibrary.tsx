@@ -121,11 +121,13 @@ export function ThemeLibrary({
 
       <span className="setting-copy">
         <strong id={`${titleId}-colour`}>Colour theme</strong>
+        <small id={`${titleId}-colour-hint`}>Pick a circle for one appearance, or the card for both.</small>
       </span>
       <div
         className="color-theme-options"
         role="group"
         aria-labelledby={`${titleId}-colour`}
+        aria-describedby={`${titleId}-colour-hint`}
       >
         {COLOR_THEME_OPTIONS.map((option) => {
           const lightActive = !settings.lightCustomColor && (settings.lightColorTheme ?? settings.colorTheme) === option.id;

@@ -22,7 +22,7 @@ it("shows global disk usage and changes the budget without deleting attachments"
   expect(screen.getByText(/Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files\./u)).toBeVisible();
   expect(screen.getByText(/Each message takes up to 100 files, 50 MiB each\./u)).toBeVisible();
   expect(screen.queryByText(/Original images and documents kept on this device/u)).toBeNull();
-  expect(screen.queryByText("Deleting a chat also releases its unshared files.")).toBeNull();
+  expect(screen.getByText("Deleting a chat also releases its unshared files.")).toBeVisible();
   expect(screen.getByText("Lowering it keeps existing files.")).toBeVisible();
 });
 

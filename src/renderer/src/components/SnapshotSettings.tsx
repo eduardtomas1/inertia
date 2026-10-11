@@ -1,5 +1,5 @@
 import { SettingSwitch } from "./settings/SettingControls";
-import { SettingActionRow, SettingNoteStatus, SettingsGroup } from "./settings/SettingsLayout";
+import { SettingActionRow, SettingDisclosure, SettingNoteStatus, SettingsGroup } from "./settings/SettingsLayout";
 import type { SettingNotice } from "./settings/useSettingAction";
 import { useSnapshotSettings } from "./settings/useSnapshotSettings";
 import "./SnapshotSettings.css";
@@ -12,7 +12,7 @@ const REVIEWED_BACKENDS = {
 } as const;
 
 export function SnapshotSettings(): React.JSX.Element {
-  const { available, state, error, pending, linux, request, configure } = useSnapshotSettings();
+  const { available, state, error, pending, linux, accelerator, request, configure } = useSnapshotSettings();
   if (!available) {
     return <SettingsGroup title="Snapshots" headingId="snapshot-capture-heading" className="snapshot-settings">
       <p className="snapshot-settings-note" role="status">Snapshots is available in the desktop app.</p>
@@ -63,5 +63,13 @@ export function SnapshotSettings(): React.JSX.Element {
     <div className="snapshot-settings-status">
       <SettingNoteStatus notice={notice} />
     </div>
+    <SettingDisclosure summary="How to take a snapshot" className="snapshot-settings-guide">
+      <ol className="snapshot-instructions">
+        <li>Focus the message box of the chat that should receive it.</li>
+        <li>Switch to the window you want to share, then press <kbd>{state?.shortcut === "both-shift" ? "both Shift keys together" : accelerator}</kbd>.</li>
+        <li>Review the image and accessibility details before sending.</li>
+      </ol>
+      <p className="snapshot-settings-note">Detected editable fields are masked.</p>
+    </SettingDisclosure>
   </SettingsGroup>;
 }

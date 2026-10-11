@@ -137,6 +137,7 @@ export function NewChatDefaults({
         <SettingSelect
           id="new-chat-reasoning"
           title="Reasoning"
+          description={fallback ? "Choose a model to change its reasoning." : undefined}
           value={levels.length > 0 ? effective.reasoning ?? "" : ""}
           options={levels.length > 0 ? reasoningOptions : reasoningOptions.slice(0, 1)}
           disabled={disabled}

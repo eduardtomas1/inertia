@@ -114,6 +114,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       id="attachment-remove-oldest"
       className="runtime-log-setting"
       title="Remove oldest files"
+      description="Deleting a chat also releases its unshared files."
       notice={cleanupAction.notice}
       actions={<button type="button" className="secondary-button" disabled={blocked || storage?.state !== "ready" || !storage.removableRecords} onClick={(event) => { triggerRef.current = event.currentTarget; setConfirm("cleanup"); }}>Remove oldest files{storage?.removableRecords ? ` (${storage.removableRecords} · ${formatBytes(storage.removableBytes)})` : ""}</button>}
     />

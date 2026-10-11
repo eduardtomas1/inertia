@@ -45,16 +45,17 @@ const removed: Record<string, { section: SettingsSection; anchor: string; gone: 
     section: "notifications",
     anchor: "Desktop notifications",
     gone: [
-      "Completion and attention alerts, without prompt or response text.",
       "Skips desktop notifications while an Inertia window is in front.",
       "Shows a notice in Inertia when an account's remaining quota drops below the chosen level.",
       "The first notice appears at this level and again at each lower one.",
     ],
+    kept: ["Completion and attention alerts, without prompt or response text."],
   },
   keyboard: {
     section: "keyboard",
     anchor: "Open settings",
-    gone: [
+    gone: [],
+    kept: [
       "⌘ stays fixed; available keys avoid system shortcuts.",
       "Also closes Settings. This shortcut is fixed.",
     ],

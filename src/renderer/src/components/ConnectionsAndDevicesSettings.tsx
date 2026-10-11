@@ -19,6 +19,7 @@ import {
 } from "./settings/SettingsLayout";
 import type { SettingNotice } from "./settings/useSettingAction";
 import "./ConnectionsAndDevicesSettings.css";
+import { HintButton } from "./HintButton";
 
 type UpdateState = (
   operation: () => Promise<PrivateConnectStateView>,
@@ -145,16 +146,16 @@ export function ConnectionsAndDevicesSettings({
               title="Open on another device"
               description={ready.externalUrl ?? undefined}
               actions={(
-                <button
-                  type="button"
+                <HintButton
                   className="secondary-button"
                   aria-disabled={pairingUnavailable || undefined}
+                  hint={ready.status === "ready" ? undefined : "Turn on Private Connect to create a private link."}
                   onClick={() => {
                     if (!pairingUnavailable) void createInvitation();
                   }}
                 >
                   <Link size={14} aria-hidden="true" />Create pairing link
-                </button>
+                </HintButton>
               )}
             />
             {ready.invitation && (
@@ -285,6 +286,7 @@ export function ConnectionsAndDevicesSettings({
             />
           ))}
           <SettingDisclosure summary="Security activity" className="private-connect-disclosure">
+            <p className="private-connect-note">Prompt text and private content are never recorded.</p>
             {(ready.audit ?? []).length === 0 ? (
               <p className="private-connect-note">No security activity yet.</p>
             ) : (

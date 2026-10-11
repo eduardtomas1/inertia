@@ -6,6 +6,38 @@
   margin-top: 8px;
 }
 
+.snapshot-settings-guide {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.snapshot-settings-guide .setting-disclosure-content {
+  padding: 0 0 8px 19px;
+}
+
+.snapshot-instructions {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+  list-style: decimal;
+}
+
+.snapshot-instructions li + li {
+  margin-top: 4px;
+}
+
+.snapshot-instructions kbd {
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+}
+
 .snapshot-settings-note {
   margin: 8px 0 0;
   color: var(--text-muted);

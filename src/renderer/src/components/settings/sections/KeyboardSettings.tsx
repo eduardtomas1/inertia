@@ -38,6 +38,7 @@ function SnapshotShortcut(): React.JSX.Element | null {
       <SettingSelect<SnapshotState["shortcut"]>
         id="snapshot-shortcut"
         title="Window snapshot"
+        description="Works while another app is in front."
         value={state?.shortcut ?? "accelerator"}
         options={options}
         inactive={pending || !state?.available}
@@ -91,7 +92,7 @@ export function KeyboardSettings({
     .every(([shortcut, key]) => draft[shortcut as AppShortcutAction] === key);
   return (
     <>
-      <SettingsGroup title="App shortcuts" headingId="keybindings-heading">
+      <SettingsGroup title="App shortcuts" headingId="keybindings-heading" description={`${primaryModifier} stays fixed; available keys avoid system shortcuts.`}>
         <div className="settings-rows">
           {SHORTCUT_ROWS.map(([shortcut, label]) => (
             <SettingSelect<AppShortcutKey>
@@ -110,7 +111,7 @@ export function KeyboardSettings({
               onChange={(key) => persist({ ...draftRef.current, [shortcut]: key })}
             />
           ))}
-          <SettingRow id="open-settings" title="Open settings">
+          <SettingRow id="open-settings" title="Open settings" description="Also closes Settings. This shortcut is fixed.">
             <span className="setting-keys"><kbd>{primaryModifier}</kbd><kbd>,</kbd></span>
           </SettingRow>
           <SettingRow id="reset-shortcuts" title="Default shortcuts" notice={reset.notice}>

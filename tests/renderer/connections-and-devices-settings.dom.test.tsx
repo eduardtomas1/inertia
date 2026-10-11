@@ -49,6 +49,14 @@ afterEach(() => {
 });
 
 describe("Connections and devices settings", () => {
+  it("says why Create pairing link is unavailable while Private Connect is off", async () => {
+    installBridge({ ...state(null), enabled: false, status: "off" });
+    render(<ConnectionsAndDevicesSettings projects={[]} />);
+    const create = await screen.findByRole("button", { name: "Create pairing link" });
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    expect(create).toHaveAccessibleDescription("Turn on Private Connect to create a private link.");
+  });
+
   it("reports when a newly created pairing link expires", async () => {
     const expiresAt = "2030-01-01T10:05:00.000Z";
     const invitation = { url: "https://inertia.example.ts.net/pair#one", expiresAt };
@@ -98,7 +106,8 @@ describe("Connections and devices settings", () => {
     expect(screen.getByRole("button", { name: "Create pairing link" })).toHaveClass("secondary-button");
     expect(container.querySelector(".settings-card-heading > div")).toBeNull();
     expect(container.textContent).not.toMatch(/[●↺]|\bQR\b/u);
-    expect(container.textContent).not.toMatch(/Turn on Private Connect to create a private link|Recent local authority events/u);
+    expect(container.textContent).not.toMatch(/Recent local authority events/u);
+    expect(screen.getByText("Prompt text and private content are never recorded.")).toBeInTheDocument();
     for (const summary of ["Security activity", "Advanced diagnostics"]) {
       expect(screen.getByText(summary).closest("details")).not.toHaveAttribute("open");
     }

@@ -8912,9 +8912,9 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .sent-attachment {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
 }
 
 .sent-attachment-open {
@@ -8950,7 +8950,6 @@ button.sent-attachment-open:hover {
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: var(--fill);
-  box-shadow: inset 0 0 0 1px var(--line-soft);
 }
 
 .sent-attachment-thumbnail img {
@@ -8968,7 +8967,7 @@ button.sent-attachment-open:hover {
 }
 
 .sent-attachment-thumbnail.is-document {
-  color: var(--accent-strong);
+  color: var(--text-muted);
 }
 
 .sent-attachment-copy {
@@ -8986,9 +8985,9 @@ button.sent-attachment-open:hover {
 }
 
 .sent-attachment-copy strong {
-  color: var(--text-muted);
+  color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .sent-attachment-copy small {

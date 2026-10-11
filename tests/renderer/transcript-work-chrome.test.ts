@@ -45,4 +45,13 @@ describe("transcript work log chrome", () => {
     expect(warning.has("background")).toBe(false);
     expect(warning.has("border-left")).toBe(false);
   });
+
+  it("lists sent attachments as rows on the bubble, not bordered cards with accent tiles", () => {
+    const item = declarationsFor(rules, ".sent-attachment");
+    expect(item.get("border")).toBe("0");
+    expect(item.get("background")).toBe("transparent");
+    expect(declarationsFor(rules, ".sent-attachment-thumbnail").has("box-shadow")).toBe(false);
+    expect(declarationsFor(rules, ".sent-attachment-thumbnail.is-document").get("color")).toBe("var(--text-muted)");
+    expect(declarationsFor(rules, ".sent-attachment-copy strong").get("font-weight")).toBe("500");
+  });
 });

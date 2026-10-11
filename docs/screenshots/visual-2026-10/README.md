@@ -1,6 +1,6 @@
 # Visual campaign, before and after
 
-Captures of the visual campaign on `feat/turn-feel-2026-10`. Before is commit 1a192a1e2 and after is commit dc262c278, except the Daily work and panel tab overflow after captures, which come from 29189ba39 after the final fixes. Both sets come from one throwaway Playwright spec run against each packaged build with the same seeded projects, chats and turns, fake providers only and no DOM edits, so the build is the only difference.
+Captures of the visual campaign on `feat/turn-feel-2026-10`. Before is commit 1a192a1e2 and after is commit f8afff5b3, the final head of the campaign. Both sets come from one throwaway Playwright spec run against each packaged build with the same seeded projects, chats and turns, fake providers only and no DOM edits, so the build is the only difference.
 
 AFTER turn footers appear on hover, so finished turns show no footer row in the after captures.
 The browser-panel captures composite the native browser view onto the window capture at 1440×860, because the native view is not part of the page screenshot.

@@ -333,7 +333,9 @@
 .setting-status {
   min-width: 0;
   flex: 0 1 auto;
+  overflow: hidden;
   line-height: var(--leading-chrome);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

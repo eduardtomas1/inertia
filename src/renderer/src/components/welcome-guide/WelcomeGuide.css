@@ -40,7 +40,7 @@
 }
 
 .welcome-guide-step:is([data-step="welcome"], [data-step="start"]) {
-  justify-content: center;
+  justify-content: safe center;
 }
 
 .welcome-guide-body {

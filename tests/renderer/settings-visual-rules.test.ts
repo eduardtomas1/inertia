@@ -19,6 +19,16 @@ const settings = "../../src/renderer/src/components/settings/settings.css";
 const search = "../../src/renderer/src/components/settings/SettingsSearch.css";
 const styles = "../../src/renderer/src/styles.css";
 
+describe("settings nits", () => {
+  it("marks an invalid custom colour in danger, keeps short welcome steps scrollable and truncates one-line statuses", () => {
+    expect(rule("../../src/renderer/src/components/ThemeLibrary.css", ".custom-theme-inputs input[aria-invalid=\"true\"]")).toContain("border-color: var(--danger);");
+    expect(rule("../../src/renderer/src/components/welcome-guide/WelcomeGuide.css", ".welcome-guide-step:is([data-step=\"welcome\"], [data-step=\"start\"])")).toContain("justify-content: safe center;");
+    const status = rule(settings, ".setting-status");
+    expect(status).toContain("overflow: hidden;");
+    expect(status).toContain("text-overflow: ellipsis;");
+  });
+});
+
 describe("completion sound choices", () => {
   const sound = "../../src/renderer/src/components/notifications/CompletionSoundSettings.css";
 

@@ -113,6 +113,11 @@
   font-size: var(--text-sm);
   white-space: nowrap;
 }
+@container (max-width: 560px) {
+  .composer-shell .composer-tools-status {
+    display: none;
+  }
+}
 .composer-shell .composer-tools-toggle {
   width: var(--composer-control-height);
   height: var(--composer-control-height);

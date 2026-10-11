@@ -122,6 +122,24 @@ describe("Diagnostics settings", () => {
     expect(row).not.toHaveAttribute("aria-controls");
   });
 
+  it("keeps focus on Open affected conversation when the runtime becomes ready", async () => {
+    const page: Partial<DiagnosticPage> = { runtime: "unavailable" };
+    const h = setup([record(1)], [], page);
+    await settle();
+    fireEvent.click(rows()[0]!);
+    const open = screen.getByRole("button", { name: "Open affected conversation" });
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    open.focus();
+    page.runtime = "ready";
+    h.publish();
+    await act(() => vi.advanceTimersByTimeAsync(1_250));
+    const ready = screen.getByRole("button", { name: "Open affected conversation" });
+    expect(ready).toBe(open);
+    expect(ready).toHaveFocus();
+    expect(ready).not.toHaveAttribute("aria-disabled");
+    expect(ready).not.toHaveAttribute("aria-describedby");
+  });
+
   it("expands an incident to its explanation, facts and actions, copies it, and never opens offline work", async () => {
     const incident = record(1);
     const h = setup([incident]);

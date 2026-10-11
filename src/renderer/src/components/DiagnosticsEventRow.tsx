@@ -8,7 +8,7 @@ import {
   type DiagnosticSubsystem,
 } from "@shared/application-diagnostics";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
-import { TooltipButton } from "./TooltipButton";
+import { HintButton } from "./HintButton";
 
 export type DiagnosticsListEntry =
   | { kind: "incident"; id: string; at: string; record: DiagnosticRecord }
@@ -87,6 +87,9 @@ function IncidentDetail(props: RowProps & { record: DiagnosticRecord }): React.J
   const { record } = props;
   const definition = diagnosticDefinition(record.code);
   const conversation = record.context.conversationId ? props.conversationTitle(record.context.conversationId) : undefined;
+  const openReason = !conversation
+    ? "Conversation is unavailable or deleted"
+    : !props.runtimeReady ? "Reconnect the runtime to open this conversation" : undefined;
   const outcome = props.currentIncident && record.outcome === "failed" && record.operation === "provider-connect" && !record.context.turnId
     ? "Needs attention"
     : record.outcome === "observing" && !props.currentIncident ? "Historical observation" : OUTCOME_NAMES[record.outcome];
@@ -114,15 +117,12 @@ function IncidentDetail(props: RowProps & { record: DiagnosticRecord }): React.J
         onClick={() => navigateDiagnosticContext({ section: definition.action as "providers" | "discord" })}>
         Open {definition.action === "providers" ? "provider" : "Discord"} settings
       </button> : null}
-      {record.context.conversationId && (!conversation || !props.runtimeReady
-        ? <TooltipButton className="secondary-button" aria-disabled="true"
-          tooltip={!conversation ? "Conversation is unavailable or deleted" : "Reconnect the runtime to open this conversation"}>
+      {record.context.conversationId && (
+        <HintButton className="secondary-button" aria-disabled={openReason ? "true" : undefined} hint={openReason}
+          onClick={() => { if (!openReason) navigateDiagnosticContext({ conversationId: record.context.conversationId! }); }}>
           Open affected conversation
-        </TooltipButton>
-        : <button type="button" className="secondary-button"
-          onClick={() => navigateDiagnosticContext({ conversationId: record.context.conversationId! })}>
-          Open affected conversation
-        </button>)}
+        </HintButton>
+      )}
       <button type="button" className="secondary-button" aria-disabled={props.copying} onClick={() => { if (!props.copying) props.onCopy(record); }}>
         <Copy size={14} aria-hidden="true" />Copy incident
       </button>

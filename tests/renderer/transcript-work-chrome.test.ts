@@ -67,4 +67,14 @@ describe("transcript work log chrome", () => {
     expect(details.has("background")).toBe(false);
     expect(details.has("border-left")).toBe(false);
   });
+
+  it("sizes the stop action, follow-up rows and legacy disclosure on the shared grid", () => {
+    expect(declarationsFor(rules, ".turn-stop-action").get("min-height")).toBe("28px");
+    const followUp = declarationsFor(rules, ".turn-follow-up-row");
+    expect(followUp.get("border-radius")).toBe("var(--radius-md)");
+    expect(declarationsFor(rules, ".turn-follow-up-row > p").get("line-height")).toBe("var(--leading-prose)");
+    expect(declarationsFor(rules, ".timeline-follow-controls .icon-button:hover").get("background")).toBe("var(--fill-solid)");
+    expect(declarationsFor(rules, "button.turn-agents-line:hover").get("color")).toBe("var(--text)");
+    expect(declarationsFor(rules, ".orphan-run-flow > details > summary").get("list-style")).toBe("none");
+  });
 });

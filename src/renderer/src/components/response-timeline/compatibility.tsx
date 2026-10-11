@@ -1,4 +1,5 @@
 import {
+  ChevronRight,
   RotateCcw,
   TriangleAlert,
 } from "lucide-react";
@@ -92,10 +93,12 @@ function CompatibilityDisclosure({
         open={expanded}
         onToggle={(event) => setExpanded(event.currentTarget.open)}
       >
-        <summary>Recovered legacy history</summary>
+        <summary>
+          <ChevronRight className="orphan-run-flow-chevron" size={14} aria-hidden="true" />
+          Recovered legacy history
+        </summary>
         {expanded && (
           <>
-            <p>These records could not be verified as ordinary authoritative turns.</p>
             {compatibility.inferredTurns.map((turn) => (
               <TurnTimeline
                 key={turn.id}

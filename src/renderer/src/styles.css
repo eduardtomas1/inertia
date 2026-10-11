@@ -3801,7 +3801,7 @@ button.turn-agents-line {
 }
 
 button.turn-agents-line:hover {
-  color: var(--text-muted);
+  color: var(--text);
   background: var(--fill);
 }
 
@@ -9231,11 +9231,11 @@ button.sent-attachment-open:hover {
 
 .turn-stop-action {
   display: inline-flex;
-  min-height: 24px;
+  min-height: 28px;
   flex: 0 0 auto;
   align-items: center;
   margin-left: auto;
-  padding: 0 5px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
@@ -9422,6 +9422,32 @@ button.sent-attachment-open:hover {
   margin: 0 auto var(--response-block-gap);
 }
 
+.orphan-run-flow > details > summary {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  list-style: none;
+}
+
+.orphan-run-flow > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.orphan-run-flow > details > summary:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.orphan-run-flow > details[open] > summary .orphan-run-flow-chevron {
+  transform: rotate(90deg);
+}
+
 .legacy-exchange {
   margin-bottom: 28px;
 }
@@ -9499,9 +9525,9 @@ button.sent-attachment-open:hover {
 .turn-follow-up-row {
   width: fit-content;
   max-width: min(620px, 78%);
-  margin: 8px 0 9px auto;
-  padding: 7px 9px;
-  border-radius: var(--radius-xs);
+  margin: 8px 0 8px auto;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
   color: var(--text);
   background: var(--fill);
 }
@@ -9509,7 +9535,7 @@ button.sent-attachment-open:hover {
 .turn-follow-up-row > p {
   margin: 0;
   font-size: var(--response-font-size);
-  line-height: var(--leading-chrome);
+  line-height: var(--leading-prose);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -10173,9 +10199,14 @@ button.sent-attachment-open:hover {
   box-shadow: var(--shadow-float);
 }
 
-.timeline-follow-controls .icon-button:is(:hover, :active) {
+.timeline-follow-controls .icon-button:hover {
   color: var(--text);
-  background: var(--surface-raised);
+  background: var(--fill-solid);
+}
+
+.timeline-follow-controls .icon-button:active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-raised));
 }
 
 .turn-changed-files {

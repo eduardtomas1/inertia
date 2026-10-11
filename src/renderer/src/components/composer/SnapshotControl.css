@@ -2,5 +2,5 @@
 .snapshot-dialog { --dialog-width: 440px; font-size: var(--text-sm); line-height: var(--leading-chrome); }
 .snapshot-note { color: var(--text-muted); font-size: var(--text-sm); }
 
-.snapshot-alert { margin: 14px 0 0; padding: 9px 12px; border-radius: var(--radius-sm); color: var(--danger); background: var(--fill); }
-.snapshot-alert code { padding: 0.13em 0.34em; border: 1px solid var(--line); border-radius: var(--radius-xs); color: inherit; background: var(--fill); font-family: var(--font-mono); font-size: var(--text-code); white-space: break-spaces; }
+.snapshot-alert { margin: 0; color: var(--danger); }
+.snapshot-alert code { padding: 0.13em 0.34em; border-radius: var(--radius-xs); color: inherit; background: var(--fill); font-family: var(--font-mono); font-size: var(--text-code); white-space: break-spaces; }

@@ -102,4 +102,13 @@ describe("dialog shell", () => {
       expect(source, file).not.toMatch(/aria-modal="true"|className="(?:dialog|snapshot|attachment-preview)-backdrop/u);
     }
   });
+
+  it("keeps snapshot errors and the screenshot review flat", () => {
+    const snapshot = readSourceText("src/renderer/src/components/composer/SnapshotControl.css");
+    expect(snapshot).toMatch(/\.snapshot-alert \{ margin: 0; color: var\(--danger\); \}/u);
+    expect(snapshot).not.toMatch(/\.snapshot-alert code \{[^}]*border:/u);
+    const review = readSourceText("src/renderer/src/components/composer/ReviewedScreenshotControl.css");
+    expect(review).toMatch(/\.screenshot-sources button:hover:not\(:disabled\) \{ background: var\(--fill\); \}/u);
+    expect(review).not.toMatch(/\.screenshot-edit \{[^}]*border: 1px/u);
+  });
 });

@@ -202,9 +202,8 @@ test("starts without a demo and adds the first real project", async () => {
   )).stdout.trim();
   await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
   const changesPanel = page.getByRole("tabpanel", { name: "Changes" });
-  await expect(changesPanel.locator(
-    `.workspace-repository-scope-branch[title=${JSON.stringify(currentBranch)}]`,
-  )).toBeVisible();
+  await expect(changesPanel.locator(".workspace-repository-scope-branch"))
+    .toHaveText(currentBranch);
   await expect(page.getByRole("alert").filter({
     hasText: "The request could not be completed.",
   })).toHaveCount(0);

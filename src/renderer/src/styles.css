@@ -5208,10 +5208,6 @@ button.turn-agents-line:hover {
   padding: 10px;
 }
 
-.goal-panel-toolbar .panel-heading > svg {
-  color: var(--accent);
-}
-
 .goal-panel-sync {
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -5250,7 +5246,7 @@ button.turn-agents-line:hover {
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .goal-panel-section-heading > span {
@@ -5262,26 +5258,7 @@ button.turn-agents-line:hover {
 
 .goal-panel-card {
   display: grid;
-  gap: 7px;
-  padding: 9px 10px;
-  border: 1px solid var(--line-soft);
-  border-left: 2px solid var(--line-strong);
-  border-radius: var(--radius-xs);
-  background: var(--fill);
-}
-
-.goal-panel-card.is-local {
-  border-left-color: var(--line-strong);
-}
-
-.goal-panel-card.is-blocked,
-.goal-panel-card.is-budgetLimited,
-.goal-panel-card.is-usageLimited {
-  border-left-color: var(--line-strong);
-}
-
-.goal-panel-card.is-complete {
-  border-left-color: var(--line-strong);
+  gap: 8px;
 }
 
 .goal-panel-card > header,
@@ -5337,7 +5314,7 @@ button.turn-agents-line:hover {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--text-muted);
 }
 
 .goal-panel-card-actions {
@@ -5357,11 +5334,12 @@ button.turn-agents-line:hover {
   gap: 4px;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .goal-panel-text-button {
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .goal-panel-icon-button {
@@ -5379,10 +5357,7 @@ button.turn-agents-line:hover {
 
 .goal-panel-composer {
   display: grid;
-  gap: 5px;
-  padding: 8px 9px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
+  gap: 4px;
 }
 
 .goal-panel-budget-recovery {
@@ -5408,7 +5383,7 @@ button.turn-agents-line:hover {
 
 .goal-panel-budget-recovery > input {
   min-width: 0;
-  height: 29px;
+  height: var(--control-height-small);
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
@@ -5422,7 +5397,7 @@ button.turn-agents-line:hover {
 .goal-panel-capability-note,
 .goal-panel-empty-row {
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: var(--leading-chrome);
 }
 
@@ -5433,7 +5408,7 @@ button.turn-agents-line:hover {
 
 .goal-panel-composer input {
   min-width: 0;
-  height: 29px;
+  height: var(--control-height-small);
   flex: 1;
   padding: 0 8px;
   border: 1px solid var(--line);
@@ -5446,9 +5421,6 @@ button.turn-agents-line:hover {
 .goal-panel-empty-row,
 .goal-panel-capability-note {
   margin: 0;
-  padding: 7px 9px;
-  border-radius: var(--radius-xs);
-  background: var(--fill);
 }
 
 .goal-panel-refusal { display: flex; align-items: center; gap: 8px; }
@@ -5458,13 +5430,9 @@ button.turn-agents-line:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin: 0 1px 4px;
-  padding: 7px 9px;
-  border-left: 2px solid var(--line-strong);
-  border-radius: var(--radius-xs);
+  margin: 0 0 4px;
   color: var(--status-failed);
-  background: var(--fill);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: var(--leading-chrome);
 }
 
@@ -5496,7 +5464,7 @@ button.turn-agents-line:hover {
 }
 
 .goal-panel-skill-copy code {
-  color: var(--accent-strong);
+  color: var(--text);
   font: inherit;
 }
 
@@ -5575,34 +5543,6 @@ button.turn-agents-line:hover {
   display: none;
 }
 
-.goal-panel-subagent-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-
-.goal-panel-subagents > li[data-status="queued"] .goal-panel-subagent-dot,
-.goal-panel-subagents > li[data-status="spawned"] .goal-panel-subagent-dot,
-.goal-panel-subagents > li[data-status="running"] .goal-panel-subagent-dot,
-.goal-panel-subagents > li[data-status="waiting"] .goal-panel-subagent-dot {
-  background: var(--accent);
-}
-
-.goal-panel-subagents > li[data-status="completed"] .goal-panel-subagent-dot {
-  background: var(--status-completed);
-}
-
-.goal-panel-subagents > li[data-status="failed"] .goal-panel-subagent-dot,
-.goal-panel-subagents > li[data-status="interrupted"] .goal-panel-subagent-dot,
-.goal-panel-subagents > li[data-status="lost"] .goal-panel-subagent-dot {
-  background: var(--danger);
-}
-
-.goal-panel-subagents > li[data-status="unknown"] .goal-panel-subagent-dot {
-  background: var(--warning);
-}
-
 .goal-panel-subagent-copy > span {
   gap: 6px;
   flex-wrap: wrap;
@@ -5620,28 +5560,9 @@ button.turn-agents-line:hover {
 
 .goal-panel-subagent-state {
   flex: 0 0 auto;
-  padding: 1px 5px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
   color: var(--text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-chrome);
-}
-
-.goal-panel-subagents > li[data-status="completed"]
-  .goal-panel-subagent-state {
-  color: var(--status-completed);
-  border-color: var(--line-strong);
-}
-
-.goal-panel-subagents > li[data-status="failed"]
-  .goal-panel-subagent-state,
-.goal-panel-subagents > li[data-status="interrupted"]
-  .goal-panel-subagent-state,
-.goal-panel-subagents > li[data-status="lost"]
-  .goal-panel-subagent-state {
-  color: var(--danger);
-  border-color: var(--line-strong);
 }
 
 .goal-panel-subagent-actions {
@@ -5661,12 +5582,13 @@ button.turn-agents-line:hover {
 }
 
 .goal-panel-history-toggle {
-  min-height: 27px;
+  min-height: var(--control-height-small);
   justify-self: start;
-  padding: 0 7px;
+  padding: 0 8px;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .goal-panel-history-toggle:hover {
@@ -12117,12 +12039,6 @@ html[data-chat-drag] * {
     outline: 2px solid Highlight;
     outline-offset: -2px;
     background: Canvas;
-    forced-color-adjust: auto;
-  }
-
-  .goal-panel-subagent-dot {
-    border: 1px solid CanvasText;
-    background: CanvasText;
     forced-color-adjust: auto;
   }
 

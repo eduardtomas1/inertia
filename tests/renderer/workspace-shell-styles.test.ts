@@ -179,3 +179,18 @@ describe("plan panel", () => {
     expect(inset).toContain(".plan-step-button");
   });
 });
+
+describe("goal panel", () => {
+  it("shows goals, notes and empty lines as plain rows without stripes, fills or accent", () => {
+    expect(block(".goal-panel-card")).not.toMatch(/border|background/u);
+    expect(block(".goal-panel-empty-row,\n.goal-panel-capability-note")).not.toContain("background");
+    expect(block(".goal-panel-composer")).not.toContain("border");
+    expect(block(".goal-panel-progress > span")).not.toContain("accent");
+    expect(block(".goal-panel-skill-copy code")).not.toContain("accent");
+    expect(block(".goal-panel-section-heading h3")).toContain("font-weight: 500;");
+    expect(css).not.toContain(".goal-panel-toolbar .panel-heading > svg");
+    expect(css).not.toContain(".goal-panel-subagent-dot");
+    expect(motion).not.toMatch(/\.goal-panel-subagent[^{]*\{[^}]*(accent|background: var\(--fill\))/u);
+    expect(motion).not.toMatch(/\.goal-panel-subagents > li \{[^}]*border/u);
+  });
+});

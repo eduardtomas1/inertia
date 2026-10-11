@@ -262,7 +262,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
       className="commit-shell"
       titleId="commit-dialog-title"
       title="Commit changes"
-      description={<>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")} · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></>}
+      description={<><span>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")}</span> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></>}
       closeLabel="Close commit dialog"
       closeDisabled={locked}
       onClose={onClose}

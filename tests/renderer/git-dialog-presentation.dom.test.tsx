@@ -34,6 +34,7 @@ describe("git dialog presentation", () => {
     expect(screen.getByRole("button", { name: "None" })).toHaveClass("text-button");
     expect(dialog.querySelector(".commit-path-list strong, .commit-path-list small, header strong")).toBeNull();
     expect(screen.getByText("Untracked").tagName).toBe("SPAN");
+    expect(screen.getByText("main", { exact: true }).tagName).toBe("SPAN");
     expect(dialog).not.toHaveTextContent("Only checked paths will be staged and committed.");
     expect(dialog).toHaveTextContent("Review marks never stage files.");
     expect(rule(".commit-path-list")).not.toMatch(/border:|border-radius/u);

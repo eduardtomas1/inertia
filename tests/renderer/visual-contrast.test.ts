@@ -609,4 +609,15 @@ describe("composer primary action contrast", () => {
       }
     },
   );
+
+  it.each(themeCases)("draws the %s %s selected project swatch ring at 3:1 or more", (colorTheme, theme) => {
+    const controls = readFileSync(new URL("../../src/renderer/src/components/ProjectAppearanceControls.css", import.meta.url), "utf8");
+    const ring = /\.project-swatch\[aria-checked="true"\] \{ box-shadow: 0 0 0 2px var\(--(?<token>[\w-]+)\); \}/u.exec(controls)?.groups?.token;
+    expect(ring, "selected swatch ring token").toBeDefined();
+    const tokens = themeTokens(theme, colorTheme);
+    for (const surface of ["surface", "surface-raised"]) {
+      expect(contrast(tokens.get(ring!)!, tokens.get(surface)!), `${colorTheme} ${theme} --${ring} on --${surface}`)
+        .toBeGreaterThanOrEqual(3);
+    }
+  });
 });

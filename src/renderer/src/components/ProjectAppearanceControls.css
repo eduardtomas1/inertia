@@ -34,7 +34,7 @@
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .project-swatch:hover:not(:disabled, [aria-disabled="true"]) { box-shadow: 0 0 0 2px var(--line); }
-.project-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--line-strong); }
+.project-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--text-muted); }
 
 .project-swatch:disabled { cursor: default; opacity: var(--disabled-opacity); }
 .project-swatches > .project-swatch[aria-disabled="true"],

@@ -3,12 +3,11 @@
 .sidebar .sidebar-update-button { position: relative; width: 32px; height: 32px; padding: 0; border-radius: var(--radius-xs); }
 .sidebar-update-button[data-update-state="available"],
 .sidebar-update-button[data-update-state="downloading"],
-.sidebar-update-button[data-update-state="downloaded"] { color: var(--text); background: var(--fill); }
+.sidebar-update-button[data-update-state="downloaded"] { color: var(--text); }
 .sidebar-update-button[data-update-state="attention"] { color: var(--warning); }
 .sidebar-update-button[aria-disabled="true"] { cursor: default; }
 .update-status-icon { position: relative; display: grid; width: 16px; height: 16px; place-items: center; }
 .update-status-icon.is-downloading { width: 32px; height: 32px; }
-.update-available-dot { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px var(--fill); }
 .update-progress-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
 .update-progress-ring circle { fill: none; stroke: currentColor; stroke-width: 1.5; }
 .update-progress-track { opacity: 0.22; }
@@ -17,21 +16,21 @@
 .update-status-icon.is-checking { animation: sidebar-update-check 1s linear infinite; }
 .app-shell[data-document-visible="false"] .update-status-icon.is-checking { animation-play-state: paused; }
 .sidebar-update-details {
-  position: fixed; inset: auto; margin: 0; padding: 16px; box-sizing: border-box;
-  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: var(--radius-md);
+  position: fixed; inset: auto; margin: 0; padding: 12px; box-sizing: border-box;
+  overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
   color: var(--text); background: var(--surface-raised); box-shadow: var(--shadow-float);
   font: inherit; font-size: var(--text-sm);
 }
 .sidebar-update-details header { display: flex; align-items: flex-start; gap: 12px; }
 .sidebar-update-details header > div { flex: 1; min-width: 0; }
-.sidebar-update-details strong { display: block; font-weight: 600; line-height: var(--leading-chrome); overflow-wrap: anywhere; }
+.sidebar-update-details strong { display: block; font-weight: 500; line-height: var(--leading-chrome); overflow-wrap: anywhere; }
 .sidebar-update-details small { display: block; color: var(--text-muted); font-size: var(--text-xs); margin-top: 4px; }
-.sidebar-update-details header .icon-button { flex: 0 0 24px; width: 24px; height: 24px; margin: -4px -4px 0 0; }
+.sidebar-update-details header .icon-button { flex: 0 0 auto; width: var(--control-height-small); height: var(--control-height-small); margin: -4px -4px 0 0; }
 .update-detail-message, .update-detail-muted { margin: 12px 0 0; line-height: var(--leading-prose); overflow-wrap: anywhere; }
 .update-detail-muted { color: var(--text-muted); font-size: var(--text-xs); }
 .update-detail-progress { height: 3px; margin-top: 12px; border-radius: var(--radius-xs); background: var(--fill); overflow: hidden; }
-.update-detail-progress > span { display: block; height: 100%; background: var(--accent-strong); }
-.update-release-notes { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.update-detail-progress > span { display: block; height: 100%; background: var(--text-muted); }
+.update-release-notes { border-top: 1px solid var(--line-soft); margin-top: 12px; padding-top: 12px; }
 .update-release-notes h3 { margin: 0 0 8px; font-size: inherit; font-weight: 600; }
 .update-release-body { max-height: min(280px, 36vh); overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; line-height: var(--leading-prose); }
 .update-release-body :is(p, ul, ol, pre, blockquote) { margin: 0 0 10px; }
@@ -43,8 +42,8 @@
 .update-release-body pre, .update-release-plain { white-space: pre-wrap; }
 .update-release-body blockquote { border-left: 2px solid var(--line); padding-left: 10px; color: var(--text-muted); }
 .update-release-body > :last-child { margin-bottom: 0; }
-.update-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
-.update-detail-actions > button { min-height: 30px; margin: 0; font-size: var(--text-xs); }
+.update-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.update-detail-actions > button { margin: 0; }
 .update-detail-actions .text-button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
 .update-restart-dialog { --dialog-width: 420px; position: fixed; inset: 0; margin: auto; padding: 0; }
 .update-restart-dialog:not([open]) { display: none; }
@@ -54,6 +53,5 @@
   .update-progress-value { transition: none; }
 }
 @media (forced-colors: active) {
-  .update-available-dot { background: ButtonText; color: ButtonFace; }
   .sidebar-update-details, .update-restart-dialog { border-color: ButtonText; }
 }

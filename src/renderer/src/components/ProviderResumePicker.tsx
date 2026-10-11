@@ -7,6 +7,7 @@ import {
   nextSelectableNavigationIndex,
   type SidebarNavigationKey,
 } from "../utils/sidebarModel";
+import { TooltipText } from "./TooltipText";
 
 export interface ProviderResumePickerProps {
   options: readonly ProviderTerminalResumeOption[];
@@ -225,7 +226,7 @@ export function ProviderResumePicker({
                     )}
                   </span>
                   {row.sessionId && (
-                    <code title={row.sessionId}>{row.sessionId}</code>
+                    <code><TooltipText tooltip={row.sessionId}>{row.sessionId}</TooltipText></code>
                   )}
                 </button>
               </li>

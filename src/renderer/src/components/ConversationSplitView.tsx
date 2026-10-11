@@ -33,6 +33,7 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton } from "./ui";
 import type { Project } from "@shared/contracts";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
+import { TooltipText } from "./TooltipText";
 
 const GUTTER_PX = 7;
 const POSITION_NAMES = ["Primary", "Second", "Third", "Fourth"];
@@ -185,8 +186,8 @@ export function ConversationSplitView({
                 />
               )}
               {details.project && <ProjectIcon project={details.project} size={14} />}
-              <ProjectName project={details.project} title={details.projectName}>{details.projectName}</ProjectName>
-              <strong title={details.title}>{details.title}</strong>
+              <ProjectName project={details.project}><TooltipText tooltip={details.projectName}>{details.projectName}</TooltipText></ProjectName>
+              <strong><TooltipText tooltip={details.title}>{details.title}</TooltipText></strong>
               <span className="conversation-split-actions">
                 {details.onOpenInWindow && (
                   <IconButton

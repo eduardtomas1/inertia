@@ -21,6 +21,7 @@ import { loadCommitDialog } from "./lazySurfaceLoaders";
 import { HintButton } from "./HintButton";
 import "./workspace-git-menus.css";
 import { navigateMenuItems } from "../utils/menuKeyboard";
+import { TooltipText } from "./TooltipText";
 
 type WorkspaceGitActionMenuProps = {
   status: GitStatusSnapshot;
@@ -105,10 +106,10 @@ export default function WorkspaceGitActionMenu({
       onKeyDown={navigateMenuItems}
     >
       <div className="git-overview">
-        <div className="git-overview-heading"><GitBranch size={14} aria-hidden="true" /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
+        <div className="git-overview-heading"><GitBranch size={14} aria-hidden="true" /><strong><TooltipText tooltip={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</TooltipText></strong></div>
         {status.upstream && (
           <div className="git-overview-detail">
-            <span title={status.upstream}>Tracking {status.upstream}</span>
+            <span><TooltipText tooltip={status.upstream}>Tracking {status.upstream}</TooltipText></span>
             <span>{status.ahead} outgoing</span>
             <span>{status.behind} incoming</span>
           </div>

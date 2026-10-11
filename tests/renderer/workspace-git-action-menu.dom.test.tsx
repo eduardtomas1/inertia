@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import WorkspaceGitActionMenu from "../../src/renderer/src/components/WorkspaceGitActionMenu";
@@ -35,6 +35,17 @@ describe("Git actions menu", () => {
     const { container } = render(<WorkspaceGitActionMenu status={{ ...status, ahead: 2, behind: 0 }} busy={false} onAction={vi.fn()} />);
     expect(screen.getByText("2 outgoing", { exact: true })).toBeInTheDocument();
     expect(container).not.toHaveTextContent(/outgoing commit/u);
+  });
+
+  it("reveals the branch and upstream in shared tooltips instead of native titles", async () => {
+    render(<WorkspaceGitActionMenu status={status} busy={false} onAction={vi.fn()} />);
+    const menu = screen.getByRole("menu", { name: "Git actions" });
+    expect(menu.querySelectorAll("[title]")).toHaveLength(0);
+    for (const [text, tip] of [["feature/header", "feature/header"], ["Tracking origin/feature/header", "origin/feature/header"]] as const) {
+      fireEvent.pointerEnter(within(menu).getByText(text), { pointerType: "mouse" });
+      await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(tip));
+      fireEvent.pointerLeave(within(menu).getByText(text), { pointerType: "mouse" });
+    }
   });
 
   it("states a missing upstream once", () => {

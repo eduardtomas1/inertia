@@ -3,6 +3,7 @@ import { Check, GitBranch, Search, RefreshCw } from "lucide-react";
 import type { GitBranchInfo } from "@shared/contracts";
 import "./workspace-git-menus.css";
 import { IconButton } from "./ui";
+import { TooltipButton } from "./TooltipButton";
 
 export default function WorkspaceBranchList({ branches, busy, loading = false, error, onRefresh, onSwitch, onCreate, onClose }: {
   branches: GitBranchInfo[];
@@ -56,10 +57,10 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
         const labelled = visible.some((branch) => branch.remote !== remote);
         return <div role="group" aria-label={remote ? "Remote branches" : "Local branches"} key={String(remote)}>
           {labelled && <div className="git-menu-section-label">{remote ? "Remote" : "Local"}</div>}
-          {group.map((branch) => <button type="button" role="menuitemradio" aria-checked={branch.current} disabled={busy || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} title={branch.name} onClick={() => select(branch)}>
+          {group.map((branch) => <TooltipButton tooltip={branch.name} describeTooltip={false} role="menuitemradio" aria-checked={branch.current} disabled={busy || Boolean(error) || (!branch.current && Boolean(branch.checkedOut))} key={branch.name} onClick={() => select(branch)}>
             <GitBranch size={14} /><span className="git-branch-name">{branch.name}</span>
             {branch.current ? <Check size={14} aria-label="Current" /> : branch.checkedOut ? <small>In worktree</small> : remote ? <small>Track</small> : null}
-          </button>)}
+          </TooltipButton>)}
         </div>;
       })}
       {visible.length === 0 && !loading && !error && <p className="git-branch-empty" role="status">{branches.length === 0 ? "No branches loaded." : "No matching branches."}</p>}

@@ -326,6 +326,9 @@ describe("toast primitives", () => {
       .toBe(root.getPropertyValue("--danger").trim());
     expect(css).toMatch(/^:where\(\.database-recovery-notice, \.error-toast, \.provider-quota-notice\) \{\n  border: 1px solid var\(--line-soft\);\n  border-radius: var\(--radius-sm\);\n  color: var\(--text\);\n  background: var\(--surface-raised\);\n  box-shadow: var\(--shadow-float\);/mu);
     expect(css).not.toMatch(/\.provider-quota-notice\.is-5 \{|\.database-recovery-notice\.is-critical \{/u);
+    expect(css).toMatch(/\.error-toast \{\n  display: flex;\n  min-height: 48px;/u);
+    expect(css).not.toMatch(/\.status-overlay-stack > \.error-toast|transform: translateY\(5px\)|grid-template-columns: 17px minmax\(0, 1fr\) 28px|grid-template-columns: 19px/u);
+    expect(css).toMatch(/\.renderer-startup-error > h1 \{[^}]*font-weight: 600;/u);
   });
 });
 

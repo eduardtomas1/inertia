@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentProps } from "react";
-import { CircleAlert, X } from "lucide-react";
+import { CircleAlert, ShieldAlert, X } from "lucide-react";
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 
 import type { useAppUpdate } from "../hooks/useAppUpdate";
@@ -62,7 +62,7 @@ export function AppStatusOverlays({
             aria-label="Database recovery warning"
             role="alert"
           >
-            <CircleAlert size={16} aria-hidden="true" />
+            <ShieldAlert size={14} aria-hidden="true" />
             <span>
               <strong>{databaseRecoveryNotice.outcome === "created-empty"
                 ? "Inertia started with empty data"
@@ -102,7 +102,7 @@ export function StatusToastStack({
       />
       {appUpdate.error && (
         <div className="error-toast" role="alert">
-          <CircleAlert size={16} />
+          <CircleAlert size={14} aria-hidden="true" />
           <span>{appUpdate.error}</span>
           <IconButton label="Dismiss update error" onClick={appUpdate.dismissError}>
             <X size={14} />
@@ -111,7 +111,7 @@ export function StatusToastStack({
       )}
       {error && (
         <div className="error-toast" role="alert">
-          <CircleAlert size={16} />
+          <CircleAlert size={14} aria-hidden="true" />
           <span>{diagnosticError?.message}</span>
           {diagnosticError?.incidentId && <button type="button" className="text-button" onClick={() => navigateDiagnosticContext({ section: "help", anchor: "diagnostics-incidents", selection: { incidentId: diagnosticError.incidentId } })}>View diagnostics</button>}
           <IconButton label="Dismiss error" onClick={onDismissError}>

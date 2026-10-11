@@ -16,8 +16,7 @@ export class WindowErrorBoundary extends Component<
     return (
       <main className="renderer-startup-error" role="alert">
         <h1>This window could not finish loading.</h1>
-        <p>Reload the window to try again.</p>
-        <button type="button" onClick={() => window.location.reload()}>Reload window</button>
+        <button type="button" className="primary-button" onClick={() => window.location.reload()}>Reload window</button>
       </main>
     );
   }

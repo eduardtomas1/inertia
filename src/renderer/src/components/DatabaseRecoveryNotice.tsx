@@ -52,7 +52,7 @@ export function DatabaseRecoveryNotice({
       aria-label="Database recovery warning"
       role="alert"
     >
-      <ShieldAlert size={16} aria-hidden="true" />
+      <ShieldAlert size={14} aria-hidden="true" />
       <span>
         <strong>{createdEmpty
           ? "Inertia started with empty data"

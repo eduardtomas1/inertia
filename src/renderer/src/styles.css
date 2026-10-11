@@ -1751,11 +1751,21 @@ button.header-breadcrumb-project:hover {
   height: 100%;
   margin: 0;
   padding: 28px;
-  place-items: center;
-  color: var(--danger);
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  color: var(--text);
   background: var(--bg);
   font-size: var(--text-sm);
   text-align: center;
+}
+
+.renderer-startup-error > h1 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: var(--tracking-heading);
+  line-height: var(--leading-heading);
 }
 
 @property --ultra-angle {
@@ -7912,15 +7922,15 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 /* App notices and errors */
 .database-recovery-notice {
   position: fixed;
-  top: 22px;
-  right: 22px;
+  top: calc(48px + 12px);
+  right: 12px;
   z-index: 101;
   display: grid;
-  width: min(620px, calc(100vw - 44px));
+  width: min(620px, calc(100vw - 24px));
   align-items: center;
   gap: 8px;
-  padding: 8px;
-  grid-template-columns: 19px minmax(0, 1fr) auto auto 28px;
+  padding: 8px 8px 8px 12px;
+  grid-template-columns: 14px minmax(0, 1fr) auto auto var(--control-height);
 }
 
 .database-recovery-notice > svg {
@@ -7940,6 +7950,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .database-recovery-notice strong {
   font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .database-recovery-notice small {
@@ -8001,12 +8012,12 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .provider-quota-notice {
   display: grid;
-  min-height: 46px;
+  min-height: 48px;
   align-items: center;
   gap: 8px;
-  padding: 8px;
-  grid-template-columns: 17px minmax(0, 1fr) 28px;
-  animation: quota-notice-enter var(--dur-fast) var(--ease) both;
+  padding: 8px 8px 8px 12px;
+  grid-template-columns: 16px minmax(0, 1fr) var(--control-height);
+  animation: quota-notice-enter var(--dur-fast) var(--ease-fade) both;
 }
 
 .provider-quota-notice > svg {
@@ -8027,7 +8038,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .provider-quota-notice strong {
   overflow: hidden;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -8043,32 +8054,15 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 @keyframes quota-notice-enter {
   from {
     opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
 .error-toast {
-  position: fixed;
-  right: 22px;
-  bottom: 20px;
-  z-index: 100;
   display: flex;
-  width: min(390px, calc(100vw - 44px));
-  min-height: 46px;
+  min-height: 48px;
   align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 12px;
-}
-
-.status-overlay-stack > .error-toast {
-  position: relative;
-  right: auto;
-  bottom: auto;
-  width: 100%;
 }
 
 .overlay-loading-shell {
@@ -8211,10 +8205,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 @media (max-width: 560px) {
   .database-recovery-notice {
-    top: 12px;
-    right: 12px;
-    width: calc(100vw - 24px);
-    grid-template-columns: 19px minmax(0, 1fr) 28px;
+    grid-template-columns: 14px minmax(0, 1fr) var(--control-height);
   }
 
   .database-recovery-notice > button:not(.icon-button) {

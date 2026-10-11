@@ -30,6 +30,9 @@ describe("window loading recovery", () => {
       render(<WindowErrorBoundary><Surface load={load} /></WindowErrorBoundary>);
       expect(await screen.findByRole("alert")).toHaveTextContent("This window could not finish loading.");
       expect(screen.getByRole("button", { name: "Reload window" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Reload window" })).toHaveClass("primary-button");
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("This window could not finish loading.");
+      expect(screen.queryByText("Reload the window to try again.")).toBeNull();
     } finally { error.mockRestore(); }
   });
 });

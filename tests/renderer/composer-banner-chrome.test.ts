@@ -26,8 +26,8 @@ describe("composer banner chrome", () => {
     expect(declarationsFor(rules, ".provider-maintenance-notice").has("border-left")).toBe(false);
     expect(declarationsFor(rules, ".provider-maintenance-notice small").get("font-size")).toBe("inherit");
     const quota = declarationsFor(rules, ".provider-quota-notice");
-    expect(quota.get("grid-template-columns")).toBe("16px minmax(0, 1fr) auto");
-    expect(quota.get("min-height")).toBe("44px");
+    expect(quota.get("grid-template-columns")).toBe("16px minmax(0, 1fr) var(--control-height)");
+    expect(quota.get("min-height")).toBe("48px");
     expect(declarationsFor(rules, ".provider-quota-notice strong").get("font-weight")).toBe("500");
   });
 

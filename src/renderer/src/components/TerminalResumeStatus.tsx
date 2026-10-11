@@ -67,7 +67,6 @@ export function TerminalResumeStatus({
       <span id={descriptionId}>
         {resumeOptions.length > 1 && (
           <span className="terminal-resume-picker">
-            <span className="terminal-resume-picker-caption">Resume provider chat</span>
             <span ref={pickerRef} className={`terminal-resume-anchor${pickerOpen ? " is-open" : ""}`}>
               <button
                 ref={triggerRef}

@@ -7620,10 +7620,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   color: var(--text-muted);
 }
 
-.terminal-resume-picker-caption {
-  flex: 0 0 auto;
-}
-
 .terminal-resume-anchor {
   display: inline-flex;
   min-width: 0;

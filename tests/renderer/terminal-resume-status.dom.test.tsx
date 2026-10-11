@@ -38,4 +38,26 @@ describe("terminal resume status", () => {
     expect(code).toHaveTextContent("019fe0c1-c6fc-79a1-bff4-92311f314da8");
     expect(code).not.toHaveAttribute("title");
   });
+
+  it("names the chat to resume through the trigger alone, without a caption", () => {
+    const second = { ...option, conversationId: "second", conversationTitle: "Second chat" };
+    const { container } = render(
+      <TerminalResumeStatus
+        selectedResumeOption={option}
+        resumeOptions={[option, second]}
+        activeResume={null}
+        siblingResumedConversationIds={new Set()}
+        resumeBlockedBySibling={false}
+        resumeInFlight={false}
+        sessionState="ready"
+        status="online"
+        projectName="Inertia"
+        resumeError={null}
+        onSelect={vi.fn()}
+        onResume={vi.fn(() => true)}
+      />,
+    );
+    expect(container.querySelector(".terminal-resume-picker-caption")).toBeNull();
+    expect(container.querySelector(".terminal-resume-trigger")).toHaveAccessibleName("Chat to resume: First chat in Inertia");
+  });
 });

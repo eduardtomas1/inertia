@@ -129,6 +129,28 @@ describe("provider auth dialog contents", () => {
   });
 });
 
+describe("welcome and help guides", () => {
+  const welcome = "../../src/renderer/src/components/welcome-guide/WelcomeGuide.css";
+  const help = "../../src/renderer/src/components/welcome-guide/HelpGuide.css";
+
+  it("draws flat demos, rows instead of cards and an ink progress dot", () => {
+    expect(rule(welcome, ".welcome-demo")).not.toMatch(/gradient|accent/u);
+    expect(rule(welcome, ".welcome-guide-dots i[data-state=\"current\"]")).toContain("background: var(--text);");
+    expect(rule(welcome, ".welcome-guide-tiles li")).not.toMatch(/border:|background:/u);
+    expect(rule(welcome, ".welcome-guide-agents li")).not.toMatch(/border:|background:/u);
+    expect(rule(help, ".help-guide-entries li,\n.help-guide-result")).not.toMatch(/border:|background:/u);
+    expect(rule(welcome, ".welcome-guide-topics button[aria-selected=\"true\"]")).toContain("background: var(--fill-strong);");
+  });
+
+  it("fades the guide in on opacity alone and sets heading weights", () => {
+    for (const name of ["welcome-step-in", "welcome-rise", "welcome-pop"]) {
+      expect(new RegExp(`@keyframes ${name} \\{[^@]*?transform`, "u").test(source(welcome)), name).toBe(false);
+    }
+    expect(rule(welcome, ".welcome-guide h2")).toContain("font-weight: 600;");
+    expect(rule(welcome, ".welcome-guide-topic h3")).toContain("font-weight: 600;");
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

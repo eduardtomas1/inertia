@@ -3,10 +3,9 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { ArrowRight, Check, FolderPlus } from "lucide-react";
+import { ArrowRight, FolderPlus } from "lucide-react";
 import type { ProviderId, ProviderInfo } from "@shared/contracts";
 
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
@@ -77,7 +76,6 @@ export function WelcomeGuide({
   onAddProject: () => void;
 }): React.JSX.Element {
   const [step, setStep] = useState(0);
-  const [direction, setDirection] = useState(1);
   const [leavingStep, leaveStep] = useLeavingTransition<number>(200);
   const primary = useRef<HTMLButtonElement>(null);
   const titleId = useId();
@@ -95,7 +93,6 @@ export function WelcomeGuide({
   const go = (offset: number): void => {
     const next = clampWelcomeStep(step + offset);
     if (next === step) return;
-    setDirection(offset > 0 ? 1 : -1);
     leaveStep(step);
     setStep(next);
   };
@@ -125,7 +122,6 @@ export function WelcomeGuide({
           <div className="welcome-guide-hero">
             <img className="welcome-guide-logo" src="./inertia-logo.png" alt="" />
             <h2 id={headingId}>Welcome to Inertia</h2>
-            <p>A calm, local desktop workspace for building with the coding agents you already use.</p>
           </div>
           <ul className="welcome-guide-tiles">
             {WELCOME_TILES.map((tile, index) => (
@@ -134,7 +130,6 @@ export function WelcomeGuide({
                   <WelcomeDemo demo={tile.demo} />
                 </div>
                 <strong>{tile.title}</strong>
-                <small>{tile.detail}</small>
               </li>
             ))}
           </ul>
@@ -144,9 +139,7 @@ export function WelcomeGuide({
       {stepIndex === 2 && (
         <>
           <h2 id={headingId} className="welcome-guide-title">Connect an agent</h2>
-          <p className="welcome-guide-lede">
-            Inertia works with the coding agents you already use. Each provider keeps its own sign-in.
-          </p>
+          <p className="welcome-guide-lede">Each provider keeps its own sign-in.</p>
           {readiness.length === 0 ? (
             <p className="welcome-guide-note">Checking installed agents…</p>
           ) : (
@@ -159,6 +152,7 @@ export function WelcomeGuide({
                   {state !== "ready" && (
                     <button
                       type="button"
+                      className="secondary-button"
                       aria-label={`Set up ${provider.label}`}
                       onClick={() => onOpenProviderSetup(provider.id)}
                     >
@@ -169,28 +163,18 @@ export function WelcomeGuide({
               ))}
             </ul>
           )}
-          <p className="welcome-guide-note">
-            {readyCount} of {readiness.length} ready · change this any time in Settings → Agents
-          </p>
+          <p className="welcome-guide-note">{readyCount} of {readiness.length} ready</p>
         </>
       )}
       {stepIndex === 3 && (
         <>
           <div className="welcome-guide-hero">
-            <span className="welcome-guide-check" aria-hidden="true"><Check size={16} /></span>
             <h2 id={headingId}>You're ready to start</h2>
-            <p>
-              {readyCount > 0
-                ? `${readyCount} agent${readyCount === 1 ? " is" : "s are"} ready. Add a project to open your first chat.`
-                : "Add a project now and connect an agent when you're ready."}
-            </p>
           </div>
-          <button type="button" className="welcome-guide-project" onClick={onAddProject}>
-            <FolderPlus size={16} aria-hidden="true" />
-            <span><strong>Add a project</strong><small>Open a local folder or clone a repository.</small></span>
-            <ArrowRight size={16} aria-hidden="true" />
+          <button type="button" className="secondary-button welcome-guide-project" onClick={onAddProject}>
+            <FolderPlus size={14} aria-hidden="true" />
+            Add a project
           </button>
-          <p className="welcome-guide-note">You can replay this guide from Settings.</p>
         </>
       )}
     </>
@@ -205,10 +189,7 @@ export function WelcomeGuide({
       onKeyDown={onKeyDown}
     >
       <header className="welcome-guide-header">
-        <span className="welcome-guide-count">
-          Step {step + 1} of {WELCOME_STEPS.length}
-        </span>
-        <button type="button" className="welcome-guide-skip" onClick={onClose}>
+        <button type="button" className="subtle-button welcome-guide-skip" onClick={onClose}>
           Skip
         </button>
       </header>
@@ -220,7 +201,6 @@ export function WelcomeGuide({
               key={index}
               className={`welcome-guide-step${leaving ? " is-leaving" : ""}`}
               data-step={WELCOME_STEPS[index]!.id}
-              style={{ "--welcome-direction": direction } as CSSProperties}
               aria-hidden={leaving || undefined}
               inert={leaving}
             >
@@ -245,11 +225,11 @@ export function WelcomeGuide({
         </span>
         <span className="welcome-guide-actions">
           {step > 0 && (
-            <button type="button" className="welcome-guide-back" onClick={() => go(-1)}>
+            <button type="button" className="secondary-button" onClick={() => go(-1)}>
               Back
             </button>
           )}
-          <button ref={primary} type="button" className="welcome-guide-primary" onClick={advance}>
+          <button ref={primary} type="button" className="primary-button" onClick={advance}>
             {WELCOME_STEPS[step]!.primary}
             <ArrowRight size={14} aria-hidden="true" />
           </button>

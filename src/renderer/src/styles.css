@@ -3742,9 +3742,9 @@ button.turn-agents-line:hover {
 }
 
 .send-button-loading:disabled {
-  border-color: transparent;
-  color: var(--text-muted);
-  background: var(--fill-strong);
+  border-color: var(--line-strong);
+  color: var(--accent-strong);
+  background: var(--fill);
   opacity: 1;
 }
 

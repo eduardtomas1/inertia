@@ -38,7 +38,10 @@ describe("composer context rows", () => {
     expect(declarationsFor(rules, ".composer-compact-notice-icon").has("background")).toBe(false);
     expect(declarationsFor(rules, '.send-button[data-motion-state="sending"] .composer-send-motion-icon').get("animation"))
       .toBe(declarationsFor(rules, ".loading-mark").get("animation"));
-    expect(source).not.toMatch(/\.send-button-loading:disabled\s*\{[^}]*--accent-strong/u);
+    const sending = declarationsFor(rules, ".send-button-loading:disabled");
+    expect(sending.get("border-color")).toBe("var(--line-strong)");
+    expect(sending.get("color")).toBe("var(--accent-strong)");
+    expect(sending.get("background")).toBe("var(--fill)");
   });
 
   it("leaves the float shadow to the composer surface, not its toolbar rows", () => {

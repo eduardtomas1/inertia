@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
 import { TooltipButton } from "../../src/renderer/src/components/TooltipButton";
+import { HintButton } from "../../src/renderer/src/components/HintButton";
 import { readSourceText } from "../helpers/source-text";
 
 beforeEach(() => {
@@ -81,6 +82,27 @@ describe("text button tooltip", () => {
     });
     expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent("Copy code");
     fireEvent.keyDown(copy, { key: "Escape" });
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+
+  it("keeps the same focused button when a hint appears or goes away", () => {
+    const { rerender } = render(<HintButton>Open affected conversation</HintButton>);
+    const button = screen.getByRole("button", { name: "Open affected conversation" });
+    act(() => {
+      button.focus();
+    });
+    rerender(<HintButton hint="Reconnect the runtime to open this conversation" aria-disabled="true">Open affected conversation</HintButton>);
+    expect(screen.getByRole("button", { name: "Open affected conversation" })).toBe(button);
+    expect(button).toHaveFocus();
+    expect(button).toHaveAccessibleDescription("Reconnect the runtime to open this conversation");
+    rerender(<HintButton>Open affected conversation</HintButton>);
+    expect(screen.getByRole("button", { name: "Open affected conversation" })).toBe(button);
+    expect(button).toHaveFocus();
+    expect(button).not.toHaveAttribute("aria-describedby");
+    fireEvent.pointerEnter(button, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
     expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
   });
 

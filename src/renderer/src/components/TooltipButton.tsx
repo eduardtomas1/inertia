@@ -37,7 +37,7 @@ export function TooltipButton({
     else if (ref) ref.current = node;
   }, [ref]);
   const named = props["aria-label"];
-  const hint = describeTooltip && label !== (named ?? (typeof children === "string" ? children : undefined)) ? label : undefined;
+  const hint = describeTooltip && label !== "" && label !== (named ?? (typeof children === "string" ? children : undefined)) ? label : undefined;
   const describedText = describedBy !== undefined ? "" : [hint, shortcut].filter(Boolean).join(" ");
   const description = describedText
     ? <span id={descriptionId} className="visually-hidden">{describedText}</span>
@@ -55,7 +55,7 @@ export function TooltipButton({
         {named !== undefined && description}
       </button>
       {named === undefined && description}
-      {tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
+      {tooltip.layer && label !== "" && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
     </>
   );
 }

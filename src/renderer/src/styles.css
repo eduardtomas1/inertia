@@ -8897,7 +8897,7 @@ button.sent-attachment-open:hover {
 }
 
 .sent-attachment-thumbnail.is-document {
-  color: var(--accent-strong);
+  color: var(--text-muted);
 }
 
 .sent-attachment-copy {
@@ -8917,7 +8917,7 @@ button.sent-attachment-open:hover {
 .sent-attachment-copy strong {
   color: var(--text-muted);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .sent-attachment-copy small {

@@ -207,3 +207,26 @@ describe("goal control in the composer", () => {
     expect(block(".chat-goal-form > button:not(:disabled):hover")).toContain("background: var(--accent-hover);");
   });
 });
+
+describe("usage, attachments and background task surfaces", () => {
+  const surfaces = readSourceText("src/renderer/src/components/WorkspaceSurfaces.css");
+  const tasks = readSourceText("src/renderer/src/components/BackgroundTasksSurface.css");
+
+  it("keeps meters, section headings and secondary buttons neutral", () => {
+    expect(block(".usage-surface-track > i", surfaces)).not.toContain("accent");
+    expect(block(".usage-surface-track", surfaces)).toContain("height: 4px;");
+    expect(block(".workspace-surface-heading h3,\n.workspace-surface-section > h3,\n.attachments-surface-gallery .environment-attachments-header h3", surfaces)).toContain("font-size: var(--text-sm);");
+    const button = block(".workspace-surface-button", surfaces);
+    expect(button).toContain("border: 1px solid var(--line);");
+    expect(button).toContain("background: transparent;");
+    expect(block(".sent-attachment-thumbnail.is-document")).not.toContain("accent");
+    expect(block(".sent-attachment-copy strong")).toContain("font-weight: 500;");
+  });
+
+  it("rests the task stop control transparent at the small control size", () => {
+    const stop = block(".background-task-stop", tasks);
+    expect(stop).toContain("width: var(--control-height-small);");
+    expect(stop).toContain("background: transparent;");
+    expect(block(".background-task-stop:hover:not(:disabled)", tasks)).toContain("background: var(--fill);");
+  });
+});

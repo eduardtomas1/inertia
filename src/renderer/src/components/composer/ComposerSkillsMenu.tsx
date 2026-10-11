@@ -8,6 +8,7 @@ import type {
 import { LoadingMark } from "../ui";
 import type { ComposerMenuController } from "./useComposerMenus";
 import "./ComposerSkillsMenu.css";
+import { TooltipText } from "../TooltipText";
 
 export interface ComposerSkillsMenuProps {
   skills: readonly AgentSkillSummary[];
@@ -107,7 +108,7 @@ export function ComposerSkillsMenu({
                 }}
               >
                 <code translate="no">{`$${skill.name}`}</code>
-                <small title={description}>{description}</small>
+                <small><TooltipText tooltip={description}>{description}</TooltipText></small>
               </button>
             );
           })}

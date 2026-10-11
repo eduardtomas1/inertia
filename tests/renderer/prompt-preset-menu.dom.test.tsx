@@ -120,8 +120,9 @@ describe("PromptPresetMenu", () => {
     });
     expect(trigger).not.toHaveAttribute("aria-describedby");
     fireEvent.click(trigger);
-    expect((await screen.findByTitle(/speed Standard/u)).closest("button"))
+    expect((await screen.findByText(/speed Standard/u)).closest("button"))
       .toHaveAttribute("aria-disabled", "true");
+    expect(document.querySelectorAll(".prompt-presets small[title], .composer-popover small[title]")).toHaveLength(0);
   });
 
   it("lists presets without a heading and offers one line plus one button when empty", async () => {
@@ -192,10 +193,14 @@ describe("PromptPresetMenu", () => {
       "model gpt-5.6-sol",
       "reasoning high",
     ].join(" · ");
-    const reason = await screen.findByTitle(
+    const reason = await screen.findByText(
       `Available on ${blockedRouteLabel}`,
     );
-    expect(reason).toHaveTextContent(`Available on ${blockedRouteLabel}`);
+    expect(reason).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(reason, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent))
+      .toContain(`Available on ${blockedRouteLabel}`));
+    fireEvent.pointerLeave(reason, { pointerType: "mouse" });
     const blocked = reason.closest("button")!;
     expect(blocked).toHaveAttribute("aria-disabled", "true");
     expect(blocked).not.toHaveAttribute("title");
@@ -310,7 +315,7 @@ describe("PromptPresetMenu", () => {
       "model gpt-5.6-sol",
       "reasoning xhigh",
     ].join(" · ");
-    expect((await screen.findByTitle(`Available on ${storedRouteLabel}`)).closest("button"))
+    expect((await screen.findByText(`Available on ${storedRouteLabel}`)).closest("button"))
       .toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(screen.getByRole("button", {

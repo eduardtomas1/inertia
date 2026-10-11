@@ -32,6 +32,7 @@ import type {
   PromptPresetCommandRunner,
 } from "./types";
 import type { ComposerMenuController } from "./useComposerMenus";
+import { TooltipText } from "../TooltipText";
 
 type EditorState = {
   kind: "create" | "edit";
@@ -319,8 +320,8 @@ export function PromptPresetMenu({
                   <strong>{editor.route
                     ? "Bound to saved model route"
                     : "Limit to current model route"}</strong>
-                  <small title={displayedEditorRouteLabel}>
-                    {displayedEditorRouteLabel}
+                  <small>
+                    <TooltipText tooltip={displayedEditorRouteLabel}>{displayedEditorRouteLabel}</TooltipText>
                   </small>
                   {editorRouteDiffers && (
                     <small className="prompt-preset-route-rebind-note">
@@ -477,7 +478,7 @@ export function PromptPresetMenu({
                           <BookOpenText size={14} />
                           <span>
                             <strong>{preset.name}</strong>
-                            <small title={blockedReason ?? preset.body}>{blockedReason ?? preset.body}</small>
+                            <small><TooltipText tooltip={blockedReason ?? preset.body}>{blockedReason ?? preset.body}</TooltipText></small>
                           </span>
                         </button>
                         <TooltipButton

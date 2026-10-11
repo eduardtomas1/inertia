@@ -229,6 +229,7 @@ describe("ComposerSkillsMenu", () => {
     expect(popover.querySelector("header")).toBeNull();
     expect(popover).not.toHaveTextContent("Choose with");
     for (const option of screen.getAllByRole("option")) expect(option).not.toHaveAttribute("title");
+    expect(popover.querySelectorAll("[title]")).toHaveLength(0);
     const refresh = screen.getByRole("button", { name: "Refresh skills" });
     expect(refresh.closest(".composer-skills-footer")).not.toBeNull();
     expect(refresh.querySelector(".is-spinning")).toBeNull();

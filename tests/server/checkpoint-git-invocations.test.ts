@@ -11,6 +11,7 @@ const gitOutputBytes = vi.hoisted(() => new Map<string, number>());
 const gitEvents = vi.hoisted(() => [] as string[]);
 const gitGate = vi.hoisted(() => ({
   hold: null as null | ((args: readonly string[]) => Promise<void> | null),
+  spawned: null as null | ((args: readonly string[]) => void),
 }));
 
 vi.mock("../../src/server/git/runner", async (importOriginal) => {
@@ -20,7 +21,9 @@ vi.mock("../../src/server/git/runner", async (importOriginal) => {
     runGit: async (...parameters: Parameters<typeof original.runGit>) => {
       gitCalls.push([...parameters[1]]);
       gitEvents.push(`start:${parameters[1].filter((arg) => !arg.startsWith("-") && !arg.includes("=")).join(" ")}`);
-      const result = await original.runGit(...parameters);
+      const running = original.runGit(...parameters);
+      gitGate.spawned?.(parameters[1]);
+      const result = await running;
       gitOutputBytes.set(parameters[1].join(" "), result.stdout.length);
       return result;
     },
@@ -58,6 +61,7 @@ describe("checkpoint Git invocations", () => {
 
   afterEach(() => {
     gitGate.hold = null;
+    gitGate.spawned = null;
     gitEvents.splice(0);
     gitCalls.splice(0);
     gitOutputBytes.clear();
@@ -238,6 +242,27 @@ describe("checkpoint Git invocations", () => {
       releaseStatus();
       const result = await creating;
 
+      expect(result.checkpointId).toBeNull();
+      expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([]);
+      expect(git(root, "for-each-ref", "--format=%(refname)", `refs/inertia/checkpoints/${conversation.id}/`)).toBe("");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("discards a turn checkpoint whose reference was being written when its turn stopped", async () => {
+    const { root, indexes } = repository();
+    writeFileSync(join(root, "tracked.txt"), "edit\n");
+    const { store, conversation, turn } = turnInRepository(root, indexes);
+    try {
+      const stop = new AbortController();
+      gitGate.spawned = (args) => {
+        if (subcommand(args) === "update-ref" && !args.includes("-d")) stop.abort();
+      };
+
+      const result = await new TurnGitArtifactManager(store, indexes).createTurnCheckpoint(turn, stop.signal);
+
+      expect(gitCalls.filter((args) => subcommand(args) === "update-ref" && !args.includes("-d"))).toHaveLength(1);
       expect(result.checkpointId).toBeNull();
       expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([]);
       expect(git(root, "for-each-ref", "--format=%(refname)", `refs/inertia/checkpoints/${conversation.id}/`)).toBe("");

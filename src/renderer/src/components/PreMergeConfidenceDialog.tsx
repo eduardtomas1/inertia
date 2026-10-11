@@ -5,13 +5,7 @@ import {
   CircleDot,
   Clock,
   ExternalLink,
-  FileCheck2,
-  GitPullRequest,
-  MonitorCheck,
-  PackageCheck,
   RefreshCw,
-  ShieldCheck,
-  TestTube2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -297,7 +291,6 @@ export function PreMergeConfidenceDialog({
         <>
           <section className="pre-merge-section pre-merge-identity" aria-labelledby="pre-merge-identity-title">
             <div className="pre-merge-section-heading">
-              <GitPullRequest size={14} />
               <div><h3 id="pre-merge-identity-title">Exact identity</h3><span>Green applies only to this local head and this GitHub PR head.</span></div>
               <span className={`pre-merge-state is-${confidence.identity.state}`}>{confidence.identity.state}</span>
             </div>
@@ -326,7 +319,6 @@ export function PreMergeConfidenceDialog({
 
           <section className="pre-merge-section" aria-labelledby="pre-merge-checks-title">
             <div className="pre-merge-section-heading">
-              <MonitorCheck size={14} />
               <div><h3 id="pre-merge-checks-title">Hosted checks</h3><span>{stateSummary(confidence.checks)}</span></div>
               <FactSource kind="github">GitHub</FactSource>
             </div>
@@ -346,7 +338,6 @@ export function PreMergeConfidenceDialog({
 
           <section className="pre-merge-section" aria-labelledby="pre-merge-reviews-title">
             <div className="pre-merge-section-heading">
-              <FileCheck2 size={14} />
               <div>
                 <h3 id="pre-merge-reviews-title">Actionable review threads</h3>
                 <span>{codexThreads.length} Codex · {otherThreads.length} other unresolved</span>
@@ -375,7 +366,6 @@ export function PreMergeConfidenceDialog({
 
           <section className="pre-merge-section" aria-labelledby="pre-merge-scope-title">
             <div className="pre-merge-section-heading">
-              <FileCheck2 size={14} />
               <div><h3 id="pre-merge-scope-title">Affected scope</h3><span>{confidence.totalFiles} remote {confidence.totalFiles === 1 ? "file" : "files"}</span></div>
               <FactSource kind="github">GitHub</FactSource>
             </div>
@@ -398,7 +388,6 @@ export function PreMergeConfidenceDialog({
 
           <section className="pre-merge-section pre-merge-evidence" aria-labelledby="pre-merge-evidence-title">
             <div className="pre-merge-section-heading">
-              <TestTube2 size={14} />
               <div><h3 id="pre-merge-evidence-title">Test and portability evidence</h3><span>Execution evidence stays separate from changed test scope.</span></div>
             </div>
             <div className="pre-merge-evidence-row">
@@ -420,10 +409,10 @@ export function PreMergeConfidenceDialog({
               <FactSource kind="github">Changed scope</FactSource>
               <strong>Changed test files</strong>
               <span>{confidence.changedTestFiles.length > 0 ? confidence.changedTestFiles.join(" · ") : "None in the loaded PR file set"}</span>
-              <small>Changed test files are scope evidence, not proof that they ran.</small>
+              <p className="pre-merge-evidence-note">Changed test files are scope evidence, not proof that they ran.</p>
             </div>
             <div className="pre-merge-evidence-row">
-              <PackageCheck size={14} aria-hidden="true" />
+              <span aria-hidden="true" />
               <strong>Bundle delta</strong>
               <span>{confidence.bundle.summary}</span>
             </div>
@@ -431,7 +420,6 @@ export function PreMergeConfidenceDialog({
 
           <section className="pre-merge-section pre-merge-readiness" aria-labelledby="pre-merge-readiness-title">
             <div className="pre-merge-section-heading">
-              <ShieldCheck size={14} />
               <div><h3 id="pre-merge-readiness-title">Readiness</h3><span>Merge confidence and release proof are intentionally different.</span></div>
             </div>
             <div className="pre-merge-readiness-row">
@@ -451,14 +439,13 @@ export function PreMergeConfidenceDialog({
           {confidence.authorClaim && (
             <section className="pre-merge-section" aria-labelledby="pre-merge-claim-title">
               <div className="pre-merge-section-heading">
-                <FileCheck2 size={14} />
                 <div><h3 id="pre-merge-claim-title">PR description</h3><span>User-entered text is shown as a claim, never as execution evidence.</span></div>
                 <FactSource kind="claim">Author claim</FactSource>
               </div>
               <details className="pre-merge-details pre-merge-claim">
                 <summary>View claimed summary and verification</summary>
                 <pre>{confidence.authorClaim.body}</pre>
-                {confidence.authorClaim.truncated && <small>Claim text is truncated.</small>}
+                {confidence.authorClaim.truncated && <p className="pre-merge-caution">Claim text is truncated.</p>}
               </details>
             </section>
           )}

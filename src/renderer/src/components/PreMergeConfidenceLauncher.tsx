@@ -5,6 +5,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { GitForge, ServerEvent } from "@shared/contracts";
 import { PreMergeConfidenceDialog } from "./PreMergeConfidenceDialog";
 import PullRequestDialog from "./PullRequestDialog";
+import { TooltipButton } from "./TooltipButton";
 import { confidenceTitle } from "./RepositoryScopeActions";
 
 interface PreMergeConfidenceLauncherProps {
@@ -53,26 +54,24 @@ export function PreMergeConfidenceLauncher({
   }, [authorityRef, confidenceEnabled, handledRequest, openRequest, pullRequestDisabled]);
   return <>
     {buttons && <>
-      <button
-        type="button"
+      <TooltipButton
         disabled={!confidenceEnabled}
-        title={confidenceTitle(authorityRef, forge)}
+        tooltip={confidenceTitle(authorityRef, forge)}
         onClick={() => {
           if (authorityRef) setOpen({ kind: "confidence" });
         }}
       >
         <GitPullRequest size={14} aria-hidden="true" /><span>Confidence</span>
-      </button>
-      <button
-        type="button"
+      </TooltipButton>
+      <TooltipButton
         disabled={!authorityRef || pullRequestDisabled}
-        title={!authorityRef ? "Refresh this repository before changing it." : pullRequestDetail}
+        tooltip={!authorityRef ? "Refresh this repository before changing it." : pullRequestDetail ?? "Pull request"}
         onClick={() => {
           if (authorityRef) setOpen({ kind: "pull-request", authorityRef });
         }}
       >
         <GitPullRequest size={14} aria-hidden="true" /><span>PR</span>
-      </button>
+      </TooltipButton>
     </>}
     {open?.kind === "confidence" && authorityRef && (
       <PreMergeConfidenceDialog

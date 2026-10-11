@@ -38,18 +38,39 @@ function expectQuietMenu(menu: HTMLElement): void {
   expect(menu.querySelector(".option-check")).toBeNull();
 }
 
+function expectCheckOnChosenRowOnly(menu: HTMLElement): void {
+  const rows = within(menu).getAllByRole("menuitemradio");
+  expect(rows.length).toBeGreaterThan(1);
+  for (const row of rows) {
+    const check = row.querySelector(".composer-option-check");
+    if (row.getAttribute("aria-checked") === "true") {
+      expect(check).not.toBeNull();
+      expect(check).toHaveAttribute("aria-hidden", "true");
+    } else {
+      expect(check).toBeNull();
+    }
+  }
+}
+
 describe("composer setting menus", () => {
-  it("marks the chosen reasoning, speed and access rows by state alone, without titles or dots", () => {
+  it("marks the chosen reasoning, mode and access rows with a check, without titles or dots", () => {
     renderComposer();
     fireEvent.click(screen.getByRole("button", { name: /^Choose reasoning level/u }));
     const reasoning = screen.getByRole("menu", { name: "Reasoning level" });
     expectQuietMenu(reasoning);
     expect(within(reasoning).getByRole("menuitemradio", { name: /High/u })).toHaveAttribute("aria-checked", "true");
+    expectCheckOnChosenRowOnly(reasoning);
 
     fireEvent.click(screen.getByRole("button", { name: /^Choose project access/u }));
     const access = screen.getByRole("menu", { name: "Project access" });
     expectQuietMenu(access);
     expect(within(access).getByRole("menuitemradio", { name: /Supervised/u })).toHaveAttribute("aria-checked", "true");
+    expectCheckOnChosenRowOnly(access);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Choose work mode/u }));
+    const workMode = screen.getByRole("menu", { name: "Work mode" });
+    expectQuietMenu(workMode);
+    expectCheckOnChosenRowOnly(workMode);
   });
 
   it("leaves Standard speed without a description that repeats its label and without a dot", () => {
@@ -69,9 +90,10 @@ describe("composer setting menus", () => {
     expect(standard).toHaveAttribute("aria-checked", "true");
     expect(standard.querySelector("small")).toBeNull();
     expect(screen.getByRole("menuitemradio", { name: /Fast/u })).toHaveTextContent("Faster replies");
+    expectCheckOnChosenRowOnly(container);
   });
 
-  it("keeps the More menu to rows and a back header without repeated titles or mode helper lines", async () => {
+  it("keeps the More menu to rows and a back header, with the mode consequences and a check on the chosen row", async () => {
     renderComposer();
     fireEvent.click(await screen.findByRole("button", { name: "More composer options" }));
     const root = screen.getByRole("menu", { name: "More composer options" });
@@ -80,7 +102,8 @@ describe("composer setting menus", () => {
     const mode = screen.getByRole("menu", { name: "Mode options" });
     expectQuietMenu(mode);
     expect(mode).not.toHaveTextContent("Composer options");
-    expect(mode).not.toHaveTextContent("Work directly in the project");
-    expect(mode).not.toHaveTextContent("Inspect and propose steps first");
+    expect(within(mode).getByRole("menuitemradio", { name: /Build/u })).toHaveTextContent("Work directly in the project");
+    expect(within(mode).getByRole("menuitemradio", { name: /Plan/u })).toHaveTextContent("Inspect and propose steps first");
+    expectCheckOnChosenRowOnly(mode);
   });
 });

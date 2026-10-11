@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import type { ProviderFastMode } from "@shared/contracts";
 
 export function ComposerResponseSpeedOptions({
@@ -43,6 +44,7 @@ export function ComposerResponseSpeedOptions({
             <strong>{option.label}</strong>
             {option.description && <small>{option.description}</small>}
           </span>
+          {selectedFastMode === option.enabled && <Check className="composer-option-check" size={14} aria-hidden="true" />}
         </button>
       ))}
     </>

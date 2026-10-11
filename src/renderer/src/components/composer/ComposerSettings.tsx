@@ -1,4 +1,5 @@
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   Hammer,
@@ -150,6 +151,7 @@ export function ComposerSettings({
                         : ""}
                     </strong>
                   </span>
+                  {selectedReasoning === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
                 </button>
               ))}
             </div>
@@ -263,6 +265,7 @@ export function ComposerSettings({
                   <strong>{option.label}</strong>
                   <small>{option.description}</small>
                 </span>
+                {conversation.accessMode === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
               </button>
             ))}
           </div>
@@ -311,7 +314,6 @@ export function ComposerSettings({
             aria-label="Work mode"
             onKeyDown={handleComposerMenuNavigation}
           >
-            <div className="popover-title">Mode</div>
             {(["build", "plan"] as InteractionMode[]).map((mode) => (
               <button
                 type="button"
@@ -329,9 +331,7 @@ export function ComposerSettings({
                 <span>
                   <strong>{mode === "build" ? "Build" : "Plan"}</strong>
                 </span>
-                {conversation.interactionMode === mode && (
-                  <span className="option-check" />
-                )}
+                {conversation.interactionMode === mode && <Check className="composer-option-check" size={14} aria-hidden="true" />}
               </button>
             ))}
           </div>

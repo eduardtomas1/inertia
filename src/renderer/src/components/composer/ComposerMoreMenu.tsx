@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   ChevronRight,
   Play,
@@ -135,6 +136,7 @@ export function ComposerMoreMenu({
             </strong>
             <small>{option.description}</small>
           </span>
+          {selectedReasoning === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
         </button>
       ));
     }
@@ -168,7 +170,13 @@ export function ComposerMoreMenu({
         >
           <span>
             <strong>{mode === "build" ? "Build" : "Plan"}</strong>
+            <small>
+              {mode === "build"
+                ? "Work directly in the project"
+                : "Inspect and propose steps first"}
+            </small>
           </span>
+          {conversation.interactionMode === mode && <Check className="composer-option-check" size={14} aria-hidden="true" />}
         </button>
       ));
     }
@@ -190,6 +198,7 @@ export function ComposerMoreMenu({
           <strong>{option.label}</strong>
           <small>{option.description}</small>
         </span>
+        {conversation.accessMode === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
       </button>
     ));
   };

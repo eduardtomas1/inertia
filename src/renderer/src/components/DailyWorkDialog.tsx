@@ -21,6 +21,7 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { focusModalOnAnimationFrame } from "../utils/modalFocus";
 import { DialogShell } from "./DialogShell";
 import { ProviderMark } from "./ProviderMark";
@@ -57,6 +58,14 @@ export function dailyWorkCommand(now = new Date()): DailyWorkCommand {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     },
   };
+}
+
+function formatDateLabel(dateKey: string): string {
+  return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(`${dateKey}T12:00:00`));
 }
 
 /** Share of a settled total, or null when either side is unmeasured. */
@@ -140,6 +149,7 @@ export function DailyWorkDialog({
   onOpenConversation,
 }: DailyWorkDialogProps): React.JSX.Element {
   const titleId = useId();
+  const dateDescriptionId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -213,6 +223,7 @@ export function DailyWorkDialog({
       onClose={onClose}
       onDismiss={onClose}
       aria-busy={loading}
+      aria-describedby={dateDescriptionId}
       headerActions={<>
         <input
           className="daily-work-date-input"
@@ -238,6 +249,7 @@ export function DailyWorkDialog({
         ? "Runtime is clipped to this local day. Tokens count when turns settle."
         : undefined}
     >
+      <span id={dateDescriptionId} className="visually-hidden">{formatDateLabel(selectedDateKey)}</span>
       {loading && (
         <div className="daily-work-loading">
           <p className="daily-work-loading-status">

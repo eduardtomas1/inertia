@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import type { ComponentPropsWithRef, FormEvent, KeyboardEvent, ReactNode } from "react";
+import { useId, type ComponentPropsWithRef, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import clsx from "clsx";
 
 import { trapModalFocus } from "../utils/modalFocus";
@@ -107,6 +107,8 @@ export function DialogShell({
   ref,
   ...props
 }: DialogShellProps): React.JSX.Element {
+  const fallbackDescriptionId = useId();
+  const describedById = descriptionId ?? fallbackDescriptionId;
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (trapFocus) trapModalFocus(event, event.currentTarget);
     onKeyDown?.(event);
@@ -117,7 +119,7 @@ export function DialogShell({
         title={title}
         titleId={titleId}
         description={description}
-        descriptionId={descriptionId}
+        descriptionId={describedById}
         start={headerStart}
         actions={headerActions}
         closeLabel={closeLabel}
@@ -141,7 +143,7 @@ export function DialogShell({
     role: "dialog",
     "aria-modal": true,
     "aria-labelledby": props["aria-label"] ? undefined : titleId,
-    "aria-describedby": props["aria-describedby"] ?? (description ? descriptionId : undefined),
+    "aria-describedby": props["aria-describedby"] ?? (description ? describedById : undefined),
     onKeyDown: handleKeyDown,
   } as const;
   return (

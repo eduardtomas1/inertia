@@ -62,6 +62,11 @@ describe("dialog shell", () => {
     expect(sources).toMatch(/\.workspace-frame > \.status-overlay-stack \{[^}]*z-index: 100;/u);
   });
 
+  it("describes the dialog by its visible description even without a caller id", () => {
+    render(<DialogShell titleId="pr-title" title="Create pull request" description="Uses your local GitHub CLI sign-in." closeLabel="Close" onClose={vi.fn()}><p>Body</p></DialogShell>);
+    expect(screen.getByRole("dialog", { name: "Create pull request" })).toHaveAccessibleDescription("Uses your local GitHub CLI sign-in.");
+  });
+
   it("dismisses from the backdrop only when the caller allows it", () => {
     const dismiss = vi.fn();
     render(<DialogShell titleId="t" title="Snapshots" closeLabel="Close Snapshots" onClose={vi.fn()} onDismiss={dismiss}><p>Body</p></DialogShell>);

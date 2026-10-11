@@ -460,6 +460,18 @@
   accent-color: var(--accent);
 }
 
+.multi-spawn-preset-toggle > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.multi-spawn-preset-toggle small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
 .multi-spawn-launch {
   gap: 8px;
   min-width: 124px;

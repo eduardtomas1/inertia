@@ -567,6 +567,7 @@ export function MultiSpawnDialog({
       bodyClassName="multi-spawn-dialog-body is-flush"
       titleId="multi-spawn-title"
       title="Launch a duo"
+      description="Send one brief to two independent agents with separate routes and permissions."
       closeLabel="Close multi-spawn"
       closeDisabled={cancelling}
       onClose={onClose}
@@ -583,7 +584,10 @@ export function MultiSpawnDialog({
               rememberPreset: event.currentTarget.checked,
             })}
           />
-          <span>Save this pairing</span>
+          <span>
+            Save this pairing
+            <small>Saves names, routes, reasoning, access, and the compare toggle locally — never prompts or projects.</small>
+          </span>
         </label>
       )}
       footer={<>

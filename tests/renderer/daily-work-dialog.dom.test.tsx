@@ -179,7 +179,7 @@ describe("DailyWorkDialog", () => {
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Daily work" });
     await screen.findByRole("region", { name: "Daily work totals" });
-    expect(dialog).not.toHaveAccessibleDescription();
+    expect(dialog).toHaveAccessibleDescription(/\w+day, \w+ \d+|\d+ \w+/u);
     for (const text of ["Agent work", "Settled only", "Most recent first"]) expect(dialog).not.toHaveTextContent(text);
     expect(within(dialog).getByRole("button", { name: "Refresh daily work" })).toHaveClass("icon-button");
     expect(dialog.querySelectorAll(".daily-work-conversation-card small")).toHaveLength(dialog.querySelectorAll(".daily-work-conversation-card").length);

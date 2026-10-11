@@ -138,8 +138,8 @@ describe("Duo third-model comparison dialog", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "Launch a duo" });
     expect(dialog.querySelector(".dialog-shell-header")?.querySelectorAll("svg")).toHaveLength(1);
-    expect(dialog).not.toHaveTextContent("Send one brief to two independent agents");
-    expect(dialog).not.toHaveTextContent("never prompts or projects");
+    expect(dialog).toHaveAccessibleDescription("Send one brief to two independent agents with separate routes and permissions.");
+    expect(dialog).toHaveTextContent("Saves names, routes, reasoning, access, and the compare toggle locally — never prompts or projects.");
     expect(dialog.querySelectorAll(".multi-spawn-side-number, .multi-spawn-side > header svg, .multi-spawn-field svg")).toHaveLength(0);
     expect(screen.getByRole("heading", { level: 3, name: "Route A" })).toBeInTheDocument();
     expect(screen.getAllByText("Ready", { exact: true })).toHaveLength(2);

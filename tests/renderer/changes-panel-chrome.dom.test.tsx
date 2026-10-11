@@ -101,6 +101,9 @@ describe("changes panel chrome", () => {
     for (const button of within(actions).getAllByRole("button")) expect(button).not.toHaveAttribute("title");
     expect(within(actions).getByRole("button", { name: "Fetch" })).toHaveAccessibleDescription("Refresh remote branches while preserving local changes");
     expect(document.querySelectorAll(".change-file-status[title]")).toHaveLength(0);
+    const branch = document.querySelector<HTMLElement>(".workspace-repository-scope-branch")!;
+    expect(branch).not.toHaveAttribute("title");
+    expect(branch.querySelector("[title]")).toBeNull();
     const status = document.querySelector<HTMLElement>(".change-file-status")!;
     fireEvent.pointerEnter(status, { pointerType: "mouse" });
     await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(status.nextElementSibling!.textContent!));

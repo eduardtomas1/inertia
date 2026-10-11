@@ -1534,14 +1534,6 @@ button.header-breadcrumb-project:hover {
   color: var(--warning);
 }
 
-.checkout-context-dot {
-  width: 5px;
-  height: 5px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .header-split > button,
   .corner-toggle,

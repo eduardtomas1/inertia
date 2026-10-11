@@ -262,3 +262,14 @@ describe("Git and branch menus", () => {
     expect(block(".new-chat-location-actions > button:focus-visible")).toContain("background: var(--fill-strong);");
   });
 });
+
+describe("checkout branch control", () => {
+  it("names a differing checkout in words instead of an accent dot and opens 4px above the trigger", () => {
+    const button = readSourceText("src/renderer/src/components/CheckoutBranchMenuButton.tsx");
+    expect(button).toContain("contextMismatch ? `Current checkout · ${branch}` : branch");
+    expect(button).not.toContain("checkout-context-dot");
+    expect(button).toContain("window.innerHeight - bounds.top + 4");
+    expect(css).not.toContain(".checkout-context-dot");
+    expect(readSourceText("src/renderer/src/components/CheckoutBranchControl.css")).not.toContain("opacity: 0.7");
+  });
+});

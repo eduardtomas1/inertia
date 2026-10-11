@@ -36,6 +36,54 @@ describe("text button tooltip", () => {
     expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
   });
 
+  it("stays closed when a button is focused programmatically as a surface opens", () => {
+    render(<TooltipButton tooltip="Close restart confirmation" aria-label="Close">x</TooltipButton>);
+    const button = screen.getByRole("button", { name: "Close" });
+    act(() => {
+      button.focus();
+    });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+
+  it("stays closed when Enter opens a surface that focuses the button", () => {
+    render(<TooltipButton tooltip="Scratch prompts" aria-label="Scratch">s</TooltipButton>);
+    fireEvent.keyDown(document.body, { key: "Enter" });
+    act(() => {
+      screen.getByRole("button", { name: "Scratch" }).focus();
+    });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+
+  it("opens after Tab moves keyboard focus onto the button and closes on Escape", () => {
+    render(
+      <>
+        <button type="button">Before</button>
+        <TooltipButton tooltip="Copy code">Copy</TooltipButton>
+      </>,
+    );
+    const before = screen.getByRole("button", { name: "Before" });
+    const copy = screen.getByRole("button", { name: "Copy" });
+    act(() => {
+      before.focus();
+    });
+    fireEvent.keyDown(before, { key: "Tab" });
+    act(() => {
+      copy.focus();
+    });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent("Copy code");
+    fireEvent.keyDown(copy, { key: "Escape" });
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+
   it("hands its button to a caller ref", () => {
     const ref = createRef<HTMLButtonElement>();
     render(<TooltipButton ref={ref} tooltip="Close" aria-label="Close preview">x</TooltipButton>);

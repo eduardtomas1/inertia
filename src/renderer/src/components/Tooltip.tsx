@@ -17,6 +17,23 @@ const TOOLTIP_GAP = 4;
 const VIEWPORT_PADDING = 8;
 
 let warmUntil = 0;
+let lastNavigationKeyAt = Number.NEGATIVE_INFINITY;
+const NAVIGATION_KEY_WINDOW_MS = 500;
+const NAVIGATION_KEYS = new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+const trackedDocuments = new WeakSet<Document>();
+
+function trackNavigationKeys(document: Document): void {
+  if (trackedDocuments.has(document)) return;
+  trackedDocuments.add(document);
+  document.addEventListener("keydown", (event) => {
+    if (NAVIGATION_KEYS.has(event.key)) lastNavigationKeyAt = Date.now();
+  }, true);
+}
+
+function focusFollowsNavigationKey(): boolean {
+  const elapsed = Date.now() - lastNavigationKeyAt;
+  return elapsed >= 0 && elapsed < NAVIGATION_KEY_WINDOW_MS;
+}
 
 interface TooltipPosition {
   top: number;
@@ -69,6 +86,10 @@ export function useTooltip<T extends HTMLElement>(
   useEffect(() => clearTimer, [clearTimer]);
 
   useEffect(() => {
+    trackNavigationKeys(triggerRef.current?.ownerDocument ?? document);
+  }, [triggerRef]);
+
+  useEffect(() => {
     if (!open) return;
     const dismiss = () => close();
     window.addEventListener("scroll", dismiss, { capture: true, passive: true });
@@ -100,7 +121,7 @@ export function useTooltip<T extends HTMLElement>(
       },
       onFocus: (event) => {
         handlers.onFocus?.(event);
-        if (event.currentTarget.matches(":focus-visible")) show();
+        if (event.currentTarget.matches(":focus-visible") && focusFollowsNavigationKey()) show();
       },
       onBlur: (event) => {
         handlers.onBlur?.(event);

@@ -9,6 +9,7 @@ import { resultEvent } from "../lib/runtimeCommands";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { DialogShell } from "./DialogShell";
+import { LoadingMark } from "./ui";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { useUsageLimitsContext } from "./usage-limits-state";
 import "./UsageLimitsPanel.css";
@@ -259,15 +260,15 @@ export function UsageLimitsPanel({ request, status, heading = true }: Props & { 
   return <section className="usage-limits-panel" aria-label="Provider limits" aria-busy={busy}>
     <header className="limits-heading">
       <div className="limits-title">{heading && <h2>Limits</h2>}<button type="button" className="limits-about" aria-label="About these numbers" aria-expanded={about} aria-controls={aboutId} onClick={() => setAbout(!about)}><Info size={14} aria-hidden="true" /></button></div>
-      <small className="limits-checked" title={snapshot?.checkedAt ? dateLabel(snapshot.checkedAt) : undefined}>{checked ? `Checked ${checked}` : "Not checked yet"}</small>
-      <button type="button" className="limits-refresh" disabled={busy || status !== "online"} onClick={() => void load(true, true)}><RefreshCw size={14} aria-hidden="true" />{busy ? "Refreshing…" : "Refresh limits"}</button>
+      <small className="limits-checked">{checked ? `Checked ${checked}` : "Not checked yet"}</small>
+      <button type="button" className="limits-refresh" disabled={busy || status !== "online"} onClick={() => void load(true, true)}>{busy ? <LoadingMark size={14} aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}{busy ? "Refreshing…" : "Refresh limits"}</button>
     </header>
     <p className="limits-explanation" id={aboutId} hidden={!about}>Subscription quota across your accounts. Remaining percentages describe provider quota. Account averages give each equivalent account equal weight; they do not estimate tokens or combined plan capacity. Reset times stay due until the provider reports new quota.</p>
     {status !== "online" && <p className="limits-notice" role="status">The local service is offline. Displayed limits may be stale.</p>}
     {error && <p className="limits-notice" role="alert">{error}</p>}
     {accounts.length === 0 && (busy
       ? <><p className="visually-hidden" role="status">Reading provider accounts…</p><div className="limits-skeleton" aria-hidden="true">{[0, 1, 2].map((index) => <span key={index} style={{ "--i": index } as CSSProperties}><i /><b /><em /><em /></span>)}</div></>
-      : <p className="limits-empty">No limits loaded. Refresh configured providers or connect a usage hub.</p>)}
+      : <p className="limits-empty">No limits loaded</p>)}
     {providerIds.map((providerId, index) => <ProviderLimits key={providerId} accounts={accounts.filter((account) => account.providerId === providerId)} index={index} now={now}
       open={expanded.has(providerId)} onToggle={() => toggle(providerId)}
       renderAccount={(account, number, cells) => <AccountDetails key={account.id} account={account} number={number} cells={cells} now={now} selected={selected === account.id} onSelect={() => setSelected(selected === account.id ? null : account.id)} request={request} onRefresh={() => void load(true, true)} online={status === "online"} />} />)}

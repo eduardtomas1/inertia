@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import "./PromptPresetMenu.css";
 import { TooltipButton } from "../TooltipButton";
+import { HintButton } from "../HintButton";
 
 import {
   MAX_PROMPT_PRESETS,
@@ -127,6 +128,8 @@ export function PromptPresetMenu({
       `${preset.name} ${preset.body}`.toLocaleLowerCase().includes(needle));
   }, [presets, query]);
 
+  const atPresetLimit = presets.length >= MAX_PROMPT_PRESETS;
+  const presetLimitReason = atPresetLimit ? `${MAX_PROMPT_PRESETS} presets is the limit` : undefined;
   const beginCreate = (): void => {
     const body = currentMessage.trim() ? currentMessage : "";
     setEditor({
@@ -348,10 +351,12 @@ export function PromptPresetMenu({
                     }
                     onClick={() => void move(editor.preset!, "down")}
                   ><ArrowDown size={14} /></TooltipButton>
-                  <button
-                    type="button"
-                    disabled={pending || presets.length >= MAX_PROMPT_PRESETS}
+                  <HintButton
+                    disabled={pending}
+                    aria-disabled={atPresetLimit || undefined}
+                    hint={presetLimitReason}
                     onClick={() => {
+                      if (atPresetLimit) return;
                       void run(() => dispatch({
                         type: "prompt-preset.duplicate",
                         payload: {
@@ -364,7 +369,7 @@ export function PromptPresetMenu({
                         })
                         .catch(() => undefined);
                     }}
-                  ><Copy size={14} />Duplicate</button>
+                  ><Copy size={14} />Duplicate</HintButton>
                   <button
                     type="button"
                     className={confirmingDelete ? "is-confirming" : undefined}
@@ -418,14 +423,17 @@ export function PromptPresetMenu({
                       onChange={(event) => setQuery(event.currentTarget.value)}
                     />
                   </label>
-                  <button
-                    type="button"
+                  <small className="prompt-presets-count">{presets.length}/{MAX_PROMPT_PRESETS}</small>
+                  <HintButton
                     className="secondary-button prompt-presets-add"
-                    disabled={presets.length >= MAX_PROMPT_PRESETS}
-                    onClick={beginCreate}
+                    aria-disabled={atPresetLimit || undefined}
+                    hint={presetLimitReason}
+                    onClick={() => {
+                      if (!atPresetLimit) beginCreate();
+                    }}
                   >
                     <Plus size={14} />New
-                  </button>
+                  </HintButton>
                 </div>
               )}
               {!editor && error && (

@@ -124,7 +124,7 @@ describe("PromptPresetMenu", () => {
       .toHaveAttribute("aria-disabled", "true");
   });
 
-  it("lists presets without a heading or counter and offers one line plus one button when empty", async () => {
+  it("lists presets without a heading and offers one line plus one button when empty", async () => {
     const view = render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "Prompt presets, 2 saved" }));
     const dialog = await screen.findByRole("dialog", { name: "Prompt presets" });
@@ -137,6 +137,31 @@ describe("PromptPresetMenu", () => {
     const empty = await screen.findByRole("dialog", { name: "Prompt presets" });
     expect(empty).toHaveTextContent(/^No presets yetCreate a preset$/u);
     expect(empty.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("states the 30-preset limit on New and Duplicate and keeps the count as plain text", async () => {
+    const full: PromptPreset[] = Array.from({ length: 30 }, (_, index) => ({
+      ...presets[0]!,
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      name: `Preset ${index}`,
+      position: index,
+    }));
+    const onDuplicate = vi.fn(() => Promise.resolve());
+    render(<Harness entries={full} onDuplicate={onDuplicate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets, 30 saved" }));
+    const dialog = await screen.findByRole("dialog", { name: "Prompt presets" });
+    expect(within(dialog).getByText("30/30")).toHaveClass("prompt-presets-count");
+    const create = within(dialog).getByRole("button", { name: "New" });
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    expect(create).toHaveAccessibleDescription("30 presets is the limit");
+    fireEvent.click(create);
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Edit prompt preset: Preset 3" }));
+    const duplicate = screen.getByRole("button", { name: "Duplicate" });
+    expect(duplicate).toHaveAttribute("aria-disabled", "true");
+    expect(duplicate).toHaveAccessibleDescription("30 presets is the limit");
+    fireEvent.click(duplicate);
+    expect(onDuplicate).not.toHaveBeenCalled();
   });
 
   it("opens from the keyboard, applies matching text, and explains route blocks", async () => {

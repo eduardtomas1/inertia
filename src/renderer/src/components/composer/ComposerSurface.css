@@ -100,8 +100,13 @@
   gap: 4px;
 }
 .composer-shell .model-chooser-anchor {
-  flex: 0 1 auto;
+  min-width: 52px;
+  max-width: none;
+  flex: 0 100 auto;
   margin-inline-start: -10px;
+}
+.composer-shell .model-chooser-anchor > .selected-model-chip {
+  max-width: 100%;
 }
 .composer-shell .selected-model-chip,
 .composer-shell .composer-pill {

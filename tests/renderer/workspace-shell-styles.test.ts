@@ -56,6 +56,7 @@ describe("changes panel", () => {
     expect(css).not.toMatch(/\.diff-review-toolbar \{[^}]*background/u);
     expect(css).not.toContain("filter: brightness(0.98)");
     expect(css).toContain(".diff-code .diff-line.is-selected { background-image: linear-gradient(var(--fill-strong), var(--fill-strong)); }");
+    expect(css).toContain(".diff-code .diff-line:not(:disabled, .is-selected):hover { background-image: linear-gradient(var(--fill), var(--fill)); }");
   });
 
   it("shows the review filter as plain buttons with --fill-strong for the pressed one", () => {

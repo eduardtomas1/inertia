@@ -6109,7 +6109,7 @@ button.turn-agents-line:hover {
   line-height: inherit;
   text-align: left;
 }
-.diff-code .diff-line:not(:disabled):hover { background-image: linear-gradient(var(--fill), var(--fill)); }
+.diff-code .diff-line:not(:disabled, .is-selected):hover { background-image: linear-gradient(var(--fill), var(--fill)); }
 .diff-code .diff-line.is-addition { background: var(--diff-addition-surface); }
 .diff-code .diff-line.is-deletion { background: var(--diff-deletion-surface); }
 .diff-code .diff-line.is-selected { background-image: linear-gradient(var(--fill-strong), var(--fill-strong)); }

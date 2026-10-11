@@ -696,6 +696,13 @@ button:disabled,
   padding-right: calc(var(--workspace-corner-controls-width, 0px) + 16px + var(--titlebar-overlay-inset));
 }
 
+@container (max-width: 400px) {
+  .platform-win32 .workspace-panel:not(.is-stacked) > .workspace-panel-tabs {
+    margin-top: 48px;
+    padding-right: 16px;
+  }
+}
+
 .platform-win32 .workspace-corner-controls {
   right: calc(12px + var(--titlebar-overlay-inset));
 }

@@ -167,6 +167,14 @@ describe("terminal", () => {
   });
 });
 
+describe("Windows panel tab strip", () => {
+  it("moves a narrow panel's tabs below the caption-button row so they keep room at the 300px minimum", () => {
+    const rule = /@container \(max-width: 400px\) \{\n  \.platform-win32 \.workspace-panel:not\(\.is-stacked\) > \.workspace-panel-tabs \{\n([^}]*)\}\n\}/u.exec(css)?.[1] ?? "";
+    expect(rule).toContain("margin-top: 48px;");
+    expect(rule).toContain("padding-right: 16px;");
+  });
+});
+
 describe("dead selectors", () => {
   it("drops rules for elements that are no longer rendered", () => {
     const usage = readSourceText("src/renderer/src/components/UsageView.css");

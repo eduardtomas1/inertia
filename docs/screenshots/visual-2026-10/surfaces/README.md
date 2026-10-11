@@ -6,12 +6,13 @@ One light pair at 1440×920 per surface; other sizes and dark pairs only where t
 
 Left out on purpose:
 
-- The terminal dock and split terminal captures: the shell prompt in them shows the capture machine's account and host name, and the fixture had no neutral prompt.
-- The first-run intro screens: the batch captured them only after its change, so there is no before to pair.
+- The batch's split terminal capture: its shell prompt showed the capture machine's account and host name. The terminal dock pair below was re-captured with a fixture prompt instead.
 - Surfaces already in the parent folder's before and after set (sidebar, finished, running, handoff and failed turns, model chooser, command palette with a search, Changes and Browser panels, Daily work, empty sidebar search).
 - Pairs with no visible change, near-duplicates of a kept pair (scrolled pages, a second notice state, a submenu that did not open) and pairs whose before was still loading or whose seeded data differed.
 
 Project paths under `/var/folders/.../T/ie-*/` are the fixture's temporary repositories, and `/opt/homebrew/Cellar/node@22/...` is the fake provider's Node executable.
+Pairs added afterwards: the Fix round group compares commit af84b28ad (the branch before the final fix round) with the final head. The terminal dock, branch menu, narrow commit dialog, Settings Codex models and welcome guide pairs compare the campaign start, 1a192a1e2, with the final head; they replace batch captures that showed a private shell prompt, had no before, did not open, were still loading or had no seeded models.
+In those added pairs the terminal runs zsh with a fixture home folder whose prompt is `$ `, the usage error is produced by answering the usage request with an error at the test transport, the loading page is a fixture route that answers after 45 seconds, and the sidebar row actions show through keyboard focus because a hovered row could not be captured reliably.
 The restart confirmation and composer More tools after captures come from the final branch head f8afff5b3, after the fix that stopped a tooltip opening with them.
 The accent outline on the theme library's selected Mode and colour theme cards is intended: it keeps main's presentation of that picker.
 
@@ -36,6 +37,7 @@ The accent outline on the theme library's selected Mode and colour theme cards i
 - Usage panel, light, 1440×920 (`panel-usage-light-1440x920-before.png`, `panel-usage-light-1440x920-after.png`): Usage reads No provider limits reported instead of the longer sentence, and the Refresh usage and account buttons are quieter.
 - Split view, light, 1440×920 (`split-view-light-1440x920-before.png`, `split-view-light-1440x920-after.png`): Each pane header uses the shared icon buttons, including a terminal button, and the pane composers match the main composer; at 760 the panes stack.
 - Split view, light, 760×600 (`split-view-light-760x600-before.png`, `split-view-light-760x600-after.png`): Each pane header uses the shared icon buttons, including a terminal button, and the pane composers match the main composer; at 760 the panes stack.
+- Terminal dock, light, 1440×920 (`terminal-dock-light-1440x920-before.png`, `terminal-dock-light-1440x920-after.png`): The terminal dock's tab row is plainer and the tinted resume bar is gone; the shell prompt is a fixture prompt.
 
 ## Batch B: Transcript cards and composer popovers
 
@@ -65,6 +67,7 @@ The accent outline on the theme library's selected Mode and colour theme cards i
 - Run diagnostics, light, 1440×920 (`transcript-run-diagnostics-light-1440x920-before.png`, `transcript-run-diagnostics-light-1440x920-after.png`): With Diagnostics open, harness and backend profile IDs show as a plain two-column list.
 - Work log open, light, 1440×920 (`transcript-worklog-open-light-1440x920-before.png`, `transcript-worklog-open-light-1440x920-after.png`): The opened work log lists each step as a plain row under the summary line.
 - Usage popover, light, 1440×920 (`usage-popover-light-1440x920-before.png`, `usage-popover-light-1440x920-after.png`): The usage popover keeps its layout; the carried-context chip beside it becomes one line.
+- Branch menu, light, 1440×920 (`checkout-branch-menu-light-1440x920-before.png`, `checkout-branch-menu-light-1440x920-after.png`): The branch menu opens from the faint branch line in the composer footer, without its Branches heading, count and Start another chat label.
 
 ## Batch C: Dialogs
 
@@ -99,6 +102,7 @@ The accent outline on the theme library's selected Mode and colour theme cards i
 - Update ready to install, light, 1440×920 (`update-ready-light-1440x920-before.png`, `update-ready-light-1440x920-after.png`): The ready-to-install popover keeps its content; only spacing changes.
 - Usage, Limits tab, light, 1440×920 (`usage-limits-light-1440x920-before.png`, `usage-limits-light-1440x920-after.png`): Provider rows lose their card borders and the History and Limits tabs use the neutral fill.
 - Usage, History tab, light, 1440×920 (`usage-view-light-1440x920-before.png`, `usage-view-light-1440x920-after.png`): The Insight card and inner borders are gone; chart, totals and breakdown sit on one surface.
+- Commit dialog, narrow, light, 760×600 (`commit-dialog-light-760x600-before.png`, `commit-dialog-light-760x600-after.png`): At 760 wide the dialog drops its icon tile and uppercase heading, and file rows put their state on the right.
 
 ## Batch D: Settings, guides and theme library
 
@@ -132,3 +136,34 @@ The accent outline on the theme library's selected Mode and colour theme cards i
 - Welcome guide, How it works, light, 1440×920 (`welcome-guide-2-light-1440x920-before.png`, `welcome-guide-2-light-1440x920-after.png`): How it works drops its kicker; the demo sits without the tinted frame.
 - Welcome guide, Connect an agent, light, 1440×920 (`welcome-guide-3-light-1440x920-before.png`, `welcome-guide-3-light-1440x920-after.png`): Connect an agent lists providers as plain rows with Set up buttons instead of a card grid and drops the ready count line.
 - Welcome guide, last step, light, 1440×920 (`welcome-guide-4-light-1440x920-before.png`, `welcome-guide-4-light-1440x920-after.png`): The last step drops the check icon, the summary line and the Add a project card for one small button.
+- Settings, Codex models, light, 1440×920 (`settings-agents-models-light-1440x920-before.png`, `settings-agents-models-light-1440x920-after.png`): The models list keeps its entries; provider rows and the detail lose their borders and the Models tab uses the neutral fill.
+- Welcome guide, first step, light, 1440×920 (`intro-1-light-1440x920-before.png`, `intro-1-light-1440x920-after.png`): The first step drops its Step 1 of 4 kicker, subtitle and card descriptions.
+- Welcome guide, Split view, light, 1440×920 (`intro-2-split-view-light-1440x920-before.png`, `intro-2-split-view-light-1440x920-after.png`): How it works drops its kicker and the demo loses its tinted frame.
+- Welcome guide, Work tab, light, 1440×920 (`intro-2-work-tab-light-1440x920-before.png`, `intro-2-work-tab-light-1440x920-after.png`): The Work tab demo loses its tinted frame; the content is unchanged.
+- Welcome guide, Duo, light, 1440×920 (`intro-2-duo-light-1440x920-before.png`, `intro-2-duo-light-1440x920-after.png`): The Duo demo loses its tinted frame and the brief chip its fill.
+- Welcome guide, Review and ship, light, 1440×920 (`intro-2-review-and-ship-light-1440x920-before.png`, `intro-2-review-and-ship-light-1440x920-after.png`): The diff demo drops its coloured line bars for plain ones.
+- Welcome guide, Limits, light, 1440×920 (`intro-2-limits-light-1440x920-before.png`, `intro-2-limits-light-1440x920-after.png`): The Limits demo loses its tinted frame; the meter is unchanged.
+- Welcome guide, Shortcuts, light, 1440×920 (`intro-2-shortcuts-light-1440x920-before.png`, `intro-2-shortcuts-light-1440x920-after.png`): The Shortcuts demo loses its tinted frame and the selected result its accent fill.
+- Welcome guide, reduced motion, light, 1440×920 (`intro-2-reduced-light-1440x920-before.png`, `intro-2-reduced-light-1440x920-after.png`): With reduced motion the step shows the still Split view demo without the kicker.
+- Welcome guide, Connect an agent, light, 1440×920 (`intro-3-light-1440x920-before.png`, `intro-3-light-1440x920-after.png`): Providers become plain rows instead of a card grid, and the ready count line is gone.
+- Welcome guide, last step, light, 1440×920 (`intro-4-light-1440x920-before.png`, `intro-4-light-1440x920-after.png`): The last step drops the check icon, the summary line and the Add a project card for one small button.
+
+## Fix round
+
+- Reasoning menu, keyboard focus, light, 1440×920 (`fix-reasoning-menu-focus-light-1440x920-before.png`, `fix-reasoning-menu-focus-light-1440x920-after.png`): With Extra high focused from the keyboard, the after marks the current level with a check; the before shows no check, so both filled rows look alike.
+- Composer mode menu, light, 1440×920 (`fix-composer-mode-menu-light-1440x920-before.png`, `fix-composer-mode-menu-light-1440x920-after.png`): The Mode title is gone and the current mode carries a check.
+- Header Git menu, light, 1440×920 (`fix-git-menu-light-1440x920-before.png`, `fix-git-menu-light-1440x920-after.png`): The branch and upstream line at the top reads the same; the fixture branch has no upstream, so no outgoing or incoming counts show on either side.
+- Database recovery notice with a toast, light, 1440×920 (`fix-database-recovery-toast-light-1440x920-before.png`, `fix-database-recovery-toast-light-1440x920-after.png`): The recovery notice becomes the first item of the toast stack, with the error toast below it; before, it was a wide banner drawn over the stack, which hides the error toast.
+- Project colour swatches, Default selected, light, 1440×920 (`fix-project-swatches-light-1440x920-before.png`, `fix-project-swatches-light-1440x920-after.png`): The ring around the selected Default swatch is drawn darker so it stands out from the other swatches.
+- Help search, light, 1440×920 (`fix-help-search-light-1440x920-before.png`, `fix-help-search-light-1440x920-after.png`): Matches of the typed word get a light fill in addition to bold.
+- Usage error, light, 760×600 (`fix-usage-error-light-760x600-before.png`, `fix-usage-error-light-760x600-after.png`): The error row is unchanged at this width: Try again sits beside the message in both builds.
+- Selected diff line under the pointer, light, 1440×920 (`fix-diff-line-hover-light-1440x920-before.png`, `fix-diff-line-hover-light-1440x920-after.png`): The selected line keeps the selected fill while the pointer rests on it.
+- Goal panel with a plan, light, 1440×920 (`fix-goal-plan-light-1440x920-before.png`, `fix-goal-plan-light-1440x920-after.png`): The plan summary loses its padded row and reads as one plain column under Latest conversation plan.
+- Sidebar row actions, light, 1440×920 (`fix-sidebar-row-actions-light-1440x920-before.png`, `fix-sidebar-row-actions-light-1440x920-after.png`): The row's snooze and settle buttons are 24px and centred in the 32px row; they show here through keyboard focus, which reveals the same buttons as hover.
+- Review note for a long path, light, 1440×920 (`fix-review-note-long-title-light-1440x920-before.png`, `fix-review-note-long-title-light-1440x920-after.png`): The dialog title wraps onto several lines to show the whole path instead of cutting it off.
+- Launch a duo, light, 1440×920 (`fix-duo-dialog-light-1440x920-before.png`, `fix-duo-dialog-light-1440x920-after.png`): The dialog's description line under the title and the privacy line under Save this pairing are back.
+- Provider question, light, 1440×920 (`fix-question-card-light-1440x920-before.png`, `fix-question-card-light-1440x920-after.png`): The provider's short question header, Presentation, shows above the question.
+- Plan steps in the work log, light, 1440×920 (`fix-worklog-plan-steps-light-1440x920-before.png`, `fix-worklog-plan-steps-light-1440x920-after.png`): The plan steps look the same; the change gives each step its status in words for screen readers.
+- Turn footer on hover, light, 1440×920 (`fix-footer-hover-light-1440x920-before.png`, `fix-footer-hover-light-1440x920-after.png`): A separator dot is back between the time and Worked 1m 36s.
+- Usage limit banner, light, 1440×920 (`fix-limit-banner-light-1440x920-before.png`, `fix-limit-banner-light-1440x920-after.png`): The banner keeps its text; Continue with another model is drawn slightly larger, at the composer's control size.
+- Browser panel while a page loads, light, 1440×920 (`fix-browser-loading-light-1440x920-before.png`, `fix-browser-loading-light-1440x920-after.png`): The address row shows the loading mark at the start of the field while the page loads.

@@ -139,7 +139,8 @@ describe("interface scale layer", () => {
 
 describe("terminal", () => {
   it("shows overlay and empty-state glyphs plain, without an accent tile", () => {
-    const tile = block(".palette-empty > svg:first-child,\n.sidebar-empty > svg:first-child,\n.terminal-overlay > svg:first-child");
+    const tile = block(".sidebar-empty > svg:first-child,\n.terminal-overlay > svg:first-child");
+    expect(css).not.toContain(".palette-empty > svg");
     expect(tile).toContain("color: var(--text-muted);");
     expect(tile).not.toContain("border");
     expect(tile).not.toContain("accent");

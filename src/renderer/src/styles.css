@@ -5468,7 +5468,6 @@ button.turn-agents-line:hover {
 .panel-empty p, .panel-loading { margin: 0; font-size: var(--text-sm); line-height: var(--leading-chrome); }
 .panel-empty > .secondary-button { margin-top: 4px; }
 
-.palette-empty > svg:first-child,
 .sidebar-empty > svg:first-child,
 .terminal-overlay > svg:first-child {
   color: var(--text-muted);

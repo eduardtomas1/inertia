@@ -141,8 +141,9 @@
 }
 
 .help-guide-results mark {
-  color: inherit;
-  background: transparent;
+  border-radius: 2px;
+  color: var(--text);
+  background: var(--fill);
   font-weight: 500;
 }
 

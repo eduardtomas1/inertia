@@ -142,6 +142,12 @@ describe("welcome and help guides", () => {
     expect(rule(welcome, ".welcome-guide-topics button[aria-selected=\"true\"]")).toContain("background: var(--fill-strong);");
   });
 
+  it("marks help search matches with a visible fill, not only a weight the title already has", () => {
+    const mark = rule(help, ".help-guide-results mark");
+    expect(mark).toContain("color: var(--text);");
+    expect(mark).toContain("background: var(--fill);");
+  });
+
   it("draws the compact split demo's sidebar rows as bars, since 12px labels cannot fit their rows", () => {
     expect(rule(welcome, ".welcome-demo.is-compact .d-side")).toContain("color: transparent;");
   });

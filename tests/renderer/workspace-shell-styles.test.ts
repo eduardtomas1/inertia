@@ -343,7 +343,7 @@ describe("detached chat window", () => {
     expect(dismiss).toContain("font-weight: 500;");
     const app = readSourceText("src/renderer/src/DetachedChatApp.tsx");
     expect(app).toContain("<Pin size={16} />");
-    expect(app).not.toContain("Review this request in the main window.");
+    expect(app).toContain("Review this request in the main window.");
     expect(readSourceText("src/renderer/src/components/DetachedConversationPlaceholder.tsx")).toContain("{windowOpen ? <PictureInPicture2 size={14} /> : <PanelTopOpen size={14} />}");
   });
 });

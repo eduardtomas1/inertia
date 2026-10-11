@@ -42,7 +42,6 @@ import { conversationContextMismatch } from "../../lib/newConversation";
 import { layoutStorage } from "../../utils/layoutStorage";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
-import { TooltipText } from "../TooltipText";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
 import {
@@ -430,15 +429,19 @@ export function ComposerToolbar({
           aria-label="Add context"
         >
           {selectedProvider?.agentThreadManagement && (
-            <TooltipText
-              className="composer-tools-status composer-action-control"
-              data-state={selectedProvider.agentThreadManagement.state}
+            <span
+              className={clsx(
+                "composer-pill composer-action-control",
+                selectedProvider.agentThreadManagement.state === "supported"
+                  ? "is-active"
+                  : undefined,
+              )}
               aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
-              tooltip={selectedProvider.agentThreadManagement.detail}
+              title={selectedProvider.agentThreadManagement.detail}
             >
               <MessagesSquare size={14} aria-hidden="true" />
               <span>Chat tools</span>
-            </TooltipText>
+            </span>
           )}
         {promptPresetsEnabled && (
           <Suspense fallback={null}>

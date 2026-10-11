@@ -106,4 +106,17 @@ describe("composer setting menus", () => {
     expect(within(mode).getByRole("menuitemradio", { name: /Plan/u })).toHaveTextContent("Inspect and propose steps first");
     expectCheckOnChosenRowOnly(mode);
   });
+
+  it("keeps the Chat tools pill as it was before the restyle", async () => {
+    const current = conversation("chat-tools");
+    render(<Composer {...composerProps(current, {
+      providers: [{ ...reasoningProvider, agentThreadManagement: { state: "supported", detail: "Agents can read other chats." } }],
+    })} />);
+    const more = screen.queryByRole("button", { name: /More tools/u });
+    if (more) fireEvent.click(more);
+    const pill = await screen.findByLabelText("Agent chat tools: supported");
+    expect(pill).toHaveClass("composer-pill", "composer-action-control", "is-active");
+    expect(pill).not.toHaveClass("composer-tools-status");
+    expect(pill).toHaveAttribute("title", "Agents can read other chats.");
+  });
 });

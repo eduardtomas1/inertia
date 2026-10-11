@@ -103,21 +103,6 @@
 .composer-shell .composer-more-tools[hidden] {
   display: none;
 }
-.composer-shell .composer-tools-status {
-  display: inline-flex;
-  min-height: var(--composer-control-height);
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
-@container (max-width: 560px) {
-  .composer-shell .composer-tools-status {
-    display: none;
-  }
-}
 .composer-shell .composer-tools-toggle {
   width: var(--composer-control-height);
   height: var(--composer-control-height);

@@ -75,7 +75,7 @@ describe("button primitives", () => {
   it("keeps hover and press feedback off disabled buttons and never lifts", () => {
     expect(css).toMatch(/:is\(\.secondary-button, \.subtle-button, \.text-button, \.icon-button\):hover:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--fill\);/u);
     expect(css).toMatch(/:is\(\.secondary-button, \.subtle-button, \.text-button, \.icon-button\):active:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--fill-strong\);/u);
-    expect(css).toMatch(/:is\(\.subtle-button, \.text-button, \.icon-button\):active:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*transform: scale\(0\.97\);/u);
+    expect(css).toMatch(/:is\(\.primary-button, \.secondary-button, \.subtle-button, \.text-button, \.icon-button\):active:not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*transform: scale\(0\.97\);/u);
     expect(css).toMatch(/\.primary-button:is\(:hover, :active\):not\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*background: var\(--accent-hover\);/u);
     expect(css).not.toMatch(/translateY\(-1px\)/u);
   });
@@ -188,8 +188,10 @@ describe("popover primitives", () => {
     for (const menuItem of [".conversation-menu button", ".header-menu-item", ".palette-group button", ".composer-command-list button", ".thread-submenu button"]) {
       expect(item?.list.split("|"), menuItem).toContain(menuItem);
     }
-    expect(whereRule(".project-menu button", ':is(:hover, .is-active, [data-active="true"], [aria-expanded="true"]):not(:disabled, [aria-disabled="true"])')?.body)
+    expect(whereRule(".project-menu button", ':is(:hover, .is-active, [aria-expanded="true"]):not(:disabled, [aria-disabled="true"])')?.body)
       .toBe("  background: var(--fill);");
+    expect(whereRule(".project-menu button", '[data-active="true"]:not(:disabled, [aria-disabled="true"])')?.body)
+      .toBe("  background: var(--fill-strong);");
     expect(whereRule(".project-menu button", ":focus-visible:not(:disabled, [aria-disabled=\"true\"])")?.body)
       .toBe("  outline: none;\n  background: var(--fill-strong);");
     expect(css).toMatch(/@media \(forced-colors: active\) \{\n  :where\(\n[^{]*\.project-menu button[^{]*\):focus-visible \{\n    outline: 2px solid Highlight;\n    outline-offset: -2px;\n  \}\n\}/u);

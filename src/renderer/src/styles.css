@@ -821,7 +821,7 @@ textarea {
   background: var(--fill-strong);
 }
 
-:is(.subtle-button, .text-button, .icon-button):active:not(:disabled, [aria-disabled="true"]) {
+:is(.primary-button, .secondary-button, .subtle-button, .text-button, .icon-button):active:not(:disabled, [aria-disabled="true"]) {
   transform: scale(0.97);
 }
 

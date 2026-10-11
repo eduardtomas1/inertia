@@ -79,7 +79,6 @@ describe("Minimal Workstream active pixel signal", () => {
     for (const selector of [
       '.agent-pixel-loader[data-animated="true"] > span',
       ".turn-reasoning-step.is-active::before",
-      '.subagent-status-mark[data-live="true"]::after',
       ".loading-mark",
       ".daily-work-skeleton i",
       '.send-button[data-motion-state="sending"] .composer-send-motion-icon',

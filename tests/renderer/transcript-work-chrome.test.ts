@@ -54,4 +54,17 @@ describe("transcript work log chrome", () => {
     expect(declarationsFor(rules, ".sent-attachment-thumbnail.is-document").get("color")).toBe("var(--text-muted)");
     expect(declarationsFor(rules, ".sent-attachment-copy strong").get("font-weight")).toBe("500");
   });
+
+  it("marks delegated work with plain status glyphs and text instead of tiles, spinners and badges", () => {
+    const mark = declarationsFor(rules, ".subagent-status-mark");
+    expect(mark.get("background")).toBe("transparent");
+    expect(mark.has("box-shadow")).toBe(false);
+    expect(mark.has("border-radius")).toBe(false);
+    expect(motion).not.toContain('.subagent-status-mark[data-live="true"]::after');
+    expect(declarationsFor(rules, ".goal-panel-subagent-state").has("background")).toBe(false);
+    expect(motion).not.toMatch(/subagent[^{}]*\{[^}]*--accent-strong/u);
+    const details = declarationsFor(rules, ".subagent-trace-details");
+    expect(details.has("background")).toBe(false);
+    expect(details.has("border-left")).toBe(false);
+  });
 });

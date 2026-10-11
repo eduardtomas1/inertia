@@ -3817,12 +3817,9 @@ button.turn-agents-line:hover {
   display: grid;
   min-width: 0;
   grid-column: 2 / -1;
-  gap: 5px;
-  margin: 4px 0 1px;
-  padding: 8px 9px;
-  border-left: 2px solid var(--line-strong);
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
-  background: var(--fill);
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
 }
 
 .subagent-trace-details > div {

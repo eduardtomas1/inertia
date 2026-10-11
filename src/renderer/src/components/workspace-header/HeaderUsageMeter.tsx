@@ -89,7 +89,6 @@ export function HeaderUsageMeter({
               </span>
             );
           })}
-          <small className="header-usage-popover-hint">Open Usage for details</small>
         </span>
       )}
     </span>

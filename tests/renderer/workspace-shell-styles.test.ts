@@ -273,3 +273,12 @@ describe("checkout branch control", () => {
     expect(readSourceText("src/renderer/src/components/CheckoutBranchControl.css")).not.toContain("opacity: 0.7");
   });
 });
+
+describe("header usage meter", () => {
+  it("hovers on --fill with a neutral bar and no trailing hint", () => {
+    expect(block(".header-usage-meter:hover")).toContain("background: var(--fill);");
+    expect(block(".header-usage-meter-bars > i > b")).not.toContain("accent");
+    expect(block(".header-usage-meter")).toContain("height: var(--control-height-small);");
+    expect(readSourceText("src/renderer/src/components/workspace-header/HeaderUsageMeter.tsx")).not.toContain("Open Usage for details");
+  });
+});

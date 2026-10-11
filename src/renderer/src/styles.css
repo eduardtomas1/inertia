@@ -1436,9 +1436,9 @@ button.header-breadcrumb-project:hover {
 
 .header-usage-meter {
   display: inline-flex;
-  height: 26px;
+  height: var(--control-height-small);
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 0 8px;
   border: 0;
   border-radius: var(--radius-xs);
@@ -1451,8 +1451,8 @@ button.header-breadcrumb-project:hover {
 }
 
 .header-usage-meter:hover {
-  color: var(--text-muted);
-  background: var(--fill-strong);
+  color: var(--text);
+  background: var(--fill);
 }
 
 .header-usage-meter.is-low {
@@ -1479,7 +1479,7 @@ button.header-breadcrumb-project:hover {
   inset: 0 auto 0 0;
   width: var(--meter-value, 0%);
   border-radius: inherit;
-  background: var(--accent);
+  background: var(--text-muted);
 }
 
 .header-usage-meter-bars > i[data-low] > b {
@@ -1494,7 +1494,7 @@ button.header-breadcrumb-project:hover {
   display: grid;
   width: 240px;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px;
   color: var(--text-muted);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;

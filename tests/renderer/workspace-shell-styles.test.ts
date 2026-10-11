@@ -190,7 +190,8 @@ describe("goal panel", () => {
     expect(block(".goal-panel-section-heading h3")).toContain("font-weight: 500;");
     expect(css).not.toContain(".goal-panel-toolbar .panel-heading > svg");
     expect(css).not.toContain(".goal-panel-subagent-dot");
-    expect(motion).not.toMatch(/\.goal-panel-subagent[^{]*\{[^}]*(accent|background: var\(--fill\))/u);
+    expect(motion).not.toMatch(/\.goal-panel-subagent[^{]*\{[^}]*accent/u);
+    expect(motion).not.toMatch(/\.goal-panel-subagent-state \{[^}]*background/u);
     expect(motion).not.toMatch(/\.goal-panel-subagents > li \{[^}]*border/u);
   });
 });

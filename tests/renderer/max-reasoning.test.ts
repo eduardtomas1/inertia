@@ -26,4 +26,9 @@ describe("maximum reasoning frame", () => {
     expect(isMaximumReasoning(model(["low", "medium"]), "medium")).toBe(false);
     expect(isMaximumReasoning(model(["minimal", "low"]), "low")).toBe(false);
   });
+  it("does not treat a model's only reasoning level as a chosen maximum", () => {
+    expect(isMaximumReasoning(model(["medium"], "medium"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["medium"], "medium"), "medium")).toBe(false);
+    expect(isMaximumReasoning(model(["medium", "creative"], "medium"), null)).toBe(false);
+  });
 });

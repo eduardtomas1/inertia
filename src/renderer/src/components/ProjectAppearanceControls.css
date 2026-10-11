@@ -1,4 +1,4 @@
-.project-color-picker { display: grid; gap: 9px; min-width: 0; }
+.project-color-picker { display: grid; gap: 8px; min-width: 0; }
 .project-swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .project-swatches > .project-swatch {
   --project-tint: var(--project-tint-light);
@@ -14,7 +14,7 @@
   border-radius: 50%;
   background: transparent;
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease, ease);
+  transition: box-shadow var(--dur-fast) var(--ease);
 }
 :root[data-theme="dark"] .project-swatches > .project-swatch { --project-tint: var(--project-tint-dark); }
 .project-swatch-fill {
@@ -33,10 +33,10 @@
   background: linear-gradient(135deg, transparent calc(50% - 0.75px), var(--text-muted) calc(50% - 0.75px), var(--text-muted) calc(50% + 0.75px), transparent calc(50% + 0.75px));
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
-.project-swatch[aria-checked="true"] { box-shadow: 0 0 0 1.5px var(--text); }
-.project-swatch:hover:not(:disabled, [aria-disabled="true"]) { transform: scale(1.08); }
+.project-swatch:hover:not(:disabled, [aria-disabled="true"]) { box-shadow: 0 0 0 2px var(--line); }
+.project-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--line-strong); }
 
-.project-swatch:disabled { cursor: default; opacity: .5; }
+.project-swatch:disabled { cursor: default; opacity: var(--disabled-opacity); }
 .project-swatches > .project-swatch[aria-disabled="true"],
 .project-emphasis-picker > .project-emphasis-option[aria-disabled="true"],
 .project-color-custom [aria-disabled="true"] { cursor: default; opacity: var(--disabled-opacity); }
@@ -45,12 +45,12 @@
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
+  width: var(--control-height-small);
+  height: var(--control-height-small);
+  flex: 0 0 var(--control-height-small);
   border-radius: var(--radius-xs);
-  border: 1px solid var(--line-strong);
-  background: var(--fill);
+  border: 1px solid var(--line);
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
@@ -70,8 +70,8 @@
 .project-color-hex.project-color-hex {
   width: 92px;
   min-width: 0;
-  min-height: 26px;
-  padding: 3px 8px;
+  min-height: var(--control-height-small);
+  padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   background: var(--fill);
@@ -85,15 +85,12 @@
 .project-color-error { flex-basis: 100%; color: var(--danger); font-size: var(--text-sm); }
 .project-emphasis-picker {
   display: inline-flex;
-  padding: 2px;
+  flex-wrap: wrap;
   gap: 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--fill);
 }
 .project-emphasis-picker > .project-emphasis-option {
-  min-height: 24px;
-  padding: 3px 10px;
+  min-height: var(--control-height-small);
+  padding: 0 10px;
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
@@ -102,11 +99,11 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.project-emphasis-picker > .project-emphasis-option:hover:not(:disabled, [aria-disabled="true"]) { color: var(--text); }
+.project-emphasis-picker > .project-emphasis-option:hover:not(:disabled, [aria-disabled="true"]) { background: var(--fill); color: var(--text); }
 .project-emphasis-picker > .project-emphasis-option[aria-checked="true"] {
-  background: var(--surface-raised);
+  background: var(--fill-strong);
   color: var(--text);
-  box-shadow: none;
+  font-weight: 500;
 }
 
 .project-icon-choices { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -118,17 +115,16 @@
   height: 28px;
   min-height: 28px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
   cursor: pointer;
 }
 .project-icon-choices > .project-icon-choice:hover:not(:disabled) { background: var(--fill); }
-.project-icon-choices > .project-icon-choice[aria-checked="true"] { border-color: var(--line-strong); background: var(--fill); }
+.project-icon-choices > .project-icon-choice[aria-checked="true"] { background: var(--fill-strong); }
 
 @media (prefers-reduced-motion: reduce) {
   .project-swatches > .project-swatch { transition: none; }
-  .project-swatch:hover:not(:disabled, [aria-disabled="true"]) { transform: none; }
 }
 @media (forced-colors: active) {
   .project-swatch-fill { forced-color-adjust: none; box-shadow: inset 0 0 0 1px CanvasText; }

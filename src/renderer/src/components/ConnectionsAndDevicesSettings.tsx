@@ -143,7 +143,7 @@ export function ConnectionsAndDevicesSettings({
             <SettingActionRow
               className="runtime-log-setting"
               title="Open on another device"
-              description={ready.externalUrl ?? "Turn on Private Connect to create a private link."}
+              description={ready.externalUrl ?? undefined}
               actions={(
                 <button
                   type="button"
@@ -285,7 +285,6 @@ export function ConnectionsAndDevicesSettings({
             />
           ))}
           <SettingDisclosure summary="Security activity" className="private-connect-disclosure">
-            <p className="private-connect-note">Recent local authority events. Prompt text and private content are never recorded.</p>
             {(ready.audit ?? []).length === 0 ? (
               <p className="private-connect-note">No security activity yet.</p>
             ) : (

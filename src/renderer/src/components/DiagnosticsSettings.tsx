@@ -187,7 +187,7 @@ export function DiagnosticsSettings(props: Props): React.JSX.Element {
     : filters.search || filters.subsystem || filters.after || filters.severity !== "all" ? "No events match these filters." : "No events recorded.";
 
   return <div className="diagnostics">
-    <SettingsGroup title="Diagnostics" headingId="diagnostics-heading" description="Events and failures recorded on this device." className="diagnostics-overview">
+    <SettingsGroup title="Diagnostics" headingId="diagnostics-heading" className="diagnostics-overview">
       <SettingSwitch id="diagnostics-capture" title="Capture diagnostics" description={!capture
         ? readFailed ? "The capture setting could not be read." : "Reading…"
         : capture.enabled ? "Events are kept for 7 days."

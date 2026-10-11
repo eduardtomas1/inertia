@@ -72,7 +72,7 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       id="attachment-storage"
       className="runtime-log-setting"
       title="Attachment storage"
-      description="Original images and documents kept on this device. Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Each message takes up to 100 files, 50 MiB each."
+      description="Unsent attachments use a separate temporary disk budget of 16 GiB and 1,024 files. Each message takes up to 100 files, 50 MiB each."
       details={<>
         <small role="status" className="data-facts">{storage?.state === "ready"
           ? `${formatBytes(storage.bytes!)} used · ${storage.records!.toLocaleString(INTERFACE_LOCALE)} of ${storage.maxRecords.toLocaleString(INTERFACE_LOCALE)} files · ${storage.availableDiskBytes === null ? "free disk space unavailable" : `${formatBytes(storage.availableDiskBytes)} free`}`
@@ -114,7 +114,6 @@ export function AttachmentStorageSettings({ settings, disabled, request, onUpdat
       id="attachment-remove-oldest"
       className="runtime-log-setting"
       title="Remove oldest files"
-      description="Deleting a chat also releases its unshared files."
       notice={cleanupAction.notice}
       actions={<button type="button" className="secondary-button" disabled={blocked || storage?.state !== "ready" || !storage.removableRecords} onClick={(event) => { triggerRef.current = event.currentTarget; setConfirm("cleanup"); }}>Remove oldest files{storage?.removableRecords ? ` (${storage.removableRecords} · ${formatBytes(storage.removableBytes)})` : ""}</button>}
     />

@@ -21,7 +21,7 @@ export function HelpJumpButtons({
   return (
     <div className="help-guide-jumps">
       {jumps.map((target) => (
-        <button key={target.label} type="button" onClick={() => onJump(target)}>
+        <button key={target.label} type="button" className="secondary-button" onClick={() => onJump(target)}>
           {target.label}
           <ArrowRight size={14} aria-hidden="true" />
         </button>

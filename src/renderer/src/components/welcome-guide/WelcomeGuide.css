@@ -21,26 +21,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px var(--welcome-inset) 0;
 }
 
-.welcome-guide-count {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-
 .welcome-guide-skip {
-  padding: 4px 8px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  background: transparent;
-  font-size: var(--text-sm);
-}
-
-.welcome-guide-skip:hover {
-  color: var(--text);
+  margin-left: auto;
 }
 
 .welcome-guide-step {
@@ -51,6 +37,10 @@
   padding: 10px var(--welcome-inset) 18px;
   overflow: auto;
   animation: welcome-step-in var(--dur) var(--ease) both;
+}
+
+.welcome-guide-step:is([data-step="welcome"], [data-step="start"]) {
+  justify-content: center;
 }
 
 .welcome-guide-body {
@@ -71,6 +61,7 @@
 .welcome-guide h2 {
   margin: 0;
   font-size: var(--text-xl);
+  font-weight: 600;
   letter-spacing: var(--tracking-heading);
   text-wrap: balance;
 }
@@ -88,7 +79,6 @@
   text-align: center;
 }
 
-.welcome-guide-hero p,
 .welcome-guide-lede {
   max-width: 50ch;
   margin: 0;
@@ -103,18 +93,7 @@
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   box-shadow: none;
-  animation: welcome-pop var(--dur-slow) var(--ease) both;
-}
-
-.welcome-guide-check {
-  display: grid;
-  width: 46px;
-  height: 46px;
-  place-items: center;
-  border-radius: 50%;
-  animation: welcome-pop var(--dur-slow) var(--ease) both;
-  color: var(--status-completed);
-  background: var(--fill);
+  animation: welcome-pop var(--dur-slow) var(--ease-fade) both;
 }
 
 .welcome-guide-tiles,
@@ -133,23 +112,18 @@
 .welcome-guide-tiles li {
   display: grid;
   align-content: start;
-  gap: 5px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  animation: welcome-rise var(--dur-slow) var(--ease) both;
+  gap: 8px;
+  animation: welcome-rise var(--dur-slow) var(--ease-fade) both;
   animation-delay: calc(var(--i, 0) * var(--stagger) + var(--dur-slow));
 }
 
 .welcome-guide-tiles strong,
 .welcome-guide-agents strong {
   font-size: var(--text-sm);
+  font-weight: 500;
 }
 
-.welcome-guide-tiles small,
-.welcome-guide-agents small,
-.welcome-guide-project small {
+.welcome-guide-agents small {
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-chrome);
@@ -169,22 +143,27 @@
 }
 
 .welcome-guide-topics button {
-  padding: 8px 10px;
+  min-height: var(--control-height);
+  padding: 0 10px;
   border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
   font-size: var(--text-sm);
-  font-weight: 500;
   text-align: left;
-  animation: welcome-rise var(--dur-slow) var(--ease) both;
+  animation: welcome-rise var(--dur-slow) var(--ease-fade) both;
   animation-delay: calc(var(--i, 0) * var(--stagger));
+}
+
+.welcome-guide-topics button:hover {
+  color: var(--text);
+  background: var(--fill);
 }
 
 .welcome-guide-topics button[aria-selected="true"] {
   color: var(--text);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--fill-strong);
+  font-weight: 500;
 }
 
 .welcome-guide-topic {
@@ -200,7 +179,8 @@
 
 .welcome-guide-topic h3 {
   margin: 0;
-  font-size: var(--text-base);
+  font-size: var(--text-md);
+  font-weight: 600;
 }
 
 .welcome-guide-topic p {
@@ -212,8 +192,6 @@
 
 .welcome-guide-agents {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
 }
 
 .welcome-guide-agents li {
@@ -221,17 +199,19 @@
   align-items: center;
   grid-template-columns: auto minmax(0, 1fr) auto;
   column-gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  animation: welcome-rise var(--dur-slow) var(--ease) both;
+  padding: 8px 0;
+  animation: welcome-rise var(--dur-slow) var(--ease-fade) both;
   animation-delay: calc(var(--i, 0) * var(--stagger));
 }
 
-.welcome-guide-agents .provider-brand-icon,
+.welcome-guide-agents .provider-brand-icon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
 .welcome-guide-agents button {
-  grid-row: span 2;
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 
 .welcome-guide-agents strong,
@@ -244,13 +224,8 @@
   font-weight: 500;
 }
 
-.welcome-guide-agents button {
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  color: var(--text);
-  background: transparent;
-  font-size: var(--text-sm);
+.welcome-guide-agents li + li {
+  border-top: 1px solid var(--line-soft);
 }
 
 .welcome-guide-note {
@@ -261,24 +236,7 @@
 }
 
 .welcome-guide-project {
-  display: grid;
-  width: min(420px, 100%);
-  align-items: center;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 12px;
-  margin: 4px auto 0;
-  padding: 14px 16px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--fill);
-  text-align: left;
-  animation: welcome-rise var(--dur-slow) var(--ease) var(--dur-fast) both;
-}
-
-.welcome-guide-project span {
-  display: grid;
-  gap: 2px;
+  align-self: center;
 }
 
 .welcome-guide-footer {
@@ -287,7 +245,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px var(--welcome-inset) 18px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .welcome-guide-dots {
@@ -300,8 +258,7 @@
   height: 6px;
   border-radius: 50%;
   background: var(--line-strong);
-  transition:
-    width var(--dur) var(--ease), background var(--dur) var(--ease);
+  transition: background var(--dur) var(--ease);
 }
 
 .welcome-guide-dots i[data-state="done"] {
@@ -309,8 +266,7 @@
 }
 
 .welcome-guide-dots i[data-state="current"] {
-  width: 20px;
-  background: var(--accent);
+  background: var(--text);
 }
 
 .welcome-guide-actions {
@@ -318,41 +274,13 @@
   gap: 8px;
 }
 
-.welcome-guide-back,
-.welcome-guide-primary {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
-.welcome-guide-back {
-  border: 1px solid var(--line);
-  color: var(--text);
-  background: transparent;
-}
-
-.welcome-guide-primary {
-  border: 0;
-  color: var(--accent-text);
-  background: var(--accent);
-}
-
 .welcome-demo {
   position: relative;
   height: 196px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  background: linear-gradient(
-    160deg,
-    var(--surface),
-    color-mix(in srgb, var(--accent-soft) 55%, var(--surface))
-  );
+  background: var(--surface);
   font-size: var(--text-xs);
 }
 
@@ -1069,6 +997,10 @@
   font-size: var(--text-xs);
 }
 
+.welcome-demo.is-compact .d-side {
+  color: transparent;
+}
+
 .welcome-demo.is-compact .d-pane > i:nth-of-type(3) {
   display: none;
 }
@@ -1133,7 +1065,7 @@
 }
 
 @keyframes welcome-step-in {
-  from { opacity: 0.35; transform: translateX(calc(var(--welcome-direction, 1) * 14px)); }
+  from { opacity: 0; }
 }
 
 @keyframes welcome-step-out {
@@ -1141,12 +1073,11 @@
 }
 
 @keyframes welcome-rise {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; }
 }
 
 @keyframes welcome-pop {
-  0% { opacity: 0; transform: scale(0.7); }
-  70% { opacity: 1; transform: scale(1.06); }
+  from { opacity: 0; }
 }
 
 @keyframes d-enter {
@@ -1414,11 +1345,9 @@
   .welcome-guide,
   .welcome-guide-step,
   .welcome-guide-logo,
-  .welcome-guide-check,
   .welcome-guide-tiles li,
   .welcome-guide-topics button,
   .welcome-guide-agents li,
-  .welcome-guide-project,
   .welcome-demo *,
   .welcome-demo *::after {
     animation: none !important;

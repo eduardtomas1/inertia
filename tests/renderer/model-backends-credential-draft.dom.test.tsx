@@ -177,7 +177,7 @@ describe("backend credential draft identity", () => {
       }
       expect(change).toHaveBeenCalledOnce();
       const rail = screen.getByRole("complementary", { name: "Backend profiles" });
-      const profileBButton = within(rail).getByTitle("Claude harness · Profile B");
+      const profileBButton = within(rail).getByRole("button", { description: "Claude harness · Profile B" });
       await user.click(profileBButton);
       await waitFor(() => expect(container.querySelector(".backend-profile-facts"))
         .toHaveTextContent("custom-b.example.test"));
@@ -204,7 +204,7 @@ describe("backend credential draft identity", () => {
       [profileA, profileB], async (id) => details.get(id)!, vi.fn(),
     )} onProbe={onProbe} />);
     await user.click(await screen.findByRole("button", { name: "Test connection" }));
-    await user.click(screen.getByTitle("Claude harness · Profile B"));
+    await user.click(screen.getByRole("button", { description: "Claude harness · Profile B" }));
 
     await act(async () => { reject(new Error("Profile A endpoint is unavailable")); });
 
@@ -233,7 +233,7 @@ describe("backend credential draft identity", () => {
     await act(async () => { finish(created); await pending; });
 
     const rail = screen.getByRole("complementary", { name: "Backend profiles" });
-    expect(within(rail).getByTitle("Claude harness · Profile A"))
+    expect(within(rail).getByRole("button", { description: "Claude harness · Profile A" }))
       .toHaveAttribute("aria-current", "true");
     expect(credentialInput(container)).toHaveValue("profile-a-draft");
   });
@@ -262,7 +262,7 @@ describe("backend credential draft identity", () => {
     )).not.toBeNull());
 
     await user.type(credentialInput(container), "profile-a-secret");
-    await user.click(screen.getByTitle("Claude harness · Profile B"));
+    await user.click(screen.getByRole("button", { description: "Claude harness · Profile B" }));
 
     await waitFor(() => {
       expect(credentialInput(container)).toHaveValue("");
@@ -362,12 +362,8 @@ describe("backend credential draft identity", () => {
     const profileRail = screen.getByRole("complementary", {
       name: "Backend profiles",
     });
-    const profileAButton = within(profileRail).getByTitle(
-      "Claude harness · Profile A",
-    );
-    const profileBButton = within(profileRail).getByTitle(
-      "Claude harness · Profile B",
-    );
+    const profileAButton = within(profileRail).getByRole("button", { description: "Claude harness · Profile A" });
+    const profileBButton = within(profileRail).getByRole("button", { description: "Claude harness · Profile B" });
     await user.click(profileBButton);
     await waitFor(() => {
       expect(profileBButton).toHaveAttribute("aria-current", "true");

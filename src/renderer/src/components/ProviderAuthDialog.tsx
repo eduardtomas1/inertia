@@ -6,7 +6,6 @@ import {
   CircleCheck,
   Copy,
   ExternalLink,
-  Plug,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -477,13 +476,12 @@ export function ProviderAuthDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="provider-auth-title"
-        aria-describedby="provider-auth-description"
+        aria-describedby={isAntigravity ? "provider-auth-description" : undefined}
       >
         <header className="provider-auth-header">
-          <span className="provider-auth-mark"><Plug size={16} /></span>
-          <span><h2 id="provider-auth-title">Connect {provider.label}</h2><p id="provider-auth-description">{isAntigravity
-            ? "Sign in with Antigravity's own prompt below. Inertia only shows this terminal and doesn't read or store your sign-in. Close this window once Antigravity is ready."
-            : "Finish the official provider sign-in below or in the browser it opens."}</p></span>
+          <span><h2 id="provider-auth-title">Connect {provider.label}</h2>{isAntigravity && <p id="provider-auth-description">
+            Sign in with Antigravity&apos;s own prompt below. Inertia only shows this terminal and doesn&apos;t read or store your sign-in. Close this window once Antigravity is ready.
+          </p>}</span>
           <IconButton label="Close connection window" onClick={closeDialog}><X size={16} /></IconButton>
         </header>
         <div
@@ -508,13 +506,9 @@ export function ProviderAuthDialog({
                   : browserState === "opened"
                     ? "Sign-in page opened in your browser"
                     : "The default browser did not open"}</strong>
-                <small>{copyState === "copied"
+                {copyState !== "idle" && <small>{copyState === "copied"
                   ? "Secure sign-in link copied."
-                  : copyState === "failed"
-                    ? "The secure link could not be copied."
-                    : browserState === "failed"
-                      ? "Retry, or copy the one-time link and open it yourself."
-                      : `Return here after you finish with ${provider.label}.`}</small>
+                  : "The secure link could not be copied."}</small>}
               </span>
             </span>
             <span className="provider-auth-browser-actions">
@@ -525,7 +519,7 @@ export function ProviderAuthDialog({
         ) : null}
         <footer className="provider-auth-footer">
           <span className={`provider-auth-state is-${sessionState}`}>
-            {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !isAntigravity ? <CircleCheck size={14} /> : <Plug size={14} />}
+            {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !isAntigravity ? <CircleCheck size={14} /> : sessionState === "error" ? <TriangleAlert size={14} /> : null}
             <span
               aria-live={sessionState === "error" ? "assertive" : "polite"}
               aria-atomic="true"

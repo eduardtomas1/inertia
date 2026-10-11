@@ -37,7 +37,6 @@ export function AppearanceSettings({
         <SettingSwitch
           id="muted-custom-colours"
           title="Muted colours"
-          description="Softens custom colours for a quieter workbench."
           checked={Boolean(settings.mutedCustomColors)}
           disabled={disabled}
           inactive={!settings.lightCustomColor && !settings.darkCustomColor}
@@ -48,7 +47,6 @@ export function AppearanceSettings({
         <SettingRadioGroup
           id="interface-scale"
           title="Interface scale"
-          description="Scales navigation, messages, controls, files and diffs. Terminal text stays independent."
           value={settings.interfaceScale}
           options={INTERFACE_SCALES}
           disabled={disabled}
@@ -57,7 +55,6 @@ export function AppearanceSettings({
         <SettingRadioGroup
           id="response-density"
           title="Text density"
-          description="Spacing and type size of agent responses."
           value={settings.responseDensity}
           options={RESPONSE_DENSITIES}
           disabled={disabled}

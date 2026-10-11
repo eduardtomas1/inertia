@@ -3,12 +3,7 @@
 }
 
 .attachment-storage-setting > .setting-row {
-  margin-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.attachment-storage-setting > .setting-row + .setting-row {
-  margin-top: 0;
+  border-top: 1px solid var(--line-soft);
 }
 
 .attachment-storage-confirm,
@@ -16,7 +11,7 @@
   display: grid;
   gap: 6px;
   margin-top: 10px;
-  padding: 11px 12px;
+  padding: 12px;
   border-radius: var(--radius-sm);
   background: var(--fill);
 }
@@ -72,7 +67,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .archive-row .setting-copy strong {
@@ -90,7 +85,7 @@
   justify-content: space-between;
   gap: 8px 12px;
   padding-top: 8px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .archived-chats-footer small {

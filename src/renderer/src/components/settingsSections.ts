@@ -147,7 +147,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   defineSection({
     ...settingsSectionRows("agents"),
     icon: Plug,
-    contentClassName: "is-providers",
     load: sectionAfter(AgentsSettings, () => Promise.all([loadModelBackendsSettings(), loadLifecycleIntegritySettings()])),
     prefetch: [],
     select: (context) => ({

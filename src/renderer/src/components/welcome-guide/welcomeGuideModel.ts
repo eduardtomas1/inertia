@@ -51,11 +51,10 @@ export const WELCOME_TOPICS: ReadonlyArray<{
 export const WELCOME_TILES: ReadonlyArray<{
   demo: WelcomeTopicId;
   title: string;
-  detail: string;
 }> = [
-  { demo: "work", title: "Follow every agent", detail: "Live progress for each running chat." },
-  { demo: "split", title: "Work side by side", detail: "Drag a chat onto the workspace to split it." },
-  { demo: "ship", title: "Review, then ship", detail: "Mark hunks, commit and open a pull request." },
+  { demo: "work", title: "Follow every agent" },
+  { demo: "split", title: "Work side by side" },
+  { demo: "ship", title: "Review, then ship" },
 ];
 
 export function topicDetail(

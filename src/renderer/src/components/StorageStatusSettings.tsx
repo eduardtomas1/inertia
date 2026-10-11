@@ -63,7 +63,7 @@ export function StorageStatusSettings({
       description="Chats, settings and attachment records, without secrets or attachment files."
       details={<small className="data-facts">
         {backup?.lastValidatedAt
-          ? <>Last validated <time dateTime={backup.lastValidatedAt} title={backup.lastValidatedAt}>{new Date(backup.lastValidatedAt).toLocaleString(INTERFACE_LOCALE)}</time></>
+          ? <>Last validated <time dateTime={backup.lastValidatedAt}>{new Date(backup.lastValidatedAt).toLocaleString(INTERFACE_LOCALE)}</time></>
           : "No validated backup yet"}
         {` · Every ${DATABASE_BACKUP_INTERVAL_MS / 3_600_000} hour · ${DATABASE_BACKUP_MAX_COUNT} copies, ${formatBytes(DATABASE_BACKUP_MAX_TOTAL_BYTES)} in total`}
       </small>}

@@ -314,7 +314,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
         <button type="submit" className="primary-button" aria-disabled={unavailable}>{busy ? "Preparing…" : "Preview issue"}</button>
       </div>}
       {replacing && <div className="issue-report-confirm" role="group" aria-labelledby="issue-report-replace-heading" tabIndex={-1} ref={replaceRef}>
-        <h4 id="issue-report-replace-heading">Replace your edited preview?</h4>
+        <strong id="issue-report-replace-heading">Replace your edited preview?</strong>
         <p>Previewing again rebuilds the issue from the form and discards your edits to it. Keeping the edited preview drops your form changes.</p>
         <div className="issue-report-actions">
           <button type="button" className="secondary-button" onClick={keepPreview}>Keep edited preview</button>
@@ -346,7 +346,7 @@ export function IssueReportSettings({ providers, disabled, request }: IssueRepor
         {report.status === "submitted" && report.issueUrl && <button ref={issueRef} type="button" className="primary-button" onClick={() => { void window.inertia.openExternal(report.issueUrl!); }}><ExternalLink size={14} aria-hidden="true" />View issue</button>}
       </div>
       {retiring && report.status === "uncertain" && <div className="issue-report-confirm" role="group" aria-labelledby="issue-report-retire-heading" tabIndex={-1} ref={retireRef}>
-        <h4 id="issue-report-retire-heading">Retire uncertain publication?</h4>
+        <strong id="issue-report-retire-heading">Retire uncertain publication?</strong>
         <p>The issue may already exist on GitHub. Retiring stops checking it and blocks resubmission of this report.</p>
         <div className="issue-report-actions">
           <button type="button" className="secondary-button" onClick={() => { setRetiring(false); setFocusTarget("retire-trigger"); }}>Keep checking</button>

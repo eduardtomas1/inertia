@@ -4,6 +4,7 @@ import type { AppUpdateController } from "../../hooks/useAppUpdate";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
+import { IconButton } from "../ui";
 import { UpdateStatusIcon } from "./UpdateStatusIcon";
 import { UpdateRestartConfirmation } from "./UpdateRestartConfirmation";
 import "./SidebarUpdateControl.css";
@@ -178,8 +179,8 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
       onToggle={(event) => { if (event.newState === "closed") close(); }}>
       <header><div><strong>{presentation.label}</strong>
         {currentVersion && <small>{status?.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed {currentVersion}</small>}</div>
-        <button type="button" className="icon-button" aria-label="Close update details" onClick={() => close(true)}><X size={14} /></button></header>
-      <p className="update-detail-message">{controller.error ?? status?.message ?? "Check for a new version without leaving your work."}</p>
+        <IconButton label="Close update details" onClick={() => close(true)}><X size={16} /></IconButton></header>
+      {(controller.error ?? status?.message) && <p className="update-detail-message">{controller.error ?? status?.message}</p>}
       {status?.freshness === "cached" && <p className="update-detail-muted">Showing the last successful check. Release information may be out of date.</p>}
       {status?.state === "downloading" && <div className="update-detail-progress" role="progressbar" aria-label="Update download progress"
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? "Waiting for download progress" : `${percent}%`}>

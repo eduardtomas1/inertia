@@ -178,14 +178,14 @@ export function DailyProviderChart({
             }))}
             {series.map(({ provider, segments }) => segments.map((segment, index) => (
               segment.length === 1 ? (
-                <circle
-                  className="usage-chart-isolated-point"
-                  data-provider={provider.providerId}
-                  cx={segment[0]!.x}
-                  cy={segment[0]!.y}
-                  r="3"
-                  key={`${provider.key}:point:${index}`}
-                />
+                <g key={`${provider.key}:point:${index}`}>
+                  <path
+                    className="usage-chart-isolated-point"
+                    data-provider={provider.providerId}
+                    d={`M ${segment[0]!.x} ${segment[0]!.y} h 0`}
+                  />
+                  <path className="usage-chart-point-core" d={`M ${segment[0]!.x} ${segment[0]!.y} h 0`} />
+                </g>
               ) : (
                 <path
                   className="usage-chart-series"
@@ -196,14 +196,14 @@ export function DailyProviderChart({
               )
             )))}
             {series.map(({ provider, partialPoints }) => partialPoints.map((point, index) => (
-              <circle
-                className="usage-chart-partial-point"
-                data-provider={provider.providerId}
-                cx={point.x}
-                cy={point.y}
-                r="3.5"
-                key={`${provider.key}:partial:${index}`}
-              />
+              <g key={`${provider.key}:partial:${index}`}>
+                <path
+                  className="usage-chart-partial-point"
+                  data-provider={provider.providerId}
+                  d={`M ${point.x} ${point.y} h 0`}
+                />
+                <path className="usage-chart-point-core" d={`M ${point.x} ${point.y} h 0`} />
+              </g>
             )))}
             {activeIndex !== null && (
               <line
@@ -214,18 +214,18 @@ export function DailyProviderChart({
                 y2={baseline}
               />
             )}
+          </svg>
+          <div className="usage-chart-labels" aria-hidden="true">
             {labelIndexes.map((index) => (
-              <text
-                className="usage-chart-label"
-                x={index * step}
-                y={height - 2}
-                textAnchor={index === 0 ? "start" : index === dashboard.daily.length - 1 ? "end" : "middle"}
+              <span
+                data-anchor={index === 0 ? "start" : index === dashboard.daily.length - 1 ? "end" : "middle"}
+                style={{ left: `${index * step / width * 100}%` }}
                 key={dashboard.daily[index]!.date}
               >
                 {formatDate(dashboard.daily[index]!.date)}
-              </text>
+              </span>
             ))}
-          </svg>
+          </div>
           <div
             className="usage-chart-interactor"
             role="slider"
@@ -255,7 +255,7 @@ export function DailyProviderChart({
                 const metric = dailyProviderMetric(selectedDay, provider.providerId);
                 return (
                   <span key={provider.key}>
-                    <i><ProviderMark providerId={provider.providerId} size={11} />{provider.providerLabel}</i>
+                    <i><ProviderMark providerId={provider.providerId} size={14} />{provider.providerLabel}</i>
                     <b>{metric.value === null ? "Unavailable" : `${formatTokens(metric.value)}${metric.coverage === "partial" ? "*" : ""}`}</b>
                   </span>
                 );

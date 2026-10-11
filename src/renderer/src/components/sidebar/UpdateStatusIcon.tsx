@@ -14,7 +14,7 @@ export function UpdateStatusIcon({ state, percent, animate, onIteration }: {
   if (state === "downloaded") return <span className="update-status-icon" aria-hidden="true">
     <RotateCw size={16} />
   </span>;
-  if (state === "available") return <span className="update-status-icon" aria-hidden="true"><Download size={16} /><span className="update-available-dot" /></span>;
+  if (state === "available") return <span className="update-status-icon" aria-hidden="true"><Download size={16} /></span>;
   if (state === "attention") return <TriangleAlert size={16} aria-hidden="true" />;
   return <span aria-hidden="true" className={`update-status-icon${animate ? " is-checking" : ""}`} onAnimationIteration={onIteration}>
     <RefreshCw size={16} />

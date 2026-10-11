@@ -34,7 +34,6 @@ describe("Windows title bar overlay clearance", () => {
 
   it("keeps the recovery notice and every dialog below the caption buttons", () => {
     expect(css).toMatch(/:root\[data-platform="win32"\] \.database-recovery-notice \{\n  top: calc\(env\(titlebar-area-height, 48px\) \+ 8px\);/u);
-    expect(css).toMatch(/:root\[data-platform="win32"\] :is\(\.dialog-backdrop, \.multi-spawn-backdrop, \.daily-work-backdrop, \.attachment-preview-backdrop, \.snapshot-backdrop\) \{\n  padding-top: calc\(env\(titlebar-area-height, 48px\) \+ 8px\);/u);
-    expect(css).toMatch(/:root\[data-platform="win32"\] :is\(\.dialog-backdrop, \.attachment-preview-backdrop\) \{\n  grid-template-rows: minmax\(0, 1fr\);\n\}\n\n:root\[data-platform="win32"\] :is\(\.dialog-backdrop, \.attachment-preview-backdrop\) > \* \{\n  max-height: 100%;\n\}/u);
+    expect(css).toMatch(/:root\[data-platform="win32"\] \.dialog-backdrop \{\n  padding-top: calc\(env\(titlebar-area-height, 48px\) \+ 8px\);\n  grid-template-rows: minmax\(0, 1fr\);\n\}\n\n:root\[data-platform="win32"\] \.dialog-backdrop > \* \{\n  max-height: 100%;\n\}/u);
   });
 });

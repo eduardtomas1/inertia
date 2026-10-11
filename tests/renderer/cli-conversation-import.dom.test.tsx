@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readSourceText } from "../helpers/source-text";
 import { CliConversationImportDialog } from "../../src/renderer/src/components/CliConversationImportDialog";
 import type { ServerEvent } from "../../src/shared/contracts";
 import type { CliConversationCandidate } from "../../src/shared/cli-conversations";
@@ -45,8 +46,8 @@ describe("CLI import dialog", () => {
     const buttons = within(list).getAllByRole("listitem").map((item) => within(item).getByRole("button"));
     expect(buttons.map((button) => button.getAttribute("aria-label")?.split(",")[0])).toEqual(["Build the sidebar", "Review accessibility", "Older work"]);
     expect(buttons[0]).toHaveAccessibleName(/^Build the sidebar, Codex, .*2026/u);
-    expect(buttons[0]!.querySelectorAll(".provider-brand-icon")).toHaveLength(2);
-    expect(buttons[0]!.querySelector(".cli-import-card-watermark")).toHaveAttribute("data-provider-id", "codex");
+    expect(buttons[0]!.querySelectorAll(".provider-brand-icon")).toHaveLength(1);
+    expect(buttons[0]!.querySelector(".cli-import-card-meta .provider-brand-icon")).toHaveAttribute("data-provider-id", "codex");
     const miniature = buttons[0]!.querySelector(".cli-import-mini")!;
     expect(miniature).toHaveAttribute("aria-hidden", "true");
     expect(miniature.querySelector(".cli-import-mini-user")).toHaveTextContent(/^Sidebar request$/u);
@@ -171,6 +172,7 @@ describe("CLI import dialog", () => {
     expect(rescan).toHaveTextContent("");
     fireEvent.click(rescan);
     expect(rescan).toHaveClass("is-scanning");
+    expect(rescan.querySelector(".loading-mark")).not.toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(/^Looking for conversations…$/u);
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
     await act(async () => pendingScan.resolve(scanOf([])));
@@ -363,5 +365,12 @@ describe("CLI import dialog", () => {
     fireEvent.click(card(/Review accessibility/u));
     await screen.findByRole("group", { name: "Review accessibility" });
     expect(document.querySelector(".cli-import-continuation")).toHaveTextContent(/^Continues in a new session$/u);
+  });
+  it("draws the importer as flat tiles with fill hover, filled filters and opacity-only entrances", () => {
+    const css = readSourceText("src/renderer/src/components/CliConversationImportDialog.css");
+    expect(css).toMatch(/\.cli-import-card:hover:not\(\[aria-disabled="true"\]\) \{\n  background: var\(--fill\);\n\}/u);
+    expect(css).toMatch(/\.cli-import-filter button\[aria-pressed="true"\] \{[^}]*background: var\(--fill-strong\);[^}]*font-weight: 500;/u);
+    expect(css).not.toMatch(/translateY|cli-import-card-watermark|spin 750ms|opacity: 1;|linear-gradient/u);
+    expect(css).toMatch(/\.cli-import-message\.is-user \{[^}]*border-radius: var\(--radius-md\);/u);
   });
 });

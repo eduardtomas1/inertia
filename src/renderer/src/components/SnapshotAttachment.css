@@ -7,10 +7,10 @@
 .composer-attachment[data-snapshot] .composer-attachment-copy strong { color: var(--on-media); font-size: var(--text-sm); }
 .composer-attachment[data-snapshot] .composer-attachment-copy small { color: color-mix(in srgb, var(--on-media) 72%, transparent); font-size: var(--text-xs); }
 .composer-attachment[data-snapshot] .composer-attachment-remove { position: absolute; top: 4px; right: 4px; background: var(--surface-raised); color: var(--text); border-radius: var(--radius-xs); }
-.snapshot-preview-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: var(--text-sm); }
-.attachment-preview-dialog:has(.snapshot-preview-controls) { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.snapshot-preview-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 20px; border-bottom: 1px solid var(--line-soft); font-size: var(--text-sm); }
+.attachment-preview-body:has(.snapshot-preview-controls) { grid-template-rows: auto minmax(0, 1fr); }
 .snapshot-preview-controls span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.snapshot-preview-controls button { flex: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xs); padding: 5px 8px; }
+.snapshot-preview-controls .secondary-button { flex: none; min-height: var(--control-height-small); }
 .snapshot-accessibility-data { width: 100%; max-height: 100%; overflow: auto; margin: 0; padding: 20px; font-size: var(--text-sm); line-height: var(--leading-chrome); white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
 @keyframes snapshot-arrive { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .composer-attachment[data-snapshot] { animation: none; } }

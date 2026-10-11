@@ -1,3 +1,4 @@
+import { readSourceText } from "../helpers/source-text";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -128,6 +129,12 @@ describe("PreMergeConfidenceDialog", () => {
     expect(within(dialog).getByText(
       "Changed test files are scope evidence, not proof that they ran.",
     )).toBeInTheDocument();
+    expect(dialog.querySelectorAll(".pre-merge-section-heading > svg")).toHaveLength(0);
+    expect(within(dialog).getByText("Changed test files are scope evidence, not proof that they ran.").tagName).toBe("P");
+    const css = readSourceText("src/renderer/src/styles.css");
+    const source = /\n\.pre-merge-source \{(?<body>[^}]*)\}/u.exec(css)?.groups?.body ?? "";
+    expect(source).not.toMatch(/border|background|font-weight/u);
+    expect(css).not.toMatch(/\.pre-merge-[a-z-]+[^{]*\{[^}]*(?:--accent-strong|border: 1px dashed|text-transform: capitalize|background: var\(--surface\))/u);
     expect(run).toHaveBeenCalledWith("git.pr.confidence", {
       type: "git.pr.confidence",
       payload: {

@@ -116,9 +116,10 @@ describe("field primitives", () => {
   it("moves a bordered field from the line to the accent on focus with no glow or ring", () => {
     const fields = /^:is\(\n(?<fields>[\s\S]*?)\n\):focus,\n:is\(\n(?<wraps>[\s\S]*?)\n\):focus-within \{\n(?<body>[\s\S]*?)\n\}/mu.exec(css)?.groups;
     expect(fields?.body).toBe("  outline: none;\n  border-color: var(--accent);\n  box-shadow: none;");
-    for (const field of [".setting-input", ".setting-select", ".commit-dialog > label input", ".multi-spawn-prompt-zone textarea"]) {
+    for (const field of [".setting-input", ".setting-select", ".multi-spawn-field input", ".multi-spawn-prompt-zone textarea"]) {
       expect(fields?.fields).toContain(field);
     }
+    expect(readSourceText("src/renderer/src/components/DialogShell.css")).toMatch(/\.dialog-field :is\(input, select, textarea\):focus \{\n  outline: none;\n  border-color: var\(--accent\);\n\}/u);
     expect(fields?.wraps).toContain(".preview-address-form");
     expect(css).not.toMatch(/--shadow-focus|--focus-ring-soft/u);
     expect(css).toMatch(/^::placeholder \{\n  color: var\(--text-muted\);/mu);
@@ -133,7 +134,7 @@ describe("field primitives", () => {
 });
 
 describe("popover primitives", () => {
-  const surfaces = [".project-menu", ".conversation-menu", ".header-popover", ".composer-popover", ".command-palette", ".thread-submenu"];
+  const surfaces = [".project-menu", ".conversation-menu", ".header-popover", ".composer-popover", ".thread-submenu"];
   const allCss = [
     css,
     readSourceText("src/renderer/src/components/sidebar/thread-actions.css"),
@@ -167,6 +168,8 @@ describe("popover primitives", () => {
       expect(allCss, surface).not.toMatch(new RegExp(String.raw`(?:^|\n)[^{}\n]*${escaped} \{[^}]*(?:box-shadow|border-radius|background):`, "u"));
     }
     expect(css).toMatch(/@keyframes popover-in \{\n  from \{\n    opacity: 0;\n    transform: scale\(0\.98\);\n  \}\n\}/u);
+    expect(base?.list.split("|")).not.toContain(".command-palette");
+    expect(whereRule(".dialog-shell")?.list.split("|")).toContain(".command-palette");
     expect(allCss).not.toMatch(/composer-popover-in|workspace-popover-in|palette-panel-in var\(--dur-fast\) var\(--ease\) both;\n\}/u);
   });
 
@@ -217,39 +220,54 @@ describe("popover primitives", () => {
 });
 
 describe("dialog primitives", () => {
-  const dialogCss = [
-    css,
-    ...[
+  const componentDialogCss = [
+      "components/DialogShell.css",
       "components/AddProjectDialog.css",
       "components/CliConversationImportDialog.css",
       "components/MultiSpawnDialog.css",
       "components/DailyWorkDialog.css",
-      "components/welcome-guide/WelcomeGuide.css",
       "components/composer/SnapshotControl.css",
+      "components/composer/ReviewedScreenshotControl.css",
       "components/sidebar/SidebarUpdateControl.css",
       "components/response-timeline/HtmlRenderDialog.css",
-    ].map((path) => readSourceText(`src/renderer/src/${path}`)),
-  ].join("\n");
+      "components/UsageLimitsPanel.css",
+      "components/ReviewNoteDialog.css",
+      "components/SnapshotAttachment.css",
+    ].map((path) => readSourceText(`src/renderer/src/${path}`)).join("\n");
+  const dialogCss = `${css}\n${componentDialogCss}\n${readSourceText("src/renderer/src/components/welcome-guide/WelcomeGuide.css")}`;
+  const shellCss = readSourceText("src/renderer/src/components/DialogShell.css");
 
   it("gives every dialog one surface, radius, overlay shadow and title size, without icon tiles", () => {
     const base = /^:where\(\n(?<list>[^)]*)\n\) \{\n(?<body>[^}]*)\n\}/mu.exec(css.slice(css.indexOf("@keyframes dialog-surface-out")))?.groups;
     expect(base?.body).toBe([
       "  border: 1px solid var(--line-soft);",
-      "  border-radius: var(--radius-md);",
+      "  border-radius: var(--radius-lg);",
       "  color: var(--text);",
       "  background: var(--surface-raised);",
       "  box-shadow: var(--shadow-overlay);",
     ].join("\n"));
-    for (const dialog of [".commit-dialog", ".file-editor-dialog", ".pre-merge-dialog", ".provider-auth-dialog", ".add-project-dialog", ".multi-spawn-dialog", ".welcome-guide"]) {
+    for (const dialog of [".dialog-shell", ".command-palette", ".provider-auth-dialog", ".welcome-guide"]) {
       expect(base?.list, dialog).toContain(dialog);
     }
-    expect(css).toMatch(/\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
-    expect(dialogCss).not.toMatch(/\.dialog-icon|--scrim\b|--scrim-strong|backdrop-filter: blur\(5px\)|welcome-guide-open|palette-panel-in/u);
+    expect(css).toMatch(/:where\(\n  \.dialog-shell\n\) h2 \{\n  font-size: var\(--text-md\);\n  font-weight: 600;/u);
+    expect(css).not.toMatch(/\.commit-dialog/u);
+    expect(dialogCss).not.toMatch(/\.dialog-icon|--scrim\b|--scrim-strong|backdrop-filter: blur\(5px\)|welcome-guide-open|palette-panel-in|multi-spawn-dialog-mark|attachment-preview-close|limits-dialog-close|daily-work-refresh/u);
+    expect(dialogCss).not.toMatch(/(?:dialog|preview|review)[\w-]*\s*\{[^}]*border-radius: var\(--radius-(?:sm|md)\)[^}]*box-shadow: var\(--shadow-overlay\)/u);
+  });
+
+  it("closes every dialog from one title row and ends it with 32px footer buttons", () => {
+    expect(shellCss).toMatch(/\.dialog-shell-header \{[^}]*align-items: flex-start;[^}]*\}/u);
+    expect(shellCss).toMatch(/\.dialog-shell-heading > p \{[^}]*overflow-wrap: anywhere;/u);
+    expect(shellCss).toMatch(/\.dialog-shell-footer > :is\(\.primary-button, \.secondary-button\) \{\n  min-height: var\(--control-height\);/u);
+    expect(shellCss).toMatch(/\.dialog-shell \{\n  display: flex;\n  width: min\(var\(--dialog-width, 480px\), 100%\);/u);
+    expect(componentDialogCss).not.toMatch(/min-height: (?:30|34|37|39)px|height: (?:30|37|39)px/u);
   });
 
   it("dims the window behind dialogs with one backdrop token and no blur", () => {
     expect(css).toMatch(/--backdrop: rgb\(0 0 0 \/ 0\.48\);/u);
-    expect(css).toMatch(/\.attachment-preview-backdrop\n\),\n\.update-restart-dialog::backdrop \{\n  background: var\(--backdrop\);\n\}/u);
+    expect(css).toMatch(/:where\(\n  \.dialog-backdrop,\n  \.palette-backdrop\n\),\n\.update-restart-dialog::backdrop \{\n  background: var\(--backdrop\);\n\}/u);
+    expect(css).toMatch(/\.dialog-backdrop \{\n  position: fixed;\n  inset: 0;\n  z-index: 90;\n  display: grid;\n  place-items: center;\n  padding: 24px;\n\}/u);
+    expect(dialogCss).not.toMatch(/\.(?:snapshot|attachment-preview|multi-spawn|daily-work)-backdrop \{[^}]*(?:padding|place-items)/u);
   });
 
   it("opens with a fade and slight scale and closes the same way while DialogPresence holds it", () => {
@@ -257,6 +275,8 @@ describe("dialog primitives", () => {
     expect(css).toMatch(/@keyframes dialog-surface-out \{\n  to \{\n    opacity: 0;\n    transform: scale\(0\.98\);/u);
     expect(css).toMatch(/\.dialog-presence\.is-closing > \.dialog-backdrop > \* \{\n    animation: dialog-surface-out/u);
     expect(css).toMatch(/\.dialog-backdrop > \*,[\s\S]*?\{\n    animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
+    expect(css).toMatch(/  \.dialog-backdrop,\n  \.update-restart-dialog::backdrop \{\n    animation: dialog-veil-in/u);
+    expect(css).toMatch(/  \.dialog-backdrop > \*,\n  \.update-restart-dialog \{\n    animation: dialog-surface-in/u);
   });
 });
 
@@ -309,6 +329,9 @@ describe("toast primitives", () => {
       .toBe(root.getPropertyValue("--danger").trim());
     expect(css).toMatch(/^:where\(\.database-recovery-notice, \.error-toast, \.provider-quota-notice\) \{\n  border: 1px solid var\(--line-soft\);\n  border-radius: var\(--radius-sm\);\n  color: var\(--text\);\n  background: var\(--surface-raised\);\n  box-shadow: var\(--shadow-float\);/mu);
     expect(css).not.toMatch(/\.provider-quota-notice\.is-5 \{|\.database-recovery-notice\.is-critical \{/u);
+    expect(css).toMatch(/\.error-toast \{\n  display: flex;\n  min-height: 48px;/u);
+    expect(css).not.toMatch(/\.status-overlay-stack > \.error-toast|transform: translateY\(5px\)|grid-template-columns: 17px minmax\(0, 1fr\) 28px|grid-template-columns: 19px/u);
+    expect(css).toMatch(/\.renderer-startup-error > h1 \{[^}]*font-weight: 600;/u);
   });
 });
 

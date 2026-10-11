@@ -1,3 +1,4 @@
+import { readSourceText } from "../helpers/source-text";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +58,14 @@ describe("Limits overview", () => {
     const secondRow = within(codexRegion).getByRole("button", { name: /2 Codex account pro ready/ });
     expect([...secondRow.querySelectorAll(".limits-cell")].map((cell) => cell.getAttribute("data-tone"))).toEqual(["ok", "low"]);
     expect(claudeRegion.querySelector(".limits-strip-accounts")).toHaveAttribute("inert");
+  });
+
+  it("draws providers as plain rows with plain status text and no tiles, dots, hatching or spinners", () => {
+    const css = readSourceText("src/renderer/src/components/UsageLimitsPanel.css");
+    expect(css).toMatch(/\.limits-provider \{ overflow: hidden; border-top: 1px solid var\(--line-soft\); \}/u);
+    expect(css).not.toMatch(/limits-cell-label::before|repeating-linear-gradient|limits-spin|limits-shimmer|border-radius: 50%|translate: 0 8px|limits-dialog-close/u);
+    expect(css).toMatch(/\.usage-limits-panel \.limits-state \{ color: var\(--text-muted\); font-size: var\(--text-sm\); \}/u);
+    expect(css).toMatch(/\.limits-logo \{ display: grid; place-items: center; width: 16px; height: 16px; \}/u);
   });
 
   it("keeps the averages explanation behind the info control", async () => {

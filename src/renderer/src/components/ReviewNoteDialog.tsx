@@ -2,7 +2,8 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import "./ReviewNoteDialog.css";
 import { createPortal } from "react-dom";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
+import { captureModalFocus } from "../utils/modalFocus";
+import { DialogShell } from "./DialogShell";
 
 export interface ReviewNoteDraft {
   title: string;
@@ -42,28 +43,31 @@ export function ReviewNoteDialog({ draft, onClose }: {
     }
   };
   return createPortal(
-    <div className="dialog-backdrop">
-      <form className="commit-dialog review-note-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}
-        onSubmit={(event) => { event.preventDefault(); void save(); }}
-        onKeyDown={(event) => {
-          trapModalFocus(event, event.currentTarget);
-          if (event.key === "Escape") {
-            event.preventDefault(); event.stopPropagation();
-            if (!saving.current) onClose();
-          }
-        }}>
-        <h2 id={titleId}>{draft.title}</h2>
-        <label>Review note
-          <textarea ref={textarea} value={body} maxLength={8_000} rows={6}
-            disabled={busy} onChange={(event) => setBody(event.target.value)} />
-        </label>
-        {error && <p role="alert">The note could not be saved. Your text is still here; try again.</p>}
-        <footer>
-          <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary-button dialog-primary" disabled={busy || !body.trim()}>{busy ? "Saving…" : "Save note"}</button>
-        </footer>
-      </form>
-    </div>, document.body,
+    <DialogShell
+      className="review-note-dialog"
+      titleId={titleId}
+      title={draft.title}
+      closeLabel="Close review note"
+      closeDisabled={busy}
+      onClose={onClose}
+      onSubmit={(event) => { event.preventDefault(); void save(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault(); event.stopPropagation();
+          if (!saving.current) onClose();
+        }
+      }}
+      footer={<>
+        <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
+        <button type="submit" className="primary-button dialog-primary" disabled={busy || !body.trim()}>{busy ? "Saving…" : "Save note"}</button>
+      </>}
+    >
+      <label className="dialog-field">Review note
+        <textarea ref={textarea} value={body} maxLength={8_000} rows={6}
+          disabled={busy} onChange={(event) => setBody(event.target.value)} />
+      </label>
+      {error && <p className="dialog-error" role="alert">The note could not be saved. Your text is still here; try again.</p>}
+    </DialogShell>, document.body,
   );
 }
 

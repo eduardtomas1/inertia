@@ -31,8 +31,11 @@ test("shows the persisted remote device on the desktop transcript after startup"
     const origin = app.page.locator(".turn-user-request").getByText("Private Connect · 33333333", { exact: true });
     await expect(origin).toBeVisible();
     await expect(origin).not.toHaveAttribute("title");
-    await origin.hover();
-    await expect(app.page.locator(".tooltip")).toHaveText(`Private Connect device ${deviceId}`);
+    await expect(async () => {
+      await app.page.mouse.move(1, 1);
+      await origin.hover();
+      await expect(app.page.locator(".tooltip")).toHaveText(`Private Connect device ${deviceId}`, { timeout: 2_000 });
+    }).toPass();
     const screenshot = testInfo.outputPath("private-connect-message-origin.png");
     await app.page.locator(".turn-user-request").screenshot({ animations: "disabled", path: screenshot });
     await testInfo.attach("private-connect-message-origin", { path: screenshot, contentType: "image/png" });

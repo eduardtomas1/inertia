@@ -299,7 +299,7 @@ export function BackgroundTasksSurface({
           </div>
         )}
         {items.active.length === 0 && finishedCount === 0 && (
-          <p className="background-tasks-label">No background tasks.</p>
+          <p className="background-tasks-label">No background tasks</p>
         )}
         {items.active.length > 0 && (
           <div className="background-tasks-group">

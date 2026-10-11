@@ -63,7 +63,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
           </TooltipButton>)}
         </div>;
       })}
-      {visible.length === 0 && !loading && !error && <p className="git-branch-empty" role="status">{branches.length === 0 ? "No branches loaded." : "No matching branches."}</p>}
+      {visible.length === 0 && !loading && !error && <p className="git-branch-empty" role="status">{branches.length === 0 ? "No branches loaded" : "No matching branches"}</p>}
     </div>
     <form className="new-branch-form" onSubmit={(event) => {
       event.preventDefault();

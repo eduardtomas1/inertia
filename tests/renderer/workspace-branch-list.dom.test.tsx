@@ -66,7 +66,7 @@ describe("branch picker", () => {
     const onCreate = vi.fn();
     const { rerender } = render(<WorkspaceBranchList branches={branches} busy={false} onSwitch={vi.fn()} onCreate={onCreate} />);
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing" } });
-    expect(screen.getByText("No matching branches.")).toBeInTheDocument();
+    expect(screen.getByText("No matching branches")).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "New branch name" });
     fireEvent.change(input, { target: { value: "feature/new" } });
     fireEvent.submit(input.closest("form")!);

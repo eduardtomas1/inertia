@@ -911,7 +911,7 @@ export function FilesPanel({
             </div>
           ) : rows.length === 0 ? (
             <div className={`${PANEL_EMPTY_CLASS} compact`}>
-              <p>{searchActive ? "No matches." : "Empty project."}</p>
+              <p>{searchActive ? "No matches" : "Empty project"}</p>
             </div>
           ) : null}
           <FileTree

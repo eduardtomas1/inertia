@@ -104,7 +104,7 @@ test("new draft has a painted, clickable composer and can reference a chat", asy
     await expect(page.getByRole("heading", { name: "What should we build in Inertia?" })).toBeVisible();
     const panel = await ensureWorkspaceTools(page);
     await selectWorkspaceTool(panel, "Background tasks");
-    await expect(panel.getByText("No background tasks.", { exact: true })).toBeVisible();
+    await expect(panel.getByText("No background tasks", { exact: true })).toBeVisible();
     const savedEmpty = await page.screenshot({ animations: "disabled", scale: "css",
       path: testInfo.outputPath(`composer-agents-${theme}.png`) });
     await expectPaintedComposer(page, savedEmpty);

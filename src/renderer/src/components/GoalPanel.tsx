@@ -423,7 +423,7 @@ function PlanRelationship({
   if (!plan) {
     return (
       <div className="goal-panel-empty-row">
-        <span>No plan yet.</span>
+        <span>No plan yet</span>
       </div>
     );
   }
@@ -475,7 +475,7 @@ function SkillsSection({
         </p>
       ) : workflow.skills.length === 0 ? (
         <div className="goal-panel-empty-row">
-          <span>No enabled skills.</span>
+          <span>No enabled skills</span>
         </div>
       ) : (
         <ul className="goal-panel-skills">
@@ -574,7 +574,7 @@ export function SubagentsSection({
       </header>
       {rows.length === 0 ? (
         <div className="goal-panel-empty-row">
-          <span>No delegated work.</span>
+          <span>No delegated work</span>
         </div>
       ) : (
         <ol
@@ -855,7 +855,7 @@ export function GoalPanel({
             <>
               {primaryGoals.length === 0 ? (
                 <div className="goal-panel-empty-row">
-                  <span>No current goal.</span>
+                  <span>No current goal</span>
                 </div>
               ) : primaryGoals.map((goal) => (
                 <GoalCard

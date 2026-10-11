@@ -192,6 +192,13 @@ function renderPanel(props: Partial<GoalPanelProps> = {}): void {
 }
 
 describe("GoalPanel", () => {
+  it("writes empty lines without a closing full stop", () => {
+    renderPanel({ workflow: workflow({ goals: [], skills: [] }), plan: null, subagents: [] });
+    for (const line of ["No current goal", "No plan yet", "No enabled skills", "No delegated work"]) {
+      expect(screen.getByText(line)).toBeInTheDocument();
+    }
+  });
+
   it("renders authoritative goal progress and its current plan relationship", () => {
     renderPanel();
 

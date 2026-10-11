@@ -341,7 +341,7 @@ describe("Environment content in its workspace surfaces", () => {
   it("separates background tasks from the dedicated attachment browser", () => {
     render(<>{backgroundTasksSurface()}{attachmentsSurface()}</>);
     const tasks = screen.getByRole("region", { name: "Background tasks" });
-    expect(within(tasks).getByText("No background tasks.")).toBeVisible();
+    expect(within(tasks).getByText("No background tasks")).toBeVisible();
     expect(within(tasks).queryByRole("list", { name: "Chat attachments" })).toBeNull();
     const attachments = screen.getByRole("region", { name: "Attachments" });
     expect(within(attachments).getByText("reference.png")).toBeVisible();
@@ -386,7 +386,7 @@ describe("Environment content in its workspace surfaces", () => {
       />,
     );
     expect(screen.getByText("Stale")).toBeVisible();
-    expect(screen.getByText("No provider limits reported.")).toBeVisible();
+    expect(screen.getByText("No provider limits reported")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
     expect(onRefreshUsage).toHaveBeenCalledOnce();
 
@@ -421,7 +421,7 @@ describe("Environment content in its workspace surfaces", () => {
     expect(screen.queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
 
     view.rerender(<UsageSurface usage={null} onRefreshUsage={onRefreshUsage} />);
-    expect(screen.getByText("No provider route selected.")).toBeVisible();
+    expect(screen.getByText("No provider route selected")).toBeVisible();
   });
 
   it("moves local servers into Run with their status in text, not a dot", async () => {

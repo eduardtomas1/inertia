@@ -255,7 +255,7 @@ describe("UsageIndicator", () => {
     expect(html).toContain("Context window unavailable");
     expect(html).toContain("200K window · occupancy unavailable");
     expect(html).toContain("Processed in this session");
-    expect(html).toContain("Provider-reported session total");
+    expect(html).not.toContain("Provider-reported session total");
     expect(html).not.toContain("100% left");
 
     const invalidScope = render(
@@ -287,7 +287,7 @@ describe("UsageIndicator", () => {
     expect(reported).toContain("<dt>Cache write</dt><dd>200</dd>");
     expect(reported).toContain("<dt>Output</dt><dd>350</dd>");
     expect(reported).toContain("<dt>Reasoning</dt><dd>125</dd>");
-    expect(reported).toContain("cache counts are a breakdown of input where applicable");
+    expect(reported).not.toContain("cache counts are a breakdown of input where applicable");
     expect(reported).toContain("Automatic compaction enabled");
 
     const unavailable = render(
@@ -473,5 +473,14 @@ describe("UsageIndicator", () => {
     expect(html.match(/usage-quota-refresh-indicator/gu)).toHaveLength(1);
     expect(html).toMatch(/class="usage-popover-context"><span class="usage-context-ring is-current"/u);
     expect(html).toMatch(/<footer class="usage-popover-footer"><button type="button" class="usage-hide-button">/u);
+  });
+
+  it("keeps the usage popover on text tiers: no accent ring, blue quality, filled chips or 600 weights", () => {
+    const styles = readFileSync(new URL("../../src/renderer/src/styles.css", import.meta.url), "utf8");
+    const usage = styles.slice(styles.indexOf(".usage-context-ring-track,"), styles.indexOf(".usage-hide-button {"));
+    expect(usage).not.toMatch(/--accent\)|--blue|font-weight: 600/u);
+    expect(usage).not.toContain(".usage-limits-shortcut::after");
+    expect(usage).not.toMatch(/translateY\(4px\) scale/u);
+    expect(usage).not.toMatch(/\.usage-popover-breakdown > div \{[^}]*background/u);
   });
 });

@@ -1191,7 +1191,7 @@ describe("composer asynchronous ownership", () => {
 
     fireEvent.change(input, { target: { value: "Preset this Fast prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create a preset" }));
     fireEvent.click(screen.getByRole("checkbox", {
       name: /Limit to current model route/u,
     }));
@@ -2307,7 +2307,7 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Prompt presets, 1 saved",
     }));
-    fireEvent.click(await screen.findByTitle("Insert Lifecycle review"));
+    fireEvent.click(await screen.findByRole("button", { name: /^Lifecycle review/u }));
     await waitFor(() => expect(input).toHaveValue(preset.body));
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByText("kept.png")).toBeVisible();
@@ -2355,7 +2355,7 @@ describe("composer asynchronous ownership", () => {
     const dialog = await within(secondaryPane).findByRole("dialog", {
       name: "Prompt presets",
     });
-    fireEvent.click(within(dialog).getByTitle("Insert Lifecycle review"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Lifecycle review/u }));
 
     expect(primaryInput).toHaveValue("Primary draft");
     await waitFor(() => expect(secondaryInput).toHaveValue(

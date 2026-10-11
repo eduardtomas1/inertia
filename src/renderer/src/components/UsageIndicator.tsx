@@ -1,6 +1,6 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Clock, EyeOff, X } from "lucide-react";
+import { ChevronRight, Clock, EyeOff, X } from "lucide-react";
 
 import type {
   ProviderMetadataFieldState,
@@ -401,9 +401,6 @@ export function UsageIndicator({
                     </div>
                   ))}
                 </dl>
-                <p className="usage-popover-quality-detail">
-                  Provider-reported values; cache counts are a breakdown of input where applicable.
-                </p>
               </section>
             )}
 
@@ -414,7 +411,6 @@ export function UsageIndicator({
                 </div>
                 <div className="usage-popover-value">
                   <strong>{compactNumber(processed.value)}</strong>
-                  <span>Provider-reported {processed.scope} total</span>
                 </div>
               </section>
             )}
@@ -481,6 +477,7 @@ export function UsageIndicator({
                 onClick={() => { closePopover(false); limitsContext.open(triggerRef.current); }}
               >
                 All provider limits
+                <ChevronRight size={14} aria-hidden="true" />
               </button>
             )}
             <button

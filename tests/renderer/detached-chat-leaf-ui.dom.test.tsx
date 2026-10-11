@@ -167,11 +167,15 @@ describe("detached chat leaf controls", () => {
     }));
 
     expect(onOpenConversationInWindow).toHaveBeenCalledWith(conversation);
-    expect(screen.getByRole("menuitem", {
-      name: "Add this chat to split view",
-    })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Archive thread" })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
+    const split = screen.getByRole("menuitem", { name: "Add this chat to split view" });
+    expect(split).toHaveAttribute("aria-disabled", "true");
+    expect(split).not.toHaveAttribute("title");
+    expect(split).toHaveAccessibleDescription("This chat is already open in its own window.");
+    const archive = screen.getByRole("menuitem", { name: "Archive thread" });
+    expect(archive).toHaveAttribute("aria-disabled", "true");
+    expect(archive).toHaveAccessibleDescription("Return this chat to the main window before archiving it.");
+    fireEvent.click(archive);
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("keeps focusing a detached chat available from the header title menu at the window limit", async () => {

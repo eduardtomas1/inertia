@@ -16,7 +16,7 @@ function ThreadPreview({ conversation, project, anchor, onEnter, onLeave }: {
     const node = surface.current;
     if (!node) return;
     const rect = anchor.getBoundingClientRect();
-    node.style.left = `${Math.max(8, Math.min(rect.right + 8, window.innerWidth - node.offsetWidth - 8))}px`;
+    node.style.left = `${Math.max(8, Math.min(rect.right + 4, window.innerWidth - node.offsetWidth - 8))}px`;
     node.style.top = `${Math.max(8, Math.min(rect.top, window.innerHeight - node.offsetHeight - 8))}px`;
   }, [anchor]);
   return createPortal(<div ref={surface} role="tooltip" id={`thread-preview-${conversation.id}`}

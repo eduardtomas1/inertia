@@ -124,12 +124,11 @@ describe("field primitives", () => {
     expect(css).toMatch(/^::placeholder \{\n  color: var\(--text-muted\);/mu);
   });
 
-  it("keeps the composer outline, glass and shadow unchanged on focus", () => {
-    expect(composerCss).not.toMatch(/:focus-within[^{]*\.composer-surface/u);
-    expect(composerCss).toMatch(/\.composer-shell \.composer-box > \.composer-surface \{[^}]*border: 1px solid var\(--composer-outline\);[^}]*background: var\(--composer-glass\);/u);
-    expect(composerCss).toMatch(/\.composer-shell \.composer-box \{[^}]*box-shadow: var\(--composer-shadow\);/u);
+  it("keeps the composer flat and only strengthens its border on focus", () => {
+    expect(composerCss).toMatch(/\.composer-shell \.composer:focus-within > \.composer-surface \{\n  border-color: var\(--line\);\n\}/u);
+    expect(composerCss).toMatch(/\.composer-shell \.composer > \.composer-surface \{[^}]*background: var\(--surface-raised\);[^}]*box-shadow: var\(--shadow-float\);/u);
     expect(`${css}\n${composerCss}`).not.toMatch(/^\.composer(?:-shell \.composer)?:focus-within[^{,]*\{[^}]*(?:--focus-ring|--accent|gradient|box-shadow:(?! none))/mu);
-    expect(composerCss).toMatch(/\.composer-shell \.composer textarea \{[^}]*min-height: 70px;[^}]*max-height: 208px;/u);
+    expect(composerCss).toMatch(/\.composer-shell \.composer textarea \{[^}]*max-height: 200px;/u);
   });
 });
 

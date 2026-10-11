@@ -111,13 +111,12 @@ async function expectLayoutHolds(app: AppFixture, row: Locator): Promise<void> {
   const layout = await row.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const dock = element.closest(".composer")!.getBoundingClientRect();
-    const banner = element.closest(".composer-banners")!.getBoundingClientRect();
-    const frame = element.closest(".composer")!.querySelector(":scope > .composer-box")!.getBoundingClientRect();
+    const frame = element.parentElement!.querySelector(":scope > .composer-surface")!.getBoundingClientRect();
     const buttons = [...element.querySelectorAll("button")];
     return {
       inside: bounds.left >= dock.left - 0.5 && bounds.right <= dock.right + 0.5 && bounds.top >= dock.top,
-      attached: Math.abs(banner.bottom - frame.top) <= 1 && bounds.bottom <= banner.bottom,
-      narrower: banner.left > frame.left + 4 && banner.right < frame.right - 4,
+      attached: Math.abs(bounds.bottom - frame.top) <= 1,
+      narrower: bounds.left > frame.left + 4 && bounds.right < frame.right - 4,
       overflow: element.scrollWidth - element.clientWidth,
       nested: buttons.filter((button) => button.parentElement?.closest("button")).length,
       clipped: buttons.filter((button) => button.scrollWidth > button.clientWidth + 1).length,

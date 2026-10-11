@@ -30,4 +30,8 @@ describe("composer banner chrome", () => {
     expect(quota.get("min-height")).toBe("44px");
     expect(declarationsFor(rules, ".provider-quota-notice strong").get("font-weight")).toBe("500");
   });
+
+  it("outlines the limit drawer with the composer's soft line", () => {
+    expect(declarationsFor(rules, ".limit-reset").get("border")).toBe("1px solid var(--line-soft)");
+  });
 });

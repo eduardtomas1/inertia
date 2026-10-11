@@ -1,4 +1,4 @@
-import { lazy, Suspense, useContext, useId, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useContext, useId, useState } from "react";
 import {
   ChevronDown,
   Ellipsis,
@@ -110,54 +110,6 @@ export function composerCheckoutBranch(
     : checkoutBranch ?? conversation.branch) ?? "Detached HEAD";
 }
 
-export function ComposerCheckoutStrip({
-  conversation,
-  checkoutBranch,
-  showCheckoutContext,
-  scratchWorkspace,
-  newChatProjectPicker,
-}: {
-  conversation: Conversation;
-  checkoutBranch: string | null | undefined;
-  showCheckoutContext: boolean;
-  scratchWorkspace: boolean;
-  newChatProjectPicker: NewChatProjectPicker | undefined;
-}): React.JSX.Element | null {
-  const checkoutModel = useContext(CheckoutBranchControlContext);
-  const checkoutGitStatus = checkoutModel?.gitStatus ?? null;
-  const checkoutStrip = composerCheckoutStrip({
-    showCheckoutContext,
-    scratchWorkspace,
-    newChatProjectPicker: Boolean(newChatProjectPicker),
-    worktreePath: conversation.worktreePath,
-    checkoutDiffers: Boolean(checkoutGitStatus?.isRepository && (
-      checkoutGitStatus.branch === null
-      || conversationContextMismatch(checkoutModel?.project ?? null, conversation, checkoutGitStatus)
-    )),
-    repository: checkoutGitStatus
-      ? checkoutGitStatus.isRepository
-      : Boolean(checkoutModel?.project.repositoryRoot),
-  });
-  if (checkoutStrip === "hidden") return null;
-  return (
-    <div
-      className={clsx("composer-checkout-strip", checkoutStrip === "branch" && "is-branch-only")}
-      role="group"
-      aria-label="Chat checkout context"
-    >
-      {checkoutStrip === "branch" ? null : newChatProjectPicker ? (
-        <ProjectPicker picker={newChatProjectPicker} />
-      ) : (
-        <span className="composer-checkout-location">
-          <FolderGit2 size={14} aria-hidden="true" />
-          <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-        </span>
-      )}
-      {!scratchWorkspace && <CheckoutBranchSlot branch={composerCheckoutBranch(conversation, checkoutBranch)} />}
-    </div>
-  );
-}
-
 export interface ComposerToolbarProps {
   onQueueCommand?: QueueCommandRunner;
   actions: ProjectAction[];
@@ -205,6 +157,10 @@ export interface ComposerToolbarProps {
   onUpdateReasoningEffort: (reasoningEffort: string) => Promise<void>;
   onUpdateFastMode: (enabled: boolean) => Promise<void>;
   conversation: Conversation;
+  checkoutBranch?: string | null;
+  showCheckoutContext: boolean;
+  scratchWorkspace?: boolean;
+  newChatProjectPicker?: NewChatProjectPicker;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -278,6 +234,10 @@ export function ComposerToolbar({
   onUpdateReasoningEffort,
   onUpdateFastMode,
   conversation,
+  checkoutBranch,
+  showCheckoutContext,
+  scratchWorkspace = false,
+  newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -303,6 +263,10 @@ export function ComposerToolbar({
   const canSendAttachmentWhileRunning = supportsActiveParentFollowUp(
     latestTurn?.harnessId ?? null,
   );
+  const visibleCheckoutBranch = composerCheckoutBranch(
+    conversation,
+    checkoutBranch,
+  );
   const {
     menu,
     toggleMenu,
@@ -312,33 +276,26 @@ export function ComposerToolbar({
     handleComposerMenuNavigation,
     handleComposerMenuTriggerKeyDown,
   } = menuController;
+  const checkoutModel = useContext(CheckoutBranchControlContext);
+  const checkoutGitStatus = checkoutModel?.gitStatus ?? null;
+  const checkoutStrip = composerCheckoutStrip({
+    showCheckoutContext,
+    scratchWorkspace,
+    newChatProjectPicker: Boolean(newChatProjectPicker),
+    worktreePath: conversation.worktreePath,
+    checkoutDiffers: Boolean(checkoutGitStatus?.isRepository && (
+      checkoutGitStatus.branch === null
+      || conversationContextMismatch(checkoutModel?.project ?? null, conversation, checkoutGitStatus)
+    )),
+    repository: checkoutGitStatus
+      ? checkoutGitStatus.isRepository
+      : Boolean(checkoutModel?.project.repositoryRoot),
+  });
   const toolsId = useId();
-  const toolsToggleRef = useRef<HTMLButtonElement>(null);
-  const toolsTrayRef = useRef<HTMLDivElement>(null);
   const [toolsOpen, setToolsOpen] = useState(() => layoutStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open");
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
   const hasTools = promptPresetsEnabled || promptStashEnabled || actions.length > 0
     || Boolean(selectedProvider?.agentThreadManagement);
-  const setTools = (next: boolean): void => {
-    if (!next && menu !== null && COMPOSER_TOOL_MENUS.has(menu)) dismissMenu("context-change");
-    setToolsOpen(next);
-    layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, next ? "open" : "closed");
-  };
-  useLayoutEffect(() => {
-    const toggle = toolsToggleRef.current;
-    const tray = toolsTrayRef.current;
-    if (!hasTools || !toolsVisible || !toggle || !tray) return;
-    let active = true;
-    let stopObserving: (() => void) | null = null;
-    void import("../../utils/composerPopoverPlacement").then((module) => {
-      if (active) stopObserving = module.observeComposerPopover(toggle, tray, () => undefined);
-    });
-    return () => {
-      active = false;
-      stopObserving?.();
-      tray.removeAttribute("data-composer-popover-positioned");
-    };
-  }, [hasTools, toolsVisible]);
   return (
     <div
       className="composer-toolbar"
@@ -346,6 +303,28 @@ export function ComposerToolbar({
       aria-label="Composer controls"
     >
       <div className="composer-primary-rail">
+        <div className="composer-attach-actions" role="group" aria-label="Attach">
+          <IconButton
+            label={running
+              ? imageInputUnavailableReason
+                ? `Attach images. ${imageInputUnavailableReason}`
+                : canSendAttachmentWhileRunning
+                  ? "Attach follow-up images"
+                  : "Attach queued images"
+              : imageInputUnavailableReason
+                ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
+                : "Attach images, documents, or spreadsheets"}
+            onClick={() => void onChooseAttachments()}
+            disabled={
+              attachmentDisabled
+              || attachmentCount >= MAX_ATTACHMENT_COUNT
+              || (running && imageInputUnavailableReason !== null)
+            }
+          >
+            <Paperclip size={16} />
+          </IconButton>
+          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_ATTACHMENT_COUNT || imageInputUnavailableReason !== null} /></Suspense>
+        </div>
         <div
           className="composer-options"
           role="group"
@@ -408,6 +387,12 @@ export function ComposerToolbar({
             />
           </Suspense>
         </div>
+        {attachmentImporting && (
+          <span className="provider-status" role="status">
+            <LoadingMark size={14} aria-hidden="true" />
+            <span>Adding attachments…</span>
+          </span>
+        )}
         <Suspense fallback={null}>
           <ComposerSkillsMenu
             skills={skills}
@@ -424,225 +409,201 @@ export function ComposerToolbar({
             onInsert={onInsertSkill}
           />
         </Suspense>
-        {hasTools && (
-          <div className="composer-tools-anchor">
-            <IconButton
-              ref={toolsToggleRef}
-              label="More tools"
-              className="composer-tools-toggle"
-              aria-expanded={toolsVisible}
-              aria-controls={toolsId}
-              onClick={() => setTools(!toolsVisible)}
+        {hasTools && <IconButton
+          label="More tools"
+          className="composer-tools-toggle"
+          aria-expanded={toolsVisible}
+          aria-controls={toolsId}
+          onClick={() => {
+            const next = !toolsVisible;
+            if (!next && menu !== null && COMPOSER_TOOL_MENUS.has(menu)) dismissMenu("context-change");
+            setToolsOpen(next);
+            layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, next ? "open" : "closed");
+          }}
+        >
+          <Ellipsis size={16} />
+        </IconButton>}
+        <div id={toolsId} className="composer-more-tools" hidden={!hasTools || !toolsVisible}>
+        <div
+          className="composer-tools"
+          role="group"
+          aria-label="Add context"
+        >
+          {selectedProvider?.agentThreadManagement && (
+            <TooltipText
+              className="composer-tools-status composer-action-control"
+              data-state={selectedProvider.agentThreadManagement.state}
+              aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
+              tooltip={selectedProvider.agentThreadManagement.detail}
             >
-              <Ellipsis size={16} />
-            </IconButton>
-            <div
-              ref={toolsTrayRef}
-              id={toolsId}
-              className="composer-more-tools"
-              hidden={!toolsVisible}
-              onKeyDown={(event) => {
-                if (event.key !== "Escape" || menu !== null) return;
-                event.preventDefault();
-                setTools(false);
-                toolsToggleRef.current?.focus();
+              <MessagesSquare size={14} aria-hidden="true" />
+              <span>Chat tools</span>
+            </TooltipText>
+          )}
+        {promptPresetsEnabled && (
+          <Suspense fallback={null}>
+            <PromptPresetMenu
+              presets={promptPresets}
+              currentMessage={currentPrompt}
+              currentRoute={{
+                harnessId: conversation.modelSelection.harnessId,
+                backendProfileId: conversation.modelSelection.backendProfileId,
+                modelId: conversation.modelSelection.modelId,
+                reasoningEffort: conversation.modelSelection.reasoningEffort,
+                ...((selectedModel?.fastMode || selectedFastMode)
+                  && routeSupportsNativeFastModeIdentity(
+                    conversation.modelSelection,
+                  )
+                  ? {
+                      fastMode: modelSelectionUsesFastMode(
+                        conversation.modelSelection,
+                      ),
+                    }
+                  : {}),
               }}
+              menuController={menuController}
+              onApply={onApplyPromptPreset}
+              onCommand={onPromptPresetCommand}
+            />
+          </Suspense>
+        )}
+        {promptStashEnabled && (
+          <Suspense fallback={null}>
+            <PromptStashMenu
+              entries={promptStash}
+              canStash={canStashPrompt}
+              blockedReason={promptStashBlockedReason}
+              restoreBlockedReason={promptRestoreBlockedReason}
+              menuController={menuController}
+              onStash={onStashPrompt}
+              onRestore={onRestorePrompt}
+              onRemove={onRemoveStashedPrompt}
+              onSetRecurrence={onSetPromptRecurrence}
+            />
+          </Suspense>
+        )}
+        {actions.length > 0 ? (
+          <div className="popover-anchor composer-action-control">
+            <button
+              ref={(node) => setMenuTrigger("action", node)}
+              type="button"
+              className={clsx(
+                "composer-pill",
+                menu === "action" && "is-active",
+              )}
+              aria-label="Open project actions"
+              aria-haspopup="menu"
+              aria-controls={menuId("action")}
+              aria-expanded={menu === "action"}
+              onClick={() => toggleMenu("action")}
+              onKeyDown={(event) =>
+                handleComposerMenuTriggerKeyDown("action", event)}
             >
+              <Wrench size={14} />
+              <span>Actions</span>
+              <ChevronDown size={14} />
+            </button>
+            {menu === "action" && (
               <div
-                className="composer-tools"
-                role="group"
-                aria-label="Add context"
+                ref={(node) => setMenuPopover("action", node)}
+                id={menuId("action")}
+                className="composer-popover action-popover"
+                role="menu"
+                aria-label="Project actions"
+                onKeyDown={handleComposerMenuNavigation}
               >
-                {selectedProvider?.agentThreadManagement && (
-                  <TooltipText
-                    className="composer-tools-status composer-action-control"
-                    data-state={selectedProvider.agentThreadManagement.state}
-                    aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
-                    tooltip={selectedProvider.agentThreadManagement.detail}
+                {actions.map((action) => (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={action.id}
+                    onClick={() => {
+                      dismissMenu("selection");
+                      onRunAction(action);
+                    }}
                   >
-                    <MessagesSquare size={16} aria-hidden="true" />
-                    <span>Chat tools</span>
-                  </TooltipText>
-                )}
-                {promptPresetsEnabled && (
-                  <Suspense fallback={null}>
-                    <PromptPresetMenu
-                      presets={promptPresets}
-                      currentMessage={currentPrompt}
-                      currentRoute={{
-                        harnessId: conversation.modelSelection.harnessId,
-                        backendProfileId: conversation.modelSelection.backendProfileId,
-                        modelId: conversation.modelSelection.modelId,
-                        reasoningEffort: conversation.modelSelection.reasoningEffort,
-                        ...((selectedModel?.fastMode || selectedFastMode)
-                          && routeSupportsNativeFastModeIdentity(
-                            conversation.modelSelection,
-                          )
-                          ? {
-                              fastMode: modelSelectionUsesFastMode(
-                                conversation.modelSelection,
-                              ),
-                            }
-                          : {}),
-                      }}
-                      menuController={menuController}
-                      onApply={onApplyPromptPreset}
-                      onCommand={onPromptPresetCommand}
-                    />
-                  </Suspense>
-                )}
-                {promptStashEnabled && (
-                  <Suspense fallback={null}>
-                    <PromptStashMenu
-                      entries={promptStash}
-                      canStash={canStashPrompt}
-                      blockedReason={promptStashBlockedReason}
-                      restoreBlockedReason={promptRestoreBlockedReason}
-                      menuController={menuController}
-                      onStash={onStashPrompt}
-                      onRestore={onRestorePrompt}
-                      onRemove={onRemoveStashedPrompt}
-                      onSetRecurrence={onSetPromptRecurrence}
-                    />
-                  </Suspense>
-                )}
-                {actions.length > 0 ? (
-                  <div className="popover-anchor composer-action-control">
-                    <button
-                      ref={(node) => setMenuTrigger("action", node)}
-                      type="button"
-                      className={clsx(
-                        "composer-pill",
-                        menu === "action" && "is-active",
-                      )}
-                      aria-label="Open project actions"
-                      aria-haspopup="menu"
-                      aria-controls={menuId("action")}
-                      aria-expanded={menu === "action"}
-                      onClick={() => toggleMenu("action")}
-                      onKeyDown={(event) =>
-                        handleComposerMenuTriggerKeyDown("action", event)}
-                    >
-                      <Wrench size={16} />
-                      <span>Actions</span>
-                      <ChevronDown size={14} />
-                    </button>
-                    {menu === "action" && (
-                      <div
-                        ref={(node) => setMenuPopover("action", node)}
-                        id={menuId("action")}
-                        className="composer-popover action-popover"
-                        role="menu"
-                        aria-label="Project actions"
-                        onKeyDown={handleComposerMenuNavigation}
-                      >
-                        {actions.map((action) => (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            key={action.id}
-                            onClick={() => {
-                              dismissMenu("selection");
-                              onRunAction(action);
-                            }}
-                          >
-                            <Play size={16} />
-                            <span>
-                              <strong>{action.label}</strong>
-                              <small>{action.command}</small>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                    <Play size={16} />
+                    <span>
+                      <strong>{action.label}</strong>
+                      <small>{action.command}</small>
+                    </span>
+                  </button>
+                ))}
               </div>
-            </div>
+            )}
           </div>
-        )}
-      </div>
-      <div className="composer-end">
-        {attachmentImporting && (
-          <span className="provider-status" role="status">
-            <LoadingMark size={14} aria-hidden="true" />
-            <span>Adding attachments…</span>
-          </span>
-        )}
-        <div className="composer-attach-actions" role="group" aria-label="Attach">
-          <IconButton
-            label={running
-              ? imageInputUnavailableReason
-                ? `Attach images. ${imageInputUnavailableReason}`
-                : canSendAttachmentWhileRunning
-                  ? "Attach follow-up images"
-                  : "Attach queued images"
-              : imageInputUnavailableReason
-                ? `Attach documents or spreadsheets. ${imageInputUnavailableReason}`
-                : "Attach images, documents, or spreadsheets"}
-            onClick={() => void onChooseAttachments()}
-            disabled={
-              attachmentDisabled
-              || attachmentCount >= MAX_ATTACHMENT_COUNT
-              || (running && imageInputUnavailableReason !== null)
-            }
-          >
-            <Paperclip size={16} />
-          </IconButton>
-          <Suspense fallback={null}><SnapshotControl conversationId={conversation.id} disabled={attachmentDisabled || attachmentCount >= MAX_ATTACHMENT_COUNT || imageInputUnavailableReason !== null} /></Suspense>
+        ) : null}
+        </div>
         </div>
         <div
           className="composer-actions"
           role="group"
           aria-label="Usage"
         >
-          {selectedProvider ? (
-            <UsageIndicator
-              providerId={selectedProvider.id}
-              usage={usage}
-              rateLimits={selectedProvider.rateLimits}
-              rateLimitState={selectedProvider.metadataState.rateLimits}
-              quotaSource={usageQuotaSourceForSelection(
-                conversation.modelSelection,
-                selectedBackendProfile,
-              )}
-              mode={usageDisplayMode}
-              providerLabel={selectedIdentityLabel}
-              contextQuality={contextUsageQualityForTurn(
-                usage,
-                latestTurn?.id ?? null,
-              )}
-              onModeChange={onUsageDisplayModeChange}
-            />
-          ) : null}
-        </div>
-        <div className="composer-input-actions" role="group" aria-label="Message actions">
-          <Suspense
-            fallback={(
-              <ComposerSendActionsFallback
-                primaryAction={primaryAction}
-                onSubmit={onSubmit}
-                onStop={onStop}
-              />
+        {selectedProvider ? (
+          <UsageIndicator
+            providerId={selectedProvider.id}
+            usage={usage}
+            rateLimits={selectedProvider.rateLimits}
+            rateLimitState={selectedProvider.metadataState.rateLimits}
+            quotaSource={usageQuotaSourceForSelection(
+              conversation.modelSelection,
+              selectedBackendProfile,
             )}
-          >
-            <ComposerSendActions
-              conversationId={conversation.id}
+            mode={usageDisplayMode}
+            providerLabel={selectedIdentityLabel}
+            contextQuality={contextUsageQualityForTurn(
+              usage,
+              latestTurn?.id ?? null,
+            )}
+            onModeChange={onUsageDisplayModeChange}
+          />
+        ) : null}
+        </div>
+      </div>
+      <div className="composer-input-actions" role="group" aria-label="Message actions">
+        <Suspense
+          fallback={(
+            <ComposerSendActionsFallback
               primaryAction={primaryAction}
-              canSendQueuedNow={canSendQueuedNow}
-              running={running}
-              latestTurnId={queuedTurnId}
-              latestTurnStatus={queuedTurnStatus}
-              latestTurnAuthoritative={queuedTurnAuthoritative}
-              onSendQueued={onSendQueued}
-              onQueueCommand={onQueueCommand}
-              onReleaseAttachment={onReleaseAttachment}
               onSubmit={onSubmit}
               onStop={onStop}
             />
-          </Suspense>
-        </div>
+          )}
+        >
+          <ComposerSendActions
+            conversationId={conversation.id}
+            primaryAction={primaryAction}
+            canSendQueuedNow={canSendQueuedNow}
+            running={running}
+            latestTurnId={queuedTurnId}
+            latestTurnStatus={queuedTurnStatus}
+            latestTurnAuthoritative={queuedTurnAuthoritative}
+            onSendQueued={onSendQueued}
+            onQueueCommand={onQueueCommand}
+            onReleaseAttachment={onReleaseAttachment}
+            onSubmit={onSubmit}
+            onStop={onStop}
+          />
+        </Suspense>
       </div>
+      {checkoutStrip !== "hidden" && (
+        <div
+          className={clsx("composer-checkout-strip", checkoutStrip === "branch" && "is-branch-only")}
+          role="group"
+          aria-label="Chat checkout context"
+        >
+          {checkoutStrip === "branch" ? null : newChatProjectPicker ? (
+            <ProjectPicker picker={newChatProjectPicker} />
+          ) : (
+            <span className="composer-checkout-location">
+              <FolderGit2 size={14} aria-hidden="true" />
+              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+            </span>
+          )}
+          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
+        </div>
+      )}
     </div>
   );
 }

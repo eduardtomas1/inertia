@@ -1,20 +1,39 @@
+.composer-shell .composer:has(> .limit-reset) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.composer-shell .composer:has(> .limit-reset) > .composer-surface,
+.composer-shell .composer:has(> .limit-reset) > .composer-ultra-glow {
+  grid-row-start: 2;
+}
+
 .limit-reset {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 4px;
-  padding: 0 0 0 4px;
+  gap: 2px 8px;
+  margin: 0 var(--composer-drawer-inset);
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--line-soft);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--fill);
 }
 
 .limit-reset-icon {
   flex: 0 0 auto;
-  margin-inline: 5px;
   color: var(--warning);
 }
 
 .limit-reset[data-state="scheduled"] .limit-reset-icon {
   color: var(--text-muted);
+}
+
+.limit-reset[data-state="limited"] {
+  border-color: var(--line-soft);
+  background: transparent;
 }
 
 .limit-reset[data-state="limited"] .limit-reset-copy strong {
@@ -24,13 +43,13 @@
 .limit-reset-copy {
   display: flex;
   min-width: 0;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 22px);
   flex: 1 0 auto;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 6px;
-  font-size: var(--text-xs);
-  line-height: 16px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }
 
 .limit-reset-copy strong {
@@ -83,12 +102,12 @@
 .limit-reset-message {
   min-width: 0;
   flex: 1 0 100%;
-  margin: 0 0 4px;
-  padding-left: 28px;
+  margin: 0 0 3px;
+  padding-left: 22px;
   overflow-wrap: anywhere;
   color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: 16px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }
 
 .limit-reset-message[role="alert"] {
@@ -116,6 +135,10 @@
 }
 
 @media (forced-colors: active) {
+  .limit-reset {
+    border-color: CanvasText;
+  }
+
   .limit-reset-action.secondary-button {
     border-color: ButtonText;
   }

@@ -25,8 +25,8 @@ describe("sidebar index presentation contracts", () => {
   it("keeps the trailing action hit target stable during press feedback", () => {
     expect(css).toMatch(/\.activity-thread-trailing\s*\{[^}]*pointer-events:\s*none;/su);
     expect(css).not.toContain(".activity-thread-menu-button");
-    expect(css).toMatch(/\.thread-inline-actions\s*\{[^}]*position:\s*absolute;[^}]*top:\s*2px;[^}]*right:\s*2px;/su);
-    expect(css).toMatch(/\.thread-inline-actions \.icon-button\s*\{[^}]*width:\s*var\(--control-height-small\);[^}]*height:\s*var\(--control-height-small\);/su);
+    expect(css).toMatch(/\.thread-inline-actions\s*\{[^}]*position:\s*absolute;[^}]*top:\s*4px;[^}]*right:\s*4px;/su);
+    expect(css).toMatch(/\.thread-inline-actions \.icon-button\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/su);
     expect(css).not.toMatch(/\.thread-inline-actions[^{}]*\{[^}]*transform:/su);
   });
 

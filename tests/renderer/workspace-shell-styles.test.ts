@@ -304,7 +304,7 @@ describe("sidebar", () => {
     expect(block(".platform-darwin .brand-lockup:hover")).toContain("background: var(--fill);");
     expect(workIndex).not.toContain(".activity-thread.is-split:not(.is-active)");
     expect(workbench).not.toContain(".activity-thread.is-detached:not(.is-active) {");
-    expect(block(".thread-inline-actions .icon-button", workIndex)).toContain("width: var(--control-height-small);");
+    expect(block(".thread-inline-actions .icon-button", workIndex)).toContain("width: 24px;");
     const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
     expect(inset).toContain(".activity-show-more");
   });

@@ -193,16 +193,16 @@
 .thread-inline-actions {
   position: absolute;
   z-index: 2;
-  top: 2px;
-  right: 2px;
+  top: 4px;
+  right: 4px;
   display: flex;
   gap: 2px;
   visibility: hidden;
 }
 
 .thread-inline-actions .icon-button {
-  width: var(--control-height-small);
-  height: var(--control-height-small);
+  width: 24px;
+  height: 24px;
 }
 
 .activity-thread:hover .thread-inline-actions,

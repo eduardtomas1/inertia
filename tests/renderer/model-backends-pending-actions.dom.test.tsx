@@ -117,7 +117,7 @@ describe("backend settings pending actions", () => {
     await act(async () => { finish(); await pending; });
     await waitFor(() => expect(container.querySelector(".backend-profile-facts")).toHaveTextContent("custom-b.example.test"));
     const rail = screen.getByRole("complementary", { name: "Backend profiles" });
-    expect(within(rail).getByTitle("Claude harness · Profile B")).toHaveAttribute("aria-current", "true");
+    expect(within(rail).getByRole("button", { description: "Claude harness · Profile B" })).toHaveAttribute("aria-current", "true");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
   });

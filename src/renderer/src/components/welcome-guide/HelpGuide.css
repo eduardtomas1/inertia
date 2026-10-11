@@ -83,7 +83,7 @@
 .help-guide-entries,
 .help-guide-hits {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -94,22 +94,28 @@
   display: grid;
   align-items: baseline;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  gap: 4px 12px;
+  padding: 10px 0;
+}
+
+.help-guide-entries li + li,
+.help-guide-hits > li + li {
+  border-top: 1px solid var(--line-soft);
 }
 
 .help-guide-entries li {
-  animation: welcome-rise var(--dur-slow) var(--ease) both;
+  animation: welcome-rise var(--dur-slow) var(--ease-fade) both;
   animation-delay: calc(var(--i, 0) * var(--stagger));
 }
 
 .help-guide-result {
   width: 100%;
   min-width: 0;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
   color: var(--text);
+  background: transparent;
   text-align: left;
 }
 
@@ -120,6 +126,7 @@
 .help-guide-entries strong,
 .help-guide-result strong {
   font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .help-guide .help-guide-entries p,
@@ -134,9 +141,9 @@
 }
 
 .help-guide-results mark {
-  border-radius: var(--radius-xs);
   color: inherit;
-  background: var(--fill);
+  background: transparent;
+  font-weight: 500;
 }
 
 .help-guide .welcome-guide-actions {
@@ -147,24 +154,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.help-guide-jumps button {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: transparent;
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
-.help-guide-jumps button:hover {
-  background: var(--surface);
 }
 
 @media (max-width: 680px) {
@@ -186,10 +175,7 @@
 }
 
 @media (forced-colors: active) {
-  .help-guide-entries li,
-  .help-guide-result,
-  .help-guide-search,
-  .help-guide-jumps button {
+  .help-guide-search {
     border-color: CanvasText;
   }
 }

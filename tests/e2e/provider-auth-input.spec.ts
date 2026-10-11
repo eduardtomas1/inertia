@@ -411,7 +411,7 @@ async function returnFromBrowser(dialog: Locator): Promise<void> {
   const [, height] = await app.page.evaluate(() => [window.innerWidth, window.innerHeight]);
   await app.page.mouse.click(6, height - 6);
   await expectTerminalFocused(dialog);
-  await dialog.locator("#provider-auth-description").click();
+  await dialog.locator("#provider-auth-title").click();
   await expectTerminalFocused(dialog);
 }
 

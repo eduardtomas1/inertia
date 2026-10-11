@@ -16,6 +16,7 @@ import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { AgentPixelGrid } from "../AgentPixelGrid";
+import { TooltipButton } from "../TooltipButton";
 import { Switch } from "../ui";
 import { SettingDisclosure, SettingRow, SettingsGroup } from "../settings/SettingsLayout";
 import { useSettingAction } from "../settings/useSettingAction";
@@ -164,13 +165,12 @@ export function WorkingIndicatorSettings({
             {WORKING_INDICATOR_STYLES.map((style) => {
               const copy = STYLE_LABELS[style];
               return (
-                <button
-                  type="button"
+                <TooltipButton
                   key={style}
                   className={clsx("working-indicator-option", value.style === style && "is-active")}
                   data-indicator-style={style}
                   aria-label={copy.label}
-                  title={copy.detail}
+                  tooltip={copy.detail}
                   disabled={disabled}
                   {...styles.radioProps(style)}
                 >
@@ -182,7 +182,7 @@ export function WorkingIndicatorSettings({
                         : <WorkingOrb size={PICKER_ORB_SIZE} design={style} />}
                   </span>
                   <span className="working-indicator-option-label" aria-hidden="true">{copy.label}</span>
-                </button>
+                </TooltipButton>
               );
             })}
           </div>
@@ -190,7 +190,6 @@ export function WorkingIndicatorSettings({
         <div className="response-density-setting working-indicator-row">
           <span>
             <strong id="working-indicator-color-label">Colour</strong>
-            <small>Theme ink follows light and dark mode. Accent follows the palette.</small>
           </span>
           <div className="working-indicator-colors">
             <div
@@ -205,13 +204,12 @@ export function WorkingIndicatorSettings({
                   ? `${COLOR_LABELS.custom} colour, ${preview.customColor}`
                   : COLOR_LABELS[color];
                 return (
-                  <button
-                    type="button"
+                  <TooltipButton
                     key={color}
                     className="working-indicator-swatch"
                     data-indicator-color={color}
                     aria-label={label}
-                    title={label}
+                    tooltip={label}
                     disabled={disabled}
                     style={color === "custom" ? { "--indicator-custom": preview.customColor } as React.CSSProperties : undefined}
                     {...radio}
@@ -241,7 +239,7 @@ export function WorkingIndicatorSettings({
           </div>
         </div>
         <div className="settings-rows working-indicator-switches">
-          <SettingRow id="working-indicator-glow" title="Glow" description={preview.color === "ink" ? "Choose a colour to add a soft halo." : "A soft halo in the indicator's colour."}>
+          <SettingRow id="working-indicator-glow" title="Glow" description={preview.color === "ink" ? "Choose a colour to add a soft halo." : undefined}>
             <Switch
               label="Glow"
               checked={value.glow}

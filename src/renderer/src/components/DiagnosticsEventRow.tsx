@@ -8,6 +8,7 @@ import {
   type DiagnosticSubsystem,
 } from "@shared/application-diagnostics";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
+import { TooltipButton } from "./TooltipButton";
 
 export type DiagnosticsListEntry =
   | { kind: "incident"; id: string; at: string; record: DiagnosticRecord }
@@ -113,11 +114,15 @@ function IncidentDetail(props: RowProps & { record: DiagnosticRecord }): React.J
         onClick={() => navigateDiagnosticContext({ section: definition.action as "providers" | "discord" })}>
         Open {definition.action === "providers" ? "provider" : "Discord"} settings
       </button> : null}
-      {record.context.conversationId && <button type="button" className="secondary-button" disabled={!conversation || !props.runtimeReady}
-        title={!conversation ? "Conversation is unavailable or deleted" : !props.runtimeReady ? "Reconnect the runtime to open this conversation" : undefined}
-        onClick={() => navigateDiagnosticContext({ conversationId: record.context.conversationId! })}>
-        Open affected conversation
-      </button>}
+      {record.context.conversationId && (!conversation || !props.runtimeReady
+        ? <TooltipButton className="secondary-button" aria-disabled="true"
+          tooltip={!conversation ? "Conversation is unavailable or deleted" : "Reconnect the runtime to open this conversation"}>
+          Open affected conversation
+        </TooltipButton>
+        : <button type="button" className="secondary-button"
+          onClick={() => navigateDiagnosticContext({ conversationId: record.context.conversationId! })}>
+          Open affected conversation
+        </button>)}
       <button type="button" className="secondary-button" aria-disabled={props.copying} onClick={() => { if (!props.copying) props.onCopy(record); }}>
         <Copy size={14} aria-hidden="true" />Copy incident
       </button>

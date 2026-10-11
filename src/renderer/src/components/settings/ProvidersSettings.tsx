@@ -219,7 +219,6 @@ export function ProvidersSettings({
       <div className="settings-card-heading provider-settings-heading">
         <span>
           <h3 id="providers-heading">Providers</h3>
-          <p>Use the coding tools and accounts already installed on this computer.</p>
         </span>
         <IconButton
           label="Refresh all providers"
@@ -346,7 +345,6 @@ export function ProvidersSettings({
                   <div className="setting-row setting-text-field" data-setting-id="provider-display-name">
                     <SettingCopy
                       title="Account name"
-                      description="Shown wherever Inertia names this account."
                       notice={labelAction.notice}
                     />
                     <span className="setting-field-control">
@@ -372,9 +370,6 @@ export function ProvidersSettings({
                   <div className="setting-row provider-settings-binary" data-setting-id="provider-binary-path">
                     <SettingCopy
                       title="Executable"
-                      description={selectedProvider.id === "codex"
-                        ? "Found automatically. A file you choose is version-checked before it is saved."
-                        : undefined}
                       notice={binaryAction.notice}
                     />
                     <span className="provider-settings-binary-control">
@@ -457,7 +452,7 @@ export function ProvidersSettings({
                           {model.isDefault && <small>Default</small>}
                         </span>
                         <code>{model.id}</code>
-                        <p>{model.description || "Available from the provider."}</p>
+                        {model.description && <p>{model.description}</p>}
                         <small>
                           {model.reasoningOptions.length > 0
                             ? `${model.reasoningOptions.length} reasoning levels`
@@ -470,7 +465,7 @@ export function ProvidersSettings({
                     ))
                   ) : (
                     <p className="provider-settings-empty">
-                      No models reported yet. Refresh or connect this provider to load them.
+                      No models reported yet.
                     </p>
                   )}
                 </div>
@@ -478,7 +473,7 @@ export function ProvidersSettings({
             </>
           ) : (
             <p className="provider-settings-empty">
-              No providers detected. Refresh to check again.
+              No providers detected.
             </p>
           )}
         </div>

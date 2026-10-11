@@ -14,7 +14,7 @@
 .diagnostics-capture {
   min-height: 0;
   padding: 10px 0 12px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .diagnostics-actions {
@@ -54,13 +54,14 @@
   gap: 3px;
   margin-top: 10px;
   padding-top: 12px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .diagnostics-section-label {
   margin-bottom: 2px;
   color: var(--text-muted);
   font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .diagnostics-health p {
@@ -136,19 +137,19 @@
 .diagnostics-list {
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
   list-style: none;
 }
 
 .diagnostics-event {
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .diagnostics-event-row {
   display: grid;
   width: 100%;
   min-height: 44px;
-  grid-template-columns: 16px minmax(0, 1fr) auto 13px;
+  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
   align-items: center;
   gap: 10px;
   padding: 8px 6px;
@@ -287,7 +288,7 @@
 .diagnostics-empty {
   margin: 0;
   padding: 14px 2px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
@@ -301,10 +302,6 @@
 
 .diagnostics-clear-dialog {
   width: min(440px, 100%);
-}
-
-.diagnostics-clear-dialog .is-danger {
-  color: var(--danger);
 }
 
 .diagnostics-clear-error {

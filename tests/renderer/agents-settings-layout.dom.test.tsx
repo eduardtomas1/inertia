@@ -147,8 +147,11 @@ describe("Agents custom backends layout", () => {
   it("names each profile's state in words instead of a coloured dot", async () => {
     const { container } = render(<ModelBackendsSettings {...backendProps()} />);
     const rail = screen.getByRole("complementary", { name: "Backend profiles" });
-    expect(within(within(rail).getByTitle("Claude harness · Profile A")).getByText("Ready")).toBeInTheDocument();
-    expect(within(within(rail).getByTitle("Claude harness · Profile B")).getByText("Needs credential")).toBeInTheDocument();
+    const profileA = within(rail).getByRole("button", { description: "Claude harness · Profile A" });
+    const profileB = within(rail).getByRole("button", { description: "Claude harness · Profile B" });
+    expect(within(profileA).getByText("Ready")).toBeInTheDocument();
+    expect(within(profileB).getByText("Needs credential")).toBeInTheDocument();
+    expect(rail.querySelectorAll("[title]")).toHaveLength(0);
     expect(container.querySelector(".backend-profile-dot")).toBeNull();
     expect(await screen.findByRole("switch", { name: "Use this backend" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Connected")).toBeInTheDocument();

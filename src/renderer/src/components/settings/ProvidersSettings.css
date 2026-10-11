@@ -1,7 +1,3 @@
-.settings-content.is-providers {
-  max-width: 952px;
-}
-
 .settings-card.provider-settings-section {
   container: providers / inline-size;
 }
@@ -26,13 +22,13 @@
   grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
   align-items: stretch;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
 }
 
 .settings-card > .provider-settings-heading + .provider-settings-shell {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .provider-settings-rail {
@@ -40,7 +36,7 @@
   min-width: 0;
   align-content: start;
   margin-bottom: -1px;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-soft);
   background: var(--surface);
 }
 
@@ -52,7 +48,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   color: var(--text);
   background: transparent;
   text-align: left;
@@ -152,7 +148,7 @@
 }
 
 .provider-settings-editor-copy > strong {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
 }
 
 .provider-settings-editor-copy > small {
@@ -170,35 +166,31 @@
   display: flex;
   min-width: 0;
   gap: 2px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .provider-settings-tabs button {
-  position: relative;
   display: flex;
   min-height: var(--control-height);
   align-items: center;
   gap: 6px;
   padding: 0 10px;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
   font-size: var(--text-sm);
 }
 
-.provider-settings-tabs button:hover,
-.provider-settings-tabs button.is-active {
+.provider-settings-tabs button:hover {
   color: var(--text);
+  background: var(--fill);
 }
 
-.provider-settings-tabs button.is-active::after {
-  position: absolute;
-  right: 6px;
-  bottom: -1px;
-  left: 6px;
-  height: 2px;
-  background: var(--accent);
-  content: "";
+.provider-settings-tabs button.is-active {
+  color: var(--text);
+  background: var(--fill-strong);
+  font-weight: 500;
 }
 
 .provider-settings-tabs button small {
@@ -215,7 +207,7 @@
 }
 
 .provider-settings-editor-body > * + * {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .provider-settings-binary-control {
@@ -299,6 +291,11 @@
 
 .provider-settings-maintenance .provider-maintenance-actions {
   margin-left: auto;
+}
+
+.provider-settings-maintenance .provider-maintenance-actions > button:not(.icon-button) {
+  min-height: var(--control-height-small);
+  padding: 0 8px;
 }
 
 .provider-settings-details {
@@ -413,7 +410,7 @@
   .provider-settings-rail {
     margin-bottom: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .provider-settings-rail:empty {

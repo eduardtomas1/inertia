@@ -20,11 +20,8 @@
 .color-theme-option,
 .custom-theme-color {
   border-radius: var(--radius-sm);
-  background: transparent;
-}
-
-.custom-theme-color {
   background: var(--fill);
+  box-shadow: inset 0 0 0 1px transparent;
 }
 
 .appearance-mode-option {
@@ -39,23 +36,15 @@
 .appearance-mode-option:hover:not(:disabled),
 .color-theme-option:hover:not(:has(:disabled)) {
   color: var(--text);
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .appearance-mode-option.is-active,
-.color-theme-option.is-active {
-  color: var(--text);
-  background: var(--fill-strong);
-}
-
+.color-theme-option.is-active,
 .custom-theme-color.is-active {
   color: var(--text);
   background: var(--fill-strong);
-}
-
-.appearance-mode-option.is-active > span:last-child,
-.color-theme-option.is-active .color-theme-option-name {
-  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .appearance-mode-option:disabled {
@@ -69,7 +58,7 @@
   justify-content: center;
   gap: 6px;
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .appearance-mode-icon {
@@ -82,15 +71,15 @@
 }
 
 .appearance-mode-icon.is-system {
-  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z'/%3E%3Cpath d='M20.054 15.987H3.946'/%3E%3C/svg%3E");
+  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z'/%3E%3Cpath d='M20.054 15.987H3.946'/%3E%3C/svg%3E");
 }
 
 .appearance-mode-icon.is-light {
-  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2M20 12h2m-2.34 5.66-1.41 1.41m1.41-14.14-1.41 1.41'/%3E%3C/svg%3E");
+  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2M20 12h2m-2.34 5.66-1.41 1.41m1.41-14.14-1.41 1.41'/%3E%3C/svg%3E");
 }
 
 .appearance-mode-icon.is-dark {
-  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401'/%3E%3C/svg%3E");
+  --appearance-mode-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401'/%3E%3C/svg%3E");
 }
 
 .appearance-wireframe {
@@ -201,7 +190,7 @@
 }
 
 .color-theme-mode-button.is-selected {
-  border-color: var(--line-strong);
+  border-color: var(--accent);
 }
 
 .color-theme-mode-button:disabled,
@@ -235,7 +224,7 @@
 .color-theme-option-name {
   color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: 500;
   pointer-events: none;
 }
 
@@ -411,7 +400,7 @@
 .custom-theme-inputs input {
   min-width: 0;
   height: var(--control-height-small);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-xs);
   color: var(--text);
   background: var(--fill);
@@ -474,6 +463,7 @@
   .custom-theme-color {
     transition:
       background-color var(--dur-fast) var(--ease-fade),
+      box-shadow var(--dur-fast) var(--ease-fade),
       color var(--dur-fast) var(--ease-fade);
   }
 }

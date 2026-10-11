@@ -7409,11 +7409,10 @@ button.turn-agents-line:hover {
 .provider-auth-header > span:nth-child(2) { min-width: 0; flex: 1; }
 .provider-auth-header h2 { margin: 0 0 3px; font-size: var(--text-sm); }
 .provider-auth-header p { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
-.provider-auth-mark { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-sm); color: var(--accent); background: var(--fill); }
-.provider-auth-terminal { min-width: 0; min-height: 0; padding: 11px; background: var(--terminal-bg); }
+.provider-auth-terminal { min-width: 0; min-height: 0; padding: 12px; background: var(--terminal-bg); }
 .provider-auth-terminal .xterm { height: 100%; padding: 4px; }
-.provider-auth-state { display: inline-flex; min-width: 0; align-items: center; gap: 7px; color: var(--text-muted); font-size: var(--text-xs); }
-.provider-auth-state.is-finished { color: var(--accent-strong); }
+.provider-auth-state { display: inline-flex; min-width: 0; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--text-xs); }
+.provider-auth-state.is-finished { color: var(--status-completed); }
 .provider-auth-state.is-error { color: var(--danger); }
 
 .palette-backdrop {
@@ -7912,10 +7911,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .settings-toolbar .secondary-button { flex: 0 0 auto; }
 
 .setting-action-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
-.setting-action-row > span { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.setting-action-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .setting-action-row small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setting-action-row > div { display: flex; flex: 0 0 auto; gap: 8px; }
-.runtime-log-setting { align-items: flex-start; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.runtime-log-setting { align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
 .runtime-log-setting small { max-width: 620px; overflow: visible; line-height: var(--leading-chrome); white-space: normal; }
 .runtime-log-setting > div,
 .application-update-setting > div { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

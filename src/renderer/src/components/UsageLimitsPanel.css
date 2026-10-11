@@ -103,7 +103,6 @@
 .limits-sources label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .limits-sources input { width: 100%; min-width: 0; min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--surface); color: var(--text); }
 
-.limits-dialog-backdrop { z-index: 1100; }
 .limits-dialog { --dialog-width: 900px; }
 
 .usage-accounts-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--line-soft); color: var(--text-muted); font-size: var(--text-xs); }

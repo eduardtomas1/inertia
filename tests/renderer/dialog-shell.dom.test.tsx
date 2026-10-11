@@ -49,6 +49,19 @@ describe("dialog shell", () => {
     expect(rule).not.toMatch(/text-overflow|white-space: nowrap/u);
   });
 
+  it("stacks every dialog on one backdrop layer above the status toasts", () => {
+    const sources = [
+      "src/renderer/src/styles.css",
+      "src/renderer/src/components/UsageLimitsPanel.css",
+      "src/renderer/src/components/composer/SnapshotControl.css",
+    ].map((path) => readSourceText(path)).join("\n");
+    const backdrops = [...sources.matchAll(/(?<selector>[^{}\n]*backdrop[^{}\n]*)\{(?<body>[^}]*)\}/gu)]
+      .filter(({ groups }) => /z-index/u.test(groups!.body!) && !/palette|welcome/u.test(groups!.selector!));
+    expect(backdrops.map(({ groups }) => groups!.selector!.trim())).toEqual([".dialog-backdrop"]);
+    expect(backdrops[0]!.groups!.body).toContain("z-index: 105;");
+    expect(sources).toMatch(/\.workspace-frame > \.status-overlay-stack \{[^}]*z-index: 100;/u);
+  });
+
   it("dismisses from the backdrop only when the caller allows it", () => {
     const dismiss = vi.fn();
     render(<DialogShell titleId="t" title="Snapshots" closeLabel="Close Snapshots" onClose={vi.fn()} onDismiss={dismiss}><p>Body</p></DialogShell>);

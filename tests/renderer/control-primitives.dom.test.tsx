@@ -266,7 +266,7 @@ describe("dialog primitives", () => {
   it("dims the window behind dialogs with one backdrop token and no blur", () => {
     expect(css).toMatch(/--backdrop: rgb\(0 0 0 \/ 0\.48\);/u);
     expect(css).toMatch(/:where\(\n  \.dialog-backdrop,\n  \.palette-backdrop\n\),\n\.update-restart-dialog::backdrop \{\n  background: var\(--backdrop\);\n\}/u);
-    expect(css).toMatch(/\.dialog-backdrop \{\n  position: fixed;\n  inset: 0;\n  z-index: 90;\n  display: grid;\n  place-items: center;\n  padding: 24px;\n\}/u);
+    expect(css).toMatch(/\.dialog-backdrop \{\n  position: fixed;\n  inset: 0;\n  z-index: 105;\n  display: grid;\n  place-items: center;\n  padding: 24px;\n\}/u);
     expect(dialogCss).not.toMatch(/\.(?:snapshot|attachment-preview|multi-spawn|daily-work)-backdrop \{[^}]*(?:padding|place-items)/u);
   });
 

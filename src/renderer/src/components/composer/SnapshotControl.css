@@ -1,4 +1,3 @@
-.snapshot-backdrop { z-index: 140; }
 .snapshot-dialog { --dialog-width: 440px; font-size: var(--text-sm); line-height: var(--leading-chrome); }
 .snapshot-note { color: var(--text-muted); font-size: var(--text-sm); }
 

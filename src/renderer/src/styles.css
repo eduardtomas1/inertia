@@ -2952,7 +2952,6 @@ button.header-breadcrumb-project:hover {
 }
 
 .attachment-preview-backdrop {
-  z-index: 110;
   overscroll-behavior: contain;
 }
 
@@ -6542,7 +6541,7 @@ button.turn-agents-line:hover {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 105;
   display: grid;
   place-items: center;
   padding: 24px;

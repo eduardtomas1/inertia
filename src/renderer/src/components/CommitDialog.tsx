@@ -292,7 +292,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
           </label>
         ))}
       </div>
-      <p className="commit-stage-note">Review marks never stage files.</p>
+      <p className="commit-stage-note">Only checked paths will be staged and committed. Review marks never stage files.</p>
       {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
       {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
       {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}

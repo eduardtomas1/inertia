@@ -584,11 +584,14 @@
 .usage-empty-state {
   display: grid;
   min-height: 310px;
-  place-items: center;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
   padding: 48px 0;
 }
 
 .usage-empty-state h2 { margin: 0; color: var(--text-muted); font-size: var(--text-sm); font-weight: 400; }
+.usage-empty-state p { max-width: 420px; margin: 0; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-chrome); text-align: center; }
 
 .usage-error {
   display: flex;

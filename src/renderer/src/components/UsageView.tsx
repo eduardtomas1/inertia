@@ -236,6 +236,7 @@ function UsageDashboardContent({
       {dashboard.totals.requestCount === 0 ? (
         <section className="usage-empty-state" aria-labelledby="usage-empty-title">
           <h2 id="usage-empty-title">No terminal requests in this range</h2>
+          <p>Usage will appear after Inertia records a completed, failed, cancelled, or interrupted terminal agent turn.</p>
         </section>
       ) : (
         <>

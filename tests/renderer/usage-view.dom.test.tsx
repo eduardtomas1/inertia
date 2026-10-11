@@ -335,6 +335,7 @@ describe("UsageView", () => {
     expect(await screen.findByRole("heading", {
       name: "No terminal requests in this range",
     })).toBeVisible();
+    expect(screen.getByText("Usage will appear after Inertia records a completed, failed, cancelled, or interrupted terminal agent turn.")).toBeVisible();
     view.unmount();
     render(<UsageView status="online" request={request} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Database is busy");

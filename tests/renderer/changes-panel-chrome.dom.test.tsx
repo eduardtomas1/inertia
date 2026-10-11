@@ -101,7 +101,7 @@ describe("changes panel chrome", () => {
     for (const button of within(actions).getAllByRole("button")) expect(button).not.toHaveAttribute("title");
     expect(within(actions).getByRole("button", { name: "Fetch" })).toHaveAccessibleDescription("Refresh remote branches while preserving local changes");
     expect(document.querySelectorAll(".change-file-status[title]")).toHaveLength(0);
-    expect(within(actions).getByRole("button", { name: "Confidence" }).querySelector(".lucide-shield-check")).not.toBeNull();
+    expect((await within(actions).findByRole("button", { name: "Confidence" })).querySelector(".lucide-shield-check")).not.toBeNull();
   });
 
   it("explains a nested repository through a described control and drops the kicker from the compact picker", async () => {

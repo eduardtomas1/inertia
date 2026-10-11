@@ -868,7 +868,7 @@ export function WorkspaceChangesPanel({
                     <span className="workspace-repository-file-stats"><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>
                   <IconButton
-                    label={openPath === null ? `${file.path} is outside the project folder` : `Open ${file.path} from ${label}`}
+                    label={`Open ${file.path} from ${label}`}
                     disabled={openPath === null}
                     onClick={() => { if (openPath !== null) onOpenWorkspaceFile(openPath); }}
                   >

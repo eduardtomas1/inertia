@@ -997,6 +997,10 @@
   font-size: var(--text-xs);
 }
 
+.welcome-demo.is-compact .d-side {
+  color: transparent;
+}
+
 .welcome-demo.is-compact .d-pane > i:nth-of-type(3) {
   display: none;
 }

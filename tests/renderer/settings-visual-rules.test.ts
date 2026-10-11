@@ -142,6 +142,10 @@ describe("welcome and help guides", () => {
     expect(rule(welcome, ".welcome-guide-topics button[aria-selected=\"true\"]")).toContain("background: var(--fill-strong);");
   });
 
+  it("draws the compact split demo's sidebar rows as bars, since 12px labels cannot fit their rows", () => {
+    expect(rule(welcome, ".welcome-demo.is-compact .d-side")).toContain("color: transparent;");
+  });
+
   it("fades the guide in on opacity alone and sets heading weights", () => {
     for (const name of ["welcome-step-in", "welcome-rise", "welcome-pop"]) {
       expect(new RegExp(`@keyframes ${name} \\{[^@]*?transform`, "u").test(source(welcome)), name).toBe(false);

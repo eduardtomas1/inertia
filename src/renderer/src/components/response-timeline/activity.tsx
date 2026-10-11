@@ -13,6 +13,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Circle,
   CircleDot,
   Clock,
   Code2,
@@ -22,6 +23,7 @@ import {
   Terminal,
   TriangleAlert,
   Wrench,
+  X,
 } from "lucide-react";
 import "./ActivityGroup.css";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
@@ -63,6 +65,7 @@ import {
 import { layeredHtmlRenders } from "../../utils/response-timeline/model";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { Tooltip, useTooltip } from "../Tooltip";
+import { LoadingMark } from "../ui";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
 import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
 import {
@@ -397,7 +400,17 @@ export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }
       <span><ListChecks size={14} aria-hidden="true" />Plan</span>
       {plan.explanation && <p>{plan.explanation}</p>}
       {plan.steps.length > 0 && (
-        <p>{plan.steps.map(({ step, status }) => `${status === "completed" ? "✓" : status === "cancelled" ? "✕" : status === "inProgress" ? "•" : "○"} ${step}`).join("\n")}</p>
+        <ul className="turn-plan-steps">
+          {plan.steps.map(({ step, status }, index) => {
+            const StepIcon = status === "completed" ? Check : status === "cancelled" ? X : status === "inProgress" ? CircleDot : Circle;
+            return (
+              <li key={index} data-plan-step-status={status}>
+                <StepIcon size={12} aria-hidden="true" />
+                <span>{step}</span>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
@@ -585,7 +598,9 @@ export const ActivityGroup = memo(function ActivityGroup({
         >
           {groupOrb
             ? <WorkingOrb size={14} design={groupOrb.design} pace={groupOrb.pace} />
-            : <MarkIcon size={14} />}
+            : summary.running > 0
+              ? <LoadingMark size={14} aria-hidden="true" />
+              : <MarkIcon size={14} />}
         </span>
         <span className="turn-activity-group-parts">
           {parts.map((part) => (

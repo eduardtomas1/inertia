@@ -50,22 +50,8 @@
   height: 14px;
 }
 
-.turn-activity-group[data-activity-group-state="folded"] .turn-activity-group-mark {
-  color: color-mix(in srgb, var(--status-completed) 60%, var(--text-muted));
-}
-
 .turn-activity-group-mark[data-running="true"] {
   color: var(--active-work-text-highlight);
-}
-
-.turn-activity-group-mark[data-running="true"]::after {
-  position: absolute;
-  inset: 0;
-  border: 1.5px solid transparent;
-  border-top-color: currentColor;
-  border-radius: 50%;
-  content: "";
-  animation: activity-group-spin 900ms linear infinite;
 }
 
 .turn-activity-group-parts {
@@ -306,14 +292,7 @@
   font: inherit;
   font-size: var(--text-xs);
   cursor: pointer;
-  opacity: 0.5;
-  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
-}
-
-.turn-activity-group .agent-activity:hover .agent-activity-disclosure,
-.turn-activity-group .agent-activity.is-important .agent-activity-disclosure,
-.turn-activity-group .agent-activity-disclosure:is(:focus-visible, [aria-expanded="true"]) {
-  opacity: 1;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
 
 .turn-activity-group .agent-activity-disclosure:hover {
@@ -357,12 +336,6 @@
 
   .turn-activity-group .agent-activity-disclosure > span {
     display: none;
-  }
-}
-
-@keyframes activity-group-spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 

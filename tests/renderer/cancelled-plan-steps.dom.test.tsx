@@ -32,8 +32,12 @@ describe("cancelled native plan steps", () => {
   });
 
   it("does not mark cancelled steps done in the turn plan detail", () => {
-    render(<PlanDetail plan={plan} />);
-    expect(screen.getByText(/Rewrite the adapter/u).textContent)
-      .toBe("✓ Inspect provider state\n✕ Rewrite the adapter");
+    const { container } = render(<PlanDetail plan={plan} />);
+    const steps = [...container.querySelectorAll(".turn-plan-steps > li")];
+    expect(steps.map((step) => step.textContent)).toEqual(["Inspect provider state", "Rewrite the adapter"]);
+    expect(steps.map((step) => step.getAttribute("data-plan-step-status"))).toEqual(["completed", "cancelled"]);
+    expect(steps[0]!.querySelector("svg.lucide-check")).not.toBeNull();
+    expect(steps[1]!.querySelector("svg.lucide-x")).not.toBeNull();
+    expect(container).not.toHaveTextContent(/[✓✕•○]/u);
   });
 });

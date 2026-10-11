@@ -96,6 +96,7 @@ describe("CLI import dialog", () => {
     expect(button).toHaveFocus();
     fireEvent.keyDown(button, { key: "Escape" });
     expect(screen.getByRole("group", { name: "Build the sidebar" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Build the sidebar" })).toHaveProperty("tagName", "H3");
     await act(async () => pendingImport.resolve(imported));
     expect(button).toHaveAccessibleName("Open chat");
     expect(button).toHaveClass("primary-button");

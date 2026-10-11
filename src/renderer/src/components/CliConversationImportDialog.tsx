@@ -201,7 +201,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
         {openId && openCandidate ? <div key={openId} className="cli-import-open" role="group" aria-labelledby={openTitleId}>
           <div className="cli-import-open-head">
             <IconButton ref={backButton} label="Back to conversations" aria-disabled={busy === "import"} onClick={() => back()}><ArrowLeft size={14} aria-hidden="true" /></IconButton>
-            <h2 id={openTitleId}>{openCandidate.title}</h2>
+            <h3 id={openTitleId}>{openCandidate.title}</h3>
           </div>
           <div className="cli-import-open-scroll">
             {busy === "preview" ? <p className="cli-import-state" role="status">Loading conversation…</p>

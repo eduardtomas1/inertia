@@ -50,4 +50,26 @@ describe("tooltip text", () => {
     fireEvent.pointerDown(text, { pointerType: "mouse" });
     expect(tooltip()).toBeNull();
   });
+
+  it("keeps the caller's pointer handlers alongside its own", () => {
+    const onPointerEnter = vi.fn();
+    const onPointerLeave = vi.fn();
+    const onPointerDown = vi.fn();
+    render(
+      <TooltipText tooltip="Detail" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave} onPointerDown={onPointerDown}>
+        Label
+      </TooltipText>,
+    );
+    const text = screen.getByText("Label");
+    fireEvent.pointerEnter(text, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(tooltip()).not.toBeNull();
+    fireEvent.pointerDown(text, { pointerType: "mouse" });
+    fireEvent.pointerLeave(text, { pointerType: "mouse" });
+    expect(onPointerEnter).toHaveBeenCalledOnce();
+    expect(onPointerDown).toHaveBeenCalledOnce();
+    expect(onPointerLeave).toHaveBeenCalledOnce();
+  });
 });

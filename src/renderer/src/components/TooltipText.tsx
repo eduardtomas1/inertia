@@ -5,10 +5,13 @@ import { Tooltip, useTooltip } from "./Tooltip";
 export function TooltipText({
   tooltip: label,
   children,
+  onPointerEnter,
+  onPointerLeave,
+  onPointerDown,
   ...props
 }: ComponentPropsWithoutRef<"span"> & { tooltip: string }): React.JSX.Element {
   const anchor = useRef<HTMLSpanElement>(null);
-  const tooltip = useTooltip(anchor, {});
+  const tooltip = useTooltip(anchor, { onPointerEnter, onPointerLeave, onPointerDown });
   return (
     <>
       <span

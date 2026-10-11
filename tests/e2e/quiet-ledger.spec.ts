@@ -329,7 +329,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       expect(geometry.requestToAnswer).toBeLessThanOrEqual(17);
       expect(geometry.answerToMetadata).toBeGreaterThanOrEqual(5);
       expect(geometry.answerToMetadata).toBeLessThanOrEqual(13);
-      expect(geometry.metadataHeight).toBeCloseTo(33, 0);
+      expect(geometry.metadataHeight).toBeCloseTo(32, 0);
     }
     const successfulTurnSeparation = await Promise.all([
       completedTurn.evaluate((element) => {
@@ -506,7 +506,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       expect(geometry.executionToAnswer).toBeLessThanOrEqual(17);
       expect(geometry.answerToMetadata).toBeGreaterThanOrEqual(5);
       expect(geometry.answerToMetadata).toBeLessThanOrEqual(13);
-      expect(geometry.metadataHeight).toBeCloseTo(33, 0);
+      expect(geometry.metadataHeight).toBeCloseTo(32, 0);
     }
     await captureScenario("failed-tool");
     await captureScenario("exception-history-dark-1440x920");

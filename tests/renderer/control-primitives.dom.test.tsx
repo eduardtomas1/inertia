@@ -253,7 +253,8 @@ describe("dialog primitives", () => {
   });
 
   it("closes every dialog from one title row and ends it with 32px footer buttons", () => {
-    expect(shellCss).toMatch(/\.dialog-shell-header \{[^}]*align-items: center;[^}]*\}/u);
+    expect(shellCss).toMatch(/\.dialog-shell-header \{[^}]*align-items: flex-start;[^}]*\}/u);
+    expect(shellCss).toMatch(/\.dialog-shell-heading > p \{[^}]*overflow-wrap: anywhere;/u);
     expect(shellCss).toMatch(/\.dialog-shell-footer > :is\(\.primary-button, \.secondary-button\) \{\n  min-height: var\(--control-height\);/u);
     expect(shellCss).toMatch(/\.dialog-shell \{\n  display: flex;\n  width: min\(var\(--dialog-width, 480px\), 100%\);/u);
     expect(componentDialogCss).not.toMatch(/min-height: (?:30|34|36|37|39)px|height: (?:30|37|39)px/u);

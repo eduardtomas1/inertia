@@ -11,7 +11,7 @@
   display: flex;
   min-width: 0;
   flex: 0 0 auto;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 16px 16px 12px 20px;
 }
@@ -19,6 +19,7 @@
 .dialog-shell-heading {
   min-width: 0;
   flex: 1;
+  padding-top: 6px;
 }
 
 .dialog-shell-heading > h2 {
@@ -29,13 +30,11 @@
 }
 
 .dialog-shell-heading > p {
-  overflow: hidden;
   margin: 2px 0 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-chrome);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .dialog-shell-close {

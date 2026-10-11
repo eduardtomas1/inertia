@@ -404,9 +404,9 @@ export function AttachmentPreviewDialog({
       closeRef={closeRef}
       onClose={onClose}
       onDismiss={onClose}
-      footerStart={previewKind === "pdf" && (openFailed
-        ? <span className="attachment-preview-open-error" role="alert">The validated copy could not be opened.</span>
-        : "If the embedded viewer is unavailable, open this validated copy in your default PDF app.")}
+      footerStart={previewKind === "pdf" && openFailed && (
+        <span className="attachment-preview-open-error" role="alert">The validated copy could not be opened.</span>
+      )}
       footer={previewKind === "pdf" && (
         <button
           type="button"
@@ -426,15 +426,12 @@ export function AttachmentPreviewDialog({
         </button>
       )}
     >
-      {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
+      {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" className="secondary-button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
       <div className="attachment-preview-stage" data-load-failed={loadFailed}>
         {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
           ? (
               <div className="attachment-preview-unavailable" role="alert">
                 <strong>Preview unavailable</strong>
-                <span>
-                  This file could not be previewed. It may use an unsupported format, have changed, or have been removed from storage.
-                </span>
               </div>
             )
           : previewKind === "file"

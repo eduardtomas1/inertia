@@ -1,3 +1,4 @@
+import { readSourceText } from "../helpers/source-text";
 import * as XLSX from "xlsx";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -339,5 +340,13 @@ describe("document attachment previews", () => {
     expect(block).toHaveTextContent("The complete file is saved. The agent can read or search it with file tools.");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("selects sheets with the strong fill and keeps preview controls square-cornered at 28px", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toMatch(/\.spreadsheet-attachment-tabs button\[aria-pressed="true"\] \{\n  color: var\(--text\);\n  background: var\(--fill-strong\);\n  font-weight: 500;\n\}/u);
+    expect(css).toMatch(/\.image-attachment-zoom-controls button \{\n  display: grid;\n  width: var\(--control-height-small\);[^}]*border-radius: var\(--radius-xs\);/u);
+    expect(css).toMatch(/\.pdf-attachment-preview-toolbar button \{\n  display: grid;\n  width: var\(--control-height-small\);/u);
+    expect(css).not.toMatch(/attachment-preview-unavailable > svg|\.text-attachment-preview \{[^}]*color: var\(--text-muted\)/u);
+    expect(readSourceText("src/renderer/src/components/DocumentAttachmentPreview.tsx")).not.toMatch(/If the embedded viewer is unavailable|It may use an unsupported format/u);
   });
 });

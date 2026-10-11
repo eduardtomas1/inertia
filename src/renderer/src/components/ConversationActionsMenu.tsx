@@ -237,7 +237,7 @@ export function ConversationActionsMenu({
       </ThreadSubmenu>
       <div role="separator" />
       <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={14} />Rename thread</ConversationMenuItem>
-      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} hint="Use the latest user message as the title. Runs locally without an AI request." onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}
+      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} hint={canSettle ? "Use the latest user message as the title. Runs locally without an AI request." : "Available after the current turn finishes."} onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}
       {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={14} />Mark unread</ConversationMenuItem>}
       <div role="separator" />
       <ThreadSubmenu label="Copy" icon={<Copy size={14} />} open={submenu === "copy"}

@@ -185,6 +185,50 @@ describe("detached chat leaf controls", () => {
     expect(onDeleteConversation).not.toHaveBeenCalled();
   });
 
+  it("says why Regenerate title is unavailable while a turn runs", () => {
+    const onRegenerateTitle = vi.fn();
+    const running = { ...conversation, status: "running" as const };
+    render(
+      <ConversationActionsMenu
+        activeConversationId={running.id}
+        activity={false}
+        conversation={running}
+        runs={[]}
+        splitConversationIds={new Set()}
+        thread={{
+          conversation: running,
+          run: null,
+          status: "idle",
+          needsAttention: false,
+          unread: false,
+          hidden: false,
+          settled: false,
+        }}
+        onAcknowledgeRun={noOp}
+        onArchiveConversation={noOp}
+        onCloseConversationSplit={noOp}
+        onDeleteConversation={noOp}
+        onDismiss={noOp}
+        onDismissRun={noOp}
+        onOpenConversationInSplit={noOp}
+        onOpenConversationInWindow={noOp}
+        onPinConversation={noOp}
+        onRegenerateTitle={onRegenerateTitle}
+        onRestoreConversation={noOp}
+        onSetPopover={noOp}
+        onSettleConversation={noOp}
+        onSnoozeConversation={noOp}
+        onStartRename={noOp}
+      />,
+    );
+
+    const regenerate = screen.getByRole("menuitem", { name: "Regenerate title" });
+    expect(regenerate).toHaveAttribute("aria-disabled", "true");
+    expect(regenerate).toHaveAccessibleDescription("Available after the current turn finishes.");
+    fireEvent.click(regenerate);
+    expect(onRegenerateTitle).not.toHaveBeenCalled();
+  });
+
   it("keeps focusing a detached chat available from the header title menu at the window limit", async () => {
     const onOpenConversationInWindow = vi.fn();
     render(

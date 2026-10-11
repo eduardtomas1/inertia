@@ -12,3 +12,7 @@ export interface ProviderTerminalResumeOption {
   conversationTitle: string;
   availability: ProviderTerminalResumeAvailability;
 }
+
+export function hasStoredResumeSession(options: readonly ProviderTerminalResumeOption[]): boolean {
+  return options.some(({ availability }) => availability.resume !== null);
+}

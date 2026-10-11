@@ -16,7 +16,7 @@ import type { ProviderTerminalResumeDescriptor, ServerEvent } from "@shared/cont
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { terminalContextMenu, terminalPasteKeyHandler } from "../utils/terminalContextMenu";
-import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import { hasStoredResumeSession, type ProviderTerminalResumeOption } from "./providerResumeOptions";
 import {
   command,
   ignoreCommandFailure,
@@ -1049,7 +1049,7 @@ export function TerminalSession({
           </div>
         </div>
       )}
-      {selectedResumeOption && (
+      {selectedResumeOption && (activeResume || resumeError || hasStoredResumeSession(resumeOptions)) && (
         <Suspense fallback={(
           <div className="terminal-resume-status" role="status">
             Loading provider resume controls…

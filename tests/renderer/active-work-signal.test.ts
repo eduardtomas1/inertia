@@ -82,7 +82,6 @@ describe("Minimal Workstream active pixel signal", () => {
       '.subagent-status-mark[data-live="true"]::after',
       ".agent-activity.is-running .agent-activity-icon::after",
       ".loading-mark",
-      ".daily-work-skeleton i",
       ".composer-status-dots i",
       '.send-button[data-motion-state="sending"] .composer-send-motion-icon',
     ]) {

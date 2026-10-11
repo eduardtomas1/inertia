@@ -1567,18 +1567,8 @@ button.header-breadcrumb-project:hover {
   overflow-y: auto;
 }
 
-.git-action-popover {
-  width: 290px;
-}
-
 .git-action-popover > button {
   justify-content: flex-start;
-}
-
-.git-action-popover > button > span {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
 }
 
 .header-popover-title {
@@ -1607,26 +1597,19 @@ button.header-breadcrumb-project:hover {
   white-space: nowrap;
 }
 
-.branch-current {
-  color: var(--accent-strong);
-  font-size: var(--text-xs);
-}
-
 .checkout-context-note {
   display: grid;
-  grid-template-columns: 15px minmax(0, 1fr);
-  gap: 7px;
-  margin: 0 2px 6px;
-  padding: 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-xs);
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--line-soft);
   color: var(--text-muted);
-  background: var(--fill);
 }
 
 .checkout-context-note > svg {
-  margin-top: 1px;
-  color: var(--accent-strong);
+  margin-top: 2px;
+  color: var(--text-muted);
 }
 
 .checkout-context-note > span {
@@ -1652,12 +1635,14 @@ button.header-breadcrumb-project:hover {
 .checkout-context-note > button {
   grid-column: 2;
   width: fit-content;
-  padding: 3px 6px;
+  min-height: var(--control-height-small);
+  padding: 0 8px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
-  color: var(--accent-strong);
+  color: var(--text);
   background: transparent;
-  font-size: var(--text-xs);
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .checkout-context-note > button:hover {
@@ -1666,56 +1651,62 @@ button.header-breadcrumb-project:hover {
 
 .new-branch-form {
   display: flex;
-  gap: 5px;
-  margin-top: 5px;
-  padding: 6px 3px 2px;
-  border-top: 1px solid var(--line);
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .new-branch-form input {
   min-width: 0;
-  height: 31px;
+  height: var(--control-height-small);
   flex: 1;
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   outline: none;
-  background: var(--surface);
-  font-size: var(--text-xs);
+  background: transparent;
+  font-size: var(--text-sm);
 }
 
 .new-branch-form button {
-  padding: 0 9px;
+  min-height: var(--control-height-small);
+  padding: 0 12px;
   border-radius: var(--radius-xs);
   color: var(--accent-text);
   background: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .new-chat-location-actions {
-  margin-top: 6px;
-  padding-top: 3px;
-  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .new-chat-location-actions > button {
   display: flex;
   width: 100%;
-  min-height: 32px;
+  min-height: var(--menu-item-height);
   align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
+  gap: 8px;
+  padding: 0 8px;
   border-radius: var(--radius-xs);
-  color: var(--text-muted);
+  color: var(--text);
   background: transparent;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   text-align: left;
 }
 
 .new-chat-location-actions > button:hover {
   color: var(--text);
   background: var(--fill);
+}
+
+.new-chat-location-actions > button:focus-visible {
+  outline: 0;
+  background: var(--fill-strong);
 }
 
 .new-chat-location-actions > button svg {

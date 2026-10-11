@@ -243,3 +243,22 @@ describe("workspace header", () => {
     expect(css).not.toContain(".header-menu-separator {");
   });
 });
+
+describe("Git and branch menus", () => {
+  const menus = readSourceText("src/renderer/src/components/workspace-git-menus.css");
+
+  it("uses 28px items, the shared disabled opacity and no boxed counts, cards or accent", () => {
+    expect(menus).not.toContain(".git-overview-counts");
+    expect(menus).not.toMatch(/opacity: \.52/u);
+    expect(menus).toContain('.git-branch-results button[aria-checked="true"] { color: var(--text); font-weight: 500; }');
+    expect(menus).not.toMatch(/\.git-branch-error \{[^}]*border/u);
+    expect(menus).toMatch(/\.git-action-group > button \{[^}]*min-height: var\(--menu-item-height\);/u);
+    expect(css).not.toContain(".branch-current {");
+    expect(block(".checkout-context-note")).not.toMatch(/background|line-strong/u);
+    expect(block(".checkout-context-note > svg")).not.toContain("accent");
+    expect(block(".checkout-context-note > button")).not.toContain("accent");
+    expect(block(".new-branch-form input")).toContain("height: var(--control-height-small);");
+    expect(block(".new-chat-location-actions > button")).toContain("min-height: var(--menu-item-height);");
+    expect(block(".new-chat-location-actions > button:focus-visible")).toContain("background: var(--fill-strong);");
+  });
+});

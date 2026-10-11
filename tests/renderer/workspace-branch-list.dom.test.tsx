@@ -40,6 +40,17 @@ describe("branch picker", () => {
     expect(onRefresh).toHaveBeenCalledWith();
   });
 
+  it("shows no standing branch count and labels groups only when both are present", () => {
+    const one = [branches[0]!];
+    const { rerender } = render(<WorkspaceBranchList branches={one} busy={false} onSwitch={vi.fn()} onCreate={vi.fn()} onRefresh={vi.fn()} />);
+    expect(screen.queryByText(/branch(es)?$/u)).toBeNull();
+    expect(document.querySelector(".git-menu-section-label")).toBeNull();
+    expect(screen.getByRole("menuitemradio", { name: /main/u })).toHaveAttribute("title", "main");
+    rerender(<WorkspaceBranchList branches={branches} busy={false} onSwitch={vi.fn()} onCreate={vi.fn()} onRefresh={vi.fn()} />);
+    expect([...document.querySelectorAll(".git-menu-section-label")].map((node) => node.textContent)).toEqual(["Local", "Remote"]);
+    expect(screen.getByRole("button", { name: "Refresh branches" })).toHaveClass("icon-button");
+  });
+
   it("explains empty search and submits branch creation only when idle", () => {
     const onCreate = vi.fn();
     const { rerender } = render(<WorkspaceBranchList branches={branches} busy={false} onSwitch={vi.fn()} onCreate={onCreate} />);

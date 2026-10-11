@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { PanelTopOpen } from "lucide-react";
 
 export interface DetachedConversationPlaceholderProps {
   title: string;
@@ -18,7 +18,7 @@ export function DetachedConversationPlaceholder({
     >
       <h2>{windowOpen ? "Chat window active" : "Chat window closed"}</h2>
       <button type="button" className="secondary-button" onClick={onActivate}>
-        <ExternalLink size={14} />
+        <PanelTopOpen size={14} />
         <span>{windowOpen ? "Focus chat window" : "Open chat here"}</span>
       </button>
     </section>

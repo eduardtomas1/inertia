@@ -143,7 +143,6 @@ export function DetachedContextHandoffNotice({
       <MessagesSquare size={14} aria-hidden="true" />
       <span>
         <strong>Agent requested chat context</strong>
-        <small>Review this request in the main window.</small>
       </span>
       <button type="button" onClick={onReturnToMain}>
         <PanelTopOpen size={14} aria-hidden="true" />
@@ -543,8 +542,8 @@ export default function DetachedChatApp({
             onClick={toggleAlwaysOnTop}
           >
             {windowContext.alwaysOnTop
-              ? <PinOff size={14} />
-              : <Pin size={14} />}
+              ? <PinOff size={16} />
+              : <Pin size={16} />}
           </IconButton>
           <IconButton label="Return chat to main window" onClick={dockInMain}>
             <PanelTopOpen size={16} />

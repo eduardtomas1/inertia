@@ -317,3 +317,20 @@ describe("split view", () => {
     expect(block(".chat-drag-chip")).toContain("border: 1px solid var(--line-soft);");
   });
 });
+
+describe("detached chat window", () => {
+  const detached = readSourceText("src/renderer/src/detached-chat.css");
+
+  it("puts project and title on one breadcrumb line and keeps the error bar plain", () => {
+    expect(block(".detached-chat-title", detached)).not.toContain("flex-direction: column;");
+    expect(block(".detached-chat-title > .detached-chat-project::after", detached)).toContain('content: "/";');
+    expect(block(".detached-chat-error", detached)).not.toContain("background");
+    const dismiss = block(".detached-chat-error > button", detached);
+    expect(dismiss).toContain("border: 1px solid var(--line);");
+    expect(dismiss).toContain("font-weight: 500;");
+    const app = readSourceText("src/renderer/src/DetachedChatApp.tsx");
+    expect(app).toContain("<Pin size={16} />");
+    expect(app).not.toContain("Review this request in the main window.");
+    expect(readSourceText("src/renderer/src/components/DetachedConversationPlaceholder.tsx")).toContain("<PanelTopOpen size={14} />");
+  });
+});

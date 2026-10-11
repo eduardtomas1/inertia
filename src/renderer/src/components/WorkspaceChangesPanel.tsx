@@ -46,8 +46,8 @@ import {
   type ChangesPanelProps,
   type DiffSelection,
 } from "./ChangesPanel";
-import { IconButton } from "./ui";
 import { HintButton } from "./HintButton";
+import { TooltipButton } from "./TooltipButton";
 import { projectPathContextMenu } from "../utils/contextMenu";
 import { CommitDialog } from "./CommitDialog";
 import {
@@ -867,13 +867,15 @@ export function WorkspaceChangesPanel({
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
                     <span className="workspace-repository-file-stats"><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>
-                  <IconButton
-                    label={`Open ${file.path} from ${label}`}
+                  <TooltipButton
+                    className="icon-button"
+                    aria-label={`Open ${file.path} from ${label}`}
+                    tooltip={openPath === null ? "This file is outside the project folder." : `Open ${file.path} from ${label}`}
                     disabled={openPath === null}
                     onClick={() => { if (openPath !== null) onOpenWorkspaceFile(openPath); }}
                   >
                     <ExternalLink size={14} />
-                  </IconButton>
+                  </TooltipButton>
                 </li>
               );
             }),

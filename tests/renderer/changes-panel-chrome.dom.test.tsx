@@ -117,6 +117,18 @@ describe("changes panel chrome", () => {
   });
 });
 
+describe("files outside the project folder", () => {
+  it("keeps the open label and explains why the action is unavailable", async () => {
+    const snapshot = snapshotWith(".");
+    snapshot.repositories[0] = { ...snapshot.repositories[0]!, workspacePrefix: "app" } as typeof snapshot.repositories[number];
+    await renderPanel(snapshot);
+    const open = await screen.findByRole("button", { name: /^Open README\.md from /u });
+    expect(open).toBeDisabled();
+    expect(open).not.toHaveAttribute("title");
+    expect(open).toHaveAccessibleDescription("This file is outside the project folder.");
+  });
+});
+
 describe("selection review answer", () => {
   it("labels the answer without an accent icon", () => {
     render(<SelectionReviewAnswerCard answer={{

@@ -401,6 +401,22 @@ describe("workspace panel tab row", () => {
     expect(files).toHaveAccessibleDescription(reason);
   });
 
+  it("reaches an unavailable surface by arrow keys so its reason is announced, without opening it", async () => {
+    const reason = "Available after the first message creates this chat's workspace.";
+    render(<Host initial={state("changes", "changes")} unavailable={{ files: reason }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
+    const menu = await screen.findByRole("menu", { name: "Add panel surface" });
+    const files = await within(menu).findByRole("menuitem", { name: /^Files/u });
+    const items = within(menu).getAllByRole("menuitem");
+    const previous = items[items.indexOf(files) - 1]!;
+    previous.focus();
+    fireEvent.keyDown(previous, { key: "ArrowDown" });
+    expect(files).toHaveFocus();
+    expect(files).toHaveAccessibleDescription(reason);
+    fireEvent.click(files);
+    expect(tabNames()).toEqual(["changes"]);
+  });
+
   it("keeps the add button on the 2px outside button ring", () => {
     const css = readSourceText("src/renderer/src/styles.css");
     const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";

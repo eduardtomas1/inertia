@@ -228,7 +228,7 @@ export function WorkspacePanel({
       openSurface(action.surface);
       return;
     }
-    navigateMenuItems(event, '[role="menuitem"]:not([aria-disabled="true"])');
+    navigateMenuItems(event);
   };
 
   return (

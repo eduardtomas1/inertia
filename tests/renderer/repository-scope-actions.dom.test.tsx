@@ -107,6 +107,17 @@ describe("Changes repository actions", () => {
     expect(screen.getByTestId("launcher")).toHaveTextContent("buttons");
   });
 
+  it("reaches an unavailable collapsed action by arrow keys", () => {
+    sizes.rowScroll = 760;
+    render(actionsRow());
+    fireEvent.click(screen.getByRole("button", { name: "More actions for inertia" }));
+    const menu = screen.getByRole("menu", { name: "More actions for inertia" });
+    const fetch = within(menu).getByRole("menuitem", { name: "Fetch" });
+    fetch.focus();
+    fireEvent.keyDown(fetch, { key: "ArrowDown" });
+    expect(within(menu).getByRole("menuitem", { name: "Pull" })).toHaveFocus();
+  });
+
   it("returns focus to the More trigger after a collapsed action runs", async () => {
     sizes.rowScroll = 760;
     const onFetch = vi.fn();

@@ -153,7 +153,7 @@ export function RepositoryScopeActions({
               className="header-popover workspace-repository-more-menu"
               role="menu"
               aria-label={`More actions for ${label}`}
-              onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]:not([aria-disabled="true"])')}
+              onKeyDown={(event) => navigateMenuItems(event)}
             >
               {items.map((item) => (
                 <HintButton

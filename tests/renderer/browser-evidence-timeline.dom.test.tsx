@@ -103,6 +103,7 @@ describe("Browser evidence timeline", () => {
     );
     const toggle = screen.getByRole("button", { name: "Evidence 3" });
     expect(toggle).not.toHaveTextContent("3");
+    expect(toggle).not.toHaveAttribute("aria-describedby");
     fireEvent.click(toggle);
     const timeline = await screen.findByRole("list", { name: "Browser evidence timeline" });
     expect(document.querySelector(".browser-evidence-heading-icon, .browser-evidence-entry-icon")).toBeNull();

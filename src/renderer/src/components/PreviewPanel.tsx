@@ -337,6 +337,7 @@ export function PreviewPanel({
         <TooltipButton
           ref={evidenceToggleRef}
           tooltip="Browser evidence"
+          describeTooltip={false}
           className={`preview-evidence-toggle${evidenceOpen ? " is-active" : ""}${evidence.entries.some((entry) => entry.kind === "console-error" || entry.kind === "network-failure") ? " has-failures" : ""}`}
           aria-label={`Evidence ${evidence.entries.length}`}
           aria-expanded={evidenceOpen}

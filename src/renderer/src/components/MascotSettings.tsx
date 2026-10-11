@@ -1,5 +1,5 @@
+import { ChevronDown } from "lucide-react";
 import { Switch } from "./ui";
-import { SettingDisclosure } from "./settings/SettingsLayout";
 import { useEffect, useState } from "react";
 import type { SettingAction, SettingNotice } from "./settings/useSettingAction";
 import { MASCOT_LABELS, type MascotSettingsBridge, type MascotSnapshot } from "../../../shared/mascot";
@@ -120,7 +120,8 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
             <button className="secondary-button" type="button" aria-disabled={held} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
           </div>
         </div>
-        <SettingDisclosure summary="How custom sprites work" className="mascot-sprite-guide">
+        <details className="setting-disclosure mascot-sprite-guide">
+          <summary><ChevronDown size={14} aria-hidden="true" className="setting-disclosure-chevron" />How custom sprites work</summary>
           <ol aria-label="Steps">
             {MASCOT_SPRITE_STEPS.map((step) => <li key={step}>{step}</li>)}
           </ol>
@@ -134,7 +135,7 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
               <small>{MASCOT_SPRITE_NOTES[state]}</small>
             </li>)}
           </ul>}
-        </SettingDisclosure>
+        </details>
         {shown && <ul className="mascot-sprite-preview" aria-label={pending ? "Sprite preview" : "Current sprites"}>
           {MASCOT_SPRITE_STATES.map((state) => <li key={state}>
             <picture>

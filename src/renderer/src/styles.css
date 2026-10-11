@@ -5244,10 +5244,6 @@ button.turn-agents-line:hover {
 
 .goal-panel-plan {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 9px;
 }
 
 .goal-panel-plan > div,
@@ -5275,7 +5271,6 @@ button.turn-agents-line:hover {
 }
 
 .goal-panel-plan span,
-.goal-panel-plan small,
 .goal-panel-skill-copy small,
 .goal-panel-subagent-copy small {
   overflow: hidden;
@@ -5283,10 +5278,6 @@ button.turn-agents-line:hover {
   font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.goal-panel-plan small {
-  white-space: normal;
 }
 
 .goal-panel-skills,

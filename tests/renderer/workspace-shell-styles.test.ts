@@ -189,6 +189,8 @@ describe("goal panel", () => {
     expect(block(".goal-panel-progress > span")).not.toContain("accent");
     expect(block(".goal-panel-skill-copy code")).not.toContain("accent");
     expect(block(".goal-panel-section-heading h3")).toContain("font-weight: 500;");
+    expect(block(".goal-panel-plan")).not.toMatch(/padding|grid-template-columns/u);
+    expect(css).not.toContain(".goal-panel-plan small");
     expect(css).not.toContain(".goal-panel-toolbar .panel-heading > svg");
     expect(css).not.toContain(".goal-panel-subagent-dot");
     expect(motion).not.toMatch(/\.goal-panel-subagent[^{]*\{[^}]*accent/u);

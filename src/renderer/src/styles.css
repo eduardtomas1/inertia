@@ -2383,7 +2383,7 @@ button.header-breadcrumb-project:hover {
 
 .pending-input-notice button {
   display: inline-flex;
-  min-height: 24px;
+  min-height: calc(var(--control-height-small) - 4px);
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;

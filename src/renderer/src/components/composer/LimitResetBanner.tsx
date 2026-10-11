@@ -168,7 +168,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
       <strong>{title}</strong>
-      <TooltipText tooltip={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>
+      <TooltipText className="limit-reset-when" tooltip={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>
         <time dateTime={resetsAt}>
           {pending ? "Resumes" : missed ? "Reset" : "Resets"} {when}
         </time>

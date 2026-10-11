@@ -58,6 +58,10 @@ function StateMark({ state }: { state: GitPreMergeEvidenceState }): React.JSX.El
   return <CircleAlert aria-hidden="true" />;
 }
 
+function sentenceCase(value: string): string {
+  return `${value.charAt(0).toLocaleUpperCase("en-US")}${value.slice(1).replace(/-/gu, " ")}`;
+}
+
 function FactSource({ kind, children }: {
   kind: "local" | "github" | "claim";
   children: React.ReactNode;
@@ -292,7 +296,7 @@ export function PreMergeConfidenceDialog({
           <section className="pre-merge-section pre-merge-identity" aria-labelledby="pre-merge-identity-title">
             <div className="pre-merge-section-heading">
               <div><h3 id="pre-merge-identity-title">Exact identity</h3><span>Green applies only to this local head and this GitHub PR head.</span></div>
-              <span className={`pre-merge-state is-${confidence.identity.state}`}>{confidence.identity.state}</span>
+              <span className={`pre-merge-state is-${confidence.identity.state}`}>{sentenceCase(confidence.identity.state)}</span>
             </div>
             <div className="pre-merge-identity-grid">
               <div>
@@ -423,7 +427,7 @@ export function PreMergeConfidenceDialog({
               <div><h3 id="pre-merge-readiness-title">Readiness</h3><span>Merge confidence and release proof are intentionally different.</span></div>
             </div>
             <div className="pre-merge-readiness-row">
-              <strong>Merge</strong><span data-state={confidence.mergeReadiness.state}>{confidence.mergeReadiness.state}</span>
+              <strong>Merge</strong><span data-state={confidence.mergeReadiness.state}>{sentenceCase(confidence.mergeReadiness.state)}</span>
             </div>
             {confidence.mergeReadiness.blockers.length > 0 && (
               <ul className="pre-merge-blockers">

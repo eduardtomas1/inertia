@@ -35,7 +35,7 @@ describe("new chat default provider fallback", () => {
     const reasoning = screen.getByRole("combobox", { name: "Reasoning" });
     expect(reasoning).toHaveAttribute("aria-disabled", "true");
     expect(container.querySelector('[data-setting-id="new-chat-reasoning"]'))
-      .toHaveTextContent("Choose a model to change its reasoning.");
+      .not.toHaveTextContent("Choose a model to change its reasoning.");
     fireEvent.change(reasoning, { target: { value: "high" } });
     expect(onSetDefaultModel).not.toHaveBeenCalled();
   });

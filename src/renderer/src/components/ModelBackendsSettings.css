@@ -24,13 +24,13 @@
   grid-template-columns: minmax(200px, 30%) minmax(0, 1fr);
   align-items: stretch;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
 }
 
 .settings-card > .backend-settings-toolbar + .backend-settings-grid {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .backend-profile-rail {
@@ -38,7 +38,7 @@
   min-width: 0;
   align-content: start;
   margin-bottom: -1px;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--line-soft);
   background: var(--surface);
 }
 
@@ -50,7 +50,7 @@
   align-content: start;
   gap: 3px;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
   color: var(--text);
   background: transparent;
   text-align: left;
@@ -61,7 +61,7 @@
 }
 
 .backend-profile-rail-item.is-active {
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .backend-profile-rail-item > strong {
@@ -138,7 +138,7 @@
 }
 
 .backend-profile-header-copy > strong {
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -160,7 +160,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
   font-size: var(--text-sm);
 }
 
@@ -183,7 +183,7 @@
 }
 
 .backend-profile-facts + .setting-row {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .backend-credential-control {
@@ -230,7 +230,7 @@
   justify-content: space-between;
   gap: 4px 12px;
   padding: 10px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .backend-model-list > li > span {
@@ -265,7 +265,7 @@
 
 .backend-profile-details {
   padding: 4px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .backend-capability-list {
@@ -299,7 +299,7 @@
 }
 
 .backend-profile-details + .setting-row {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 .backend-settings .is-danger {
@@ -369,9 +369,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
   color: var(--text);
   background: transparent;
   text-align: left;
@@ -382,8 +381,7 @@
 }
 
 .backend-choice-grid > button.is-active {
-  border-color: var(--line-strong);
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .backend-choice-grid > button > span {
@@ -394,6 +392,10 @@
 
 .backend-choice-grid strong {
   font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+.backend-choice-grid > button.is-active strong {
   font-weight: 500;
 }
 
@@ -404,7 +406,7 @@
 
 .backend-choice-grid > button > svg {
   flex: 0 0 auto;
-  color: var(--accent-strong);
+  color: var(--text-muted);
 }
 
 .backend-form-grid,
@@ -475,7 +477,7 @@
   gap: 8px;
   margin-top: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-soft);
 }
 
 @container backends (max-width: 760px) {
@@ -486,7 +488,7 @@
   .backend-profile-rail {
     margin-bottom: 0;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .backend-profile-rail:empty {
@@ -535,7 +537,7 @@
 
   .backend-editable-model {
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .backend-editable-model > .icon-button {

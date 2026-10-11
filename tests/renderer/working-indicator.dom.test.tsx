@@ -249,8 +249,16 @@ describe("working indicator settings", () => {
     const group = screen.getByRole("radiogroup", { name: "Working indicator" });
     expect(document.getElementById(group.getAttribute("aria-labelledby") ?? "")).toHaveRole("heading");
     const tiles = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
-    expect(tiles.map((tile) => tile.textContent)).toEqual(tiles.map((tile) => tile.getAttribute("aria-label")));
+    const visibleText = (tile: HTMLElement): string | null => {
+      const copy = tile.cloneNode(true) as HTMLElement;
+      for (const hidden of copy.querySelectorAll(".visually-hidden")) hidden.remove();
+      return copy.textContent;
+    };
+    expect(tiles.map(visibleText)).toEqual(tiles.map((tile) => tile.getAttribute("aria-label")));
     expect(view.container.textContent).not.toMatch(/By activity|Agent activity/u);
+    expect(screen.getByRole("radio", { name: "Working" })).toHaveAccessibleDescription("Particles on tilted orbits");
+    expect(view.container.querySelectorAll(".working-indicator-settings [title]")).toHaveLength(0);
+    expect(view.container.textContent).not.toMatch(/Theme ink follows|soft halo in the indicator/u);
   });
 
   it("moves and selects with arrow keys, Home and End", () => {

@@ -104,7 +104,10 @@ describe("WelcomeGuide", () => {
     expect([...dialog.querySelectorAll(".welcome-demo.is-compact > .d-stage")].map((stage) => stage.className))
       .toEqual(["d-stage is-work", "d-stage is-split", "d-stage is-ship"]);
     expect(screen.getByRole("button", { name: "Take the tour" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Take the tour" })).toHaveClass("primary-button");
     expect(progress).toHaveAttribute("aria-valuetext", "Step 1 of 4: Welcome");
+    expect(dialog.querySelectorAll(".welcome-guide-tiles > li > small, .welcome-guide-hero p, .welcome-guide-count")).toHaveLength(0);
+    expect(dialog).not.toHaveTextContent("Step 1 of 4");
 
     fireEvent.click(screen.getByRole("button", { name: "Take the tour" }));
     expect(screen.getByRole("heading", { name: "How it works" })).toBeVisible();
@@ -118,7 +121,10 @@ describe("WelcomeGuide", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect an agent" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("heading", { name: "You're ready to start" })).toBeVisible();
-    expect(screen.getByText("1 agent is ready. Add a project to open your first chat.")).toBeVisible();
+    expect(screen.queryByText(/to open your first chat/u)).toBeNull();
+    expect(screen.queryByText("You can replay this guide from Settings.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add a project" })).toHaveClass("secondary-button");
+    expect(dialog.querySelector(".welcome-guide-check")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Start using Inertia" }));
     expect(guide.onClose).toHaveBeenCalledOnce();
@@ -202,7 +208,9 @@ describe("WelcomeGuide", () => {
       "ClaudeSign in neededSet up",
       "AntigravityNot installedSet up",
     ]);
-    expect(screen.getByText(/1 of 3 ready/)).toBeVisible();
+    expect(screen.getByText("1 of 3 ready", { exact: true })).toBeVisible();
+    expect(screen.getByText("Each provider keeps its own sign-in.", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Set up Claude" })).toHaveClass("secondary-button");
 
     fireEvent.click(screen.getByRole("button", { name: "Set up Claude" }));
     expect(guide.onOpenProviderSetup).toHaveBeenCalledWith("claude");

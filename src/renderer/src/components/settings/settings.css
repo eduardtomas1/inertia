@@ -142,7 +142,7 @@
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: 500;
   line-height: var(--leading-chrome);
 }
 
@@ -331,9 +331,15 @@
 }
 
 .setting-status {
-  flex: 0 0 auto;
-  line-height: 1;
+  min-width: 0;
+  flex: 0 1 auto;
+  line-height: var(--leading-chrome);
   white-space: nowrap;
+}
+
+.setting-status.is-error {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .setting-status.is-error,
@@ -390,7 +396,7 @@
 .setting-select::picker(select) {
   max-height: min(320px, 70dvh);
   padding: 4px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   color: var(--text);
   background: var(--surface-raised);
@@ -399,16 +405,19 @@
 }
 
 .setting-select option {
-  min-height: var(--control-height);
-  padding: 7px 9px;
+  min-height: var(--control-height-small);
+  padding: 5px 8px;
   border-radius: var(--radius-xs);
   overflow-wrap: anywhere;
 }
 
-.setting-select option:hover,
+.setting-select option:hover {
+  background: var(--fill);
+}
+
 .setting-select option:focus-visible {
   outline: none;
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .setting-select-group {
@@ -424,18 +433,13 @@
 
 .setting-select-group kbd,
 .setting-keys kbd {
-  min-width: 24px;
-  padding: 2px 6px;
-  border: 1px solid var(--line);
-  border-bottom-width: 2px;
-  border-radius: var(--radius-xs);
-  color: var(--text-muted);
-  background: transparent;
+  padding: 0;
+  border: 0;
+  color: var(--text-faint);
+  background: none;
   font-family: inherit;
-  font-size: var(--text-xs);
-  font-weight: 500;
+  font-size: var(--text-sm);
   line-height: var(--leading-chrome);
-  text-align: center;
 }
 
 .setting-keys {
@@ -519,8 +523,10 @@
 }
 
 .setting-action-row > span > strong {
+  color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: 400;
+  line-height: var(--leading-chrome);
 }
 
 .setting-action-row small {

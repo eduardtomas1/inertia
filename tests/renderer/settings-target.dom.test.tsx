@@ -200,6 +200,7 @@ describe("Settings external section targets", () => {
     expect(screen.getByText("Chats, settings and attachment records, without secrets or attachment files.")).toBeVisible();
     expect(document.querySelector('[data-setting-id="database-backup"] .data-facts'))
       .toHaveTextContent(/^Last validated .+ · Every 1 hour · 5 copies, 512 MiB in total$/u);
+    expect(document.querySelector('[data-setting-id="database-backup"] time')).not.toHaveAttribute("title");
     expect(screen.getByText("Portable conversation recovery export"))
       .toBeVisible();
     expect(screen.getByText("Project paths and messages only. Imports create new supervised identities."))

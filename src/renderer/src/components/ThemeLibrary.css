@@ -20,7 +20,8 @@
 .color-theme-option,
 .custom-theme-color {
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px transparent;
 }
 
 .appearance-mode-option {
@@ -33,26 +34,17 @@
 }
 
 .appearance-mode-option:hover:not(:disabled),
-.color-theme-option:hover:not(:has(:disabled)),
-.custom-theme-color:hover:not(:has(:disabled)) {
+.color-theme-option:hover:not(:has(:disabled)) {
   color: var(--text);
-  background: var(--fill);
+  background: var(--fill-strong);
 }
 
 .appearance-mode-option.is-active,
-.color-theme-option.is-active {
-  color: var(--text);
-  background: var(--fill-strong);
-}
-
+.color-theme-option.is-active,
 .custom-theme-color.is-active {
   color: var(--text);
   background: var(--fill-strong);
-}
-
-.appearance-mode-option.is-active > span:last-child,
-.color-theme-option.is-active .color-theme-option-name {
-  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .appearance-mode-option:disabled {
@@ -66,7 +58,7 @@
   justify-content: center;
   gap: 6px;
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .appearance-mode-icon {
@@ -95,8 +87,9 @@
   display: block;
   height: 76px;
   overflow: hidden;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
+  background: var(--fill);
 }
 
 .appearance-wireframe-pane {
@@ -197,7 +190,7 @@
 }
 
 .color-theme-mode-button.is-selected {
-  border-color: var(--line-strong);
+  border-color: var(--accent);
 }
 
 .color-theme-mode-button:disabled,
@@ -209,10 +202,29 @@
   opacity: var(--disabled-opacity);
 }
 
+.color-theme-mode-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+}
+
+.color-theme-mode-badge .appearance-mode-icon {
+  width: 12px;
+  height: 12px;
+}
+
 .color-theme-option-name {
   color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: 500;
   pointer-events: none;
 }
 
@@ -222,9 +234,13 @@
   width: 52px;
   height: 52px;
   overflow: hidden;
+  border: 2px solid var(--surface-raised);
   border-radius: 50%;
   background-color: var(--theme-preview-canvas);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background-image:
+    radial-gradient(circle at 72% 25%, color-mix(in oklab, var(--theme-preview-accent) 68%, transparent), transparent 46%),
+    radial-gradient(circle at 76% 76%, var(--theme-preview-accent-soft), transparent 36%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-preview-surface) 30%, var(--theme-preview-accent));
 }
 
 .color-theme-swatch[data-color-theme="inertia"].is-light {
@@ -323,6 +339,7 @@
   background:
     linear-gradient(var(--theme-preview-accent), var(--theme-preview-accent)) right 4px bottom 4px / 12px 4px no-repeat,
     color-mix(in srgb, var(--theme-preview-surface) 88%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-preview-accent) 14%, transparent);
   content: "";
 }
 
@@ -369,6 +386,11 @@
   font-weight: 500;
 }
 
+.custom-theme-status {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .custom-theme-inputs {
   display: flex;
   align-items: center;
@@ -378,7 +400,7 @@
 .custom-theme-inputs input {
   min-width: 0;
   height: var(--control-height-small);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-xs);
   color: var(--text);
   background: var(--fill);
@@ -414,8 +436,7 @@
 
 .custom-theme-reset {
   min-height: var(--control-height-small);
-  padding: 0 8px;
-  border-radius: var(--radius-xs);
+  padding: 0 4px;
   color: var(--text-muted);
   background: transparent;
   font-size: var(--text-sm);
@@ -423,7 +444,6 @@
 
 .custom-theme-reset:hover:not(:disabled) {
   color: var(--text);
-  background: var(--fill);
 }
 
 .custom-theme-color :disabled {
@@ -443,6 +463,7 @@
   .custom-theme-color {
     transition:
       background-color var(--dur-fast) var(--ease-fade),
+      box-shadow var(--dur-fast) var(--ease-fade),
       color var(--dur-fast) var(--ease-fade);
   }
 }

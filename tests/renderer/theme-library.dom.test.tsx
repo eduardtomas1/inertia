@@ -27,7 +27,7 @@ describe("Theme library", () => {
     expect(screen.getByRole("button", { name: "Grove theme" })).toHaveAccessibleDescription("Use Grove for both light and dark");
     expect(screen.getByRole("button", { name: "Use Grove for dark" })).toHaveAccessibleDescription("Use Grove for dark only");
     for (const button of screen.getAllByRole("button")) expect(button).not.toHaveAttribute("title");
-    expect(document.querySelector(".color-theme-mode-badge")).toBeNull();
+    expect(document.querySelectorAll(".color-theme-mode-badge")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     expect(onUpdate).toHaveBeenCalledWith({ theme: "dark" });

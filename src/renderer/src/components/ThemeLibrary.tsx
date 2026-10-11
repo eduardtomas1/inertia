@@ -149,6 +149,7 @@ export function ThemeLibrary({
                     tooltip={`Use ${option.label} for ${mode} only`}
                     onClick={() => onUpdate(mode === "light" ? { lightColorTheme: option.id } : { darkColorTheme: option.id })}>
                     <ColorThemeSwatch mode={mode} colorTheme={option.id} />
+                    {selected && <span className="color-theme-mode-badge" aria-hidden="true"><span className={`appearance-mode-icon is-${mode}`} /></span>}
                   </TooltipButton>;
                 })}
               </span>

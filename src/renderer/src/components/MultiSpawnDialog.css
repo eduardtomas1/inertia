@@ -227,6 +227,10 @@
   gap: 2px;
 }
 
+.multi-spawn-comparison-toggle h3 > label {
+  cursor: pointer;
+}
+
 .multi-spawn-comparison-toggle > span > span {
   color: var(--text-muted);
   font-size: var(--text-sm);

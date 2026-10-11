@@ -16,20 +16,23 @@ export function IconButton({
 }
 
 export function Switch({
+  id,
   checked,
   onChange,
   label,
   disabled = false,
   inactive = false,
 }: {
+  id?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
-  label: string;
+  label?: string;
   disabled?: boolean;
   inactive?: boolean;
 }): React.JSX.Element {
   return (
     <button
+      id={id}
       type="button"
       role="switch"
       aria-checked={checked}

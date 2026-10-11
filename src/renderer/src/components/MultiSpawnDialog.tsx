@@ -664,7 +664,7 @@ export function MultiSpawnDialog({
       >
         <div className="multi-spawn-comparison-toggle">
           <Switch
-            label="Compare with a third model"
+            id="multi-spawn-comparison-switch"
             checked={draft.comparison.enabled}
             disabled={busy}
             onChange={(enabled) => setDraft({
@@ -677,7 +677,7 @@ export function MultiSpawnDialog({
           />
           <span>
             <h3 id="multi-spawn-comparison-title">
-              Add an independent judge
+              <label htmlFor="multi-spawn-comparison-switch">Add an independent judge</label>
             </h3>
             <span>
               Runs after both agents finish and receives bounded results only.

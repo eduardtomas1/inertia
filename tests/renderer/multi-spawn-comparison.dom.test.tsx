@@ -143,9 +143,10 @@ describe("Duo third-model comparison dialog", () => {
     expect(dialog.querySelectorAll(".multi-spawn-side-number, .multi-spawn-side > header svg, .multi-spawn-field svg")).toHaveLength(0);
     expect(screen.getByRole("heading", { level: 3, name: "Route A" })).toBeInTheDocument();
     expect(screen.getAllByText("Ready", { exact: true })).toHaveLength(2);
-    const judge = screen.getByRole("switch", { name: "Compare with a third model" });
+    const judge = screen.getByRole("switch", { name: "Add an independent judge" });
     expect(judge).toHaveClass("switch-control");
-    fireEvent.click(judge);
+    expect(judge).not.toHaveAttribute("aria-label");
+    fireEvent.click(screen.getByText("Add an independent judge"));
     expect(judge).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Configure judge").querySelector("svg.lucide-chevron-down")).not.toBeNull();
   });
@@ -167,7 +168,7 @@ describe("Duo third-model comparison dialog", () => {
     );
 
     fireEvent.click(screen.getByRole("switch", {
-      name: "Compare with a third model",
+      name: "Add an independent judge",
     }));
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(3);
     const judgeConfiguration = screen.getByText("Configure judge")

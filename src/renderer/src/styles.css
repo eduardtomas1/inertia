@@ -5813,9 +5813,22 @@ button.turn-agents-line:hover {
   font-style: normal;
 }
 
-.workspace-repository-scope-boundary.icon-button {
-  width: var(--control-height-small);
+.workspace-repository-scope-boundary {
+  display: inline-flex;
   height: var(--control-height-small);
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.workspace-repository-scope-boundary:hover {
+  color: var(--text);
+  background: var(--fill);
 }
 
 .workspace-repository-scope-actions {

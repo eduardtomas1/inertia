@@ -6,6 +6,7 @@ import { INTERFACE_LOCALE } from "../../lib/locale";
 import { diagnosticErrorReference } from "../../utils/diagnosticNavigation";
 import { useDocumentActivity } from "../../hooks/useDocumentPresence";
 import "./LimitResetBanner.css";
+import { TooltipText } from "../TooltipText";
 
 const PENDING_POLL_MS = 30_000;
 const RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000];
@@ -167,9 +168,11 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
       <strong>{title}</strong>
-      <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>
-        {pending ? "Resumes" : missed ? "Reset" : "Resets"} {when}
-      </time>
+      <TooltipText tooltip={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>
+        <time dateTime={resetsAt}>
+          {pending ? "Resumes" : missed ? "Reset" : "Resets"} {when}
+        </time>
+      </TooltipText>
     </span>
     <span className="limit-reset-actions">
       {missed && <button type="button" className={action} aria-disabled={unavailable || undefined}

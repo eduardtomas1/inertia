@@ -60,19 +60,19 @@
 }
 
 .limit-reset-action.secondary-button {
-  min-height: calc(var(--control-height-small) - 4px);
+  min-height: 24px;
   padding: 0 8px;
-  border-color: transparent;
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   color: var(--text);
-  background: var(--fill-strong);
-  font-size: var(--text-sm);
+  background: transparent;
+  font-size: var(--text-xs);
   font-weight: 500;
   white-space: nowrap;
 }
 
 .limit-reset-action.secondary-button:hover:not([aria-disabled="true"]) {
-  background: var(--fill-strong);
+  background: var(--fill);
 }
 
 .limit-reset-action[aria-disabled="true"] {
@@ -104,7 +104,8 @@
   }
 
   .limit-reset-action.secondary-button:active:not([aria-disabled="true"]) {
-    transform: scale(0.98);
+    background: var(--fill-strong);
+    transform: scale(0.97);
   }
 }
 

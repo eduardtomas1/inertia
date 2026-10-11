@@ -124,12 +124,7 @@ export function RightPanelLauncher({
             key={action.surface}
             className={highlighted === action ? "is-highlighted" : undefined}
             aria-keyshortcuts={action.shortcut}
-            onPointerEnter={() => {
-              prefetchWorkspaceTool(action.surface);
-              setHighlight(availableActions.indexOf(action));
-            }}
-            onPointerLeave={() => setHighlight((current) =>
-              current === availableActions.indexOf(action) ? -1 : current)}
+            onPointerEnter={() => prefetchWorkspaceTool(action.surface)}
             onFocus={() => prefetchWorkspaceTool(action.surface)}
             onClick={() => onOpen(action.surface)}
           >

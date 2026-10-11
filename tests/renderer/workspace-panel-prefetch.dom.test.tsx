@@ -222,6 +222,18 @@ describe("right panel surface host", () => {
     expect(await screen.findByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("leaves pointer hover to the --fill hover and highlights launcher rows only from the keyboard", async () => {
+    render(<SurfaceHost initial={{ ...EMPTY_RIGHT_PANEL_STATE, isOpen: true }} />);
+    const launcher = await screen.findByRole("group", { name: "Open a surface" });
+    const changes = within(launcher).getByRole("button", { name: /^Changes/u });
+    fireEvent.pointerEnter(changes);
+    expect(changes).not.toHaveClass("is-highlighted");
+    fireEvent.keyDown(launcher, { key: "ArrowDown" });
+    expect(changes).toHaveClass("is-highlighted");
+    fireEvent.pointerLeave(changes);
+    expect(changes).toHaveClass("is-highlighted");
+  });
+
   it("adds surfaces from the plus menu and keeps each tab closable", async () => {
     const onChange = vi.fn();
     render(<SurfaceHost initial={openState("changes")} onChange={onChange} />);

@@ -23,6 +23,10 @@ interface AppStatusOverlaysProps {
   providerQuotaNotices: ProviderQuotaNoticeController;
   error: string | null;
   databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
+}
+
+interface DatabaseRecoveryNoticeProps {
+  databaseRecoveryNotice: DatabaseRecoveryStartupNotice | null;
   onDismissDatabaseRecoveryNotice: () => void;
   onImportRecovery: () => Promise<void>;
   onCopyRecoveryReport: () => Promise<void>;
@@ -34,9 +38,6 @@ export function AppStatusOverlays({
   providerQuotaNotices,
   error,
   databaseRecoveryNotice,
-  onDismissDatabaseRecoveryNotice,
-  onImportRecovery,
-  onCopyRecoveryReport,
 }: AppStatusOverlaysProps): React.JSX.Element {
   // Own preview suspension from this always-loaded boundary. The credential
   // dialog itself remains lazy, so waiting for its chunk would briefly leave
@@ -55,6 +56,26 @@ export function AppStatusOverlays({
           <ProviderAuthDialog {...providerAuth} />
         </Suspense>
       )}
+    </>
+  );
+}
+
+export function StatusToastStack({
+  appUpdate,
+  providerQuotaNotices,
+  error,
+  onDismissError,
+  databaseRecoveryNotice,
+  onDismissDatabaseRecoveryNotice,
+  onImportRecovery,
+  onCopyRecoveryReport,
+}: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error"> & DatabaseRecoveryNoticeProps & {
+  onDismissError: () => void;
+}): React.JSX.Element | null {
+  if (!databaseRecoveryNotice && !appUpdate.error && providerQuotaNotices.notices.length === 0 && !error) return null;
+  const diagnosticError = error ? diagnosticErrorReference(error) : null;
+  return (
+    <div className="status-overlay-stack">
       {databaseRecoveryNotice && (
         <Suspense fallback={(
           <aside
@@ -79,22 +100,6 @@ export function AppStatusOverlays({
           />
         </Suspense>
       )}
-    </>
-  );
-}
-
-export function StatusToastStack({
-  appUpdate,
-  providerQuotaNotices,
-  error,
-  onDismissError,
-}: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error"> & {
-  onDismissError: () => void;
-}): React.JSX.Element | null {
-  if (!appUpdate.error && providerQuotaNotices.notices.length === 0 && !error) return null;
-  const diagnosticError = error ? diagnosticErrorReference(error) : null;
-  return (
-    <div className="status-overlay-stack">
       <ProviderQuotaNotices
         notices={providerQuotaNotices.notices}
         onDismiss={providerQuotaNotices.dismiss}

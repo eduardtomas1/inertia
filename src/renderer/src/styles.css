@@ -707,10 +707,6 @@ button:disabled,
   right: calc(12px + var(--titlebar-overlay-inset));
 }
 
-:root[data-platform="win32"] .database-recovery-notice {
-  top: calc(env(titlebar-area-height, 48px) + 8px);
-}
-
 :root[data-platform="win32"] .dialog-backdrop {
   padding-top: calc(env(titlebar-area-height, 48px) + 8px);
   grid-template-rows: minmax(0, 1fr);
@@ -7674,20 +7670,20 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 /* App notices and errors */
 .database-recovery-notice {
-  position: fixed;
-  top: calc(48px + 12px);
-  right: 12px;
-  z-index: 101;
   display: grid;
-  width: min(620px, calc(100vw - 24px));
   align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 12px;
-  grid-template-columns: 14px minmax(0, 1fr) auto auto var(--control-height);
+  grid-template-columns: 14px minmax(0, 1fr) var(--control-height);
 }
 
 .database-recovery-notice > svg {
   color: var(--warning);
+}
+
+.database-recovery-notice > .icon-button {
+  grid-row: 1;
+  grid-column: 3;
 }
 
 .database-recovery-notice.is-critical > svg {
@@ -7713,6 +7709,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .database-recovery-notice > button:not(.icon-button) {
   display: inline-flex;
+  grid-column: 2;
+  justify-self: start;
   min-height: var(--control-height-small);
   align-items: center;
   gap: 6px;
@@ -7965,14 +7963,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 @media (max-width: 560px) {
-  .database-recovery-notice {
-    grid-template-columns: 14px minmax(0, 1fr) var(--control-height);
-  }
-
-  .database-recovery-notice > button:not(.icon-button) {
-    grid-column: 2;
-  }
-
   .app-update-notice {
     grid-template-columns: 17px minmax(0, 1fr) auto 28px;
   }

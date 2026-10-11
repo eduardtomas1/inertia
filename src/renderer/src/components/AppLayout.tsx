@@ -824,6 +824,20 @@ export const AppLayout = memo(function AppLayout({
             providerQuotaNotices={providerQuotaNotices}
             error={visibleError}
             onDismissError={dismissVisibleError}
+            databaseRecoveryNotice={connection.databaseRecoveryNotice}
+            onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
+            onImportRecovery={async () => {
+              const result = await window.inertia.importRecoveryData();
+              if (result.status === "imported") {
+                connection.dismissDatabaseRecoveryNotice();
+              }
+            }}
+            onCopyRecoveryReport={async () => {
+              const result = await window.inertia.copyRuntimeDiagnosticReport(
+                connection.snapshot?.lifecycleDiagnostics ?? null,
+              );
+              if (!result.copied) throw new Error("The recovery report could not be copied.");
+            }}
           />
         </div>
       </section>
@@ -934,19 +948,6 @@ export const AppLayout = memo(function AppLayout({
         providerQuotaNotices={providerQuotaNotices}
         error={visibleError}
         databaseRecoveryNotice={connection.databaseRecoveryNotice}
-        onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
-        onImportRecovery={async () => {
-          const result = await window.inertia.importRecoveryData();
-          if (result.status === "imported") {
-            connection.dismissDatabaseRecoveryNotice();
-          }
-        }}
-        onCopyRecoveryReport={async () => {
-          const result = await window.inertia.copyRuntimeDiagnosticReport(
-            connection.snapshot?.lifecycleDiagnostics ?? null,
-          );
-          if (!result.copied) throw new Error("The recovery report could not be copied.");
-        }}
       />
       <WelcomeGuideHost
         snapshot={connection.snapshot}

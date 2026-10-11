@@ -18,6 +18,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  X,
 } from "lucide-react";
 import type {
   Conversation,
@@ -459,7 +460,7 @@ export function WorkspaceHeader({
           </div>
         )}
         {view === "settings" ? (
-          <IconButton label="Close settings" onClick={onCloseSettings}><Settings size={16} /></IconButton>
+          <IconButton label="Close settings" onClick={onCloseSettings}><X size={16} /></IconButton>
         ) : view !== "workspace" ? (
           <IconButton label="Open settings" onClick={onOpenSettings}><Settings size={16} /></IconButton>
         ) : null}

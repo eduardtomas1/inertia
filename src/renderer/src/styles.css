@@ -342,7 +342,6 @@ button:disabled,
   .header-menu-item,
   .header-popover .header-action-item,
   .header-run-action,
-  .header-split > button,
   .help-guide .help-guide-result,
   .help-guide .welcome-guide-topic,
   .image-attachment-zoom,
@@ -1069,7 +1068,7 @@ textarea {
   min-width: 0;
   flex: 1 1 auto;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: var(--text-sm);
 }
 
@@ -1161,9 +1160,9 @@ button.header-breadcrumb-project:hover {
   min-width: 0;
   padding: 2px 4px;
   margin: -2px -4px;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: var(--radius-xs);
-  outline: 1px solid var(--line);
+  outline: 0;
   color: var(--text);
   background: transparent;
   font: inherit;
@@ -1171,7 +1170,7 @@ button.header-breadcrumb-project:hover {
 }
 
 .header-title-input:focus {
-  outline-color: var(--accent);
+  border-color: var(--accent);
 }
 
 .header-actions {
@@ -1212,7 +1211,7 @@ button.header-breadcrumb-project:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 7px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
@@ -1223,10 +1222,14 @@ button.header-breadcrumb-project:hover {
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
-.header-split > button:hover:not([aria-disabled="true"]),
-.header-split > button[aria-expanded="true"] {
+.header-split > button:hover:not([aria-disabled="true"]) {
   color: var(--text);
   background: var(--fill);
+}
+
+.header-split > button[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--fill-strong);
 }
 
 .header-split > button:active:not([aria-disabled="true"]) {
@@ -1243,11 +1246,6 @@ button.header-breadcrumb-project:hover {
 
 .header-split > button[aria-disabled="true"] {
   color: var(--text-muted);
-  cursor: help;
-}
-
-.header-split > button[aria-disabled="true"] > svg {
-  opacity: 0.6;
 }
 
 .header-split-label {
@@ -1300,12 +1298,6 @@ button.header-breadcrumb-project:hover {
   margin: 4px 9px 6px;
   color: var(--danger);
   font-size: var(--text-xs);
-}
-
-.header-menu-separator {
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--line);
 }
 
 .header-menu-group {

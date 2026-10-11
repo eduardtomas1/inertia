@@ -230,3 +230,16 @@ describe("usage, attachments and background task surfaces", () => {
     expect(block(".background-task-stop:hover:not(:disabled)", tasks)).toContain("background: var(--fill);");
   });
 });
+
+describe("workspace header", () => {
+  it("rings toolbar split buttons outside, marks open menus on --fill-strong and draws the rename field with a border", () => {
+    const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
+    expect(inset).not.toContain(".header-split > button");
+    expect(block('.header-split > button[aria-expanded="true"]')).toContain("background: var(--fill-strong);");
+    expect(block('.header-split > button[aria-disabled="true"]')).not.toContain("cursor: help");
+    expect(css).not.toContain('.header-split > button[aria-disabled="true"] > svg');
+    expect(block(".header-title-input")).toContain("border: 1px solid var(--line);");
+    expect(block(".header-title-input:focus")).toContain("border-color: var(--accent);");
+    expect(css).not.toContain(".header-menu-separator {");
+  });
+});

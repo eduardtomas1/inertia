@@ -382,9 +382,11 @@ export function AgentExecutionLayer({
           data-turn-work-notice=""
           key={message.id}
         >
-          <div className="message-meta">
-            {props.showTimestamps && <TooltipText tooltip={formatFullDateTime(message.createdAt)}><time dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time></TooltipText>}
-          </div>
+          {props.showTimestamps && (
+            <div className="message-meta">
+              <TooltipText tooltip={formatFullDateTime(message.createdAt)}><time dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time></TooltipText>
+            </div>
+          )}
           <div className="message-body">{message.content}</div>
         </article>
       ))}

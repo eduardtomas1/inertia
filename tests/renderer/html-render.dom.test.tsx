@@ -273,8 +273,9 @@ describe("visual replies in the response timeline", () => {
       chatMessage("notice-visual-reply", "system", "Earlier messages were not imported.", at(4)),
     ])} />);
 
-    expect(screen.getByRole("article", { name: "Agent system notice" }))
-      .toHaveTextContent("Earlier messages were not imported.");
+    const notice = screen.getByRole("article", { name: "Agent system notice" });
+    expect(notice).toHaveTextContent("Earlier messages were not imported.");
+    expect(notice.querySelector(".message-meta")).toBeNull();
     expect(screen.queryByTestId("html-render")).not.toBeInTheDocument();
   });
 

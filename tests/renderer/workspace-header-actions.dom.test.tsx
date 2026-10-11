@@ -86,14 +86,20 @@ describe("workspace header action menus first click", () => {
 });
 
 describe("workspace header settings control", () => {
-  it("offers Close settings with the close glyph inside Settings", () => {
+  it("offers Close settings with the same gear inside Settings", () => {
     const callbacks = props();
     render(<WorkspaceHeader {...callbacks} view="settings" />);
     expect(screen.queryByRole("button", { name: /^Settings$/u })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Close settings" }).querySelector(".lucide-x")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
     expect(callbacks.onCloseSettings).toHaveBeenCalledOnce();
     expect(callbacks.onOpenSettings).not.toHaveBeenCalled();
+  });
+
+  it("shows the settings gear pressed while Settings is open", () => {
+    render(<WorkspaceHeader {...props()} view="settings" />);
+    const close = screen.getByRole("button", { name: "Close settings" });
+    expect(close).toHaveAttribute("aria-pressed", "true");
+    expect(close.querySelector(".lucide-settings")).not.toBeNull();
   });
 });
 

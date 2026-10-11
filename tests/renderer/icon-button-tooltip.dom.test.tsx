@@ -125,7 +125,7 @@ describe("icon button tooltip", () => {
     expect(onPointerLeave).toHaveBeenCalledTimes(1);
   });
 
-  it("lets Escape close an open tooltip without closing the surrounding dialog, then reach the dialog", () => {
+  it("lets one Escape close an open tooltip and reach the surrounding dialog", () => {
     const dialogEscape = vi.fn();
     render(
       <div role="dialog" aria-label="Settings dialog" onKeyDown={(event) => { if (event.key === "Escape") dialogEscape(); }}>
@@ -140,8 +140,6 @@ describe("icon button tooltip", () => {
     expect(tooltip()).not.toBeNull();
     fireEvent.keyDown(button, { key: "Escape" });
     expect(tooltip()).toBeNull();
-    expect(dialogEscape).not.toHaveBeenCalled();
-    fireEvent.keyDown(button, { key: "Escape" });
     expect(dialogEscape).toHaveBeenCalledTimes(1);
   });
 

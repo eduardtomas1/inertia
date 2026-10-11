@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DialogHeader, DialogShell } from "../../src/renderer/src/components/DialogShell";
@@ -24,6 +24,22 @@ describe("dialog shell", () => {
     expect(dialog.querySelectorAll(".dialog-shell-header button")).toHaveLength(1);
     expect([...dialog.querySelectorAll(".dialog-shell-footer button")].map((button) => button.textContent)).toEqual(["Commit", "Commit & push"]);
     fireEvent.click(screen.getByRole("button", { name: "Close commit dialog" }));
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("closes with one Escape while the close button's tooltip is showing", async () => {
+    const close = vi.fn();
+    render(
+      <DialogShell titleId="t" title="Restart" closeLabel="Close restart confirmation" onClose={close}
+        onKeyDown={(event) => { if (event.key === "Escape") close(); }}>
+        <p>Body</p>
+      </DialogShell>,
+    );
+    const button = screen.getByRole("button", { name: "Close restart confirmation" });
+    fireEvent.pointerEnter(button, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull());
+    fireEvent.keyDown(button, { key: "Escape" });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
     expect(close).toHaveBeenCalledOnce();
   });
 

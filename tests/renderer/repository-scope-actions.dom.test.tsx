@@ -118,6 +118,19 @@ describe("Changes repository actions", () => {
     expect(within(menu).getByRole("menuitem", { name: "Pull" })).toHaveFocus();
   });
 
+  it("closes the More menu with one Escape while an item's tooltip shows", async () => {
+    sizes.rowScroll = 760;
+    render(actionsRow());
+    fireEvent.click(screen.getByRole("button", { name: "More actions for inertia" }));
+    const menu = screen.getByRole("menu", { name: "More actions for inertia" });
+    const confidence = within(menu).getByRole("menuitem", { name: "Confidence" });
+    confidence.focus();
+    fireEvent.pointerEnter(confidence, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull());
+    fireEvent.keyDown(confidence, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "More actions for inertia" })).toBeNull());
+  });
+
   it("returns focus to the More trigger after a collapsed action runs", async () => {
     sizes.rowScroll = 760;
     const onFetch = vi.fn();

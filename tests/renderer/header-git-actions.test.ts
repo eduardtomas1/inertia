@@ -150,6 +150,9 @@ describe("Git overview states", () => {
     expect(gitSyncSummary(status({ upstream: null }))).toBe("No upstream");
     expect(gitSyncSummary(status({ branch: null }))).toBe("Detached HEAD");
     expect(gitSyncSummary(status())).toBe("Up to date with last fetch");
+    expect(gitSyncSummary(status({ ahead: 1 }))).toBe("");
+    expect(gitSyncSummary(status({ behind: 2 }))).toBe("");
+    expect(gitSyncSummary(status({ ahead: 1, behind: 2 }))).toBe("Branches have diverged");
   });
   it("allows fetch while diverged or dirty but fails incomplete mutation state closed", () => {
     const actions = headerGitActions(status({ ahead: 2, behind: 3, truncated: true }));

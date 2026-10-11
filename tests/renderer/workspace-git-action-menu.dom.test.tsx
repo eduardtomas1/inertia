@@ -31,6 +31,12 @@ describe("Git actions menu", () => {
     expect(within(menu).getByRole("menuitem", { name: "Switch branch" })).toBeInTheDocument();
   });
 
+  it("states outgoing and incoming counts once", () => {
+    const { container } = render(<WorkspaceGitActionMenu status={{ ...status, ahead: 2, behind: 0 }} busy={false} onAction={vi.fn()} />);
+    expect(screen.getByText("2 outgoing", { exact: true })).toBeInTheDocument();
+    expect(container).not.toHaveTextContent(/outgoing commit/u);
+  });
+
   it("states a missing upstream once", () => {
     render(<WorkspaceGitActionMenu status={{ ...status, upstream: null }} busy={false} onAction={vi.fn()} />);
     expect(screen.getAllByText("No upstream")).toHaveLength(1);

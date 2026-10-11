@@ -13,9 +13,11 @@ describe("composer banner chrome", () => {
     for (const action of [limit, maintenance]) {
       expect(action.get("border")).toBe("1px solid var(--line)");
       expect(action.get("background")).toBe("transparent");
-      expect(action.get("font-size")).toBe("var(--text-xs)");
-      expect(action.get("min-height")).toBe("24px");
     }
+    expect(limit.get("font-size")).toBe("var(--text-sm)");
+    expect(limit.get("min-height")).toBe("calc(var(--control-height-small) - 4px)");
+    expect(maintenance.get("font-size")).toBe("var(--text-xs)");
+    expect(maintenance.get("min-height")).toBe("24px");
     expect(declarationsFor(rules, '.limit-reset-action.secondary-button:hover:not([aria-disabled="true"])').get("background"))
       .toBe("var(--fill)");
     expect(banner).toContain("transform: scale(0.97)");

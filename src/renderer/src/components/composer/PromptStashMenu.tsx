@@ -93,7 +93,7 @@ export function PromptStashMenu({
             <Archive size={14} />
             <span>
               <strong>{COMPOSER_LABELS.saveScratchPrompt}</strong>
-              {blockedReason && <small>{blockedReason}</small>}
+              <small>{blockedReason ?? "Text and route · this chat only"}</small>
             </span>
           </button>
           {entries.length === 0 ? (
@@ -159,7 +159,7 @@ export function PromptStashMenu({
                     aria-label={`${recurrenceLabel}: ${entry.content}`}
                     tooltip={entry.recurrence
                       ? `${recurrenceLabel}; activate to ${nextRecurrence ? "change cadence" : "turn off"}`
-                      : recurrenceLabel}
+                      : "Keep this prompt recurring; it will never run automatically"}
                     describeTooltip={false}
                     onClick={() => onSetRecurrence(entry.id, nextRecurrence)}
                   >

@@ -688,6 +688,8 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
   </>;
 }
 
+const BLOCKED_LINK_REASON = "This link was blocked because its address is invalid or uses an unsafe protocol.";
+
 function MarkdownLink({
   href = "",
   children,
@@ -812,7 +814,10 @@ function MarkdownLink({
       heading?.focus({ preventScroll: true });
     }}>{children}</a>;
   }
-  return <TooltipText className="response-unsafe-link" tooltip="Blocked link">{children}</TooltipText>;
+  return <>
+    <TooltipText className="response-unsafe-link" tooltip={BLOCKED_LINK_REASON}>{children}</TooltipText>
+    <span className="visually-hidden">{BLOCKED_LINK_REASON}</span>
+  </>;
 }
 
 function MarkdownImage({

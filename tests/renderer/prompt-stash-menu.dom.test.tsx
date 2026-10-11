@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -28,17 +28,19 @@ function Harness({
   onStash,
   onRestore,
   onRemove,
+  blockedReason = "Remove attachments before stashing text",
 }: {
   onStash: () => void;
   onRestore: (value: PromptStashEntry) => void;
   onRemove: (entryId: string) => void;
+  blockedReason?: string | null;
 }): React.JSX.Element {
   const menuController = useComposerMenus();
   return (
     <PromptStashMenu
       entries={[entry]}
-      canStash={false}
-      blockedReason="Remove attachments before stashing text"
+      canStash={blockedReason === null}
+      blockedReason={blockedReason}
       restoreBlockedReason={() => "This route is not available"}
       menuController={menuController}
       onStash={onStash}
@@ -107,12 +109,12 @@ describe("PromptStashMenu", () => {
     expect(onRemove).toHaveBeenCalledWith(entry.id);
   });
 
-  it("drops the menu title, helper hints and text glyphs", () => {
-    render(<Harness onStash={vi.fn()} onRestore={vi.fn()} onRemove={vi.fn()} />);
+  it("drops the menu title and text glyphs but keeps the scope and recurrence consequences", async () => {
+    render(<Harness onStash={vi.fn()} onRestore={vi.fn()} onRemove={vi.fn()} blockedReason={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Scratch prompts, 1 saved" }));
     const menu = screen.getByRole("menu", { name: "Scratch prompts" });
     expect(menu.querySelector(".popover-title")).toBeNull();
-    expect(menu).not.toHaveTextContent("Text and route");
+    expect(within(menu).getByRole("menuitem", { name: /^Save current prompt/u })).toHaveTextContent("Text and route · this chat only");
     expect(menu).not.toHaveTextContent("↻");
     const repeat = screen.getByRole("menuitem", { name: /^Repeat daily:/u });
     expect(repeat).not.toHaveAttribute("title");
@@ -120,5 +122,9 @@ describe("PromptStashMenu", () => {
     for (const item of screen.getAllByRole("menuitem")) {
       expect(item.getAttribute("title") ?? "").not.toMatch(/never run automatically|Save this text/u);
     }
+    fireEvent.pointerEnter(repeat, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent))
+      .toContain("Keep this prompt recurring; it will never run automatically"));
+    fireEvent.pointerLeave(repeat, { pointerType: "mouse" });
   });
 });

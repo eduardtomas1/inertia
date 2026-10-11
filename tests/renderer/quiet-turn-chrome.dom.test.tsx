@@ -345,6 +345,7 @@ describe("quiet turn chrome", () => {
     expect(within(history).getByRole("article", { name: "Your request" })).toHaveTextContent("Recovered request");
     expect(within(history).getByRole("article", { name: "Assistant answer" })).toHaveTextContent("Recovered answer");
     expect(within(history).getByRole("article", { name: "Agent system notice" })).toHaveTextContent("Recovered notice");
+    expect(within(history).getByText("These records could not be verified as ordinary authoritative turns.")).toBeVisible();
   });
 
   it("keeps recovered legacy history in the same column as the turns so its footer lines up", () => {

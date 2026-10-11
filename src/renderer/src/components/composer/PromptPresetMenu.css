@@ -112,6 +112,13 @@
   color: var(--text-muted);
   font-size: var(--text-sm);
 }
+.prompt-presets-empty > span {
+  display: grid;
+  gap: 2px;
+}
+.prompt-presets-empty small {
+  font-size: var(--text-xs);
+}
 .prompt-preset-editor {
   display: grid;
   gap: 8px;

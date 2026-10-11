@@ -135,7 +135,7 @@ describe("PromptPresetMenu", () => {
     render(<Harness entries={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
     const empty = await screen.findByRole("dialog", { name: "Prompt presets" });
-    expect(empty).toHaveTextContent(/^No presets yetCreate a preset$/u);
+    expect(empty).toHaveTextContent(/^No presets yetPresets never send automatically\.Create a preset$/u);
     expect(empty.querySelectorAll("button")).toHaveLength(1);
   });
 
@@ -254,7 +254,7 @@ describe("PromptPresetMenu", () => {
     expect(routeToggle).toHaveAccessibleName(
       /Harness codex-app-server · backend builtin:openai · model gpt-5\.6-sol · reasoning high/u,
     );
-    expect(screen.getByText(/Saved route differs from this chat/u))
+    expect(screen.getByText("Saved route differs from this chat. Turn this off, then on again to bind to the current route."))
       .toBeVisible();
     const name = screen.getByLabelText("Name");
     fireEvent.change(name, { target: { value: "Route review" } });

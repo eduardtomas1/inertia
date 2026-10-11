@@ -324,7 +324,7 @@ export function PromptPresetMenu({
                   </small>
                   {editorRouteDiffers && (
                     <small className="prompt-preset-route-rebind-note">
-                      Saved route differs from this chat
+                      Saved route differs from this chat. Turn this off, then on again to bind to the current route.
                     </small>
                   )}
                 </span>
@@ -441,7 +441,7 @@ export function PromptPresetMenu({
               )}
               {presets.length === 0 ? (
                 <div className="prompt-presets-empty">
-                  <span>No presets yet</span>
+                  <span>No presets yet<small>Presets never send automatically.</small></span>
                   <button type="button" className="secondary-button" onClick={beginCreate}>
                     <Plus size={14} />Create a preset
                   </button>

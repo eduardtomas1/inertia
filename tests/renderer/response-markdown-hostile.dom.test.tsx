@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -64,13 +64,18 @@ describe("hostile provider markdown", () => {
     expect(container.querySelector("use")).toBeNull();
   });
 
-  it("blocks javascript: links", () => {
+  it("blocks javascript: links", async () => {
     const bridge = inertiaBridge();
     renderMarkdown("[click](javascript:window.inertia.openExternal('x'))");
     const blocked = screen.getByText("click");
     expect(blocked).toHaveClass("response-unsafe-link");
     expect(blocked).not.toHaveAttribute("title");
     expect(blocked.tagName.toLowerCase()).toBe("span");
+    expect(blocked.nextElementSibling).toHaveClass("visually-hidden");
+    expect(blocked.nextElementSibling).toHaveTextContent("This link was blocked because its address is invalid or uses an unsafe protocol.");
+    fireEvent.pointerEnter(blocked, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("This link was blocked because its address is invalid or uses an unsafe protocol."));
+    fireEvent.pointerLeave(blocked, { pointerType: "mouse" });
     expect(bridge.openExternal).not.toHaveBeenCalled();
   });
 

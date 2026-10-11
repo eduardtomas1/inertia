@@ -99,6 +99,7 @@ function CompatibilityDisclosure({
         </summary>
         {expanded && (
           <>
+            <p>These records could not be verified as ordinary authoritative turns.</p>
             {compatibility.inferredTurns.map((turn) => (
               <TurnTimeline
                 key={turn.id}

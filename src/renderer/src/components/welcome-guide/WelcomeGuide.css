@@ -39,6 +39,10 @@
   animation: welcome-step-in var(--dur) var(--ease) both;
 }
 
+.welcome-guide-step:is([data-step="welcome"], [data-step="start"]) {
+  justify-content: center;
+}
+
 .welcome-guide-body {
   position: relative;
   display: grid;
@@ -200,9 +204,14 @@
   animation-delay: calc(var(--i, 0) * var(--stagger));
 }
 
-.welcome-guide-agents .provider-brand-icon,
+.welcome-guide-agents .provider-brand-icon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
 .welcome-guide-agents button {
-  grid-row: span 2;
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 
 .welcome-guide-agents strong,

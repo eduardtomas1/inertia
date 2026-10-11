@@ -34,7 +34,7 @@ test("Git actions and Changes share a subfolder's containing repository and open
       .getByRole("button", { name: "More Git actions" })
       .click();
     const gitMenu = page.getByRole("menu", { name: "Git actions" });
-    await expect(gitMenu.locator(".git-menu-section-label")).toContainText("2 files");
+    await expect(gitMenu.getByRole("menuitem", { name: "Commit", exact: true })).toHaveAccessibleDescription(/2 changed files/u);
     const environmentScreenshot = testInfo.outputPath("subfolder-environment.png");
     await page.screenshot({ animations: "disabled", path: environmentScreenshot });
     await testInfo.attach("subfolder-environment", { path: environmentScreenshot, contentType: "image/png" });

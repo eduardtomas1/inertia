@@ -281,7 +281,7 @@ describe("Environment content in its workspace surfaces", () => {
 
   it("explains an empty chat and shows all available attachments without an expansion step", () => {
     const view = render(attachmentsSurface({ attachments: [] }));
-    expect(screen.getByText("Attachments you send in this chat appear here.")).toBeVisible();
+    expect(screen.getByText("No attachments")).toBeVisible();
     expect(screen.queryByRole("list")).toBeNull();
     const attachments = Array.from({ length: 9 }, (_, index) => ({
       id: `gallery-${index}`, name: `shot-${index}.png`, mimeType: "image/png" as const, size: 2048,
@@ -289,7 +289,7 @@ describe("Environment content in its workspace surfaces", () => {
     view.rerender(attachmentsSurface({ attachments }));
     expect(within(screen.getByRole("list", { name: "Chat attachments" })).getAllByRole("listitem")).toHaveLength(9);
     expect(screen.getByRole("heading", { name: "9 attachments" })).toBeVisible();
-    expect(screen.queryByText("Attachments you send in this chat appear here.")).toBeNull();
+    expect(screen.queryByText("No attachments")).toBeNull();
   });
 
   it("labels the bounded gallery truthfully and keeps split attachment headings unique", () => {
@@ -386,7 +386,7 @@ describe("Environment content in its workspace surfaces", () => {
       />,
     );
     expect(screen.getByText("Stale")).toBeVisible();
-    expect(screen.getByText("No provider limit windows are available.")).toBeVisible();
+    expect(screen.getByText("No provider limits reported.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
     expect(onRefreshUsage).toHaveBeenCalledOnce();
 

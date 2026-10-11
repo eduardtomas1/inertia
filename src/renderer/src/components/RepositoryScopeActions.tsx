@@ -6,12 +6,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Ellipsis, GitPullRequest } from "lucide-react";
+import { Ellipsis, GitPullRequest, ShieldCheck } from "lucide-react";
 
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { FocusFirstMenuItem } from "./workspace-header/FocusFirstMenuItem";
 import { IconButton } from "./ui";
+import { HintButton } from "./HintButton";
 
 export interface RepositoryScopeAction {
   id: string;
@@ -108,7 +109,7 @@ export function RepositoryScopeActions({
     {
       id: "confidence",
       label: "Confidence",
-      icon: <GitPullRequest size={14} aria-hidden="true" />,
+      icon: <ShieldCheck size={14} aria-hidden="true" />,
       disabled: confidence.disabled,
       title: confidence.title,
       onSelect: () => onRequestMergeDialog("confidence"),
@@ -155,12 +156,11 @@ export function RepositoryScopeActions({
               onKeyDown={(event) => navigateMenuItems(event, '[role="menuitem"]:not([aria-disabled="true"])')}
             >
               {items.map((item) => (
-                <button
-                  type="button"
+                <HintButton
                   role="menuitem"
                   key={item.id}
                   aria-disabled={item.disabled || undefined}
-                  title={item.title}
+                  hint={item.title}
                   onClick={() => {
                     if (item.disabled) return;
                     dismissMenu("selection");
@@ -170,22 +170,21 @@ export function RepositoryScopeActions({
                 >
                   {item.icon}
                   <span>{item.label}</span>
-                </button>
+                </HintButton>
               ))}
               <FocusFirstMenuItem menuId={menuId} />
             </div>
           )}
         </span>
       ) : actions.map((action) => (
-        <button
-          type="button"
+        <HintButton
           key={action.id}
           disabled={action.disabled}
-          title={action.title}
+          hint={action.title}
           onClick={action.onSelect}
         >
           {action.icon}<span>{action.label}</span>
-        </button>
+        </HintButton>
       ))}
       {children(compact)}
     </span>

@@ -82,7 +82,7 @@ test("keeps the right panel available while an isolated draft worktree materiali
     for (const surface of ["Changes", "Files", "Browser"]) {
       await expect(launcher.locator('[aria-disabled="true"]').filter({
         hasText: surface,
-      })).toHaveAttribute("title", unavailableReason);
+      })).toContainText(unavailableReason);
     }
     for (const surface of ["Background tasks", "Usage", "Goal", "Plan"]) {
       await expect(launcher.getByRole("button", {

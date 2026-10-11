@@ -1,12 +1,12 @@
-import { GitPullRequest } from "lucide-react";
+import { GitPullRequest, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { GitForge, ServerEvent } from "@shared/contracts";
 import { PreMergeConfidenceDialog } from "./PreMergeConfidenceDialog";
 import PullRequestDialog from "./PullRequestDialog";
-import { TooltipButton } from "./TooltipButton";
 import { confidenceTitle } from "./RepositoryScopeActions";
+import { HintButton } from "./HintButton";
 
 interface PreMergeConfidenceLauncherProps {
   projectId: string;
@@ -54,24 +54,24 @@ export function PreMergeConfidenceLauncher({
   }, [authorityRef, confidenceEnabled, handledRequest, openRequest, pullRequestDisabled]);
   return <>
     {buttons && <>
-      <TooltipButton
+      <HintButton
         disabled={!confidenceEnabled}
-        tooltip={confidenceTitle(authorityRef, forge)}
+        hint={confidenceTitle(authorityRef, forge)}
         onClick={() => {
           if (authorityRef) setOpen({ kind: "confidence" });
         }}
       >
-        <GitPullRequest size={14} aria-hidden="true" /><span>Confidence</span>
-      </TooltipButton>
-      <TooltipButton
+        <ShieldCheck size={14} aria-hidden="true" /><span>Confidence</span>
+      </HintButton>
+      <HintButton
         disabled={!authorityRef || pullRequestDisabled}
-        tooltip={!authorityRef ? "Refresh this repository before changing it." : pullRequestDetail ?? "Pull request"}
+        hint={!authorityRef ? "Refresh this repository before changing it." : pullRequestDetail}
         onClick={() => {
           if (authorityRef) setOpen({ kind: "pull-request", authorityRef });
         }}
       >
         <GitPullRequest size={14} aria-hidden="true" /><span>PR</span>
-      </TooltipButton>
+      </HintButton>
     </>}
     {open?.kind === "confidence" && authorityRef && (
       <PreMergeConfidenceDialog

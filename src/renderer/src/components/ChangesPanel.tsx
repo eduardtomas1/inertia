@@ -11,13 +11,14 @@ import {
   type ReactNode,
 } from "react";
 import clsx from "clsx";
-import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Square, StickyNote, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, CircleHelp, ExternalLink, FileCode2, MessageSquarePlus, Pencil, RefreshCw, RotateCcw, Square, StickyNote, Trash2, X } from "lucide-react";
 import type { ChangedFile, DiffFile, DiffHunk, DiffReviewClassificationHint, DiffReviewNote, DiffReviewState, DiffReviewSummary, DiffReversalOperation, DiffSelectionReviewAnswer, GitDiffSnapshot } from "@shared/contracts";
 import { buildDiffContext, diffFileFingerprint, diffHunkFingerprint, selectedLineFingerprint } from "@shared/diff-review";
 import { sourceLanguageForFile } from "@shared/source-language";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useParsedUnifiedDiff } from "../hooks/useParsedUnifiedDiff";
 import { IconButton, LoadingMark } from "./ui";
+import { HintButton } from "./HintButton";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 import type { RetainedDiffLock } from "../utils/retainedDiffLock";
 import { scopedReviewDispatch } from "../utils/scopedReviewDispatch";
@@ -531,15 +532,14 @@ export function ChangesPanel({
       {noteDraft && ReviewNoteDialog && <ReviewNoteDialog draft={noteDraft} onClose={() => setNoteDraft(null)} />}
       <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
-          <GitCompareArrows size={16} aria-hidden="true" />
-          <div className="panel-heading-copy"><h2>Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
+          <div className="panel-heading-copy"><h2 className="visually-hidden">Changes</h2><span>{toolbarFiles} {toolbarFiles === 1 ? "file" : "files"}{headerMetrics?.repositories !== undefined ? ` in ${headerMetrics.repositories} ${headerMetrics.repositories === 1 ? "repository" : "repositories"}` : ""}</span></div>
         </div>
         <div className="panel-stats" aria-label={`${toolbarInsertions} insertions and ${toolbarDeletions} deletions`}>
           <span className="stat-additions">+{toolbarInsertions}</span><span className="stat-deletions">−{toolbarDeletions}</span>
           {lastReversal && onUndoReversal && (
-            <button type="button" className="subtle-button" title={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void undoReversal()}>
+            <HintButton className="subtle-button" hint={`Restore ${repositoryPath === "." ? lastReversal.filePath : `${repositoryPath}/${lastReversal.filePath}`} to its staged and working-tree state before the reversal`} onClick={() => void undoReversal()}>
               <RotateCcw size={14} />Undo revert
-            </button>
+            </HintButton>
           )}
           {onGenerateSummary && toolbarFiles > 0 && (
             <button
@@ -576,7 +576,6 @@ export function ChangesPanel({
       {totalHunks > 0 && persistentReview && (
         <div className="diff-review-toolbar">
           <span><strong>{reviewedHunks}/{totalHunks}</strong> hunks reviewed</span>
-          <progress aria-label={`${reviewedHunks} of ${totalHunks} hunks reviewed`} max={totalHunks} value={reviewedHunks} />
           <div className="diff-review-filter" role="group" aria-label="Filter review state">
             {([
               ["all", totalHunks],
@@ -597,14 +596,14 @@ export function ChangesPanel({
         <div className="panel-empty changes-empty"><h3>{emptyState?.title ?? "No local changes"}</h3>{emptyState?.detail && <p>{emptyState.detail}</p>}{onRefresh && <button type="button" className="secondary-button" onClick={onRefresh} disabled={diffBusy}>Refresh</button>}</div>
       ) : (
         <div className="changes-layout">
-          {compactFileNavigator ?? <div className="changes-file-picker"><span>Reviewing</span><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
+          {compactFileNavigator ?? <div className="changes-file-picker"><select aria-label="Changed file" value={selectedPath ?? files[0]?.path ?? ""} onChange={(event) => { clearSelection(); onSelectFile(event.target.value); }}>{files.map((file) => <option value={file.path} key={file.path}>{changedFileStatusCode(file)} · {file.path}</option>)}</select></div>}
           {fileNavigator ?? <nav className="changes-file-list" aria-label="Changed files">
             {files.filter((file) => visibleFiles.some((visible) => visible.path === file.path)).map((file) => {
               const parts = changedFilePathParts(file.path);
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
               const language = sourceLanguageForFile(file.path);
               return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true" title={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true">{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
                   <span className="file-insertions">+{file.insertions}</span>

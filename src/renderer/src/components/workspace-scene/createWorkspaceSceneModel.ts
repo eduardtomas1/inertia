@@ -442,9 +442,6 @@ export function createWorkspaceSceneModel({
   });
   const canUpdatePlan = planActionsAvailable(conversation);
   const latestPlan = projection.plans.at(-1) ?? null;
-  const planSummary = conversation?.interactionMode === "plan"
-    ? "The latest agent response is reflected as a working plan."
-    : "Switch the composer to Plan mode and ask the agent to propose an approach.";
   const visibleDetailState = detailState?.conversationId === conversation?.id
     ? detailState
     : null;
@@ -987,7 +984,6 @@ export function createWorkspaceSceneModel({
       },
       plan: {
         steps: planSteps,
-        summary: planSummary,
         document: latestPlan?.explanation ?? null,
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,

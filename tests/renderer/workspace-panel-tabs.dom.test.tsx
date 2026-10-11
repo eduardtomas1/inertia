@@ -384,6 +384,23 @@ describe("workspace panel tab row", () => {
     expect(css).not.toContain(".panel-tab:is(:hover, :focus-within)");
   });
 
+  it("explains unavailable surfaces without native titles", async () => {
+    const reason = "Available after the first message creates this chat's workspace.";
+    const { unmount } = render(<Host initial={{ isOpen: true, surfaces: [], activeSurfaceId: null }} unavailable={{ files: reason }} />);
+    const row = screen.getByRole("group", { name: "Open a surface" }).querySelector<HTMLElement>(".is-unavailable")!;
+    expect(row).toHaveTextContent(reason);
+    expect(row).not.toHaveAttribute("title");
+    unmount();
+
+    render(<Host initial={state("changes", "changes")} unavailable={{ files: reason }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
+    const menu = await screen.findByRole("menu", { name: "Add panel surface" });
+    const files = await within(menu).findByRole("menuitem", { name: /^Files/u });
+    expect(files).toHaveAttribute("aria-disabled", "true");
+    expect(files).not.toHaveAttribute("title");
+    expect(files).toHaveAccessibleDescription(reason);
+  });
+
   it("keeps the add button on the 2px outside button ring", () => {
     const css = readSourceText("src/renderer/src/styles.css");
     const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";

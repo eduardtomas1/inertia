@@ -49,6 +49,16 @@ describe("plan panel document", () => {
     expect(screen.getByRole("button", { name: "Copy plan" })).toBeTruthy();
   });
 
+  it("shows an empty plan as one line without a count, progress, helper or actions", () => {
+    const { container } = render(<PlanPanel steps={[]} onRefine={() => undefined} onImplement={() => undefined} />);
+    expect(screen.getByText("No plan yet")).toBeTruthy();
+    expect(screen.queryByText(/of 0 complete/u)).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(container.querySelector(".plan-summary")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refine plan" })).toBeNull();
+    expect(container.querySelector(".panel-heading > svg")).toBeNull();
+  });
+
   it("shows a document-only plan without the empty state", () => {
     render(<PlanPanel document={"# Plan: Short\nOne paragraph."} markdown={markdown} steps={[]} />);
     expect(screen.queryByText("No plan yet")).toBeNull();

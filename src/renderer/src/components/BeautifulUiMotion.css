@@ -59,16 +59,15 @@
 
 .diff-review-filter {
   display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
-  padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--surface);
 }
 .diff-review-filter button {
-  display: inline-flex; min-height: 23px; align-items: center; gap: 4px; padding: 0 7px;
-  border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font-size: var(--text-xs); text-transform: capitalize; white-space: nowrap;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  display: inline-flex; min-height: var(--control-height-small); align-items: center; gap: 4px; padding: 0 8px;
+  border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font-size: var(--text-sm); font-weight: 500; text-transform: capitalize; white-space: nowrap;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.diff-review-filter button > span { min-width: 15px; padding: 1px 4px; border-radius: var(--radius-xs); color: inherit; background: var(--fill); font-size: var(--text-xs); text-align: center; }
-.diff-review-filter button[aria-pressed="true"] { color: var(--text); background: var(--fill); }
-.diff-review-filter button[aria-pressed="true"] > span { color: var(--accent-strong); background: var(--fill); }
+.diff-review-filter button:hover { color: var(--text); background: var(--fill); }
+.diff-review-filter button > span { color: var(--text-faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.diff-review-filter button[aria-pressed="true"] { color: var(--text); background: var(--fill-strong); }
 
 .diff-filter-row {
   display: grid; min-width: max-content; grid-template-rows: 1fr; opacity: 1;
@@ -78,27 +77,20 @@
 .diff-filter-row[inert] { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
 .diff-code.wraps .diff-filter-row { min-width: 0; }
 .diff-hunk { transition: filter var(--dur) var(--ease), opacity var(--dur) var(--ease); }
-.diff-code .diff-line { transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), filter var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+.diff-code .diff-line { transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), opacity var(--dur) var(--ease); }
 .diff-selection-popover { transform-origin: top left; animation: beautiful-pop-in var(--dur) var(--ease) both; }
 
-.plan-progress > span { transition: width var(--dur-slow) var(--ease); }
 .plan-step {
-  position: relative; border-radius: var(--radius-sm);
+  position: relative; border-radius: var(--radius-xs);
   animation: beautiful-fade-up var(--dur-slow) var(--ease) both;
   animation-delay: calc(var(--motion-index, 0) * var(--stagger));
   transition: border-radius var(--dur-slow) var(--ease), background var(--dur-slow) var(--ease);
 }
-.plan-step:not(:last-child)::after {
-  position: absolute; z-index: 0; top: 30px; bottom: -13px; left: 19.5px; width: 1px;
-  background: var(--line); content: "";
-}
 .plan-step-status {
-  flex: 0 0 auto; margin-top: 1px; padding: 2px 6px; border-radius: var(--radius-xs);
-  background: var(--fill); animation: beautiful-fade-in var(--dur) ease-out both;
+  flex: 0 0 auto; margin-top: 1px; animation: beautiful-fade-in var(--dur) ease-out both;
 }
-.plan-step.is-completed .plan-step-status { color: var(--blue); background: var(--fill); }
-.plan-step.is-in-progress .plan-step-status { color: var(--accent-strong); background: var(--fill); }
-.plan-step.is-blocked .plan-step-status { color: var(--danger); background: var(--fill); }
+.plan-step.is-in-progress .plan-step-status { color: var(--text); }
+.plan-step.is-blocked .plan-step-status { color: var(--danger); }
 
 .turn-working-status .turn-working-copy strong {
   color: var(--text-muted);
@@ -212,26 +204,20 @@
 .subagent-status-mark:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) { color: var(--danger); background: var(--fill); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .subagent-status-mark[data-status="unknown"] { color: var(--warning); background: var(--fill); }
 .goal-panel-subagent-state {
-  display: inline-flex; min-height: 19px; flex: 0 0 auto; align-items: center; padding: 1px 6px;
-  border: 0; border-radius: var(--radius-xs); color: var(--text-muted); background: var(--fill);
-  font-size: var(--text-xs); font-weight: 500; line-height: var(--leading-heading);
+  display: inline-flex; flex: 0 0 auto; align-items: center;
+  color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-heading);
 }
-.goal-panel-subagents > li:is([data-status="queued"], [data-status="spawned"], [data-status="running"], [data-status="waiting"]) .goal-panel-subagent-state { color: var(--accent-strong); background: var(--fill); }
-.goal-panel-subagents > li[data-status="completed"] .goal-panel-subagent-state { color: var(--status-completed); background: var(--fill); }
-.goal-panel-subagents > li:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) .goal-panel-subagent-state { color: var(--danger); background: var(--fill); }
+.goal-panel-subagents > li:is([data-status="queued"], [data-status="spawned"], [data-status="running"], [data-status="waiting"]) .goal-panel-subagent-state { color: var(--text); }
+.goal-panel-subagents > li:is([data-status="failed"], [data-status="interrupted"], [data-status="lost"]) .goal-panel-subagent-state { color: var(--danger); }
 .subagent-detail-reveal { min-width: 0; grid-column: 2 / -1; }
 .subagent-detail-reveal > .subagent-trace-details { grid-column: auto; }
 
-.goal-panel-subagents { gap: 5px; }
+.goal-panel-subagents { gap: 0; }
 .goal-panel-subagents > li {
-  grid-template-columns: 24px minmax(0, 1fr) auto; padding: 7px 8px;
-  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
-  background: var(--surface);
-  transition: border-radius var(--dur-slow) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+  grid-template-columns: 24px minmax(0, 1fr) auto; padding: 8px;
+  transition: background-color var(--dur) var(--ease);
 }
-.goal-panel-subagents > li[data-expanded="true"] { border-radius: var(--radius-xs); }
-.goal-panel-subagents > li:hover { border-color: var(--line); background: var(--fill); }
-.goal-panel-subagent-state { min-height: 18px; }
+.goal-panel-subagents > li:hover { background: var(--fill); }
 .goal-panel-subagents .subagent-trace-details { grid-column: auto; }
 .goal-panel-subagents .subagent-detail-reveal { grid-column: 2 / -1; }
 

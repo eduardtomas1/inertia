@@ -13,7 +13,7 @@ export function AttachmentsSurface({ attachments }: AttachmentsSurfaceProps): Re
     <section className="workspace-surface attachments-surface" aria-label="Attachments">
       <div className="workspace-surface-scroll">
         {attachments.length === 0 ? (
-          <p className="workspace-surface-empty">Attachments you send in this chat appear here.</p>
+          <p className="workspace-surface-empty">No attachments</p>
         ) : (
           <section className="workspace-surface-section attachments-surface-gallery environment-attachments"
             data-expanded="true" aria-labelledby={headingId}>

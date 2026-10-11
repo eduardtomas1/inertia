@@ -3,8 +3,8 @@ import {
   Check,
   Copy,
   ExternalLink,
+  Folder,
   FolderOpen,
-  PanelLeft,
   Play,
   Plus,
   Square,
@@ -14,6 +14,7 @@ import type { ProjectAction } from "@shared/contracts";
 
 import type { EnvironmentRunItem } from "../../utils/environmentSummary";
 import { TooltipButton } from "../TooltipButton";
+import { HintButton } from "../HintButton";
 import {
   workspaceRunStatusLabel,
   type WorkspaceRunsModel,
@@ -195,9 +196,9 @@ export function ProjectActionMenuItems({
 export type OpenInTarget = "folder" | "file-manager" | "files";
 
 const openInIcons = {
-  folder: FolderOpen,
+  folder: ExternalLink,
   "file-manager": FolderOpen,
-  files: PanelLeft,
+  files: Folder,
 } as const;
 
 export function OpenInMenuItems({
@@ -237,19 +238,18 @@ export function OpenInMenuItems({
         const Icon = openInIcons[target];
         const disabled = target === "files" && !filesAvailable;
         return (
-          <button
-            type="button"
+          <HintButton
             role="menuitem"
             key={target}
             className={itemClass}
             aria-disabled={disabled || undefined}
-            title={disabled ? "Files become available after the first message creates this isolated worktree." : undefined}
+            hint={disabled ? "Files become available after the first message creates this isolated worktree." : undefined}
             onClick={() => onOpen(target)}
           >
             <Icon size={14} aria-hidden="true" />
             <span><strong>{labels[target]}</strong></span>
             {target === preferred && <small className="header-menu-hint">Default</small>}
-          </button>
+          </HintButton>
         );
       })}
       <div role="separator" className="header-menu-separator" />

@@ -70,11 +70,10 @@ describe("browser chrome", () => {
     expect(within(strip).getByRole("button", { name: "Close Two" }).closest(".panel-tab")).not.toBeNull();
   });
 
-  it("draws a loading bar along the seam while a page loads", () => {
-    const { container, rerender } = render(panel({ loading: true }));
-    expect(container.querySelector(".preview-chrome > .preview-loading-bar")).not.toBeNull();
-    rerender(panel({ loading: false }));
+  it("shows a loading page with the stage mark only, without an accent bar along the seam", () => {
+    const { container } = render(panel({ loading: true }));
     expect(container.querySelector(".preview-loading-bar")).toBeNull();
+    expect(screen.getByText("Connecting to preview…")).toBeInTheDocument();
   });
 
   it("scrolls the page strip with the wheel and fades the edge that hides pages", () => {

@@ -2,8 +2,8 @@ import { lazy, Suspense, useCallback, useId, useLayoutEffect, useRef, useState }
 import {
   ChevronDown,
   ExternalLink,
+  Folder,
   FolderOpen,
-  PanelLeft,
 } from "lucide-react";
 
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
@@ -49,9 +49,9 @@ interface OpenInControlProps {
 }
 
 const targetIcons = {
-  folder: FolderOpen,
+  folder: ExternalLink,
   "file-manager": FolderOpen,
-  files: PanelLeft,
+  files: Folder,
 } as const;
 
 export function OpenInControl({
@@ -136,7 +136,7 @@ export function OpenInControl({
           tooltip={`Open ${checkoutName} in ${labels[effectivePreferred]}`}
           onClick={() => open(effectivePreferred)}
         >
-          <PrimaryIcon size={14} aria-hidden="true" />
+          <PrimaryIcon size={16} aria-hidden="true" />
           <span className="header-split-label">Open</span>
         </TooltipButton>
         <TooltipButton

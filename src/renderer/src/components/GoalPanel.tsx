@@ -7,13 +7,13 @@ import {
   CirclePause,
   Eye,
   Flag,
-  ListTree,
   Play,
   RefreshCw,
   Square,
   Trash2,
 } from "lucide-react";
 import "./BeautifulUiMotion.css";
+import { HintButton } from "./HintButton";
 
 import type {
   AgentGoal,
@@ -198,7 +198,6 @@ function GoalCard({
         && executionStatus === "idle" && (
           <p className="goal-panel-capability-note" role="status">
             The goal is active in Codex, but no Inertia run is connected.
-            Resume it to continue.
           </p>
         )}
 
@@ -410,7 +409,7 @@ function GoalComposer({
       <small>
         {source === "codex-native"
           ? "Shared with this Codex thread."
-          : "Tracked by Inertia only; it is not injected into the provider. Inertia does not measure or enforce the local token target."}
+          : "Tracked by Inertia only; not shared with the provider."}
       </small>
     </form>
   );
@@ -424,7 +423,7 @@ function PlanRelationship({
   if (!plan) {
     return (
       <div className="goal-panel-empty-row">
-        <span>No conversation plan has been reported.</span>
+        <span>No plan yet.</span>
       </div>
     );
   }
@@ -435,13 +434,7 @@ function PlanRelationship({
       <div>
         <strong>{completed} of {plan.steps.length} plan steps complete</strong>
         <span>{active?.step ?? plan.explanation ?? "No active plan step"}</span>
-        <small>
-          Latest conversation plan · not linked to this goal
-        </small>
       </div>
-      <span aria-label={`${completed} of ${plan.steps.length} plan steps complete`}>
-        {completed}/{plan.steps.length}
-      </span>
     </div>
   );
 }
@@ -482,18 +475,15 @@ function SkillsSection({
         </p>
       ) : workflow.skills.length === 0 ? (
         <div className="goal-panel-empty-row">
-          <span>
-            No enabled skills were reported by this provider for this project.
-          </span>
+          <span>No enabled skills.</span>
         </div>
       ) : (
         <ul className="goal-panel-skills">
           {workflow.skills.map((skill) => (
               <li key={skill.id}>
-                <button
-                  type="button"
+                <HintButton
                   disabled={!skill.enabled || !onInsertSkill}
-                  title={skill.enabled
+                  hint={skill.enabled
                     ? `Insert $${skill.name} in the composer`
                     : skill.description}
                   onClick={() => onInsertSkill?.(skill)}
@@ -505,7 +495,7 @@ function SkillsSection({
                   <span className="goal-panel-skill-meta">
                     {skill.scope}
                   </span>
-                </button>
+                </HintButton>
               </li>
           ))}
         </ul>
@@ -574,7 +564,6 @@ export function SubagentsSection({
     <section className="goal-panel-section" aria-labelledby={headingId}>
       <header className="goal-panel-section-heading">
         <div>
-          <ListTree size={14} aria-hidden="true" />
           <h3 id={headingId}>Delegated work</h3>
         </div>
         <span aria-label={`${subagents.length} delegated ${subagents.length === 1 ? "task" : "tasks"}${statsLabel
@@ -585,7 +574,7 @@ export function SubagentsSection({
       </header>
       {rows.length === 0 ? (
         <div className="goal-panel-empty-row">
-          <span>No provider-reported subagents in this conversation.</span>
+          <span>No delegated work.</span>
         </div>
       ) : (
         <ol
@@ -676,14 +665,13 @@ export function SubagentsSection({
                     </button>
                   )}
                   {mayFollowUp && (
-                    <button
-                      type="button"
+                    <HintButton
                       aria-label={`Guide parent about ${label}`}
-                      title="Draft guidance to the active parent; nothing is sent yet."
+                      hint="Draft guidance to the active parent; nothing is sent yet."
                       onClick={() => followUp?.(trace)}
                     >
                       Guide parent
-                    </button>
+                    </HintButton>
                   )}
                   <button
                     type="button"
@@ -808,9 +796,8 @@ export function GoalPanel({
     >
       <header className="panel-toolbar goal-panel-toolbar">
         <div className="panel-heading">
-          <Flag size={16} aria-hidden="true" />
           <div className="panel-heading-copy">
-            <h2>Goal</h2>
+            <h2 className="visually-hidden">Goal</h2>
             <span>{workflow?.goalCapability.label ?? "Workflow unavailable"}</span>
           </div>
         </div>
@@ -850,7 +837,6 @@ export function GoalPanel({
         <section className="goal-panel-section" aria-labelledby={currentHeadingId}>
           <header className="goal-panel-section-heading">
             <div>
-              <Flag size={14} aria-hidden="true" />
               <h3 id={currentHeadingId}>Current objective</h3>
             </div>
           </header>
@@ -869,7 +855,7 @@ export function GoalPanel({
             <>
               {primaryGoals.length === 0 ? (
                 <div className="goal-panel-empty-row">
-                  <span>No current goal. Inertia does not infer one from chat text.</span>
+                  <span>No current goal.</span>
                 </div>
               ) : primaryGoals.map((goal) => (
                 <GoalCard
@@ -903,7 +889,6 @@ export function GoalPanel({
           >
             <header className="goal-panel-section-heading">
               <div>
-                <Flag size={14} aria-hidden="true" />
                 <h3 id={localHeadingId}>Local tracking</h3>
               </div>
             </header>
@@ -928,7 +913,6 @@ export function GoalPanel({
         <section className="goal-panel-section" aria-labelledby={planHeadingId}>
           <header className="goal-panel-section-heading">
             <div>
-              <Check size={14} aria-hidden="true" />
               <h3 id={planHeadingId}>Latest conversation plan</h3>
             </div>
           </header>

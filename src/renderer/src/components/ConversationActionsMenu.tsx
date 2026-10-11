@@ -32,15 +32,17 @@ import type { SidebarThreadView } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { canOrganizeThread, threadSnoozePresets } from "../../../shared/thread-organization";
 import { ThreadSubmenu } from "./sidebar/ThreadSubmenu";
+import { HintButton } from "./HintButton";
 import "./sidebar/thread-actions.css";
 
 type DismissReason = "selection" | "context-change";
 
 interface ConversationMenuItemProps extends Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
-  "children" | "onClick" | "role" | "tabIndex" | "type"
+  "children" | "onClick" | "role" | "tabIndex" | "type" | "title"
 > {
   children: ReactNode;
+  hint?: string | undefined;
   onActivate: () => void;
   onDismiss: (reason: DismissReason) => void;
   restoreFocus?: boolean;
@@ -51,21 +53,27 @@ function ConversationMenuItem({
   onActivate,
   onDismiss,
   restoreFocus = true,
+  hint,
+  disabled,
   ...props
 }: ConversationMenuItemProps): React.JSX.Element {
+  const explained = Boolean(disabled && hint);
   return (
-    <button
+    <HintButton
       {...props}
-      type="button"
+      hint={hint}
       role="menuitem"
       tabIndex={-1}
+      disabled={disabled && !explained}
+      aria-disabled={explained || undefined}
       onClick={() => {
+        if (disabled) return;
         onDismiss(restoreFocus ? "selection" : "context-change");
         onActivate();
       }}
     >
       {children}
-    </button>
+    </HintButton>
   );
 }
 
@@ -229,7 +237,7 @@ export function ConversationActionsMenu({
       </ThreadSubmenu>
       <div role="separator" />
       <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={14} />Rename thread</ConversationMenuItem>
-      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} title="Use the latest user message as the title. Runs locally without an AI request." onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}
+      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} hint="Use the latest user message as the title. Runs locally without an AI request." onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}
       {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={14} />Mark unread</ConversationMenuItem>}
       <div role="separator" />
       <ThreadSubmenu label="Copy" icon={<Copy size={14} />} open={submenu === "copy"}
@@ -244,7 +252,7 @@ export function ConversationActionsMenu({
         <ConversationMenuItem
           {...itemProps}
           disabled={!isDetached && detachedChatLimitReached}
-          title={!isDetached && detachedChatLimitReached
+          hint={!isDetached && detachedChatLimitReached
             ? "Close a chat window before opening another."
             : undefined}
           onActivate={() => onOpenConversationInWindow(conversation)}
@@ -264,7 +272,7 @@ export function ConversationActionsMenu({
         <ConversationMenuItem
           {...itemProps}
           disabled={!canOpenInSplit}
-          title={canOpenInSplit
+          hint={canOpenInSplit
             ? undefined
             : isDetached
               ? "This chat is already open in its own window."
@@ -296,7 +304,7 @@ export function ConversationActionsMenu({
       <ConversationMenuItem
         {...itemProps}
         disabled={!canSettle || isDetached}
-        title={isDetached
+        hint={isDetached
           ? "Return this chat to the main window before archiving it."
           : undefined}
         onActivate={() => onArchiveConversation(conversation)}
@@ -307,7 +315,7 @@ export function ConversationActionsMenu({
         {...itemProps}
         className="is-danger"
         disabled={!canSettle || isDetached}
-        title={isDetached
+        hint={isDetached
           ? "Return this chat to the main window before deleting it."
           : undefined}
         onActivate={() => onDeleteConversation(conversation)}

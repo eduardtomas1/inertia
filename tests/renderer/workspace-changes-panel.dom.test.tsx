@@ -1276,7 +1276,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
     expect([...navigator.querySelectorAll(".change-file-status")].map((node) => [
       node.textContent,
-      node.getAttribute("title"),
+      node.getAttribute("title") ?? node.nextElementSibling?.textContent,
     ])).toEqual([
       ["C", "Copied, unstaged"],
       ["T", "Type changed, unstaged"],

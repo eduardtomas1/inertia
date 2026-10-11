@@ -321,9 +321,9 @@ async function verifyScopedTools(testInfo: TestInfo) {
     await secondarySession.getAttribute("data-terminal-id");
   expect(primaryTerminalId).not.toBe(secondaryTerminalId);
   await expect(primaryTerminal.getByRole("tab", { name: "Terminal 1" }))
-    .toHaveAttribute("title", "Terminal 1 · Inertia");
+    .toHaveAccessibleDescription("Terminal 1 · Inertia");
   await expect(secondaryTerminal.getByRole("tab", { name: "Terminal 1" }))
-    .toHaveAttribute("title", "Terminal 1 · Companion");
+    .toHaveAccessibleDescription("Terminal 1 · Companion");
   const secondaryTerminalSurface = await openConversationPaneTool(secondary, secondaryTitle, "Terminal");
   await expect(secondaryTerminalSurface.locator(".terminal-panel[data-terminal-id]"))
     .toHaveAttribute("data-terminal-id", secondaryTerminalId!);
@@ -723,10 +723,10 @@ async function verifyPromotion(testInfo: TestInfo, browsers: ScopedBrowsers): Pr
   // Each pane keeps its own docked terminal, labelled with its project.
   await expect(primary.locator(".conversation-pane-chat > .terminal-dock")
     .getByRole("tab", { name: "Terminal 1" }))
-    .toHaveAttribute("title", "Terminal 1 · Companion");
+    .toHaveAccessibleDescription("Terminal 1 · Companion");
   await expect(secondary.locator(".conversation-pane-chat > .terminal-dock")
     .getByRole("tab", { name: "Terminal 1" }))
-    .toHaveAttribute("title", "Terminal 1 · Inertia");
+    .toHaveAccessibleDescription("Terminal 1 · Inertia");
   await expect(
     primary.locator(".terminal-panel[data-terminal-id]"),
   ).toHaveAttribute(

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Check } from "lucide-react";
 import { surfaceIcons } from "./workspacePanelIcons";
+import { HintButton } from "./HintButton";
 
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
@@ -144,7 +145,6 @@ export function RightPanelLauncher({
             key={action.surface}
             className="is-unavailable"
             aria-disabled="true"
-            title={action.reason}
           >
             {surfaceIcons[action.surface]}
             <span>{action.label}<small>{action.reason}</small></span>
@@ -167,30 +167,32 @@ export function AddSurfaceMenuItems({
 }): React.JSX.Element {
   return (
     <>
-      {actions.map((action) => (
-        <button
-          type="button"
-          role="menuitem"
-          key={action.surface}
-          aria-disabled={!action.available || undefined}
-          aria-keyshortcuts={action.shortcut}
-          title={action.reason}
-          onPointerEnter={() => {
-            if (action.available) prefetchWorkspaceTool(action.surface);
-          }}
-          onClick={() => {
-            if (action.available) onOpen(action.surface);
-          }}
-        >
-          {surfaceIcons[action.surface]}
-          <span>
-            {action.label}
-            {openSurfaces.includes(action.surface) && <span className="visually-hidden">, open</span>}
-          </span>
-          {openSurfaces.includes(action.surface) && <Check size={14} aria-hidden="true" />}
-          <kbd>{action.shortcut}</kbd>
-        </button>
-      ))}
+      {actions.map((action) => {
+        const open = openSurfaces.includes(action.surface);
+        return (
+          <HintButton
+            key={action.surface}
+            hint={action.available ? undefined : action.reason}
+            role="menuitem"
+            aria-disabled={!action.available || undefined}
+            aria-keyshortcuts={action.shortcut}
+            onPointerEnter={() => {
+              if (action.available) prefetchWorkspaceTool(action.surface);
+            }}
+            onClick={() => {
+              if (action.available) onOpen(action.surface);
+            }}
+          >
+            {surfaceIcons[action.surface]}
+            <span>
+              {action.label}
+              {open && <span className="visually-hidden">, open</span>}
+            </span>
+            {open && <Check size={14} aria-hidden="true" />}
+            <kbd>{action.shortcut}</kbd>
+          </HintButton>
+        );
+      })}
     </>
   );
 }

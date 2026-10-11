@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import {
+  ArrowDownUp,
   ChevronDown,
   CloudDownload,
   CloudUpload,
@@ -7,7 +8,6 @@ import {
   GitBranchPlus,
   GitCommitHorizontal,
   GitPullRequest,
-  Info,
 } from "lucide-react";
 import type { GitStatusSnapshot } from "@shared/contracts";
 
@@ -43,7 +43,7 @@ export function GitQuickActionIcon({
     return <GitCommitHorizontal size={size} aria-hidden="true" />;
   }
   if (quickAction.label === "Push") return <CloudUpload size={size} aria-hidden="true" />;
-  return <Info size={size} aria-hidden="true" />;
+  return <ArrowDownUp size={size} aria-hidden="true" />;
 }
 
 interface GitActionsControlProps {
@@ -194,7 +194,7 @@ export function GitActionsControl({
           }}
           onClick={runQuickAction}
         >
-          <GitQuickActionIcon quickAction={quickAction} />
+          <GitQuickActionIcon quickAction={quickAction} size={16} />
           <span className="header-split-label">{quickAction.label}</span>
         </TooltipButton>
         <TooltipButton

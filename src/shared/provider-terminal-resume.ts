@@ -95,7 +95,7 @@ export function providerTerminalResumeAvailability(
     return {
       kind: "unavailable",
       resume: null,
-      reason: `No resumable ${providerLabel} CLI session is stored for this chat. It may be new or the saved provider session may be stale.`,
+      reason: `No resumable ${providerLabel} CLI session for this chat.`,
     };
   }
   if (!isProviderTerminalSessionId(conversation.providerSessionId)) {

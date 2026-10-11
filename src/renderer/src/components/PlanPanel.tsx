@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { useId, useState, type ComponentProps } from "react";
-import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, ListChecks, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, Play, RotateCcw } from "lucide-react";
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
@@ -72,7 +72,6 @@ export function PlanPanel({
   const documentId = useId();
   const planCopy = useCopiedState();
   const completed = steps.filter((step) => step.status === "completed").length;
-  const progress = steps.length > 0 ? Math.round((completed / steps.length) * 100) : 0;
   const parsed = document?.trim() ? planDocument(document) : null;
   const heading = parsed?.title ?? title;
   const body = parsed?.body ?? "";
@@ -83,10 +82,9 @@ export function PlanPanel({
     <section className="plan-panel" aria-label="Implementation plan">
       <header className="panel-toolbar plan-toolbar">
         <div className="panel-heading">
-          <ListChecks size={16} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
-            <span>{completed} of {steps.length} complete</span>
+            {steps.length > 0 && <span>{completed} of {steps.length} complete</span>}
           </div>
         </div>
         <div className="plan-toolbar-actions">
@@ -101,13 +99,8 @@ export function PlanPanel({
               {planCopy.copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
             </IconButton>
           )}
-          <span className="plan-percent" aria-label={`${progress}% complete`}>{progress}%</span>
         </div>
       </header>
-
-      <div className="plan-progress" role="progressbar" aria-label="Plan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
-        <span style={{ width: `${progress}%` }} />
-      </div>
 
       <div className="plan-scroll">
         {body ? (
@@ -138,12 +131,6 @@ export function PlanPanel({
           </div>
         ) : (
           <>
-            {body && (
-              <div className="plan-steps-heading">
-                <span>Steps</span>
-                <span>{completed} of {steps.length}</span>
-              </div>
-            )}
             <ol className="plan-steps">
               {steps.map((step, index) => {
                 const content = (
@@ -184,7 +171,7 @@ export function PlanPanel({
         )}
       </div>
 
-      {(onRefine || onImplement) && (
+      {(onRefine || onImplement) && (steps.length > 0 || body) && (
         <footer className="plan-actions">
           {onRefine && (
             <button type="button" className="secondary-button" onClick={onRefine}>

@@ -15,9 +15,9 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
       const bounds = trigger.current?.getBoundingClientRect();
       if (!bounds) return;
       const width = menu.offsetWidth;
-      menu.style.left = `${Math.max(8, Math.min(bounds.right + 2, window.innerWidth - width - 8))}px`;
+      menu.style.left = `${Math.max(8, Math.min(bounds.right + 4, window.innerWidth - width - 8))}px`;
       if (bounds.right + width > window.innerWidth - 8 && bounds.left > width + 8) {
-        menu.style.left = `${bounds.left - width - 2}px`;
+        menu.style.left = `${bounds.left - width - 4}px`;
       }
       menu.style.top = `${Math.max(8, Math.min(bounds.top, window.innerHeight - menu.offsetHeight - 8))}px`;
     };

@@ -174,19 +174,9 @@ export function ProviderResumePicker({
         />
       </div>
       {visible.length === 0 ? (
-        <div className="resume-picker-empty" role="status">
-          <MessagesSquare size={16} aria-hidden="true" />
-          <span>
-            <strong>
-              {rows.length === 0 ? "No resumable chats" : "No matching chats"}
-            </strong>
-            <small>
-              {rows.length === 0
-                ? "Provider sessions from this folder appear here once a chat has run."
-                : "Try a different chat, project, or session id."}
-            </small>
-          </span>
-        </div>
+        <p className="resume-picker-empty" role="status">
+          {rows.length === 0 ? "No resumable chats" : "No matching chats"}
+        </p>
       ) : (
         <ul
           ref={listRef}
@@ -243,11 +233,6 @@ export function ProviderResumePicker({
           })}
         </ul>
       )}
-      <div className="resume-picker-footer">
-        <span><kbd>↑↓</kbd> navigate</span>
-        <span><kbd>↵</kbd> resume</span>
-        {onCancel && <span><kbd>Esc</kbd> close</span>}
-      </div>
     </div>
   );
 }

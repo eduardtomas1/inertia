@@ -115,7 +115,7 @@ export function UsageSurface({
           </>
         ) : (
           <p className="workspace-surface-empty">
-            Usage is unavailable.
+            No provider route selected.
           </p>
         )}
 

@@ -470,7 +470,7 @@ export function ChatGoalControl({
                 <small>
                   {nativeGoal
                     ? "This becomes the native goal for this Codex thread."
-                    : "This stays in Inertia and is never injected into provider context."}
+                    : "This stays in Inertia and is never injected into provider context. Inertia does not measure or enforce the local token target."}
                 </small>
                 {capability?.kind === "inertia-local" && (
                   <p>{capability.reason}</p>

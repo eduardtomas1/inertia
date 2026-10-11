@@ -409,7 +409,7 @@ function GoalComposer({
       <small>
         {source === "codex-native"
           ? "Shared with this Codex thread."
-          : "Tracked by Inertia only; not shared with the provider."}
+          : "Tracked by Inertia only; not shared with the provider. Inertia does not measure or enforce the local token target."}
       </small>
     </form>
   );

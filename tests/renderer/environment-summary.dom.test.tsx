@@ -421,7 +421,7 @@ describe("Environment content in its workspace surfaces", () => {
     expect(screen.queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
 
     view.rerender(<UsageSurface usage={null} onRefreshUsage={onRefreshUsage} />);
-    expect(screen.getByText(/Usage is unavailable/iu)).toBeVisible();
+    expect(screen.getByText("No provider route selected.")).toBeVisible();
   });
 
   it("moves local servers into Run with their status in text, not a dot", async () => {

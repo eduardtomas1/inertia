@@ -121,6 +121,7 @@ describe("detached chat leaf controls", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Agent requested chat context",
     );
+    expect(screen.getByRole("status")).toHaveTextContent("Review this request in the main window.");
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Return to main" }));
     expect(onReturnToMain).toHaveBeenCalledOnce();

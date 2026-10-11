@@ -143,6 +143,7 @@ export function DetachedContextHandoffNotice({
       <MessagesSquare size={14} aria-hidden="true" />
       <span>
         <strong>Agent requested chat context</strong>
+        <small>Review this request in the main window.</small>
       </span>
       <button type="button" onClick={onReturnToMain}>
         <PanelTopOpen size={14} aria-hidden="true" />

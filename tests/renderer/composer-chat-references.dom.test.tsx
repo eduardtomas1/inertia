@@ -357,8 +357,10 @@ describe("composer chat references", () => {
     const suggestions = await screen.findByRole("listbox", {
       name: "Chats and project files",
     });
-    expect(within(suggestions).getByText("Reference a chat"))
-      .toBeInTheDocument();
+    expect(within(suggestions).getByRole("group", { name: "Reference a chat" }))
+      .toContainElement(within(suggestions).getByRole("option", { name: /Architecture decisions/u }));
+    expect(within(suggestions).queryByText("Reference a chat")).toBeNull();
+    expect(suggestions.querySelector(".popover-title")).toBeNull();
 
     await user.click(within(suggestions).getByRole("option", {
       name: /Architecture decisions/u,

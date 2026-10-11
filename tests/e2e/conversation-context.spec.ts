@@ -215,7 +215,7 @@ test("references a whole chat from the composer and preserves its provenance", a
     name: "Chats and project files",
   });
   await expect(suggestions).toBeVisible();
-  await expect(suggestions.getByText("Reference a chat")).toBeVisible();
+  await expect(suggestions.getByRole("group", { name: "Reference a chat" })).toBeVisible();
   await capture("conversation-context-mention-1280x820");
 
   await suggestions.getByRole("option", { name: /Architecture decisions/u })

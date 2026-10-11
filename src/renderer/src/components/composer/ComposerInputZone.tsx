@@ -1,6 +1,6 @@
 import { PASTED_TEXT_ATTACHMENT_BYTES } from "@shared/attachments";
 import { INTERFACE_LOCALE } from "../../lib/locale";
-import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeftRight,
   Check,
@@ -317,6 +317,53 @@ export function ComposerInputZone({
     );
   };
 
+  const renderMentionOption = (
+    option: (typeof mentionOptions)[number],
+    index: number,
+  ): React.JSX.Element => (
+    <button
+      key={option.id}
+      id={`${mentionListboxId}-${index}`}
+      type="button"
+      role="option"
+      aria-selected={option.id === activeMention?.id}
+      onMouseEnter={() => setHighlightedMentionId(option.id)}
+      onClick={() => acceptMention(option)}
+    >
+      {option.kind === "this-chat"
+        ? (
+          <>
+            <span className="composer-suggestion-chat">
+              <MessagesSquare size={14} aria-hidden="true" />
+              This chat
+            </span>
+            <small>Earlier messages · {thisChatTitle}</small>
+          </>
+        )
+        : option.kind === "chat"
+        ? (
+          <>
+            <span className="composer-suggestion-chat">
+              <MessagesSquare size={14} aria-hidden="true" />
+              {option.source.conversationTitle}
+            </span>
+            <small>
+              {option.source.projectName}
+              {option.source.workspaceRelation === "different-workspace"
+                ? " · different workspace"
+                : ""}
+            </small>
+          </>
+        )
+        : (
+          <>
+            <span>{option.entry.path}</span>
+            <small>{option.entry.kind}</small>
+          </>
+        )}
+    </button>
+  );
+
   return (
     <>
       <div className="composer-input-zone" data-composer-zone="input"
@@ -602,55 +649,15 @@ export function ComposerInputZone({
             : "Project files"}
         >
           {chatOptionCount > 0 && (
-            <div className="popover-title">Reference a chat</div>
+            <div role="group" aria-label="Reference a chat">
+              {mentionOptions.slice(0, chatOptionCount).map((option, offset) => renderMentionOption(option, offset))}
+            </div>
           )}
-          {mentionOptions.map((option, index) => (
-            <Fragment key={option.id}>
-              {option.kind === "file" && index === chatOptionCount && (
-                <div className="popover-title">Reference a file</div>
-              )}
-              <button
-                id={`${mentionListboxId}-${index}`}
-                type="button"
-                role="option"
-                aria-selected={option.id === activeMention?.id}
-                onMouseEnter={() => setHighlightedMentionId(option.id)}
-                onClick={() => acceptMention(option)}
-              >
-                {option.kind === "this-chat"
-                  ? (
-                    <>
-                      <span className="composer-suggestion-chat">
-                        <MessagesSquare size={14} aria-hidden="true" />
-                        This chat
-                      </span>
-                      <small>Earlier messages · {thisChatTitle}</small>
-                    </>
-                  )
-                  : option.kind === "chat"
-                  ? (
-                    <>
-                      <span className="composer-suggestion-chat">
-                        <MessagesSquare size={14} aria-hidden="true" />
-                        {option.source.conversationTitle}
-                      </span>
-                      <small>
-                        {option.source.projectName}
-                        {option.source.workspaceRelation === "different-workspace"
-                          ? " · different workspace"
-                          : ""}
-                      </small>
-                    </>
-                  )
-                  : (
-                    <>
-                      <span>{option.entry.path}</span>
-                      <small>{option.entry.kind}</small>
-                    </>
-                  )}
-              </button>
-            </Fragment>
-          ))}
+          {mentionOptions.length > chatOptionCount && (
+            <div role="group" aria-label="Reference a file">
+              {mentionOptions.slice(chatOptionCount).map((option, offset) => renderMentionOption(option, chatOptionCount + offset))}
+            </div>
+          )}
         </div>
       )}
       {slashMenuVisible && slashMatch && (

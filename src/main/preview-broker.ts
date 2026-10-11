@@ -75,6 +75,11 @@ const MAX_PARKED_SESSIONS = 4;
 const PARKED_SESSION_IDLE_MS = 30 * 60_000;
 const UNLOAD_STAY_QUIET_MS = 5_000;
 
+function liveContents(tab: PreviewTab): WebContents | null {
+  const contents = tab.view.webContents as WebContents | null | undefined;
+  return contents && !contents.isDestroyed() ? contents : null;
+}
+
 function budgetFor(request: AgentBrowserRequest): number {
   if (request.action === "perform-approved") return AGENT_BROWSER_NAVIGATION_BUDGET_MS;
   if (request.action === "prepare-approval" || request.action === "discard-approval") {
@@ -654,10 +659,34 @@ export class PreviewBroker {
 
   #layout(session: PreviewSession): void {
     const tab = session.tabs.get(session.activeTabId);
-    if (!tab || tab.view.webContents.isDestroyed()) return;
+    if (!tab) return;
+    if (!liveContents(tab)) {
+      this.#dropDeadTabs(session);
+      return;
+    }
     const bounds = session.bounds ?? PARKED_PREVIEW_BOUNDS;
     if (!sameBounds(tab.view.getBounds(), bounds)) tab.view.setBounds(bounds);
     if (tab.view.getVisible() !== session.displayed) tab.view.setVisible(session.displayed);
+  }
+
+  #dropDeadTabs(session: PreviewSession, gone?: PreviewTab): void {
+    if (this.#sessions.get(session.contextId) !== session) return;
+    const dead = [...session.tabs.values()].filter((tab) => tab === gone || !liveContents(tab));
+    if (dead.length === 0) return;
+    if (!this.#window()) {
+      this.#destroy(session);
+      return;
+    }
+    session.evidenceInspectors.close();
+    for (const tab of dead) {
+      session.tabs.delete(tab.id);
+      session.unloadStayUntil.delete(tab.id);
+      this.#destroyTab(tab);
+    }
+    if (session.tabs.size === 0) session.activeTabId = this.#openTab(session).id;
+    else if (!session.tabs.has(session.activeTabId)) session.activeTabId = session.tabs.keys().next().value as string;
+    this.#activateTab(session, session.activeTabId);
+    this.#publish(session);
   }
 
   #evictParked(keep?: PreviewSession): void {
@@ -745,7 +774,7 @@ export class PreviewBroker {
     evidence.installSession(session.browserSession, (webContentsId) => {
       if (typeof webContentsId !== "number" || !Number.isInteger(webContentsId)) return null;
       const requestTab = [...session.tabs.values()].find(
-        (candidate) => candidate.view.webContents.id === webContentsId,
+        (candidate) => liveContents(candidate)?.id === webContentsId,
       );
       return requestTab ? {
         tabId: requestTab.id,
@@ -803,6 +832,7 @@ export class PreviewBroker {
         );
       },
     });
+    tab.view.webContents.once("destroyed", () => this.#dropDeadTabs(session, tab));
     session.tabs.set(tab.id, tab);
     return tab;
   }
@@ -874,7 +904,7 @@ export class PreviewBroker {
   #destroyTab(tab: PreviewTab): void {
     tab.unregisterHealth();
     this.#window()?.contentView.removeChildView(tab.view);
-    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    liveContents(tab)?.close();
   }
 
   #record(

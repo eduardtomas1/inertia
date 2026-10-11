@@ -699,8 +699,7 @@
   .usage-chart-isolated-point,
   .usage-chart-partial-point,
   .usage-chart-cursor { stroke: CanvasText; }
-  .usage-chart-isolated-point,
-  .usage-chart-partial-point { fill: Canvas; }
+  .usage-chart-point-core { stroke: Canvas; }
   .usage-provider-meter > i { background: CanvasText; }
   .usage-provider-meter.is-unavailable { border: 1px dashed CanvasText; background: Canvas; }
 }

@@ -131,7 +131,7 @@ describe("interface scale layer", () => {
   it("scales the review controls from the small control height and leaves the toolbar count at chrome size", () => {
     const scale = css.slice(css.indexOf(" * Interface scale is a semantic layer"));
     expect(block(".diff-review-toolbar", scale)).toContain("min-height: calc(var(--ui-control-height) + 8px);");
-    expect(block(".diff-review-toolbar select,\n.diff-file-review-heading button,\n.diff-hunk-actions button,\n.diff-review-note > button,\n.diff-selection-actions > button,\n.diff-selection-popover .primary-button", scale)).toContain("min-height: var(--control-height-small);");
+    expect(block(".diff-file-review-heading button,\n.diff-hunk-actions button,\n.diff-review-note > button,\n.diff-selection-actions > button,\n.diff-selection-popover .primary-button", scale)).toContain("min-height: var(--control-height-small);");
     expect(block(".change-file-button,\n.file-entry", scale)).toContain("min-height: max(36px, calc(var(--ui-control-height) + 4px));");
     expect(scale).not.toContain(".panel-heading-copy span,");
   });
@@ -163,7 +163,24 @@ describe("terminal", () => {
     expect(block('.resume-picker-list button[data-active="true"]')).toContain("background: var(--fill-strong);");
     expect(block('.resume-picker-list button[data-selected="true"] .resume-picker-option-copy strong')).not.toContain("accent");
     expect(block(".resume-picker-list code")).not.toContain("background");
-    expect(css).not.toContain(".resume-picker-footer {");
+    expect(css).not.toContain(".resume-picker-footer");
+  });
+});
+
+describe("dead selectors", () => {
+  it("drops rules for elements that are no longer rendered", () => {
+    const usage = readSourceText("src/renderer/src/components/UsageView.css");
+    const preview = readSourceText("src/renderer/src/components/PreviewPanel.css");
+    const plan = readSourceText("src/renderer/src/components/PlanPanel.tsx");
+    expect(css).not.toContain(".plan-summary");
+    expect(plan).not.toContain("summary");
+    expect(css).not.toContain(".diff-review-toolbar select");
+    expect(block(".terminal-resume-picker")).not.toContain("min-width");
+    expect(css.match(/\.terminal-header \{/gu)).toHaveLength(2);
+    expect(/\.preview-evidence-toggle \{([^}]*)\}/u.exec(preview)?.[1]).not.toContain("font-size");
+    const forced = usage.slice(usage.indexOf("@media (forced-colors: active)"));
+    expect(forced).toContain(".usage-chart-point-core { stroke: Canvas; }");
+    expect(forced).not.toContain("fill: Canvas; }\n  .usage-provider-meter > i");
   });
 });
 

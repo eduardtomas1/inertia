@@ -24,7 +24,6 @@ export type PlanMarkdownContext = Pick<
 export type PlanPanelProps = {
   steps: PlanStep[];
   title?: string;
-  summary?: string | null;
   document?: string | null;
   markdown?: PlanMarkdownContext;
   activeStepId?: string | null;
@@ -60,7 +59,6 @@ function PlanInlineText({ text }: { text: string }): React.JSX.Element {
 export function PlanPanel({
   steps,
   title = "Implementation plan",
-  summary,
   document,
   markdown,
   activeStepId = null,
@@ -103,7 +101,7 @@ export function PlanPanel({
       </header>
 
       <div className="plan-scroll">
-        {body ? (
+        {body && (
           <div className="plan-document-shell">
             <div id={documentId} className={clsx("plan-document", collapsed && "is-collapsed")}>
               {markdown
@@ -123,7 +121,7 @@ export function PlanPanel({
               </button>
             )}
           </div>
-        ) : summary && <p className="plan-summary">{summary}</p>}
+        )}
 
         {steps.length === 0 ? !body && (
           <div className="panel-empty plan-empty">

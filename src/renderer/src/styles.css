@@ -392,7 +392,6 @@ button:disabled,
   .daily-work-date-input,
   .diagnostics-filters input,
   .diagnostics-filters select,
-  .diff-review-toolbar select,
   .diff-selection-popover textarea,
   .goal-panel-budget-recovery > input,
   .goal-panel-composer input,
@@ -627,7 +626,6 @@ button:disabled,
   .help-guide-result,
   .model-chooser-row-primary,
   .palette-group,
-  .resume-picker-footer,
   .workspace-panel-add-menu,
   .workspace-panel-launcher
 ) kbd {
@@ -6045,7 +6043,6 @@ button.turn-agents-line:hover {
 }
 .diff-review-toolbar { display: flex; min-height: 40px; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line-soft); color: var(--text-muted); font-size: var(--text-sm); }
 .diff-review-toolbar strong { color: var(--text); font-weight: 500; }
-.diff-review-toolbar select { min-height: 27px; margin-left: auto; padding: 0 22px 0 7px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text-muted); background: var(--surface); font-size: var(--text-xs); }
 .diff-review-toolbar .icon-button { width: var(--control-height-small); height: var(--control-height-small); }
 .diff-file-review-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line-soft); background: var(--surface); font: var(--text-sm)/var(--leading-chrome) var(--font-sans); }
 .diff-file-review-heading > span { display: flex; min-width: min(12em, 100%); flex: 1 1 12em; flex-direction: column; }
@@ -6379,7 +6376,6 @@ button.turn-agents-line:hover {
 .plan-toolbar-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .plan-copy-button.icon-button { width: var(--control-height-small); height: var(--control-height-small); }
 .plan-scroll { min-height: 0; flex: 1; overflow-y: auto; }
-.plan-summary { margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: var(--text-sm); line-height: var(--leading-prose); }
 .plan-document-shell { padding: 14px 16px 8px; border-bottom: 1px solid var(--line); }
 .plan-document { --markdown-surface: var(--surface); position: relative; font-size: var(--text-sm); }
 .plan-document.is-collapsed { max-height: 16em; overflow: hidden; }
@@ -7231,7 +7227,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
 .terminal-resume-picker {
   display: inline-flex;
-  min-width: min(330px, 100%);
   align-items: center;
   gap: 8px;
   color: var(--text-muted);
@@ -7857,10 +7852,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
     flex: 0 0 clamp(184px, 33%, 230px);
     border-top: 1px solid var(--line);
     border-left: 0;
-  }
-
-  .terminal-header {
-    min-height: 40px;
   }
 
   .message-scroll {
@@ -10760,7 +10751,6 @@ button.sent-attachment-open:hover {
   font-size: var(--text-sm);
 }
 
-.diff-review-toolbar select,
 .diff-file-review-heading button,
 .diff-hunk-actions button,
 .diff-review-note > button,

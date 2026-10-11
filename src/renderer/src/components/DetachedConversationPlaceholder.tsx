@@ -1,4 +1,4 @@
-import { PanelTopOpen } from "lucide-react";
+import { PanelTopOpen, PictureInPicture2 } from "lucide-react";
 
 export interface DetachedConversationPlaceholderProps {
   title: string;
@@ -18,7 +18,7 @@ export function DetachedConversationPlaceholder({
     >
       <h2>{windowOpen ? "Chat window active" : "Chat window closed"}</h2>
       <button type="button" className="secondary-button" onClick={onActivate}>
-        <PanelTopOpen size={14} />
+        {windowOpen ? <PictureInPicture2 size={14} /> : <PanelTopOpen size={14} />}
         <span>{windowOpen ? "Focus chat window" : "Open chat here"}</span>
       </button>
     </section>

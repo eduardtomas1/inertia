@@ -32,6 +32,7 @@ import {
 } from "./TerminalPanelSupport";
 import { TerminalSession } from "./TerminalPanelSession";
 import { IconButton } from "./ui";
+import { TooltipButton } from "./TooltipButton";
 function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const subscribe = props.subscribe;
   const sendCommand = props.sendCommand;
@@ -403,12 +404,13 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
         >
           {tabs.map((tab) => (
             <div role="presentation" className={tab.id === activeId ? "panel-tab terminal-tab is-active" : "panel-tab terminal-tab"} data-tab-key={tab.id} key={tab.id}>
-              <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
+              <TooltipButton id={`terminal-tab-${tab.id}`} role="tab"
+                tooltip={`${tab.label} · ${props.projectName}`}
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
                 <Terminal size={14} /><span className="panel-tab-label" data-text={tab.label}>{tab.label}</span>
-              </button>
+              </TooltipButton>
               <IconButton className="panel-tab-close" label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
                 onClick={() => closeTerminal(tab.id)}><X size={14} /></IconButton>
             </div>

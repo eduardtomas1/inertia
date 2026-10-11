@@ -328,4 +328,14 @@ describe("final-answer turn metadata", () => {
     expect(css).toMatch(/^:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/mu);
     expect(css).not.toMatch(/\.turn-run-details-toggle[^{]*\{[^}]*outline:\s*(?:0|none)/su);
   });
+
+  it("separates the tooltip-wrapped time from the next footer item", () => {
+    const css = readFileSync(
+      new URL("../../src/renderer/src/styles.css", import.meta.url),
+      "utf8",
+    );
+    const separator = /\.turn-meta-primary > :is\((?<list>[^)]*(?:\([^)]*\)[^)]*)*)\):not\(:last-child\)::after \{[^}]*content: "·";/u.exec(css)?.groups?.list ?? "";
+    expect(separator).toContain("span:has(> time)");
+    expect(separator).toContain(".turn-duration");
+  });
 });

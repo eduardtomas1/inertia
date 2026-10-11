@@ -9533,7 +9533,7 @@ button.sent-attachment-open:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.turn-meta-primary > :is(time, [data-turn-status], .turn-duration):not(:last-child)::after {
+.turn-meta-primary > :is(time, span:has(> time), [data-turn-status], .turn-duration):not(:last-child)::after {
   margin-left: 8px;
   color: var(--text-faint);
   content: "·";

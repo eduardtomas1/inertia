@@ -18,10 +18,8 @@ import {
 import { messageContextMenu } from "./messageContextMenu";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
-import {
-  ActivityRow,
-  PlanDetail,
-} from "./activity";
+import { ActivityRow } from "./activity";
+import { PlanDetail } from "./PlanDetail";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 import { TooltipText } from "../TooltipText";

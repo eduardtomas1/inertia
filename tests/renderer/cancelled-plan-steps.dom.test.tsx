@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentPlan } from "../../src/shared/contracts";
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
-import { PlanDetail } from "../../src/renderer/src/components/response-timeline/activity";
+import { PlanDetail } from "../../src/renderer/src/components/response-timeline/PlanDetail";
 import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
 import { EMPTY_STREAMING_AGENT_SOURCE } from "../../src/renderer/src/hooks/useStreamingAgentState";
 

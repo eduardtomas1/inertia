@@ -846,6 +846,31 @@ describe("compact Work sidebar", () => {
       .toHaveFocus();
   });
 
+  it("explains why Remove project is unavailable while the project has running work", () => {
+    const startedAt = new Date(2026, 7, 11, 11, 57);
+    const running = conversation("remove-running", "Running task", startedAt, { status: "running" });
+    renderSidebar([running], vi.fn(), [{
+      id: "run-remove-running",
+      kind: "agent",
+      projectId: running.projectId,
+      conversationId: running.id,
+      actionId: null,
+      label: running.title,
+      detail: null,
+      status: "running",
+      attentionState: "acknowledged",
+      canStop: true,
+      port: null,
+      startedAt: startedAt.toISOString(),
+      finishedAt: null,
+    }]);
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
+    const remove = screen.getByRole("menuitem", { name: "Remove project" });
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    expect(remove).toHaveAccessibleDescription("Stop this project's running work before removing it.");
+  });
+
   it("dismisses project actions on outside pointer and restores filter focus on Escape", () => {
     vi.useFakeTimers();
     renderSidebar([]);

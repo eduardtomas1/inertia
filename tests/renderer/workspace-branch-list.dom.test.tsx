@@ -15,6 +15,7 @@ describe("branch picker", () => {
     render(<WorkspaceBranchList branches={branches} busy={false} onSwitch={onSwitch} onCreate={vi.fn()} />);
     const search = screen.getByRole("searchbox", { name: "Search branches" });
     expect(search).toHaveFocus();
+    expect(search.closest("label")).toHaveClass("git-branch-search");
     expect(screen.getByRole("menuitemradio", { name: /occupied/u })).toBeDisabled();
     fireEvent.change(search, { target: { value: "REMOTE" } });
     expect(screen.queryByRole("group", { name: "Local branches" })).not.toBeInTheDocument();

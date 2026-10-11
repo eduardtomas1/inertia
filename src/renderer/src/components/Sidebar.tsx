@@ -635,9 +635,10 @@ function SidebarView({
           role="menuitem"
           tabIndex={-1}
           className="is-danger"
-          disabled={running && !detached}
-          aria-disabled={detached || undefined}
-          hint={detached ? "Return this project's detached chats before removing it." : undefined}
+          aria-disabled={running || detached || undefined}
+          hint={detached
+            ? "Return this project's detached chats before removing it."
+            : running ? "Stop this project's running work before removing it." : undefined}
           onClick={() => {
             if (running || detached) return;
             dismissMenu("selection");

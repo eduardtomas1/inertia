@@ -37,7 +37,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
     else onSwitch(branch.name, branch.remote);
   };
   return <>
-    <div className="git-branch-search"><Search size={14} aria-hidden="true" /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => { queued.current = null; setQuery(event.target.value); }} onBlur={() => { queued.current = null; }} onCompositionStart={() => { queued.current = null; }} onKeyDown={(event) => {
+    <label className="git-branch-search"><Search size={14} aria-hidden="true" /><input ref={searchRef} type="search" aria-label="Search branches" placeholder="Search branches…" value={query} maxLength={255} onChange={(event) => { queued.current = null; setQuery(event.target.value); }} onBlur={() => { queued.current = null; }} onCompositionStart={() => { queued.current = null; }} onKeyDown={(event) => {
       if (event.key === "Enter") {
         event.stopPropagation();
         if (event.nativeEvent.isComposing) { queued.current = null; return; }
@@ -48,7 +48,7 @@ export default function WorkspaceBranchList({ branches, busy, loading = false, e
       }
       queued.current = null;
       if (!["ArrowDown", "ArrowUp", "Escape"].includes(event.key)) event.stopPropagation();
-    }} />{onRefresh && <IconButton label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={14} /></IconButton>}</div>
+    }} />{onRefresh && <IconButton label="Refresh branches" disabled={loading || busy} onClick={() => onRefresh()}><RefreshCw size={14} /></IconButton>}</label>
     <p className="git-branch-load-status" role="status">{loading ? "Refreshing branches…" : error ?? ""}</p>
     <div className="git-branch-results" aria-busy={loading} onBlur={() => { queued.current = null; }}>
       {[false, true].map((remote) => {

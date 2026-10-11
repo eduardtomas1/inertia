@@ -103,7 +103,6 @@ export function AddProjectDialog({
       className="add-project-dialog"
       bodyClassName="is-flush"
       tabIndex={-1}
-      aria-label="Add project"
       aria-busy={busy}
       titleId={titleId}
       title={source === "clone"

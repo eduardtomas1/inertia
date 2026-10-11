@@ -138,6 +138,14 @@ describe("add project dialog", () => {
     expect(trigger).toHaveFocus();
     trigger.remove();
   });
+  it("names the dialog by its visible title as the source changes", () => {
+    render(<AddProjectDialog onImport={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Add project");
+    expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-label");
+    fireEvent.click(screen.getByRole("button", { name: "Local folder" }));
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("Open local folder");
+  });
+
   it("lists sources as single-line rows and browses with the secondary button", () => {
     render(<AddProjectDialog onImport={vi.fn()} onClose={vi.fn()} />);
     const local = screen.getByRole("button", { name: "Local folder" });

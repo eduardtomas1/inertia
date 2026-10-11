@@ -307,7 +307,9 @@ export function PreviewPanel({
           </IconButton>
         )}
         <form className="preview-address-form" onSubmit={(event) => { event.preventDefault(); navigate(); }}>
-          {currentLocation && !("error" in currentLocation) && currentLocation.parsed.protocol === "https:" && (
+          {loading ? (
+            <LoadingMark aria-hidden />
+          ) : currentLocation && !("error" in currentLocation) && currentLocation.parsed.protocol === "https:" && (
             <Lock size={14} aria-label="Secure HTTPS address" />
           )}
           <input

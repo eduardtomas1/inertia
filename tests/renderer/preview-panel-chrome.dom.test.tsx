@@ -41,6 +41,18 @@ describe("browser chrome", () => {
     expect(screen.queryByText("Evidence")).toBeNull();
   });
 
+  it("shows the spinner in the address row while a displayed page reloads", () => {
+    const secure = { id: "one", title: "One", url: "https://example.test/one", loading: false };
+    const { container, rerender } = render(panel({ url: secure.url, tabs: [secure] }));
+    const form = () => container.querySelector(".preview-address-form")!;
+    expect(form().querySelector(".loading-mark")).toBeNull();
+    expect(within(form() as HTMLElement).getByLabelText("Secure HTTPS address")).toBeInTheDocument();
+
+    rerender(panel({ url: secure.url, tabs: [secure], loading: true }));
+    expect(form().querySelector(".loading-mark")).toHaveAttribute("aria-hidden", "true");
+    expect(within(form() as HTMLElement).queryByLabelText("Secure HTTPS address")).toBeNull();
+  });
+
   it("navigates when Enter submits the address", () => {
     const onNavigate = vi.fn();
     render(panel({ onNavigate }));

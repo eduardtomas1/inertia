@@ -1274,15 +1274,17 @@ describe("WorkspaceChangesPanel repository scope", () => {
       />);
     });
     const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
-    expect([...navigator.querySelectorAll(".change-file-status")].map((node) => [
-      node.textContent,
-      node.getAttribute("title") ?? node.nextElementSibling?.textContent,
-    ])).toEqual([
+    const statuses = [...navigator.querySelectorAll<HTMLElement>(".change-file-status")];
+    expect(statuses.map((node) => [node.textContent, node.nextElementSibling?.textContent])).toEqual([
       ["C", "Copied, unstaged"],
       ["T", "Type changed, unstaged"],
       ["?", "Unknown, unstaged"],
       ["U", "Untracked"],
     ]);
+    for (const status of statuses) expect(status).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(statuses[0]!, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Copied, unstaged"));
+    fireEvent.pointerLeave(statuses[0]!, { pointerType: "mouse" });
     expect(screen.getByRole("combobox", { name: "Repository and changed file" }))
       .toHaveTextContent("C · copied.ts");
   });

@@ -67,6 +67,9 @@ describe("bounded Git decorations in the Files editor", () => {
     const changed = screen.getByRole("treeitem", { name: "bundle.js" });
     expect(changed).toHaveAccessibleDescription("Git: Modified · unstaged");
     expect(changed.querySelector(".file-git-badge")).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(changed.querySelector(".file-git-badge")!, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Modified · unstaged"));
+    fireEvent.pointerLeave(changed.querySelector(".file-git-badge")!, { pointerType: "mouse" });
     expect(changed.querySelector(".file-entry-name")).toHaveTextContent("bundle.js");
     expect(screen.getByRole("treeitem", { name: "clean.ts" }).querySelector(".file-git-badge")).toBeNull();
     fireEvent.keyDown(changed, { key: "ArrowDown" });

@@ -15,6 +15,7 @@ import type {
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
+import { TOOLTIP_DELAY_MS } from "../../src/renderer/src/components/Tooltip";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -476,6 +477,14 @@ describe("compact Work sidebar", () => {
       .map((element) => element.textContent);
     expect(order()).toEqual(["Studio", "Studio newest", "Docs", "Docs middle", "Studio", "Studio yesterday"]);
     expect(stream.querySelectorAll(".work-project-group [tabindex], .work-project-group button")).toHaveLength(0);
+    const docsName = [...stream.querySelectorAll<HTMLElement>(".work-project-name")].find((name) => name.textContent === "Docs")!;
+    expect(docsName.closest("h3")).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(docsName.parentElement!, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("/workspace/docs");
+    fireEvent.pointerLeave(docsName.parentElement!, { pointerType: "mouse" });
     const first = screen.getByRole("button", { name: /^Studio newest,/u });
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowDown" });

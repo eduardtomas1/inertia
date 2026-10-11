@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { WorkspaceChangesPanel } from "../../src/renderer/src/components/WorkspaceChangesPanel";
@@ -101,6 +101,10 @@ describe("changes panel chrome", () => {
     for (const button of within(actions).getAllByRole("button")) expect(button).not.toHaveAttribute("title");
     expect(within(actions).getByRole("button", { name: "Fetch" })).toHaveAccessibleDescription("Refresh remote branches while preserving local changes");
     expect(document.querySelectorAll(".change-file-status[title]")).toHaveLength(0);
+    const status = document.querySelector<HTMLElement>(".change-file-status")!;
+    fireEvent.pointerEnter(status, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(status.nextElementSibling!.textContent!));
+    fireEvent.pointerLeave(status, { pointerType: "mouse" });
     expect((await within(actions).findByRole("button", { name: "Confidence" })).querySelector(".lucide-shield-check")).not.toBeNull();
   });
 

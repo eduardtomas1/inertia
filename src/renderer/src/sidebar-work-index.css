@@ -77,6 +77,11 @@
   white-space: nowrap;
 }
 
+.work-project-name-anchor {
+  display: flex;
+  min-width: 0;
+}
+
 .activity-thread {
   position: relative;
   display: flex;

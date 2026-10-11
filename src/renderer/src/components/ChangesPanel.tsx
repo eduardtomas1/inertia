@@ -22,6 +22,7 @@ import { HintButton } from "./HintButton";
 import { SelectionReviewAnswerCard } from "./SelectionReviewAnswerCard";
 import type { RetainedDiffLock } from "../utils/retainedDiffLock";
 import { scopedReviewDispatch } from "../utils/scopedReviewDispatch";
+import { TooltipText } from "./TooltipText";
 
 export type DiffSelection = {
   fingerprint: string;
@@ -603,7 +604,7 @@ export function ChangesPanel({
               const diffFile = structured.files.find((candidate) => candidate.path === file.path);
               const language = sourceLanguageForFile(file.path);
               return <button type="button" className={clsx("change-file-button", file.path === selectedPath && "is-selected")} data-language-family={language.family} aria-pressed={file.path === selectedPath} onClick={() => { clearSelection(); onSelectFile(file.path); }} key={file.path}>
-                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><span className="change-file-status" aria-hidden="true">{changedFileStatusCode(file)}</span><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
+                <span className="change-file-leading"><FileCode2 className="file-language-icon" size={14} /><TooltipText className="change-file-status" aria-hidden="true" tooltip={changedFileStatusTitle(file)}>{changedFileStatusCode(file)}</TooltipText><span className="visually-hidden">{changedFileStatusTitle(file)}</span></span>
                 <span className="change-file-copy"><span className="change-file-name">{parts.name}</span>{parts.parent && <span className="change-file-path">{parts.parent}</span>}</span>
                 <span className="change-file-stats">
                   <span className="file-insertions">+{file.insertions}</span>

@@ -79,6 +79,7 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
+import { TooltipText } from "./TooltipText";
 import { WorkStatusCue } from "./sidebar/WorkStatusCue";
 import { INTERFACE_LOCALE } from "../lib/locale";
 const SidebarUpdateControl = lazy(async () => ({
@@ -852,7 +853,13 @@ function SidebarView({
         <div className="work-project-group" role="presentation">
           <h3>
             <ProjectIcon project={project} size={14} />
-            <ProjectName project={project} className="work-project-name">{workProjectLabel(project)}</ProjectName>
+            {project?.path ? (
+              <TooltipText className="work-project-name-anchor" tooltip={project.path}>
+                <ProjectName project={project} className="work-project-name">{workProjectLabel(project)}</ProjectName>
+              </TooltipText>
+            ) : (
+              <ProjectName project={project} className="work-project-name">{workProjectLabel(project)}</ProjectName>
+            )}
           </h3>
         </div>
       );

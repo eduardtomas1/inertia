@@ -25,9 +25,10 @@ const THEME_CASES = COLOR_THEME_IDS
 
 function contrastRatio(foreground: string, background: string): number {
   const channels = (value: string): number[] => {
+    const scale = value.startsWith("color(srgb") ? 1 : 255;
     const values = value.match(/[\d.]+/gu)?.map(Number) ?? [];
     return values.slice(0, 3).map((channel) => {
-      const normalized = channel / 255;
+      const normalized = channel / scale;
       return normalized <= 0.04045
         ? normalized / 12.92
         : ((normalized + 0.055) / 1.055) ** 2.4;

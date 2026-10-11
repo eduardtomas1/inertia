@@ -676,7 +676,11 @@ export async function createCheckpoint(
       1024 * 1024,
       options.deadlineAt,
       options.signal,
-    );
+    ).catch(async (error: unknown) => {
+      await deleteCheckpoint(repositoryPath, ref, conversationId)
+        .catch(() => undefined);
+      throw error;
+    });
     return { id: checkpointId, ref };
   } finally {
     await rm(indexPath, { force: true }).catch(() => undefined);

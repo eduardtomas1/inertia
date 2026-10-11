@@ -19,7 +19,6 @@ import {
   SquarePen,
 } from "lucide-react";
 import clsx from "clsx";
-import { createPortal } from "react-dom";
 import type {
   AgentActivity,
   AgentSkillSummary,
@@ -745,11 +744,6 @@ export function ChatWorkspace({
     }
     return () => observer.disconnect();
   }, [conversationId, performScrollToLatest]);
-  const [composerNoticeHost, setComposerNoticeHost] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const host = composerRegionRef.current?.querySelector<HTMLElement>(".composer-notice-slot") ?? null;
-    setComposerNoticeHost((current) => current === host ? current : host);
-  }, [conversation, detailLoading, loading, project]);
 
   const noteReaderIntent = useCallback((): void => {
     clearPendingFinalAnswerNavigation();
@@ -907,49 +901,6 @@ export function ChatWorkspace({
   const projectPromptName = project.name.trim();
   const emptyThreadProject = projectPromptName || "this project";
   const emptyThreadTitle = `What should we build in ${emptyThreadProject}?`;
-  const composerNotices = (
-    <>
-      {pendingInputRequest && (
-        <div
-          className="pending-input-notice"
-          role="status"
-          aria-live="polite"
-        >
-          <MessageCircleQuestion size={14} aria-hidden="true" />
-          <span>
-            <strong>Agent needs your answer</strong>
-            <small>{pendingInputRequest.questions.length === 1
-              ? "1 question is waiting"
-              : `${pendingInputRequest.questions.length} questions are waiting`}</small>
-          </span>
-          <button
-            type="button"
-            aria-controls={`agent-input-request-${pendingInputRequest.id}`}
-            onClick={revealPendingInput}
-          >
-            Answer
-          </button>
-        </div>
-      )}
-      {maintenanceStatus && (maintenanceOperation
-        || maintenanceStatus.versionStatus === "update-available") && (
-        <Suspense fallback={null}>
-          <ProviderMaintenanceNotice
-            providerLabel={providerIdentityLabels?.[conversation.providerId]
-              ?? providers.find(({ id }) =>
-                id === conversation.providerId)?.label
-              ?? conversation.providerId}
-            status={maintenanceStatus}
-            operation={maintenanceOperation}
-            onRefresh={onRefreshProviderMaintenance}
-            onUpdate={onUpdateProvider}
-            onCancel={onCancelProviderUpdate}
-            onOpenInstructions={onOpenProviderUpdateInstructions}
-          />
-        </Suspense>
-      )}
-    </>
-  );
   const isEmptyThread = !detailLoading
     && ownedMessages.length === 0
     && ownedTurns.length === 0;
@@ -1076,7 +1027,45 @@ export function ChatWorkspace({
       {showJump && <div className="timeline-follow-controls"><IconButton label="Jump to latest" onClick={() => scrollToLatest("auto")}><ArrowDown size={16} /></IconButton></div>}
 
       <div ref={composerRegionRef} className="composer-region">
-        {composerNoticeHost ? createPortal(composerNotices, composerNoticeHost) : composerNotices}
+        {pendingInputRequest && (
+          <div
+            className="pending-input-notice"
+            role="status"
+            aria-live="polite"
+          >
+            <MessageCircleQuestion size={14} aria-hidden="true" />
+            <span>
+              <strong>Agent needs your answer</strong>
+              <small>{pendingInputRequest.questions.length === 1
+                ? "1 question is waiting"
+                : `${pendingInputRequest.questions.length} questions are waiting`}</small>
+            </span>
+            <button
+              type="button"
+              aria-controls={`agent-input-request-${pendingInputRequest.id}`}
+              onClick={revealPendingInput}
+            >
+              Answer
+            </button>
+          </div>
+        )}
+        {maintenanceStatus && (maintenanceOperation
+          || maintenanceStatus.versionStatus === "update-available") && (
+          <Suspense fallback={null}>
+            <ProviderMaintenanceNotice
+              providerLabel={providerIdentityLabels?.[conversation.providerId]
+                ?? providers.find(({ id }) =>
+                  id === conversation.providerId)?.label
+                ?? conversation.providerId}
+              status={maintenanceStatus}
+              operation={maintenanceOperation}
+              onRefresh={onRefreshProviderMaintenance}
+              onUpdate={onUpdateProvider}
+              onCancel={onCancelProviderUpdate}
+              onOpenInstructions={onOpenProviderUpdateInstructions}
+            />
+          </Suspense>
+        )}
         <Composer
           conversation={conversation}
           checkoutBranch={checkoutBranch}

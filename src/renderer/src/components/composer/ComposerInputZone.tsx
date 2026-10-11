@@ -2,6 +2,7 @@ import { PASTED_TEXT_ATTACHMENT_BYTES } from "@shared/attachments";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
+  ArrowLeftRight,
   Check,
   CircleAlert,
   MessageSquarePlus,
@@ -103,6 +104,7 @@ export interface ComposerInputZoneProps {
   onCompactCommand: () => void;
   compactUnavailableReason: string | null;
   /** Announces that the next turn hands this chat's history to another provider. */
+  handoffNotice?: string | null;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -165,6 +167,7 @@ export function ComposerInputZone({
   onCompactCommand,
   compactUnavailableReason,
   compactNotice,
+  handoffNotice = null,
   goalAvailable,
   onOpenGoal,
   onOpenResume,
@@ -423,6 +426,12 @@ export function ComposerInputZone({
           pendingAttachmentIds={pendingAttachmentIds}
           onRemove={onRemoveAttachment}
         />
+        {handoffNotice && (
+          <div className="composer-handoff-notice" role="status">
+            <ArrowLeftRight size={14} aria-hidden="true" />
+            <span>{handoffNotice}</span>
+          </div>
+        )}
         {compactNotice && (
           <div
             className={clsx(

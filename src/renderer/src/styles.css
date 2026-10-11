@@ -7734,6 +7734,12 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   width: min(440px, calc(100% - var(--workspace-tools-width) - 24px));
 }
 
+.workspace-frame.has-right-sheet > .status-overlay-stack {
+  --workspace-sheet-width: min(448px, max(320px, 42vw), calc(100% - 24px));
+  right: calc(var(--workspace-sheet-width) + 12px);
+  width: max(240px, min(440px, calc(100% - var(--workspace-sheet-width) - 24px)));
+}
+
 .provider-quota-notices {
   position: relative;
   display: flex;
@@ -7922,6 +7928,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   .workspace-body > .workspace-panel.is-sheet {
     width: min(384px, 88%);
     min-width: 0;
+  }
+
+  .workspace-frame.has-right-sheet > .status-overlay-stack {
+    --workspace-sheet-width: min(384px, 88%);
   }
 
   .changes-layout,

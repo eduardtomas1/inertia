@@ -17,4 +17,11 @@ describe("status toast stack placement", () => {
     expect(css).toMatch(/\.workspace-frame\.has-right-panel > \.status-overlay-stack \{\n  right: calc\(var\(--workspace-tools-width\) \+ 12px\);\n  width: min\(440px, calc\(100% - var\(--workspace-tools-width\) - 24px\)\);\n\}/u);
     expect(css).not.toMatch(/\.status-overlay-stack \{[^}]*bottom:/u);
   });
+
+  it("keeps the stack left of the panel sheet, sized from the sheet's own width at every breakpoint", () => {
+    const css = read("styles.css");
+    expect(css).toMatch(/\.workspace-frame\.has-right-sheet > \.status-overlay-stack \{\n  --workspace-sheet-width: min\(448px, max\(320px, 42vw\), calc\(100% - 24px\)\);\n  right: calc\(var\(--workspace-sheet-width\) \+ 12px\);\n  width: max\(240px, min\(440px, calc\(100% - var\(--workspace-sheet-width\) - 24px\)\)\);\n\}/u);
+    expect(css).toMatch(/\.workspace-body > \.workspace-panel\.is-sheet \{\n    width: min\(384px, 88%\);\n    min-width: 0;\n  \}\n\n  \.workspace-frame\.has-right-sheet > \.status-overlay-stack \{\n    --workspace-sheet-width: min\(384px, 88%\);\n  \}/u);
+    expect(css).toMatch(/\.workspace-body > \.workspace-panel\.is-sheet \{\n  width: min\(448px, max\(320px, 42vw\)\);\n  max-width: calc\(100% - 24px\);/u);
+  });
 });

@@ -136,7 +136,7 @@ test("shows a sandboxed, themed visual reply above the answer and keeps it acros
     await expect(dialog.getByTestId("html-render-dialog-frame")).toHaveAttribute("sandbox", "allow-scripts");
     await expect(page.frameLocator('[data-testid="html-render-dialog-frame"]')
       .getByRole("heading", { name: HTML_RENDER_HEADING })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: `Close ${HTML_RENDER_TITLE}`, exact: true })).toBeFocused();
+    await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeFocused();
     // The dialog shrink-wraps the page (plus the frame's 16 px vertical padding) instead of filling the window.
     const dialogFrameElement = dialog.getByTestId("html-render-dialog-frame");
     const dialogFrame = await (await dialogFrameElement.elementHandle())?.contentFrame();

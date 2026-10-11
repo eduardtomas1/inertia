@@ -70,7 +70,7 @@ export function HtmlRenderDialog({
       tabIndex={-1}
       titleId={titleId}
       title={reference.title}
-      closeLabel={`Close ${reference.title}`}
+      closeLabel="Close"
       closeRef={closeRef}
       onClose={onClose}
       onDismiss={onClose}

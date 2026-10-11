@@ -572,7 +572,7 @@ describe("visual replies in the response timeline", () => {
     const dialog = await screen.findByRole("dialog", { name: title }, { timeout: 10_000 });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(opened).toHaveBeenCalledOnce();
-    const close = screen.getByRole("button", { name: `Close ${title}` });
+    const close = screen.getByRole("button", { name: "Close" });
     await waitFor(() => expect(close).toHaveFocus());
     const dialogFrame = screen.getByTestId("html-render-dialog-frame");
     expect(dialogFrame).toHaveAttribute("title", title);

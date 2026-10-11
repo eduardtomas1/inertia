@@ -39,4 +39,10 @@ describe("transcript work log chrome", () => {
       expect(source, file).not.toMatch(/title=\{(?:formatFullDateTime|turn\.checkpointUnavailableReason|providerLabel|`Private Connect)/u);
     }
   });
+
+  it("states changed-file completeness as a plain row, not a filled callout with a stripe", () => {
+    const warning = declarationsFor(rules, ".turn-changed-files-warning");
+    expect(warning.has("background")).toBe(false);
+    expect(warning.has("border-left")).toBe(false);
+  });
 });

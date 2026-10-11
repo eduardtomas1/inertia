@@ -41,7 +41,7 @@ export function ChangedFilesSummary({
         tabIndex={-1}
       >
         <Files size={14} aria-hidden="true" />
-        <span><strong>Capturing changes…</strong><small>Git history will appear here when ready.</small></span>
+        <span><strong>Capturing changes…</strong></span>
       </div>
     );
   }
@@ -59,7 +59,7 @@ export function ChangedFilesSummary({
       >
         <span>
           <strong>Turn changes unavailable</strong>
-          <small>{artifact.failureReason ?? "No authoritative Git snapshot was captured for this turn."}</small>
+          <small>{artifact.failureReason ?? "No Git snapshot for this turn"}</small>
         </span>
       </div>
     );
@@ -136,7 +136,7 @@ export function ChangedFilesSummary({
             );
           })}
         </div>
-        {artifact.files.length > 12 && <p className="turn-changed-files-overflow">And {artifact.files.length - 12} more files.</p>}
+        {artifact.files.length > 12 && <p className="turn-changed-files-overflow">{artifact.files.length - 12} more files</p>}
         <div className="turn-changed-files-actions">
           <button type="button" disabled={!patchAvailable} onClick={() => props.onOpenTurnDiff(artifact.turnId)}>
             <GitCompareArrows size={14} aria-hidden="true" />Open exact turn diff

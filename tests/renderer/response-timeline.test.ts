@@ -741,7 +741,7 @@ describe("authoritative response timeline", () => {
       deletions: 0,
     }));
     expect(pendingHtml).toContain("Capturing changes…");
-    expect(pendingHtml).toContain("Git history will appear here when ready.");
+    expect(pendingHtml).not.toContain("Git history will appear here when ready.");
     expect(pendingHtml).not.toContain("is working");
     expect(pendingHtml).not.toContain(">Stop</span></button>");
 

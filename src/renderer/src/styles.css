@@ -10355,13 +10355,10 @@ button.sent-attachment-open:hover {
 .turn-changed-files-warning {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  margin: 1px 4px 4px;
-  padding: 5px 7px;
-  border-left: 2px solid var(--line-strong);
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  gap: 8px;
+  margin: 4px;
+  padding: 0;
   color: var(--text-muted);
-  background: var(--fill);
   font-size: var(--text-sm);
   line-height: var(--leading-chrome);
 }

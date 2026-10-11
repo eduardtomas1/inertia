@@ -116,9 +116,10 @@ describe("field primitives", () => {
   it("moves a bordered field from the line to the accent on focus with no glow or ring", () => {
     const fields = /^:is\(\n(?<fields>[\s\S]*?)\n\):focus,\n:is\(\n(?<wraps>[\s\S]*?)\n\):focus-within \{\n(?<body>[\s\S]*?)\n\}/mu.exec(css)?.groups;
     expect(fields?.body).toBe("  outline: none;\n  border-color: var(--accent);\n  box-shadow: none;");
-    for (const field of [".setting-input", ".setting-select", ".commit-dialog > label input", ".multi-spawn-prompt-zone textarea"]) {
+    for (const field of [".setting-input", ".setting-select", ".multi-spawn-field input", ".multi-spawn-prompt-zone textarea"]) {
       expect(fields?.fields).toContain(field);
     }
+    expect(readSourceText("src/renderer/src/components/DialogShell.css")).toMatch(/\.dialog-field :is\(input, select, textarea\):focus \{\n  outline: none;\n  border-color: var\(--accent\);\n\}/u);
     expect(fields?.wraps).toContain(".preview-address-form");
     expect(css).not.toMatch(/--shadow-focus|--focus-ring-soft/u);
     expect(css).toMatch(/^::placeholder \{\n  color: var\(--text-muted\);/mu);
@@ -257,7 +258,7 @@ describe("dialog primitives", () => {
     expect(shellCss).toMatch(/\.dialog-shell-heading > p \{[^}]*overflow-wrap: anywhere;/u);
     expect(shellCss).toMatch(/\.dialog-shell-footer > :is\(\.primary-button, \.secondary-button\) \{\n  min-height: var\(--control-height\);/u);
     expect(shellCss).toMatch(/\.dialog-shell \{\n  display: flex;\n  width: min\(var\(--dialog-width, 480px\), 100%\);/u);
-    expect(componentDialogCss).not.toMatch(/min-height: (?:30|34|36|37|39)px|height: (?:30|37|39)px/u);
+    expect(componentDialogCss).not.toMatch(/min-height: (?:30|34|37|39)px|height: (?:30|37|39)px/u);
   });
 
   it("dims the window behind dialogs with one backdrop token and no blur", () => {

@@ -440,7 +440,7 @@ describe("CommandPalette behavior", () => {
     const search = screen.getByRole("combobox", { name: "Search projects for the new chat" });
     expect(search).toHaveFocus();
     expect(search).toHaveValue("");
-    expect(screen.getByText("Back")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New chat in project" }).querySelector("footer")).toBeNull();
 
     screen.getByRole("button", { name: "Close search" }).focus();
     await user.keyboard("{Escape}");

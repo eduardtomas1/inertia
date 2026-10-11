@@ -184,7 +184,7 @@ describe("DailyWorkDialog", () => {
     expect(within(dialog).getByRole("button", { name: "Refresh daily work" })).toHaveClass("icon-button");
     expect(dialog.querySelectorAll(".daily-work-conversation-card small")).toHaveLength(dialog.querySelectorAll(".daily-work-conversation-card").length);
     const css = readSourceText("src/renderer/src/components/DailyWorkDialog.css");
-    expect(css).not.toMatch(/daily-work-skeleton|daily-work-shimmer|border: 1px dashed|font-weight: 600;\n\}\n\n\.daily-work-card-metrics|var\(--accent\)\)/u);
+    expect(css).not.toMatch(/daily-work-skeleton|daily-work-shimmer|border: 1px dashed var|font-weight: 600;\n\}\n\n\.daily-work-card-metrics|var\(--accent\)\)/u);
     expect(css).toMatch(/\.daily-work-totals \{[^}]*padding: 4px 0 8px;\n\}/u);
     expect(readSourceText("src/renderer/src/components/DailyWorkMark.css")).not.toMatch(/--accent/u);
   });

@@ -15,6 +15,7 @@ export function DialogHeader({
   actions,
   closeLabel,
   closeDisabled,
+  closeInert,
   closeRef,
   onClose,
 }: {
@@ -26,6 +27,7 @@ export function DialogHeader({
   actions?: ReactNode;
   closeLabel?: string;
   closeDisabled?: boolean;
+  closeInert?: boolean;
   closeRef?: React.Ref<HTMLButtonElement>;
   onClose?: () => void;
 }): React.JSX.Element {
@@ -43,7 +45,8 @@ export function DialogHeader({
           className="dialog-shell-close"
           label={closeLabel}
           disabled={closeDisabled}
-          onClick={onClose}
+          aria-disabled={closeInert || undefined}
+          onClick={() => { if (!closeInert) onClose(); }}
         >
           <X size={16} aria-hidden="true" />
         </IconButton>
@@ -61,6 +64,7 @@ type DialogShellProps = Omit<ComponentPropsWithRef<"section">, "title" | "onSubm
   headerActions?: ReactNode;
   closeLabel?: string;
   closeDisabled?: boolean;
+  closeInert?: boolean;
   closeRef?: React.Ref<HTMLButtonElement>;
   onClose?: () => void;
   onDismiss?: () => void;
@@ -84,6 +88,7 @@ export function DialogShell({
   headerActions,
   closeLabel,
   closeDisabled,
+  closeInert,
   closeRef,
   onClose,
   onDismiss,
@@ -117,6 +122,7 @@ export function DialogShell({
         actions={headerActions}
         closeLabel={closeLabel}
         closeDisabled={closeDisabled}
+        closeInert={closeInert}
         closeRef={closeRef}
         onClose={onClose}
       />

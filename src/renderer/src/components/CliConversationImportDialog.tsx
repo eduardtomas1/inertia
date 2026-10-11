@@ -165,7 +165,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
       : scan && !rows.length ? scan.candidates.length ? "No conversations match your search." : "No CLI conversations found." : null;
   return createPortal(
     <DialogShell className="cli-import-dialog" bodyClassName="cli-import-shell-body is-flush" titleId={dialogTitleId} title="Import CLI conversations" tabIndex={-1}
-      closeLabel="Close CLI import" closeDisabled={busy === "import"} onClose={() => { if (!importing.current) onClose(); }}
+      closeLabel="Close CLI import" closeInert={busy === "import"} onClose={() => { if (!importing.current) onClose(); }}
       onDismiss={() => { if (!importing.current) onClose(); }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {

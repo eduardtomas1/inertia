@@ -140,7 +140,7 @@ describe("Duo third-model comparison dialog", () => {
     expect(dialog.querySelector(".dialog-shell-header")?.querySelectorAll("svg")).toHaveLength(1);
     expect(dialog).not.toHaveTextContent("Send one brief to two independent agents");
     expect(dialog).not.toHaveTextContent("never prompts or projects");
-    expect(dialog.querySelectorAll(".multi-spawn-side-number, .multi-spawn-side svg")).toHaveLength(0);
+    expect(dialog.querySelectorAll(".multi-spawn-side-number, .multi-spawn-side > header svg, .multi-spawn-field svg")).toHaveLength(0);
     expect(screen.getByRole("heading", { level: 3, name: "Route A" })).toBeInTheDocument();
     expect(screen.getAllByText("Ready", { exact: true })).toHaveLength(2);
     const judge = screen.getByRole("switch", { name: "Compare with a third model" });

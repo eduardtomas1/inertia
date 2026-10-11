@@ -57,9 +57,9 @@ describe("add project dialog", () => {
     expect(
       screen.getByRole("textbox", { name: "New folder name" }),
     ).toHaveValue("website");
-    const form = screen
+    const form = document.getElementById(screen
       .getByRole("button", { name: "Clone and open" })
-      .closest("form")!;
+      .getAttribute("form")!)!;
     fireEvent.submit(form);
     fireEvent.submit(form);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });

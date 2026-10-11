@@ -43,6 +43,12 @@ describe("dialog shell", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("wraps a long title instead of cutting off its end", () => {
+    const rule = /\.dialog-shell-heading > h2 \{([^}]*)\}/u.exec(readSourceText("src/renderer/src/components/DialogShell.css"))?.[1] ?? "";
+    expect(rule).toContain("overflow-wrap: anywhere;");
+    expect(rule).not.toMatch(/text-overflow|white-space: nowrap/u);
+  });
+
   it("dismisses from the backdrop only when the caller allows it", () => {
     const dismiss = vi.fn();
     render(<DialogShell titleId="t" title="Snapshots" closeLabel="Close Snapshots" onClose={vi.fn()} onDismiss={dismiss}><p>Body</p></DialogShell>);

@@ -23,10 +23,8 @@
 }
 
 .dialog-shell-heading > h2 {
-  overflow: hidden;
   margin: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .dialog-shell-heading > p {

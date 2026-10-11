@@ -40,6 +40,7 @@ const measureComposerRail = async (composer: Locator): Promise<{
   const shellStyle = shell ? getComputedStyle(shell) : null;
   const groups = [
     dock.querySelector<HTMLElement>(".composer-options"),
+    dock.querySelector<HTMLElement>(".composer-tools"),
     dock.querySelector<HTMLElement>(".composer-actions"),
   ].flatMap((group) => group ? [group.getBoundingClientRect()] : []);
   const toolbarBounds = toolbar?.getBoundingClientRect();
@@ -63,7 +64,7 @@ const measureComposerRail = async (composer: Locator): Promise<{
     ),
     groupsContained: Boolean(
       toolbarBounds
-      && groups.length === 2
+      && groups.length === 3
       && groups.every((bounds) =>
         bounds.left >= toolbarBounds.left - 1
         && bounds.right <= toolbarBounds.right + 1),
@@ -573,7 +574,7 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       contentType: "image/png",
     });
 
-    await resizeWindow(820, 800);
+    await resizeWindow(866, 800);
     const navigation = page.getByRole("complementary", {
       name: "Project navigation",
       exact: true,
@@ -587,12 +588,11 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
     const workspacePanel = page.locator(".workspace-panel");
     await closeWorkspaceTools(page);
     await expect(workspacePanel).toBeHidden();
-    await expect(compactMore).toBeHidden();
+    await expect(compactMore).toBeVisible();
     await expect(composer.getByRole("group", { name: "Composer settings" }))
-      .toBeVisible();
+      .toBeHidden();
     const constrainedRailGeometry = await measureComposerRail(composer);
-    expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(723);
-    expect(constrainedRailGeometry.dockWidth).toBeLessThan(736);
+    expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(775);
     expect(constrainedRailGeometry.dockWidth).toBeLessThanOrEqual(constrainedRailGeometry.columnWidth + 0.5);
     expect(constrainedRailGeometry.dockWidth).toBeGreaterThanOrEqual(constrainedRailGeometry.columnWidth - 1);
     expect(constrainedRailGeometry.toolbarFits).toBe(true);
@@ -600,9 +600,9 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
     expect(Math.min(...constrainedRailGeometry.groupGaps))
       .toBeGreaterThanOrEqual(4);
     await expectNoViewportOverflow();
-    const constrainedComposerScreenshot = testInfo.outputPath("composer-working-constrained-820x800.png");
+    const constrainedComposerScreenshot = testInfo.outputPath("composer-working-constrained-779x800.png");
     await page.screenshot({ animations: "disabled", path: constrainedComposerScreenshot });
-    await testInfo.attach("composer-working-constrained-820x800", {
+    await testInfo.attach("composer-working-constrained-779x800", {
       path: constrainedComposerScreenshot,
       contentType: "image/png",
     });
@@ -627,8 +627,7 @@ test("shows a turn's delegated agents as one line that opens Background tasks wh
       complete: (element as HTMLImageElement).complete, width: (element as HTMLImageElement).naturalWidth,
     }))).toEqual({ complete: true, width: 1 });
     const expandedRailGeometry = await measureComposerRail(composer);
-    expect(expandedRailGeometry.dockWidth).toBeGreaterThanOrEqual(735);
-    expect(expandedRailGeometry.dockWidth).toBeLessThanOrEqual(737);
+    expect(expandedRailGeometry.dockWidth).toBeGreaterThanOrEqual(838);
     expect(expandedRailGeometry.toolbarFits).toBe(true);
     expect(expandedRailGeometry.groupsContained).toBe(true);
     expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(4);

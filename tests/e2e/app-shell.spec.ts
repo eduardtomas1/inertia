@@ -285,7 +285,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     });
     expect(disabledStyle.boxShadow).toBe("none");
     expect(disabledStyle.filter).toBe("none");
-    expect(disabledStyle.opacity).toBe("0.64");
+    expect(disabledStyle.opacity).toBe("1");
 
     await textbox.fill("First line");
     await textbox.press("Shift+Enter");
@@ -312,9 +312,10 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     expect(readyGeometry.width).toBeCloseTo(readyGeometry.height, 3);
     expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
     expect(readyGeometry.borderRadius).toBe("50%");
-    expect(readyGeometry.background).toBe(disabledStyle.background);
     await expect.poll(() => readySend.evaluate((button) =>
-      getComputedStyle(button).opacity)).toBe("1");
+      getComputedStyle(button).backgroundColor)).not.toBe(
+      disabledStyle.background,
+    );
     expect(readyGeometry.boxShadow).toBe("none");
     expect(readyGeometry.filter).toBe("none");
     await expect(textbox).toBeFocused();

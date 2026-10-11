@@ -9,7 +9,7 @@
 .git-overview-detail > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-overview-detail > span + span::before { margin-right: 4px; color: var(--text-faint); content: "·"; }
 .git-overview-summary { padding-left: 22px; color: var(--text-muted); font-size: var(--text-xs); }
-.git-overview-summary:empty { display: none; }
+.git-overview-summary:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; padding: 0; margin: -1px; clip-path: inset(50%); white-space: nowrap; }
 .git-menu-section-label { padding: 8px 8px 4px; color: var(--text-muted); font-size: var(--text-xs); }
 .branch-popover { width: min(360px, calc(100vw - 24px)); max-height: min(650px, 80vh); }
 .git-branch-search { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 0 2px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text-muted); }
@@ -38,4 +38,4 @@
 .git-action-group > button[aria-disabled="true"] { cursor: default; opacity: var(--disabled-opacity); }
 
 .git-branch-load-status { margin: 0; padding: 0 8px; color: var(--text-muted); font-size: var(--text-xs); }
-.git-branch-load-status:empty { display: none; }
+.git-branch-load-status:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; padding: 0; margin: -1px; clip-path: inset(50%); white-space: nowrap; }

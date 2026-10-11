@@ -248,6 +248,15 @@ describe("workspace header", () => {
 describe("Git and branch menus", () => {
   const menus = readSourceText("src/renderer/src/components/workspace-git-menus.css");
 
+  it("keeps empty status live regions in the accessibility tree", () => {
+    for (const selector of [".git-overview-summary:empty", ".git-branch-load-status:empty"]) {
+      const rule = new RegExp(`${selector.replace(/[.]/gu, "\\.")} \\{([^}]*)\\}`, "u").exec(menus)?.[1] ?? "";
+      expect(rule).not.toContain("display: none");
+      expect(rule).toContain("position: absolute;");
+      expect(rule).toContain("clip-path: inset(50%);");
+    }
+  });
+
   it("uses 28px items, the shared disabled opacity and no boxed counts, cards or accent", () => {
     expect(menus).not.toContain(".git-overview-counts");
     expect(menus).not.toMatch(/opacity: \.52/u);

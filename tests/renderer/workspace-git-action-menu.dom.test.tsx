@@ -30,4 +30,9 @@ describe("Git actions menu", () => {
     expect(fetch).toHaveAccessibleDescription(/.+/u);
     expect(within(menu).getByRole("menuitem", { name: "Switch branch" })).toBeInTheDocument();
   });
+
+  it("states a missing upstream once", () => {
+    render(<WorkspaceGitActionMenu status={{ ...status, upstream: null }} busy={false} onAction={vi.fn()} />);
+    expect(screen.getAllByText("No upstream")).toHaveLength(1);
+  });
 });

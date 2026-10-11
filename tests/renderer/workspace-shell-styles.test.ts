@@ -335,3 +335,10 @@ describe("detached chat window", () => {
     expect(readSourceText("src/renderer/src/components/DetachedConversationPlaceholder.tsx")).toContain("{windowOpen ? <PictureInPicture2 size={14} /> : <PanelTopOpen size={14} />}");
   });
 });
+
+describe("diff file heading", () => {
+  it("wraps its actions below the path before the path truncates", () => {
+    expect(css).toContain(".diff-file-review-heading > span { display: flex; min-width: min(12em, 100%); flex: 1 1 12em; flex-direction: column; }");
+    expect(css).toMatch(/\.diff-file-review-heading \{[^}]*flex-wrap: wrap;/u);
+  });
+});

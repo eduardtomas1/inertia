@@ -6203,8 +6203,7 @@ button.turn-agents-line:hover {
 .diff-review-toolbar select { min-height: 27px; margin-left: auto; padding: 0 22px 0 7px; border: 1px solid var(--line); border-radius: var(--radius-xs); color: var(--text-muted); background: var(--surface); font-size: var(--text-xs); }
 .diff-review-toolbar .icon-button { width: var(--control-height-small); height: var(--control-height-small); }
 .diff-file-review-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line-soft); background: var(--surface); font: var(--text-sm)/var(--leading-chrome) var(--font-sans); }
-.diff-file-review-heading > span { flex-basis: 12em; }
-.diff-file-review-heading > span { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.diff-file-review-heading > span { display: flex; min-width: min(12em, 100%); flex: 1 1 12em; flex-direction: column; }
 .diff-file-review-heading strong { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .diff-file-review-heading small { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
 .diff-file-review-heading button, .diff-hunk-actions button, .diff-review-note > button { display: inline-flex; min-height: var(--control-height-small); align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font: 500 var(--text-sm)/var(--leading-chrome) var(--font-sans); white-space: nowrap; }

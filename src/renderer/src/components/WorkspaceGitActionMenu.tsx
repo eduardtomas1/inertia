@@ -106,11 +106,13 @@ export default function WorkspaceGitActionMenu({
     >
       <div className="git-overview">
         <div className="git-overview-heading"><GitBranch size={14} aria-hidden="true" /><strong title={status.branch ?? "Detached HEAD"}>{status.branch ?? "Detached HEAD"}</strong></div>
-        <div className="git-overview-detail">
-          <span title={status.upstream ?? undefined}>{status.upstream ? `Tracking ${status.upstream}` : status.hasRemote ? "No upstream" : "No remote"}</span>
-          {status.upstream && <span>{status.ahead} outgoing</span>}
-          {status.upstream && <span>{status.behind} incoming</span>}
-        </div>
+        {status.upstream && (
+          <div className="git-overview-detail">
+            <span title={status.upstream}>Tracking {status.upstream}</span>
+            <span>{status.ahead} outgoing</span>
+            <span>{status.behind} incoming</span>
+          </div>
+        )}
         <div className="git-overview-summary" role="status">{busy ? "Git operation in progress…" : gitSyncSummary(status)}</div>
       </div>
       <div role="separator" />

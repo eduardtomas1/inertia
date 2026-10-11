@@ -394,6 +394,13 @@ export const ActivityRow = memo(function ActivityRow({
   );
 });
 
+const PLAN_STEP_STATUS_LABELS: Record<AgentPlan["steps"][number]["status"], string> = {
+  pending: "Pending",
+  inProgress: "In progress",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
 export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
   return (
     <div className="turn-reasoning-detail" data-turn-plan={plan.turnId ?? "legacy"}>
@@ -406,7 +413,7 @@ export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }
             return (
               <li key={index} data-plan-step-status={status}>
                 <StepIcon size={12} aria-hidden="true" />
-                <span>{step}</span>
+                <span><span className="visually-hidden">{PLAN_STEP_STATUS_LABELS[status]}: </span>{step}</span>
               </li>
             );
           })}

@@ -42,7 +42,7 @@ function describe(
     selectable: availability.kind === "available" && !blocked,
     note: blocked
       ? blockedNote
-      : availability.kind === "unavailable"
+      : availability.kind !== "available"
         ? availability.reason
         : null,
   };

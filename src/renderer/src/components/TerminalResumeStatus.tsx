@@ -60,7 +60,7 @@ export function TerminalResumeStatus({
 
   return (
     <div
-      className={`terminal-resume-status is-${availability.kind}`}
+      className={`terminal-resume-status is-${availability.kind === "available" ? "available" : "unavailable"}`}
       role={resumeError ? "alert" : "status"}
     >
       <MessagesSquare size={14} />

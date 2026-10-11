@@ -14,5 +14,5 @@ export interface ProviderTerminalResumeOption {
 }
 
 export function hasStoredResumeSession(options: readonly ProviderTerminalResumeOption[]): boolean {
-  return options.some(({ availability }) => availability.resume !== null);
+  return options.some(({ availability }) => availability.kind !== "missing");
 }

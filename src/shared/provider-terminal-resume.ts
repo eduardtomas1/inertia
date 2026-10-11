@@ -26,6 +26,11 @@ export type ProviderTerminalResumeAvailability =
       kind: "unavailable";
       resume: ProviderTerminalResumeDescriptor | null;
       reason: string;
+    }
+  | {
+      kind: "missing";
+      resume: null;
+      reason: string;
     };
 
 const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
@@ -93,7 +98,7 @@ export function providerTerminalResumeAvailability(
 
   if (!conversation.providerSessionId) {
     return {
-      kind: "unavailable",
+      kind: "missing",
       resume: null,
       reason: `No resumable ${providerLabel} CLI session for this chat.`,
     };

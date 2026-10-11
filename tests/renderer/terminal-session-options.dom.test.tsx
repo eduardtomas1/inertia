@@ -1,7 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import type { ClientCommand, ProviderTerminalResumeAvailability, ServerEvent } from "../../src/shared/contracts";
 
 const terminals = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -167,7 +167,12 @@ describe("TerminalSession resume bar", () => {
       : { type: "request.ok", requestId: sent.requestId }
   ));
 
-  function withResume(resume: { providerId: "codex"; providerLabel: string; sessionId: string } | null): React.JSX.Element {
+  function withResume(
+    resume: { providerId: "codex"; providerLabel: string; sessionId: string } | null,
+    providerResume: ProviderTerminalResumeAvailability = resume
+      ? { kind: "available", resume, reason: null }
+      : { kind: "missing", resume: null, reason: "No resumable Codex CLI session for this chat." },
+  ): React.JSX.Element {
     return (
       <TerminalSession
         projectId={projectId}
@@ -182,9 +187,7 @@ describe("TerminalSession resume bar", () => {
         sendCommand={sendCommand}
         subscribe={() => () => undefined}
         initialTerminalId={null}
-        providerResume={resume
-          ? { kind: "available", resume, reason: null }
-          : { kind: "unavailable", resume: null, reason: "No resumable Codex CLI session for this chat." }}
+        providerResume={providerResume}
         siblingResumedConversationIds={new Set()}
         onRestorableTerminalChange={() => undefined}
         onTerminalReplaced={() => true}
@@ -199,6 +202,12 @@ describe("TerminalSession resume bar", () => {
     await waitFor(() => expect(document.querySelector(".terminal-panel")).toHaveAttribute("data-terminal-state", "ready"));
     expect(document.querySelector(".terminal-resume-status")).toBeNull();
     expect(document.body).not.toHaveTextContent("No resumable Codex CLI session");
+  });
+
+  it("keeps the resume bar for a stored session that is invalid or stale so its reason stays visible", async () => {
+    const reason = "The saved Codex session identifier is invalid or stale, so it cannot be passed to the terminal CLI.";
+    render(withResume(null, { kind: "unavailable", resume: null, reason }));
+    await waitFor(() => expect(document.querySelector(".terminal-resume-status")).toHaveTextContent(reason));
   });
 
   it("shows the resume bar when a provider session can be resumed", async () => {

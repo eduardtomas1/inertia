@@ -10,8 +10,10 @@ import { attachRuntimeConnectionEvidence, createRuntimeConnectionEvidence } from
 import {
   createComposerResponsiveHelpers,
   exerciseComposerQueue,
+  expectComposerLabelsFit,
   expectHoverBackground,
   fixtureCheckoutLabel,
+  inspectComposerSettingGeometry,
   inspectLongComposerHeading,
   loadComposerResponsiveFixture,
 } from "./support/composer-responsive";
@@ -294,6 +296,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.controlHeightDelta).toBeLessThanOrEqual(1);
+    await expectComposerLabelsFit(dock);
     expect(wideGeometry.optionMarkers.filter((marker) => marker !== "reasoning"))
       .toEqual([
       "model",
@@ -325,35 +328,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       '[data-composer-setting="reasoning"]',
     );
     await expect(settingFamily).toBeVisible();
-    const settingGeometry = await settingFamily.evaluate((element) => {
-      const style = getComputedStyle(element);
-      const controls = [...element.querySelectorAll<HTMLButtonElement>(
-        "button[data-composer-setting]",
-      )];
-      return {
-        borderLeft: style.borderLeftWidth,
-        borderRight: style.borderRightWidth,
-        heights: controls.map((control) =>
-          control.getBoundingClientRect().height),
-        borders: controls.map((control) =>
-          getComputedStyle(control).borderTopWidth),
-        fontSizes: controls.map((control) =>
-          getComputedStyle(control).fontSize),
-        iconSizes: controls.map((control) => {
-          const icon = control.querySelector<SVGElement>(
-            ".composer-setting-icon",
-          );
-          const bounds = icon?.getBoundingClientRect();
-          return bounds
-            ? { width: bounds.width, height: bounds.height }
-            : null;
-        }),
-        iconDisplays: controls.map((control) => {
-          const icon = control.querySelector<SVGElement>(".composer-setting-icon");
-          return icon ? getComputedStyle(icon).display : null;
-        }),
-      };
-    });
+    const settingGeometry = await inspectComposerSettingGeometry(settingFamily);
     expect(settingGeometry.borderLeft).toBe("0px");
     expect(settingGeometry.borderRight).toBe("0px");
     expect(Math.max(...settingGeometry.heights)

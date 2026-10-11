@@ -151,6 +151,28 @@ describe("welcome and help guides", () => {
   });
 });
 
+describe("mascot overlay", () => {
+  const mascot = "../../src/renderer/src/mascot/mascot.css";
+
+  it("never sets text below 12px and fits its four lines in the bubble", () => {
+    const sizes = [...source(mascot).matchAll(/font-size:\s*(\d+)px/gu)].map((match) => Number(match[1]));
+    expect(Math.min(...sizes)).toBeGreaterThanOrEqual(12);
+    const lines = ["mascot-heading", "mascot-chat", "mascot-message", "mascot-footer"].map((name) => {
+      const body = rule(mascot, `.${name}`);
+      const height = Number(/(?:^|[ ;])height:\s*(\d+)px/u.exec(body)?.[1] ?? /line-height:\s*(\d+)px/u.exec(body)?.[1]);
+      const margin = Number(/margin-top:\s*(\d+)px/u.exec(body)?.[1] ?? 0);
+      return height + margin;
+    });
+    expect(lines.reduce((total, line) => total + line, 0)).toBeLessThanOrEqual(116 - 16);
+  });
+
+  it("draws the keyboard focus ring in the accent, inset like other rows", () => {
+    expect(source(mascot)).not.toContain("#f5ce69");
+    expect(source(mascot)).not.toContain("outline-offset: -3px");
+    expect(rule(mascot, ".mascot-open:focus-visible, .mascot-picker:focus-visible, .mascot-option:focus-visible")).toContain("outline-offset: -2px;");
+  });
+});
+
 describe("settings shell rules", () => {
   it("keeps group headings small, muted and medium weight", () => {
     const heading = rule(settings, ".settings-card-heading h3");

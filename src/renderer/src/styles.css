@@ -626,7 +626,6 @@ button:disabled,
   .help-guide-entries,
   .help-guide-result,
   .model-chooser-row-primary,
-  .palette-footer,
   .palette-group,
   .resume-picker-footer,
   .workspace-panel-add-menu,
@@ -7741,20 +7740,11 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 }
 
 .provider-quota-notices {
-  position: fixed;
-  right: 22px;
-  z-index: 98;
-  display: flex;
-  width: min(340px, calc(100vw - 44px));
-  flex-direction: column;
-  gap: 7px;
-  transition: bottom var(--dur-fast) var(--ease);
-}
-
-.provider-quota-notices.is-stacked {
   position: relative;
-  right: auto;
+  display: flex;
   width: 100%;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .provider-quota-notice {
@@ -7976,11 +7966,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
   .app-update-notice small {
     display: none;
-  }
-
-  .provider-quota-notices:not(.is-stacked) {
-    right: 12px;
-    width: calc(100vw - 24px);
   }
 
   .welcome-card,
@@ -10712,14 +10697,8 @@ button.sent-attachment-open:hover {
   min-height: var(--ui-control-height);
 }
 
-.palette-actions button {
-  min-height: var(--ui-control-height);
-  font-size: var(--text-sm);
-}
-
 .header-popover-title,
 .palette-group > span,
-.palette-footer,
 .palette-group button small {
   font-size: var(--text-xs);
 }

@@ -97,7 +97,6 @@ export function StatusToastStack({
     <div className="status-overlay-stack">
       <ProviderQuotaNotices
         notices={providerQuotaNotices.notices}
-        stacked
         onDismiss={providerQuotaNotices.dismiss}
       />
       {appUpdate.error && (

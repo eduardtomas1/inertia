@@ -34,4 +34,11 @@ describe("composer banner chrome", () => {
   it("outlines the limit drawer with the composer's soft line", () => {
     expect(declarationsFor(rules, ".limit-reset").get("border")).toBe("1px solid var(--line-soft)");
   });
+
+  it("keeps quota notices in the shared toast stack without a fixed fallback or dead palette selectors", () => {
+    const stack = declarationsFor(rules, ".provider-quota-notices");
+    expect(stack.get("position")).toBe("relative");
+    expect(base).not.toContain(".provider-quota-notices.is-stacked");
+    expect(base).not.toMatch(/\.palette-actions|\.palette-footer/u);
+  });
 });

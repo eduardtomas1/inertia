@@ -17,20 +17,15 @@ function resetLabel(resetsAt: string | null): string | null {
 
 export function ProviderQuotaNotices({
   notices,
-  bottomOffset = 20,
-  stacked = false,
   onDismiss,
 }: {
   notices: readonly QuotaNotification[];
-  bottomOffset?: number;
-  stacked?: boolean;
   onDismiss: (noticeId: string) => void;
 }): React.JSX.Element | null {
   if (notices.length === 0) return null;
   return (
     <section
-      className={`provider-quota-notices${stacked ? " is-stacked" : ""}`}
-      style={stacked ? undefined : { bottom: bottomOffset }}
+      className="provider-quota-notices"
       aria-label="Provider quota notifications"
       aria-live="polite"
       aria-relevant="additions"

@@ -621,6 +621,17 @@ describe("Tasks stylesheet", () => {
     expect(css).not.toMatch(/text-transform|999px/u);
   });
 
+  it("rings the title, note and add fields with the focus colour when they have keyboard focus", () => {
+    const rule = (selector: string) => {
+      const start = css.indexOf(`${selector} {`);
+      return start < 0 ? "" : css.slice(start, css.indexOf("}", start));
+    };
+    expect(rule(".task-detail-title:focus-visible,\n.task-detail-note:focus-visible,\n.task-add:has(.task-add-input:focus-visible)"))
+      .toContain("outline: 1px solid var(--focus-ring);");
+    const forced = css.slice(css.indexOf("@media (forced-colors: active)"));
+    expect(forced).toMatch(/\.task-add:has\(\.task-add-input:focus-visible\) \{\s*outline: 2px solid Highlight;/u);
+  });
+
   it("adapts to narrow containers, reduced motion and forced colours", () => {
     expect(css).toMatch(/@container tasks-view \(max-width: 760px\)/u);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/u);

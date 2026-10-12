@@ -236,9 +236,6 @@
   color: var(--text-faint);
 }
 
-.task-add:has(.task-add-input:focus-visible) {
-  background: var(--fill);
-}
 
 .tasks-done {
   display: grid;
@@ -325,8 +322,10 @@
 }
 
 .task-detail-title:focus-visible,
-.task-detail-note:focus-visible {
-  background: var(--fill);
+.task-detail-note:focus-visible,
+.task-add:has(.task-add-input:focus-visible) {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
 }
 
 .task-detail-note:focus {
@@ -686,6 +685,12 @@
 
   .task-check {
     border-color: CanvasText;
+  }
+
+  .task-detail-title:focus-visible,
+  .task-detail-note:focus-visible,
+  .task-add:has(.task-add-input:focus-visible) {
+    outline: 2px solid Highlight;
   }
 
   .task-check:checked {

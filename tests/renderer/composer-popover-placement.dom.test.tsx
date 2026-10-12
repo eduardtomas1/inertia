@@ -8,6 +8,7 @@ import {
 } from "../../src/renderer/src/components/composer/useComposerMenus";
 import {
   focusComposerPopoverEdge,
+  observeComposerPopover,
   positionComposerPopover,
 } from "../../src/renderer/src/utils/composerPopoverPlacement";
 
@@ -275,6 +276,35 @@ describe("composer popover DOM placement", () => {
 
     expect(popover.getBoundingClientRect().left).toBe(placement.left);
     expect(popover.getBoundingClientRect().top).toBe(placement.top);
+  });
+
+  it("places the popover again when its own entrance animation ends", () => {
+    document.body.innerHTML = `<div class="chat-workspace"><button>Model</button><div class="composer-popover"><span></span></div></div>`;
+    const workspace = document.querySelector<HTMLElement>(".chat-workspace")!;
+    const trigger = document.querySelector<HTMLButtonElement>("button")!;
+    const popover = document.querySelector<HTMLElement>(".composer-popover")!;
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(800);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(640);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue(rect({ top: 64, left: 0, right: 800, bottom: 640 }));
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect({ top: 560, left: 200, right: 360, bottom: 592 }));
+    vi.spyOn(popover, "getBoundingClientRect").mockReturnValue(rect({ top: 0, left: 0, right: 320, bottom: 160 }));
+    Object.defineProperties(popover, {
+      clientHeight: { configurable: true, value: 160 },
+      scrollHeight: { configurable: true, value: 160 },
+    });
+
+    const stop = observeComposerPopover(trigger, popover, () => undefined);
+    const placed = popover.style.translate;
+    popover.style.translate = "0.5px 0.5px";
+    popover.querySelector("span")!.dispatchEvent(new Event("animationend", { bubbles: true }));
+    expect(popover.style.translate).toBe("0.5px 0.5px");
+    popover.dispatchEvent(new Event("animationend", { bubbles: true }));
+    expect(popover.style.translate).toBe(placed);
+    stop();
   });
 
   it("keeps an explicitly opened section through later hover and pointer leave", () => {

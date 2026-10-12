@@ -302,6 +302,10 @@ export function observeComposerPopover(
   const schedule = (): void => {
     if (frame === null) frame = window.requestAnimationFrame(update);
   };
+  const surface = popoverSurface(popover);
+  const settle = (event: AnimationEvent): void => {
+    if (event.target === surface) schedule();
+  };
   update();
   const observer = typeof ResizeObserver === "undefined"
     ? null
@@ -315,13 +319,14 @@ export function observeComposerPopover(
   }
   for (const element of [
     trigger,
-    popoverSurface(popover),
+    surface,
     trigger.closest<HTMLElement>(".composer"),
     workspace,
     trigger.closest<HTMLElement>(".conversation-split-pane"),
   ]) {
     if (element) observer?.observe(element);
   }
+  surface.addEventListener("animationend", settle);
   window.addEventListener("resize", schedule);
   window.visualViewport?.addEventListener("resize", schedule);
   window.visualViewport?.addEventListener("scroll", schedule);
@@ -329,6 +334,7 @@ export function observeComposerPopover(
     if (frame !== null) window.cancelAnimationFrame(frame);
     observer?.disconnect();
     layoutObserver?.disconnect();
+    surface.removeEventListener("animationend", settle);
     window.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("scroll", schedule);

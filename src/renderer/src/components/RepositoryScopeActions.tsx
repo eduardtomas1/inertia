@@ -41,27 +41,31 @@ function requiredRowWidth(row: Element, actions: Element): number {
   return Math.max(row.scrollWidth, row.clientWidth - actions.clientWidth + actions.scrollWidth);
 }
 
-export function useCollapsedActions(actions: HTMLElement | null): boolean {
-  const [compact, setCompact] = useState(false);
-  const expandedWidth = useRef(0);
-  const compactRef = useRef(compact);
+export function useCollapsedActions(actions: HTMLElement | null): number {
+  const [level, setLevel] = useState(0);
+  const expandedWidths = useRef<number[]>([]);
+  const levelRef = useRef(level);
+
+  const changeLevel = useCallback((next: number): void => {
+    levelRef.current = next;
+    setLevel(next);
+  }, []);
 
   const collapseIfOverflowing = useCallback((): void => {
     const row = actions?.parentElement;
-    if (!actions || !row || compactRef.current) return;
+    if (!actions || !row || levelRef.current >= 2) return;
     if (!overflowing(row) && !overflowing(actions)) return;
-    expandedWidth.current = requiredRowWidth(row, actions);
-    compactRef.current = true;
-    setCompact(true);
-  }, [actions]);
+    expandedWidths.current[levelRef.current] = requiredRowWidth(row, actions);
+    changeLevel(levelRef.current + 1);
+  }, [actions, changeLevel]);
 
   useLayoutEffect(() => {
     const row = actions?.parentElement;
     if (!actions || !row || typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (compactRef.current && row.clientWidth >= expandedWidth.current) {
-        compactRef.current = false;
-        setCompact(false);
+      const current = levelRef.current;
+      if (current > 0 && row.clientWidth >= (expandedWidths.current[current - 1] ?? Infinity)) {
+        changeLevel(current - 1);
         return;
       }
       collapseIfOverflowing();
@@ -74,11 +78,11 @@ export function useCollapsedActions(actions: HTMLElement | null): boolean {
       observer.disconnect();
       mutations.disconnect();
     };
-  }, [actions, collapseIfOverflowing]);
+  }, [actions, changeLevel, collapseIfOverflowing]);
 
   useLayoutEffect(collapseIfOverflowing);
 
-  return compact;
+  return level;
 }
 
 export function RepositoryScopeActions({
@@ -91,7 +95,7 @@ export function RepositoryScopeActions({
   children,
 }: {
   label: string;
-  commit: ReactNode;
+  commit: RepositoryScopeAction;
   actions: readonly RepositoryScopeAction[];
   confidence: { disabled: boolean; title: string };
   pullRequest: { disabled: boolean; title?: string };
@@ -99,12 +103,15 @@ export function RepositoryScopeActions({
   children: (compact: boolean) => ReactNode;
 }): React.JSX.Element {
   const [element, setElement] = useState<HTMLSpanElement | null>(null);
-  const compact = useCollapsedActions(element);
+  const level = useCollapsedActions(element);
+  const compact = level > 0;
+  const commitFolded = level > 1;
   const menuId = useId();
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"more">();
   const moreTrigger = useRef<HTMLButtonElement | null>(null);
   const items: RepositoryScopeAction[] = [
+    ...(commitFolded ? [commit] : []),
     ...actions,
     {
       id: "confidence",
@@ -130,7 +137,15 @@ export function RepositoryScopeActions({
       className={`workspace-repository-scope-actions${compact ? " is-compact" : ""}`}
       aria-label={`Actions for ${label}`}
     >
-      {commit}
+      {!commitFolded && (
+        <HintButton
+          disabled={commit.disabled}
+          hint={commit.title}
+          onClick={commit.onSelect}
+        >
+          {commit.icon}<span>{commit.label}</span>
+        </HintButton>
+      )}
       {compact ? (
         <span className="workspace-repository-more-anchor">
           <IconButton

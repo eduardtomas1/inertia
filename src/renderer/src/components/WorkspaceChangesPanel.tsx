@@ -691,24 +691,21 @@ export function WorkspaceChangesPanel({
         {canRunRepositoryActions && (
           <RepositoryScopeActions
             label={label}
-            commit={(
-              <HintButton
-                disabled={
-                  commitDiffLoading
-                  || !authorityRef
-                  || Boolean(commitAction?.disabled)
-                  || activeRepository.truncated
-                }
-                hint={!authorityRef
-                  ? "Refresh this repository before changing it."
-                  : activeRepository.truncated
-                  ? "Refresh this repository before committing its complete change set."
-                  : commitAction?.disabled ? commitAction.detail : undefined}
-                onClick={prepareActiveCommit}
-              >
-                <GitCommitHorizontal size={14} aria-hidden="true" /><span>{commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit"}</span>
-              </HintButton>
-            )}
+            commit={{
+              id: "commit",
+              label: commitDiffLoading ? "Preparing…" : commitAction?.label ?? "Commit",
+              icon: <GitCommitHorizontal size={14} aria-hidden="true" />,
+              disabled: commitDiffLoading
+                || !authorityRef
+                || Boolean(commitAction?.disabled)
+                || activeRepository.truncated,
+              title: !authorityRef
+                ? "Refresh this repository before changing it."
+                : activeRepository.truncated
+                ? "Refresh this repository before committing its complete change set."
+                : commitAction?.disabled ? commitAction.detail : undefined,
+              onSelect: prepareActiveCommit,
+            }}
             actions={[
               {
                 id: "fetch",

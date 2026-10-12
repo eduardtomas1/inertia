@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreMergeConfidenceLauncher } from "../../src/renderer/src/components/PreMergeConfidenceLauncher";
 import { RepositoryScopeActions, type MergeDialogRequest } from "../../src/renderer/src/components/RepositoryScopeActions";
 
-const fitting = { rowClient: 520, rowScroll: 520, actionsClient: 300, actionsScroll: 300 };
+const fitting = { rowClient: 520, rowScroll: 520, compactScroll: 0, foldedScroll: 0, actionsClient: 300, actionsScroll: 300 };
 const sizes = { ...fitting };
 let resize: (() => void) | null = null;
 
@@ -19,7 +19,10 @@ beforeEach(() => {
     return 0;
   });
   vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
-    if (this.classList.contains("scope-row")) return sizes.rowScroll;
+    if (this.classList.contains("scope-row")) {
+      if (!this.querySelector('[aria-haspopup="menu"]')) return sizes.rowScroll;
+      return this.querySelector(".workspace-repository-scope-actions > button") ? sizes.compactScroll : sizes.foldedScroll;
+    }
     if (this.classList.contains("workspace-repository-scope-actions")) return sizes.actionsScroll;
     return 0;
   });
@@ -38,12 +41,12 @@ afterEach(() => {
   resize = null;
 });
 
-function actionsRow(onFetch = vi.fn(), onPush = vi.fn(), onMergeDialog = vi.fn()) {
+function actionsRow(onFetch = vi.fn(), onPush = vi.fn(), onMergeDialog = vi.fn(), onCommit = vi.fn()) {
   return (
     <div className="scope-row">
       <RepositoryScopeActions
         label="inertia"
-        commit={<button type="button">Commit</button>}
+        commit={{ id: "commit", label: "Commit", icon: null, disabled: false, onSelect: onCommit }}
         actions={[
           { id: "fetch", label: "Fetch", icon: null, disabled: false, onSelect: onFetch },
           { id: "pull", label: "Pull", icon: null, disabled: true, onSelect: vi.fn() },
@@ -107,6 +110,32 @@ describe("Changes repository actions", () => {
     expect(screen.getByTestId("launcher")).toHaveTextContent("buttons");
   });
 
+  it("folds Commit into More while the compact row still overflows, then restores it as the row widens", () => {
+    sizes.rowScroll = 760;
+    sizes.compactScroll = 560;
+    const onCommit = vi.fn();
+    render(actionsRow(vi.fn(), vi.fn(), vi.fn(), onCommit));
+    const group = screen.getByLabelText("Actions for inertia");
+    expect(within(group).queryByRole("button", { name: "Commit" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for inertia" }));
+    const menu = screen.getByRole("menu", { name: "More actions for inertia" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent))
+      .toEqual(["Commit", "Fetch", "Pull", "Publish branch", "Confidence", "PR"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Commit" }));
+    expect(onCommit).toHaveBeenCalledOnce();
+
+    sizes.rowClient = 560;
+    act(() => resize?.());
+    expect(within(group).getByRole("button", { name: "Commit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More actions for inertia" })).toBeInTheDocument();
+
+    sizes.rowClient = 760;
+    act(() => resize?.());
+    expect(within(group).getByRole("button", { name: "Fetch" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More actions for inertia" })).toBeNull();
+  });
+
   it("reaches an unavailable collapsed action by arrow keys", () => {
     sizes.rowScroll = 760;
     render(actionsRow());
@@ -155,7 +184,7 @@ describe("Changes repository actions", () => {
         <div className="scope-row">
           <RepositoryScopeActions
             label="inertia"
-            commit={<button type="button">Commit</button>}
+            commit={{ id: "commit", label: "Commit", icon: null, disabled: false, onSelect: () => undefined }}
             actions={[]}
             confidence={{ disabled: false, title: "Compare" }}
             pullRequest={{ disabled: false }}

@@ -155,7 +155,7 @@ export interface ProviderSteerInput {
 }
 
 export class ProviderSteerDeliveryUnknownError extends Error {
-  constructor() {
+  constructor(readonly turnEnded = false) {
     super("The provider did not confirm whether it admitted the follow-up.");
     this.name = "ProviderSteerDeliveryUnknownError";
   }
@@ -229,6 +229,10 @@ export interface ProviderTextSnapshotEvent extends ProviderEventBase {
   type: "text-snapshot";
   itemId: string;
   text: string;
+}
+
+export interface ProviderTextBoundaryEvent extends ProviderEventBase {
+  type: "text-boundary";
 }
 
 export type ProviderActivityKind = "system" | "turn" | "tool" | "command" | "reasoning";
@@ -371,6 +375,7 @@ export interface ProviderSubagentEvent extends ProviderEventBase {
 export type ProviderEvent =
   | ProviderTextEvent
   | ProviderTextSnapshotEvent
+  | ProviderTextBoundaryEvent
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
@@ -441,15 +446,18 @@ export interface ProviderHostToolCall {
   ): Promise<AgentApprovalDecision>;
 }
 
+export interface ProviderHostToolImage {
+  mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  /** Base64 without a data-URL prefix. */
+  data: string;
+}
+
 export interface ProviderHostToolResult {
   success: boolean;
   /** Bounded model-visible JSON or plain text. */
   text: string;
-  /** Optional bounded host-owned visual evidence returned directly to the model. */
-  image?: {
-    mimeType: "image/png";
-    data: string;
-  };
+  /** Optional bounded host-owned images returned directly to the model. */
+  images?: readonly ProviderHostToolImage[];
 }
 
 /** Owned by one exact active Inertia run; never persisted or provider-authored. */

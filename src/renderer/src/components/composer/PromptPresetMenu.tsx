@@ -3,7 +3,7 @@ import {
   ArrowUp,
   BookOpenText,
   Copy,
-  Edit3,
+  Pencil,
   Plus,
   Search,
   Trash2,
@@ -11,6 +11,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import "./PromptPresetMenu.css";
+import { TooltipButton } from "../TooltipButton";
+import { HintButton } from "../HintButton";
 
 import {
   MAX_PROMPT_PRESETS,
@@ -30,6 +32,7 @@ import type {
   PromptPresetCommandRunner,
 } from "./types";
 import type { ComposerMenuController } from "./useComposerMenus";
+import { TooltipText } from "../TooltipText";
 
 type EditorState = {
   kind: "create" | "edit";
@@ -126,6 +129,8 @@ export function PromptPresetMenu({
       `${preset.name} ${preset.body}`.toLocaleLowerCase().includes(needle));
   }, [presets, query]);
 
+  const atPresetLimit = presets.length >= MAX_PROMPT_PRESETS;
+  const presetLimitReason = atPresetLimit ? `${MAX_PROMPT_PRESETS} presets is the limit` : undefined;
   const beginCreate = (): void => {
     const body = currentMessage.trim() ? currentMessage : "";
     setEditor({
@@ -236,7 +241,7 @@ export function PromptPresetMenu({
 
   return (
     <div className="popover-anchor prompt-presets-control">
-      <button
+      <TooltipButton
         ref={(node) => setMenuTrigger("presets", node)}
         type="button"
         className="icon-button"
@@ -244,13 +249,14 @@ export function PromptPresetMenu({
         aria-haspopup="dialog"
         aria-controls={menuId("presets")}
         aria-expanded={menu === "presets"}
-        title="Prompt presets"
+        tooltip="Prompt presets"
+        describeTooltip={false}
         onClick={() => toggleMenu("presets")}
         onKeyDown={(event) =>
           handleComposerMenuTriggerKeyDown("presets", event)}
       >
-        <BookOpenText size={15} />
-      </button>
+        <BookOpenText size={16} />
+      </TooltipButton>
       {menu === "presets" && (
         <div
           ref={(node) => setMenuPopover("presets", node)}
@@ -266,25 +272,6 @@ export function PromptPresetMenu({
             handleMoreMenuNavigation(event);
           }}
         >
-          <div className="prompt-presets-heading">
-            <span>
-              <strong>Prompt presets</strong>
-              <small>Reusable text · {presets.length}/{MAX_PROMPT_PRESETS}</small>
-            </span>
-            {!editor && (
-              <button
-                type="button"
-                className="prompt-presets-add"
-                disabled={presets.length >= MAX_PROMPT_PRESETS}
-                onClick={beginCreate}
-              >
-                <Plus size={13} />New
-              </button>
-            )}
-          </div>
-          {!editor && error && (
-            <p className="prompt-preset-error" role="status">{error}</p>
-          )}
           {editor ? (
             <form
               className="prompt-preset-editor"
@@ -333,13 +320,12 @@ export function PromptPresetMenu({
                   <strong>{editor.route
                     ? "Bound to saved model route"
                     : "Limit to current model route"}</strong>
-                  <small title={displayedEditorRouteLabel}>
-                    {displayedEditorRouteLabel}
+                  <small>
+                    <TooltipText tooltip={displayedEditorRouteLabel}>{displayedEditorRouteLabel}</TooltipText>
                   </small>
                   {editorRouteDiffers && (
                     <small className="prompt-preset-route-rebind-note">
-                      Saved route differs from this chat. Turn this off, then
-                      on again to bind to the current route.
+                      Saved route differs from this chat. Turn this off, then on again to bind to the current route.
                     </small>
                   )}
                 </span>
@@ -350,26 +336,28 @@ export function PromptPresetMenu({
               {error && <p className="prompt-preset-error" role="status">{error}</p>}
               {editor.kind === "edit" && editor.preset && (
                 <div className="prompt-preset-editor-tools">
-                  <button
-                    type="button"
+                  <TooltipButton
                     aria-label={`Move ${editor.preset.name} up`}
-                    title="Move up"
+                    tooltip="Move up"
+                    describeTooltip={false}
                     disabled={pending || editor.position === 0}
                     onClick={() => void move(editor.preset!, "up")}
-                  ><ArrowUp size={13} /></button>
-                  <button
-                    type="button"
+                  ><ArrowUp size={14} /></TooltipButton>
+                  <TooltipButton
                     aria-label={`Move ${editor.preset.name} down`}
-                    title="Move down"
+                    tooltip="Move down"
+                    describeTooltip={false}
                     disabled={
                       pending || editor.position === presets.length - 1
                     }
                     onClick={() => void move(editor.preset!, "down")}
-                  ><ArrowDown size={13} /></button>
-                  <button
-                    type="button"
-                    disabled={pending || presets.length >= MAX_PROMPT_PRESETS}
+                  ><ArrowDown size={14} /></TooltipButton>
+                  <HintButton
+                    disabled={pending}
+                    aria-disabled={atPresetLimit || undefined}
+                    hint={presetLimitReason}
                     onClick={() => {
+                      if (atPresetLimit) return;
                       void run(() => dispatch({
                         type: "prompt-preset.duplicate",
                         payload: {
@@ -382,7 +370,7 @@ export function PromptPresetMenu({
                         })
                         .catch(() => undefined);
                     }}
-                  ><Copy size={13} />Duplicate</button>
+                  ><Copy size={14} />Duplicate</HintButton>
                   <button
                     type="button"
                     className={confirmingDelete ? "is-confirming" : undefined}
@@ -404,12 +392,13 @@ export function PromptPresetMenu({
                         })
                         .catch(() => undefined);
                     }}
-                  ><Trash2 size={13} />{confirmingDelete ? "Confirm delete" : "Delete"}</button>
+                  ><Trash2 size={14} />{confirmingDelete ? "Confirm delete" : "Delete"}</button>
                 </div>
               )}
               <div className="prompt-preset-editor-actions">
                 <button
                   type="button"
+                  className="secondary-button"
                   disabled={pending}
                   onClick={returnToList}
                 >Cancel</button>
@@ -425,23 +414,37 @@ export function PromptPresetMenu({
           ) : (
             <>
               {presets.length > 0 && (
-                <label className="prompt-presets-search">
-                  <Search size={13} />
-                  <input
-                    value={query}
-                    placeholder="Find a preset…"
-                    aria-label="Find a prompt preset"
-                    onChange={(event) => setQuery(event.currentTarget.value)}
-                  />
-                </label>
+                <div className="prompt-presets-heading">
+                  <label className="prompt-presets-search">
+                    <Search size={14} />
+                    <input
+                      value={query}
+                      placeholder="Find a preset…"
+                      aria-label="Find a prompt preset"
+                      onChange={(event) => setQuery(event.currentTarget.value)}
+                    />
+                  </label>
+                  <small className="prompt-presets-count">{presets.length}/{MAX_PROMPT_PRESETS}</small>
+                  <HintButton
+                    className="secondary-button prompt-presets-add"
+                    aria-disabled={atPresetLimit || undefined}
+                    hint={presetLimitReason}
+                    onClick={() => {
+                      if (!atPresetLimit) beginCreate();
+                    }}
+                  >
+                    <Plus size={14} />New
+                  </HintButton>
+                </div>
+              )}
+              {!editor && error && (
+                <p className="prompt-preset-error" role="status">{error}</p>
               )}
               {presets.length === 0 ? (
                 <div className="prompt-presets-empty">
-                  <BookOpenText size={17} />
-                  <strong>Keep the prompts you reuse</strong>
-                  <span>Presets never send automatically.</span>
-                  <button type="button" onClick={beginCreate}>
-                    <Plus size={13} />Create a preset
+                  <span>No presets yet<small>Presets never send automatically.</small></span>
+                  <button type="button" className="secondary-button" onClick={beginCreate}>
+                    <Plus size={14} />Create a preset
                   </button>
                 </div>
               ) : visiblePresets.length === 0 ? (
@@ -460,7 +463,6 @@ export function PromptPresetMenu({
                           type="button"
                           className="prompt-preset-use"
                           aria-disabled={routeBlocked}
-                          title={blockedReason ?? `Insert ${preset.name}`}
                           onClick={() => {
                             if (routeBlocked) return;
                             void onApply(preset).then((applied) => {
@@ -476,16 +478,16 @@ export function PromptPresetMenu({
                           <BookOpenText size={14} />
                           <span>
                             <strong>{preset.name}</strong>
-                            <small>{blockedReason ?? preset.body}</small>
+                            <small><TooltipText tooltip={blockedReason ?? preset.body}>{blockedReason ?? preset.body}</TooltipText></small>
                           </span>
                         </button>
-                        <button
-                          type="button"
+                        <TooltipButton
                           className="prompt-preset-edit"
                           aria-label={`Edit prompt preset: ${preset.name}`}
-                          title={`Edit ${preset.name}`}
+                          tooltip={`Edit ${preset.name}`}
+                          describeTooltip={false}
                           onClick={() => beginEdit(preset)}
-                        ><Edit3 size={13} /></button>
+                        ><Pencil size={14} /></TooltipButton>
                       </div>
                     );
                   })}

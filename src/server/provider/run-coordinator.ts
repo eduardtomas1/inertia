@@ -123,6 +123,7 @@ function capabilitiesForEvent(
   switch (event.type) {
     case "text":
     case "text-snapshot":
+    case "text-boundary":
       return ["text-streaming"];
     case "activity":
       return event.kind === "tool" || event.kind === "command"

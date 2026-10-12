@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { CircleAlert, Clock3 } from "lucide-react";
+import { CircleAlert, Clock } from "lucide-react";
 import type { LimitResetResult } from "@shared/limit-reset";
 import type { LimitResetCommand, LimitResetCommandRunner } from "./limitResetClient";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { diagnosticErrorReference } from "../../utils/diagnosticNavigation";
 import { useDocumentActivity } from "../../hooks/useDocumentPresence";
 import "./LimitResetBanner.css";
+import { TooltipText } from "../TooltipText";
 
 const PENDING_POLL_MS = 30_000;
 const RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000];
@@ -137,7 +138,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   if (!plan && !offer) {
     return result.usageLimited
       ? <div className="limit-reset" role="group" aria-label="Usage limit" data-state="limited">
-        <Clock3 className="limit-reset-icon" size={14} aria-hidden="true" />
+        <Clock className="limit-reset-icon" size={14} aria-hidden="true" />
         <span className="limit-reset-copy"><strong>Usage limit reached</strong></span>
         {continueElsewhere && <span className="limit-reset-actions">{continueElsewhere}</span>}
       </div>
@@ -151,7 +152,7 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
   const resetsAt = plan?.resetsAt ?? offer!.resetsAt;
   const snoozed = snoozedUntil !== null && Date.parse(snoozedUntil) >= Date.parse(resetsAt);
   const when = new Date(resetsAt).toLocaleString(INTERFACE_LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const Icon = blocked || missed ? CircleAlert : Clock3;
+  const Icon = blocked || missed ? CircleAlert : Clock;
   const state = pending ? "scheduled" : blocked ? "blocked" : missed ? "missed" : "offer";
   const title = pending ? "Resume scheduled" : blocked ? "Resume needs attention" : missed ? "Resume missed" : "Usage limit reached";
   const schedule = (): void => {
@@ -167,9 +168,11 @@ export function LimitResetBanner({ conversationId, latestTurnId, snoozedUntil, d
     <Icon className="limit-reset-icon" size={14} aria-hidden="true" />
     <span className="limit-reset-copy">
       <strong>{title}</strong>
-      <time dateTime={resetsAt} title={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>
-        {pending ? "Resumes" : missed ? "Reset" : "Resets"} {when}
-      </time>
+      <TooltipText className="limit-reset-when" tooltip={new Date(resetsAt).toLocaleString(INTERFACE_LOCALE)}>
+        <time dateTime={resetsAt}>
+          {pending ? "Resumes" : missed ? "Reset" : "Resets"} {when}
+        </time>
+      </TooltipText>
     </span>
     <span className="limit-reset-actions">
       {missed && <button type="button" className={action} aria-disabled={unavailable || undefined}

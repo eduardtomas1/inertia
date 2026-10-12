@@ -1,19 +1,18 @@
 import type Database from "better-sqlite3";
 
 import type { ProviderId } from "../../shared/contracts";
-import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES } from "../../shared/conversation-context";
-import { htmlRenderContextLine, isHtmlRenderTitle } from "../../shared/html-render-reference";
+import { MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES } from "../../shared/conversation-context";
+import { htmlRenderProviderNote, isHtmlRenderTitle } from "../../shared/html-render-reference";
 import type { MessageRow } from "./rows";
 import { readBoundedMessageTail, readBoundedMessageText } from "./bounded-message-text";
 
 // Leave room for redaction before the final excerpt cap, without loading an
 // entire message or aggregating its durable streaming chunks inside SQLite.
-const MAX_SOURCE_BYTES = 2 * MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
-const MAX_SOURCE_TAIL_BYTES = MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES;
+const SOURCE_PREFIX_BYTES = 2 * MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES;
 
 export type ConversationContextSourceRow = Pick<
   MessageRow, "id" | "turn_id" | "role" | "created_at" | "attachments_json" | "content"
-> & { contentTruncated: boolean; tail: string | null };
+> & { contentTruncated: boolean; tail: string | null; final: boolean };
 
 export const CONVERSATION_CONTEXT_MESSAGE_SQL = `(messages.role IN ('user', 'assistant')
   OR (messages.role = 'system' AND messages.html_render_json IS NOT NULL AND messages.turn_id IS NOT NULL))`;
@@ -82,13 +81,20 @@ function pageRow({ page_title: title, ...row }: StoredSourceRow): ConversationCo
   return {
     ...row,
     role: "assistant",
-    content: isHtmlRenderTitle(title) ? htmlRenderContextLine(title) : "[page]",
+    content: isHtmlRenderTitle(title) ? htmlRenderProviderNote(title) : "[page]",
     contentTruncated: false,
     tail: null,
+    final: false,
   };
 }
 
-function sourceRowReader(database: Database.Database): (row: StoredSourceRow) => ConversationContextSourceRow {
+function sourceRowReader(
+  database: Database.Database,
+): (row: StoredSourceRow, excerptBytes: number, final: boolean) => ConversationContextSourceRow {
+  const longerPrefix = database.prepare(`
+    SELECT COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content
+    FROM messages WHERE id = ?
+  `);
   const chunks = database.prepare(`
     SELECT substr(CAST(content AS BLOB), 1, ?) AS content
     FROM message_content_chunks WHERE message_id = ? ORDER BY sequence LIMIT ?
@@ -101,21 +107,25 @@ function sourceRowReader(database: Database.Database): (row: StoredSourceRow) =>
     SELECT COALESCE(substr(CAST(content AS BLOB), -?), X'') AS content
     FROM messages WHERE id = ?
   `);
-  return (row) => {
-    const text = readBoundedMessageText(row.content, () => chunks.iterate(
+  return (row, excerptBytes, final) => {
+    const sourceBytes = 2 * excerptBytes;
+    const prefix = sourceBytes > SOURCE_PREFIX_BYTES && row.content.length > SOURCE_PREFIX_BYTES
+      ? (longerPrefix.get(sourceBytes + 1, row.id) as { content: Buffer }).content
+      : row.content;
+    const text = readBoundedMessageText(prefix, () => chunks.iterate(
       // Released chunks contain at least one byte, bounding row traversal too.
-      MAX_SOURCE_BYTES + 1, row.id, MAX_SOURCE_BYTES + 1,
-    ) as Iterable<{ content: Buffer }>, MAX_SOURCE_BYTES);
+      sourceBytes + 1, row.id, sourceBytes + 1,
+    ) as Iterable<{ content: Buffer }>, sourceBytes);
     const tail = text.truncated
       ? readBoundedMessageTail(
-          () => (contentTail.get(MAX_SOURCE_TAIL_BYTES, row.id) as { content: Buffer }).content,
+          () => (contentTail.get(excerptBytes, row.id) as { content: Buffer }).content,
           () => tailChunks.iterate(
-            MAX_SOURCE_TAIL_BYTES, row.id, MAX_SOURCE_TAIL_BYTES,
+            excerptBytes, row.id, excerptBytes,
           ) as Iterable<{ content: Buffer }>,
-          MAX_SOURCE_TAIL_BYTES,
+          excerptBytes,
         )
       : null;
-    return { ...row, content: text.content, contentTruncated: text.truncated, tail };
+    return { ...row, content: text.content, contentTruncated: text.truncated, tail, final };
   };
 }
 
@@ -127,6 +137,7 @@ export function* conversationContextSourceRows(
   messageIds?: readonly string[],
   excludedMessageId?: string,
   route?: ContinuationRouteFilter,
+  finalAnswerBytes = MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES,
 ): Generator<ConversationContextSourceRow> {
   const routed = continuationRouteSql(route);
   const rows = database.prepare(`
@@ -138,10 +149,10 @@ export function* conversationContextSourceRows(
       ${messageIds ? `AND id IN (${messageIds.map(() => "?").join(", ")})` : ""}
       ${excludedMessageId ? "AND id <> ?" : ""}
       ${routed.sql}
-    ORDER BY created_at DESC, id DESC
+    ORDER BY created_at DESC, rowid DESC
     LIMIT ?
   `).iterate(
-    MAX_SOURCE_BYTES + 1,
+    SOURCE_PREFIX_BYTES + 1,
     conversationId,
     ...(messageIds ?? []),
     ...(excludedMessageId ? [excludedMessageId] : []),
@@ -149,7 +160,16 @@ export function* conversationContextSourceRows(
     limit,
   ) as Iterable<StoredSourceRow>;
   const read = sourceRowReader(database);
-  for (const row of rows) yield row.role === "system" ? pageRow(row) : read(row);
+  let awaitingAnswer = true;
+  for (const row of rows) {
+    if (row.role === "system") {
+      yield pageRow(row);
+      continue;
+    }
+    const final = row.role === "assistant" && awaitingAnswer;
+    awaitingAnswer = row.role === "user";
+    yield read(row, final ? finalAnswerBytes : MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, final);
+  }
 }
 
 export function conversationContextOpeningRow(
@@ -166,13 +186,15 @@ export function conversationContextOpeningRow(
     WHERE conversation_id = ? AND role = 'user'
       ${excludedMessageId ? "AND id <> ?" : ""}
       ${routed.sql}
-    ORDER BY created_at ASC, id ASC
+    ORDER BY created_at ASC, rowid ASC
     LIMIT 1
   `).get(
-    MAX_SOURCE_BYTES + 1,
+    SOURCE_PREFIX_BYTES + 1,
     conversationId,
     ...(excludedMessageId ? [excludedMessageId] : []),
     ...routed.parameters,
   ) as StoredSourceRow | undefined;
-  return row ? sourceRowReader(database)(row) : null;
+  return row
+    ? sourceRowReader(database)(row, MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, false)
+    : null;
 }

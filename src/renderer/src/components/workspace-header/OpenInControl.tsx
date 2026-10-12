@@ -1,10 +1,9 @@
 import { lazy, Suspense, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronDown,
+  ExternalLink,
+  Folder,
   FolderOpen,
-  FolderSearch,
-  PanelLeft,
-  SquareArrowOutUpRight,
 } from "lucide-react";
 
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
@@ -18,6 +17,7 @@ import {
   type HeaderControlPresentation,
 } from "./ProjectActionsControl";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
+import { TooltipButton } from "../TooltipButton";
 
 export type { OpenInTarget } from "./HeaderActionMenus";
 
@@ -49,9 +49,9 @@ interface OpenInControlProps {
 }
 
 const targetIcons = {
-  folder: FolderOpen,
-  "file-manager": FolderSearch,
-  files: PanelLeft,
+  folder: ExternalLink,
+  "file-manager": FolderOpen,
+  files: Folder,
 } as const;
 
 export function OpenInControl({
@@ -119,7 +119,7 @@ export function OpenInControl({
           <PrimaryIcon size={14} aria-hidden="true" />
           <span>Open in {labels[effectivePreferred]}</span>
         </button>
-        <HeaderMenuGroup label="Open in…" icon={<SquareArrowOutUpRight size={14} aria-hidden="true" />}>
+        <HeaderMenuGroup label="Open in…" icon={<ExternalLink size={14} aria-hidden="true" />}>
           {renderItems()}
         </HeaderMenuGroup>
       </>
@@ -129,22 +129,22 @@ export function OpenInControl({
   return (
     <div ref={anchorRef} className="header-split-anchor" data-header-menu="open">
       <div className="header-split" role="group" aria-label="Open checkout">
-        <button
+        <TooltipButton
           type="button"
           className="header-split-primary"
           aria-label={`Open ${checkoutName} in ${labels[effectivePreferred]}`}
-          title={`Open ${checkoutName} in ${labels[effectivePreferred]}`}
+          tooltip={`Open ${checkoutName} in ${labels[effectivePreferred]}`}
           onClick={() => open(effectivePreferred)}
         >
-          <PrimaryIcon size={14} aria-hidden="true" />
+          <PrimaryIcon size={16} aria-hidden="true" />
           <span className="header-split-label">Open</span>
-        </button>
-        <button
+        </TooltipButton>
+        <TooltipButton
           ref={(node) => setMenuTrigger("open", node)}
           type="button"
           className="header-split-chevron"
           aria-label="Choose where to open"
-          title="Choose where to open"
+          tooltip="Choose where to open"
           aria-haspopup="menu"
           aria-expanded={menu === "open"}
           aria-controls={menuId}
@@ -153,7 +153,7 @@ export function OpenInControl({
           onClick={() => toggleMenu("open")}
         >
           <ChevronDown size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       </div>
       {menu === "open" && (
         <div

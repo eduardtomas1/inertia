@@ -69,17 +69,16 @@ test("keeps the right panel available while an isolated draft worktree materiali
       name: "Open a surface",
     });
     await expect(launcher).toBeVisible();
-    // While the worktree is pending the toggle's accessible name is the
-    // unavailable reason, not "Toggle terminal".
     const terminalToggle = app.page.locator("[data-panel-layout-controls]").getByRole("button", {
-      name: /available after the first message creates this chat's workspace/u,
+      name: "Workspace tools are available after the first message creates this chat's workspace.",
+      exact: true,
     });
     await expect(terminalToggle).toBeDisabled();
-    await expect(terminalToggle).toHaveAttribute("title", /available after the first message creates this chat's workspace/u);
+    await expect(terminalToggle).not.toHaveAttribute("title");
     for (const surface of ["Changes", "Files", "Browser"]) {
       await expect(launcher.locator('[aria-disabled="true"]').filter({
         hasText: surface,
-      })).toHaveAttribute("title", unavailableReason);
+      })).toContainText(unavailableReason);
     }
     for (const surface of ["Background tasks", "Usage", "Goal", "Plan"]) {
       await expect(launcher.getByRole("button", {

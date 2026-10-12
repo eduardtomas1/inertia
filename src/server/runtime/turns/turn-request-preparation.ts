@@ -269,8 +269,8 @@ export function resolveTurnRequest(
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;
-  const referencesOwnChat = dependencies.store.contextPackets
-    .includesOwnConversation(conversation.id, contextPacketIds);
+  const ownChatPacketId = dependencies.store.contextPackets
+    .ownConversationPacketId(conversation.id, contextPacketIds);
   const unattributedHistoryOnRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
     const shell = conversation.continuationIdentity;
@@ -307,30 +307,34 @@ export function resolveTurnRequest(
         : { handoff: { before: handoffBefore, providerId: route.providerId } }),
     };
   };
-  const assembleOnFreshSession = (excludedMessageId?: string) => {
-    const fresh = assembleTurnRequest({
-      ...assemblyInput,
-      ...(!referencesOwnChat
-        ? {
-            restoredHistory: (capacityBytes: number) => dependencies.store.continuationHistory(
-              conversation.id,
-              usesNativeCatalog
-                ? capacityBytes
-                : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES),
-              requestedAt,
-              excludedMessageId,
-              restoredHistoryRoute(),
-            ),
-          }
-        : {}),
-    });
-    return {
-      ...fresh,
-      sessionRecovery: fresh.sessionRecovery ?? (referencesOwnChat
-        ? { restoredMessageCount: 0, omittedMessageCount: 0 }
-        : null),
-    };
+  const restoredCapacity = (capacityBytes: number) => usesNativeCatalog
+    ? capacityBytes
+    : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES);
+  const referencedHistory = (capacityBytes: number) => {
+    const delivery = conversationContexts?.deliveries
+      .find(({ packetId }) => packetId === ownChatPacketId);
+    return dependencies.store.transcriptRepository.referencedContinuationHistory(
+      conversation.id,
+      restoredCapacity(capacityBytes),
+      restoredHistoryRoute(),
+      {
+        messageCount: delivery?.messageCount ?? 0,
+        omittedMessageCount: delivery?.omittedMessageCount ?? 0,
+      },
+    );
   };
+  const assembleOnFreshSession = (excludedMessageId?: string) => assembleTurnRequest({
+    ...assemblyInput,
+    restoredHistory: ownChatPacketId === null
+      ? (capacityBytes: number) => dependencies.store.continuationHistory(
+          conversation.id,
+          restoredCapacity(capacityBytes),
+          requestedAt,
+          excludedMessageId,
+          restoredHistoryRoute(),
+        )
+      : referencedHistory,
+  });
   const canResume = continuation.action === "resume-session";
   const importNote = latestTurn?.origin === "cli-import"
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
@@ -340,7 +344,12 @@ export function resolveTurnRequest(
     && request.goalStart === undefined;
   const assembled = startsFreshInEstablishedChat
     ? assembleOnFreshSession()
-    : assembleTurnRequest(assemblyInput);
+    : assembleTurnRequest({
+        ...assemblyInput,
+        carriedConversationContexts: dependencies.store.contextPackets
+          .unreachedReferences(conversation.id)
+          .flatMap((reference) => reference.sentBlocks() ?? []),
+      });
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
     : undefined;
@@ -474,6 +483,9 @@ export function resolveTurnRequest(
           checkpointFailure: request.checkpointId
             ? null
             : request.checkpointFailure ?? null,
+          ...(request.turnCheckpoint && !request.checkpointId
+            ? { turnCheckpoint: true }
+            : {}),
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,
@@ -505,6 +517,8 @@ export function resolveTurnRequest(
           assistantSegmentText: "",
           assistantMessageId: null,
           latestAssistantMessageId: null,
+          followUpBoundary: null,
+          pendingFollowUpBoundary: null,
           reasoningText: "",
           reasoningPendingHighSurrogate: "",
           reasoningId: null,

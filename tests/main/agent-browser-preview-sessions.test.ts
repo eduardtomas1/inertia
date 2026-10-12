@@ -90,6 +90,68 @@ describe("conversation-owned Browser sessions", () => {
     expect(Reflect.get(children[0]!, "visible")).toBe(true);
   });
 
+  it("survives a renderer reload after a page's contents disappeared under the Browser", async () => {
+    const { broker, children } = harness();
+    const owner = { ownerId: "primary", contextId: conversationId, connectionId };
+    const bounds = { x: 10, y: 20, width: 900, height: 600 };
+    broker.connect(owner);
+    broker.setBounds({ ...owner, bounds });
+    const lost = (await broker.navigate({ ...owner, url: "http://127.0.0.1:3000/lost" })).activeTabId;
+    const view = children[0]!;
+    Reflect.set(view, "webContents", undefined);
+
+    expect(() => broker.releaseSurfaces()).not.toThrow();
+    expect(children).not.toContain(view);
+    const returned = broker.connect({ ...owner, recoverMissingLease: true });
+    expect(returned.tabs).toHaveLength(1);
+    expect(returned.activeTabId).not.toBe(lost);
+    expect(returned.url).toBe("");
+  });
+
+  it("drops a page whose contents were already destroyed when the Browser lays out again", async () => {
+    const { broker } = harness();
+    const contentsOffset = electronState.contents.length;
+    const owner = { ownerId: "primary", contextId: conversationId, connectionId };
+    broker.connect(owner);
+    broker.setBounds({ ...owner, bounds: { x: 10, y: 20, width: 900, height: 600 } });
+    await broker.navigate({ ...owner, url: "http://127.0.0.1:3000/kept" });
+    const opened = await broker.tab({ ...owner, action: "open", url: "http://127.0.0.1:3000/closed" });
+    electronState.contents[contentsOffset + 1]!.close();
+
+    expect(() => broker.releaseSurfaces()).not.toThrow();
+    const returned = broker.connect({ ...owner, recoverMissingLease: true });
+    expect(returned.tabs.map((tab) => tab.url)).toEqual(["http://127.0.0.1:3000/kept"]);
+    expect(returned.activeTabId).not.toBe(opened.activeTabId);
+  });
+
+  it("removes a page from its Browser as soon as the page closes itself", async () => {
+    const { broker, children, window } = harness();
+    const contentsOffset = electronState.contents.length;
+    const owner = { ownerId: "primary", contextId: conversationId, connectionId };
+    const bounds = { x: 10, y: 20, width: 900, height: 600 };
+    broker.connect(owner);
+    broker.setBounds({ ...owner, bounds });
+    const kept = (await broker.navigate({ ...owner, url: "http://127.0.0.1:3000/kept" })).activeTabId;
+    await broker.tab({ ...owner, action: "open", url: "http://127.0.0.1:3000/self-closing" });
+    const closing = electronState.contents[contentsOffset + 1]!;
+    const closingView = children.find((child) => child.webContents === closing as never)!;
+    window.webContents.send.mockClear();
+
+    closing.close();
+    Reflect.set(closingView, "webContents", undefined);
+    closing.emit("destroyed");
+
+    expect(children).not.toContain(closingView);
+    const keptView = children.find((child) => child.webContents === electronState.contents[contentsOffset] as never)!;
+    expect(Reflect.get(keptView, "visible")).toBe(true);
+    expect(Reflect.get(keptView, "bounds")).toEqual(bounds);
+    expect(window.webContents.send).toHaveBeenLastCalledWith("preview-state", expect.objectContaining({
+      activeTabId: kept,
+      tabs: [expect.objectContaining({ id: kept, url: "http://127.0.0.1:3000/kept" })],
+    }));
+    expect(() => broker.releaseSurfaces()).not.toThrow();
+  });
+
   it("gives a chat without a visible panel a real page size and keeps its page awake while the agent acts", async () => {
     vi.useFakeTimers();
     try {

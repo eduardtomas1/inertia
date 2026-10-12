@@ -27,31 +27,31 @@ body { user-select: none; }
 .mascot-status { position: absolute; bottom: 124px; left: 4px; display: flex; flex-direction: column; -webkit-app-region: no-drag; width: 232px; height: 116px; border: 1px solid #ffffff24; border-radius: 14px; background: #1d2229 linear-gradient(#ffffff08, #ffffff00 70%); box-shadow: inset 0 1px 0 #ffffff0d; color: #f1f2e9; transition: background-color 140ms ease, border-color 140ms ease; }
 .mascot-open { position: relative; flex: none; width: 100%; height: 114px; padding: 8px 10px; display: flex; flex-direction: column; text-align: left; border: 0; border-radius: inherit; background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .mascot-content { display: flex; flex-direction: column; width: 100%; min-width: 0; }
-.mascot-heading { display: flex; align-items: center; gap: 6px; height: 13px; min-width: 0; }
-.mascot-status:has(.mascot-picker:not([hidden])) .mascot-heading { padding-right: 64px; }
+.mascot-heading { display: flex; align-items: center; gap: 6px; height: 15px; min-width: 0; }
+.mascot-status:has(.mascot-picker:not([hidden])) .mascot-heading { padding-right: 76px; }
 .mascot-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #6f7a86; }
 .mascot-dot[data-tone="live"], .mascot[data-tone="live"] .mascot-heading .mascot-dot { background: #9fb4c6; }
 .mascot-dot[data-tone="attention"], .mascot[data-tone="attention"] .mascot-heading .mascot-dot { background: #e4cb90; }
 .mascot-dot[data-tone="done"], .mascot[data-tone="done"] .mascot-heading .mascot-dot { background: #7fb0b3; }
 .mascot-dot[data-tone="problem"], .mascot[data-tone="problem"] .mascot-heading .mascot-dot { background: #d27e75; }
 .mascot-dot[data-tone="auto"] { background: transparent; box-shadow: inset 0 0 0 1px #a9b5c2; }
-.mascot-label { min-width: 0; overflow: hidden; font-size: 11px; font-weight: 600; line-height: 13px; white-space: nowrap; text-overflow: ellipsis; }
+.mascot-label { min-width: 0; overflow: hidden; font-size: 12px; font-weight: 600; line-height: 15px; white-space: nowrap; text-overflow: ellipsis; }
 .mascot-time { flex: none; margin-left: auto; padding-left: 6px; color: #8d99a6; font-variant-numeric: tabular-nums; }
-.mascot-chat { display: flex; gap: 5px; margin-top: 3px; font-size: 10px; line-height: 12px; color: #a9b5c2; white-space: nowrap; min-width: 0; }
+.mascot-chat { display: flex; gap: 5px; margin-top: 2px; font-size: 12px; line-height: 15px; color: #a9b5c2; white-space: nowrap; min-width: 0; }
 .mascot-project { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: #8d99a6; }
 .mascot-project:empty { display: none; }
 .mascot-project:not(:empty) + .mascot-title::before { content: "/"; margin-right: 5px; color: #5d6773; }
 .mascot-title { overflow: hidden; text-overflow: ellipsis; }
-.mascot-message { margin-top: 5px; font-size: 12px; line-height: 16px; height: 48px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
-.mascot-footer { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: auto; font-size: 10px; line-height: 12px; }
+.mascot-message { margin-top: 4px; font-size: 12px; line-height: 16px; height: 48px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.mascot-footer { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: auto; font-size: 12px; line-height: 15px; }
 .mascot-steps { flex: none; width: 40px; height: 3px; border-radius: 2px; background: #ffffff17; overflow: hidden; }
 .mascot-steps i { display: block; height: 100%; background: #9fb4c6; transform: scaleX(var(--mascot-steps, 0)); transform-origin: left; transition: transform 240ms ease; }
 .mascot-action { margin-left: auto; white-space: nowrap; color: #e4cb90; font-weight: 600; }
 .mascot-open:disabled { cursor: default; }
 .mascot-status:has(.mascot-open:not(:disabled):hover) { background: #2b323b; border-color: #ffffff50; }
-.mascot-open:focus-visible, .mascot-picker:focus-visible, .mascot-option:focus-visible { outline: 2px solid #f5ce69; outline-offset: -3px; }
+.mascot-open:focus-visible, .mascot-picker:focus-visible, .mascot-option:focus-visible { outline: 2px solid #a3a3fa; outline-offset: -2px; }
 .mascot:focus { outline: none; }
-.mascot[data-keyboard-focus="true"]:focus-visible .mascot-status { outline: 2px solid #f5ce69; outline-offset: -3px; }
+.mascot[data-keyboard-focus="true"]:focus-visible .mascot-status { outline: 2px solid #a3a3fa; outline-offset: -2px; }
 .mascot[data-compact="true"] .mascot-open { height: 29px; }
 .mascot[data-compact="true"] :is(.mascot-chat, .mascot-message, .mascot-footer) { display: none; }
 .mascot[data-artwork="thinking"] .mascot-speech-dots { display: none; }
@@ -62,7 +62,7 @@ body { user-select: none; }
 .mascot-row span:last-child { flex: none; color: #8d99a6; }
 .mascot-row[data-tone="attention"] span:last-child { color: #e4cb90; }
 .mascot-row:hover span:first-child { color: #f1f2e9; }
-.mascot-row:focus-visible { outline: 2px solid #f5ce69; outline-offset: 0; }
+.mascot-row:focus-visible { outline: 2px solid #a3a3fa; outline-offset: 0; }
 .mascot-more { height: 12px; color: #8d99a6; }
 .mascot-detail { color: #b8c4d0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .mascot[data-phase="waiting-for-approval"] .mascot-status,
@@ -71,7 +71,7 @@ body { user-select: none; }
 .mascot[data-phase="interrupted"] .mascot-status { border-color: #d27e75; }
 .mascot[data-phase="completed"] .mascot-status { border-color: #557e81; }
 
-.mascot-picker { position: absolute; top: 5px; right: 6px; display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px 0 8px; border: 0; border-radius: 10px; background: #ffffff0a; color: #8d99a6; font: inherit; font-size: 10px; line-height: 12px; cursor: pointer; transition: background-color 140ms ease, color 140ms ease; }
+.mascot-picker { position: absolute; top: 5px; right: 6px; display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px 0 8px; border: 0; border-radius: 10px; background: #ffffff0a; color: #8d99a6; font: inherit; font-size: 12px; line-height: 15px; cursor: pointer; transition: background-color 140ms ease, color 140ms ease; }
 .mascot-picker::after { content: ""; width: 4px; height: 4px; margin-top: -2px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg); transition: transform 140ms ease; }
 .mascot-picker[aria-expanded="true"]::after { margin-top: 2px; transform: rotate(225deg); }
 .mascot-picker:hover, .mascot-picker[aria-expanded="true"] { background: #ffffff14; color: #f1f2e9; }
@@ -79,15 +79,15 @@ body { user-select: none; }
 .mascot-picker[data-attention="true"]::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #e4cb90; }
 
 .mascot-chooser { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 8px 6px 6px; }
-.mascot-chooser-title { height: 13px; margin: 0 4px 6px; color: #8d99a6; font-size: 10px; font-weight: 600; line-height: 13px; letter-spacing: 0.02em; }
+.mascot-chooser-title { height: 15px; margin: 0 4px 6px; color: #8d99a6; font-size: 12px; font-weight: 600; line-height: 15px; }
 .mascot-chats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ffffff30 transparent; }
-.mascot-option { flex: none; display: flex; align-items: center; gap: 7px; height: 20px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: #d7dde3; font: inherit; font-size: 11px; line-height: 13px; text-align: left; cursor: pointer; }
+.mascot-option { flex: none; display: flex; align-items: center; gap: 7px; height: 22px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: #d7dde3; font: inherit; font-size: 12px; line-height: 15px; text-align: left; cursor: pointer; }
 .mascot-option:hover { background: #ffffff0f; }
 .mascot-option[aria-pressed="true"] { background: #ffffff14; color: #f1f2e9; }
 .mascot-option-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.mascot-option-project { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; color: #8d99a6; }
+.mascot-option-project { flex: 0 1 auto; max-width: 40%; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: #8d99a6; }
 .mascot-option-project:empty { display: none; }
-.mascot-option-state { flex: none; font-size: 10px; color: #8d99a6; }
+.mascot-option-state { flex: none; font-size: 12px; color: #8d99a6; }
 .mascot-option[data-tone="attention"] .mascot-option-state { color: #e4cb90; }
 .mascot-option[aria-pressed="true"] .mascot-option-state::after { content: "✓"; margin-left: 6px; color: #e4cb90; }
 

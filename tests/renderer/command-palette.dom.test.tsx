@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { readSourceText } from "../helpers/source-text";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -403,6 +404,27 @@ describe("CommandPalette behavior", () => {
     expect(onNewThreadWithoutProject).not.toHaveBeenCalled();
   });
 
+  it("lists actions by name only, ends without a hint band and says no matches in one line", async () => {
+    const user = userEvent.setup();
+    render(
+      <CommandPalette open currentProjectId={project.id} projects={[project]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={noOp} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={noOp}
+        onAddProject={noOp} onOpenSettings={noOp} />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Search Inertia" });
+    const newChat = screen.getAllByRole("option")[0]!;
+    expect(newChat.querySelector("small")).toBeNull();
+    expect(dialog.querySelector("footer")).toBeNull();
+    await user.keyboard("zzqqxx");
+    const empty = await screen.findByText("No matches");
+    expect(empty.tagName).toBe("P");
+    expect(dialog.querySelector(".palette-empty svg")).toBeNull();
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toMatch(/\n\.palette-group button\.is-active \{ background: var\(--fill-strong\); \}/u);
+    expect(css).not.toMatch(/\.palette-footer \{|\.palette-actions \{/u);
+  });
+
   it("reaches the new chat project choice from search and steps back to it", async () => {
     const user = userEvent.setup();
     const studio = { ...project, id: "project-studio", name: "Studio", path: "/workspace/studio" };
@@ -418,7 +440,7 @@ describe("CommandPalette behavior", () => {
     const search = screen.getByRole("combobox", { name: "Search projects for the new chat" });
     expect(search).toHaveFocus();
     expect(search).toHaveValue("");
-    expect(screen.getByText("Back")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New chat in project" }).querySelector("footer")).toBeNull();
 
     screen.getByRole("button", { name: "Close search" }).focus();
     await user.keyboard("{Escape}");

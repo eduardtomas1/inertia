@@ -64,6 +64,7 @@ export function shouldConsolidateSettledWorkIntoRunDetails(
     | "isActive"
     | "agentTurn"
     | "terminalAssistantMessage"
+    | "followUpMessages"
     | "importantActivities"
     | "approvals"
     | "inputRequests"
@@ -73,10 +74,45 @@ export function shouldConsolidateSettledWorkIntoRunDetails(
   return !turn.isActive
     && turn.agentTurn.status === "completed"
     && turn.terminalAssistantMessage !== null
+    && turn.followUpMessages.length === 0
     && turn.importantActivities.length === 0
     && turn.approvals.length === 0
     && turn.inputRequests.length === 0
     && turn.systemMessages.length === 0;
+}
+
+export function layeredHtmlRenders(
+  turn: Pick<ResponseTurn, "htmlRenders" | "followUpMessages">,
+): ChatMessage[] {
+  const lastFollowUp = turn.followUpMessages.at(-1);
+  if (!lastFollowUp) return turn.htmlRenders;
+  const since = timestamp(lastFollowUp.createdAt);
+  return turn.htmlRenders.filter(({ createdAt }) => timestamp(createdAt) > since);
+}
+
+export function answerTailCommentary(
+  turn: Pick<
+    ResponseTurn,
+    | "isActive"
+    | "htmlRenders"
+    | "activities"
+    | "approvals"
+    | "inputRequests"
+    | "commentaryMessages"
+    | "followUpMessages"
+  >,
+): ChatMessage[] | null {
+  const lastRender = layeredHtmlRenders(turn).at(-1);
+  if (!turn.isActive || !lastRender) return null;
+  if (turn.approvals.length > 0 || turn.inputRequests.length > 0) return null;
+  const since = timestamp(lastRender.createdAt);
+  const afterRender = ({ createdAt }: { createdAt: string }): boolean =>
+    timestamp(createdAt) > since;
+  const workFollows = turn.activities.some((activity) =>
+    (activity.kind === "tool" || activity.kind === "command" || activity.kind === "file")
+    && afterRender(activity))
+    || turn.followUpMessages.some(afterRender);
+  return workFollows ? null : turn.commentaryMessages.filter(afterRender);
 }
 
 export interface ResponseTimelineCompatibility {

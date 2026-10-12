@@ -1,15 +1,5 @@
 import { writeClipboardText } from "../utils/clipboard";
-import {
-  Brain,
-  Check,
-  Folder,
-  KeyRound,
-  Scale,
-  Share2,
-  ShieldCheck,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { ChevronDown, TriangleAlert } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -53,7 +43,8 @@ import {
   recoveryCommandShell,
 } from "../utils/duoRecoveryCommands";
 import { ModelChooser } from "./ModelChooser";
-import { IconButton, LoadingMark } from "./ui";
+import { DialogShell } from "./DialogShell";
+import { LoadingMark, Switch } from "./ui";
 import "./MultiSpawnDialog.css";
 
 export interface MultiSpawnDialogProps {
@@ -150,20 +141,16 @@ function MultiSpawnSideEditor({
       aria-labelledby={`multi-spawn-side-heading-${index}`}
     >
       <header>
-        <span className="multi-spawn-side-number">
-          {isJudge ? <Scale size={13} /> : index + 1}
-        </span>
         <span>
-          <strong id={`multi-spawn-side-heading-${index}`}>
+          <h3 id={`multi-spawn-side-heading-${index}`}>
             {index === 0 ? "Route A" : index === 1 ? "Route B" : "Judge route"}
-          </strong>
-          <small>
+          </h3>
+          <span>
             {routeState.selected.harnessLabel} ·{" "}
             {routeState.selected.backendProfileName}
-          </small>
+          </span>
         </span>
         <span className={`multi-spawn-readiness ${ready ? "is-ready" : ""}`}>
-          {ready ? <Check size={11} /> : <KeyRound size={11} />}
           {ready ? "Ready" : routeState.statusBadge}
         </span>
       </header>
@@ -189,7 +176,7 @@ function MultiSpawnSideEditor({
           />
         </label>
         <label className="multi-spawn-field" htmlFor={projectId}>
-          <span><Folder size={11} /> Project</span>
+          <span>Project</span>
           <select
             id={projectId}
             aria-label={`${chatLabel} project`}
@@ -224,7 +211,7 @@ function MultiSpawnSideEditor({
 
       <div className="multi-spawn-field-grid is-compact">
         <label className="multi-spawn-field" htmlFor={reasoningId}>
-          <span><Brain size={11} /> Reasoning</span>
+          <span>Reasoning</span>
           <select
             id={reasoningId}
             aria-label={`${chatLabel} reasoning`}
@@ -247,7 +234,7 @@ function MultiSpawnSideEditor({
           </select>
         </label>
         <label className="multi-spawn-field" htmlFor={accessId}>
-          <span><ShieldCheck size={11} /> Access</span>
+          <span>Access</span>
           <select
             id={accessId}
             aria-label={`${chatLabel} access`}
@@ -271,10 +258,10 @@ function MultiSpawnSideEditor({
         <div className="multi-spawn-route-warning" role="status">
           <span>
             <strong>{routeState.statusTitle}</strong>
-            <small>{routeState.statusDetail}</small>
+            <span>{routeState.statusDetail}</span>
           </span>
           {routeState.repairAction && routeState.providerId && (
-            <button type="button" disabled={disabled} onClick={onRepair}>
+            <button type="button" className="secondary-button" disabled={disabled} onClick={onRepair}>
               Open setup
             </button>
           )}
@@ -573,414 +560,383 @@ export function MultiSpawnDialog({
   };
 
   return (
-    <div
-      className="dialog-backdrop multi-spawn-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !submitting && !cancelling) onClose();
-      }}
-    >
-      <section
-        ref={dialogRef}
-        className="multi-spawn-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="multi-spawn-title"
-        aria-describedby="multi-spawn-description"
-      >
-        <header className="multi-spawn-dialog-header">
-          <span className="multi-spawn-dialog-mark">
-            <Share2 size={17} strokeWidth={1.75} />
-          </span>
-          <span>
-            <h2 id="multi-spawn-title">Launch a duo</h2>
-            <p id="multi-spawn-description">
-              Send one brief to two independent agents with separate routes
-              and permissions.
-            </p>
-          </span>
-          <IconButton
-            label="Close multi-spawn"
-            disabled={cancelling}
-            onClick={onClose}
-          >
-            <X size={16} />
-          </IconButton>
-        </header>
-
-        <div className="multi-spawn-dialog-body">
-        <div className="multi-spawn-prompt-zone">
-          <label htmlFor="multi-spawn-prompt">
-            <span>Brief for both chats</span>
-            <small>{draft.prompt.trim().length.toLocaleString("en-US")} / 20,000</small>
-          </label>
-          <textarea
-            ref={promptRef}
-            id="multi-spawn-prompt"
-            aria-label="Shared prompt"
-            value={draft.prompt}
-            maxLength={20_000}
+    <DialogShell
+      ref={dialogRef}
+      className="multi-spawn-dialog"
+      backdropClassName="multi-spawn-backdrop"
+      bodyClassName="multi-spawn-dialog-body is-flush"
+      titleId="multi-spawn-title"
+      title="Launch a duo"
+      description="Send one brief to two independent agents with separate routes and permissions."
+      closeLabel="Close multi-spawn"
+      closeDisabled={cancelling}
+      onClose={onClose}
+      onDismiss={() => { if (!submitting && !cancelling) onClose(); }}
+      trapFocus={false}
+      footerStart={(
+        <label className="multi-spawn-preset-toggle">
+          <input
+            type="checkbox"
+            checked={draft.rememberPreset}
             disabled={busy}
-            placeholder="Ask both agents to inspect, implement, compare, or review the same work…"
             onChange={(event) => setDraft({
               ...draft,
-              prompt: event.currentTarget.value,
+              rememberPreset: event.currentTarget.checked,
             })}
           />
-        </div>
-
-        <div className="multi-spawn-sides">
-          <MultiSpawnSideEditor
-            index={0}
-            side={draft.sides[0]}
-            projects={regularProjects}
-            routeState={routeStates[0]}
-            disabled={busy}
-            onChange={(next) => updateSide(0, next)}
-            onRepair={() => openRepair(0)}
-          />
-          <MultiSpawnSideEditor
-            index={1}
-            side={draft.sides[1]}
-            projects={regularProjects}
-            routeState={routeStates[1]}
-            disabled={busy}
-            onChange={(next) => updateSide(1, next)}
-            onRepair={() => openRepair(1)}
-          />
-        </div>
-
-        <section
-          className={`multi-spawn-comparison${draft.comparison.enabled ? " is-enabled" : ""}`}
-          aria-labelledby="multi-spawn-comparison-title"
+          <span>
+            Save this pairing
+            <small>Saves names, routes, reasoning, access, and the compare toggle locally — never prompts or projects.</small>
+          </span>
+        </label>
+      )}
+      footer={<>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={cancelling}
+          onClick={onClose}
         >
-          <label className="multi-spawn-comparison-toggle">
-            <input
-              type="checkbox"
-              aria-label="Compare with a third model"
-              checked={draft.comparison.enabled}
-              disabled={busy}
-              onChange={(event) => setDraft({
-                ...draft,
-                comparison: {
-                  ...draft.comparison,
-                  enabled: event.currentTarget.checked,
-                },
-              })}
-            />
+          {cancelling ? "Cancelling…" : submitting ? "Cancel launch" : "Cancel"}
+        </button>
+        <button
+          type="button"
+          className="primary-button multi-spawn-launch"
+          disabled={
+            busy || launchBlocked || Boolean(validationError) || !routesReady
+          }
+          title={validationError ?? (!routesReady
+            ? (draft.comparison.enabled
+                ? "All three routes must be ready."
+                : "Both routes must be ready.")
+            : undefined)}
+          onClick={submitDraft}
+        >
+          {submitting ? <LoadingMark label="Launching duo" /> : null}
+          {submitting ? "Launching duo…" : "Launch duo"}
+        </button>
+      </>}
+    >
+      <div className="multi-spawn-prompt-zone">
+        <label htmlFor="multi-spawn-prompt">
+          <span>Brief for both chats</span>
+          <small>{draft.prompt.trim().length.toLocaleString("en-US")} / 20,000</small>
+        </label>
+        <textarea
+          ref={promptRef}
+          id="multi-spawn-prompt"
+          aria-label="Shared prompt"
+          value={draft.prompt}
+          maxLength={20_000}
+          disabled={busy}
+          placeholder="Ask both agents to inspect, implement, compare, or review the same work…"
+          onChange={(event) => setDraft({
+            ...draft,
+            prompt: event.currentTarget.value,
+          })}
+        />
+      </div>
+
+      <div className="multi-spawn-sides">
+        <MultiSpawnSideEditor
+          index={0}
+          side={draft.sides[0]}
+          projects={regularProjects}
+          routeState={routeStates[0]}
+          disabled={busy}
+          onChange={(next) => updateSide(0, next)}
+          onRepair={() => openRepair(0)}
+        />
+        <MultiSpawnSideEditor
+          index={1}
+          side={draft.sides[1]}
+          projects={regularProjects}
+          routeState={routeStates[1]}
+          disabled={busy}
+          onChange={(next) => updateSide(1, next)}
+          onRepair={() => openRepair(1)}
+        />
+      </div>
+
+      <section
+        className={`multi-spawn-comparison${draft.comparison.enabled ? " is-enabled" : ""}`}
+        aria-labelledby="multi-spawn-comparison-title"
+      >
+        <div className="multi-spawn-comparison-toggle">
+          <Switch
+            id="multi-spawn-comparison-switch"
+            checked={draft.comparison.enabled}
+            disabled={busy}
+            onChange={(enabled) => setDraft({
+              ...draft,
+              comparison: {
+                ...draft.comparison,
+                enabled,
+              },
+            })}
+          />
+          <span>
+            <h3 id="multi-spawn-comparison-title">
+              <label htmlFor="multi-spawn-comparison-switch">Add an independent judge</label>
+            </h3>
             <span>
-              <strong id="multi-spawn-comparison-title">
-                Add an independent judge
-              </strong>
-              <small>
-                Runs after both agents finish and receives bounded results only.
-              </small>
+              Runs after both agents finish and receives bounded results only.
             </span>
-          </label>
-
-          {draft.comparison.enabled && (
-            <div className="multi-spawn-comparison-body">
-              <details className="multi-spawn-judge-config">
-                <summary>
-                  <strong>Independent judge</strong>
-                  <span className="multi-spawn-judge-config-action">
-                    Configure judge
-                  </span>
-                </summary>
-                <MultiSpawnSideEditor
-                  index={2}
-                  side={draft.comparison.side}
-                  projects={regularProjects}
-                  routeState={comparisonRouteState}
-                  disabled={busy}
-                  onChange={updateComparison}
-                  onRepair={() => openRepair(2)}
-                />
-              </details>
-              {judgeSharesSourceCheckout && (
-                <div className="multi-spawn-judge-risk" role="status">
-                  <TriangleAlert size={15} />
-                  <span>
-                    <strong>Judge can edit a source checkout</strong>
-                    Full access can modify this checkout. Choose Supervised to
-                    keep comparison read-only.
-                  </span>
-                </div>
-              )}
-              <details className="multi-spawn-lock-contract">
-                <summary>What is shared with the judge?</summary>
-                <p>
-                  Inertia waits for both pinned turns, then sends the shared
-                  brief, terminal status, and up to 5,500 characters from each
-                  assistant result. It sends no source session,
-                  reasoning, tool history, permissions, credentials,
-                  attachments, or hidden context.
-                </p>
-                <p>
-                  The judge uses only the selected project, route, and access.
-                  It does not freeze either source chat or working tree.
-                </p>
-              </details>
-            </div>
-          )}
-        </section>
-
-        {sharesLocalCheckout && (
-          <div className="multi-spawn-dialog-status" role="status">
-            Both agents will share this project checkout. Concurrent edits can
-            overlap; choose different projects or enable isolated worktrees in
-            Settings when you need independent changes.
-          </div>
-        )}
-
-        {(error || recoveryStatus || (!routesReady && !submitting)) && (
-          <div
-            className={`multi-spawn-dialog-status${error ? " is-error" : ""}`}
-            role={error ? "alert" : "status"}
-          >
-            {error
-              ?? (draft.comparison.enabled
-                ? "Choose three ready routes before launching the Duo comparison."
-                : "Choose two ready routes before launching the duo.")}
-            {recoveryStatus && (
-              <section
-                className="multi-spawn-recovery-status"
-                aria-label="Duo dispatch and recovery status"
-              >
-                <strong>
-                  {recoveryStatus.state === "recovery-required"
-                    ? "Recovery required"
-                    : recoveryStatus.state === "interrupted"
-                      ? "Dispatch outcome uncertain"
-                      : recoveryStatus.sides.some(
-                          ({ dispatchState }) => dispatchState === "started",
-                        ) && recoveryStatus.sides.some(
-                          ({ dispatchState }) => dispatchState === "failed",
-                        )
-                        ? "Partial provider dispatch"
-                        : `Duo ${recoveryStatus.state}`}
-                </strong>
-                <p>
-                  Local coordination is durable. A provider may have accepted
-                  work before its sibling failed or the connection changed, so
-                  Inertia will not claim those external effects were atomic.
-                </p>
-                <dl>
-                  {recoveryStatus.sides.map((side) => (
-                    <div key={side.ordinal}>
-                      <dt>Route {side.ordinal + 1}</dt>
-                      <dd>{({
-                        pending: "Not dispatched",
-                        claimed: "Dispatch claimed",
-                        started: "Provider accepted start",
-                        failed: "Provider start failed",
-                        cancelled: "Dispatch cancelled",
-                        uncertain: "Provider effect unknown",
-                      } as const)[side.dispatchState]}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {recoveryStatus.comparison && (
-                  <section
-                    className="multi-spawn-comparison-status"
-                    aria-label="Third-model comparison status"
-                  >
-                    <span>
-                      <Scale size={14} />
-                      <strong>Separate third-model judge</strong>
-                    </span>
-                    <dl>
-                      <div>
-                        <dt>State</dt>
-                        <dd>{({
-                          waiting: "Locked · waiting for both source turns",
-                          dispatching: "Durable judge dispatch claimed",
-                          running: "Judge is comparing",
-                          completed: "Comparison completed",
-                          failed: "Judge failed · explicit retry available",
-                          cancelled: "Comparison cancelled · lock released",
-                          interrupted: "Judge outcome interrupted · not retried",
-                        } as const)[recoveryStatus.comparison.state]}</dd>
-                      </div>
-                      <div>
-                        <dt>Judge chat</dt>
-                        <dd><code>{recoveryStatus.comparison.conversationId ?? "Not created"}</code></dd>
-                      </div>
-                      <div>
-                        <dt>Attempts</dt>
-                        <dd>{recoveryStatus.comparison.attempt}</dd>
-                      </div>
-                    </dl>
-                    {recoveryStatus.comparison.error && (
-                      <p>{recoveryStatus.comparison.error}</p>
-                    )}
-                    <div>
-                      {(recoveryStatus.comparison.state === "failed"
-                        || recoveryStatus.comparison.state === "interrupted")
-                        && onRetryComparison && (
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() => { void onRetryComparison(); }}
-                        >
-                          {retryingComparison ? "Retrying judge…" : "Retry judge explicitly"}
-                        </button>
-                      )}
-                      {recoveryStatus.comparison.state !== "completed"
-                        && recoveryStatus.comparison.state !== "cancelled"
-                        && onCancelComparison && (
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          disabled={busy}
-                          onClick={() => { void onCancelComparison(); }}
-                        >
-                          {cancellingComparison
-                            ? "Cancelling comparison…"
-                            : "Cancel comparison and release lock"}
-                        </button>
-                      )}
-                    </div>
-                  </section>
-                )}
-                {onRecheckRecovery && (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={busy || recheckingRecovery}
-                    onClick={() => { void onRecheckRecovery(); }}
-                  >
-                    {recheckingRecovery ? "Re-checking…" : "Re-check recovery status"}
-                  </button>
-                )}
-                {recoveryStatus.state === "interrupted"
-                  && onAcknowledgeRecovery && (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={busy || recheckingRecovery}
-                    onClick={() => { void onAcknowledgeRecovery(); }}
-                  >
-                    {acknowledgingRecovery
-                      ? "Acknowledging…"
-                      : "I inspected both chats — continue"}
-                  </button>
-                )}
-              </section>
-            )}
-            {recoveryGuidance.map((guidance) => (
-              <section
-                key={`${guidance.launchId}:${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
-                className="multi-spawn-recovery-guidance"
-                aria-label={`Manual Git recovery for route ${guidance.ordinal + 1}`}
-              >
-                <p>
-                  Inspect this exact topology before making a manual change.
-                  Commands are offered only for an exact owned worktree or a
-                  retained generated branch; ambiguous and conflicting state
-                  remains read-only.
-                </p>
-                <dl>
-                  <dt>Repository</dt>
-                  <dd><code>{guidance.repositoryPath}</code></dd>
-                  <dt>Planned path</dt>
-                  <dd><code>{guidance.plannedPath}</code></dd>
-                  <dt>Registered path</dt>
-                  <dd><code>{guidance.observedPath ?? "Not verified"}</code></dd>
-                  <dt>Worktree ID</dt>
-                  <dd><code>{guidance.worktreeId ?? "Not verified"}</code></dd>
-                  <dt>Topology</dt>
-                  <dd><code>{guidance.topology}</code></dd>
-                  <dt>Generated branch</dt>
-                  <dd><code>{guidance.generatedBranch}</code></dd>
-                  <dt>Expected commit</dt>
-                  <dd><code>{guidance.expectedHead ?? "Not verified"}</code></dd>
-                  <dt>Observed branch</dt>
-                  <dd><code>{guidance.observedBranch ?? "Not verified"}</code></dd>
-                  <dt>Observed commit</dt>
-                  <dd><code>{guidance.observedHead ?? "Not verified"}</code></dd>
-                </dl>
-                {guidance.actions.length > 0 && (
-                  <ol>
-                    {guidance.actions.map((action) => {
-                      const key = `${action.label}:${action.args.join("\0")}`;
-                      const shell = recoveryCommandShell(action);
-                      const commandText = formatDuoRecoveryCommand(action, shell);
-                      return (
-                      <li key={key}>
-                        <strong>{action.label}</strong>
-                        <span>{shell === "powershell" ? "PowerShell" : "POSIX shell"}</span>
-                        <code data-recovery-command>{commandText}</code>
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          onClick={() => {
-                            void copyRecoveryCommand(key, commandText);
-                          }}
-                        >
-                          {copiedRecoveryCommand === key
-                            ? "Copied"
-                            : `Copy ${action.label.toLocaleLowerCase("en-US")} command`}
-                        </button>
-                      </li>
-                      );
-                    })}
-                  </ol>
-                )}
-              </section>
-            ))}
-          </div>
-        )}
-
+          </span>
         </div>
-        <footer className="multi-spawn-dialog-footer">
-          <label className="multi-spawn-preset-toggle">
-            <input
-              type="checkbox"
-              checked={draft.rememberPreset}
-              disabled={busy}
-              onChange={(event) => setDraft({
-                ...draft,
-                rememberPreset: event.currentTarget.checked,
-              })}
-            />
-            <span>
-              <strong>Save this pairing</strong>
-              <small>
-                Saves names, routes, reasoning, access, and the compare toggle
-                locally — never prompts or projects.
-              </small>
-            </span>
-          </label>
-          <div>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={cancelling}
-              onClick={onClose}
-            >
-              {cancelling ? "Cancelling…" : submitting ? "Cancel launch" : "Cancel"}
-            </button>
-            <button
-              type="button"
-              className="primary-button multi-spawn-launch"
-              disabled={
-                busy || launchBlocked || Boolean(validationError) || !routesReady
-              }
-              title={validationError ?? (!routesReady
-                ? (draft.comparison.enabled
-                    ? "All three routes must be ready."
-                    : "Both routes must be ready.")
-                : undefined)}
-              onClick={submitDraft}
-            >
-              {submitting ? <LoadingMark label="Launching duo" /> : null}
-              {submitting ? "Launching duo…" : "Launch duo"}
-            </button>
+
+        {draft.comparison.enabled && (
+          <div className="multi-spawn-comparison-body">
+            <details className="multi-spawn-judge-config">
+              <summary>
+                <span>Independent judge</span>
+                <span className="multi-spawn-judge-config-action">
+                  Configure judge
+                  <ChevronDown size={14} aria-hidden="true" />
+                </span>
+              </summary>
+              <MultiSpawnSideEditor
+                index={2}
+                side={draft.comparison.side}
+                projects={regularProjects}
+                routeState={comparisonRouteState}
+                disabled={busy}
+                onChange={updateComparison}
+                onRepair={() => openRepair(2)}
+              />
+            </details>
+            {judgeSharesSourceCheckout && (
+              <div className="multi-spawn-judge-risk" role="status">
+                <TriangleAlert size={14} />
+                <span>
+                  <strong>Judge can edit a source checkout</strong>
+                  Full access can modify this checkout. Choose Supervised to
+                  keep comparison read-only.
+                </span>
+              </div>
+            )}
+            <details className="multi-spawn-lock-contract">
+              <summary>What is shared with the judge?</summary>
+              <p>
+                Inertia waits for both pinned turns, then sends the shared
+                brief, terminal status, and up to 5,500 characters from each
+                assistant result. It sends no source session,
+                reasoning, tool history, permissions, credentials,
+                attachments, or hidden context.
+              </p>
+              <p>
+                The judge uses only the selected project, route, and access.
+                It does not freeze either source chat or working tree.
+              </p>
+            </details>
           </div>
-        </footer>
+        )}
       </section>
-    </div>
+
+      {sharesLocalCheckout && (
+        <div className="multi-spawn-dialog-status" role="status">
+          Both agents will share this project checkout. Concurrent edits can
+          overlap; choose different projects or enable isolated worktrees in
+          Settings when you need independent changes.
+        </div>
+      )}
+
+      {(error || recoveryStatus || (!routesReady && !submitting)) && (
+        <div
+          className={`multi-spawn-dialog-status${error ? " is-error" : ""}`}
+          role={error ? "alert" : "status"}
+        >
+          {error
+            ?? (draft.comparison.enabled
+              ? "Choose three ready routes before launching the Duo comparison."
+              : "Choose two ready routes before launching the duo.")}
+          {recoveryStatus && (
+            <section
+              className="multi-spawn-recovery-status"
+              aria-label="Duo dispatch and recovery status"
+            >
+              <strong>
+                {recoveryStatus.state === "recovery-required"
+                  ? "Recovery required"
+                  : recoveryStatus.state === "interrupted"
+                    ? "Dispatch outcome uncertain"
+                    : recoveryStatus.sides.some(
+                        ({ dispatchState }) => dispatchState === "started",
+                      ) && recoveryStatus.sides.some(
+                        ({ dispatchState }) => dispatchState === "failed",
+                      )
+                      ? "Partial provider dispatch"
+                      : `Duo ${recoveryStatus.state}`}
+              </strong>
+              <p>
+                Local coordination is durable. A provider may have accepted
+                work before its sibling failed or the connection changed, so
+                Inertia will not claim those external effects were atomic.
+              </p>
+              <dl>
+                {recoveryStatus.sides.map((side) => (
+                  <div key={side.ordinal}>
+                    <dt>Route {side.ordinal + 1}</dt>
+                    <dd>{({
+                      pending: "Not dispatched",
+                      claimed: "Dispatch claimed",
+                      started: "Provider accepted start",
+                      failed: "Provider start failed",
+                      cancelled: "Dispatch cancelled",
+                      uncertain: "Provider effect unknown",
+                    } as const)[side.dispatchState]}</dd>
+                  </div>
+                ))}
+              </dl>
+              {recoveryStatus.comparison && (
+                <section
+                  className="multi-spawn-comparison-status"
+                  aria-label="Third-model comparison status"
+                >
+                  <h3>Separate third-model judge</h3>
+                  <dl>
+                    <div>
+                      <dt>State</dt>
+                      <dd>{({
+                        waiting: "Locked · waiting for both source turns",
+                        dispatching: "Durable judge dispatch claimed",
+                        running: "Judge is comparing",
+                        completed: "Comparison completed",
+                        failed: "Judge failed · explicit retry available",
+                        cancelled: "Comparison cancelled · lock released",
+                        interrupted: "Judge outcome interrupted · not retried",
+                      } as const)[recoveryStatus.comparison.state]}</dd>
+                    </div>
+                    <div>
+                      <dt>Judge chat</dt>
+                      <dd><code>{recoveryStatus.comparison.conversationId ?? "Not created"}</code></dd>
+                    </div>
+                    <div>
+                      <dt>Attempts</dt>
+                      <dd>{recoveryStatus.comparison.attempt}</dd>
+                    </div>
+                  </dl>
+                  {recoveryStatus.comparison.error && (
+                    <p>{recoveryStatus.comparison.error}</p>
+                  )}
+                  <div>
+                    {(recoveryStatus.comparison.state === "failed"
+                      || recoveryStatus.comparison.state === "interrupted")
+                      && onRetryComparison && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        onClick={() => { void onRetryComparison(); }}
+                      >
+                        {retryingComparison ? "Retrying judge…" : "Retry judge explicitly"}
+                      </button>
+                    )}
+                    {recoveryStatus.comparison.state !== "completed"
+                      && recoveryStatus.comparison.state !== "cancelled"
+                      && onCancelComparison && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={busy}
+                        onClick={() => { void onCancelComparison(); }}
+                      >
+                        {cancellingComparison
+                          ? "Cancelling comparison…"
+                          : "Cancel comparison and release lock"}
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
+              {onRecheckRecovery && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy || recheckingRecovery}
+                  onClick={() => { void onRecheckRecovery(); }}
+                >
+                  {recheckingRecovery ? "Re-checking…" : "Re-check recovery status"}
+                </button>
+              )}
+              {recoveryStatus.state === "interrupted"
+                && onAcknowledgeRecovery && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={busy || recheckingRecovery}
+                  onClick={() => { void onAcknowledgeRecovery(); }}
+                >
+                  {acknowledgingRecovery
+                    ? "Acknowledging…"
+                    : "I inspected both chats — continue"}
+                </button>
+              )}
+            </section>
+          )}
+          {recoveryGuidance.map((guidance) => (
+            <section
+              key={`${guidance.launchId}:${guidance.ordinal}:${guidance.worktreeId ?? "unknown"}`}
+              className="multi-spawn-recovery-guidance"
+              aria-label={`Manual Git recovery for route ${guidance.ordinal + 1}`}
+            >
+              <p>
+                Inspect this exact topology before making a manual change.
+                Commands are offered only for an exact owned worktree or a
+                retained generated branch; ambiguous and conflicting state
+                remains read-only.
+              </p>
+              <dl>
+                <dt>Repository</dt>
+                <dd><code>{guidance.repositoryPath}</code></dd>
+                <dt>Planned path</dt>
+                <dd><code>{guidance.plannedPath}</code></dd>
+                <dt>Registered path</dt>
+                <dd><code>{guidance.observedPath ?? "Not verified"}</code></dd>
+                <dt>Worktree ID</dt>
+                <dd><code>{guidance.worktreeId ?? "Not verified"}</code></dd>
+                <dt>Topology</dt>
+                <dd><code>{guidance.topology}</code></dd>
+                <dt>Generated branch</dt>
+                <dd><code>{guidance.generatedBranch}</code></dd>
+                <dt>Expected commit</dt>
+                <dd><code>{guidance.expectedHead ?? "Not verified"}</code></dd>
+                <dt>Observed branch</dt>
+                <dd><code>{guidance.observedBranch ?? "Not verified"}</code></dd>
+                <dt>Observed commit</dt>
+                <dd><code>{guidance.observedHead ?? "Not verified"}</code></dd>
+              </dl>
+              {guidance.actions.length > 0 && (
+                <ol>
+                  {guidance.actions.map((action) => {
+                    const key = `${action.label}:${action.args.join("\0")}`;
+                    const shell = recoveryCommandShell(action);
+                    const commandText = formatDuoRecoveryCommand(action, shell);
+                    return (
+                    <li key={key}>
+                      <strong>{action.label}</strong>
+                      <span>{shell === "powershell" ? "PowerShell" : "POSIX shell"}</span>
+                      <code data-recovery-command>{commandText}</code>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          void copyRecoveryCommand(key, commandText);
+                        }}
+                      >
+                        {copiedRecoveryCommand === key
+                          ? "Copied"
+                          : `Copy ${action.label.toLocaleLowerCase("en-US")} command`}
+                      </button>
+                    </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
+    </DialogShell>
   );
 }

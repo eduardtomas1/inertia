@@ -254,6 +254,7 @@ export function useSplitWorkspaceScene({
     subscribe: connection.subscribe,
     setActionError,
     setActiveTool: layout.setActiveTool,
+    onBranchChanged: onTerminal,
     loadGitStatusOnMount: Boolean(splitConversation && splitProject),
     loadGitOnMount:
       layout.activeTool === "changes"
@@ -460,6 +461,7 @@ export function useSplitWorkspaceScene({
           ...model.chat,
           sending: sendingConversationIds.has(splitConversation.id),
         },
+        checkoutBranch: model.checkoutBranch,
         resizeHandle: model.resizeHandle,
         tools: model.tools,
       },

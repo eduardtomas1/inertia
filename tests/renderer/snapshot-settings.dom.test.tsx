@@ -90,3 +90,12 @@ it("refreshes permission status when returning from macOS Settings", async () =>
   expect(await screen.findByText("macOS capture permissions are granted.")).toBeVisible();
   expect(screen.queryByRole("button", { name: "Accessibility settings" })).toBeNull();
 });
+
+it("keeps the privacy and permission lines and the collapsed snapshot guide", async () => {
+  window.inertia = { ...original, snapshot: vi.fn().mockResolvedValue(disabled) };
+  render(<SnapshotSettings />);
+  expect(await screen.findByText(/Screenshots may still contain sensitive information/u)).toBeVisible();
+  expect(screen.getByText(/Inertia must find and mask its editable fields/u)).toBeVisible();
+  expect(screen.getByText("How to take a snapshot").closest("details")).not.toHaveAttribute("open");
+  expect(screen.getByText("Detected editable fields are masked.")).toBeInTheDocument();
+});

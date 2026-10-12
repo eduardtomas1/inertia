@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  toolsMinimumWidth,
   transferDraftWorkspacePanel,
   useWorkspaceLayout,
 } from "../../src/renderer/src/hooks/useWorkspaceLayout";
@@ -76,6 +77,7 @@ function LayoutHarness({
       <output aria-label="Tool width">{layout.tools.width}</output>
       <output aria-label="Sidebar maximum">{layout.sidebar.max}</output>
       <output aria-label="Tool maximum">{layout.tools.maxWidth}</output>
+      <output aria-label="Tool minimum">{layout.tools.minWidth}</output>
       <button type="button" onClick={layout.toggleWorkspaceTools}>Toggle tools</button>
       <button type="button" onClick={() => layout.setActiveTool("changes")}>Show changes</button>
       <button
@@ -251,6 +253,41 @@ describe("workspace startup surface", () => {
 
     act(() => bodyObserver.emit(body, 1100, 800));
     expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
+  });
+
+  it("keeps the panel minimum at 300px on every platform", () => {
+    expect(toolsMinimumWidth()).toBe(300);
+  });
+
+  it("keeps the panel inline beside the Windows caption buttons until the chat drops below 360px", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "win32" },
+    });
+    try {
+      render(<LayoutHarness />);
+      fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+      const shell = screen.getByTestId("app-shell-target");
+      const body = screen.getByTestId("workspace-body-target");
+      await waitFor(() =>
+        expect(resizeObservers.some(({ targets }) => targets.has(body))).toBe(true));
+      const shellObserver = resizeObservers.find(({ targets }) => targets.has(shell))!;
+      const bodyObserver = resizeObservers.find(({ targets }) => targets.has(body))!;
+
+      shell.style.setProperty("--titlebar-overlay-inset", "138px");
+      act(() => shellObserver.emit(shell, 1600, 800));
+      expect(screen.getByLabelText("Tool minimum")).toHaveTextContent("300");
+      fireEvent.click(screen.getByRole("button", { name: "Resize to 360" }));
+      expect(screen.getByLabelText("Tool width")).toHaveTextContent("360");
+
+      act(() => bodyObserver.emit(body, 667, 800));
+      expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("inline");
+      expect(screen.getByLabelText("Tool maximum")).toHaveTextContent("300");
+      act(() => bodyObserver.emit(body, 666, 800));
+      expect(screen.getByLabelText("Panel presentation")).toHaveTextContent("sheet");
+    } finally {
+      Reflect.deleteProperty(window, "inertia");
+    }
   });
 
   it("returns to the inline panel once the sidebar can yield instead of staying a sheet", async () => {

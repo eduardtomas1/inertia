@@ -36,6 +36,8 @@ export const WORKSPACE_BOUND_SURFACES = [
 
 export const RIGHT_PANEL_SIBLING_MIN_WIDTH = 360;
 
+export const CLOSE_ACTIVE_PANEL_SURFACE_EVENT = "inertia:close-active-panel-surface";
+
 export interface RightPanelState {
   isOpen: boolean;
   activeSurfaceId: WorkspacePanelTab | null;
@@ -117,6 +119,19 @@ export function closeRightPanelSurface(
     surfaces,
     activeSurfaceId: fallback,
   };
+}
+
+export function moveRightPanelSurface(
+  current: RightPanelState,
+  surface: WorkspacePanelTab,
+  toIndex: number,
+): RightPanelState {
+  const from = current.surfaces.indexOf(surface);
+  const to = Math.min(Math.max(toIndex, 0), current.surfaces.length - 1);
+  if (from < 0 || from === to) return current;
+  const surfaces = current.surfaces.filter((entry) => entry !== surface);
+  surfaces.splice(to, 0, surface);
+  return { ...current, surfaces };
 }
 
 export function closeOtherRightPanelSurfaces(

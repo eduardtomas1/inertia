@@ -39,9 +39,9 @@ export interface ModelSearchRoute {
   unavailableReason: string | null;
 }
 
-export type ModelSearchEmptyState =
-  | { kind: "no-models"; message: "No models are available yet." }
-  | { kind: "no-results"; message: string };
+export interface ModelSearchEmptyState {
+  kind: "no-models" | "no-results";
+}
 
 export interface ModelSearchResult<Route extends ModelSearchRoute> {
   query: string;
@@ -140,7 +140,7 @@ export function searchModelRoutes<Route extends ModelSearchRoute>(
       normalizedQuery,
       items,
       emptyState: items.length === 0
-        ? { kind: "no-models", message: "No models are available yet." }
+        ? { kind: "no-models" }
         : null,
     };
   }
@@ -161,10 +161,7 @@ export function searchModelRoutes<Route extends ModelSearchRoute>(
     normalizedQuery,
     items,
     emptyState: items.length === 0
-      ? {
-          kind: "no-results",
-          message: `No models match “${query}”.`,
-        }
+      ? { kind: "no-results" }
       : null,
   };
 }

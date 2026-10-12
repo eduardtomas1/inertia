@@ -37,7 +37,7 @@ import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
-import { AppStatusOverlays } from "./AppStatusOverlays";
+import { AppStatusOverlays, StatusToastStack } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -516,6 +516,10 @@ export const AppLayout = memo(function AppLayout({
     && headerTools !== null;
   const frameHasInlinePanel = mainPanelOpen && panelPresentation === "inline";
   const frameHasSheetPanel = mainPanelOpen && panelPresentation === "sheet";
+  const dismissVisibleError = (): void => {
+    setActionError(null);
+    connection.clearError();
+  };
   const frameStyle = {
     ...workspaceBodyStyle,
     "--workspace-corner-controls-width": `${cornerControlsVisible ? cornerControlsWidth : 0}px`,
@@ -638,6 +642,7 @@ export const AppLayout = memo(function AppLayout({
             onChooseNewChatProject={sidebarActions.chooseNewChatProject}
             onOpenMultiSpawn={sidebarActions.openMultiSpawn}
             onOpenDailyWork={sidebarActions.openDailyWork}
+            newChatShortcut={formatAppShortcutLabel(platform, settings.keybindings["new-chat"])}
             dailyWorkOpen={dailyWorkOpen}
             onRenameConversation={sidebarActions.renameConversation}
             onPinConversation={sidebarActions.pinConversation}
@@ -696,6 +701,7 @@ export const AppLayout = memo(function AppLayout({
             isServerConversation={isServerConversation}
             view={view}
             sidebarCollapsed={sidebarCollapsed}
+            sidebarShortcut={formatAppShortcutLabel(platform, settings.keybindings["toggle-sidebar"])}
             compact={mobileNavigation}
             gitStatus={gitStatus}
             gitNotice={headerTools?.gitNotice ?? null}
@@ -813,11 +819,31 @@ export const AppLayout = memo(function AppLayout({
                 actions.dropConversationInSplit?.(conversationId, plan)}
             />
           )}
+          <StatusToastStack
+            appUpdate={appUpdate}
+            providerQuotaNotices={providerQuotaNotices}
+            error={visibleError}
+            onDismissError={dismissVisibleError}
+            databaseRecoveryNotice={connection.databaseRecoveryNotice}
+            onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
+            onImportRecovery={async () => {
+              const result = await window.inertia.importRecoveryData();
+              if (result.status === "imported") {
+                connection.dismissDatabaseRecoveryNotice();
+              }
+            }}
+            onCopyRecoveryReport={async () => {
+              const result = await window.inertia.copyRuntimeDiagnosticReport(
+                connection.snapshot?.lifecycleDiagnostics ?? null,
+              );
+              if (!result.copied) throw new Error("The recovery report could not be copied.");
+            }}
+          />
         </div>
       </section>
 
       {commitDialogOpen && (
-        <Suspense fallback={<div role="status">Preparing commit review…</div>}>
+        <Suspense fallback={<LoadingMark label="Preparing commit review" />}>
           <RootCommitDialog
             owner={commitReviewOwner}
             revision={actions.commitReviewRevision}
@@ -921,24 +947,7 @@ export const AppLayout = memo(function AppLayout({
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={visibleError}
-        onDismissError={() => {
-          setActionError(null);
-          connection.clearError();
-        }}
         databaseRecoveryNotice={connection.databaseRecoveryNotice}
-        onDismissDatabaseRecoveryNotice={connection.dismissDatabaseRecoveryNotice}
-        onImportRecovery={async () => {
-          const result = await window.inertia.importRecoveryData();
-          if (result.status === "imported") {
-            connection.dismissDatabaseRecoveryNotice();
-          }
-        }}
-        onCopyRecoveryReport={async () => {
-          const result = await window.inertia.copyRuntimeDiagnosticReport(
-            connection.snapshot?.lifecycleDiagnostics ?? null,
-          );
-          if (!result.copied) throw new Error("The recovery report could not be copied.");
-        }}
       />
       <WelcomeGuideHost
         snapshot={connection.snapshot}

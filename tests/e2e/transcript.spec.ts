@@ -420,7 +420,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     };
     await expectButtonExpansionAnchored(
       ".turn-run-details-toggle",
-      "Execution transcript",
+      "Diagnostics",
     );
     await expectExpansionAnchored(".turn-changed-files > summary");
 
@@ -428,8 +428,17 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     await expect.poll(() => transcript.evaluate((element) =>
       element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(120);
     await transcript.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(transcript).toBeFocused();
+    expect(await transcript.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
     await page.keyboard.press("Alt+ArrowUp");
     await expect(page.locator(".response-turn:focus")).toHaveCount(1);
+    expect(await page.locator(".response-turn:focus").evaluate((element) => ({
+      visible: element.matches(":focus-visible"),
+      width: getComputedStyle(element).outlineWidth,
+      style: getComputedStyle(element).outlineStyle,
+    }))).toEqual({ visible: true, width: "2px", style: "solid" });
     await page.keyboard.press("Alt+Home");
     await expect(page.locator('[data-turn-jump-target="request"]:focus')).toHaveCount(1);
     await page.keyboard.press("Alt+End");
@@ -487,7 +496,7 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     // subpixel rounding.
     const scaleAnchorTolerance = await page.locator("html").evaluate((element) => {
       const mainFontSize = Number.parseFloat(
-        getComputedStyle(element).getPropertyValue("--ui-font-main"),
+        getComputedStyle(element).getPropertyValue("--text-base"),
       );
       return Math.ceil(mainFontSize / 2) + 1;
     });

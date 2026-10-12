@@ -223,6 +223,28 @@ describe("ComposerSkillsMenu", () => {
     expect(positioned.right).toBeLessThanOrEqual(252);
   });
 
+  it("lists skills without a header, helper copy or hover titles and keeps refresh as a footer row", () => {
+    render(<Harness {...defaults} completion="skill" />);
+    const popover = document.querySelector<HTMLElement>(".composer-skills-popover")!;
+    expect(popover.querySelector("header")).toBeNull();
+    expect(popover).not.toHaveTextContent("Choose with");
+    for (const option of screen.getAllByRole("option")) expect(option).not.toHaveAttribute("title");
+    expect(popover.querySelectorAll("[title]")).toHaveLength(0);
+    const refresh = screen.getByRole("button", { name: "Refresh skills" });
+    expect(refresh.closest(".composer-skills-footer")).not.toBeNull();
+    expect(refresh.querySelector(".is-spinning")).toBeNull();
+  });
+
+  it("shows discovery with the shared loading mark and short empty states", () => {
+    const view = render(<Harness {...defaults} skills={[]} completion="" loading />);
+    expect(screen.getByRole("status")).toHaveTextContent("Discovering skills…");
+    expect(screen.getByRole("status").querySelector(".loading-mark")).not.toBeNull();
+    view.rerender(<Harness {...defaults} skills={[]} completion="" />);
+    expect(screen.getByRole("status")).toHaveTextContent(/^No enabled skills$/u);
+    view.rerender(<Harness {...defaults} completion="missing" />);
+    expect(screen.getByRole("status")).toHaveTextContent(/^No skills match$/u);
+  });
+
   it("discovers an empty catalog on dollar entry once and offers retry after failure", () => {
     const onList = vi.fn(async () => undefined);
     const view = render(<Harness {...defaults} skills={[]} completion="" onList={onList} />);

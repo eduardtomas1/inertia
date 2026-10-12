@@ -3,9 +3,8 @@ import {
   Check,
   Copy,
   ExternalLink,
+  Folder,
   FolderOpen,
-  FolderSearch,
-  PanelLeft,
   Play,
   Plus,
   Square,
@@ -14,6 +13,8 @@ import {
 import type { ProjectAction } from "@shared/contracts";
 
 import type { EnvironmentRunItem } from "../../utils/environmentSummary";
+import { TooltipButton } from "../TooltipButton";
+import { HintButton } from "../HintButton";
 import {
   workspaceRunStatusLabel,
   type WorkspaceRunsModel,
@@ -44,61 +45,61 @@ function RunRow({
         <small title={`${detail}${owner}`}>{detail}{owner}</small>
       </span>
       {run.canOpenPreview && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Open preview for ${run.label}${owner}`}
-          title="Open preview"
+          tooltip="Open preview"
+          describeTooltip={false}
           onClick={() => { onDone(); runs.onOpenRunPreview(run); }}
         >
-          <ExternalLink size={12} aria-hidden="true" />
-        </button>
+          <ExternalLink size={14} aria-hidden="true" />
+        </TooltipButton>
       )}
       {run.canAcknowledge && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Acknowledge ${run.label}${owner}`}
-          title="Acknowledge"
+          tooltip="Acknowledge"
+          describeTooltip={false}
           onClick={(event) => {
             onBeforeRowAction(event);
             runs.onAcknowledgeRun(run);
           }}
         >
-          <Check size={12} aria-hidden="true" />
-        </button>
+          <Check size={14} aria-hidden="true" />
+        </TooltipButton>
       )}
       {run.canDismiss && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Dismiss ${run.label}${owner}`}
-          title="Dismiss"
+          tooltip="Dismiss"
+          describeTooltip={false}
           onClick={(event) => {
             onBeforeRowAction(event);
             runs.onDismissRun(run);
           }}
         >
-          <Trash2 size={12} aria-hidden="true" />
-        </button>
+          <Trash2 size={14} aria-hidden="true" />
+        </TooltipButton>
       )}
       {run.canStop && (
-        <button
-          type="button"
+        <TooltipButton
           role="menuitem"
           className="header-run-action"
           aria-label={`Stop ${run.label}${owner}`}
-          title="Stop"
+          tooltip="Stop"
+          describeTooltip={false}
           onClick={(event) => {
             onBeforeRowAction(event);
             runs.onStopRun(run);
           }}
         >
-          <Square size={12} aria-hidden="true" />
-        </button>
+          <Square size={14} aria-hidden="true" />
+        </TooltipButton>
       )}
     </div>
   );
@@ -173,7 +174,7 @@ export function ProjectActionMenuItems({
           title={action.command}
           onClick={() => onRun(action)}
         >
-          <Play size={13} aria-hidden="true" />
+          <Play size={14} aria-hidden="true" />
           <span><strong>{action.label}</strong><small>{action.command}</small></span>
         </button>
       ))}
@@ -184,7 +185,7 @@ export function ProjectActionMenuItems({
           className={itemClass}
           onClick={onAdd}
         >
-          <Plus size={13} aria-hidden="true" />
+          <Plus size={14} aria-hidden="true" />
           <span><strong>Add action…</strong></span>
         </button>
       )}
@@ -195,9 +196,9 @@ export function ProjectActionMenuItems({
 export type OpenInTarget = "folder" | "file-manager" | "files";
 
 const openInIcons = {
-  folder: FolderOpen,
-  "file-manager": FolderSearch,
-  files: PanelLeft,
+  folder: ExternalLink,
+  "file-manager": FolderOpen,
+  files: Folder,
 } as const;
 
 export function OpenInMenuItems({
@@ -237,19 +238,18 @@ export function OpenInMenuItems({
         const Icon = openInIcons[target];
         const disabled = target === "files" && !filesAvailable;
         return (
-          <button
-            type="button"
+          <HintButton
             role="menuitem"
             key={target}
             className={itemClass}
             aria-disabled={disabled || undefined}
-            title={disabled ? "Files become available after the first message creates this isolated worktree." : undefined}
+            hint={disabled ? "Files become available after the first message creates this isolated worktree." : undefined}
             onClick={() => onOpen(target)}
           >
-            <Icon size={13} aria-hidden="true" />
+            <Icon size={14} aria-hidden="true" />
             <span><strong>{labels[target]}</strong></span>
             {target === preferred && <small className="header-menu-hint">Default</small>}
-          </button>
+          </HintButton>
         );
       })}
       <div role="separator" className="header-menu-separator" />
@@ -261,7 +261,7 @@ export function OpenInMenuItems({
         title={checkoutPath ?? undefined}
         onClick={() => void copyPath()}
       >
-        <Copy size={13} aria-hidden="true" />
+        <Copy size={14} aria-hidden="true" />
         <span>
           <strong>{copyState === "copied" ? "Path copied" : "Copy path"}</strong>
           {checkoutPath && <small>{checkoutPath}</small>}

@@ -102,7 +102,7 @@ test("keeps visible unfocused progress animated and renders incoming reasoning a
     await expect(incoming).toContainText("New content arrived while unfocused.");
     // Playwright visibility ignores opacity: assert the actual painted style.
     await expect(incoming).toHaveCSS("opacity", "1");
-    await expect(incoming).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+    await expect(incoming).toHaveCSS("transform", "none");
     const progressTime = () => incoming.evaluate((element) => {
       const name = getComputedStyle(element, "::before").animationName;
       const animation = element.getAnimations({ subtree: true }).find((candidate) =>

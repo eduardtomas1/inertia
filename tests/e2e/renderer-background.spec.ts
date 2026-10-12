@@ -287,8 +287,6 @@ test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " i
       expect(measurement.end.counters.reactCommits).toBe(measurement.start.counters.reactCommits);
       expect(measurement.end.counters.rafCallbacks).toBe(measurement.start.counters.rafCallbacks);
     }
-    // The decorative sidebar aurora advances only in a focused window and
-    // holds its exact place while the window is visible but unfocused.
     const auroraTimes = (animations: { name: string; time: unknown }[]) => animations
       .filter(({ name }) => name.startsWith("sidebar-aurora")).map(({ time }) => Number(time));
     for (const measurement of [foreground, resumed]) {

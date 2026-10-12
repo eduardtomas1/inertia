@@ -104,7 +104,7 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
   await expect(panel).toBeVisible();
   await expect(panel.getByLabel("Contents of src/demo/OrderService.java"))
     .toBeVisible();
-  await expect(panel.getByTitle("Java recognized locally"))
+  await expect(panel.locator(".file-language", { hasText: "Java" }))
     .toHaveText("Java");
   await expect(panel.getByText("Lines 41–43", { exact: true })).toBeVisible();
   const tree = panel.locator('[role="tree"]');
@@ -197,7 +197,7 @@ test("opens a language-aware project link at its exact validated Java range", as
   await openExactJavaRange("code");
 
   const panel = page.getByRole("region", { name: "Project files" });
-  const badge = panel.getByTitle("Java recognized locally");
+  const badge = panel.locator(".file-language", { hasText: "Java" });
   const darkAccent = await badge.evaluate((element) =>
     getComputedStyle(element).color
   );
@@ -248,7 +248,7 @@ test("opens a language-aware project link at its exact validated Java range", as
   await openExactJavaRange("link");
   const lightPanel = page.getByRole("region", { name: "Project files" });
   const lightAccent = await lightPanel
-    .getByTitle("Java recognized locally")
+    .locator(".file-language", { hasText: "Java" })
     .evaluate((element) => getComputedStyle(element).color);
   expect(lightAccent).not.toBe(darkAccent);
   const lightEvidence = testInfo.outputPath("language-aware-files-light.png");

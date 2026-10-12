@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -28,17 +28,19 @@ function Harness({
   onStash,
   onRestore,
   onRemove,
+  blockedReason = "Remove attachments before stashing text",
 }: {
   onStash: () => void;
   onRestore: (value: PromptStashEntry) => void;
   onRemove: (entryId: string) => void;
+  blockedReason?: string | null;
 }): React.JSX.Element {
   const menuController = useComposerMenus();
   return (
     <PromptStashMenu
       entries={[entry]}
-      canStash={false}
-      blockedReason="Remove attachments before stashing text"
+      canStash={blockedReason === null}
+      blockedReason={blockedReason}
       restoreBlockedReason={() => "This route is not available"}
       menuController={menuController}
       onStash={onStash}
@@ -50,7 +52,7 @@ function Harness({
 }
 
 describe("PromptStashMenu", () => {
-  it("keeps unavailable actions focusable with their reason and labels deletes per entry", () => {
+  it("keeps unavailable actions focusable with their reason and labels deletes per entry", async () => {
     const onStash = vi.fn();
     const onRestore = vi.fn();
     const onRemove = vi.fn();
@@ -62,9 +64,11 @@ describe("PromptStashMenu", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", {
+    const trigger = screen.getByRole("button", {
       name: "Scratch prompts, 1 saved",
-    }));
+    });
+    expect(trigger).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(trigger);
     expect(screen.getByRole("menu", { name: "Scratch prompts" }))
       .toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Saved scratch prompts" }))
@@ -84,9 +88,10 @@ describe("PromptStashMenu", () => {
       name: /^Inspect the provider route before editing.*This route is not available/u,
     });
     expect(restore).toHaveAttribute("aria-disabled", "true");
+    expect(restore).toHaveTextContent("This route is not available");
     expect(restore).toHaveAttribute(
       "title",
-      "This route is not available",
+      "Inspect the provider route before editing.",
     );
     restore.focus();
     expect(restore).toHaveFocus();
@@ -96,7 +101,30 @@ describe("PromptStashMenu", () => {
     const remove = screen.getByRole("menuitem", {
       name: "Delete saved prompt: Inspect the provider route before editing.",
     });
+    expect(remove).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(remove, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent)).toContain("Delete saved prompt"));
+    fireEvent.pointerLeave(remove, { pointerType: "mouse" });
     fireEvent.click(remove);
     expect(onRemove).toHaveBeenCalledWith(entry.id);
+  });
+
+  it("drops the menu title and text glyphs but keeps the scope and recurrence consequences", async () => {
+    render(<Harness onStash={vi.fn()} onRestore={vi.fn()} onRemove={vi.fn()} blockedReason={null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts, 1 saved" }));
+    const menu = screen.getByRole("menu", { name: "Scratch prompts" });
+    expect(menu.querySelector(".popover-title")).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: /^Save current prompt/u })).toHaveTextContent("Text and route · this chat only");
+    expect(menu).not.toHaveTextContent("↻");
+    const repeat = screen.getByRole("menuitem", { name: /^Repeat daily:/u });
+    expect(repeat).not.toHaveAttribute("title");
+    expect(repeat.querySelector("svg.lucide-repeat")).not.toBeNull();
+    for (const item of screen.getAllByRole("menuitem")) {
+      expect(item.getAttribute("title") ?? "").not.toMatch(/never run automatically|Save this text/u);
+    }
+    fireEvent.pointerEnter(repeat, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent))
+      .toContain("Keep this prompt recurring; it will never run automatically"));
+    fireEvent.pointerLeave(repeat, { pointerType: "mouse" });
   });
 });

@@ -37,7 +37,7 @@ describe("Codex follow-up acknowledgement ownership", () => {
       // The fixture writes the receipt and terminal event in one stdout batch.
       // Completion must not erase a real receipt, or turn a foreign one into success.
       if (accepted) await expect(run.steer!(input)).resolves.toBe(true);
-      else await expect(run.steer!(input)).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError" });
+      else await expect(run.steer!(input)).rejects.toMatchObject({ name: "ProviderSteerDeliveryUnknownError", turnEnded: true });
       await expect(run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
       expect(processExists(run.child.pid!)).toBe(false);
       const requests = captured(fake.capturePath).filter(({ method }) => method === "turn/steer");
@@ -102,14 +102,14 @@ describe("Codex follow-up delivery uncertainty", () => {
 
   it("reports a lost steer acknowledgement as unknown delivery", async () => {
     await withSteerRun("steer-receipt-lost", 1_000, async (run, capturePath) => {
-      await expect(run.steer!(input)).rejects.toMatchObject(unknownDelivery);
+      await expect(run.steer!(input)).rejects.toMatchObject({ ...unknownDelivery, turnEnded: false });
       expect(steerRequests(capturePath)).toHaveLength(1);
     });
   });
 
   it("keeps a late steer acknowledgement unknown without resending", async () => {
     await withSteerRun("steer-receipt-late", 1_000, async (run, capturePath) => {
-      await expect(run.steer!(input)).rejects.toMatchObject(unknownDelivery);
+      await expect(run.steer!(input)).rejects.toMatchObject({ ...unknownDelivery, turnEnded: false });
       await expect(run.result).resolves.toMatchObject({ status: "completed", cleanupConfirmed: true });
       expect(steerRequests(capturePath)).toHaveLength(1);
     });
@@ -126,9 +126,45 @@ describe("Codex follow-up delivery uncertainty", () => {
       const steering = run.steer!(input);
       await waitFor("the steer request to reach Codex", () => steerRequests(capturePath).length === 1);
       run.cancel();
-      await expect(steering).rejects.toMatchObject(unknownDelivery);
+      await expect(steering).rejects.toMatchObject({ ...unknownDelivery, turnEnded: true });
       await expect(run.result).resolves.toMatchObject({ status: "cancelled" });
       expect(steerRequests(capturePath)).toHaveLength(1);
     });
+  });
+});
+
+describe("Codex answer boundary around an accepted follow-up", () => {
+  it.each([
+    ["open", ["text:Answer to the fir", "text:st task.", "boundary", "text:Renamed it."]],
+    ["ended", ["text:Answer to the fir", "boundary", "text:Renamed it."]],
+    ["unfinished", ["text:Answer to the fir", "text:st task.", "boundary", "text:Renamed it."]],
+  ] as const)("ends the answer that was %s when the follow-up was accepted before the reply", async (state, expected) => {
+    const roots: string[] = [];
+    const fake = fakeAppServer(roots);
+    const stream: string[] = [];
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      cwd: fake.root,
+      environment: {
+        ...process.env,
+        INERTIA_APP_SERVER_CAPTURE: fake.capturePath,
+        INERTIA_APP_SERVER_SCENARIO: `steer-answer-${state}`,
+      },
+      prompt: "Answer, then take a follow-up.",
+      access: "full",
+      planMode: false,
+      onText: (text) => { stream.push(`text:${text}`); },
+      onTextBoundary: () => { stream.push("boundary"); },
+    });
+    try {
+      await waitFor("the answer to start streaming", () => stream.length > 0);
+      await expect(run.steer!({ content: "Also rename the file.", imagePaths: [] })).resolves.toBe(true);
+      await expect(run.result).resolves.toMatchObject({ status: "completed" });
+      expect(stream).toEqual(expected);
+    } finally {
+      run.cancel(true);
+      await run.result;
+      await Promise.all(roots.map(removePortableFixture));
+    }
   });
 });

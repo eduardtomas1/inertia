@@ -8,7 +8,8 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from "react";
-import { ChevronDown, Columns2, Plus, TerminalSquare, X } from "lucide-react";
+import { ChevronDown, Columns2, Plus, Terminal, X } from "lucide-react";
+import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { PaneResizeHandle } from "./PaneResizeHandle";
@@ -31,6 +32,7 @@ import {
 } from "./TerminalPanelSupport";
 import { TerminalSession } from "./TerminalPanelSession";
 import { IconButton } from "./ui";
+import { TooltipButton } from "./TooltipButton";
 function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const subscribe = props.subscribe;
   const sendCommand = props.sendCommand;
@@ -389,22 +391,28 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const [sessionActionsHost, setSessionActionsHost] = useState<HTMLDivElement | null>(null);
   const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
   const panelError = actionRoutingError ?? closeError?.[1];
+  const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeId });
 
   return (
     <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
       <header className="terminal-tabbar">
-        <div className="terminal-tablist" role="tablist" aria-label="Terminals">
+        <div
+          className="panel-tab-row terminal-tablist"
+          role="tablist"
+          aria-label="Terminals"
+          {...tabRow.listHandlers}
+        >
           {tabs.map((tab) => (
-            <div role="presentation" className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}>
-              <button type="button" id={`terminal-tab-${tab.id}`} role="tab"
-                title={`${tab.label} · ${props.projectName}`}
+            <div role="presentation" className={tab.id === activeId ? "panel-tab terminal-tab is-active" : "panel-tab terminal-tab"} data-tab-key={tab.id} key={tab.id}>
+              <TooltipButton id={`terminal-tab-${tab.id}`} role="tab"
+                tooltip={`${tab.label} · ${props.projectName}`}
                 tabIndex={tab.id === activeId ? 0 : -1}
                 aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, tab.id)} onClick={() => setActiveId(tab.id)}>
-                <TerminalSquare size={13} /><span>{tab.label}</span>
-              </button>
-              <button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
-                onClick={() => closeTerminal(tab.id)}><X size={11} /></button>
+                <Terminal size={14} /><span className="panel-tab-label" data-text={tab.label}>{tab.label}</span>
+              </TooltipButton>
+              <IconButton className="panel-tab-close" label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)}
+                onClick={() => closeTerminal(tab.id)}><X size={14} /></IconButton>
             </div>
           ))}
         </div>

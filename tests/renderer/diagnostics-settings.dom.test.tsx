@@ -92,7 +92,7 @@ describe("Diagnostics settings", () => {
       title: "The local runtime reported a failure", detail: ["phase=restarting", "Runtime startup timed out."] })]);
     await settle();
     expect(screen.getByRole("heading", { name: "Diagnostics", level: 3 })).toBeVisible();
-    expect(screen.getByText("Events and failures recorded on this device.")).toBeVisible();
+    expect(screen.queryByText("Events and failures recorded on this device.")).toBeNull();
     expect(screen.getByRole("heading", { name: "Recent events", level: 3 })).toBeVisible();
     expect(pageStatus()).toBeNull();
     expect(rows()[0]!.querySelector("time")).toHaveTextContent("Sep 9, 8:00:03 AM");
@@ -122,6 +122,24 @@ describe("Diagnostics settings", () => {
     expect(row).not.toHaveAttribute("aria-controls");
   });
 
+  it("keeps focus on Open affected conversation when the runtime becomes ready", async () => {
+    const page: Partial<DiagnosticPage> = { runtime: "unavailable" };
+    const h = setup([record(1)], [], page);
+    await settle();
+    fireEvent.click(rows()[0]!);
+    const open = screen.getByRole("button", { name: "Open affected conversation" });
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    open.focus();
+    page.runtime = "ready";
+    h.publish();
+    await act(() => vi.advanceTimersByTimeAsync(1_250));
+    const ready = screen.getByRole("button", { name: "Open affected conversation" });
+    expect(ready).toBe(open);
+    expect(ready).toHaveFocus();
+    expect(ready).not.toHaveAttribute("aria-disabled");
+    expect(ready).not.toHaveAttribute("aria-describedby");
+  });
+
   it("expands an incident to its explanation, facts and actions, copies it, and never opens offline work", async () => {
     const incident = record(1);
     const h = setup([incident]);
@@ -133,7 +151,15 @@ describe("Diagnostics settings", () => {
     expect(screen.getByText(/message may already have arrived/u)).toBeVisible();
     expect(screen.getByText("Outcome unknown")).toBeVisible();
     expect(screen.getByText(incident.correlationId)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Open affected conversation" })).toBeDisabled();
+    const open = screen.getByRole("button", { name: "Open affected conversation" });
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    expect(open).not.toHaveAttribute("title");
+    expect(open).toHaveAccessibleDescription("Reconnect the runtime to open this conversation");
+    const opened = vi.fn();
+    window.addEventListener(DIAGNOSTIC_NAVIGATION_EVENT, opened);
+    fireEvent.click(open);
+    window.removeEventListener(DIAGNOSTIC_NAVIGATION_EVENT, opened);
+    expect(opened).not.toHaveBeenCalled();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy incident" })));
     expect(h.copyDiagnostics).toHaveBeenCalledExactlyOnceWith({ incidentId: incident.id, severity: "all" });
     expect(pageStatus()).toHaveTextContent("Incident copied.");

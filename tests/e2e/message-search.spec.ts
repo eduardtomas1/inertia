@@ -252,14 +252,16 @@ test("retains detached focus while the owning runtime client reconnects", async 
   expect(app.rendererErrors).toEqual([]);
 });
 
-test("reveals the exact follow-up inside a collapsed long historical turn", async ({ browserName: _browserName }, info) => {
+test("reveals the exact follow-up in a long historical turn without expanding its run details", async ({ browserName: _browserName }, info) => {
   const input = await search("maximum recovery delay");
   await input.press("Enter");
-  const followUp = page.locator(`[data-follow-up-message-id="${followUpMessageId}"]`);
+  const turn = page.locator(`[data-turn-id="${targetTurnId}"]`);
+  const followUp = turn.getByRole("list", { name: "Follow-up messages" }).locator(`[data-follow-up-message-id="${followUpMessageId}"]`);
   await expect(followUp).toBeFocused();
   await expect(followUp).toBeInViewport();
   await expect(followUp).toHaveText(/maximum recovery delay/u);
-  await expect(page.locator(`[data-turn-id="${targetTurnId}"] .turn-run-details-toggle`)).toHaveAttribute("aria-expanded", "true");
+  await expect(turn.locator(".turn-run-details-toggle")).toHaveAttribute("aria-expanded", "false");
+  await expect(turn.locator(".turn-run-details")).toBeHidden();
   await expect(page.locator(`[data-turn-id="${targetTurnId}"] [data-turn-jump-target="request"]`)).not.toBeInViewport();
   await evidence(page, info, "follow-up-match");
   expect(app.rendererErrors).toEqual([]);

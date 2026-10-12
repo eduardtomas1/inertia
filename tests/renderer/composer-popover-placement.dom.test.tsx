@@ -8,6 +8,7 @@ import {
 } from "../../src/renderer/src/components/composer/useComposerMenus";
 import {
   focusComposerPopoverEdge,
+  observeComposerPopover,
   positionComposerPopover,
 } from "../../src/renderer/src/utils/composerPopoverPlacement";
 
@@ -246,6 +247,64 @@ describe("composer popover DOM placement", () => {
     expect(positioned.top).toBeGreaterThanOrEqual(107);
     expect(popover.style.overflowY).toBe("auto");
     expect(popover.dataset.composerPopoverPositioned).toBe("true");
+  });
+
+  it("lands a content-sized popover with a fractional width exactly on its placement", () => {
+    document.body.innerHTML = `<div class="chat-workspace"><button>Model</button><div class="composer-popover"></div></div>`;
+    const workspace = document.querySelector<HTMLElement>(".chat-workspace")!;
+    const trigger = document.querySelector<HTMLButtonElement>("button")!;
+    const popover = document.querySelector<HTMLElement>(".composer-popover")!;
+    popover.style.transformOrigin = "180.58px 0px";
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1_200);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue(rect({ top: 0, left: 0, right: 1_200, bottom: 800 }));
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect({ top: 600, left: 300, right: 400, bottom: 632 }));
+    vi.spyOn(popover, "getBoundingClientRect").mockImplementation(() => {
+      const [shiftX = 0, shiftY = 0] = popover.style.translate
+        .match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/gu)
+        ?.map(Number) ?? [];
+      return rect({ top: 100 + shiftY, right: 461.16 + shiftX, bottom: 220 + shiftY, left: 100 + shiftX });
+    });
+    Object.defineProperties(popover, {
+      offsetWidth: { configurable: true, value: 361 },
+      offsetHeight: { configurable: true, value: 120 },
+      clientHeight: { configurable: true, value: 120 },
+      scrollHeight: { configurable: true, value: 120 },
+    });
+
+    const placement = positionComposerPopover(trigger, popover);
+
+    expect(popover.getBoundingClientRect().left).toBe(placement.left);
+    expect(popover.getBoundingClientRect().top).toBe(placement.top);
+  });
+
+  it("places the popover again when its own entrance animation ends", () => {
+    document.body.innerHTML = `<div class="chat-workspace"><button>Model</button><div class="composer-popover"><span></span></div></div>`;
+    const workspace = document.querySelector<HTMLElement>(".chat-workspace")!;
+    const trigger = document.querySelector<HTMLButtonElement>("button")!;
+    const popover = document.querySelector<HTMLElement>(".composer-popover")!;
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(800);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(640);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue(rect({ top: 64, left: 0, right: 800, bottom: 640 }));
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect({ top: 560, left: 200, right: 360, bottom: 592 }));
+    vi.spyOn(popover, "getBoundingClientRect").mockReturnValue(rect({ top: 0, left: 0, right: 320, bottom: 160 }));
+    Object.defineProperties(popover, {
+      clientHeight: { configurable: true, value: 160 },
+      scrollHeight: { configurable: true, value: 160 },
+    });
+
+    const stop = observeComposerPopover(trigger, popover, () => undefined);
+    const placed = popover.style.translate;
+    popover.style.translate = "0.5px 0.5px";
+    popover.querySelector("span")!.dispatchEvent(new Event("animationend", { bubbles: true }));
+    expect(popover.style.translate).toBe("0.5px 0.5px");
+    popover.dispatchEvent(new Event("animationend", { bubbles: true }));
+    expect(popover.style.translate).toBe(placed);
+    stop();
   });
 
   it("keeps an explicitly opened section through later hover and pointer leave", () => {

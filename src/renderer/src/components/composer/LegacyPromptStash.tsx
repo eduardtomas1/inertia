@@ -18,12 +18,11 @@ export default function LegacyPromptStash({ entries, focusOnMount }: {
   const copy = async (entry: PromptStashEntry): Promise<void> => {
     try {
       if (!await window.inertia.copyText(entry.content)) throw new Error("Clipboard unavailable");
-      setMessage("Copied. Paste into the chat of your choice.");
+      setMessage("Copied");
     } catch { setMessage("Could not copy this prompt. Try again."); }
   };
   const label = "Prompts saved before this update";
   return entries.length === 0 ? null : <div ref={root} className="prompt-stash-list" role="group" aria-label={label}>
-    <div className="popover-title">{label}</div>
     {entries.map((entry) => <div className="prompt-stash-entry" key={entry.id}>
       <button type="button" role="menuitem" title={entry.content} onClick={() => { void copy(entry); }}>
         <ArchiveRestore size={14} /><span className="prompt-stash-entry-copy">
@@ -32,6 +31,6 @@ export default function LegacyPromptStash({ entries, focusOnMount }: {
         </span>
       </button>
     </div>)}
-    {message && <p role="status">{message}</p>}
+    {message && <p className="popover-empty" role="status">{message}</p>}
   </div>;
 }

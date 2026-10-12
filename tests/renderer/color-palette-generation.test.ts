@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +9,7 @@ import {
 import {
   ARCHITECTURE,
   FAMILY_SPECS,
+  FILL_INK,
   PALETTE_APPEARANCES,
   PALETTE_FAMILIES,
   buildPaletteTokens,
@@ -22,9 +21,10 @@ import {
 } from "../../scripts/generate-color-themes.mjs";
 import { WINDOW_BACKGROUND } from "../../src/main/window-appearance";
 import { COLOR_THEME_IDS } from "../../src/shared/contracts";
+import { readSourceText } from "../helpers/source-text";
 
 const repoFile = (path: string): string =>
-  readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+  readSourceText(new URL(`../../${path}`, import.meta.url));
 
 function oklchOf(hex: string): { l: number; c: number; h: number } {
   const decode = (value: number): number => {
@@ -63,10 +63,7 @@ const palette = (family: string, appearance: string): Record<string, string> =>
 type Rgb = readonly [number, number, number];
 
 function rgbOf(color: string): Rgb {
-  if (color.startsWith("#")) {
-    return [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16)) as unknown as Rgb;
-  }
-  return color.match(/[\d.]+/gu)!.slice(0, 3).map(Number) as unknown as Rgb;
+  return [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16)) as unknown as Rgb;
 }
 
 function over(top: string, alpha: number, base: Rgb): Rgb {
@@ -82,7 +79,6 @@ function hueDistance(left: number, right: number): number {
   return Math.min(difference, 360 - difference);
 }
 
-/** The strengths the sidebar aurora actually paints with, per appearance. */
 function auroraStrengths(appearance: string): { peak: number; mid: number; wash: number } {
   const source = repoFile("src/renderer/src/components/sidebar/sidebar-aurora.css")
     .replace(/\/\*[\s\S]*?\*\//gu, "");
@@ -92,6 +88,13 @@ function auroraStrengths(appearance: string): { peak: number; mid: number; wash:
   const read = (name: string): number =>
     Number(new RegExp(`--aurora-${name}:\\s*([\\d.]+)%`, "u").exec(body)?.[1]) / 100;
   return { peak: read("peak"), mid: read("mid"), wash: read("wash") };
+}
+
+function brandHoverStrengths(): number[] {
+  const styles = repoFile("src/renderer/src/styles.css");
+  return [...styles.matchAll(/\.brand-lockup:hover\s*\{\s*background:\s*var\(--([\w-]+)\);/gu)]
+    .map(([, token]) => Number(new RegExp(`\\n  --${token}: color-mix\\(in srgb, var\\(--text\\) ([\\d.]+)%, transparent\\);`, "u")
+      .exec(styles)?.[1]) / 100);
 }
 
 const cases = PALETTE_FAMILIES.flatMap((family) =>
@@ -105,11 +108,24 @@ describe("generated color palettes", () => {
     }
   });
 
-  it.each(cases)("uses the same %s %s message-action color in previews and the chat", (family, appearance) => {
+  it.each(cases)("previews the %s %s canvas and sidebar the stylesheet paints", (family, appearance) => {
     const tokens = palette(family, appearance);
+    const styles = repoFile("src/renderer/src/styles.css");
+    expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);/u);
     const preview = Object.fromEntries(buildSwatchTokens(family, appearance));
-    expect(tokens["message-action"]).toMatch(/^#[0-9a-f]{6}$/u);
-    expect(preview["theme-preview-message-action"]).toBe(tokens["message-action"]);
+    expect(preview["theme-preview-canvas"]).toBe(tokens["surface-strong"]);
+    expect(preview["theme-preview-sidebar"]).toBe(tokens.surface);
+  });
+
+  it("maps every family onto the five painted neutrals without the unpainted ladder steps", () => {
+    const families = repoFile("src/renderer/public/color-themes.css");
+    const styles = repoFile("src/renderer/src/styles.css");
+    for (const source of [families, styles]) {
+      expect(source).not.toMatch(/--(?:app-bg|sidebar-bg|surface-hover):/u);
+    }
+    expect(styles).toMatch(/\n  --bg: var\(--surface-strong\);\n  --surface-raised: var\(--surface-strong\);/u);
+    expect(styles).toMatch(/:root\[data-theme="dark"\] \{[^}]*--surface-raised: var\(--surface-muted\);[^}]*--scrollbar-thumb:[^}]*--shadow-float-alpha: 0\.56;[^}]*--raised-edge:/u);
+    expect(families).not.toMatch(/--(?:bg|surface-raised|fill|fill-strong|line|scrollbar-thumb|shadow-float-alpha|raised-edge):/u);
   });
 
   it("covers exactly the shipped color theme identities", () => {
@@ -146,21 +162,17 @@ describe("generated color palettes", () => {
   it.each(cases)("keeps the %s %s text ramp strictly descending", (family, appearance) => {
     const tokens = palette(family, appearance);
     const surface = tokens.surface!;
-    const ratios = ["text", "text-soft", "text-muted"]
+    const ratios = ["text", "text-muted"]
       .map((role) => contrastRatio(tokens[role]!, surface));
     expect(ratios[0]).toBeGreaterThan(ratios[1]!);
-    expect(ratios[1]).toBeGreaterThan(ratios[2]!);
-    expect(ratios[2]).toBeGreaterThanOrEqual(4.5);
+    expect(ratios[1]).toBeGreaterThanOrEqual(4.5);
     expect(ratios[0]).toBeGreaterThanOrEqual(7);
   });
 
-  it("maps out-of-gamut requests by reducing chroma only", () => {
-    const requested = { l: 0.5, c: 0.4, h: 150 };
-    const mapped = gamutMapChroma(requested);
-    expect(mapped.l).toBe(requested.l);
-    expect(mapped.h).toBe(requested.h);
-    expect(mapped.c).toBeLessThan(requested.c);
-    expect(oklchToHex(requested)).toBe(oklchToHex(mapped));
+  it("solves syntax colours against the same ink fill the stylesheet paints code on", () => {
+    const fill = /--fill:\s*color-mix\(in srgb, var\(--text\) (?<percent>[\d.]+)%, transparent\)/u
+      .exec(repoFile("src/renderer/src/styles.css"))?.groups?.percent;
+    expect(Number(fill) / 100).toBe(FILL_INK);
   });
 
   it.each(cases)("builds the %s %s aurora from the accent and two neighbours at one lightness", (family, appearance) => {
@@ -182,21 +194,15 @@ describe("generated color palettes", () => {
     const { peak, mid, wash } = auroraStrengths(appearance);
     expect([peak, mid, wash].every((strength) => strength > 0 && strength < 1)).toBe(true);
     const [first, second, third] = [1, 2, 3].map((index) => tokens[`aurora-${index}`]!);
-    const glassAlpha = Number(tokens["glass-chrome"]!.match(/[\d.]+/gu)!.at(-1));
-    const sidebar = over(tokens["glass-chrome"]!, glassAlpha, rgbOf(tokens["app-bg"]!));
-    // Both static washes can overlap. Include the strongest brand hover tint
-    // too: its 14–15.5 px label needs ordinary-text contrast while clickable.
+    const sidebar = rgbOf(tokens.surface!);
     const washed = over(second!, wash, over(first!, wash, sidebar));
-    const styles = repoFile("src/renderer/src/styles.css");
-    const hoverStrengths = [...styles.matchAll(/\.brand-lockup:hover\s*\{\s*background:\s*color-mix\(in srgb, var\(--text\) ([\d.]+)%/gu)]
-      .map(([, percent]) => Number(percent) / 100);
+    const hoverStrengths = brandHoverStrengths();
     expect(hoverStrengths).toHaveLength(2);
-    // Any single light at the strongest strength behind the name.
+    expect(hoverStrengths.every((strength) => strength > 0 && strength < 1)).toBe(true);
     for (const light of [first!, second!, third!]) {
       expect(contrastRatio(tokens.text!, hexOf(over(light, peak, washed))), `${family} ${appearance} single light`)
         .toBeGreaterThanOrEqual(4.5);
     }
-    // Every layer overlapping at once: far, near and the breathing glow.
     for (const far of [third!, first!]) {
       for (const [near, strength] of [[first!, peak], [second!, mid]] as const) {
         const stacked = over(second!, mid, over(near, strength, over(far, mid, washed)));
@@ -207,6 +213,15 @@ describe("generated color palettes", () => {
         }
       }
     }
+  });
+
+  it("maps out-of-gamut requests by reducing chroma only", () => {
+    const requested = { l: 0.5, c: 0.4, h: 150 };
+    const mapped = gamutMapChroma(requested);
+    expect(mapped.l).toBe(requested.l);
+    expect(mapped.h).toBe(requested.h);
+    expect(mapped.c).toBeLessThan(requested.c);
+    expect(oklchToHex(requested)).toBe(oklchToHex(mapped));
   });
 
   it("does not leave usable chroma unspent on muted semantic roles", () => {

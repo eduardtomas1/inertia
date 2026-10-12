@@ -27,13 +27,13 @@ import { SettingStatus } from "../settings/SettingsLayout";
 import { useSettingAction } from "../settings/useSettingAction";
 import "./CompletionSoundSettings.css";
 
-const SOUND_LABELS: Readonly<Record<BuiltInCompletionSound, { label: string; detail: string }>> = {
-  chime: { label: "Chime", detail: "Two bright notes" },
-  glass: { label: "Glass", detail: "A clear, high ping" },
-  marimba: { label: "Marimba", detail: "Three soft wooden notes" },
-  bloom: { label: "Bloom", detail: "A warm, slow chord" },
-  pop: { label: "Pop", detail: "Bubbles and a soft ring" },
-  bell: { label: "Bell", detail: "A long ringing bell" },
+const SOUND_LABELS: Readonly<Record<BuiltInCompletionSound, string>> = {
+  chime: "Chime",
+  glass: "Glass",
+  marimba: "Marimba",
+  bloom: "Bloom",
+  pop: "Pop",
+  bell: "Bell",
 };
 
 export const LONG_RUN_THRESHOLDS = [30, 60, 120, 300, 600, 900] as const;
@@ -204,7 +204,7 @@ export function CompletionSoundSettings({
 
   return (
     <div className="completion-sound-settings">
-      <SettingSwitch id="completion-sound-enabled" title="Sound when a task ends" description="Plays when an agent finishes or stops with an error."
+      <SettingSwitch id="completion-sound-enabled" title="Sound when a task ends"
         checked={value.enabled} disabled={disabled} onChange={(enabled) => {
           const saving = commit({ enabled }, false);
           if (enabled) preview(latest.current.sound);
@@ -225,20 +225,19 @@ export function CompletionSoundSettings({
       {value.enabled && (
         <div className="completion-sound-options">
           <div className="completion-sound-heading">
-            <span className="setting-title"><span id="completion-sound-label">Sound</span><SettingStatus notice={soundAction.notice} /></span>
+            <span className="setting-title"><SettingStatus notice={soundAction.notice} /></span>
             <button type="button" className="secondary-button" disabled={disabled} onClick={() => preview(value.sound)}>
               <Play size={14} aria-hidden="true" />Preview
             </button>
           </div>
-          <div className="completion-sound-choices" role="radiogroup" aria-labelledby="completion-sound-label" {...sounds.groupProps}>
+          <div className="completion-sound-choices" role="radiogroup" aria-label="Sound" {...sounds.groupProps}>
             {choices.map((sound) => {
               const radio = sounds.radioProps(sound);
               const custom = value.library.find(({ file }) => file === sound);
               return (
                 <button type="button" key={sound} {...radio} disabled={disabled}
                   className={clsx("completion-sound-choice", radio["aria-checked"] && "is-active")}>
-                  <strong>{isBuiltInCompletionSound(sound) ? SOUND_LABELS[sound].label : custom?.name}</strong>
-                  <small>{isBuiltInCompletionSound(sound) ? SOUND_LABELS[sound].detail : "Your sound"}</small>
+                  {isBuiltInCompletionSound(sound) ? SOUND_LABELS[sound] : custom?.name}
                 </button>
               );
             })}
@@ -258,13 +257,13 @@ export function CompletionSoundSettings({
                     <li key={sound.file}>
                       <SoundName sound={sound} disabled={disabled} focusRequest={named === sound.file}
                         onRename={(name) => rename(sound.file, name)} />
-                      <IconButton label={`Preview ${sound.name}`} disabled={disabled} onClick={() => preview(sound.file)}><Play size={13} /></IconButton>
+                      <IconButton label={`Preview ${sound.name}`} disabled={disabled} onClick={() => preview(sound.file)}><Play size={14} /></IconButton>
                       <IconButton label={`Remove ${sound.name}`} disabled={disabled || importing}
                         ref={(node) => {
                           if (node) removeButtons.current.set(sound.file, node);
                           else removeButtons.current.delete(sound.file);
                         }}
-                        onClick={(event) => void removeSound(sound, document.activeElement === event.currentTarget)}><Trash2 size={13} /></IconButton>
+                        onClick={(event) => void removeSound(sound, document.activeElement === event.currentTarget)}><Trash2 size={14} /></IconButton>
                     </li>
                   ))}
                 </ul>
@@ -272,7 +271,7 @@ export function CompletionSoundSettings({
               <small>
                 {full
                   ? `You can keep up to ${COMPLETION_SOUND_LIBRARY_MAX} sounds. Remove one to import another.`
-                  : "Import short clips and give each a name. WAV, MP3, OGG, FLAC or M4A up to 1 MB; the first 3 seconds play."}
+                  : "WAV, MP3, OGG, FLAC or M4A up to 1 MB; the first 3 seconds play."}
               </small>
             </div>
           )}

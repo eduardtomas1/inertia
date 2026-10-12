@@ -23,6 +23,7 @@ import {
   buildTimelineMinimapMarkers,
   formatElapsed,
   resolveTimelineKeyboardIntent,
+  shouldConsolidateSettledWorkIntoRunDetails,
   shouldFollowTimeline,
   shouldShowTimelineMinimap,
   shouldVirtualizeTimeline,
@@ -258,6 +259,67 @@ describe("authoritative response timeline", () => {
       "call-after",
       "commentary-after",
     ]);
+  });
+
+  it("keeps a settled follow-up exchange visible with the earlier answer presented as an answer", () => {
+    const turn = agentTurn("turn-exchange", "user-exchange", { terminalAssistantMessageId: "reply" });
+    const messages = [
+      message("user-exchange", turn.id, "user", "Fix the parser.", "2026-07-23T10:00:00.000Z"),
+      message("note", turn.id, "assistant", "Reading the parser.", "2026-07-23T10:00:01.000Z"),
+      message("earlier-answer", turn.id, "assistant", "The parser is fixed.", "2026-07-23T10:00:03.000Z"),
+      message("follow-up", turn.id, "user", "Also rename the file.", "2026-07-23T10:00:04.000Z"),
+      message("reply", turn.id, "assistant", "Renamed it.", "2026-07-23T10:00:06.000Z"),
+    ];
+    const activities = [
+      activity("read", turn.id, { createdAt: "2026-07-23T10:00:02.000Z" }),
+      activity("rename", turn.id, { kind: "command", title: "mv a b", createdAt: "2026-07-23T10:00:05.000Z" }),
+    ];
+    const response = timelineTurn(buildResponseTimeline({
+      turns: [turn], messages, activities, reasonings: [], checkpoints: [],
+    }), turn.id);
+
+    expect(shouldConsolidateSettledWorkIntoRunDetails(response)).toBe(false);
+    expect(buildTurnExecutionStream(response).flatMap((entry) =>
+      entry.kind === "commentary" ? [`${entry.id}:${entry.answer === true ? "answer" : "commentary"}`] : []))
+      .toEqual(["note:commentary", "earlier-answer:answer"]);
+
+    const html = renderToStaticMarkup(createElement(ResponseTimeline, {
+      turns: [turn],
+      messages,
+      activities,
+      reasonings: [],
+      plans: [],
+      checkpoints: [],
+      projectRoot: "/workspace",
+      projectId: "project-1",
+      conversationId,
+      streamingText: "",
+      streamingReasoning: "",
+      approvals: [],
+      inputRequests: [],
+      showTimestamps: false,
+      showThinking: false,
+      defaultCodeWrap: false,
+      autoCollapseWorkLog: true,
+      showChangedFileSummaries: false,
+      checkpointRestoreDisabled: false,
+      onRespondToApproval: async () => undefined,
+      onRespondToInput: async () => undefined,
+      onRevertCheckpoint: () => undefined,
+      onOpenTurnDiff: () => undefined,
+      onCompareTurnArtifacts: () => undefined,
+      onOpenTurnFile: () => undefined,
+      onStop: () => undefined,
+    }));
+    const detailsEnd = html.indexOf("</details>");
+    const earlierAnswer = html.indexOf("The parser is fixed.");
+    const followUp = html.indexOf('data-follow-up-message-id="follow-up"');
+    const finalAnswer = html.indexOf('data-turn-layer="final-answer"');
+    expect(html).not.toContain("Reading the parser.");
+    expect(html).toContain('class="turn-commentary-row is-answer"');
+    expect(earlierAnswer).toBeGreaterThan(detailsEnd);
+    expect(followUp).toBeGreaterThan(earlierAnswer);
+    expect(finalAnswer).toBeGreaterThan(followUp);
   });
 
   it("renders accepted follow-up images with the shared sent-media treatment", () => {
@@ -577,15 +639,16 @@ describe("authoritative response timeline", () => {
     // Running calls remain visible even after falling outside the recent four.
     expect(html.match(/data-folded="false"/g)).toHaveLength(7);
     expect(html).not.toContain('data-folded="true"');
-    expect(html).toContain("Read source");
-    expect(html).toContain("Inspect package");
-    expect(html).toContain("Checking the existing presentation.");
-    expect(html.indexOf("Inspect package")).toBeLessThan(html.indexOf("Checking the existing presentation."));
-    expect(html.indexOf("Checking the existing presentation.")).toBeLessThan(html.indexOf("Completed command"));
-    expect(html.indexOf("Completed command")).toBeLessThan(html.indexOf("Build failed"));
-    expect(html.indexOf("Build failed")).toBeLessThan(html.indexOf("Unsupported option skipped"));
-    expect(html.indexOf("Unsupported option skipped"))
-      .toBeLessThan(html.lastIndexOf("Run tests"));
+    const text = html.replace(/<[^>]+>/gu, "");
+    expect(text).toContain("Read source");
+    expect(text).toContain("Inspect package");
+    expect(text).toContain("Checking the existing presentation.");
+    expect(text.indexOf("Inspect package")).toBeLessThan(text.indexOf("Checking the existing presentation."));
+    expect(text.indexOf("Checking the existing presentation.")).toBeLessThan(text.indexOf("Completed command"));
+    expect(text.indexOf("Completed command")).toBeLessThan(text.indexOf("Build failed"));
+    expect(text.indexOf("Build failed")).toBeLessThan(text.indexOf("Unsupported option skipped"));
+    expect(text.indexOf("Unsupported option skipped"))
+      .toBeLessThan(text.lastIndexOf("Run tests"));
 
     const detailsStart = html.indexOf('class="turn-work-details"');
     const detailsEnd = html.indexOf("</details>", detailsStart);
@@ -678,7 +741,7 @@ describe("authoritative response timeline", () => {
       deletions: 0,
     }));
     expect(pendingHtml).toContain("Capturing changes…");
-    expect(pendingHtml).toContain("Git history will appear here when ready.");
+    expect(pendingHtml).not.toContain("Git history will appear here when ready.");
     expect(pendingHtml).not.toContain("is working");
     expect(pendingHtml).not.toContain(">Stop</span></button>");
 
@@ -767,6 +830,7 @@ describe("authoritative response timeline", () => {
     expect(html).toContain("modified · +64 −9");
     expect(html).toContain("added · +20 −12");
     expect(html).toContain('data-language-family="java"');
+    expect(html).not.toMatch(/<span[^>]*\btitle="[^"]*"[^>]*role="listitem"/u);
     expect(html).toContain("Open exact turn diff");
     expect(html).toContain('aria-label="Open src/history.ts"');
     expect(html).toContain("The complete file summary is retained, but the stored patch reached its size limit.");
@@ -876,9 +940,14 @@ describe("authoritative response timeline", () => {
       },
       configurationRevision: 7,
     });
+    const previous = agentTurn("turn-codex", "user-codex", {
+      terminalAssistantMessageId: "assistant-codex",
+    });
     const html = renderToStaticMarkup(createElement(ResponseTimeline, {
-      turns: [turn],
+      turns: [previous, turn],
       messages: [
+        message("user-codex", previous.id, "user", "Start with Codex", previous.requestedAt),
+        message("assistant-codex", previous.id, "assistant", "Codex answer", previous.completedAt!),
         message("user-kimi", turn.id, "user", "Use Kimi", turn.requestedAt),
         message("assistant-kimi", turn.id, "assistant", "Kimi answer", turn.completedAt!),
       ],
@@ -909,6 +978,8 @@ describe("authoritative response timeline", () => {
     }));
 
     expect(html).toContain('data-final-answer-identity="historical-model-selection">Claude · Kimi · K3</span>');
+    expect(html.match(/data-final-answer-identity=/gu)).toHaveLength(1);
+    expect(html.indexOf("data-final-answer-identity")).toBeGreaterThan(html.indexOf("Codex answer"));
     expect(html).toContain("<span>Run details</span>");
     expect(html).not.toContain("Claude harness ·");
   });
@@ -976,7 +1047,7 @@ describe("authoritative response timeline", () => {
 
     const footerStart = html.indexOf('aria-label="Final answer actions and run metadata"');
     const primaryEnd = html.indexOf("</div>", footerStart);
-    const detailsEnd = html.indexOf("</dl>", primaryEnd);
+    const detailsEnd = html.indexOf("</footer>", primaryEnd);
     const footerPrimary = html.slice(footerStart, primaryEnd);
     const runDetails = html.slice(primaryEnd, detailsEnd);
 
@@ -984,8 +1055,8 @@ describe("authoritative response timeline", () => {
     expect(html.indexOf("1 file changed")).toBeGreaterThan(footerStart);
     expect(footerPrimary).toContain('aria-label="Copy final answer"');
     expect(footerPrimary).toContain(`dateTime="${turn.completedAt}"`);
-    expect(footerPrimary).toContain('data-turn-status="completed">Completed</span>');
-    expect(footerPrimary).toContain('class="turn-duration">Worked 7s</span>');
+    expect(footerPrimary).not.toContain(">Completed</span>");
+    expect(footerPrimary).toContain('class="turn-duration" data-turn-status="completed">Worked 7s</span>');
     expect(footerPrimary).toContain('aria-expanded="false"');
     expect(footerPrimary).toContain('aria-controls="turn-run-details-turn-footer"');
     expect(footerPrimary).toContain("<span>Run details</span>");

@@ -25,9 +25,10 @@ const THEME_CASES = COLOR_THEME_IDS
 
 function contrastRatio(foreground: string, background: string): number {
   const channels = (value: string): number[] => {
+    const scale = value.startsWith("color(srgb") ? 1 : 255;
     const values = value.match(/[\d.]+/gu)?.map(Number) ?? [];
     return values.slice(0, 3).map((channel) => {
-      const normalized = channel / 255;
+      const normalized = channel / scale;
       return normalized <= 0.04045
         ? normalized / 12.92
         : ((normalized + 0.055) / 1.055) ** 2.4;
@@ -214,7 +215,7 @@ test("references a whole chat from the composer and preserves its provenance", a
     name: "Chats and project files",
   });
   await expect(suggestions).toBeVisible();
-  await expect(suggestions.getByText("Reference a chat")).toBeVisible();
+  await expect(suggestions.getByRole("group", { name: "Reference a chat" })).toBeVisible();
   await capture("conversation-context-mention-1280x820");
 
   await suggestions.getByRole("option", { name: /Architecture decisions/u })
@@ -356,8 +357,10 @@ test("confirms cross-workspace sharing inline and restores keyboard input", asyn
     await expect(option).toContainText("different workspace");
     await option.click();
     const confirmation = page.getByRole("alertdialog", { name: "Share context from another workspace?" });
-    await expect(confirmation).toContainText(sourceWorkspace);
-    await expect(confirmation).toContainText(targetWorkspace);
+    await expect(confirmation).toContainText("From: Another workspace · Project checkout");
+    await expect(confirmation).toContainText(/To: this chat · \S/u);
+    await expect(confirmation).not.toContainText(sourceWorkspace);
+    await expect(confirmation).not.toContainText(targetWorkspace);
     await expect(confirmation.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
     const cancelBounds = (await confirmation.getByRole("button", { name: "Cancel", exact: true }).boundingBox())!;
     const shareBounds = (await confirmation.getByRole("button", { name: "Share chat", exact: true }).boundingBox())!;
@@ -432,7 +435,7 @@ test("references this chat beside two other chats and keeps what was sent", asyn
 
   await importerChip.click();
   await expect(preview.getByText(/earlier messages omitted/u)).toBeVisible();
-  await expect(preview.getByText(/intermediate agent updates left out so more turns fit/u)).toBeVisible();
+  await expect(preview.getByText(/agent updates left out$/u)).toBeVisible();
   await expect(preview.locator("li").first()).toContainText("Plan the importer rollout");
   await capture("importer-preview");
   await closePreview.click();
@@ -446,13 +449,27 @@ test("references this chat beside two other chats and keeps what was sent", asyn
   await expect(importerChip).toHaveCount(0);
   await expect(page.getByText("Pick up the importer plan", { exact: true })).toBeVisible();
 
-  const receipts = page.getByRole("article", { name: "Your request" })
-    .filter({ hasText: "Pick up the importer plan where we left it." })
-    .getByLabel("Shared chat context");
+  const sentRequest = page.getByRole("article", { name: "Your request" })
+    .filter({ hasText: "Pick up the importer plan where we left it." });
+  const receipts = sentRequest.getByLabel("Shared chat context");
   await expect(receipts).toContainText("Earlier messages from this chat");
   await expect(receipts).toContainText("Context from Importer rollout");
   await expect(receipts).toContainText(/omitted/u);
   await receipts.scrollIntoViewIfNeeded();
   await capture("sent-receipts");
+
+  const sentImporter = sentRequest.getByRole("button", { name: /Context from Importer rollout/u });
+  await expect(sentImporter).toHaveAttribute("aria-expanded", "false");
+  await sentImporter.click();
+  const sentPreview = sentRequest.getByRole("region", { name: "Shared chat context" });
+  await expect(sentPreview).toBeFocused();
+  await expect(sentImporter).toHaveAttribute("aria-expanded", "true");
+  await expect(sentPreview.locator("li").first()).toContainText("Plan the importer rollout");
+  await sentPreview.scrollIntoViewIfNeeded();
+  await capture("sent-receipt-preview");
+  await page.keyboard.press("Escape");
+  await expect(sentPreview).toHaveCount(0);
+  await expect(sentImporter).toBeFocused();
+  await expect(sentImporter).toHaveAttribute("aria-expanded", "false");
   expect(app.rendererErrors).toEqual([]);
 });

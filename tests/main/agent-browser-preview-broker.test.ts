@@ -107,6 +107,23 @@ describe("agent-owned native Browser", () => {
     );
   });
 
+  it("tells the renderer which owner's page holds keyboard focus", () => {
+    const { broker, window } = harness();
+    const owner = { ownerId: "primary", contextId: conversationId, connectionId };
+    broker.connect(owner);
+    broker.setBounds({ ...owner, bounds: { x: 0, y: 0, width: 800, height: 600 } });
+    const contents = electronState.contents.at(-1)!;
+    const lastState = () => window.webContents.send.mock.calls.at(-1)?.[1] as { ownerId: string; pageFocused?: boolean };
+
+    expect(broker.connect(owner).pageFocused).toBe(false);
+    contents.focused = true;
+    contents.emit("focus");
+    expect(lastState()).toMatchObject({ ownerId: "primary", pageFocused: true });
+    contents.focused = false;
+    contents.emit("blur");
+    expect(lastState()).toMatchObject({ ownerId: "primary", pageFocused: false });
+  });
+
   it("ignores stale renderer bounds and close after the same Browser context reconnects", async () => {
     const { broker, children } = harness();
     const contentsOffset = electronState.contents.length;

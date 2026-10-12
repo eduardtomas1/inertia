@@ -39,6 +39,8 @@ test("recent attachments show real thumbnails, open retained previews and handle
     await page.getByRole("radio", { name: theme === "dark" ? "Dark" : "Light", exact: true }).click();
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await expect(recent).toBeVisible();
+    await page.locator("#workspace-content").evaluate((element) =>
+      Promise.all(element.getAnimations().map(({ finished }) => finished.catch(() => undefined))));
     for (const button of await recent.getByRole("button").all()) {
       const layout = await button.evaluate((node) => {
         const box = node.getBoundingClientRect(); const icon = node.querySelector(".sent-attachment-thumbnail")!.getBoundingClientRect();

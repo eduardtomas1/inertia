@@ -10,6 +10,9 @@ type LifecycleScenario =
   | "resume-refused-steer"
   | "resume-dropped-steer"
   | "resume-admitted-stuck-steer"
+  | "steer-answer-open"
+  | "steer-answer-ended"
+  | "steer-answer-unfinished"
   | "early-permission-follow-up"
   | "idle-before-prompt-receipt"
   | "status-idle-before-prompt-receipt"
@@ -73,6 +76,7 @@ let markEventsReady;
 const eventsReady = new Promise((resolve) => { markEventsReady = resolve; });
 let followUpReceiptSent = false;
 let followUpPromptID;
+let initialPromptID;
 const save = () => ${fixtureCaptureWriterSource(capturePath)}({ port, captured });
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
 const session = { id: sessionID, slug: "fixture", projectID: "project", directory: ${JSON.stringify(root)}, title: "Fixture", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
@@ -342,6 +346,12 @@ const server = http.createServer((req, res) => {
         return;
       }
       json(res, undefined, 204);
+      if (scenario.startsWith("steer-answer-")) initialPromptID = parsed.messageID;
+      if (scenario.startsWith("steer-answer-")) setTimeout(() => {
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "answer", parentID: parsed.messageID, sessionID, role: "assistant", time: { created: Date.now() } } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "answer-text", sessionID, messageID: "answer", type: "text", text: "Answer to the fir" } } });
+        if (scenario === "steer-answer-ended") sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "answer", parentID: parsed.messageID, sessionID, role: "assistant", time: { created: Date.now(), completed: Date.now() } } } });
+      }, 10);
       if (scenario === "idle-after-admission") {
         setTimeout(() => {
           sendEvent({ type: "session.next.prompt.admitted", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, prompt: { text: "Continue", files: [] }, delivery: "queue" } });
@@ -482,6 +492,21 @@ const server = http.createServer((req, res) => {
       if (scenario === "resume-stuck-steer") return;
       if (scenario === "resume-refused-steer") return setTimeout(() => json(res, { name: "SteerRejected", data: { message: "Session is not accepting steering." } }, 409), 50);
       if (scenario === "resume-dropped-steer") return setTimeout(() => req.socket.destroy(), 50);
+      if (scenario.startsWith("steer-answer-")) {
+        json(res, { data: { admittedSeq: 2, id: parsed.id, sessionID, prompt: parsed.prompt, delivery: parsed.delivery, timeCreated: Date.now() } });
+        return setTimeout(() => {
+          if (scenario !== "steer-answer-ended") {
+            sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "answer-text", sessionID, messageID: "answer", type: "text", text: "Answer to the first task." } } });
+          }
+          if (scenario === "steer-answer-open") {
+            sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "answer", parentID: initialPromptID, sessionID, role: "assistant", time: { created: Date.now(), completed: Date.now() } } } });
+          }
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "reply", parentID: parsed.id, sessionID, role: "assistant", time: { created: Date.now() } } } });
+          sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "reply-text", sessionID, messageID: "reply", type: "text", text: "Renamed it." } } });
+          sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "reply", parentID: parsed.id, sessionID, role: "assistant", time: { created: Date.now(), completed: Date.now() } } } });
+          sendEvent({ type: "session.idle", properties: { sessionID } });
+        }, 200);
+      }
       if (scenario === "early-permission-follow-up") {
         followUpPromptID = parsed.id;
         sendEvent({ type: "permission.asked", properties: { id: "steer-early", sessionID, permission: "bash", patterns: ["npm test"], metadata: {} } });

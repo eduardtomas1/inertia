@@ -130,6 +130,7 @@ export default function App(): React.JSX.Element {
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
+  const refreshGit = useCallback(() => setGitRefreshVersion((version) => version + 1), []);
   const [suppressedMainConversationIds, setSuppressedMainConversationIds] =
     useState<Set<string>>(() => new Set());
   const split = useSplitPanes({
@@ -413,6 +414,7 @@ export default function App(): React.JSX.Element {
       subscribe: connection.subscribe,
       setActionError,
       setActiveTool: sceneSetActiveTool,
+      onBranchChanged: refreshGit,
       loadGitStatusOnMount: !workspaceToolsUnavailable,
       loadGitOnMount:
         !workspaceToolsUnavailable
@@ -897,7 +899,7 @@ export default function App(): React.JSX.Element {
         updateConversationById,
       },
       sendingConversationIds,
-      onTerminal: () => setGitRefreshVersion((version) => version + 1),
+      onTerminal: refreshGit,
       attentionObstructed,
       attentionVisibilityVersion,
     },

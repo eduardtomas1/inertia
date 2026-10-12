@@ -69,7 +69,7 @@ test.beforeAll(async () => {
   const tools = await ensureWorkspaceTools(app.page);
   await selectWorkspaceTool(tools, "Browser");
   await tools.getByRole("textbox", { name: "Preview address" }).fill(url);
-  await tools.getByRole("button", { name: "Go", exact: true }).click();
+  await tools.getByRole("textbox", { name: "Preview address" }).press("Enter");
   await expect.poll(() => app.nativePreviewIsVisible(url)).toBe(true);
 });
 

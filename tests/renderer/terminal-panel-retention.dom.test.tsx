@@ -96,6 +96,29 @@ describe("TerminalPanel retained ownership", () => {
     }));
   });
 
+  it("scrolls the session strip with the wheel and fades the edge that hides sessions", async () => {
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:${firstConversationId}`,
+      JSON.stringify([firstTerminalId, "44444444-4444-4444-8444-444444444446"]),
+    );
+    const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> =>
+      command.type === "terminal.attach"
+        ? { type: "terminal.created", requestId: command.requestId, terminalId: command.payload.terminalId }
+        : { type: "request.ok", requestId: command.requestId });
+    render(<TerminalPanel projectId={projectId} conversationId={firstConversationId}
+      projectName="Inertia" status="online" fontSize={13} theme="dark" visible
+      sendCommand={sendCommand} subscribe={() => () => undefined} onClose={() => undefined} />);
+    await waitFor(() => expect(screen.getAllByRole("tab")).toHaveLength(2));
+    const strip = screen.getByRole("tablist", { name: "Terminals" });
+    Object.defineProperty(strip, "clientWidth", { configurable: true, value: 120 });
+    Object.defineProperty(strip, "scrollWidth", { configurable: true, value: 300 });
+    fireEvent.wheel(strip, { deltaY: 40 });
+    expect(strip.scrollLeft).toBe(40);
+    fireEvent.scroll(strip);
+    expect(strip).toHaveAttribute("data-overflow-start");
+    expect(strip).toHaveAttribute("data-overflow-end");
+  });
+
   it("persists the live capability when Strict Mode replays initialization", async () => {
     let sequence = 0;
     const createdIds = [

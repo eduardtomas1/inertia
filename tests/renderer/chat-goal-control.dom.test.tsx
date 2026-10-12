@@ -343,6 +343,7 @@ describe("ChatGoalControl", () => {
       "This stays in Inertia and is never injected into provider context.",
     );
     expect(surface).toHaveTextContent(localCapability.reason);
+    expect(surface).toHaveTextContent("Inertia does not measure or enforce the local token target.");
 
     await user.type(objective, "Keep this pane's work independently scoped");
     await user.click(within(surface).getByRole("button", {

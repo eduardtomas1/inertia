@@ -5,7 +5,7 @@ import { defaultProjectPreferences, type ProjectAppearancePatch, type ProjectPre
 import { ProjectColorPicker, ProjectEmphasisPicker, ProjectIconPicker } from "./ProjectAppearanceControls";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { readProjectIcon } from "./project-settings-image";
-import { Switch } from "./ui";
+import { IconButton, Switch } from "./ui";
 import "./ProjectCustomizePanel.css";
 
 export type ProjectAppearanceUpdate = (project: Project, appearance: ProjectAppearancePatch) => Promise<void> | void;
@@ -57,7 +57,7 @@ export function ProjectCustomizePanel({ project, headingId, onBack, onUpdate, on
       onBack();
     }}>
     <header className="project-customize-header">
-      <button type="button" className="project-customize-back" aria-label="Back to projects" onClick={onBack}><ArrowLeft size={14} aria-hidden="true" /></button>
+      <IconButton label="Back to projects" onClick={onBack}><ArrowLeft size={14} aria-hidden="true" /></IconButton>
       <h2 id={headingId} className="project-customize-title">
         <ProjectIcon project={preview} size={16} />
         <ProjectName project={preview}>{project.name}</ProjectName>
@@ -75,7 +75,7 @@ export function ProjectCustomizePanel({ project, headingId, onBack, onUpdate, on
       <h3>Icon</h3>
       <div className="project-customize-icons">
         <ProjectIconPicker preferences={preferences} onChange={(icon) => apply({ icon })} />
-        <button type="button" className="project-customize-action" onClick={() => fileInput.current?.click()}><ImagePlus size={13} aria-hidden="true" />Import image…</button>
+        <button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><ImagePlus size={14} aria-hidden="true" />Import image…</button>
         <input ref={fileInput} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
@@ -90,7 +90,7 @@ export function ProjectCustomizePanel({ project, headingId, onBack, onUpdate, on
       <Switch label="Pin to top of project lists" checked={preferences.pinned} onChange={(pinned) => apply({ pinned })} />
     </div>
     {error && <p className="project-customize-error" role="alert">{error}</p>}
-    {onOpenSettings && <button type="button" className="project-customize-action is-footer" onClick={() => onOpenSettings(project)}>
-      <Settings size={13} aria-hidden="true" />All project settings</button>}
+    {onOpenSettings && <button type="button" className="subtle-button project-customize-footer" onClick={() => onOpenSettings(project)}>
+      <Settings size={14} aria-hidden="true" />All project settings</button>}
   </div>;
 }

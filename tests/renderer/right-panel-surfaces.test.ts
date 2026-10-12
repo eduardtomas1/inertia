@@ -10,6 +10,7 @@ import {
   EMPTY_RIGHT_PANEL_STATE,
   hideRightPanel,
   legacyRightPanelState,
+  moveRightPanelSurface,
   openRightPanelSurface,
   parseRightPanelState,
   RIGHT_PANEL_SIBLING_MIN_WIDTH,
@@ -89,6 +90,33 @@ describe("right panel surface host state", () => {
     const opened = applyRightPanelTool(EMPTY_RIGHT_PANEL_STATE, "plan");
     expect(opened).toEqual(withSurfaces(["plan"], "plan"));
     expect(applyRightPanelTool(opened, null)).toEqual(hideRightPanel(opened));
+  });
+});
+
+describe("right panel tab order", () => {
+  const four = withSurfaces(["changes", "preview", "terminal", "files"], "terminal");
+
+  it("moves a tab left and right without changing the active tab", () => {
+    expect(moveRightPanelSurface(four, "files", 0)).toEqual(
+      withSurfaces(["files", "changes", "preview", "terminal"], "terminal"),
+    );
+    expect(moveRightPanelSurface(four, "changes", 2)).toEqual(
+      withSurfaces(["preview", "terminal", "changes", "files"], "terminal"),
+    );
+    expect(moveRightPanelSurface(four, "preview", 1)).toBe(four);
+  });
+
+  it("clamps the target index and ignores unknown surfaces", () => {
+    expect(moveRightPanelSurface(four, "changes", 99).surfaces)
+      .toEqual(["preview", "terminal", "files", "changes"]);
+    expect(moveRightPanelSurface(four, "files", -3).surfaces)
+      .toEqual(["files", "changes", "preview", "terminal"]);
+    expect(moveRightPanelSurface(four, "usage", 0)).toBe(four);
+  });
+
+  it("keeps the new order through save and reload", () => {
+    const moved = moveRightPanelSurface(four, "terminal", 0);
+    expect(parseRightPanelState(serializeRightPanelState(moved))).toEqual(moved);
   });
 });
 

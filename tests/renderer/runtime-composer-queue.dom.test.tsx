@@ -123,4 +123,18 @@ describe("runtime queue presentation and durable draft identity", () => {
     await act(async () => { resolveRead(response()); await pending; });
     expect(screen.queryByText("Next task")).toBeNull();
   });
+
+  it("states a blocked entry's error once, in the status line, without repeating it in a tooltip", async () => {
+    const blocked: QueuedMessage = { ...queued, state: "blocked", error: "The route is no longer available." };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([blocked]));
+    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+    const label = await screen.findByText("Needs attention");
+    expect(label.tagName.toLowerCase()).toBe("small");
+    expect(screen.getByRole("status")).toHaveTextContent("The route is no longer available.");
+    vi.useFakeTimers();
+    fireEvent.pointerEnter(label, { pointerType: "mouse" });
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    vi.useRealTimers();
+  });
 });

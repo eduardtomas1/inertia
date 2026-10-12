@@ -1,6 +1,7 @@
 export const MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN = 3;
 export const MAX_CONVERSATION_CONTEXT_MESSAGES = 2000;
-export const MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES = 8 * 1024;
+export const MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES = 32 * 1024;
+export const MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES = 8 * 1024;
 export const MAX_CONVERSATION_CONTEXT_TOTAL_BYTES = 256 * 1024;
 export const MAX_CONVERSATION_CONTEXT_EXCERPTS_JSON_BYTES = 640 * 1024;
 export const MAX_CONVERSATION_CONTEXT_NOTE_BYTES = 1024;
@@ -23,6 +24,8 @@ export interface ConversationContextAttachmentReference {
   size: number;
 }
 
+export type UnfinishedTurnState = "failed" | "cancelled" | "running";
+
 export interface ConversationContextExcerpt {
   sourceMessageId: string;
   sourceTurnId: string | null;
@@ -31,6 +34,15 @@ export interface ConversationContextExcerpt {
   truncated: boolean;
   createdAt: string;
   attachments?: ConversationContextAttachmentReference[];
+  agent?: string;
+  turn?: UnfinishedTurnState;
+}
+
+export interface ConversationContextSupplement {
+  files?: string[];
+  omittedFiles?: number;
+  commands?: string[];
+  moved?: string;
 }
 
 export interface ConversationContextPacketSummary {
@@ -64,6 +76,7 @@ export interface ConversationContextPacket
   extends ConversationContextPacketSummary {
   excerpts: ConversationContextExcerpt[];
   omissions?: ConversationContextOmissions;
+  supplement?: ConversationContextSupplement;
 }
 
 export interface ConversationContextSourceTranscript {
@@ -77,6 +90,22 @@ export interface ConversationContextSourceTranscript {
   targetWorkspaceLabel: string;
   workspaceRelation: ConversationContextWorkspaceRelation;
   messages: ConversationContextExcerpt[];
+}
+
+export type AgentContextReadAccess = "own" | "referenced" | "approved";
+
+/** What an agent read from one chat during one turn, through the context tool. */
+export interface AgentContextReadSummary {
+  targetMessageId: string;
+  targetTurnId: string;
+  sourceConversationId: string;
+  sourceConversationTitle: string;
+  sourceState: "available" | "deleted";
+  access: AgentContextReadAccess;
+  listedTurns: boolean;
+  turnIds: string[];
+  firstReadAt: string;
+  lastReadAt: string;
 }
 
 /** Renderer-safe prompt for a host-owned, user-selected context disclosure. */
@@ -100,6 +129,20 @@ export interface MaterializedConversationContext {
   content: string;
   blockIndex: number;
   blockCount: number;
+  structured?: true;
+}
+
+export function conversationWorkspaceLabel(
+  conversation: { branch: string | null; worktreePath: string | null },
+): string {
+  if (conversation.worktreePath) {
+    return conversation.branch
+      ? `Isolated worktree · ${conversation.branch}`
+      : "Isolated worktree";
+  }
+  return conversation.branch
+    ? `Project checkout · ${conversation.branch}`
+    : "Project checkout";
 }
 
 export function isOwnConversationContext(

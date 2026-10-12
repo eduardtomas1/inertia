@@ -9,6 +9,7 @@ if (!root) {
   throw new Error("Inertia could not find its application root.");
 }
 const applicationRoot = root;
+document.documentElement.dataset.platform = window.inertia.getPlatform();
 
 async function renderApplication(): Promise<void> {
   const context = await window.inertia.getWindowContext();

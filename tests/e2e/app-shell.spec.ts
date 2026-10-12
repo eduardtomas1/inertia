@@ -202,9 +202,8 @@ test("starts without a demo and adds the first real project", async () => {
   )).stdout.trim();
   await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
   const changesPanel = page.getByRole("tabpanel", { name: "Changes" });
-  await expect(changesPanel.locator(
-    `.workspace-repository-scope-branch[title=${JSON.stringify(currentBranch)}]`,
-  )).toBeVisible();
+  await expect(changesPanel.locator(".workspace-repository-scope-branch"))
+    .toHaveText(currentBranch);
   await expect(page.getByRole("alert").filter({
     hasText: "The request could not be completed.",
   })).toHaveCount(0);
@@ -285,7 +284,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     });
     expect(disabledStyle.boxShadow).toBe("none");
     expect(disabledStyle.filter).toBe("none");
-    expect(Number(disabledStyle.opacity)).toBeLessThan(1);
+    expect(disabledStyle.opacity).toBe("1");
 
     await textbox.fill("First line");
     await textbox.press("Shift+Enter");

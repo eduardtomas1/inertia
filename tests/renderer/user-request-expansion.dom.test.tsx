@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +9,8 @@ import {
 import type {
   AgentTurn,
   ChatMessage,
+  ConversationContextPacketSummary,
+  ServerEvent,
 } from "../../src/shared/contracts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -177,5 +180,91 @@ describe("long user request expansion", () => {
       .toHaveAttribute("aria-expanded", "true");
     expect(scroll.scrollTop).toBe(300);
     expect(second.getBoundingClientRect().top).toBe(200);
+  });
+
+  it("opens the exact sent excerpt from a sent reference and closes it from the keyboard", async () => {
+    const user = userEvent.setup();
+    const packet: ConversationContextPacketSummary = {
+      id: "33333333-3333-4333-8333-333333333333",
+      sourceConversationId: "44444444-4444-4444-8444-444444444444",
+      targetConversationId: conversationId,
+      sourceProjectId: "55555555-5555-4555-8555-555555555555",
+      targetProjectId: "55555555-5555-4555-8555-555555555555",
+      sourceConversationTitle: "Architecture decisions",
+      sourceProjectName: "Inertia",
+      sourceWorkspaceLabel: "Project checkout · main",
+      targetWorkspaceLabel: "Project checkout · main",
+      workspaceRelation: "same-workspace",
+      note: null,
+      messageCount: 1,
+      characterCount: 40,
+      droppedMessageCount: 0,
+      createdAt: "2026-07-29T10:00:01.000Z",
+      consumedMessageId: "user-1",
+      consumedAt: "2026-07-29T10:00:01.000Z",
+      sourceState: "deleted",
+    };
+    const onCommand = vi.fn(async () => ({
+      type: "request.result",
+      requestId: "preview",
+      result: { kind: "conversation.context.packet", packet: {
+        ...packet,
+        excerpts: [{ sourceMessageId: "m1", sourceTurnId: null, role: "assistant", content: "Retry with jitter.", truncated: false, createdAt: "now" }],
+        supplement: { files: ["M src/retry.ts +9 -2"], commands: ["npm test (ok)"] },
+      } },
+    } as unknown as ServerEvent));
+    render(
+      <ResponseTimeline
+        turns={[agentTurn(1)]}
+        messages={[userMessage(1, "Use the decision.")]}
+        contextPackets={[packet]}
+        activities={[]}
+        reasonings={[]}
+        plans={[]}
+        checkpoints={[]}
+        projectRoot="/workspace"
+        projectId="project-1"
+        conversationId={conversationId}
+        streamingText=""
+        streamingReasoning=""
+        approvals={[]}
+        inputRequests={[]}
+        showTimestamps={false}
+        showThinking={false}
+        defaultCodeWrap={false}
+        autoCollapseWorkLog
+        showChangedFileSummaries={false}
+        checkpointRestoreDisabled={false}
+        onRespondToApproval={async () => undefined}
+        onRespondToInput={async () => undefined}
+        onRevertCheckpoint={() => undefined}
+        onOpenTurnDiff={() => undefined}
+        onCompareTurnArtifacts={() => undefined}
+        onOpenTurnFile={() => undefined}
+        onStop={() => undefined}
+        onConversationContextCommand={onCommand}
+      />,
+    );
+    const receipt = screen.getByRole("button", { name: /Context from Architecture decisions/u });
+    expect(receipt).toHaveAttribute("aria-expanded", "false");
+    receipt.focus();
+    await user.keyboard("{Enter}");
+    const preview = await screen.findByRole("region", { name: "Shared chat context" });
+    expect(receipt).toHaveAttribute("aria-expanded", "true");
+    expect(preview).toHaveFocus();
+    expect(await within(preview).findByText("Retry with jitter.")).toBeVisible();
+    expect(within(preview).getAllByRole("listitem").map(({ textContent }) => textContent)).toEqual([
+      expect.stringContaining("Retry with jitter."),
+      "M src/retry.ts +9 -2",
+      "npm test (ok)",
+    ]);
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith("conversation.context.load", {
+      type: "conversation.context.load",
+      payload: { packetId: packet.id, targetConversationId: conversationId },
+    });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Shared chat context" })).not.toBeInTheDocument();
+    expect(receipt).toHaveAttribute("aria-expanded", "false");
+    expect(receipt).toHaveFocus();
   });
 });

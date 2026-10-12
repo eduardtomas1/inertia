@@ -1,3 +1,5 @@
+import { fireEvent, screen, within } from "@testing-library/react";
+
 import type { Conversation, ProviderInfo } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { ComposerProps } from "../../src/renderer/src/components/composer/types";
@@ -134,4 +136,13 @@ export function composerProps(
     onStop: async () => undefined,
     ...overrides,
   };
+}
+
+export function openComposerTools(scope?: HTMLElement): void {
+  const toggles = scope
+    ? within(scope).getAllByRole("button", { name: "More tools" })
+    : screen.getAllByRole("button", { name: "More tools" });
+  for (const toggle of toggles) {
+    if (toggle.getAttribute("aria-expanded") !== "true") fireEvent.click(toggle);
+  }
 }

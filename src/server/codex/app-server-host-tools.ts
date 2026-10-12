@@ -175,12 +175,10 @@ export class CodexHostToolRuntime {
             type: "inputText",
             text: boundedHostToolResult(result.text),
           },
-          ...(result.image
-            ? [{
-                type: "inputImage",
-                imageUrl: `data:${result.image.mimeType};base64,${result.image.data}`,
-              }]
-            : []),
+          ...(result.images ?? []).map((image) => ({
+            type: "inputImage",
+            imageUrl: `data:${image.mimeType};base64,${image.data}`,
+          })),
         ],
         success: result.success,
       },

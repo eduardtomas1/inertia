@@ -1,9 +1,9 @@
 import { ReviewedScreenshotControl } from "./ReviewedScreenshotControl";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
+import { captureModalFocus } from "../../utils/modalFocus";
+import { DialogShell } from "../DialogShell";
 import "./SnapshotControl.css";
 
 /** Capture failures stay with their destination chat; configuration lives in Settings. */
@@ -28,14 +28,10 @@ export function SnapshotControl({ conversationId, disabled }: { conversationId: 
     close.current?.focus();
     return restore;
   }, [open]);
-  return <><ReviewedScreenshotControl conversationId={conversationId} disabled={disabled} />{open && createPortal(<div className="snapshot-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setError(null); }}>
-    <section className="snapshot-dialog" role="dialog" aria-modal="true" aria-labelledby="snapshot-title" onKeyDown={(event) => {
-      if (event.key === "Escape") { event.stopPropagation(); setError(null); }
-      else trapModalFocus(event, event.currentTarget);
-    }}>
-      <header><h2 id="snapshot-title">Snapshots</h2><button ref={close} aria-label="Close Snapshots" onClick={() => setError(null)}><X size={18} /></button></header>
-      <p role="alert" className="snapshot-alert">{error.split(/`([^`]+)`/u).map((part, index) => index % 2 ? <code key={index}>{part}</code> : part)}</p>
-      <p className="snapshot-note">Capture options and access guidance are in Settings → Devices & integrations in the main window.</p>
-    </section>
-  </div>, document.body)}</>;
+  return <><ReviewedScreenshotControl conversationId={conversationId} disabled={disabled} />{open && createPortal(<DialogShell className="snapshot-dialog" backdropClassName="snapshot-backdrop" titleId="snapshot-title" title="Snapshots"
+    closeLabel="Close Snapshots" closeRef={close} onClose={() => setError(null)} onDismiss={() => setError(null)}
+    onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setError(null); } }}>
+    <p role="alert" className="snapshot-alert">{error.split(/`([^`]+)`/u).map((part, index) => index % 2 ? <code key={index}>{part}</code> : part)}</p>
+    <p className="snapshot-note">Capture options and access guidance are in Settings → Devices & integrations in the main window.</p>
+  </DialogShell>, document.body)}</>;
 }

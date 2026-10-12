@@ -603,7 +603,7 @@ export function ModelChooser({
         >
           <div className="model-chooser-header">
             <label htmlFor={searchId}>
-              <Search size={15} aria-hidden="true" />
+              <Search size={14} aria-hidden="true" />
               <span className="visually-hidden">Search models</span>
             </label>
             <input
@@ -680,13 +680,10 @@ export function ModelChooser({
                 </ul>
                 {results.emptyState && (
                   <div className="model-chooser-empty" role="status">
-                    <Search size={17} aria-hidden="true" />
-                    <span>
-                      <strong>{results.emptyState.kind === "no-models"
-                        ? "No models yet"
-                        : "No matching models"}</strong>
-                      <small>{results.emptyState.message}</small>
-                    </span>
+                    <Search size={16} aria-hidden="true" />
+                    <span>{results.emptyState.kind === "no-models"
+                      ? "No models yet"
+                      : "No matching models"}</span>
                   </div>
                 )}
               </div>

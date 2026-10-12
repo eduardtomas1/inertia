@@ -385,7 +385,7 @@ describe("Background tasks surface", () => {
 
   it("says only that there are no background tasks when the chat has none", () => {
     render(surface({ subagents: [], runs: [], turns: [taskTurn({ providerId: "kimi" })] }));
-    expect(screen.getByText("No background tasks.")).toBeVisible();
+    expect(screen.getByText("No background tasks")).toBeVisible();
     expect(screen.queryByRole("button")).toBeNull();
   });
 

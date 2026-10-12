@@ -136,7 +136,9 @@ test.afterAll(async () => {
 test("keeps exact-head green and blocking evidence legible across real Electron layouts", async ({ browserName: _browserName }, testInfo) => {
   await app.resizeWindow(1440, 920);
   await selectWorkspaceTool(await ensureWorkspaceTools(page), "Changes");
-  await page.getByRole("button", { name: "Confidence", exact: true }).click();
+  await page.getByRole("button", { name: /^More actions for /u }).click();
+  await page.getByRole("menu", { name: /^More actions for /u })
+    .getByRole("menuitem", { name: "Confidence" }).click();
   const dialog = page.locator(".pre-merge-dialog");
   await expect(dialog).toHaveAttribute("data-state", "passed");
   await expect(dialog.getByRole("heading", { name: "Exact-head green" }))

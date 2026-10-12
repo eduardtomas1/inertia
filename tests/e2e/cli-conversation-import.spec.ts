@@ -170,7 +170,7 @@ async function expectDialogLayout(dialog: Locator): Promise<void> {
     overflowing: [...element.querySelectorAll<HTMLElement>("*")]
       .filter((node) => !["INPUT", "SELECT"].includes(node.tagName) && getComputedStyle(node).overflowX !== "visible"
         && getComputedStyle(node).textOverflow !== "ellipsis" && node.scrollWidth > node.clientWidth + 1).length,
-    truncatedTitles: [...element.querySelectorAll<HTMLElement>(".cli-import-message p, .cli-import-open-head h2")]
+    truncatedTitles: [...element.querySelectorAll<HTMLElement>(".cli-import-message p, .cli-import-open-head h3")]
       .filter((title) => title.scrollWidth > title.clientWidth + 1 || title.scrollHeight > title.clientHeight + 1).length,
   }));
   expect(layout).toEqual({ nested: 0, overflowing: 0, truncatedTitles: 0 });

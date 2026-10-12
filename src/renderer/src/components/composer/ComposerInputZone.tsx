@@ -1,14 +1,13 @@
 import { PASTED_TEXT_ATTACHMENT_BYTES } from "@shared/attachments";
 import { INTERFACE_LOCALE } from "../../lib/locale";
-import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ArrowLeftRight,
-  Box,
   Check,
   CircleAlert,
   MessageSquarePlus,
   MessagesSquare,
-  RefreshCw,
+  Plus,
   X,
 } from "lucide-react";
 import clsx from "clsx";
@@ -35,6 +34,8 @@ import {
 } from "../../utils/sidebarModel";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
+import { TooltipButton } from "../TooltipButton";
+import { LoadingMark } from "../ui";
 import {
   RouteRepairIcon,
   routeRepairLabel,
@@ -80,7 +81,7 @@ export interface ComposerInputZoneProps {
   onQueue: () => void;
   running: boolean;
   stopsBeforeSending: boolean;
-  imageInputUnavailable: boolean;
+  hasHistory: boolean;
   submissionPending: boolean;
   followUpPending: boolean;
   typedMessageLimit: number;
@@ -143,7 +144,7 @@ export function ComposerInputZone({
   onQueue,
   running,
   stopsBeforeSending,
-  imageInputUnavailable,
+  hasHistory,
   submissionPending,
   followUpPending,
   typedMessageLimit,
@@ -316,6 +317,53 @@ export function ComposerInputZone({
     );
   };
 
+  const renderMentionOption = (
+    option: (typeof mentionOptions)[number],
+    index: number,
+  ): React.JSX.Element => (
+    <button
+      key={option.id}
+      id={`${mentionListboxId}-${index}`}
+      type="button"
+      role="option"
+      aria-selected={option.id === activeMention?.id}
+      onMouseEnter={() => setHighlightedMentionId(option.id)}
+      onClick={() => acceptMention(option)}
+    >
+      {option.kind === "this-chat"
+        ? (
+          <>
+            <span className="composer-suggestion-chat">
+              <MessagesSquare size={14} aria-hidden="true" />
+              This chat
+            </span>
+            <small>Earlier messages · {thisChatTitle}</small>
+          </>
+        )
+        : option.kind === "chat"
+        ? (
+          <>
+            <span className="composer-suggestion-chat">
+              <MessagesSquare size={14} aria-hidden="true" />
+              {option.source.conversationTitle}
+            </span>
+            <small>
+              {option.source.projectName}
+              {option.source.workspaceRelation === "different-workspace"
+                ? " · different workspace"
+                : ""}
+            </small>
+          </>
+        )
+        : (
+          <>
+            <span>{option.entry.path}</span>
+            <small>{option.entry.kind}</small>
+          </>
+        )}
+    </button>
+  );
+
   return (
     <>
       <div className="composer-input-zone" data-composer-zone="input"
@@ -336,7 +384,7 @@ export function ComposerInputZone({
               routeReadiness.transient ? "is-checking" : "is-attention",
             )}>
               {routeReadiness.transient && (
-                <RefreshCw size={11} className="is-spinning" aria-hidden="true" />
+                <LoadingMark size={14} aria-hidden="true" />
               )}
               {routeReadiness.badge}
             </span>
@@ -372,7 +420,7 @@ export function ComposerInputZone({
             className="composer-context"
             aria-label={`Selected ${contextKind} context`}
           >
-            <MessageSquarePlus size={13} />
+            <MessageSquarePlus size={14} aria-hidden="true" />
             <span>
               <strong>
                 {reviewNoteContext
@@ -386,7 +434,7 @@ export function ComposerInputZone({
               aria-label={`Remove selected ${contextKind} context`}
               onClick={onClearPromptContext}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </div>
         )}
@@ -403,21 +451,23 @@ export function ComposerInputZone({
               aria-pressed={previewContextSelected}
               onClick={onTogglePreviewContext}
             >
+              {previewContextSelected
+                ? <Check size={14} aria-hidden="true" />
+                : <Plus size={14} aria-hidden="true" />}
               <span>
                 <strong>{previewContextSelected ? "Preview attached" : "Attach current preview"}</strong>
                 <small>{previewContextUrl}</small>
               </span>
-              <b aria-hidden="true">{previewContextSelected ? "✓" : "+"}</b>
             </button>
-            <button
+            <TooltipButton
               type="button"
               className="composer-preview-context-dismiss"
               aria-label={previewDismissLabel}
-              title={previewDismissLabel}
+              tooltip={previewDismissLabel}
               onClick={onDismissPreviewContext}
             >
-              <X size={12} />
-            </button>
+              <X size={14} />
+            </TooltipButton>
           </div>
         )}
         <ComposerAttachmentList
@@ -428,7 +478,7 @@ export function ComposerInputZone({
         />
         {handoffNotice && (
           <div className="composer-handoff-notice" role="status">
-            <ArrowLeftRight size={13} aria-hidden="true" />
+            <ArrowLeftRight size={14} aria-hidden="true" />
             <span>{handoffNotice}</span>
           </div>
         )}
@@ -442,14 +492,14 @@ export function ComposerInputZone({
             aria-live={compactError ? "assertive" : "polite"}
           >
             <span className="composer-compact-notice-icon" aria-hidden="true">
-              {compactWorking ? <ContextCompactionIcon /> : <Box size={14} />}
+              <ContextCompactionIcon />
             </span>
             <span>{compactNotice.message}</span>
             <span className="composer-compact-notice-state" aria-hidden="true">
               {compactWorking ? null : compactNotice.kind === "success" ? (
-                <Check size={13} />
+                <Check size={14} />
               ) : (
-                <CircleAlert size={13} />
+                <CircleAlert size={14} />
               )}
             </span>
           </div>
@@ -581,9 +631,7 @@ export function ComposerInputZone({
             ? "Enter stops and sends · Tab queues"
             : running
             ? "Enter sends · Tab queues"
-            : imageInputUnavailable
-              ? "Ask for follow-up changes"
-              : "Ask for follow-up changes or attach images"}
+            : hasHistory ? "Follow up" : "Message"}
         />
         {!messageFits && (
           <p className="composer-limit-warning" role="alert">
@@ -601,55 +649,15 @@ export function ComposerInputZone({
             : "Project files"}
         >
           {chatOptionCount > 0 && (
-            <div className="popover-title">Reference a chat</div>
+            <div role="group" aria-label="Reference a chat">
+              {mentionOptions.slice(0, chatOptionCount).map((option, offset) => renderMentionOption(option, offset))}
+            </div>
           )}
-          {mentionOptions.map((option, index) => (
-            <Fragment key={option.id}>
-              {option.kind === "file" && index === chatOptionCount && (
-                <div className="popover-title">Reference a file</div>
-              )}
-              <button
-                id={`${mentionListboxId}-${index}`}
-                type="button"
-                role="option"
-                aria-selected={option.id === activeMention?.id}
-                onMouseEnter={() => setHighlightedMentionId(option.id)}
-                onClick={() => acceptMention(option)}
-              >
-                {option.kind === "this-chat"
-                  ? (
-                    <>
-                      <span className="composer-suggestion-chat">
-                        <MessagesSquare size={11} aria-hidden="true" />
-                        This chat
-                      </span>
-                      <small>Earlier messages · {thisChatTitle}</small>
-                    </>
-                  )
-                  : option.kind === "chat"
-                  ? (
-                    <>
-                      <span className="composer-suggestion-chat">
-                        <MessagesSquare size={11} aria-hidden="true" />
-                        {option.source.conversationTitle}
-                      </span>
-                      <small>
-                        {option.source.projectName}
-                        {option.source.workspaceRelation === "different-workspace"
-                          ? " · different workspace"
-                          : ""}
-                      </small>
-                    </>
-                  )
-                  : (
-                    <>
-                      <span>{option.entry.path}</span>
-                      <small>{option.entry.kind}</small>
-                    </>
-                  )}
-              </button>
-            </Fragment>
-          ))}
+          {mentionOptions.length > chatOptionCount && (
+            <div role="group" aria-label="Reference a file">
+              {mentionOptions.slice(chatOptionCount).map((option, offset) => renderMentionOption(option, chatOptionCount + offset))}
+            </div>
+          )}
         </div>
       )}
       {slashMenuVisible && slashMatch && (

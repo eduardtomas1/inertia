@@ -10,21 +10,21 @@ import {
 import { createPortal } from "react-dom";
 import {
   Archive,
-  CheckCircle2,
-  Columns2,
-  History,
-  Pencil,
-  PictureInPicture2,
-  Trash2,
-  X,
+  CircleCheck,
   Clock,
+  Columns2,
   Copy,
   FolderOpen,
   Hash,
+  History,
   Mail,
+  Pencil,
+  PictureInPicture2,
   Pin,
   RefreshCw,
   Settings,
+  Trash2,
+  X,
 } from "lucide-react";
 import type { Conversation, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
@@ -32,15 +32,17 @@ import type { SidebarThreadView } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { canOrganizeThread, threadSnoozePresets } from "../../../shared/thread-organization";
 import { ThreadSubmenu } from "./sidebar/ThreadSubmenu";
+import { HintButton } from "./HintButton";
 import "./sidebar/thread-actions.css";
 
 type DismissReason = "selection" | "context-change";
 
 interface ConversationMenuItemProps extends Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
-  "children" | "onClick" | "role" | "tabIndex" | "type"
+  "children" | "onClick" | "role" | "tabIndex" | "type" | "title"
 > {
   children: ReactNode;
+  hint?: string | undefined;
   onActivate: () => void;
   onDismiss: (reason: DismissReason) => void;
   restoreFocus?: boolean;
@@ -51,21 +53,27 @@ function ConversationMenuItem({
   onActivate,
   onDismiss,
   restoreFocus = true,
+  hint,
+  disabled,
   ...props
 }: ConversationMenuItemProps): React.JSX.Element {
+  const explained = Boolean(disabled && hint);
   return (
-    <button
+    <HintButton
       {...props}
-      type="button"
+      hint={hint}
       role="menuitem"
       tabIndex={-1}
+      disabled={disabled && !explained}
+      aria-disabled={explained || undefined}
       onClick={() => {
+        if (disabled) return;
         onDismiss(restoreFocus ? "selection" : "context-change");
         onActivate();
       }}
     >
       {children}
-    </button>
+    </HintButton>
   );
 }
 
@@ -210,46 +218,46 @@ export function ConversationActionsMenu({
         {...itemProps}
         onActivate={() => onPinConversation(conversation, !conversation.pinnedAt)}
       >
-        <Pin size={13} />{conversation.pinnedAt ? "Unpin thread" : "Pin thread"}
+        <Pin size={14} />{conversation.pinnedAt ? "Unpin thread" : "Pin thread"}
       </ConversationMenuItem>
       <ConversationMenuItem
         {...itemProps}
         disabled={!canSettle}
         onActivate={() => conversation.settledAt ? onRestoreConversation(conversation) : onSettleConversation(conversation)}
       >
-        <CheckCircle2 size={13} />{conversation.settledAt ? "Reopen thread" : "Settle thread"}
+        <CircleCheck size={14} />{conversation.settledAt ? "Reopen thread" : "Settle thread"}
       </ConversationMenuItem>
-      <ThreadSubmenu label="Snooze" icon={<Clock size={13} />} disabled={!canOrganizeThread(conversation, runs)}
+      <ThreadSubmenu label="Snooze" icon={<Clock size={14} />} disabled={!canOrganizeThread(conversation, runs)}
         open={submenu === "snooze"} onOpenChange={(open) => setSubmenu((current) => open ? "snooze" : current === "snooze" ? null : current)}>
-        {conversation.snoozedUntil && <ConversationMenuItem {...itemProps} onActivate={() => onSnoozeConversation(conversation, null)}><History size={13} />Unsnooze</ConversationMenuItem>}
+        {conversation.snoozedUntil && <ConversationMenuItem {...itemProps} onActivate={() => onSnoozeConversation(conversation, null)}><History size={14} />Unsnooze</ConversationMenuItem>}
         {presets.map((preset) => <ConversationMenuItem {...itemProps} key={preset.id} onActivate={() => {
           const current = threadSnoozePresets(new Date()).find(({ id }) => id === preset.id);
           if (current) onSnoozeConversation(conversation, current.until);
         }}>{preset.label}</ConversationMenuItem>)}
       </ThreadSubmenu>
       <div role="separator" />
-      <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={13} />Rename thread</ConversationMenuItem>
-      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} title="Use the latest user message as the title. Runs locally without an AI request." onActivate={onRegenerateTitle}><RefreshCw size={13} />Regenerate title</ConversationMenuItem>}
-      {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={13} />Mark unread</ConversationMenuItem>}
+      <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={14} />Rename thread</ConversationMenuItem>
+      {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} hint={canSettle ? "Use the latest user message as the title. Runs locally without an AI request." : "Available after the current turn finishes."} onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}
+      {onMarkUnread && <ConversationMenuItem {...itemProps} onActivate={onMarkUnread}><Mail size={14} />Mark unread</ConversationMenuItem>}
       <div role="separator" />
-      <ThreadSubmenu label="Copy" icon={<Copy size={13} />} open={submenu === "copy"}
+      <ThreadSubmenu label="Copy" icon={<Copy size={14} />} open={submenu === "copy"}
         onOpenChange={(open) => setSubmenu((current) => open ? "copy" : current === "copy" ? null : current)}>
-        <button type="button" role="menuitem" tabIndex={-1} disabled={!conversation.worktreePath && !projectPath} onClick={() => void copy(conversation.worktreePath ?? projectPath ?? "")}><FolderOpen size={13} />Path</button>
-        <button type="button" role="menuitem" tabIndex={-1} onClick={() => void copy(conversation.id)}><Hash size={13} />Thread ID</button>
+        <button type="button" role="menuitem" tabIndex={-1} disabled={!conversation.worktreePath && !projectPath} onClick={() => void copy(conversation.worktreePath ?? projectPath ?? "")}><FolderOpen size={14} />Path</button>
+        <button type="button" role="menuitem" tabIndex={-1} onClick={() => void copy(conversation.id)}><Hash size={14} />Thread ID</button>
       </ThreadSubmenu>
       {copyError && <p className="thread-menu-error" role="alert">{copyError}</p>}
-      {onProjectSettings && <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onProjectSettings}><Settings size={13} />Project settings</ConversationMenuItem>}
+      {onProjectSettings && <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onProjectSettings}><Settings size={14} />Project settings</ConversationMenuItem>}
       <div role="separator" />
       {onOpenConversationInWindow && (
         <ConversationMenuItem
           {...itemProps}
           disabled={!isDetached && detachedChatLimitReached}
-          title={!isDetached && detachedChatLimitReached
+          hint={!isDetached && detachedChatLimitReached
             ? "Close a chat window before opening another."
             : undefined}
           onActivate={() => onOpenConversationInWindow(conversation)}
         >
-          <PictureInPicture2 size={13} />
+          <PictureInPicture2 size={14} />
           {isDetached ? "Focus chat window" : "Open chat in new window"}
         </ConversationMenuItem>
       )}
@@ -258,13 +266,13 @@ export function ConversationActionsMenu({
           {...itemProps}
           onActivate={() => onCloseConversationSplit(conversation)}
         >
-          <Columns2 size={13} />Remove from split view
+          <Columns2 size={14} />Remove from split view
         </ConversationMenuItem>
       ) : (
         <ConversationMenuItem
           {...itemProps}
           disabled={!canOpenInSplit}
-          title={canOpenInSplit
+          hint={canOpenInSplit
             ? undefined
             : isDetached
               ? "This chat is already open in its own window."
@@ -273,7 +281,7 @@ export function ConversationActionsMenu({
                 : "Choose another chat first."}
           onActivate={() => onOpenConversationInSplit(conversation)}
         >
-          <Columns2 size={13} />Add this chat to split view
+          <Columns2 size={14} />Add this chat to split view
         </ConversationMenuItem>
       )}
       {activeRun && thread.needsAttention && runAttention?.canAcknowledge && (
@@ -281,7 +289,7 @@ export function ConversationActionsMenu({
           {...itemProps}
           onActivate={() => onAcknowledgeRun(activeRun)}
         >
-          <CheckCircle2 size={13} />Acknowledge
+          <CircleCheck size={14} />Acknowledge
         </ConversationMenuItem>
       )}
       {activity && activeRun && runAttention?.canDismiss && (
@@ -289,30 +297,30 @@ export function ConversationActionsMenu({
           {...itemProps}
           onActivate={() => onDismissRun(activeRun)}
         >
-          <X size={13} />Dismiss from Work
+          <X size={14} />Dismiss from Work
         </ConversationMenuItem>
       )}
       <div role="separator" />
       <ConversationMenuItem
         {...itemProps}
         disabled={!canSettle || isDetached}
-        title={isDetached
+        hint={isDetached
           ? "Return this chat to the main window before archiving it."
           : undefined}
         onActivate={() => onArchiveConversation(conversation)}
       >
-        <Archive size={13} />Archive thread
+        <Archive size={14} />Archive thread
       </ConversationMenuItem>
       <ConversationMenuItem
         {...itemProps}
         className="is-danger"
         disabled={!canSettle || isDetached}
-        title={isDetached
+        hint={isDetached
           ? "Return this chat to the main window before deleting it."
           : undefined}
         onActivate={() => onDeleteConversation(conversation)}
       >
-        <Trash2 size={13} />Delete
+        <Trash2 size={14} />Delete
       </ConversationMenuItem>
     </div>, document.body,
   );

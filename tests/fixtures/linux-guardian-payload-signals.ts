@@ -31,6 +31,7 @@ async function withGuardian(
   payload: (root: string) => string[],
   check: (fixture: {
     child: ChildProcess; payloadPid: number; root: string; command: (action: string) => void;
+    commandAsync: (action: string) => Promise<number | null>;
   }) => Promise<void>,
   inheritBlockedSignals = false,
 ): Promise<void> {
@@ -58,12 +59,17 @@ async function withGuardian(
       execFileSync(executable, ["signal", String(child!.pid), ready[3]!,
         String(metadata.dev), String(metadata.ino), action], { timeout: 5_000 });
     };
+    const commandAsync = (action: string) => new Promise<number | null>((resolve) => {
+      spawn(executable, ["signal", String(child!.pid), ready[3]!,
+        String(metadata.dev), String(metadata.ino), action], { stdio: "ignore" })
+        .once("close", (code) => resolve(code));
+    });
     const children = readFileSync(`/proc/${child.pid}/task/${child.pid}/children`, "utf8").trim();
     assert.equal(children.split(/\s+/u).length, 1);
     const payloadPid = Number(children);
     const payloadStat = readFileSync(`/proc/${payloadPid}/stat`, "utf8");
     const payloadStart = payloadStat.slice(payloadStat.lastIndexOf(")") + 2).split(" ")[19];
-    try { await check({ child, payloadPid, root, command }); }
+    try { await check({ child, payloadPid, root, command, commandAsync }); }
     finally {
       // Preserve the recorded birth identity when cleaning up a failed proof.
       try {
@@ -160,3 +166,47 @@ void linuxIt("cleans up a payload killed at the gate without losing the guardian
     assert.equal(processState(payloadPid), null);
   });
 });
+
+void linuxIt("retires a fast-exiting payload without a fixed polling delay", async () => {
+  const elapsed: number[] = [];
+  for (let run = 0; run < 5; run += 1) {
+    await withGuardian(() => ["/bin/true"], async ({ child, command, commandAsync }) => {
+      command("claim");
+      const comm = () => readFileSync(`/proc/${child.pid}/comm`, "utf8").trim();
+      const executed = commandAsync("exec");
+      let owned = 0;
+      for (;;) {
+        const name = comm();
+        const now = performance.now();
+        if (!owned && (name === "inertia-owned" || name === "inertia-exdone")) owned = now;
+        if (name === "inertia-exdone") { elapsed.push(now - owned); break; }
+        if (owned && now - owned > 3_000) throw new Error("Timed out waiting for the payload exit.");
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.equal(await executed, 0);
+      command("release");
+      await stopped(child);
+      assert.equal(child.exitCode, 0);
+      assert.equal(child.signalCode, null);
+    });
+  }
+  assert.ok(Math.min(...elapsed) < 10, `fastest retirement took ${Math.min(...elapsed)} ms`);
+});
+
+for (const prefix of ["", "trap '' TERM; "]) {
+  void linuxIt(`drains a descendant that outlives its completed payload (${prefix ? "ignores" : "accepts"} TERM)`, async () => {
+    await withGuardian((root) => ["/bin/sh", "-c",
+      `${prefix}/bin/sleep 30 & echo $! > "$1"; exit 3`, "payload", join(root, "descendant.pid")],
+    async ({ child, root, command }) => {
+      command("claim"); command("exec");
+      await waitFor(() => readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-exdone");
+      const descendantPid = Number(readFileSync(join(root, "descendant.pid"), "utf8").trim());
+      assert.ok(Number.isSafeInteger(descendantPid) && descendantPid > 1);
+      assert.equal(processState(descendantPid), null);
+      command("release");
+      await stopped(child);
+      assert.equal(child.exitCode, 3);
+      assert.equal(child.signalCode, null);
+    });
+  });
+}

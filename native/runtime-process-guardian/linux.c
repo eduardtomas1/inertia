@@ -347,6 +347,16 @@ static int pidfd_exited(int pidfd) {
   do { result = poll(&descriptor, 1, 0); } while (result < 0 && errno == EINTR);
   return result == 1 && (descriptor.revents & (POLLIN | POLLHUP));
 }
+static void await_payload_exit_or_pause(int *pidfd, const struct timespec *pause) {
+  if (*pidfd >= 0) {
+    struct pollfd descriptor = { .fd = *pidfd, .events = POLLIN, .revents = 0 };
+    const int result = poll(&descriptor, 1, (int)(pause->tv_nsec / 1000000L));
+    if (result == 0 || (result < 0 && errno == EINTR)) return;
+    close(*pidfd); *pidfd = -1;
+    if (result > 0) return;
+  }
+  nanosleep(pause, NULL);
+}
 static int exact_process_group_absent(pid_t pid) {
   errno = 0;
   if (kill(-pid, 0) == 0) return 0;
@@ -1034,6 +1044,7 @@ static int watch_mode(int argc, char **argv, int handoff) {
   }
   if (!same_process(parent, parent_start)) { close(gate[1]); return terminal_state(drain(), 137); }
   if (prctl(PR_SET_NAME, "inertia-owned", 0, 0, 0)) { close(gate[1]); return terminal_state(0, 127); }
+  int payload_exit = pidfd_open_exact(payload);
   if (send(gate[1], "A", 1, MSG_NOSIGNAL) != 1) {
     close(gate[1]); return terminal_state(drain(), 127);
   }
@@ -1062,7 +1073,7 @@ static int watch_mode(int argc, char **argv, int handoff) {
         && payload_parent == getpid()
         && confirmed_start == payload_start) return 0;
     }
-    nanosleep(&pause, NULL);
+    await_payload_exit_or_pause(&payload_exit, &pause);
   }
 }
 int main(int argc, char **argv) {

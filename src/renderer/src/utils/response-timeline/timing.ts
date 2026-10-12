@@ -79,12 +79,20 @@ export function turnStatusLabel(status: AgentTurnStatus): string {
 }
 
 export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
-  const execution = turnExecutionElapsedMs(turn, now);
-  const duration = execution === null ? null : formatElapsed(execution);
   if (turn.agentTurn.status === "completed" && turn.toolCallCount === 0) {
     return "Completed without tool activity";
   }
-  const prefix = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
+  const prefix = workStatusLabel(turn, now);
+  const actions = turn.toolCallCount;
+  return actions > 0
+    ? `${prefix} · ${actions} ${actions === 1 ? "action" : "actions"}`
+    : prefix;
+}
+
+export function workStatusLabel(turn: ResponseTurn, now = Date.now()): string {
+  const execution = turnExecutionElapsedMs(turn, now);
+  const duration = execution === null ? null : formatElapsed(execution);
+  return turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
     ? duration ? `Usage limit reached after ${duration}` : "Usage limit reached"
     : turn.agentTurn.status === "failed"
     ? duration
@@ -103,10 +111,6 @@ export function workSummaryLabel(turn: ResponseTurn, now = Date.now()): string {
         : duration
           ? `${turn.isActive ? "Working" : "Worked"} for ${duration}`
           : turnStatusLabel(turn.agentTurn.status);
-  const actions = turn.toolCallCount;
-  return actions > 0
-    ? `${prefix} · ${actions} ${actions === 1 ? "action" : "actions"}`
-    : prefix;
 }
 
 export function turnTimingLabels(turn: ResponseTurn, now = Date.now()): string[] {

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -174,6 +174,48 @@ describe("detached chat window", () => {
     });
 
     expect(counting.composerRenders).toBe(0);
+  });
+
+  it("closes the window with Command+W only when it has no panel tab to close", async () => {
+    const closes: string[] = [];
+    const bridge = window.inertia as unknown as object;
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: new Proxy({}, {
+        get: (_target, key) => key === "closeDetachedChat"
+          ? (draft: string) => {
+            closes.push(draft);
+            return Promise.resolve();
+          }
+          : Reflect.get(bridge, key),
+      }),
+    });
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={{ ...context, draft: "keep this" }} />);
+    const message = await screen.findByRole("textbox", { name: "Message" });
+    message.focus();
+
+    fireEvent.keyDown(message, { key: "w", code: "KeyW", ctrlKey: true });
+    fireEvent.keyDown(message, { key: "w", code: "KeyW", metaKey: true, shiftKey: true });
+    expect(closes).toEqual([]);
+
+    const panel = document.createElement("aside");
+    panel.className = "workspace-panel";
+    const closedTabs: string[] = [];
+    panel.addEventListener("inertia:close-active-panel-surface", (event) => {
+      closedTabs.push("tab");
+      event.preventDefault();
+    });
+    document.body.append(panel);
+    fireEvent.keyDown(message, { key: "w", code: "KeyW", metaKey: true });
+    expect(closedTabs).toEqual(["tab"]);
+    expect(closes).toEqual([]);
+    panel.remove();
+
+    const shortcut = new KeyboardEvent("keydown", { key: "w", code: "KeyW", metaKey: true, bubbles: true, cancelable: true });
+    message.dispatchEvent(shortcut);
+    expect(shortcut.defaultPrevented).toBe(true);
+    expect(closes).toEqual(["keep this"]);
   });
 
   it("connects with cached settings when browser storage is unavailable", async () => {

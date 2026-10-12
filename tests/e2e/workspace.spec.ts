@@ -1,5 +1,7 @@
 // @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { capturePageWebSockets, refreshCapturedRuntimeSnapshot } from "./support/browser-websocket-fixture";
 
 import {
@@ -12,6 +14,8 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+
+const execFileAsync = promisify(execFile);
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -49,7 +53,7 @@ test("filters Work by project and manages chat history", async () => {
   await expect(projectMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
   await expect(projectMenu.getByRole("menuitem", { name: "New chat in Inertia" })).toBeVisible();
   await expect(projectMenu.getByRole("menuitem", { name: "Rename" })).toBeVisible();
-  await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
+  await expect(projectMenu.getByRole("group", { name: "Grouping behavior" })).toBeVisible();
   await sidebar.getByRole("searchbox", {
     name: "Search projects and conversations",
   }).click();
@@ -58,10 +62,9 @@ test("filters Work by project and manages chat history", async () => {
   await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: "Project actions for Inertia" }).first().click();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
-  const branchName = (await page
-    .locator(".checkout-branch-button code")
-    .first()
-    .textContent())?.trim();
+  const branchName = (await execFileAsync("git", ["branch", "--show-current"], {
+    cwd: app.workspaceDirectory,
+  })).stdout.trim();
   if (!branchName) {
     throw new Error("Current Git branch is unavailable");
   }
@@ -76,12 +79,12 @@ test("filters Work by project and manages chat history", async () => {
   await expect(threadCard).toBeVisible();
   const trailing = activityCard.locator(".activity-thread-trailing");
   await expect(trailing.locator("time")).toBeVisible();
-  await expect(trailing).toHaveCSS("opacity", "1");
   await activityCard.hover();
-  await expect(trailing).toHaveCSS("opacity", "0");
+  await expect(trailing).toBeHidden();
   await expect(activityCard.getByRole("button", { name: "Thread actions for New chat" })).toHaveCount(0);
   const inlineActions = activityCard.locator(".thread-inline-actions");
-  await expect(inlineActions).toHaveCSS("opacity", "1");
+  await expect(inlineActions).toBeVisible();
+  await expect(inlineActions.getByRole("button", { name: "Settle New chat" })).toHaveText("");
 
   const firstNavigationItem = sidebar.locator("[data-sidebar-nav]").first();
   await firstNavigationItem.focus();
@@ -196,8 +199,6 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   const brand = page.getByRole("button", { name: "Start a new chat" });
   await expect(shell).toHaveClass(new RegExp(`platform-${process.platform}`));
 
-  // The aurora spans the sidebar top behind the brand, takes no input, and
-  // drifts on its coarse timer while focused; reduced motion removes it.
   const aurora = page.locator(".sidebar-aurora");
   await expect(aurora).toHaveAttribute("aria-hidden", "true");
   expect(await page.evaluate(() => {

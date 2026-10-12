@@ -1,8 +1,9 @@
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   ChevronRight,
-  Command,
+  Play,
   SlidersHorizontal,
 } from "lucide-react";
 import clsx from "clsx";
@@ -96,7 +97,7 @@ export function ComposerMoreMenu({
             onRunAction(action);
           }}
         >
-          <Command size={14} />
+          <Play size={14} />
           <span>
             <strong>{action.label}</strong>
             <small>{action.command}</small>
@@ -135,9 +136,7 @@ export function ComposerMoreMenu({
             </strong>
             <small>{option.description}</small>
           </span>
-          {selectedReasoning === option.value && (
-            <span className="option-check" />
-          )}
+          {selectedReasoning === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
         </button>
       ));
     }
@@ -177,9 +176,7 @@ export function ComposerMoreMenu({
                 : "Inspect and propose steps first"}
             </small>
           </span>
-          {conversation.interactionMode === mode && (
-            <span className="option-check" />
-          )}
+          {conversation.interactionMode === mode && <Check className="composer-option-check" size={14} aria-hidden="true" />}
         </button>
       ));
     }
@@ -201,9 +198,7 @@ export function ComposerMoreMenu({
           <strong>{option.label}</strong>
           <small>{option.description}</small>
         </span>
-        {conversation.accessMode === option.value && (
-          <span className="option-check" />
-        )}
+        {conversation.accessMode === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
       </button>
     ));
   };
@@ -270,12 +265,11 @@ export function ComposerMoreMenu({
           handleComposerMenuTriggerKeyDown("more", event)}
       >
         <SlidersHorizontal
-          size={13}
-          strokeWidth={1.8}
+          size={14}
           aria-hidden="true"
         />
         <span>More</span>
-        <ChevronDown size={11} aria-hidden="true" />
+        <ChevronDown size={14} aria-hidden="true" />
       </button>
       {menu === "more" && (
         <div
@@ -305,10 +299,7 @@ export function ComposerMoreMenu({
                   >
                     <ArrowLeft size={14} />
                   </button>
-                  <div>
-                    <strong>{moreSectionLabel(moreSection)}</strong>
-                    <small>Composer options</small>
-                  </div>
+                  <strong>{moreSectionLabel(moreSection)}</strong>
                 </div>
                 <div className="composer-more-options" data-more-submenu>
                   {renderMoreSectionOptions(moreSection)}
@@ -316,7 +307,6 @@ export function ComposerMoreMenu({
               </>
             ) : (
               <>
-                <div className="popover-title">Composer options</div>
                 <div className="composer-more-root">
                   {moreRootItems.map((item) => (
                     <button
@@ -356,7 +346,7 @@ export function ComposerMoreMenu({
                         <strong>{item.label}</strong>
                         <small>{item.value}</small>
                       </span>
-                      <ChevronRight size={13} />
+                      <ChevronRight size={14} />
                     </button>
                   ))}
                 </div>
@@ -381,9 +371,6 @@ export function ComposerMoreMenu({
                 handleMoreMenuNavigation(event);
               }}
             >
-              <div className="popover-title">
-                {moreSectionLabel(moreSection)}
-              </div>
               {renderMoreSectionOptions(moreSection)}
             </div>
           )}

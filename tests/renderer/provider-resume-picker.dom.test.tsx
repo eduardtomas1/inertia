@@ -66,6 +66,23 @@ describe("ProviderResumePicker", () => {
     expect(onSelect).toHaveBeenLastCalledWith("first");
   });
 
+  it("reveals a truncated session id in the shared tooltip", async () => {
+    const { container } = render(<ProviderResumePicker options={[available("first", "First chat")]} selectedConversationId="first" onSelect={vi.fn()} />);
+    const code = container.querySelector("code")!;
+    expect(container.querySelectorAll("[title]")).toHaveLength(0);
+    fireEvent.pointerEnter(code.firstElementChild ?? code, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("session-first"));
+  });
+
+  it("shows a one-line empty state and no keyboard hint row", () => {
+    const view = render(<ProviderResumePicker options={[]} selectedConversationId={null} onSelect={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/^No resumable chats$/u);
+    expect(view.container.querySelector(".resume-picker-footer")).toBeNull();
+    view.rerender(<ProviderResumePicker options={[available("first", "First chat")]} selectedConversationId="first" onSelect={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "nothing matches" } });
+    expect(screen.getByRole("status")).toHaveTextContent(/^No matching chats$/u);
+  });
+
   it("never defaults or arrows onto an unavailable row", () => {
     const onSelect = vi.fn();
     render(

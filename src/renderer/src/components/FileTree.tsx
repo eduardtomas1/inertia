@@ -126,18 +126,18 @@ export const FileTree = memo(function FileTree({
           {entry.kind === "directory" && !searchActive ? (
             <ChevronRight
               className="file-tree-chevron"
-              size={13}
+              size={14}
               aria-hidden="true"
             />
           ) : (
             <span className="file-tree-chevron-spacer" aria-hidden="true" />
           )}
           {entry.kind === "directory"
-            ? <Folder size={15} aria-hidden="true" />
+            ? <Folder size={14} aria-hidden="true" />
             : (
                 <File
                   className="file-language-icon"
-                  size={15}
+                  size={14}
                   aria-hidden="true"
                 />
               )}

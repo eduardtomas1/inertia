@@ -1,5 +1,6 @@
 // @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
+import { openComposerTools } from "./support/composer-tools";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
 let app: AppFixture | undefined;
@@ -17,6 +18,7 @@ test("recovers a v54 scratch prompt through an explicit copy without changing th
   await app.page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key, raw });
   const draft = "Leave this current draft intact.";
   await app.page.getByRole("textbox", { name: "Message", exact: true }).fill(draft);
+  await openComposerTools(app.page);
   const trigger = app.page.getByRole("button", { name: "Scratch prompts", exact: true });
   await trigger.focus();
   await trigger.press("ArrowUp");
@@ -28,7 +30,7 @@ test("recovers a v54 scratch prompt through an explicit copy without changing th
   const copy = recovery.getByRole("menuitem", { name: /Review the release checklist/ });
   await expect(copy).toBeFocused();
   await copy.press("Enter");
-  await expect(recovery.getByRole("status")).toContainText("Copied.");
+  await expect(recovery.getByRole("status")).toHaveText("Copied");
   expect(await app.electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(content);
   await expect(app.page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(draft);
   expect(await app.page.evaluate((key) => localStorage.getItem(key), key)).toBe(raw);

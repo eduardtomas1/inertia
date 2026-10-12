@@ -27,7 +27,7 @@ test("opens the command palette and manages a thread", async () => {
   await expect(page.getByRole("dialog", { name: "Search Inertia" })).toBeVisible();
   await page.getByRole("dialog", { name: "Search Inertia" })
     .getByRole("option")
-    .filter({ hasText: "Start work in the current project" })
+    .filter({ has: page.locator("strong", { hasText: /^New chat$/u }) })
     .click();
   await expect(page.locator(".activity-thread")).toHaveCount(initialThreadCount + 1);
   await expect(page.locator(".activity-thread.is-active .activity-thread-select")).toHaveCount(1);

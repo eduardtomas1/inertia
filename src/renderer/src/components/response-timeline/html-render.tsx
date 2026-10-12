@@ -60,6 +60,23 @@ export function TurnHtmlRenders({
   );
 }
 
+export function HtmlRenderStreamItem({
+  reference,
+}: {
+  reference: HtmlRenderReference;
+}): React.JSX.Element {
+  const [fullSize, setFullSize] = useState<HtmlRenderReference | null>(null);
+  const closeFullSize = useCallback(() => setFullSize(null), []);
+  return (
+    <>
+      <HtmlRenderFrame reference={reference} onOpenFullSize={setFullSize} />
+      {fullSize && (
+        <DeferredHtmlRenderDialog reference={fullSize} onClose={closeFullSize} />
+      )}
+    </>
+  );
+}
+
 interface HtmlRenderFrameProps {
   reference: HtmlRenderReference;
   onOpenFullSize: (reference: HtmlRenderReference) => void;

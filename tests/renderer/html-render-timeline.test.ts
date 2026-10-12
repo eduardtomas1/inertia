@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import type {
+  AgentActivity,
+  AgentApprovalRequest,
+  AgentInputRequest,
+  AgentTurn,
+  ChatMessage,
+} from "../../src/shared/contracts";
 import {
+  answerTailCommentary,
   buildResponseTimeline,
   estimateTimelineRowSize,
   shouldConsolidateSettledWorkIntoRunDetails,
@@ -161,5 +168,129 @@ describe("visual replies in the response timeline model", () => {
 
   it("serves the page from the privileged render route of the running build", () => {
     expect(htmlRenderUrl(renderId)).toBe(`inertia://render/${renderId}`);
+  });
+});
+
+function runningTurn(): AgentTurn {
+  return {
+    ...settledTurn(),
+    terminalAssistantMessageId: null,
+    completedAt: null,
+    status: "running",
+    updatedAt: at(7),
+  };
+}
+
+function activity(id: string, kind: AgentActivity["kind"], seconds: number): AgentActivity {
+  return {
+    id,
+    conversationId,
+    runId: "run-render-model",
+    turnId,
+    kind,
+    title: kind,
+    detail: null,
+    status: "completed",
+    createdAt: at(seconds),
+  };
+}
+
+function liveTurn(
+  messages: ChatMessage[],
+  activities: AgentActivity[],
+  requests: { approvals?: AgentApprovalRequest[]; inputRequests?: AgentInputRequest[] } = {},
+): ResponseTurn {
+  return onlyTurn(buildResponseTimeline({
+    turns: [runningTurn()],
+    messages: [request, ...messages],
+    activities,
+    reasonings: [],
+    checkpoints: [],
+    ...requests,
+  }));
+}
+
+describe("the answer tail after a visual reply", () => {
+  const preamble = message("preamble", "assistant", "Drawing the chart.", 3);
+  const renderTool = activity("tool-render", "tool", 4);
+  const page = render("render", 5);
+  const tail = message("tail", "assistant", "p99 doubled after the deploy.", 7);
+
+  it("keeps commentary after the last render in the tail while only reasoning follows it", () => {
+    const turn = liveTurn([preamble, page, tail], [renderTool, activity("thinking", "reasoning", 6)]);
+
+    expect(answerTailCommentary(turn)).toEqual([tail]);
+  });
+
+  it("applies with no saved commentary yet so streamed text joins the tail", () => {
+    expect(answerTailCommentary(liveTurn([preamble, page], [renderTool]))).toEqual([]);
+  });
+
+  it("returns the text to the work rail once work follows the render", () => {
+    for (const kind of ["tool", "command", "file"] as const) {
+      const turn = liveTurn([preamble, page, tail], [renderTool, activity(`after-${kind}`, kind, 6)]);
+      expect(answerTailCommentary(turn)).toBeNull();
+    }
+  });
+
+  it("returns the text to the work rail while an approval or input request waits", () => {
+    const approval: AgentApprovalRequest = {
+      id: "approval",
+      providerId: "codex",
+      conversationId,
+      runId: "run-render-model",
+      turnId,
+      kind: "command",
+      title: "Run a command",
+      detail: null,
+      command: "ls",
+      cwd: null,
+      reason: null,
+      networkScope: null,
+      permissionRoots: [],
+      availableDecisions: [],
+    };
+    const input: AgentInputRequest = {
+      id: "input",
+      providerId: "codex",
+      conversationId,
+      runId: "run-render-model",
+      turnId,
+      questions: [],
+      autoResolutionMs: null,
+    };
+
+    expect(answerTailCommentary(liveTurn([page], [renderTool], { approvals: [approval] }))).toBeNull();
+    expect(answerTailCommentary(liveTurn([page], [renderTool], { inputRequests: [input] }))).toBeNull();
+  });
+
+  it("returns the text to the work rail once the user follows up after the render", () => {
+    const followUp = message("follow-up", "user", "Add the error budget too.", 6);
+
+    expect(answerTailCommentary(liveTurn([preamble, page, followUp, tail], [renderTool]))).toBeNull();
+    const earlier = message("earlier-follow-up", "user", "Use the last quarter.", 2);
+    expect(answerTailCommentary(liveTurn([earlier, preamble, page, tail], [renderTool]))).toEqual([tail]);
+  });
+
+  it("starts the tail after the last of several renders", () => {
+    const between = message("between", "assistant", "Now the error budget.", 6);
+    const turn = liveTurn(
+      [preamble, page, between, render("render-2", 8, 480, "Error budget"), message("last", "assistant", "Both agree.", 9)],
+      [renderTool, activity("tool-render-2", "tool", 7)],
+    );
+
+    expect(answerTailCommentary(turn)?.map(({ id }) => id)).toEqual(["last"]);
+  });
+
+  it("keeps commentary saved before a reload in the tail when the turn is rebuilt", () => {
+    const rebuilt = liveTurn([tail, page, preamble], [activity("thinking", "reasoning", 6), renderTool]);
+
+    expect(rebuilt.commentaryMessages).toEqual([preamble, tail]);
+    expect(answerTailCommentary(rebuilt)).toEqual([tail]);
+  });
+
+  it("does not apply without a render or once the turn has settled", () => {
+    expect(answerTailCommentary(liveTurn([preamble, tail], [renderTool]))).toBeNull();
+    expect(answerTailCommentary(onlyTurn(timeline([page])))).toBeNull();
   });
 });

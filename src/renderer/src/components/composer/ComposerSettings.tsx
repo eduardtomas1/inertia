@@ -1,10 +1,9 @@
 import {
-  Brain,
+  Check,
   ChevronDown,
   ChevronRight,
   Hammer,
   ListChecks,
-  ShieldCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -113,16 +112,10 @@ export function ComposerSettings({
             onClick={() => toggleMenu("reasoning")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
           >
-            <Brain
-              className="composer-setting-icon"
-              size={13}
-              strokeWidth={1.8}
-              aria-hidden="true"
-            />
             <span className="composer-setting-value">{reasoningLabel}</span>
             <ChevronDown
               className="composer-setting-chevron"
-              size={11}
+              size={14}
               aria-hidden="true"
             />
           </button>
@@ -135,7 +128,6 @@ export function ComposerSettings({
               aria-label="Reasoning level"
               onKeyDown={handleComposerMenuNavigation}
             >
-              <div className="popover-title">Reasoning</div>
               {selectedModel.reasoningOptions.map((option) => (
                 <button
                   type="button"
@@ -157,11 +149,8 @@ export function ComposerSettings({
                         ? " · Default"
                         : ""}
                     </strong>
-                    <small>{option.description}</small>
                   </span>
-                  {selectedReasoning === option.value && (
-                    <span className="option-check" />
-                  )}
+                  {selectedReasoning === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
                 </button>
               ))}
             </div>
@@ -188,14 +177,13 @@ export function ComposerSettings({
           >
             <ChevronRight
               className="composer-setting-icon"
-              size={13}
-              strokeWidth={1.8}
+              size={14}
               aria-hidden="true"
             />
             <span className="composer-setting-value">{responseSpeedLabel}</span>
             <ChevronDown
               className="composer-setting-chevron"
-              size={11}
+              size={14}
               aria-hidden="true"
             />
           </button>
@@ -208,7 +196,6 @@ export function ComposerSettings({
               aria-label={RESPONSE_SPEED_LABEL}
               onKeyDown={handleComposerMenuNavigation}
             >
-              <div className="popover-title">{RESPONSE_SPEED_LABEL}</div>
               <ComposerResponseSpeedOptions
                 fastMode={fastMode}
                 selectedFastMode={selectedFastMode}
@@ -238,16 +225,10 @@ export function ComposerSettings({
           onKeyDown={(event) =>
             handleComposerMenuTriggerKeyDown("access", event)}
         >
-          <ShieldCheck
-            className="composer-setting-icon"
-            size={13}
-            strokeWidth={1.8}
-            aria-hidden="true"
-          />
           <span className="composer-setting-value">{access.label}</span>
           <ChevronDown
             className="composer-setting-chevron"
-            size={11}
+            size={14}
             aria-hidden="true"
           />
         </button>
@@ -260,7 +241,6 @@ export function ComposerSettings({
             aria-label="Project access"
             onKeyDown={handleComposerMenuNavigation}
           >
-            <div className="popover-title">Project access</div>
             {accessOptions.map((option) => (
               <button
                 type="button"
@@ -279,9 +259,7 @@ export function ComposerSettings({
                   <strong>{option.label}</strong>
                   <small>{option.description}</small>
                 </span>
-                {conversation.accessMode === option.value && (
-                  <span className="option-check" />
-                )}
+                {conversation.accessMode === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
               </button>
             ))}
           </div>
@@ -309,8 +287,7 @@ export function ComposerSettings({
         >
           <ModeIcon
             className="composer-setting-icon"
-            size={13}
-            strokeWidth={1.8}
+            size={14}
             aria-hidden="true"
           />
           <span className="composer-setting-value">
@@ -318,7 +295,7 @@ export function ComposerSettings({
           </span>
           <ChevronDown
             className="composer-setting-chevron"
-            size={11}
+            size={14}
             aria-hidden="true"
           />
         </button>
@@ -331,7 +308,6 @@ export function ComposerSettings({
             aria-label="Work mode"
             onKeyDown={handleComposerMenuNavigation}
           >
-            <div className="popover-title">Mode</div>
             {(["build", "plan"] as InteractionMode[]).map((mode) => (
               <button
                 type="button"
@@ -348,15 +324,8 @@ export function ComposerSettings({
               >
                 <span>
                   <strong>{mode === "build" ? "Build" : "Plan"}</strong>
-                  <small>
-                    {mode === "build"
-                      ? "Work directly in the project"
-                      : "Inspect and propose steps first"}
-                  </small>
                 </span>
-                {conversation.interactionMode === mode && (
-                  <span className="option-check" />
-                )}
+                {conversation.interactionMode === mode && <Check className="composer-option-check" size={14} aria-hidden="true" />}
               </button>
             ))}
           </div>

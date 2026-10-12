@@ -98,7 +98,7 @@ test("sidebar updater uses real main actions, bounded notes and safe restart in 
     const confirmation = page.getByRole("dialog", { name: "Restart to install Inertia 1.2.3?" });
     await expect(confirmation).toBeVisible(); await expect(confirmation.getByRole("button", { name: "Not now" })).toBeFocused();
     const modalGeometry = await confirmation.evaluate((node) => {
-      const box = node.getBoundingClientRect(); const buttons = [...node.querySelectorAll("button")].map((element) => element.getBoundingClientRect());
+      const box = node.getBoundingClientRect(); const buttons = [...node.querySelectorAll("footer button")].map((element) => element.getBoundingClientRect());
       return { centerX: box.left + box.width / 2, centerY: box.top + box.height / 2,
         viewportX: innerWidth / 2, viewportY: innerHeight / 2, buttonOffset: buttons[0]!.top - buttons[1]!.top };
     });

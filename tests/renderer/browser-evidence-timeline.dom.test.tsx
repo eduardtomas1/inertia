@@ -90,6 +90,27 @@ beforeEach(() => {
 });
 
 describe("Browser evidence timeline", () => {
+  it("shows evidence as plain rows with the kind in words and no letter tiles, chips or count", async () => {
+    render(
+      <PreviewPanel
+        owner="primary"
+        contextId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        url="http://127.0.0.1:4173/"
+        evidence={evidence}
+        onNavigate={vi.fn()}
+        onOpenExternal={vi.fn()}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: "Evidence 3" });
+    expect(toggle).not.toHaveTextContent("3");
+    expect(toggle).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(toggle);
+    const timeline = await screen.findByRole("list", { name: "Browser evidence timeline" });
+    expect(document.querySelector(".browser-evidence-heading-icon, .browser-evidence-entry-icon")).toBeNull();
+    expect(screen.getByRole("button", { name: "Close Browser evidence" }).querySelector(".lucide-x")).not.toBeNull();
+    expect(within(timeline).getAllByRole("listitem")[0]!.querySelector(".browser-evidence-entry-kind")).not.toBeNull();
+  });
+
   it("does not steal newer focus when the lazy evidence view resolves", async () => {
     render(
       <PreviewPanel
@@ -338,13 +359,13 @@ describe("Browser evidence timeline", () => {
     view.rerender(panel([tabs[2]!], "three"));
     await waitFor(() => expect(address).toHaveFocus());
 
-    view.rerender(panel([tabs[0]!], "one"));
+    view.rerender(panel([tabs[0]!, tabs[2]!], "one"));
+    screen.getByRole("tab", { name: "One" }).focus();
     fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "Delete" });
     expect(onCloseTab).toHaveBeenLastCalledWith("one");
-    view.rerender(panel([
-      { id: "replacement", title: "New page", url: "", loading: false },
-    ], "replacement"));
-    await waitFor(() => expect(screen.getByRole("tab", { name: "New page" })).toHaveFocus());
+    view.rerender(panel([tabs[2]!], "three"));
+    expect(screen.queryByRole("tab")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Preview address" })).toHaveFocus());
   });
 
   it("restores close-button focus after delayed removal without stealing newer focus", async () => {

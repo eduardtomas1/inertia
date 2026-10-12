@@ -35,6 +35,7 @@ interface WorkspaceToolsOptions {
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   setActionError: (message: string | null) => void;
   setActiveTool: (tool: WorkspacePanelTab | null) => void;
+  onBranchChanged?: () => void;
 }
 
 export function useWorkspaceTools(options: WorkspaceToolsOptions) {
@@ -52,6 +53,7 @@ export function useWorkspaceTools(options: WorkspaceToolsOptions) {
     run: options.run,
     subscribe: options.subscribe,
     setActionError: options.setActionError,
+    onBranchChanged: options.onBranchChanged,
     enabled,
     loadStatusOnMount: options.loadGitStatusOnMount ?? true,
     loadWorkspaceOnMount: options.loadGitOnMount ?? false,

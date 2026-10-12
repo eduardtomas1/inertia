@@ -45,13 +45,14 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("Claude in-process Inertia chat tools", () => {
-  it("returns host-owned PNG evidence through Claude MCP content", async () => {
+  it("returns host-owned images through Claude MCP content", async () => {
     const image = Buffer.from("png-evidence").toString("base64");
+    const photo = Buffer.from("jpeg-evidence").toString("base64");
     const bridge = hostBridge();
     bridge.invoke = async () => ({
       success: true,
       text: "captured",
-      image: { mimeType: "image/png", data: image },
+      images: [{ mimeType: "image/png", data: image }, { mimeType: "image/jpeg", data: photo }],
     });
     const runtime = new ProviderHostToolRuntime({
       bridge,
@@ -73,6 +74,7 @@ describe("Claude in-process Inertia chat tools", () => {
       content: [
         { type: "text", text: "captured" },
         { type: "image", mimeType: "image/png", data: image },
+        { type: "image", mimeType: "image/jpeg", data: photo },
       ],
     });
     await tools.close();

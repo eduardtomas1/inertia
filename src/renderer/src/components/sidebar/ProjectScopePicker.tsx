@@ -1,4 +1,4 @@
-import { ChevronDown, FolderPlus, Folders } from "lucide-react";
+import { ChevronDown, Folder, FolderPlus } from "lucide-react";
 import { useRef, useState } from "react";
 import type { Project } from "@shared/contracts";
 import { ProjectIcon, ProjectName } from "../ProjectIcon";
@@ -28,7 +28,7 @@ export function ProjectScopePicker({ projects, selectedId, onSelect, onAdd, disa
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
         }}>
-        {selected ? <ProjectIcon project={selected} size={16} /> : <Folders size={16} aria-hidden="true" />}
+        {selected ? <ProjectIcon project={selected} size={16} /> : <Folder size={16} aria-hidden="true" />}
         <ProjectName project={selected}>{selected?.name ?? "All projects"}</ProjectName>
         <ChevronDown size={14} aria-hidden="true" />
       </button>

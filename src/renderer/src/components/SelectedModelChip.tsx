@@ -13,6 +13,7 @@ import {
   type SelectedModelChipRoute,
 } from "../utils/selectedModelChip";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { TooltipButton } from "./TooltipButton";
 
 export interface SelectedModelChipProps {
   route: SelectedModelChipRoute;
@@ -42,11 +43,12 @@ export const SelectedModelChip = forwardRef<
   const identity = selectedModelChipIdentity(route);
 
   return (
-    <button
+    <TooltipButton
       ref={ref}
       type="button"
       className={`selected-model-chip${expanded ? " is-open" : ""}`}
-      title={identity.title}
+      tooltip={identity.title}
+      describeTooltip={false}
       aria-label={identity.accessibleName}
       aria-haspopup={ariaHasPopup}
       aria-controls={controlsId}
@@ -59,16 +61,16 @@ export const SelectedModelChip = forwardRef<
       {showSourceGlyph && (
         <span className="selected-model-chip-glyph" aria-hidden="true">
           {identity.glyph === "custom"
-            ? <CloudCog size={13} strokeWidth={1.8} />
-            : <ProviderBrandIcon providerId={identity.glyph} size={13} decorative />}
+            ? <CloudCog size={14} />
+            : <ProviderBrandIcon providerId={identity.glyph} size={14} decorative />}
         </span>
       )}
       <span className="selected-model-chip-label">{identity.label}</span>
       <ChevronDown
         className="selected-model-chip-chevron"
-        size={12}
+        size={14}
         aria-hidden="true"
       />
-    </button>
+    </TooltipButton>
   );
 });

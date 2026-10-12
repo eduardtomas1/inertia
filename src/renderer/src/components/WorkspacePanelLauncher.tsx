@@ -5,7 +5,9 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { Check } from "lucide-react";
 import { surfaceIcons } from "./workspacePanelIcons";
+import { HintButton } from "./HintButton";
 
 import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
@@ -122,12 +124,7 @@ export function RightPanelLauncher({
             key={action.surface}
             className={highlighted === action ? "is-highlighted" : undefined}
             aria-keyshortcuts={action.shortcut}
-            onPointerEnter={() => {
-              prefetchWorkspaceTool(action.surface);
-              setHighlight(availableActions.indexOf(action));
-            }}
-            onPointerLeave={() => setHighlight((current) =>
-              current === availableActions.indexOf(action) ? -1 : current)}
+            onPointerEnter={() => prefetchWorkspaceTool(action.surface)}
             onFocus={() => prefetchWorkspaceTool(action.surface)}
             onClick={() => onOpen(action.surface)}
           >
@@ -143,7 +140,6 @@ export function RightPanelLauncher({
             key={action.surface}
             className="is-unavailable"
             aria-disabled="true"
-            title={action.reason}
           >
             {surfaceIcons[action.surface]}
             <span>{action.label}<small>{action.reason}</small></span>
@@ -157,33 +153,41 @@ export function RightPanelLauncher({
 
 export function AddSurfaceMenuItems({
   actions,
+  openSurfaces = [],
   onOpen,
 }: {
   actions: readonly SurfaceAction[];
+  openSurfaces?: readonly WorkspacePanelTab[];
   onOpen: (surface: WorkspacePanelTab) => void;
 }): React.JSX.Element {
   return (
     <>
-      {actions.map((action) => (
-        <button
-          type="button"
-          role="menuitem"
-          key={action.surface}
-          aria-disabled={!action.available || undefined}
-          aria-keyshortcuts={action.shortcut}
-          title={action.reason}
-          onPointerEnter={() => {
-            if (action.available) prefetchWorkspaceTool(action.surface);
-          }}
-          onClick={() => {
-            if (action.available) onOpen(action.surface);
-          }}
-        >
-          {surfaceIcons[action.surface]}
-          <span>{action.label}</span>
-          <kbd>{action.shortcut}</kbd>
-        </button>
-      ))}
+      {actions.map((action) => {
+        const open = openSurfaces.includes(action.surface);
+        return (
+          <HintButton
+            key={action.surface}
+            hint={action.available ? undefined : action.reason}
+            role="menuitem"
+            aria-disabled={!action.available || undefined}
+            aria-keyshortcuts={action.shortcut}
+            onPointerEnter={() => {
+              if (action.available) prefetchWorkspaceTool(action.surface);
+            }}
+            onClick={() => {
+              if (action.available) onOpen(action.surface);
+            }}
+          >
+            {surfaceIcons[action.surface]}
+            <span>
+              {action.label}
+              {open && <span className="visually-hidden">, open</span>}
+            </span>
+            {open && <Check size={14} aria-hidden="true" />}
+            <kbd>{action.shortcut}</kbd>
+          </HintButton>
+        );
+      })}
     </>
   );
 }

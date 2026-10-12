@@ -11,12 +11,12 @@ import { createPortal } from "react-dom";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Maximize2, RotateCcw, TerminalSquare, X } from "lucide-react";
+import { Maximize2, RotateCcw, Terminal as TerminalIcon, X } from "lucide-react";
 import type { ProviderTerminalResumeDescriptor, ServerEvent } from "@shared/contracts";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { terminalContextMenu, terminalPasteKeyHandler } from "../utils/terminalContextMenu";
-import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import { hasStoredResumeSession, type ProviderTerminalResumeOption } from "./providerResumeOptions";
 import {
   command,
   ignoreCommandFailure,
@@ -1038,20 +1038,18 @@ export function TerminalSession({
       ) : (
         <div className="terminal-header">
           <div className="terminal-title">
-            <TerminalSquare size={16} />
             <span>Terminal</span>
-            <span className="terminal-project">{projectName}</span>
           </div>
           <div className="terminal-actions">
-            <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={15} /></IconButton>
+            <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={14} /></IconButton>
             <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
-              <RotateCcw size={15} />
+              <RotateCcw size={14} />
             </IconButton>
-            <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
+            <IconButton label="Close terminal" onClick={onClose}><X size={14} /></IconButton>
           </div>
         </div>
       )}
-      {selectedResumeOption && (
+      {selectedResumeOption && (activeResume || resumeError || hasStoredResumeSession(resumeOptions)) && (
         <Suspense fallback={(
           <div className="terminal-resume-status" role="status">
             Loading provider resume controls…
@@ -1088,7 +1086,7 @@ export function TerminalSession({
               <><LoadingMark label="Starting terminal" /><span>Starting terminal…</span></>
             ) : (
               <>
-                <TerminalSquare size={19} />
+                <TerminalIcon size={16} />
                 <span>{status !== "online" ? "Terminal will return when the local service reconnects." : sessionError ?? "Terminal session ended."}</span>
                 {status === "online" && (
                   <button type="button" className="secondary-button" onClick={restartTerminal}>Start again</button>

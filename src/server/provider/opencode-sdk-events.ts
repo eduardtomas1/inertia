@@ -23,6 +23,7 @@ import {
   emitOpenCodeNextActivity,
   emitOpenCodeUsage,
   emitOpenCodeUsageSnapshot,
+  endOpenCodeAssistantText,
   handleOpenCodeNextTextEvent,
   handleOpenCodePart,
   handleOpenCodePartDelta,
@@ -341,12 +342,16 @@ export function handleOpenCodeEvent(
         emitter,
         eventState,
       );
+      if (finite(objectValue(info.time)?.completed) !== null) {
+        endOpenCodeAssistantText(messageId, eventState, emitter);
+      }
     }
   } else if (event.type === "message.removed") {
     const messageId = stringValue(properties.messageID);
     ownership.markAssistantWork(messageId);
     if (messageId) {
       removeOpenCodeMessage(messageId, emittedParts, eventState, emitter);
+      endOpenCodeAssistantText(messageId, eventState, emitter);
     }
   } else if (event.type === "message.part.updated") {
     const part = objectValue(properties.part);
@@ -503,6 +508,7 @@ export function handleOpenCodeEvent(
     if (messageId && failureState.pending?.activityId === messageId) {
       failureState.pending = undefined;
     }
+    if (messageId) endOpenCodeAssistantText(messageId, eventState, emitter);
     emitter.activity(
       "turn",
       "completed",
@@ -527,6 +533,7 @@ export function handleOpenCodeEvent(
       options.input.cwd,
     );
     failureState.pending = failure;
+    if (messageId) endOpenCodeAssistantText(messageId, eventState, emitter);
     emitter.activity(
       "turn",
       "failed",

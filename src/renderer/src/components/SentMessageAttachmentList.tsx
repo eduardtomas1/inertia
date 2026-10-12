@@ -66,7 +66,7 @@ function SentAttachment({
           data-thumbnail-state={kind === "image" ? state : undefined}
           aria-hidden="true"
         >
-          {state !== "ready" && <Icon size={18} />}
+          {state !== "ready" && <Icon size={16} />}
         </span>
         <span className="sent-attachment-copy">
           <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>

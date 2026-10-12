@@ -544,6 +544,99 @@ describe("turn Git artifacts", () => {
     runtime.store.close();
   });
 
+  it("creates the turn's Before turn checkpoint and uses it as the pre-turn state", async () => {
+    const runtime = workspace();
+    const conversationId = runtime.conversationId;
+    const earlier = await checkpointFor(runtime.store, runtime.repository, runtime.data, conversationId, 1);
+    const turn = beginTurn(runtime.store, conversationId, "turn-owned-checkpoint");
+    writeFileSync(join(runtime.repository, "tracked.txt"), "before\nedited\n");
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
+
+    const checkpoints = runtime.store.conversationDetail(conversationId)!.checkpoints;
+    const created = checkpoints.find(({ id }) => id !== earlier.id)!;
+    expect(result).toEqual({ checkpointId: created.id, failure: null });
+    expect(created).toMatchObject({
+      label: "Before turn 2",
+      turnIndex: 2,
+      turnId: turn.id,
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 0,
+    });
+    expect(git(runtime.repository, ["show", `${created.ref}:tracked.txt`])).toBe("before\nedited");
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "pending",
+      beforeCheckpointId: created.id,
+    });
+    runtime.store.close();
+  });
+
+  it("removes the checkpoint ref and reports the failure when its metadata cannot be saved", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-checkpoint-count");
+    vi.spyOn(runtime.store, "checkpointCount").mockImplementation(() => {
+      throw new Error("checkpoint count unavailable");
+    });
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const listRefs = () => git(runtime.repository, [
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/inertia/checkpoints/${runtime.conversationId}/`,
+    ]).split("\n").filter(Boolean);
+
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
+
+    const artifact = runtime.store.turnGitArtifactStorage(turn.id);
+    expect(result).toEqual({ checkpointId: null, failure: "Git could not create the checkpoint." });
+    expect(runtime.store.conversationDetail(runtime.conversationId)!.checkpoints).toEqual([]);
+    expect(listRefs()).toEqual([artifact.beforeRef]);
+    expect(artifact.beforeCheckpointId).toBeNull();
+    runtime.store.close();
+  });
+
+  it("reports a turn checkpoint failure inside a broken repository", async () => {
+    const runtime = workspace();
+    git(runtime.repository, ["init", "--quiet", "nested"]);
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-checkpoint-failure");
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
+
+    expect(result).toEqual({ checkpointId: null, failure: "Git could not create the checkpoint." });
+    expect(runtime.store.conversationDetail(runtime.conversationId)!.checkpoints).toEqual([]);
+    runtime.store.close();
+  });
+
+  it("reports no turn checkpoint failure outside a Git repository", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-turn-checkpoint-absent-"));
+    const data = join(root, "data");
+    const folder = join(root, "folder");
+    mkdirSync(data);
+    mkdirSync(folder);
+    roots.push(root);
+    const store = new RuntimeStore(join(data, "inertia.sqlite"), folder);
+    const project = store.createProject("Plain folder", folder);
+    const conversation = store.createConversation(project.id, "Plain chat");
+    const turn = beginTurn(store, conversation.id, "turn-plain-folder");
+    const manager = new TurnGitArtifactManager(store, data);
+
+    const result = await manager.createTurnCheckpoint(turn);
+    await manager.captureBefore({ turn, checkpointId: result.checkpointId });
+
+    expect(result).toEqual({ checkpointId: null, failure: null });
+    expect(store.conversationDetail(conversation.id)!.checkpoints).toEqual([]);
+    expect(store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      absenceReason: "not-repository",
+    });
+    store.close();
+  });
+
   it("bounds oversized patches and rejects tampered or out-of-artifact reads", async () => {
     const runtime = workspace();
     const turn = beginTurn(runtime.store, runtime.conversationId, "turn-bounded");

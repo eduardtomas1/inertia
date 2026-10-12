@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,8 +31,11 @@ export async function checkNativeBackgroundMotion(): Promise<void> {
       define: { "process.env.NODE_ENV": '"development"' },
       loader: { ".woff": "file", ".woff2": "file", ".ttf": "file", ".svg": "file", ".png": "file" },
     });
+    const styles = await readFile(fileURLToPath(new URL("../../../src/renderer/src/styles.css", import.meta.url)), "utf8");
+    const spin = /@keyframes spin \{[^{}]*\{[^{}]*\}\s*\}/u.exec(styles)?.[0];
+    if (!spin) throw new Error("The renderer stylesheet no longer defines the shared spin keyframes.");
     await writeFile(join(root, "index.html"),
-      '<!doctype html><title>Native background motion</title><link rel="stylesheet" href="renderer.css"><div id="root"></div><script src="renderer.js"></script>');
+      `<!doctype html><title>Native background motion</title><style>${spin}</style><link rel="stylesheet" href="renderer.css"><div id="root"></div><script src="renderer.js"></script>`);
     await writeFile(join(root, "main.cjs"), `
 const { app, BrowserWindow } = require("electron");
 const { join } = require("node:path");

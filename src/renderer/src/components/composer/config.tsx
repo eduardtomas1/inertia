@@ -1,11 +1,12 @@
 import {
   Download,
   KeyRound,
-  PlugZap,
+  Plug,
   RefreshCw,
   Wrench,
 } from "lucide-react";
 import type { AccessMode } from "@shared/contracts";
+import { LoadingMark } from "../ui";
 import type { ComposerRouteRepair } from "../../utils/composerReadiness";
 import type { ComposerMenu } from "./types";
 
@@ -64,16 +65,10 @@ export function RouteRepairIcon({
   action: ComposerRouteRepair;
   pending: boolean;
 }): React.JSX.Element {
-  if (pending || action === "refresh") {
-    return (
-      <RefreshCw
-        size={13}
-        className={pending ? "is-spinning" : undefined}
-      />
-    );
-  }
-  if (action === "install") return <Download size={13} />;
-  if (action === "connect") return <PlugZap size={13} />;
-  if (action === "add-key") return <KeyRound size={13} />;
-  return <Wrench size={13} />;
+  if (pending) return <LoadingMark size={14} aria-hidden="true" />;
+  if (action === "refresh") return <RefreshCw size={14} />;
+  if (action === "install") return <Download size={14} />;
+  if (action === "connect") return <Plug size={14} />;
+  if (action === "add-key") return <KeyRound size={14} />;
+  return <Wrench size={14} />;
 }

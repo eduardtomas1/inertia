@@ -40,7 +40,6 @@ import { EMPTY_STREAMING_AGENT_SOURCE } from "../../hooks/useStreamingAgentState
 import {
   TOOLS_DEFAULT_WIDTH,
   TOOLS_MIN_HEIGHT,
-  TOOLS_MIN_WIDTH,
   type useWorkspaceLayout,
 } from "../../hooks/useWorkspaceLayout";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
@@ -90,6 +89,7 @@ type WorkspaceSceneLayout = Pick<
   | "openSurface"
   | "activateSurface"
   | "closeSurface"
+  | "moveSurface"
   | "toggleWorkspaceTools"
 >;
 
@@ -442,9 +442,6 @@ export function createWorkspaceSceneModel({
   });
   const canUpdatePlan = planActionsAvailable(conversation);
   const latestPlan = projection.plans.at(-1) ?? null;
-  const planSummary = conversation?.interactionMode === "plan"
-    ? "The latest agent response is reflected as a working plan."
-    : "Switch the composer to Plan mode and ask the agent to propose an approach.";
   const visibleDetailState = detailState?.conversationId === conversation?.id
     ? detailState
     : null;
@@ -745,7 +742,7 @@ export function createWorkspaceSceneModel({
       orientation: stackedTools ? "horizontal" : "vertical",
       pane: "after",
       value: stackedTools ? toolsLayout.height : toolsLayout.width,
-      min: stackedTools ? TOOLS_MIN_HEIGHT : TOOLS_MIN_WIDTH,
+      min: stackedTools ? TOOLS_MIN_HEIGHT : toolsLayout.minWidth,
       max: stackedTools ? toolsLayout.maxHeight : toolsLayout.maxWidth,
       defaultValue: stackedTools ? 320 : TOOLS_DEFAULT_WIDTH,
       onChange: stackedTools
@@ -776,6 +773,7 @@ export function createWorkspaceSceneModel({
         onActivateSurface: openPanelSurface,
         onOpenSurface: openPanelSurface,
         onCloseSurface: layout.closeSurface,
+        onMoveSurface: layout.moveSurface,
         onClosePanel: layout.toggleWorkspaceTools,
       },
       usage: {
@@ -986,7 +984,6 @@ export function createWorkspaceSceneModel({
       },
       plan: {
         steps: planSteps,
-        summary: planSummary,
         document: latestPlan?.explanation ?? null,
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,
@@ -1034,6 +1031,7 @@ export function createWorkspaceSceneModel({
         tabs: desktopTools.previewNavigation.tabs,
         activeTabId: desktopTools.previewNavigation.activeTabId,
         evidence: desktopTools.previewNavigation.evidence,
+        pageFocused: desktopTools.previewNavigation.pageFocused ?? false,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),

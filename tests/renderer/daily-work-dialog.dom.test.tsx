@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DailyWorkDialog,
@@ -12,6 +12,7 @@ import type {
   ServerEvent,
   UsageMeasuredValue,
 } from "../../src/shared/contracts";
+import { readSourceText } from "../helpers/source-text";
 
 function metric(
   value: number | null,
@@ -119,6 +120,30 @@ function renderDialog(
   return { ...view, request, onClose, onOpenConversation };
 }
 
+let stylesheet: HTMLStyleElement | null = null;
+
+function loadStyles(): void {
+  stylesheet = document.createElement("style");
+  stylesheet.textContent = [
+    readSourceText("src/renderer/src/styles.css"),
+    readSourceText("src/renderer/src/components/DailyWorkDialog.css"),
+  ].join("\n");
+  document.head.append(stylesheet);
+}
+
+afterEach(() => {
+  stylesheet?.remove();
+  stylesheet = null;
+});
+
+function declared(element: Element, property: string): string | undefined {
+  return [...stylesheet!.sheet!.cssRules]
+    .filter((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && element.matches(rule.selectorText))
+    .map((rule) => rule.style.getPropertyValue(property))
+    .filter(Boolean)
+    .at(-1);
+}
+
 describe("DailyWorkDialog", () => {
   it("requests the current local day and renders totals, providers, and navigable conversations", async () => {
     const user = userEvent.setup();
@@ -126,8 +151,7 @@ describe("DailyWorkDialog", () => {
 
     expect(screen.getByRole("status", { name: "Loading daily work" })).toBeVisible();
     const dialog = await screen.findByRole("dialog", { name: "Daily work" });
-    const mark = dialog.querySelector(".daily-work-mark");
-    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(dialog.querySelector(".daily-work-mark")).toBeNull();
     await waitFor(() => expect(view.request).toHaveBeenCalledTimes(1));
     expect(view.request.mock.calls[0]?.[0]).toEqual(dailyWorkCommand(new Date()));
 
@@ -149,6 +173,69 @@ describe("DailyWorkDialog", () => {
 
     expect(within(dialog).getByRole("button", { name: /New planning chat/u }))
       .toHaveTextContent("Created this day");
+  });
+
+  it("keeps the ledger to totals, plain headings and one column header without restating hints", async () => {
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+    await screen.findByRole("region", { name: "Daily work totals" });
+    expect(dialog).toHaveAccessibleDescription(/\w+day, \w+ \d+|\d+ \w+/u);
+    for (const text of ["Agent work", "Settled only", "Most recent first"]) expect(dialog).not.toHaveTextContent(text);
+    expect(within(dialog).getByRole("button", { name: "Refresh daily work" })).toHaveClass("icon-button");
+    expect(dialog.querySelectorAll(".daily-work-conversation-card small")).toHaveLength(dialog.querySelectorAll(".daily-work-conversation-card").length);
+    const css = readSourceText("src/renderer/src/components/DailyWorkDialog.css");
+    expect(css).not.toMatch(/daily-work-skeleton|daily-work-shimmer|border: 1px dashed var|font-weight: 600;\n\}\n\n\.daily-work-card-metrics|var\(--accent\)\)/u);
+    expect(css).toMatch(/\.daily-work-totals \{[^}]*padding: 4px 0 8px;\n\}/u);
+    expect(readSourceText("src/renderer/src/components/DailyWorkMark.css")).not.toMatch(/--accent/u);
+  });
+
+  it("draws running state, the active-turn note, providers and conversations as plain text and rows on the dialog surface", async () => {
+    loadStyles();
+    const view = renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+    const active = await within(dialog).findByRole("button", { name: /Implement daily work/u });
+
+    const running = within(active).getByText("Running");
+    expect(running.tagName).toBe("SPAN");
+    expect(declared(running, "color")).toBe("var(--text-muted)");
+    expect(declared(running, "border")).toBeUndefined();
+    expect(declared(running, "background")).toBeUndefined();
+
+    const note = within(dialog).getByText(/active turn is excluded/u);
+    expect(declared(note, "color")).toBe("var(--text-muted)");
+    expect(declared(note, "border")).toBeUndefined();
+    expect(declared(note, "background")).toBeUndefined();
+
+    const provider = view.container.querySelector(".daily-work-provider-summary")!;
+    const css = readSourceText("src/renderer/src/components/DailyWorkDialog.css");
+    for (const row of [provider, active]) {
+      const marker = `\n.${row.classList[0]} {\n`;
+      const body = css.slice(css.indexOf(marker) + marker.length, css.indexOf("\n}", css.indexOf(marker)));
+      expect(body).toContain("border: 0;");
+      expect(body).toContain("border-top: 1px solid var(--line-soft);");
+      expect(body).toContain("border-radius: 0;");
+      expect(body).toContain("background: transparent;");
+    }
+  });
+
+  it("lists provider summaries as full-width rows with one soft rule between them", async () => {
+    loadStyles();
+    const view = renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Daily work" });
+    await within(dialog).findByRole("heading", { name: "By provider" });
+
+    const rows = [...view.container.querySelectorAll(".daily-work-provider-summary")];
+    expect(rows).toHaveLength(2);
+    expect(declared(rows[0]!.parentElement!, "grid-template-columns")).toBeUndefined();
+    for (const row of rows) {
+      expect(declared(row, "grid-template-columns")).toBe("minmax(0, 1fr) auto minmax(72px, 140px)");
+      expect(declared(row, "align-items")).toBe("center");
+      expect(declared(row, "border-bottom")).toBe("0px");
+      expect(row.querySelector("header")).toHaveTextContent(/^(Codex|Claude)$/u);
+      const meter = row.querySelector(".daily-work-provider-meter")!;
+      expect(meter.parentElement).not.toBe(row);
+      expect(meter.parentElement).toHaveClass("daily-work-provider-portion");
+    }
   });
 
   it("renders each provider's settled token share against the day total", async () => {

@@ -26,7 +26,8 @@ describe("Beautiful UI primitive adaptations", () => {
       }),
     );
 
-    expect(html).toContain('role="progressbar"');
+    expect(html).not.toContain('role="progressbar"');
+    expect(html).toContain("1 of 3 complete");
     expect(html).toContain('data-plan-step-status="completed"');
     expect(html).toContain('data-plan-step-status="in-progress"');
     expect(html).toContain('aria-current="step"');

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -89,19 +89,60 @@ describe("corner panel controls and header meter", () => {
     expect(screen.queryByRole("button", { name: /^Usage:/u })).not.toBeInTheDocument();
   });
 
-  it("toggles the terminal and right panel with pressed state and an active background task badge", () => {
+  it("toggles the terminal and right panel with pressed state and an active background task count", () => {
     const props = controls({ terminalOpen: true, rightPanelOpen: true, activeBackgroundTaskCount: 2 });
     render(<PanelLayoutControls {...props} />);
     const terminal = screen.getByRole("button", { name: "Toggle terminal" });
     expect(terminal).toHaveAttribute("aria-pressed", "true");
-    expect(terminal).toHaveAttribute("title", "Toggle terminal (Ctrl+J)");
+    expect(terminal).not.toHaveAttribute("title");
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(terminal, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      const hint = document.querySelector('[role="tooltip"]');
+      expect(hint).toHaveTextContent("Toggle terminalCtrl+J");
+      expect(hint?.querySelector("kbd")).toHaveTextContent("Ctrl+J");
+      fireEvent.pointerLeave(terminal, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     fireEvent.click(terminal);
     expect(props.onToggleTerminal).toHaveBeenCalledOnce();
 
     const panel = screen.getByRole("button", { name: "Toggle right panel, 2 background tasks active" });
     expect(panel).toHaveAttribute("aria-pressed", "true");
-    expect(panel).toHaveTextContent("2");
+    expect(panel).toHaveTextContent(/^2$/u);
+    expect(panel.querySelector(".corner-toggle-count")).toHaveTextContent("2");
     fireEvent.click(panel);
     expect(props.onToggleRightPanel).toHaveBeenCalledOnce();
+  });
+
+  it("explains unavailable toggles with the shared tooltip and no second native one", () => {
+    render(<PanelLayoutControls {...controls({ usage: null, terminalAvailable: false, rightPanelAvailable: false })} />);
+    const terminal = screen.getByRole("button", { name: "Terminal is unavailable" });
+    const panel = screen.getByRole("button", { name: "Right panel is unavailable" });
+    for (const toggle of [terminal, panel]) {
+      expect(toggle).toBeDisabled();
+      expect(toggle).not.toHaveAttribute("title");
+    }
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(panel, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Right panel is unavailable");
+      fireEvent.pointerLeave(panel, { pointerType: "mouse" });
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

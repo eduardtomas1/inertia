@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { WorkspaceHeaderActions } from "../../src/renderer/src/components/workspace-header/WorkspaceHeaderActions";
+import { hoverTooltipText } from "./tooltip-fixtures";
 import type {
   GitStatusSnapshot,
   Project,
@@ -186,8 +187,9 @@ describe("WorkspaceHeader Git split button", () => {
     const more = screen.getByRole("button", { name: "More Git actions" });
     fireEvent.click(more);
     expect(await screen.findByRole("menu", { name: "Git actions" })).toBeInTheDocument();
-    const pullReason = screen.getByText("Commit or stash local changes before pulling.");
-    expect(pullReason.closest("button")).toHaveAttribute("aria-disabled", "true");
+    const pull = screen.getByRole("menuitem", { name: "Pull" });
+    expect(pull).toHaveAttribute("aria-disabled", "true");
+    expect(pull).toHaveAccessibleDescription("Commit or stash local changes before pulling.");
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Git actions" })).not.toBeInTheDocument();
@@ -215,7 +217,8 @@ describe("WorkspaceHeader Git split button", () => {
     const primary = screen.getByRole("button", { name: "Commit" });
     expect(primary).toHaveAttribute("aria-disabled", "true");
     expect(primary).not.toBeDisabled();
-    expect(primary).toHaveAttribute("title", "Branch is up to date. Nothing to commit or push.");
+    expect(primary).not.toHaveAttribute("title");
+    expect(hoverTooltipText(primary)).toBe("Branch is up to date. Nothing to commit or push.");
     expect(primary).toHaveAccessibleDescription("Branch is up to date. Nothing to commit or push.");
     fireEvent.click(primary);
     expect(props.onCommit).not.toHaveBeenCalled();
@@ -287,7 +290,9 @@ describe("WorkspaceHeader Git split button", () => {
     await waitFor(() => expect(commit).toHaveFocus());
     expect(commit).toHaveAttribute("aria-disabled", "true");
     expect(commit).not.toBeDisabled();
-    expect(screen.getByText(/^Detached HEAD: create and check out a branch/u)).toBeInTheDocument();
+    expect(within(menu).getByText(/^Detached HEAD: create and check out a branch/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create branch" }))
+      .toHaveAccessibleDescription("Detached HEAD: create and check out a branch before pushing or opening a pull request.");
 
     fireEvent.click(commit);
     expect(props.onCommit).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { BarChart3, RefreshCw, Users } from "lucide-react";
+import { Gauge, RefreshCw, Users } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../utils/environmentSummary";
 import {
@@ -96,7 +96,7 @@ export function UsageSurface({
                   ? "Refreshing provider limits…"
                   : usage.quota.source === "isolated"
                     ? "Account limits are not shared with this custom backend route."
-                    : "No provider limit windows are available."}
+                    : "No provider limits reported"}
               </p>
             )}
             {onRefreshUsage
@@ -108,14 +108,14 @@ export function UsageSurface({
                 onClick={onRefreshUsage}
                 disabled={usage.quota.freshness === "refreshing"}
               >
-                <RefreshCw size={13} aria-hidden="true" />
+                <RefreshCw size={14} aria-hidden="true" />
                 <span>{usage.quota.freshness === "refreshing" ? "Refreshing" : "Refresh usage"}</span>
               </button>
             )}
           </>
         ) : (
           <p className="workspace-surface-empty">
-            Usage is unavailable until this task has a selected provider route.
+            No provider route selected
           </p>
         )}
 
@@ -152,7 +152,7 @@ export function UsageSurface({
               className="workspace-surface-button"
               onClick={(event) => usageLimits.open(event.currentTarget)}
             >
-              <Users size={13} aria-hidden="true" />
+              <Users size={14} aria-hidden="true" />
               <span>All accounts</span>
             </button>
           )}
@@ -162,7 +162,7 @@ export function UsageSurface({
               className="workspace-surface-button"
               onClick={onOpenUsageView}
             >
-              <BarChart3 size={13} aria-hidden="true" />
+              <Gauge size={14} aria-hidden="true" />
               <span>Usage history</span>
             </button>
           )}

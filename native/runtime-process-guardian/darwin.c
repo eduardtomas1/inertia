@@ -34,6 +34,7 @@ struct owned_tree_tracker {
   struct session_member *all;
   unsigned char *owned;
   int root_event_queue;
+  int exit_event_queue;
   int fork_tainted;
 };
 
@@ -563,6 +564,51 @@ static void observe_root_forks(struct owned_tree_tracker *tracker) {
   tracker->fork_tainted = 1;
 }
 
+static void arm_root_exit_observer(
+  struct owned_tree_tracker *tracker,
+  pid_t root_pid
+) {
+  const int queue = kqueue();
+  if (queue < 0) return;
+  struct kevent change;
+  EV_SET(
+    &change,
+    (uintptr_t)root_pid,
+    EVFILT_PROC,
+    EV_ADD | EV_ONESHOT,
+    NOTE_EXIT,
+    0,
+    NULL
+  );
+  if (kevent(queue, &change, 1, NULL, 0, NULL) == 0) {
+    tracker->exit_event_queue = queue;
+    return;
+  }
+  (void)close(queue);
+}
+
+static void await_root_exit_or_pause(
+  struct owned_tree_tracker *tracker,
+  const struct timespec *pause
+) {
+  if (tracker->exit_event_queue >= 0) {
+    struct kevent event;
+    const int count = kevent(
+      tracker->exit_event_queue,
+      NULL,
+      0,
+      &event,
+      1,
+      pause
+    );
+    if (count == 0 || (count < 0 && errno == EINTR)) return;
+    (void)close(tracker->exit_event_queue);
+    tracker->exit_event_queue = -1;
+    if (count > 0) return;
+  }
+  (void)nanosleep(pause, NULL);
+}
+
 static int refresh_owned_tree_bounded(
   pid_t session_id,
   pid_t guardian_pid,
@@ -592,6 +638,7 @@ static int refresh_owned_tree_bounded(
 static int initialize_owned_tree_tracker(struct owned_tree_tracker *tracker) {
   memset(tracker, 0, sizeof(*tracker));
   tracker->root_event_queue = -1;
+  tracker->exit_event_queue = -1;
   tracker->capacity = process_scan_capacity();
   if (tracker->capacity < 1) return 0;
   tracker->members = calloc((size_t)tracker->capacity, sizeof(*tracker->members));
@@ -606,12 +653,14 @@ static int initialize_owned_tree_tracker(struct owned_tree_tracker *tracker) {
 
 static void free_owned_tree_tracker(struct owned_tree_tracker *tracker) {
   if (tracker->root_event_queue >= 0) (void)close(tracker->root_event_queue);
+  if (tracker->exit_event_queue >= 0) (void)close(tracker->exit_event_queue);
   free(tracker->members);
   free(tracker->previous);
   free(tracker->all);
   free(tracker->owned);
   memset(tracker, 0, sizeof(*tracker));
   tracker->root_event_queue = -1;
+  tracker->exit_event_queue = -1;
 }
 
 static int same_member_sets(
@@ -704,7 +753,7 @@ static int freeze_owned_tree(
     // existing pass limit. Reaping one child alone never proves tree cleanup.
     if (exited_direct_child) continue;
     const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
-    (void)nanosleep(&pause, NULL);
+    if (previous_count > 0) (void)nanosleep(&pause, NULL);
     reap_children();
     if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) {
       return cleanup_failed("freeze-post-stop-census");
@@ -736,7 +785,7 @@ static int bounded_owned_tree_cleanup(
     }
   }
   for (int poll = 0; poll < TERM_GRACE_POLLS; poll += 1) {
-    (void)nanosleep(&pause, NULL);
+    if (poll > 0 || tracker->count > 0) (void)nanosleep(&pause, NULL);
     reap_children();
     if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) {
       return cleanup_failed("term-census");
@@ -1137,6 +1186,7 @@ static int watch_mode(
   if (child_tracked) {
     tracker.members[0].identity = child_identity;
     tracker.count = 1;
+    arm_root_exit_observer(&tracker, child);
   }
   const char authorization = 'A';
   const int execution_released = child_tracked
@@ -1244,7 +1294,7 @@ static int watch_mode(
       result = 137;
       break;
     }
-    (void)nanosleep(&pause, NULL);
+    await_root_exit_or_pause(&tracker, &pause);
   }
 
   // A payload that reached waitpid while its exact runtime parent remained

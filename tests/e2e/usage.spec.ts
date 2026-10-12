@@ -252,7 +252,8 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   // comparison viewport used for the committed wide screenshots.
   await resizeWindow(1280, 734);
   const usageDestination = page.getByRole("button", { name: "Usage", exact: true });
-  await expect(page.locator(".sidebar-footer .sidebar-destination")).toHaveText([
+  expect(await page.locator(".sidebar-footer .sidebar-destination").evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute("aria-label")))).toEqual([
     "Daily work",
     "Usage",
     "Settings",
@@ -278,9 +279,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await dailyWorkDestination.click();
   const dailyWorkDialog = page.getByRole("dialog", { name: "Daily work" });
   await expect(dailyWorkDialog).toBeVisible();
-  const headerMark = dailyWorkDialog.locator(".daily-work-mark");
-  await expect(headerMark).toBeVisible();
-  await expect(headerMark).toHaveAttribute("width", "19");
+  await expect(dailyWorkDialog.locator(".daily-work-mark")).toHaveCount(0);
   await expect(dailyWorkDialog.getByRole("region", {
     name: "Daily work totals",
   })).toBeVisible();
@@ -309,7 +308,8 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(page.getByRole("heading", { name: "Daily processed tokens" })).toBeVisible();
   const usageSections = page.getByRole("group", { name: "Usage section" });
   await expect(usageSections).toHaveCSS("display", "flex");
-  await expect(usageSections.getByRole("button", { name: "History", exact: true })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(usageSections.getByRole("button", { name: "Limits", exact: true })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(usageSections.getByRole("button", { name: "History", exact: true })).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("button", { name: "Devices & integrations", exact: true }))
     .toHaveAttribute("aria-current", "page");
@@ -437,7 +437,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(dailyWorkDestination).toBeVisible();
   await dailyWorkDestination.click();
   await expect(dailyWorkDialog).toBeVisible();
-  await expect(headerMark).toBeVisible();
+  await expect(dailyWorkDialog.getByRole("region", {
+    name: "Daily work totals",
+  })).toBeVisible();
   const dailyWorkDarkPath = testInfo.outputPath(
     "daily-work-day-ledger-mark-dark.png",
   );

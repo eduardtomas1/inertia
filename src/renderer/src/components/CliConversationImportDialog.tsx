@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, ArrowRight, Check, Download, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Download, RefreshCw, Search } from "lucide-react";
 import type { Project, ServerEvent } from "@shared/contracts";
 import { cliContinuationText, cliOmissionText, cliProviderLabel, type CliConversationCandidate, type CliConversationPreview, type CliConversationScan } from "@shared/cli-conversations";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { diagnosticErrorReference } from "../utils/diagnosticNavigation";
-import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
-import { IconButton } from "./ui";
+import { captureModalFocus } from "../utils/modalFocus";
+import { DialogShell } from "./DialogShell";
+import { IconButton, LoadingMark } from "./ui";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import "./CliConversationImportDialog.css";
 
@@ -58,6 +59,7 @@ export function CliConversationImportDialog({ project, request, disabled = false
   const returnFocusId = useRef<string | null>(null);
   const idPrefix = useId();
   const openTitleId = useId();
+  const dialogTitleId = useId();
   useNativePreviewSuspension(true);
   useLayoutEffect(() => captureModalFocus(), []);
   useLayoutEffect(() => { searchInput.current?.focus(); }, []);
@@ -162,93 +164,89 @@ export function CliConversationImportDialog({ project, request, disabled = false
     : error ? diagnosticErrorReference(error).message
       : scan && !rows.length ? scan.candidates.length ? "No conversations match your search." : "No CLI conversations found." : null;
   return createPortal(
-    <div className="dialog-backdrop" role="presentation"
-      onMouseDown={(event) => { if (event.target === event.currentTarget && !importing.current) onClose(); }}>
-      <section className="cli-import-dialog" role="dialog" aria-modal="true" aria-label="Import CLI conversations" tabIndex={-1}
-        onKeyDown={(event) => {
-          trapModalFocus(event, event.currentTarget);
-          if (event.key === "Escape") {
-            event.preventDefault(); event.stopPropagation();
-            if (importing.current) return;
-            if (openId) back(); else onClose();
-          }
-          if (openId && event.key === "Enter" && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); runAction(); }
-        }}>
-        <div className="cli-import-search">
-          <Search size={17} aria-hidden="true" />
-          <input ref={searchInput} aria-label="Search CLI conversations" placeholder="Search Codex and Claude Code conversations…" value={query} autoComplete="off"
-            onChange={(event) => { setQuery(event.target.value); if (openId) back(false); }}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowDown" || openId) return;
-              const first = gallery.current?.querySelector<HTMLElement>(".cli-import-card");
-              if (!first) return;
-              event.preventDefault();
-              first.focus();
-            }} />
-          <div className="cli-import-filter" role="group" aria-label="Filter by CLI provider">
-            {providerFilters.map(([value, label], index) => <span key={value}>
-              {index > 0 && <span aria-hidden="true">·</span>}
-              <button type="button" aria-pressed={provider === value} onClick={() => { setProvider(value); if (openId) back(false); }}>{label}</button>
-            </span>)}
-          </div>
-          <IconButton label="Scan again" className={busy === "scan" ? "is-scanning" : undefined} aria-disabled={scanUnavailable}
-            onClick={() => { if (!scanUnavailable) void refresh(); }}>
-            <RefreshCw size={15} aria-hidden="true" />
-          </IconButton>
-          <IconButton label="Close CLI import" aria-disabled={busy === "import"} onClick={() => { if (!importing.current) onClose(); }}><X size={15} aria-hidden="true" /></IconButton>
+    <DialogShell className="cli-import-dialog" bodyClassName="cli-import-shell-body is-flush" titleId={dialogTitleId} title="Import CLI conversations" tabIndex={-1}
+      closeLabel="Close CLI import" closeInert={busy === "import"} onClose={() => { if (!importing.current) onClose(); }}
+      onDismiss={() => { if (!importing.current) onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault(); event.stopPropagation();
+          if (importing.current) return;
+          if (openId) back(); else onClose();
+        }
+        if (openId && event.key === "Enter" && (mac ? event.metaKey : event.ctrlKey)) { event.preventDefault(); runAction(); }
+      }}>
+      <div className="cli-import-search">
+        <Search size={16} aria-hidden="true" />
+        <input ref={searchInput} aria-label="Search CLI conversations" placeholder="Search Codex and Claude Code conversations…" value={query} autoComplete="off"
+          onChange={(event) => { setQuery(event.target.value); if (openId) back(false); }}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" || openId) return;
+            const first = gallery.current?.querySelector<HTMLElement>(".cli-import-card");
+            if (!first) return;
+            event.preventDefault();
+            first.focus();
+          }} />
+        <div className="cli-import-filter" role="group" aria-label="Filter by CLI provider">
+          {providerFilters.map(([value, label], index) => <span key={value}>
+            {index > 0 && <span aria-hidden="true">·</span>}
+            <button type="button" aria-pressed={provider === value} onClick={() => { setProvider(value); if (openId) back(false); }}>{label}</button>
+          </span>)}
         </div>
-        <div className="cli-import-body">
-          {openId && openCandidate ? <div key={openId} className="cli-import-open" role="group" aria-labelledby={openTitleId}>
-            <div className="cli-import-open-head">
-              <IconButton ref={backButton} label="Back to conversations" aria-disabled={busy === "import"} onClick={() => back()}><ArrowLeft size={15} aria-hidden="true" /></IconButton>
-              <h2 id={openTitleId}>{openCandidate.title}</h2>
-            </div>
-            <div className="cli-import-open-scroll">
-              {busy === "preview" ? <p className="cli-import-state" role="status">Loading conversation…</p>
-                : preview && <div className="cli-import-messages">
-                  {preview.omittedMessages > 0 && <p className="cli-import-omitted">{cliOmissionText({ omitted: preview.omittedMessages, total: preview.omittedMessages + preview.messages.length }, alreadyImported)}</p>}
-                  {preview.messages.map((message, index) => <article key={index} className={`cli-import-message is-${message.role}`}
-                    aria-label={message.role === "user" ? "You" : cliProviderLabel(preview.candidate.providerId)}>
-                    <p>{message.content}</p>
-                  </article>)}
-                </div>}
-            </div>
-            <div className="cli-import-actions">
-              {preview && !status && <p className="cli-import-continuation">{cliContinuationText(preview.candidate.continuation)}</p>}
-              {status && <p className="cli-import-status" role={error ? "alert" : "status"}>{status}</p>}
-              {preview && <button type="button" className={openedId || !alreadyImported ? "primary-button" : "secondary-button"}
-                aria-disabled={openedId ? false : importUnavailable} aria-keyshortcuts={importShortcut} onClick={runAction}>
-                {openedId ? <ArrowRight size={14} aria-hidden="true" /> : busy === "import" ? <span className="loading-mark" aria-hidden="true" /> : alreadyImported ? <Check size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
-                {openedId ? "Open chat" : busy === "import" ? "Importing…" : alreadyImported ? "Already imported" : "Import conversation"}
-              </button>}
-            </div>
+        <IconButton label="Scan again" className={busy === "scan" ? "is-scanning" : undefined} aria-disabled={scanUnavailable}
+          onClick={() => { if (!scanUnavailable) void refresh(); }}>
+          {busy === "scan" ? <LoadingMark size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
+        </IconButton>
+      </div>
+      <div className="cli-import-body">
+        {openId && openCandidate ? <div key={openId} className="cli-import-open" role="group" aria-labelledby={openTitleId}>
+          <div className="cli-import-open-head">
+            <IconButton ref={backButton} label="Back to conversations" aria-disabled={busy === "import"} onClick={() => back()}><ArrowLeft size={14} aria-hidden="true" /></IconButton>
+            <h3 id={openTitleId}>{openCandidate.title}</h3>
           </div>
-            : galleryState ? <p className="cli-import-state" role={error ? "alert" : busy === "scan" ? "status" : undefined}>{galleryState}</p>
-              : <div ref={gallery} className="cli-import-gallery" role="list" aria-label="CLI conversations" onKeyDown={onGalleryKeyDown}>
-                {rows.map((item, index) => {
-                  return <div key={item.id} role="listitem" className="cli-import-cell" style={{ "--cli-import-index": Math.min(index, 10) } as React.CSSProperties}>
-                    <button type="button" id={cardId(item.id)} className="cli-import-card" aria-label={accessibleName(item)}
-                      aria-disabled={disabled} onClick={() => void open(item.id)}>
-                      <ProviderBrandIcon providerId={item.providerId} size={56} decorative className="cli-import-card-watermark" />
-                      <span className="cli-import-card-title">{item.title}</span>
-                      <span className="cli-import-mini" aria-hidden="true">
-                        <span className="cli-import-mini-user">{item.opening.user}</span>
-                        {item.opening.assistant && <span className="cli-import-mini-reply">{item.opening.assistant}</span>}
-                      </span>
-                      <span className="cli-import-card-meta">
-                        <ProviderBrandIcon providerId={item.providerId} size={16} decorative />
-                        <time dateTime={item.updatedAt}>{cardLabel(new Date(item.updatedAt))}</time>
-                        {item.importedConversationId && <span>Imported</span>}
-                      </span>
-                      <span className="cli-import-card-continuation">{cliContinuationText(item.continuation)}</span>
-                      {item.importedOmission && <span className="cli-import-card-omission">{cliOmissionText(item.importedOmission, true)}</span>}
-                    </button>
-                  </div>;
-                })}
+          <div className="cli-import-open-scroll">
+            {busy === "preview" ? <p className="cli-import-state" role="status">Loading conversation…</p>
+              : preview && <div className="cli-import-messages">
+                {preview.omittedMessages > 0 && <p className="cli-import-omitted">{cliOmissionText({ omitted: preview.omittedMessages, total: preview.omittedMessages + preview.messages.length }, alreadyImported)}</p>}
+                {preview.messages.map((message, index) => <article key={index} className={`cli-import-message is-${message.role}`}
+                  aria-label={message.role === "user" ? "You" : cliProviderLabel(preview.candidate.providerId)}>
+                  <p>{message.content}</p>
+                </article>)}
               </div>}
-          {note && <p className="cli-import-note">{note}</p>}
+          </div>
+          <div className="cli-import-actions">
+            {preview && !status && <p className="cli-import-continuation">{cliContinuationText(preview.candidate.continuation)}</p>}
+            {status && <p className="cli-import-status" role={error ? "alert" : "status"}>{status}</p>}
+            {preview && <button type="button" className={openedId || !alreadyImported ? "primary-button" : "secondary-button"}
+              aria-disabled={openedId ? false : importUnavailable} aria-keyshortcuts={importShortcut} onClick={runAction}>
+              {openedId ? <ArrowRight size={14} aria-hidden="true" /> : busy === "import" ? <LoadingMark size={14} aria-hidden="true" /> : alreadyImported ? <Check size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
+              {openedId ? "Open chat" : busy === "import" ? "Importing…" : alreadyImported ? "Already imported" : "Import conversation"}
+            </button>}
+          </div>
         </div>
-      </section>
-    </div>, document.body,
+          : galleryState ? <p className="cli-import-state" role={error ? "alert" : busy === "scan" ? "status" : undefined}>{galleryState}</p>
+            : <div ref={gallery} className="cli-import-gallery" role="list" aria-label="CLI conversations" onKeyDown={onGalleryKeyDown}>
+              {rows.map((item, index) => {
+                return <div key={item.id} role="listitem" className="cli-import-cell" style={{ "--cli-import-index": Math.min(index, 10) } as React.CSSProperties}>
+                  <button type="button" id={cardId(item.id)} className="cli-import-card" aria-label={accessibleName(item)}
+                    aria-disabled={disabled} onClick={() => void open(item.id)}>
+                    <span className="cli-import-card-title">{item.title}</span>
+                    <span className="cli-import-mini" aria-hidden="true">
+                      <span className="cli-import-mini-user">{item.opening.user}</span>
+                      {item.opening.assistant && <span className="cli-import-mini-reply">{item.opening.assistant}</span>}
+                    </span>
+                    <span className="cli-import-card-meta">
+                      <ProviderBrandIcon providerId={item.providerId} size={14} decorative />
+                      <time dateTime={item.updatedAt}>{cardLabel(new Date(item.updatedAt))}</time>
+                      {item.importedConversationId && <span>Imported</span>}
+                    </span>
+                    <span className="cli-import-card-continuation">{cliContinuationText(item.continuation)}</span>
+                    {item.importedOmission && <span className="cli-import-card-omission">{cliOmissionText(item.importedOmission, true)}</span>}
+                  </button>
+                </div>;
+              })}
+            </div>}
+        {note && <p className="cli-import-note">{note}</p>}
+      </div>
+    </DialogShell>, document.body,
   );
 }

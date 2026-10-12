@@ -428,7 +428,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     fireEvent.click(within(document.querySelector<HTMLElement>(".diff-selection-popover")!)
       .getByRole("button", { name: "Note" }));
     expect(screen.getByText("2 selected lines")).toBeInTheDocument();
-    expect(screen.getByText(/Shift\+Enter/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ after" })).toHaveAttribute("aria-keyshortcuts", "Shift+Enter");
   });
 
   it("names each review note control after its note", () => {
@@ -559,8 +559,7 @@ describe("WorkspaceChangesPanel repository scope", () => {
     const rootFile = screen.getByText("README.md", { exact: true })
       .closest("button");
     expect(rootFile).not.toBeNull();
-    expect(within(rootFile!).getAllByText("unstaged", { exact: true }))
-      .toHaveLength(1);
+    expect(rootFile).toHaveAccessibleName(/^M?\s*Modified, unstaged README\.md/u);
     expect(screen.queryByText("Main.java", { exact: true })).not.toBeInTheDocument();
 
     fireEvent.change(repositoryScope, { target: { value: "modules/alpha" } });
@@ -1275,15 +1274,17 @@ describe("WorkspaceChangesPanel repository scope", () => {
       />);
     });
     const navigator = screen.getByRole("navigation", { name: "Git repositories and changed files" });
-    expect([...navigator.querySelectorAll(".change-file-status")].map((node) => [
-      node.textContent,
-      node.getAttribute("title"),
-    ])).toEqual([
-      ["C", "Copied"],
-      ["T", "Type changed"],
-      ["?", "Unknown"],
+    const statuses = [...navigator.querySelectorAll<HTMLElement>(".change-file-status")];
+    expect(statuses.map((node) => [node.textContent, node.nextElementSibling?.textContent])).toEqual([
+      ["C", "Copied, unstaged"],
+      ["T", "Type changed, unstaged"],
+      ["?", "Unknown, unstaged"],
       ["U", "Untracked"],
     ]);
+    for (const status of statuses) expect(status).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(statuses[0]!, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Copied, unstaged"));
+    fireEvent.pointerLeave(statuses[0]!, { pointerType: "mouse" });
     expect(screen.getByRole("combobox", { name: "Repository and changed file" }))
       .toHaveTextContent("C · copied.ts");
   });

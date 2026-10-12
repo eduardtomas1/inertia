@@ -1,4 +1,4 @@
-import { MessagesSquare, X } from "lucide-react";
+import { ChevronDown, MessagesSquare, X } from "lucide-react";
 import type { ConversationContextPacketSummary } from "@shared/contracts";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import "./ConversationContextPacketStrip.css";
@@ -6,11 +6,13 @@ import "./ConversationContextPacketStrip.css";
 export function ConversationContextPacketStrip({
   packets,
   disabled,
+  previewPacketId,
   onPreview,
   onRemove,
 }: {
   packets: readonly ConversationContextPacketSummary[];
   disabled: boolean;
+  previewPacketId: string | null;
   onPreview: (packetId: string) => void;
   onRemove: (packetId: string) => void;
 }): React.JSX.Element | null {
@@ -32,6 +34,7 @@ export function ConversationContextPacketStrip({
             <button
               type="button"
               className="p-o"
+              aria-expanded={previewPacketId === packet.id}
               onClick={() => onPreview(packet.id)}
             >
               <span>
@@ -47,7 +50,7 @@ export function ConversationContextPacketStrip({
                     : ""}
                 </small>
               </span>
-              <span aria-hidden="true">↗</span>
+              <ChevronDown className="p-x" size={14} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -58,7 +61,7 @@ export function ConversationContextPacketStrip({
               disabled={disabled}
               onClick={() => onRemove(packet.id)}
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </article>
         );

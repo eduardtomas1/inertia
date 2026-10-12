@@ -97,6 +97,12 @@ function PaneResource({
   );
 }
 
+async function hoverTooltip(element: Element, text: string): Promise<void> {
+  fireEvent.pointerEnter(element, { pointerType: "mouse" });
+  await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(text));
+  fireEvent.pointerLeave(element, { pointerType: "mouse" });
+}
+
 describe("ConversationSplitView", () => {
   beforeEach(() => {
     vi.stubGlobal("matchMedia", matchMedia(false));
@@ -136,6 +142,16 @@ describe("ConversationSplitView", () => {
     expect(onClosePane).toHaveBeenCalledWith("secondary");
     expect(screen.queryByRole("button", { name: "Close split chat Provider routing" }))
       .toBeNull();
+  });
+
+  it("reveals truncated pane titles and project names in the shared tooltip", async () => {
+    const { container } = render(
+      <ConversationSplitView layout={pair} panes={routingPanes} onLayoutChange={vi.fn()} onClosePane={vi.fn()} />,
+    );
+    const header = container.querySelector<HTMLElement>(".conversation-split-header")!;
+    expect(header.querySelectorAll("[title]")).toHaveLength(0);
+    await hoverTooltip(within(header).getAllByText("Provider routing").find((node) => node.closest("strong"))!, "Provider routing");
+    await hoverTooltip(within(header).getAllByText("Inertia")[0]!, "Inertia");
   });
 
   it("restores focus to an actionable detached primary after closing the split", async () => {
@@ -418,7 +434,7 @@ describe("ConversationSplitView", () => {
     expect(currentChatDrag()).toBeNull();
     fireEvent.pointerUp(document, { pointerId: 1, buttons: 0 });
 
-    fireEvent.pointerDown(screen.getByTitle("Windows focus"), {
+    fireEvent.pointerDown(screen.getAllByText("Windows focus").find((node) => node.closest(".conversation-split-header"))!, {
       ...pointer,
       button: 0,
       clientX: 10,

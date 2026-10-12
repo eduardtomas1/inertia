@@ -1,4 +1,4 @@
-import { AlertCircle, MessageSquareX, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 type ConversationDetailStateProps = {
   embedded?: boolean;
@@ -18,16 +18,11 @@ export function ConversationDetailState({
   const Root = embedded ? "section" : "main";
   return (
     <Root className="chat-workspace centered-state" role={failed ? "alert" : "status"}>
-      {failed ? <AlertCircle size={24} /> : <MessageSquareX size={24} />}
       <h2>{deleted ? "This chat was deleted." : failed ? "This chat could not be loaded." : "This chat is no longer available."}</h2>
-      <p>{message ?? (deleted
-        ? "Choose another chat from the project navigation."
-        : failed
-          ? "The local runtime kept the rest of your workspace available."
-          : "It may have been removed from this workspace.")}</p>
+      {message && <p>{message}</p>}
       {failed && (
         <button type="button" className="secondary-button" onClick={onRetry}>
-          <RefreshCw size={15} />
+          <RefreshCw size={14} />
           <span>Try again</span>
         </button>
       )}

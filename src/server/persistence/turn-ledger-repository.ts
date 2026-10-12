@@ -331,7 +331,7 @@ export class TurnLedgerRepository {
           consumedAt: message.createdAt,
         });
       }
-      return { message, turn };
+      return { message: { ...message, turnId: turn.id }, turn };
     })();
   }
 

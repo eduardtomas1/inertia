@@ -10,7 +10,7 @@ import {
   Columns2,
   GripVertical,
   PanelBottom,
-  TerminalSquare,
+  Terminal,
   PictureInPicture2,
   Rows2,
   X,
@@ -33,6 +33,7 @@ import { PaneResizeHandle } from "./PaneResizeHandle";
 import { IconButton } from "./ui";
 import type { Project } from "@shared/contracts";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
+import { TooltipText } from "./TooltipText";
 
 const GUTTER_PX = 7;
 const POSITION_NAMES = ["Primary", "Second", "Third", "Fourth"];
@@ -179,14 +180,14 @@ export function ConversationSplitView({
             >
               {details.conversationId && (
                 <GripVertical
-                  size={12}
+                  size={14}
                   aria-hidden="true"
                   className="conversation-split-grip"
                 />
               )}
-              {details.project && <ProjectIcon project={details.project} size={12} />}
-              <ProjectName project={details.project} title={details.projectName}>{details.projectName}</ProjectName>
-              <strong title={details.title}>{details.title}</strong>
+              {details.project && <ProjectIcon project={details.project} size={14} />}
+              <ProjectName project={details.project}><TooltipText tooltip={details.projectName}>{details.projectName}</TooltipText></ProjectName>
+              <strong><TooltipText tooltip={details.title}>{details.title}</TooltipText></strong>
               <span className="conversation-split-actions">
                 {details.onOpenInWindow && (
                   <IconButton
@@ -203,7 +204,7 @@ export function ConversationSplitView({
                   aria-pressed={details.terminalOpen}
                   onClick={details.onToggleTerminal}
                 >
-                  <TerminalSquare size={14} />
+                  <Terminal size={14} />
                 </IconButton>
                 <IconButton
                   label={`${details.toolsOpen ? "Close" : "Open"} tools for ${
@@ -221,7 +222,7 @@ export function ConversationSplitView({
                       : "Stack split chats"}
                     onClick={() => onLayoutChange(toggleSplitAxis(layout))}
                   >
-                    {stacked ? <Columns2 size={13} /> : <Rows2 size={13} />}
+                    {stacked ? <Columns2 size={14} /> : <Rows2 size={14} />}
                   </IconButton>
                 )}
                 {position > 0 && (
@@ -232,7 +233,7 @@ export function ConversationSplitView({
                       focusPaneComposer(details.owner);
                     }}
                   >
-                    <ArrowLeftRight size={13} />
+                    <ArrowLeftRight size={14} />
                   </IconButton>
                 )}
                 {details.owner !== "primary" && (

@@ -216,7 +216,7 @@ describe("Help search", () => {
   it("starts with an empty search when reopened", async () => {
     const { dialog, opener, type } = await openHelp();
     type("archiv");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close help" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     fireEvent.click(opener);
@@ -237,7 +237,7 @@ describe("Help search", () => {
     expect(within(dialog).queryByRole("button", { name: "Previous" })).toBeNull();
 
     type("");
-    expect(within(dialog).getByText(`Topic 2 of ${HELP_TOPICS.length}`)).toBeVisible();
+    expect(within(dialog).getByRole("tab", { name: "Chat and composer" })).toHaveAttribute("aria-selected", "true");
     expect(within(dialog).getByRole("button", { name: "Previous" })).toBeVisible();
 
     type("terminal");

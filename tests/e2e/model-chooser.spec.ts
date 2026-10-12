@@ -17,6 +17,7 @@ import type { AppFixture } from "./support/app-fixture";
 import { createModelChooserFixture } from "./support/model-chooser-fixture";
 import { seedModelChooserNativeMetadata } from "./support/model-catalog-fixture";
 import { closeWorkspaceTools, ensureWorkspaceTools } from "./support/workspace-tools";
+import { expectComposerBranch } from "./support/composer-tools";
 
 const execFileAsync = promisify(execFile);
 
@@ -234,7 +235,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
 
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
-  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 4 } });
   await expect(modelChooser).toBeHidden();
   await expect(modelTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(modelTrigger).toBeFocused();
@@ -358,10 +359,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     timeout: 10_000,
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  })).toBeVisible();
+  await expectComposerBranch(page, currentBranch);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {
@@ -396,10 +394,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   }, MODEL_FAVORITES_STORAGE_KEY);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Chat checkout context" }).getByRole("button", {
-    name: `Branch ${currentBranch}`,
-    exact: true,
-  })).toBeVisible();
+  await expectComposerBranch(page, currentBranch);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
     try {

@@ -208,6 +208,7 @@ export interface PreviewState {
   tabs: PreviewTabState[];
   agentActivity: PreviewAgentActivity | null;
   evidence: BrowserEvidenceSnapshot;
+  pageFocused?: boolean;
 }
 export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";

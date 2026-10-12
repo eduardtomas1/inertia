@@ -16,7 +16,7 @@ export {
   type GitSnapshotComparison,
   type GitUnifiedDiff,
 } from "./git/types";
-export { getRepositoryStatus } from "./git/status";
+export { getRepositoryStatus, repositoryChangeCounts } from "./git/status";
 export {
   captureGitArtifactState,
   compareGitSnapshots,

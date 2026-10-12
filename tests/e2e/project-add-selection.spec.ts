@@ -97,7 +97,7 @@ test("keeps the chosen project scope after a cancelled or failed import", async 
       Reflect.set(dialog, "showOpenDialog", async () => ({ canceled: true, filePaths: [], bookmarks: [] }));
     });
     await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+    const dialog = page.getByRole("dialog", { name: /^(?:Add project|Open local folder|Clone repository)$/u });
     await dialog.getByRole("button", { name: /Local folder/u }).click();
     await dialog.getByRole("button", { name: "Browse", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "Open project", exact: true })).toBeDisabled();
@@ -126,7 +126,7 @@ test("keeps the search placeholder and typed text clear of the focus frame", asy
     const page = app.page;
     await page.getByRole("complementary", { name: "Project navigation", exact: true })
       .getByRole("button", { name: "Add project", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+    const dialog = page.getByRole("dialog", { name: /^(?:Add project|Open local folder|Clone repository)$/u });
     const search = dialog.getByRole("textbox", { name: "Search project sources" });
     await expect(search).toBeFocused();
     const icon = dialog.locator(".add-project-search > svg");

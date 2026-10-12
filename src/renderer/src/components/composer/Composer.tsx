@@ -44,7 +44,7 @@ import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
-import { composerAttachmentActions } from "./composerAttachmentActions";
+import { composerAttachmentActions, DOCUMENT_FOLLOW_UP_UNSUPPORTED } from "./composerAttachmentActions";
 import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
@@ -142,12 +142,12 @@ export const Composer = memo(function Composer({
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]); const [pendingAttachmentIds, setPendingAttachmentIds] = useState<ReadonlySet<string>>(() => new Set()); const pendingAttachmentIdsRef = useRef(new Set<string>());
   const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
+  const [submitting, setSubmitting] = useState(false);
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, latestTurnCompletedAt: latestKnownTurn?.completedAt ?? null, paused: running || submitting || sending, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const shownAttachmentsRef = useRef(attachments);
   shownAttachmentsRef.current = attachments;
-  const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const queueingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
@@ -355,18 +355,6 @@ export const Composer = memo(function Composer({
   useEffect(() => {
     if (running) {
       dismissMenu("context-change");
-      const retainedImages = attachmentsRef.current.filter(
-        ({ mimeType }) => chatAttachmentKind(mimeType) === "image",
-      );
-      for (const attachment of attachmentsRef.current) {
-        if (chatAttachmentKind(attachment.mimeType) !== "image") {
-          void releaseAttachmentRef.current(attachment.id);
-        }
-      }
-      if (retainedImages.length !== attachmentsRef.current.length) {
-        attachmentsRef.current = retainedImages;
-        setAttachments(() => retainedImages);
-      }
       if (submissionReleaseTimerRef.current !== null) {
         window.clearTimeout(submissionReleaseTimerRef.current);
         submissionReleaseTimerRef.current = null;
@@ -466,6 +454,10 @@ export const Composer = memo(function Composer({
       setAttachmentError("Send or remove the queued message first.");
       return;
     }
+    if (documentBlocksFollowUp) {
+      setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),
@@ -534,6 +526,11 @@ export const Composer = memo(function Composer({
         onClearPromptContext?.();
       }
       textareaRef.current?.focus();
+      if (running) {
+        submittingRef.current = false;
+        setSubmitting(false);
+        return;
+      }
       submissionReleaseTimerRef.current = window.setTimeout(() => {
         submissionReleaseTimerRef.current = null;
         submittingRef.current = false;
@@ -684,10 +681,15 @@ export const Composer = memo(function Composer({
   });
   const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
     && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
+  const documentBlocksFollowUp = running && !attachmentsAreImages;
   const queuedMessageCount = useRuntimeQueueLength(conversation.id);
   const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
   const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
+    if (documentBlocksFollowUp) {
+      setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
+      return;
+    }
     if (!canQueue || queueingRef.current || conversationContext.isReferencing()) return;
     queueingRef.current = true;
     try { await queueDraft(stopTurnId); } finally { queueingRef.current = false; }
@@ -1001,9 +1003,9 @@ export const Composer = memo(function Composer({
           onNavigatePromptHistory={promptHistoryController.navigate}
           onImportAttachments={importAttachments}
           onSubmit={submit}
-          canQueue={canQueue}
+          canQueue={canQueue || documentBlocksFollowUp}
           onQueue={() => void queueCurrentMessage()}
-          running={running} imageInputUnavailable={imageInputUnavailableReason !== null}
+          running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
           stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}
           submissionPending={submissionPending}
           followUpPending={followUpPending}

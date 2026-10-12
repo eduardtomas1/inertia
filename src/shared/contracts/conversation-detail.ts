@@ -21,7 +21,7 @@ import type {
   DiffReviewSummary,
   TurnGitArtifact,
 } from "./git";
-import type { ConversationContextPacketSummary } from "../conversation-context";
+import type { AgentContextReadSummary, ConversationContextPacketSummary } from "../conversation-context";
 import type { ConversationHistoryPage } from "../conversation-history";
 import type { ConversationAttachmentGalleryItem } from "../conversation-attachment-gallery";
 
@@ -48,6 +48,8 @@ export interface ConversationDetail {
   reviewNotes: DiffReviewNote[];
   /** Present on current local-runtime details; absent from legacy projections. */
   contextPackets?: ConversationContextPacketSummary[];
+  /** Chats an agent read through the context tool, per turn; absent from legacy projections. */
+  contextReads?: AgentContextReadSummary[];
 }
 
 export type ConversationDetailResult =

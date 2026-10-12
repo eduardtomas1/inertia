@@ -277,6 +277,17 @@ if (message.method === "thread/goal/clear") {
   return;
 }
 if (message.method === "turn/start") {
+  if (process.env.INERTIA_APP_SERVER_SCENARIO?.startsWith("steer-answer-")) {
+    send({ id: message.id, result: { turn: turnShape(turnId, "inProgress", null, null) } });
+    sendBatch([
+      { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "answer", type: "agentMessage", text: "" } } },
+      process.env.INERTIA_APP_SERVER_SCENARIO === "steer-answer-ended"
+        ? { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "answer", type: "agentMessage", text: "Answer to the fir" } } }
+        : { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "answer", delta: "Answer to the fir" } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "approval-before-response") {
     sendBatch([
       { method: "turn/started", params: { threadId, turn: turnShape(turnId, "inProgress") } },
@@ -679,6 +690,24 @@ if (message.method === "turn/steer") {
   if (scenario === "steer-receipt-lost") return;
   if (scenario === "steer-receipt-refused") {
     send({ id: message.id, error: { code: -32600, message: "expected turn mismatch" } });
+    return;
+  }
+  if (scenario?.startsWith("steer-answer-")) {
+    send({ id: message.id, result: { turnId } });
+    if (scenario !== "steer-answer-ended") {
+      sendBatch([
+        { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "answer", delta: "st task." } },
+        ...(scenario === "steer-answer-open"
+          ? [{ method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "answer", type: "agentMessage", text: "Answer to the first task." } } }]
+          : []),
+      ]);
+    }
+    setTimeout(() => sendBatch([
+      { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "reply", type: "agentMessage", text: "" } } },
+      { method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "reply", delta: "Renamed it." } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "reply", type: "agentMessage", text: "Renamed it." } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
+    ]), 20);
     return;
   }
   if (scenario === "steer-receipt-late") {

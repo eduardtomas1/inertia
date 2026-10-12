@@ -12,6 +12,7 @@ import {
 } from "@shared/project-colors";
 import { defaultProjectPreferences, PROJECT_ICON_NAMES, type ProjectPreferences } from "@shared/project-preferences";
 import { ProjectIcon, projectTintStyle } from "./ProjectIcon";
+import { Tooltip, useTooltip } from "./Tooltip";
 import { useProjectColorRevision } from "../lib/projectColorTints";
 import "./ProjectAppearanceControls.css";
 
@@ -19,6 +20,28 @@ interface RadioOption<T extends string> { id: T; label: string; content: ReactNo
 
 const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown"]);
 const PREVIOUS_KEYS = new Set(["ArrowLeft", "ArrowUp"]);
+
+function RovingRadio<T extends string>({ option, checked, focusable, disabled, inactive, register, onPick }: {
+  option: RadioOption<T>;
+  checked: boolean;
+  focusable: boolean;
+  disabled: boolean;
+  inactive: boolean;
+  register: (id: T, node: HTMLButtonElement | null) => void;
+  onPick: () => void;
+}): React.JSX.Element {
+  const button = useRef<HTMLButtonElement | null>(null);
+  const tooltip = useTooltip(button, {});
+  const named = typeof option.content !== "string";
+  return <>
+    <button type="button" role="radio" aria-checked={checked} aria-label={option.label} data-radio-id={option.id}
+      disabled={disabled} aria-disabled={inactive || undefined} tabIndex={focusable ? 0 : -1} style={option.style} className={option.className}
+      ref={(node) => { button.current = node; register(option.id, node); }}
+      {...(named ? tooltip.handlers : {})}
+      onClick={onPick}>{option.content}</button>
+    {named && tooltip.layer && <Tooltip anchor={button} layer={tooltip.layer} label={option.label} />}
+  </>;
+}
 
 export function RovingRadioGroup<T extends string>({ label, options, value, disabled = false, inactive = false, className, onChange }: {
   label: string;
@@ -45,11 +68,10 @@ export function RovingRadioGroup<T extends string>({ label, options, value, disa
     if (target.id !== value) onChange(target.id);
   };
   return <div role="radiogroup" aria-label={label} aria-disabled={disabled || inactive || undefined} className={className} onKeyDown={onKeyDown}>
-    {options.map((option) => <button key={option.id} type="button" role="radio" aria-checked={option.id === value}
-      aria-label={option.label} title={option.label} data-radio-id={option.id} disabled={disabled} aria-disabled={inactive || undefined}
-      tabIndex={option.id === focusable ? 0 : -1} style={option.style} className={option.className}
-      ref={(node) => { if (node) buttons.current.set(option.id, node); else buttons.current.delete(option.id); }}
-      onClick={() => { if (!inactive && option.id !== value) onChange(option.id); }}>{option.content}</button>)}
+    {options.map((option) => <RovingRadio key={option.id} option={option} checked={option.id === value} focusable={option.id === focusable}
+      disabled={disabled} inactive={inactive}
+      register={(id, node) => { if (node) buttons.current.set(id, node); else buttons.current.delete(id); }}
+      onPick={() => { if (!inactive && option.id !== value) onChange(option.id); }} />)}
   </div>;
 }
 
@@ -74,6 +96,8 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
   useProjectColorRevision();
   const hexId = useId();
   const colorInput = useRef<HTMLInputElement>(null);
+  const well = useRef<HTMLLabelElement>(null);
+  const wellTooltip = useTooltip(well, {});
   const customValue = value?.kind === "custom" ? value.value : null;
   const rememberedCustom = useRememberedValue(customValue);
   const [draft, setDraft] = useState(customValue ?? "");
@@ -102,10 +126,10 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
     { id: "default", label: "Default", content: <span className="project-swatch-fill" aria-hidden="true" />, className: "project-swatch is-default" },
     ...PROJECT_COLOR_NAMES.map((name): RadioOption<ColorChoice> => ({
       id: name, label: PROJECT_COLOR_PALETTE[name].label, style: swatchStyle({ kind: "palette", name }), className: "project-swatch",
-      content: <span className="project-swatch-fill" aria-hidden="true"><Check size={11} strokeWidth={2.6} /></span>,
+      content: <span className="project-swatch-fill" aria-hidden="true"><Check size={14} /></span>,
     })),
     ...(rememberedCustom ? [{ id: "custom" as const, label: `Custom ${rememberedCustom}`, style: swatchStyle({ kind: "custom", value: rememberedCustom }),
-      className: "project-swatch is-custom", content: <span className="project-swatch-fill" aria-hidden="true"><Check size={11} strokeWidth={2.6} /></span> }] : []),
+      className: "project-swatch is-custom", content: <span className="project-swatch-fill" aria-hidden="true"><Check size={14} /></span> }] : []),
   ];
   const selected: ColorChoice = !value ? "default" : value.kind === "palette" ? value.name : "custom";
   const applyDraft = (): void => {
@@ -124,11 +148,12 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
         else onChange({ kind: "palette", name: choice });
       }} />
     <div className="project-color-custom">
-      <label className="project-color-well" title="Pick a custom colour">
-        <Pipette size={13} aria-hidden="true" />
+      <label ref={well} className="project-color-well" {...wellTooltip.handlers}>
+        <Pipette size={14} aria-hidden="true" />
         <input ref={colorInput} type="color" aria-label="Pick a custom colour" disabled={disabled} aria-disabled={inactive || undefined}
           defaultValue={customValue ?? "#6f76d9"} />
       </label>
+      {wellTooltip.layer && <Tooltip anchor={well} layer={wellTooltip.layer} label="Pick a custom colour" />}
       <input className="project-color-hex" aria-label="Custom colour hex value" placeholder="#RRGGBB" spellCheck={false}
         autoComplete="off" maxLength={7} disabled={disabled} readOnly={inactive} aria-disabled={inactive || undefined} value={draft} aria-invalid={invalid || undefined}
         aria-describedby={invalid ? hexId : undefined}

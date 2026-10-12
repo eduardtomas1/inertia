@@ -7,20 +7,21 @@
 }
 
 .snapshot-settings-guide {
+  margin-top: 12px;
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line-soft);
 }
 
 .snapshot-settings-guide .setting-disclosure-content {
-  padding: 4px 0 8px 19px;
+  padding: 0 0 8px 19px;
 }
 
 .snapshot-instructions {
-  margin: 0;
+  margin: 4px 0 0;
   padding-left: 18px;
-  color: var(--text-soft);
-  font-size: var(--ui-font-secondary);
-  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
   list-style: decimal;
 }
 
@@ -29,17 +30,17 @@
 }
 
 .snapshot-instructions kbd {
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-muted);
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  background: none;
   font-family: inherit;
-  font-size: var(--ui-font-micro);
+  font-size: inherit;
 }
 
 .snapshot-settings-note {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: var(--ui-font-micro);
-  line-height: 1.4;
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }

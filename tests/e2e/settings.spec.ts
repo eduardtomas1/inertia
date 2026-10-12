@@ -12,6 +12,7 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
 import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
+import { expectContextRingFitsItsNumber } from "./support/usage-ring";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -75,7 +76,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
     themeSource: nativeTheme.themeSource,
   }));
   expect(nativeAppearance.themeSource).toBe("dark");
-  expect(nativeAppearance.background).toMatch(/^#050507(?:ff)?$/iu);
+  expect(nativeAppearance.background).toMatch(/^#18181b(?:ff)?$/iu);
   await page.getByRole("radiogroup", { name: "Interface scale" }).getByRole("radio", { name: "Comfortable" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-interface-scale", "comfortable");
   await page.getByRole("radiogroup", { name: "Text density" }).getByRole("radio", { name: "Comfortable" }).click();
@@ -476,10 +477,10 @@ test("persists composer usage modes without losing the followed transcript", asy
   await expect(compactTrigger).toHaveAccessibleName(
     "Open usage and context. Context window 15% remaining, near limit.",
   );
-  await expect(compactTrigger).toHaveAttribute(
-    "title",
-    "Context window 15% remaining, near limit.",
-  );
+  await compactTrigger.hover();
+  await expect(page.locator('[role="tooltip"]')).toHaveText("Context window 15% remaining, near limit.");
+  await page.mouse.move(1, 1);
+  await expect(page.locator('[role="tooltip"]')).toHaveCount(0);
   await expect(compactTrigger).toHaveAttribute("aria-expanded", "false");
   const ringGeometry = await compact.locator(".usage-popover-trigger .usage-context-ring").evaluate((ring) => {
     const bounds = ring.getBoundingClientRect();
@@ -497,12 +498,11 @@ test("persists composer usage modes without losing the followed transcript", asy
       strokeWidth: value ? getComputedStyle(value).strokeWidth : null,
     };
   });
-  expect(ringGeometry.width).toBeGreaterThanOrEqual(23);
-  expect(ringGeometry.width).toBeLessThanOrEqual(31);
-  expect(ringGeometry.height).toBe(ringGeometry.width);
+  expect([ringGeometry.width, ringGeometry.height]).toEqual([28, 28]);
   expect(ringGeometry.animations).toBe(0);
-  expect(ringGeometry.strokeWidth).toBe("1.65px");
+  expect(ringGeometry.strokeWidth).toBe("2px");
   expect(ringGeometry.width).toBeLessThan(ringGeometry.sendWidth);
+  await expectContextRingFitsItsNumber(compact.locator(".usage-popover-trigger .usage-context-ring"));
   const contextRingScreenshot = testInfo.outputPath(
     "context-ring-near-limit-1440x920.png",
   );
@@ -549,7 +549,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     name: "Close usage and context",
   });
   await closeCompactUsage.focus();
-  await page.locator(".workspace-header").click({ position: { x: 12, y: 12 } });
+  await page.locator(".workspace-header").click({ position: { x: 12, y: 4 } });
   await expect(compactPopover).toBeHidden();
   await expect(compactTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(compactTrigger).toBeFocused();
@@ -666,9 +666,9 @@ test("applies every interface scale live and remains usable at common Linux disp
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Appearance", exact: true }).click();
   const scaleGroup = page.getByRole("radiogroup", { name: "Interface scale" });
   const expected = [
-    ["Compact", "compact", "13px", "30px"],
-    ["Default", "default", "14px", "32px"],
-    ["Comfortable", "comfortable", "15px", "35px"],
+    ["Compact", "compact", "13.5px", "30px"],
+    ["Default", "default", "14.5px", "32px"],
+    ["Comfortable", "comfortable", "15.5px", "35px"],
     ["Large", "large", "16.5px", "38px"],
   ] as const;
 

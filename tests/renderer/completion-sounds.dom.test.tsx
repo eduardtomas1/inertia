@@ -403,13 +403,21 @@ describe("completion sound settings", () => {
   it("confirms a sound choice and reports one that could not be saved", async () => {
     const { onUpdate } = renderSettings(enabled);
     fireEvent.click(screen.getByRole("radio", { name: /Glass/u }));
-    const heading = screen.getByText("Sound", { selector: "#completion-sound-label" }).parentElement!;
+    const heading = document.querySelector<HTMLElement>(".completion-sound-heading")!;
     await waitFor(() => expect(heading.querySelector('[role="status"]')).toHaveTextContent("Saved"));
     onUpdate.mockRejectedValueOnce(new Error("The local service disconnected."));
     fireEvent.click(screen.getByRole("radio", { name: /Bell/u }));
     await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
     expect(heading).toContainElement(screen.getByRole("alert"));
     expect(screen.getByRole("radio", { name: /Chime/u })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("names each sound once, without a description line or a repeated heading", () => {
+    renderSettings(enabled);
+    expect(screen.getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["Chime", "Glass", "Marimba", "Bloom", "Pop", "Bell"]);
+    expect(screen.queryByText("Plays when an agent finishes or stops with an error.")).toBeNull();
+    expect(document.querySelector("#completion-sound-label")).toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "Sound" })).toBeVisible();
   });
 
   it("hides the library where the desktop bridge is unavailable", () => {

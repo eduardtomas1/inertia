@@ -195,3 +195,10 @@ Before is a build of main; after is this branch: the queue is a card above the c
 
 - composer-queue-light-1440x920: light.
 - composer-queue-dark-1440x920: dark.
+
+## Composer footer (owner, 2026-10-12)
+
+Before is the branch before these changes. The access-mode control has no icon, the context ring is 28px with a 2px stroke and a centred tabular number, and the "…" tray shows only its options.
+
+- composer-footer-light-1440x920 / -dark: the footer crop.
+- composer-tray-light-1440x920 / -dark: the tray open.

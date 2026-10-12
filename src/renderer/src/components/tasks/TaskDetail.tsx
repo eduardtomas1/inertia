@@ -63,7 +63,8 @@ export function TaskDetail({
   const [note, setNote] = useState(todo.note);
   const savedTitle = useRef(todo.title);
   const savedNote = useRef(todo.note);
-  const editing = useRef<"title" | "note" | null>(null);
+  const titleDirty = useRef(false);
+  const noteDirty = useRef(false);
   const noteTimer = useRef<number | null>(null);
   const noteDraft = useRef(todo.note);
   const update = useRef(onUpdate);
@@ -71,12 +72,12 @@ export function TaskDetail({
 
   useEffect(() => {
     savedTitle.current = todo.title;
-    if (editing.current !== "title") setTitle(todo.title);
+    if (!titleDirty.current) setTitle(todo.title);
   }, [todo.title]);
 
   useEffect(() => {
     savedNote.current = todo.note;
-    if (editing.current !== "note" && noteTimer.current === null) {
+    if (!noteDirty.current) {
       noteDraft.current = todo.note;
       setNote(todo.note);
     }
@@ -85,6 +86,8 @@ export function TaskDetail({
   const flushNote = (): void => {
     if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
     noteTimer.current = null;
+    if (!noteDirty.current) return;
+    noteDirty.current = false;
     if (noteDraft.current === savedNote.current) return;
     savedNote.current = noteDraft.current;
     update.current({ note: noteDraft.current });
@@ -94,6 +97,11 @@ export function TaskDetail({
   useEffect(() => () => flushNoteRef.current(), []);
 
   const saveTitle = (): void => {
+    if (!titleDirty.current) {
+      setTitle(savedTitle.current);
+      return;
+    }
+    titleDirty.current = false;
     const next = title.trim();
     if (!next) {
       setTitle(savedTitle.current);
@@ -117,7 +125,7 @@ export function TaskDetail({
   }, [focusTarget, onFocusHandled]);
 
   const close = (): void => {
-    if (editing.current === "title") saveTitle();
+    saveTitle();
     flushNote();
     onClose();
   };
@@ -145,12 +153,11 @@ export function TaskDetail({
           value={title}
           maxLength={MAX_TODO_TITLE_CHARS}
           rows={1}
-          onFocus={() => { editing.current = "title"; }}
-          onBlur={() => {
-            editing.current = null;
-            saveTitle();
+          onBlur={saveTitle}
+          onChange={(event) => {
+            titleDirty.current = true;
+            setTitle(event.currentTarget.value.replace(/[\r\n]+/gu, " "));
           }}
-          onChange={(event) => setTitle(event.currentTarget.value.replace(/[\r\n]+/gu, " "))}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
             event.preventDefault();
@@ -168,13 +175,10 @@ export function TaskDetail({
         value={note}
         maxLength={MAX_TODO_NOTE_CHARS}
         rows={1}
-        onFocus={() => { editing.current = "note"; }}
-        onBlur={() => {
-          editing.current = null;
-          flushNote();
-        }}
+        onBlur={flushNote}
         onChange={(event) => {
           const value = event.currentTarget.value;
+          noteDirty.current = true;
           setNote(value);
           noteDraft.current = value;
           if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);

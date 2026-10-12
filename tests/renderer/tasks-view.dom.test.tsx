@@ -471,6 +471,25 @@ describe("Tasks view", () => {
     expect(commands[0]).toEqual({ type: "todo.update", payload: { id: second, patch: { note: "Gone" } } });
   });
 
+  it("adopts a newer title and note when the fields were focused without typing", async () => {
+    const user = userEvent.setup();
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const view = harness(snapshot([todo(id, "Write release notes", { note: "Old note" })]));
+    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    const title = screen.getByRole("textbox", { name: "Title" });
+    const note = screen.getByRole("textbox", { name: "Note" });
+    await user.click(title);
+    view.update(snapshot([todo(id, "Write the release notes", { note: "Newer note" })]));
+    await user.click(note);
+    view.update(snapshot([todo(id, "Write the release notes", { note: "Newest note" })]));
+    await user.click(screen.getByRole("textbox", { name: "Add a task" }));
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(sent(view.request, "todo.update")).toEqual([]);
+    expect(title).toHaveValue("Write the release notes");
+    expect(note).toHaveValue("Newest note");
+  });
+
   it("starts a task in the chosen project and opens its chat", async () => {
     const user = userEvent.setup();
     const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

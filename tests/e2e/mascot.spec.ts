@@ -52,9 +52,9 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
         await overlay.mouse.move(120, 260);
         await overlay.mouse.move(20, 296);
         await expect.poll(() => input.evaluate((value) => value.last())).toBe(true);
-        await overlay.mouse.move(120, 170);
+        await overlay.mouse.move(120, 186);
         await expect.poll(() => input.evaluate((value) => value.last())).toBe(false);
-        await overlay.mouse.move(4, 94);
+        await overlay.mouse.move(4, 177);
         await expect.poll(() => input.evaluate((value) => value.last())).toBe(true);
         await overlay.mouse.move(120, 260);
         await expect.poll(() => input.evaluate((value) => value.last())).toBe(false);

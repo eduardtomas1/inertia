@@ -377,6 +377,24 @@ describe("Tasks view", () => {
     expect(check).not.toBeChecked();
   });
 
+  it("closes a menu whose task disappeared and keeps focus and Escape working", async () => {
+    const user = userEvent.setup();
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const view = harness(snapshot([todo(first, "Write release notes"), todo(second, "Clean the downloads folder")]));
+    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    await user.click(screen.getByRole("button", { name: "Actions for Clean the downloads folder" }));
+    expect(screen.getByRole("menu", { name: "Actions for Clean the downloads folder" })).toBeVisible();
+
+    view.update(snapshot([todo(first, "Write release notes")]));
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus());
+
+    screen.getByRole("textbox", { name: "Title" }).focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary", { name: "Task details" })).toBeNull();
+  });
+
   it("renames from the menu by focusing and selecting the detail title", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));

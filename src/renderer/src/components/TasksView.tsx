@@ -122,6 +122,14 @@ export function TasksView({
     }
   }, [focusRequest?.id, selectedId, todoById, todos]);
 
+  useEffect(() => {
+    if (!menu || !todos) return;
+    const id = menu.startsWith("row:") ? menu.slice(4) : selectedId;
+    if (id && todoById.has(id)) return;
+    dismissMenu("context-change");
+    if (!document.activeElement || document.activeElement === document.body) addInputRef.current?.focus();
+  }, [dismissMenu, menu, selectedId, todoById, todos]);
+
   const send = useCallback((command: CommandWithoutId): void => {
     void request(command, { passive: true }).catch(() => undefined);
   }, [request]);

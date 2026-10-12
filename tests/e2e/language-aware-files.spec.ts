@@ -326,6 +326,15 @@ test("opens a language-aware project link at its exact validated Java range", as
 
   await app.resizeWindow(760, 760);
   const narrowPanel = page.getByRole("region", { name: "Project files" });
+  await narrowPanel.getByLabel("Contents of src/demo/OrderService.java").evaluate(
+    (element) => new Promise<void>((resolve) => {
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      observer.observe(element);
+    }),
+  );
   const geometry = await narrowPanel.evaluate((element) => {
     const panelBounds = element.getBoundingClientRect();
     const tree = element.querySelector<HTMLElement>(".file-entry-list")

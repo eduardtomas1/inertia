@@ -1,6 +1,7 @@
 import { useId } from "react";
 import clsx from "clsx";
 import { CustomThemeColor } from "./CustomThemeColor";
+import { TooltipButton } from "./TooltipButton";
 import "./ThemeLibrary.css";
 
 import type {
@@ -137,21 +138,21 @@ export function ThemeLibrary({
               className={clsx("color-theme-option", active && "is-active")}
               key={option.id}
             >
-              <button type="button" className="color-theme-apply-both" disabled={disabled}
+              <TooltipButton className="color-theme-apply-both" disabled={disabled}
                 aria-label={`${option.label} theme`} aria-pressed={active}
-                title={`Use ${option.label} for both light and dark`}
+                tooltip={`Use ${option.label} for both light and dark`}
                 onClick={() => selectColorTheme(option.id)} />
               <span className="color-theme-preview-pair">
                 {(["light", "dark"] as const).map((mode) => {
                   const selected = mode === "light" ? lightActive : darkActive;
-                  return <button type="button" key={mode} disabled={disabled}
+                  return <TooltipButton key={mode} disabled={disabled}
                     className={clsx("color-theme-mode-button", selected && "is-selected")}
                     aria-label={`Use ${option.label} for ${mode}`} aria-pressed={selected}
-                    title={`Use ${option.label} for ${mode} only`}
+                    tooltip={`Use ${option.label} for ${mode} only`}
                     onClick={() => onUpdate(mode === "light" ? { lightColorTheme: option.id } : { darkColorTheme: option.id })}>
                     <ColorThemeSwatch mode={mode} colorTheme={option.id} />
                     {selected && <span className="color-theme-mode-badge" aria-hidden="true"><span className={`appearance-mode-icon is-${mode}`} /></span>}
-                  </button>;
+                  </TooltipButton>;
                 })}
               </span>
               <span className="color-theme-option-name">{option.label}</span>

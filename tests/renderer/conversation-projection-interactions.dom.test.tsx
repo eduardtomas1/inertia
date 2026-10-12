@@ -1940,6 +1940,49 @@ describe("useConversationProjection pending interactions", () => {
     });
   });
 
+  it("keeps the answer before a follow-up when a correction replaces only the later reply", async () => {
+    const source = createEventSource();
+    const turn = runningTurn();
+    const base = { conversationId: primaryId, turnId: turn.id, attachments: [] };
+    const userMessage: ChatMessage = { ...base, id: turn.userMessageId, role: "user", content: "First task.", createdAt: "2026-07-28T12:00:30.000Z" };
+    const earlier: ChatMessage = { ...base, id: "earlier-answer", role: "assistant", content: "Earlier answer.", createdAt: "2026-07-28T12:00:31.000Z" };
+    const followUp: ChatMessage = { ...base, id: "follow-up", role: "user", content: "Also rename it.", createdAt: "2026-07-28T12:00:32.000Z" };
+    const reply: ChatMessage = { ...base, id: "reply", role: "assistant", content: "Draft reply.", createdAt: "2026-07-28T12:00:33.000Z" };
+    const canonical: ChatMessage = { ...reply, content: "Final reply." };
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => command.type === "conversation.detail.load"
+      ? {
+          type: "request.result",
+          requestId: crypto.randomUUID(),
+          result: {
+            kind: "conversation.detail",
+            conversationId: primaryId,
+            state: "ready",
+            detail: {
+              conversation: conversation(primaryId), agentTurns: [turn], turnGitArtifacts: [],
+              messages: [userMessage, earlier, followUp, reply], activities: [], subagents: [], reasonings: [],
+              usage: [], plans: [], goals: [], checkpoints: [], reviewSummaries: [], reviewStates: [], reviewNotes: [],
+            },
+          },
+        }
+      : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot, status: "online", request, subscribe: source.subscribe, enabled: true,
+      autoOpenPlan: false, onOpenPlan: vi.fn(), onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detail).not.toBeNull());
+
+    source.emit({
+      type: "agent.text.replaced",
+      conversationId: primaryId,
+      runId: turn.runId,
+      turnId: turn.id,
+      message: canonical,
+      after: followUp.createdAt,
+    });
+
+    expect(hook.result.current.messages).toEqual([userMessage, earlier, followUp, canonical]);
+  });
+
   it("does not clear a newer turn stream for a delayed older replacement", () => {
     const source = createEventSource();
     const hook = renderProjection(source, {

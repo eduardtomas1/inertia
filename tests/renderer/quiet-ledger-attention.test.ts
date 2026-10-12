@@ -103,9 +103,7 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(implicitFailure).toContain('<span class="visually-hidden">Failed: </span>');
     expect(implicitFailure).toContain('<span class="agent-activity-state" aria-hidden="true">Failed</span>');
     expect(implicitFailure).toContain("lucide-triangle-alert");
-    expect(implicitFailure).toContain(
-      'title="Provider could not complete the request"',
-    );
+    expect(implicitFailure).not.toContain("title=");
     expect(implicitFailure).toContain("<span>Output</span>");
     expect(implicitFailure).not.toContain("Process exited with status 1.");
     expect(explicitFailure).not.toContain('class="agent-activity-state"');
@@ -135,7 +133,7 @@ describe("Quiet Ledger warning and failure attention", () => {
     expect(interrupted).toContain('<span class="visually-hidden">Interrupted: </span>');
     expect(interrupted).not.toContain('class="agent-activity-state"');
     expect(interrupted).toContain("<span>Details</span>");
-    expect(interrupted).toContain('title="Interrupted · npm test"');
+    expect(interrupted).not.toContain("title=");
     expect(interrupted).not.toContain("The Codex App Server connection closed.");
     expect(terminal).toContain("<span>Details</span>");
     expect(terminal).not.toContain("Reason: transport-closed");

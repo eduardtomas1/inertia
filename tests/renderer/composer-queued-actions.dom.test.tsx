@@ -58,7 +58,8 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
     await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
     // The reply is still pending: the persisted entry already carries the marker.
     expect(readComposerQueue(conversationId)[0]?.dispatchedAt).toEqual(expect.any(String));
-    expect(screen.getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Sending…");
+    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeDisabled();
+    expect(screen.getByRole("listitem")).toHaveTextContent(/Sending…$/u);
     await act(async () => {
       pending.resolve();
       await pending.promise;
@@ -98,6 +99,15 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
     await act(async () => { await Promise.resolve(); });
     expect(onSendQueued).not.toHaveBeenCalled();
     expect(screen.getByText("Send unconfirmed")).toBeInTheDocument();
+    expect(screen.getByText("Send unconfirmed")).not.toHaveAttribute("title");
+    expect(screen.getByText("A previous send did not confirm. Check the transcript before sending again.")).toHaveClass("visually-hidden");
+    vi.useFakeTimers();
+    fireEvent.pointerEnter(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("A previous send did not confirm");
+    fireEvent.pointerLeave(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
+    act(() => { vi.advanceTimersByTime(500); });
+    vi.useRealTimers();
 
     // An explicit send is the reconciliation the label asks for.
     fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
@@ -127,7 +137,8 @@ describe("ComposerQueuedActions dispatch bookkeeping", () => {
       render(view(onSendQueued));
       await act(async () => { await Promise.resolve(); });
       expect(onSendQueued).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Send now");
+      expect(screen.getByRole("button", { name: "Send queued message now" })).toBeEnabled();
+      expect(screen.getByText("Queued")).toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "localStorage", { configurable: true, value: original });
     }

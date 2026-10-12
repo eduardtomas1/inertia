@@ -51,8 +51,8 @@ describe("preview panel URL routing", () => {
       onOpenExternal: () => undefined,
     }));
 
-    expect(html).toContain("<span>127.0.0.1:3000/app</span>");
-    expect(html).toContain("<span>127.0.0.1</span>");
+    expect(html).toContain(">127.0.0.1:3000/app</span>");
+    expect(html).toContain(">127.0.0.1</span>");
   });
 
   it("renders bounded browser pages and visible agent activity", () => {
@@ -64,6 +64,11 @@ describe("preview panel URL routing", () => {
         id: activeTabId,
         title: "Local dashboard",
         url: "http://127.0.0.1:4173/",
+        loading: false,
+      }, {
+        id: "55555555-5555-4555-8555-555555555555",
+        title: "Settings",
+        url: "http://127.0.0.1:4173/settings",
         loading: false,
       }],
       activeTabId,
@@ -98,7 +103,7 @@ describe("preview panel URL routing", () => {
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain("Local dashboard");
-    expect(html).toContain("Evidence");
+    expect(html).toContain('aria-label="Evidence 1"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-label="Open browser page"');
     expect(html).toContain('aria-label="Close Local dashboard"');

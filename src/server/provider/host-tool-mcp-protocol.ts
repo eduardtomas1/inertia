@@ -146,13 +146,11 @@ async function handleRequest(
       return response(message.id, {
         content: [
           { type: "text", text: result.text },
-          ...(result.image
-            ? [{
-                type: "image",
-                mimeType: result.image.mimeType,
-                data: result.image.data,
-              }]
-            : []),
+          ...(result.images ?? []).map((image) => ({
+            type: "image",
+            mimeType: image.mimeType,
+            data: image.data,
+          })),
         ],
         ...(result.success ? {} : { isError: true }),
       });

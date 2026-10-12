@@ -79,7 +79,7 @@ export default function CheckoutBranchMenuButton({
       const width = Math.min(380, window.innerWidth - 24);
       setPosition({
         left: `${Math.max(12, Math.min(bounds.right - width, window.innerWidth - width - 12))}px`,
-        bottom: `${Math.max(12, window.innerHeight - bounds.top + 8)}px`,
+        bottom: `${Math.max(12, window.innerHeight - bounds.top + 4)}px`,
       });
     };
     place();
@@ -113,11 +113,10 @@ export default function CheckoutBranchMenuButton({
         }}
       >
         {detached
-          ? <TriangleAlert size={12} aria-hidden="true" />
-          : <GitBranch size={12} aria-hidden="true" />}
-        <code translate="no">{detached ? "Detached HEAD · Create branch" : branch}</code>
-        {contextMismatch && <span className="checkout-context-dot" aria-hidden="true" />}
-        <ChevronDown size={11} aria-hidden="true" className="checkout-branch-chevron" />
+          ? <TriangleAlert size={14} aria-hidden="true" />
+          : <GitBranch size={14} aria-hidden="true" />}
+        <code translate="no">{detached ? "Detached HEAD · Create branch" : contextMismatch ? `Current checkout · ${branch}` : branch}</code>
+        <ChevronDown size={14} aria-hidden="true" className="checkout-branch-chevron" />
       </button>
       {menu === "branch" && position && createPortal(
         <div

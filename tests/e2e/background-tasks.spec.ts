@@ -586,7 +586,7 @@ test("shows what each harness reports and nothing more", async ({ browserName: _
     await capture(page, info, "background-tasks-cursor-wide-dark");
 
     region = await showChat(app, seed.kimi);
-    await expect(region.getByText("No background tasks.", { exact: true })).toBeVisible();
+    await expect(region.getByText("No background tasks", { exact: true })).toBeVisible();
     await expect(region.getByText(/Kimi/u)).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {

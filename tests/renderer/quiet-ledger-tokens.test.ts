@@ -20,7 +20,7 @@ describe("Minimal Workstream tokens", () => {
       expect(root, `missing ${token}`).toContain(`${token}:`);
     }
     expect(css).toMatch(
-      /--model-row-height:\s*calc\(var\(--ui-control-height\)\s*\+\s*6px\)/u,
+      /--model-row-height:\s*calc\(var\(--ui-control-height\)\s*\+\s*4px\)/u,
     );
   });
 });

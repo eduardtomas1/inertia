@@ -64,7 +64,6 @@ export function ProviderBrandIcon({
         <CircleHelp
           data-provider-icon-fallback
           size={size}
-          strokeWidth={1.8}
           aria-hidden="true"
         />
       )}

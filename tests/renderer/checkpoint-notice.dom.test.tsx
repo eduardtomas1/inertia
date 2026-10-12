@@ -118,7 +118,7 @@ describe("missing checkpoint notice", () => {
 
     const label = container.querySelector(".message-checkpoint-missing");
     expect(label?.textContent).toBe("No checkpoint for this turn: Checkpoint operation timed out.");
-    expect(label?.getAttribute("title")).toBe("Checkpoint operation timed out.");
+    expect(label?.getAttribute("title")).toBeNull();
     expect(screen.getByText(": Checkpoint operation timed out.").classList.contains("visually-hidden")).toBe(true);
   });
 });

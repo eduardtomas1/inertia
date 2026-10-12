@@ -1,6 +1,6 @@
 import { useUsageLimitsContext } from "./usage-limits-state";
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Clock3, EyeOff, X } from "lucide-react";
+import { ChevronRight, Clock, EyeOff, X } from "lucide-react";
 
 import type {
   ProviderMetadataFieldState,
@@ -15,6 +15,7 @@ import {
   usageDisplayBehavior,
 } from "../utils/usageDisplay";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { TooltipButton } from "./TooltipButton";
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
@@ -212,7 +213,7 @@ function ContextRing({
           />
         )}
       </svg>
-      <span className="usage-context-ring-label">{value === null ? "—" : value}</span>
+      {value !== null && <span className="usage-context-ring-label">{value}</span>}
       {quotaRefreshing && <span className="usage-quota-refresh-indicator" />}
     </span>
   );
@@ -323,22 +324,22 @@ export function UsageIndicator({
       data-composer-control="usage"
     >
       <div ref={anchorRef} className="usage-popover-anchor">
-        <button
+        <TooltipButton
           ref={triggerRef}
-          type="button"
           className={`usage-popover-trigger${open ? " is-open" : ""}`}
           aria-label={triggerLabel}
           aria-haspopup="dialog"
           aria-controls={detailsId}
           aria-expanded={open}
-          title={triggerSummary}
+          tooltip={triggerSummary}
+          describeTooltip={false}
           onClick={() => setOpen((current) => !current)}
         >
           <ContextRing context={context} quotaRefreshing={quotaRefreshing} />
-          {behavior.showAdjacentValue && (
+          {behavior.showAdjacentValue && ringState !== "unavailable" && (
             <span className="usage-trigger-value" aria-hidden="true">{context.valueLabel}</span>
           )}
-        </button>
+        </TooltipButton>
 
         <div
           id={detailsId}
@@ -400,9 +401,6 @@ export function UsageIndicator({
                     </div>
                   ))}
                 </dl>
-                <p className="usage-popover-quality-detail">
-                  Provider-reported values; cache counts are a breakdown of input where applicable.
-                </p>
               </section>
             )}
 
@@ -413,7 +411,6 @@ export function UsageIndicator({
                 </div>
                 <div className="usage-popover-value">
                   <strong>{compactNumber(processed.value)}</strong>
-                  <span>Provider-reported {processed.scope} total</span>
                 </div>
               </section>
             )}
@@ -449,7 +446,7 @@ export function UsageIndicator({
                             <span style={{ width: `${remaining}%` }} />
                           </span>
                         )}
-                        {reset && <small><Clock3 size={11} aria-hidden="true" />{reset}</small>}
+                        {reset && <small><Clock size={14} aria-hidden="true" />{reset}</small>}
                       </div>
                     );
                   })}
@@ -480,6 +477,7 @@ export function UsageIndicator({
                 onClick={() => { closePopover(false); limitsContext.open(triggerRef.current); }}
               >
                 All provider limits
+                <ChevronRight size={14} aria-hidden="true" />
               </button>
             )}
             <button
@@ -487,7 +485,7 @@ export function UsageIndicator({
               className="usage-hide-button"
               onClick={() => onModeChange("hidden")}
             >
-              <EyeOff size={13} aria-hidden="true" />
+              <EyeOff size={14} aria-hidden="true" />
               Hide usage
             </button>
           </footer>

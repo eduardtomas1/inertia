@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import { Switch } from "./ui";
 import { useEffect, useState } from "react";
 import type { SettingAction, SettingNotice } from "./settings/useSettingAction";
@@ -89,7 +90,6 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
       <div className="setting-row" data-setting-id="desktop-mascot">
         <span className="setting-copy">
           <span className="setting-title"><strong>Show mascot</strong><RowStatus notice={showAction.notice} /></span>
-          <small>A tiny companion above your windows, showing live chat status.</small>
         </span>
         <Switch label="Show mascot" checked={enabled} inactive={held || !snapshot} onChange={(value) => configure(showAction, { enabled: value })} />
       </div>
@@ -107,21 +107,21 @@ export function MascotSettings({ showAction, motionAction }: { showAction: Setti
         <button className="secondary-button" type="button" disabled={snapshot.placement === "system"} onClick={() => {
           void bridge.action("reset-position").catch(() => setError("Could not reset the position."));
         }}>Reset position</button>
-        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : "Drag to move, or focus and use arrow keys. "}Escape hides it. Right-click for animation and hide controls. Reduced motion uses still artwork.</small>
+        <small>{snapshot.placement === "system" ? "Your Wayland window manager controls mascot placement. " : ""}Escape hides it. Right-click for animation and hide controls.</small>
       </div>}
       {snapshot && <section className="mascot-sprites" aria-labelledby="mascot-sprites-heading">
         <div className="mascot-sprites-heading">
           <span className="setting-copy">
             <strong id="mascot-sprites-heading">Custom sprites</strong>
-            <small>{pending ? `Preview: ${counts}. Apply to use them.` : shown ? `Using your sprites: ${counts}.` : "Import your own artwork for each state. The built-in mascot stays until you apply a set."}</small>
+            {shown && <small>{pending ? `Preview: ${counts}.` : `Using your sprites: ${counts}.`}</small>}
           </span>
           <div>
             <button className="secondary-button" type="button" aria-disabled={held} onClick={exportTemplate}>{busy === "export" ? "Exporting…" : "Export template"}</button>
             <button className="secondary-button" type="button" aria-disabled={held} onClick={importSprites}>{busy === "import" ? "Importing…" : "Import sprites"}</button>
           </div>
         </div>
-        <details className="mascot-sprite-guide">
-          <summary>How custom sprites work</summary>
+        <details className="setting-disclosure mascot-sprite-guide">
+          <summary><ChevronDown size={14} aria-hidden="true" className="setting-disclosure-chevron" />How custom sprites work</summary>
           <ol aria-label="Steps">
             {MASCOT_SPRITE_STEPS.map((step) => <li key={step}>{step}</li>)}
           </ol>

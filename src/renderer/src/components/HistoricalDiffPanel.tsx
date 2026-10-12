@@ -1,4 +1,4 @@
-import { ExternalLink, FileCode2, GitCompareArrows, RotateCcw } from "lucide-react";
+import { ExternalLink, FileCode2, RotateCcw } from "lucide-react";
 import clsx from "clsx";
 
 import type {
@@ -66,30 +66,27 @@ export function HistoricalDiffPanel({
     <section className="changes-panel historical-diff-panel" aria-label="Historical turn changes">
       <header className="panel-toolbar">
         <div className="panel-heading">
-          <GitCompareArrows size={17} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>{diff.title}</h2>
-            <span>Historical snapshot · not current workspace state</span>
           </div>
         </div>
         <div className="panel-stats">
           <span className="stat-additions">+{insertions}</span>
           <span className="stat-deletions">−{deletions}</span>
           <button type="button" className="subtle-button" onClick={onShowCurrentChanges}>
-            <RotateCcw size={13} />Current changes
+            <RotateCcw size={14} />Current changes
           </button>
         </div>
       </header>
 
       {diff.completeness !== "complete" && (
         <div className="historical-diff-notice">
-          This capture is {diff.completeness}. The visible patch is the retained historical data, not a reconstruction from today’s workspace.
+          This capture is {diff.completeness}.
         </div>
       )}
 
       {error ? (
         <div className="panel-empty changes-empty" role="alert">
-          <GitCompareArrows size={22} />
           <h3>Historical diff unavailable</h3>
           <p>{error}</p>
         </div>
@@ -97,14 +94,11 @@ export function HistoricalDiffPanel({
         <div className="panel-loading"><span>Parsing historical diff…</span></div>
       ) : diff.files.length === 0 ? (
         <div className="panel-empty changes-empty">
-          <GitCompareArrows size={22} />
           <h3>No files changed by this turn</h3>
-          <p>The before and after snapshots are identical.</p>
         </div>
       ) : (
         <div className="changes-layout">
           <div className="changes-file-picker">
-            <span>Historical file</span>
             <select
               aria-label="Historical changed file"
               value={selectedFile?.path ?? diff.files[0]?.path ?? ""}
@@ -148,9 +142,9 @@ export function HistoricalDiffPanel({
             {selectedFile ? (
               <>
                 <div className="diff-file-review-heading">
-                  <div><strong>{selectedFile.path}</strong><span>Exact turn artifact</span></div>
-                  <button type="button" className="subtle-button" onClick={() => onOpenFile(selectedFile.path)}>
-                    <ExternalLink size={12} />Open current file
+                  <span><strong>{selectedFile.path}</strong></span>
+                  <button type="button" onClick={() => onOpenFile(selectedFile.path)}>
+                    <ExternalLink size={14} />Open current file
                   </button>
                 </div>
                 <HistoricalFileDiff file={selectedFile} wrapLines={wrapLines} />

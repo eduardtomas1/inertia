@@ -3,10 +3,16 @@ import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, 
 import { stopOwnedManagedTurn } from "../../src/server/runtime/managed-turn-ownership";
 import type { RuntimeStore } from "../../src/server/database";
 import type { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 afterEach(cleanupTurnControllerTestDirectories);
-it("keeps an accepted follow-up ambiguous when its owner ends before acknowledgement", async () => {
-  const runtime = await createTurnControllerTestRuntime();
+it.each([
+  ["codex", "completed", "accepted"],
+  ["claude", "failed", "unconfirmed"],
+] as const)("settles a %s follow-up acknowledged as its owner ended %s as %s", async (providerId, status, kind) => {
+  const runtime = await createTurnControllerTestRuntime({}, providerId === "claude"
+    ? { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) }
+    : {});
   const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start" });
   runtime.controller.start(queued.turn.id);
   runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
@@ -16,12 +22,15 @@ it("keeps an accepted follow-up ambiguous when its owner ends before acknowledge
   const acknowledged = vi.fn();
   const sending = runtime.controller.steer(lease, { content: "Follow up", imagePaths: [] }, [], acknowledged);
   await flushTurnControllerTestPromises();
-  runtime.provider.resolve(); await flushTurnControllerTestPromises();
+  runtime.provider.resolve({ status }); await flushTurnControllerTestPromises();
   accept(true);
-  await expect(sending).rejects.toMatchObject({ delivery: "ambiguous" });
+  await expect(sending).resolves.toMatchObject(kind === "accepted"
+    ? { kind, message: { turnId: queued.turn.id, content: "Follow up" } }
+    : { kind, message: "The follow-up was accepted as its turn ended. Check this chat before retrying." });
   expect(acknowledged).toHaveBeenCalledTimes(1);
   lease.release(); await flushTurnControllerTestPromises();
-  expect(runtime.store.conversationDetail(runtime.conversationId)?.messages.filter((message) => message.content === "Follow up")).toEqual([]);
+  expect(runtime.store.conversationDetail(runtime.conversationId)?.messages
+    .filter((message) => message.content === "Follow up")).toHaveLength(kind === "accepted" ? 1 : 0);
   runtime.store.close();
 });
 

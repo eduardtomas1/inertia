@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, ChevronDown, CircleAlert, Copy, Info, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, CircleAlert, Copy, Info, TriangleAlert } from "lucide-react";
 import { INTERFACE_LOCALE } from "../lib/locale";
 import {
   diagnosticDefinition,
@@ -8,6 +8,7 @@ import {
   type DiagnosticSubsystem,
 } from "@shared/application-diagnostics";
 import { navigateDiagnosticContext } from "../utils/diagnosticNavigation";
+import { HintButton } from "./HintButton";
 
 export type DiagnosticsListEntry =
   | { kind: "incident"; id: string; at: string; record: DiagnosticRecord }
@@ -29,10 +30,10 @@ export function formatDiagnosticTime(at: string): string {
 }
 
 function LevelIcon({ severity, recovered }: { severity: DiagnosticSeverity; recovered: boolean }): React.JSX.Element {
-  if (recovered) return <Check size={15} aria-hidden="true" />;
-  if (severity === "error") return <CircleAlert size={15} aria-hidden="true" />;
-  if (severity === "warning") return <TriangleAlert size={15} aria-hidden="true" />;
-  return <Info size={15} aria-hidden="true" />;
+  if (recovered) return <Check size={14} aria-hidden="true" />;
+  if (severity === "error") return <CircleAlert size={14} aria-hidden="true" />;
+  if (severity === "warning") return <TriangleAlert size={14} aria-hidden="true" />;
+  return <Info size={14} aria-hidden="true" />;
 }
 
 interface RowProps {
@@ -67,7 +68,7 @@ export function DiagnosticsEventRow(props: RowProps): React.JSX.Element {
       <span className="diagnostics-event-icon"><LevelIcon severity={severity} recovered={recovered} /></span>
       <span className="diagnostics-event-copy"><strong>{title}</strong><span>{meta}</span></span>
       <time dateTime={item.at}>{formatDiagnosticTime(item.at)}</time>
-      <ChevronDown className="diagnostics-event-chevron" size={13} aria-hidden="true" />
+      <ChevronDown className="diagnostics-event-chevron" size={14} aria-hidden="true" />
     </button>
     {expanded && <div className="diagnostics-event-detail" id={detailId}>
       {item.kind === "incident" ? <IncidentDetail {...props} record={item.record} /> : <EventDetail entry={item.entry} />}
@@ -86,6 +87,9 @@ function IncidentDetail(props: RowProps & { record: DiagnosticRecord }): React.J
   const { record } = props;
   const definition = diagnosticDefinition(record.code);
   const conversation = record.context.conversationId ? props.conversationTitle(record.context.conversationId) : undefined;
+  const openReason = !conversation
+    ? "Conversation is unavailable or deleted"
+    : !props.runtimeReady ? "Reconnect the runtime to open this conversation" : undefined;
   const outcome = props.currentIncident && record.outcome === "failed" && record.operation === "provider-connect" && !record.context.turnId
     ? "Needs attention"
     : record.outcome === "observing" && !props.currentIncident ? "Historical observation" : OUTCOME_NAMES[record.outcome];
@@ -111,15 +115,16 @@ function IncidentDetail(props: RowProps & { record: DiagnosticRecord }): React.J
     <div className="diagnostics-event-actions">
       {definition.action === "providers" || definition.action === "discord" ? <button type="button" className="secondary-button"
         onClick={() => navigateDiagnosticContext({ section: definition.action as "providers" | "discord" })}>
-        Open {definition.action === "providers" ? "provider" : "Discord"} settings<ArrowUpRight size={13} aria-hidden="true" />
+        Open {definition.action === "providers" ? "provider" : "Discord"} settings
       </button> : null}
-      {record.context.conversationId && <button type="button" className="secondary-button" disabled={!conversation || !props.runtimeReady}
-        title={!conversation ? "Conversation is unavailable or deleted" : !props.runtimeReady ? "Reconnect the runtime to open this conversation" : undefined}
-        onClick={() => navigateDiagnosticContext({ conversationId: record.context.conversationId! })}>
-        Open affected conversation<ArrowUpRight size={13} aria-hidden="true" />
-      </button>}
+      {record.context.conversationId && (
+        <HintButton className="secondary-button" aria-disabled={openReason ? "true" : undefined} hint={openReason}
+          onClick={() => { if (!openReason) navigateDiagnosticContext({ conversationId: record.context.conversationId! }); }}>
+          Open affected conversation
+        </HintButton>
+      )}
       <button type="button" className="secondary-button" aria-disabled={props.copying} onClick={() => { if (!props.copying) props.onCopy(record); }}>
-        <Copy size={13} aria-hidden="true" />Copy incident
+        <Copy size={14} aria-hidden="true" />Copy incident
       </button>
     </div>
   </>;

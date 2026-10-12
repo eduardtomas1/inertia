@@ -54,7 +54,7 @@ describe("bounded Git decorations in the Files editor", () => {
     const index = buildFileTreeGitIndex(state(snapshot([repo(".", files)])));
     expect(index.files.size).toBe(FILE_GIT_LIMITS.files);
     expect(index.notice).toContain("Files without badges may still have changes");
-    expect(buildFileTreeGitIndex(state(snapshot([]))).notice).toContain("No Git repository detected");
+    expect(buildFileTreeGitIndex(state(snapshot([]))).notice).toBe("No Git repository detected.");
     expect(buildFileTreeGitIndex({ ...state(snapshot([repo(".", files)])), unavailable: true }).files.size).toBe(0);
     expect(buildFileTreeGitIndex({ ...state(snapshot([repo(".", files)])), loading: true }).files.size).toBe(0);
   });
@@ -66,6 +66,10 @@ describe("bounded Git decorations in the Files editor", () => {
     const { rerender } = render(<FilesPanel {...props} git={state(snapshot([repo(".", [file("bundle.js")])]))} />);
     const changed = screen.getByRole("treeitem", { name: "bundle.js" });
     expect(changed).toHaveAccessibleDescription("Git: Modified · unstaged");
+    expect(changed.querySelector(".file-git-badge")).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(changed.querySelector(".file-git-badge")!, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("Modified · unstaged"));
+    fireEvent.pointerLeave(changed.querySelector(".file-git-badge")!, { pointerType: "mouse" });
     expect(changed.querySelector(".file-entry-name")).toHaveTextContent("bundle.js");
     expect(screen.getByRole("treeitem", { name: "clean.ts" }).querySelector(".file-git-badge")).toBeNull();
     fireEvent.keyDown(changed, { key: "ArrowDown" });

@@ -245,13 +245,14 @@ describe("Codex App Server host tools", () => {
     }
   });
 
-  it("returns host-owned PNG evidence through Codex dynamic tool content", async () => {
+  it("returns host-owned images through Codex dynamic tool content", async () => {
     const image = Buffer.from("png-evidence").toString("base64");
+    const photo = Buffer.from("webp-evidence!").toString("base64");
     const harness = eventHarness({
       invoke: async () => ({
         success: true,
         text: "captured",
-        image: { mimeType: "image/png", data: image },
+        images: [{ mimeType: "image/png", data: image }, { mimeType: "image/webp", data: photo }],
       }),
     });
     try {
@@ -263,6 +264,7 @@ describe("Codex App Server host tools", () => {
           contentItems: [
             { type: "inputText", text: "captured" },
             { type: "inputImage", imageUrl: `data:image/png;base64,${image}` },
+            { type: "inputImage", imageUrl: `data:image/webp;base64,${photo}` },
           ],
           success: true,
         },

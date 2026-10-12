@@ -45,6 +45,7 @@ import {
   terminalEventMatchesCurrentTurn,
   turnEventOwner,
   withoutHydratedBaseline,
+  withProvisionalLatestTurn,
   withTerminalTurnProjection,
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
@@ -69,9 +70,12 @@ function replaceAssistantMessagesForTurn(
   messages: readonly ChatMessage[],
   turnId: string,
   replacement: ChatMessage | null,
+  after?: string,
 ): ChatMessage[] {
   const retained = messages.filter((message) =>
-    message.turnId !== turnId || message.role !== "assistant");
+    message.turnId !== turnId
+    || message.role !== "assistant"
+    || (after !== undefined && Date.parse(message.createdAt) <= Date.parse(after)));
   if (replacement) retained.push(replacement);
   return retained.sort(compareCreatedRecords);
 }
@@ -840,6 +844,7 @@ export function useConversationProjection({
               current.detail.messages,
               event.turnId,
               event.message,
+              event.after,
             ),
           },
         };
@@ -850,6 +855,7 @@ export function useConversationProjection({
           existing,
           event.turnId,
           event.message,
+          event.after,
         );
         if (replacement.length === 0) {
           if (!(event.conversationId in current)) return current;
@@ -946,18 +952,25 @@ export function useConversationProjection({
   }, [conversation?.id, resetLiveProjection]);
 
   const activeConversationId = conversation?.id ?? null;
-  const turns = useMemo(() => applyTerminalTurnProjections(
+  const activeLiveMessages = activeConversationId
+    ? liveMessages[activeConversationId] ?? EMPTY_MESSAGES
+    : EMPTY_MESSAGES;
+  const projectedTurns = useMemo(() => applyTerminalTurnProjections(
     detail?.agentTurns ?? EMPTY_TURNS,
     terminalProjections,
     conversation?.latestTurn ?? null,
   ), [conversation?.latestTurn, detail?.agentTurns, terminalProjections]);
+  const turns = useMemo(
+    () => withProvisionalLatestTurn(projectedTurns, conversation, activeLiveMessages),
+    [activeLiveMessages, conversation, projectedTurns],
+  );
   const messages = useMemo(
     () => mergeProjectionRecords(
       detail?.messages ?? [],
-      activeConversationId ? liveMessages[activeConversationId] ?? [] : [],
+      activeLiveMessages,
       compareCreatedRecords,
     ),
-    [activeConversationId, detail?.messages, liveMessages],
+    [activeLiveMessages, detail?.messages],
   );
   const activities = useMemo(() => mergeProjectionRecords(
     detail?.activities ?? [],
@@ -1002,7 +1015,7 @@ export function useConversationProjection({
     refreshDetail,
     turns,
     messages,
-    liveMessages: activeConversationId ? liveMessages[activeConversationId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES,
+    liveMessages: activeLiveMessages,
     activities,
     subagents,
     reasonings: detail?.reasonings ?? EMPTY_REASONINGS,

@@ -7,6 +7,8 @@ import {
 import { Check, Star } from "lucide-react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { TooltipButton } from "./TooltipButton";
+import { TooltipText } from "./TooltipText";
 import { providerIdForHarness, providerNativeBackendProfile } from "../../../shared/model-routing";
 import { MODEL_SOURCE_PROVIDER_LABELS } from "../utils/modelSourceRail";
 import type { ModelSearchRoute } from "../utils/modelSearch";
@@ -223,21 +225,20 @@ export const ModelChooserRow = memo(function ModelChooserRow({
         data-model-route-key={row.key}
         data-model-source={row.source}
         tabIndex={tabIndex}
-        title={row.disabledReason ?? undefined}
         onClick={select}
       >
         <span className="model-chooser-row-main">
           <span className="model-chooser-row-primary">
             <strong title={row.displayName}>{row.displayName}</strong>
             {row.shortcut && (
-              <kbd title={`Shortcut ${row.shortcut.label}`}>{row.shortcut.label}</kbd>
+              <kbd>{row.shortcut.label}</kbd>
             )}
           </span>
           <span className="model-chooser-row-secondary">
             {row.providerId && (
               <ProviderBrandIcon
                 providerId={row.providerId}
-                size={11}
+                size={14}
                 className="model-chooser-row-brand"
                 decorative
               />
@@ -245,14 +246,14 @@ export const ModelChooserRow = memo(function ModelChooserRow({
             <span title={secondaryIdentity}>{secondaryIdentity}</span>
             {row.source === "custom" && <em>Custom</em>}
             {compatibilityLabel && (
-              <span
+              <TooltipText
                 id={compatibilityId}
                 className={`model-chooser-row-compatibility is-${row.compatibility!.state}`}
-                title={row.compatibility?.explanation ?? undefined}
+                tooltip={row.compatibility?.explanation ?? compatibilityLabel}
                 aria-label={`Selection compatibility: ${compatibilityLabel}${row.compatibility?.explanation ? `. ${row.compatibility.explanation}` : ""}`}
               >
                 {compatibilityLabel}
-              </span>
+              </TooltipText>
             )}
           </span>
           {row.disabledReason && (
@@ -263,7 +264,7 @@ export const ModelChooserRow = memo(function ModelChooserRow({
         </span>
 
         {row.active && (
-          <span className="model-chooser-row-active" title="Active model">
+          <span className="model-chooser-row-active">
             <Check size={14} aria-hidden="true" />
             <span className="visually-hidden">Active model</span>
           </span>
@@ -286,16 +287,16 @@ export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButt
   onFavoriteToggle,
 }: ModelChooserFavoriteButtonProps): JSX.Element {
   return (
-    <button
-      type="button"
+    <TooltipButton
       className="model-chooser-row-favorite"
       aria-label={`${row.favorite ? "Remove" : "Add"} ${row.displayName} on ${row.backendProfileName} ${row.favorite ? "from" : "to"} favorites`}
       aria-pressed={row.favorite}
-      title={row.favorite ? "Remove from favorites" : "Add to favorites"}
+      tooltip={row.favorite ? "Remove from favorites" : "Add to favorites"}
+      describeTooltip={false}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => activateModelChooserFavorite(event, row, onFavoriteToggle)}
     >
-      <Star size={13} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
-    </button>
+      <Star size={14} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
+    </TooltipButton>
   );
 });

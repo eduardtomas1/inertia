@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { ChevronLeft, MessageCircleQuestion, ShieldAlert } from "lucide-react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
-import { agentRequestProviderName, buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
+import { buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
 
 type ApprovalCardProps = {
   request: AgentApprovalRequest;
@@ -38,24 +39,20 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
       role="region"
       aria-busy={busy}
       aria-labelledby={`approval-${request.id}`}
-      aria-describedby={descriptionId}
+      aria-describedby={request.detail ? descriptionId : undefined}
       data-agent-request-kind={request.kind}
       data-agent-request-state="approval"
     >
       <div className="agent-request-heading">
-        <span className="agent-request-icon" aria-hidden="true">?</span>
-        <span className="agent-request-heading-copy">
-          <span className="agent-request-kicker">Approval required</span>
-          <strong id={`approval-${request.id}`}>{request.title}</strong>
-          <small id={descriptionId}>{agentRequestProviderName(request.providerId)} paused for your review.</small>
-        </span>
+        <ShieldAlert className="agent-request-icon" size={16} aria-hidden="true" />
+        <strong id={`approval-${request.id}`}>{request.title}</strong>
       </div>
       {request.command && (
         <code className="agent-request-command" aria-label="Command awaiting approval">
           {request.command}
         </code>
       )}
-      {request.detail && <p className="agent-request-detail">{request.detail}</p>}
+      {request.detail && <p id={descriptionId} className="agent-request-detail">{request.detail}</p>}
       {detailRows.length > 0 && (
         <dl className="agent-request-details">
           {detailRows.flatMap(([label, value]) => [<dt key={label}>{label}</dt>, <dd key={`${label}-value`}>{value}</dd>])}
@@ -79,7 +76,6 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
-  const descriptionId = `input-${request.id}-description`;
 
   const hasAnswer = (id: string) => (answers[id] ?? []).some((value) => Boolean(value.trim()));
   const complete = request.questions.every(({ id }) => hasAnswer(id));
@@ -98,17 +94,12 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
       role="region"
       aria-busy={busy}
       aria-labelledby={`input-${request.id}`}
-      aria-describedby={descriptionId}
       data-agent-request-kind="input"
       data-agent-request-state="question"
     >
       <div className="agent-request-heading">
-        <span className="agent-request-icon" aria-hidden="true">?</span>
-        <span className="agent-request-heading-copy">
-          <span className="agent-request-kicker">Input required</span>
-          <strong id={`input-${request.id}`}>{inputRequestTitle(request.providerId)}</strong>
-          <small id={descriptionId}>{agentRequestProviderName(request.providerId)} will continue after every question is answered.</small>
-        </span>
+        <MessageCircleQuestion className="agent-request-icon" size={16} aria-hidden="true" />
+        <strong id={`input-${request.id}`}>{inputRequestTitle(request.providerId)}</strong>
       </div>
       <div className="agent-input-questions">
         {request.questions.slice(activeQuestionIndex, activeQuestionIndex + 1).map((question) => {
@@ -141,7 +132,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
           };
           return (
             <fieldset className="agent-input-question" key={question.id} disabled={busy}>
-              <legend><span>{question.header}</span>{question.question}</legend>
+              <legend>{question.header.trim() && <span className="agent-input-question-header">{question.header}</span>}{question.question}</legend>
               {question.options.length > 0 && (
                 <div className="agent-input-options">
                   {question.options.map((option) => (
@@ -187,7 +178,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
               disabled={busy || activeQuestionIndex === 0}
               onClick={() => setActiveQuestionIndex(activeQuestionIndex - 1)}
             >
-              ←
+              <ChevronLeft size={16} aria-hidden="true" />
             </button>
             <span className="agent-input-page-dots">
               {request.questions.map((question, questionIndex) => (
@@ -210,7 +201,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
               disabled={busy || (lastQuestion ? !complete : !activeQuestionComplete)}
               onClick={() => lastQuestion ? void submit() : setActiveQuestionIndex(activeQuestionIndex + 1)}
             >
-              {lastQuestion ? "Continue" : "Next →"}
+              {lastQuestion ? "Continue" : "Next"}
             </button>
           </div>
         </div>

@@ -16,6 +16,7 @@ import {
   closeOtherRightPanelSurfaces,
   closeRightPanelSurface,
   legacyRightPanelState,
+  moveRightPanelSurface,
   openRightPanelSurface,
   parseRightPanelState,
   serializeRightPanelState,
@@ -39,6 +40,7 @@ export interface ConversationPaneLayout extends WorkspacePanelActions {
   tools: {
     width: number;
     height: number;
+    minWidth: number;
     maxWidth: number;
     maxHeight: number;
     onWidthChange: (value: number) => void;
@@ -160,6 +162,8 @@ export function useConversationPaneLayout(
       updatePanel((current) => closeRightPanelSurface(current, surface)),
     closeOtherSurfaces: (surface: WorkspacePanelTab) =>
       updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
+    moveSurface: (surface: WorkspacePanelTab, toIndex: number) =>
+      updatePanel((current) => moveRightPanelSurface(current, surface, toIndex)),
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);
@@ -181,6 +185,7 @@ export function useConversationPaneLayout(
     tools: {
       width: 0,
       height,
+      minWidth: 0,
       maxWidth: 0,
       maxHeight: PANE_TOOL_MAX_HEIGHT,
       onWidthChange: () => undefined,

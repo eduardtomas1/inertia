@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Check,
-  CheckCircle2,
   CircleAlert,
+  CircleCheck,
   CircleDot,
-  LoaderCircle,
   Plus,
   Trash2,
   X,
@@ -25,6 +24,7 @@ import {
 } from "../utils/backendProfileDraft";
 import { useRovingRadios } from "../hooks/useRovingRadios";
 import { providerIconDefinition } from "../utils/providerIcons";
+import { TooltipButton } from "./TooltipButton";
 import { IconButton, LoadingMark, Switch } from "./ui";
 import { SettingDisclosure, SettingCopy } from "./settings/SettingsLayout";
 import "./ModelBackendsSettings.css";
@@ -177,10 +177,10 @@ function profileState(profile: ModelBackendProfileView): { tone: "ready" | "atte
 
 function BackendProfileState({ profile }: { profile: ModelBackendProfileView }): React.JSX.Element {
   const { tone, label } = profileState(profile);
-  const Icon = tone === "ready" ? CheckCircle2 : tone === "checking" ? LoaderCircle : tone === "idle" ? CircleDot : CircleAlert;
+  const Icon = tone === "ready" ? CircleCheck : tone === "checking" ? LoadingMark : tone === "idle" ? CircleDot : CircleAlert;
   return (
     <span className={clsx("backend-profile-state", `is-${tone}`)}>
-      <Icon size={13} aria-hidden="true" className={tone === "checking" ? "provider-status-spinner" : undefined} />
+      <Icon size={14} aria-hidden="true" />
       {label}
     </span>
   );
@@ -455,7 +455,6 @@ export function ModelBackendsSettings({
       <div className="settings-card-heading backend-settings-toolbar">
         <span>
           <h3 id="backends-heading">Custom backends</h3>
-          <p>Route chats through your own compatible endpoint.</p>
         </span>
         <button
           type="button"
@@ -477,8 +476,7 @@ export function ModelBackendsSettings({
       <div className="backend-settings-grid">
         <aside className="backend-profile-rail" aria-label="Backend profiles">
           {profiles.map((profile) => (
-            <button
-              type="button"
+            <TooltipButton
               className={clsx(
                 "backend-profile-rail-item",
                 !draft && selected?.id === profile.id && "is-active",
@@ -491,14 +489,14 @@ export function ModelBackendsSettings({
                 setError(null);
               }}
               key={profile.id}
-              title={identityLabel(profile)}
+              tooltip={identityLabel(profile)}
             >
               <strong>{profileName(profile)}</strong>
               <span className="backend-profile-rail-meta">
                 <small>{profile.endpointHost ?? (profile.preset === "native" ? "Harness managed" : "Endpoint hidden")}</small>
                 {profile.preset !== "native" && <BackendProfileState profile={profile} />}
               </span>
-            </button>
+            </TooltipButton>
           ))}
         </aside>
 
@@ -508,9 +506,9 @@ export function ModelBackendsSettings({
               <div className="backend-profile-header">
                 <span className="backend-profile-header-copy">
                   <strong>{editingId ? "Edit backend configuration" : "New backend profile"}</strong>
-                  <small>{editingId ? "Saving changes to the connection starts a new revision that needs a fresh connection test." : "Custom endpoints stay separate from native provider configuration."}</small>
+                  {editingId && <small>Saving changes to the connection starts a new revision that needs a fresh connection test.</small>}
                 </span>
-                <IconButton label="Cancel profile editing" onClick={cancelEditing}><X size={15} aria-hidden="true" /></IconButton>
+                <IconButton label="Cancel profile editing" onClick={cancelEditing}><X size={14} aria-hidden="true" /></IconButton>
               </div>
 
               <fieldset disabled={busy === "save" || busy === "create"}>

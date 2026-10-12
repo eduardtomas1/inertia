@@ -1,4 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import { readSourceText } from "../helpers/source-text";
+import { declarationsFor, parseCssRules } from "./css-rules";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -175,7 +177,7 @@ describe("UsageView", () => {
     )).toHaveStyle({ "--provider-icon-size": "16px" });
     expect(view.container.querySelector(
       '.usage-model-identity .usage-provider-mark[data-provider-id="claude"]',
-    )).toHaveStyle({ "--provider-icon-size": "13px" });
+    )).toHaveStyle({ "--provider-icon-size": "14px" });
     expect(screen.getByText(/no prompts, files, credentials, or new telemetry/iu)).toBeVisible();
     expect(screen.getByRole("region", { name: "Model usage table" })).toHaveAttribute(
       "tabindex",
@@ -184,6 +186,10 @@ describe("UsageView", () => {
     expect(screen.getByRole("region", { name: "Model usage table" })).toHaveClass("usage-table-wrap");
 
     const cost = screen.getByRole("button", { name: "Cost" });
+    expect(cost).not.toHaveAttribute("title");
+    expect(view.container.querySelector(".usage-provider-chart text, .usage-provider-chart circle")).toBeNull();
+    expect(view.container.querySelectorAll(".usage-chart-labels > span").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Refresh usage" })).toHaveClass("icon-button");
     expect(cost).toHaveAttribute("aria-disabled", "true");
     expect(cost).toHaveAttribute("aria-describedby", "usage-cost-unavailable");
     cost.focus();
@@ -196,7 +202,7 @@ describe("UsageView", () => {
     await waitFor(() => expect(screen.getByText("* Partial coverage")).toBeVisible());
     expect(view.container.querySelector(
       '.usage-chart-tooltip .usage-provider-mark[data-provider-id="claude"]',
-    )).toHaveStyle({ "--provider-icon-size": "11px" });
+    )).toHaveStyle({ "--provider-icon-size": "14px" });
     await user.keyboard("[ArrowLeft]");
     expect(explorer).toHaveAttribute("aria-valuenow", "29");
 
@@ -329,11 +335,25 @@ describe("UsageView", () => {
     expect(await screen.findByRole("heading", {
       name: "No terminal requests in this range",
     })).toBeVisible();
+    expect(screen.getByText("Usage will appear after Inertia records a completed, failed, cancelled, or interrupted terminal agent turn.")).toBeVisible();
     view.unmount();
     render(<UsageView status="online" request={request} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Database is busy");
     expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  });
+  it("aligns the narrow Try again button under the error text instead of the base right alignment", () => {
+    const rules = parseCssRules(readSourceText("src/renderer/src/components/UsageView.css"));
+    expect(declarationsFor(rules, ".usage-error .secondary-button").get("margin-left")).toBe("auto");
+    expect(declarationsFor(rules, ".usage-error .secondary-button", "@media (max-width: 760px)").get("margin-left")).toBe("27px");
+  });
+  it("keeps the usage canvas on plain rules with filled segment states and an opacity-only entrance", () => {
+    const css = readSourceText("src/renderer/src/components/UsageView.css");
+    expect(css).not.toMatch(/content: "Insight"|filter: blur|scale\(0\.96\)|text-decoration: line-through|usage-refresh-button|overflow: hidden;\n  border: 1px solid var\(--line\);/u);
+    expect(css).toMatch(/\.usage-section-switch button\[aria-pressed="true"\] \{[^}]*background: var\(--fill-strong\);/u);
+    expect(css).toMatch(/\.usage-range-segment button\[aria-pressed="true"\],\n\.usage-mini-segment button\[aria-pressed="true"\] \{[^}]*background: var\(--fill-strong\);/u);
+    expect(css).toMatch(/\.usage-chart-tooltip \{[^}]*border-radius: var\(--radius-sm\);[^}]*background: var\(--surface-raised\);/u);
+    expect(css).toMatch(/var\(--usage-provider-series, var\(--text-muted\)\)/u);
   });
 });

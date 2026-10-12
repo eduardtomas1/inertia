@@ -60,14 +60,13 @@ export function TerminalResumeStatus({
 
   return (
     <div
-      className={`terminal-resume-status is-${availability.kind}`}
+      className={`terminal-resume-status is-${availability.kind === "available" ? "available" : "unavailable"}`}
       role={resumeError ? "alert" : "status"}
     >
       <MessagesSquare size={14} />
       <span id={descriptionId}>
         {resumeOptions.length > 1 && (
           <span className="terminal-resume-picker">
-            <span className="terminal-resume-picker-caption">Resume provider chat</span>
             <span ref={pickerRef} className={`terminal-resume-anchor${pickerOpen ? " is-open" : ""}`}>
               <button
                 ref={triggerRef}
@@ -83,7 +82,7 @@ export function TerminalResumeStatus({
                   <strong>{selectedResumeOption.conversationTitle}</strong>
                   <small>{selectedResumeOption.projectName}</small>
                 </span>
-                <ChevronDown size={13} aria-hidden="true" />
+                <ChevronDown size={14} aria-hidden="true" />
               </button>
               {pickerOpen && (
                 <span className="terminal-resume-popover" role="dialog" aria-label="Choose a chat to resume">
@@ -106,7 +105,7 @@ export function TerminalResumeStatus({
         {displayedResume ? (
           <>
             <span>{displayedResume.providerLabel} session</span>
-            <code title={displayedResume.sessionId}>{displayedResume.sessionId}</code>
+            <code>{displayedResume.sessionId}</code>
           </>
         ) : (
           <span>{availability.reason}</span>

@@ -65,7 +65,12 @@ test("says No checkpoint for this turn beside a request whose checkpoint failed"
     const notice = requests.nth(1).locator(".message-checkpoint-missing");
     await expect(notice).toBeVisible();
     await expect(notice).toHaveText("No checkpoint for this turn: Checkpoint operation timed out.");
-    await expect(notice).toHaveAttribute("title", "Checkpoint operation timed out.");
+    await expect(notice).not.toHaveAttribute("title");
+    await expect(async () => {
+      await page.mouse.move(1, 1);
+      await notice.hover();
+      await expect(page.locator(".tooltip")).toHaveText("Checkpoint operation timed out.", { timeout: 2_000 });
+    }).toPass();
     await expect(notice.locator(".visually-hidden")).toHaveText(": Checkpoint operation timed out.");
     await expect(requests.nth(1).getByRole("button", { name: "Revert" })).toHaveCount(0);
     await expect(page.getByText("No checkpoint for this turn")).toHaveCount(1);

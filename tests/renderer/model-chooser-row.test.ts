@@ -3,6 +3,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import { declarationsFor, parseCssRules, readRendererCss } from "./css-rules";
+
 import {
   ModelChooserFavoriteButton,
   ModelChooserRow,
@@ -95,6 +97,7 @@ describe("ModelChooserRow", () => {
       active: true,
       favorite: true,
     }))).toContain('aria-pressed="true"');
+    expect(renderFavorite(row({}, { active: false, favorite: true }))).not.toContain("title=");
   });
 
   it("names only the identity terms that actually vary for a route", () => {
@@ -241,5 +244,44 @@ describe("ModelChooserRow", () => {
 
     expect(block).toContain("var(--model-row-height)");
     expect(block).toContain("var(--ui-control-height)");
+  });
+
+  it("keeps native titles to truncation reveals and draws compatibility as plain text", () => {
+    const html = render(row({ unavailableReason: "Unavailable for this harness.", selectable: false }, {
+      active: true,
+      favorite: false,
+      shortcut: { label: "⌘1", ariaKeyShortcuts: "Meta+1" },
+      compatibility: { affectsSelection: true, state: "partial", explanation: "Only some settings carry over." },
+    }));
+    const titles = [...html.matchAll(/title="([^"]*)"/gu)].map((match) => match[1]);
+    expect(titles).toEqual(["GPT 5.6 Sol", expect.any(String)]);
+    expect(html).not.toContain("Shortcut ⌘1");
+    expect(html).not.toContain('title="Active model"');
+    expect(html).not.toContain('title="Only some settings carry over."');
+  });
+
+  it("selects rows with the strong fill, without an inner focus ring, badges or accent marks other than the saved star", () => {
+    const rules = parseCssRules(readRendererCss("styles.css"));
+    expect(declarationsFor(rules, ".model-chooser-row").get("min-height")).toBe("var(--model-row-height)");
+    expect(declarationsFor(rules, ".model-chooser-row.is-active").get("background")).toBe("var(--fill-strong)");
+    const focused = declarationsFor(rules, ".model-chooser-row:has(.model-chooser-row-option:focus-visible)");
+    expect(focused.get("background")).toBe("var(--fill-strong)");
+    expect(focused.has("outline")).toBe(false);
+    expect(declarationsFor(rules, ".model-chooser-row-active").get("color")).toBe("var(--text-muted)");
+    const badge = declarationsFor(rules, ".model-chooser-row-compatibility");
+    expect(badge.has("border")).toBe(false);
+    expect(badge.has("padding")).toBe(false);
+    expect(declarationsFor(rules, ".model-source-rail-item.is-selected").get("background")).toBe("var(--fill-strong)");
+    expect(declarationsFor(rules, ".model-source-rail-item").get("border-radius")).toBe("var(--radius-xs)");
+    expect(declarationsFor(rules, ".model-source-rail-mark").get("background")).toBe("var(--text-muted)");
+    expect(declarationsFor(rules, ".selected-model-chip-glyph").has("border-radius")).toBe(false);
+    expect(declarationsFor(rules, ".model-chooser-palette").get("bottom")).toBe("calc(100% + var(--popover-offset))");
+    const css = readRendererCss("styles.css");
+    const chooserCss = css.slice(css.indexOf("/* Reusable model chooser result row."), css.indexOf("@container conversation-workspace (min-height: 0px)"));
+    const savedStar = '.model-chooser-row-favorite[aria-pressed="true"] {\n  color: var(--accent-strong);\n}';
+    expect(declarationsFor(rules, '.model-chooser-row-favorite[aria-pressed="true"]').get("color")).toBe("var(--accent-strong)");
+    expect(declarationsFor(rules, ".model-chooser-row-favorite").get("color")).toBe("var(--text-muted)");
+    expect(chooserCss).toContain(savedStar);
+    expect(chooserCss.replace(savedStar, "")).not.toContain("--accent");
   });
 });

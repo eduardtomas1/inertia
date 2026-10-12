@@ -1,7 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import type { ClientCommand, ProviderTerminalResumeAvailability, ServerEvent } from "../../src/shared/contracts";
 
 const terminals = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -147,5 +147,71 @@ describe("TerminalSession live options", () => {
       .toHaveAttribute("data-terminal-state", "ready");
     expect(document.querySelector(".terminal-panel"))
       .toHaveAttribute("data-terminal-id", terminalId);
+  });
+});
+
+describe("TerminalSession resume bar", () => {
+  beforeEach(() => {
+    terminals.instances = [];
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => (
+    sent.type === "terminal.create"
+      ? { type: "terminal.created", requestId: sent.requestId, terminalId }
+      : { type: "request.ok", requestId: sent.requestId }
+  ));
+
+  function withResume(
+    resume: { providerId: "codex"; providerLabel: string; sessionId: string } | null,
+    providerResume: ProviderTerminalResumeAvailability = resume
+      ? { kind: "available", resume, reason: null }
+      : { kind: "missing", resume: null, reason: "No resumable Codex CLI session for this chat." },
+  ): React.JSX.Element {
+    return (
+      <TerminalSession
+        projectId={projectId}
+        conversationId={conversationId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="light"
+        colorTheme="inertia"
+        lightColorTheme="inertia"
+        darkColorTheme="inertia"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        initialTerminalId={null}
+        providerResume={providerResume}
+        siblingResumedConversationIds={new Set()}
+        onRestorableTerminalChange={() => undefined}
+        onTerminalReplaced={() => true}
+        onProviderResumeStarted={() => undefined}
+        onClose={() => undefined}
+      />
+    );
+  }
+
+  it("hides the resume bar when no chat has a stored provider session", async () => {
+    render(withResume(null));
+    await waitFor(() => expect(document.querySelector(".terminal-panel")).toHaveAttribute("data-terminal-state", "ready"));
+    expect(document.querySelector(".terminal-resume-status")).toBeNull();
+    expect(document.body).not.toHaveTextContent("No resumable Codex CLI session");
+  });
+
+  it("keeps the resume bar for a stored session that is invalid or stale so its reason stays visible", async () => {
+    const reason = "The saved Codex session identifier is invalid or stale, so it cannot be passed to the terminal CLI.";
+    render(withResume(null, { kind: "unavailable", resume: null, reason }));
+    await waitFor(() => expect(document.querySelector(".terminal-resume-status")).toHaveTextContent(reason));
+  });
+
+  it("shows the resume bar when a provider session can be resumed", async () => {
+    render(withResume({ providerId: "codex", providerLabel: "Codex", sessionId: "019fe0c1-c6fc-79a1-bff4-92311f314da8" }));
+    await waitFor(() => expect(document.querySelector(".terminal-resume-status")).not.toBeNull());
   });
 });

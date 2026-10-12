@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { conversation } from "./composer-fixtures";
+import { hoverTooltipText } from "./tooltip-fixtures";
 
 type HeaderProps = ComponentProps<typeof WorkspaceHeader>;
 
@@ -32,7 +33,8 @@ describe("workspace header project crumb", () => {
     const callbacks = props({ name: "No project", path: "/data/scratch", workspaceKind: "scratch" });
     render(<WorkspaceHeader {...callbacks} />);
     const crumb = screen.getByRole("button", { name: "New chat without a project" });
-    expect(crumb).toHaveAttribute("title", "New chat without a project");
+    expect(crumb).not.toHaveAttribute("title");
+    expect(hoverTooltipText(crumb)).toBe("New chat without a project");
     expect(screen.queryByRole("button", { name: "New chat in No project" })).not.toBeInTheDocument();
     fireEvent.click(crumb);
     expect(callbacks.onCreateConversationInProject).toHaveBeenCalledOnce();
@@ -40,6 +42,27 @@ describe("workspace header project crumb", () => {
 
   it("keeps naming the project for project chats", () => {
     render(<WorkspaceHeader {...props({})} />);
-    expect(screen.getByRole("button", { name: "New chat in Studio" })).toHaveAttribute("title", "New chat in Studio");
+    expect(hoverTooltipText(screen.getByRole("button", { name: "New chat in Studio" }))).toBe("New chat in Studio");
+  });
+
+  it("describes the title hint outside the heading text", () => {
+    const callbacks = props({});
+    const noop = vi.fn();
+    render(
+      <WorkspaceHeader
+        {...callbacks}
+        conversationMenu={{
+          activeConversationId: callbacks.conversation!.id, detachedChatLimitReached: false, isDetached: false,
+          runs: [], splitConversationIds: new Set(), onAcknowledgeRun: noop, onArchiveConversation: noop,
+          onCloseConversationSplit: noop, onDeleteConversation: noop, onDismissRun: noop,
+          onOpenConversationInSplit: noop, onOpenConversationInWindow: noop, onPinConversation: noop,
+          onRestoreConversation: noop, onSettleConversation: noop, onSnoozeConversation: noop,
+        }}
+      />,
+    );
+    const heading = screen.getByRole("heading", { level: 1 });
+    const title = callbacks.conversation!.title;
+    expect(heading).toHaveTextContent(new RegExp(`^${title}$`, "u"));
+    expect(screen.getByRole("button", { name: title })).toHaveAccessibleDescription("Chat actions · double-click to rename");
   });
 });

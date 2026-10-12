@@ -676,7 +676,12 @@ export async function createCheckpoint(
       1024 * 1024,
       options.deadlineAt,
       options.signal,
-    );
+    ).catch(async (error: unknown) => {
+      if (isGitProcessTreeTerminationFailure(error)) throw error;
+      await deleteCheckpoint(repositoryPath, ref, conversationId)
+        .catch(() => undefined);
+      throw error;
+    });
     return { id: checkpointId, ref };
   } finally {
     await rm(indexPath, { force: true }).catch(() => undefined);

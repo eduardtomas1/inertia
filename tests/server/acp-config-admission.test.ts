@@ -24,7 +24,7 @@ vi.mock("../../src/node/runtime-owned-processes", async (original) => ({
 }));
 
 type Category = "model" | "thought_level" | "mode";
-type ResponseKind = "applied" | "unchanged" | "missing" | "wrong-type" | "category-omitted" | "reverted";
+type ResponseKind = "applied" | "unchanged" | "missing" | "wrong-type" | "category-omitted" | "reverted" | "already-selected";
 
 function providerFixture(provider: "cursor" | "kimi", category: Category, responseKind: ResponseKind, laterEffort: boolean) {
   const stdout = new PassThrough();
@@ -34,12 +34,12 @@ function providerFixture(provider: "cursor" | "kimi", category: Category, respon
   const previous = category === "model" ? "model-a" : category === "thought_level" ? "low" : "build";
   const option = {
     id: `config-${category}`, name: category, category, type: "select",
-    currentValue: previous,
+    currentValue: responseKind === "already-selected" ? desired : previous,
     options: [{ value: previous, name: previous }, { value: desired, name: desired }],
   };
   const configOptions = [option, ...(laterEffort ? [{
     id: "later-effort", name: "Effort", category: "thought_level", type: "select",
-    currentValue: "low", options: [{ value: "low", name: "Low" }, { value: "high", name: "High" }],
+    currentValue: responseKind === "already-selected" ? "high" : "low", options: [{ value: "low", name: "Low" }, { value: "high", name: "High" }],
   }] : [])];
   const send = (message: unknown) => stdout.write(`${JSON.stringify(message)}\n`);
   let pending = "";
@@ -125,6 +125,10 @@ describe.each([
     "rejects a later full response that reverts the confirmed %s selection",
     async (category) => { await verify(category, "reverted", true, true); },
   );
+  it.each(["model", "thought_level"] as const)(
+    "starts without mutating a %s the session already has",
+    async (category) => { await verify(category, "already-selected", true, true); },
+  );
   it.each(["model", "mode"] as const)(
     "accepts sequential full responses that retain the confirmed %s selection",
     async (category) => { await verify(category, "applied", true, true); },
@@ -132,7 +136,8 @@ describe.each([
 
   async function verify(category: Category, responseKind: ResponseKind, requestSelection = true, laterEffort = false) {
     const fixture = providerFixture(provider, category, responseKind, laterEffort);
-    const applied = !requestSelection || responseKind === "applied" || responseKind === "category-omitted";
+    const applied = !requestSelection || responseKind === "applied" || responseKind === "category-omitted"
+      || responseKind === "already-selected";
     processFixture.child = fixture.child;
     const terminate = vi.fn(async () => true);
     const run = createHarness({ terminateProcessTree: terminate }).start({
@@ -150,7 +155,8 @@ describe.each([
       expect(result).toMatchObject({
         status: applied ? "completed" : "failed", cleanupConfirmed: true,
       });
-      expect(fixture.methods.includes("session/set_config_option")).toBe(requestSelection);
+      expect(fixture.methods.includes("session/set_config_option"))
+        .toBe(requestSelection && responseKind !== "already-selected");
       expect(fixture.methods.includes("session/prompt")).toBe(applied);
       expect(terminate).toHaveBeenCalledOnce();
     } finally {

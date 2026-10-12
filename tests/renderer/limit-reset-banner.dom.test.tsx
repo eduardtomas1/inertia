@@ -61,6 +61,18 @@ describe("quota reset banner", () => {
     expect(limited.find(([, selector]) => selector.trim() === "")?.[2]).toMatch(/background:\s*transparent;/u);
     expect(limited.find(([, selector]) => selector.trim() === ".limit-reset-copy strong")?.[2]).toMatch(/color:\s*var\(--warning\);/u);
   });
+  it("truncates the reset time through its tooltip wrapper and keeps scaled action and notice buttons", () => {
+    const css = readFileSync(join(process.cwd(), "src/renderer/src/components/composer/LimitResetBanner.css"), "utf8");
+    const when = /\.limit-reset-when \{([^}]*)\}/u.exec(css)?.[1] ?? "";
+    for (const declaration of ["min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;"]) {
+      expect(when).toContain(declaration);
+    }
+    const action = /\.limit-reset-action\.secondary-button \{([^}]*)\}/u.exec(css)?.[1] ?? "";
+    expect(action).toContain("min-height: calc(var(--control-height-small) - 4px);");
+    expect(action).toContain("font-size: var(--text-sm);");
+    const styles = readFileSync(join(process.cwd(), "src/renderer/src/styles.css"), "utf8");
+    expect(/\n\.pending-input-notice button \{([^}]*)\}/u.exec(styles)?.[1]).toContain("min-height: calc(var(--control-height-small) - 4px);");
+  });
   it("drops a late response from a different chat", async () => {
     let resolve!: (value: LimitResetResult) => void;
     const promise = new Promise<LimitResetResult>((done) => { resolve = done; });

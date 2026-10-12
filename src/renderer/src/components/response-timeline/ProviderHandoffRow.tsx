@@ -1,4 +1,3 @@
-import { ArrowLeftRight, ArrowRight } from "lucide-react";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { ProviderHandoffItem } from "../../utils/response-timeline/model";
 import { PROVIDER_HANDOFF_TITLE, providerHandoffText } from "../../utils/providerHandoff";
@@ -8,8 +7,8 @@ import "./ProviderHandoffRow.css";
 
 /**
  * Marks where a chat continued on another provider. The divider is derived
- * from the two turns' immutable identities; its restored-message count comes
- * from the receiving turn's recorded session recovery.
+ * from the two turns' immutable identities; its carried and left-behind
+ * counts come from the receiving turn's recorded session recovery.
  */
 export function ProviderHandoffRow({
   id,
@@ -26,16 +25,15 @@ export function ProviderHandoffRow({
       <div className="context-compaction-separator provider-handoff-separator" role="separator" aria-label={text.label}>
         <span aria-hidden="true" />
         <small className="context-compaction-marker provider-handoff-marker" aria-hidden="true">
-          <ArrowLeftRight size={13} />
-          <strong>{PROVIDER_HANDOFF_TITLE}</strong>
+          <span>{PROVIDER_HANDOFF_TITLE}</span>
           <i>·</i>
           <span className="provider-handoff-route">
-            <ProviderBrandIcon providerId={handoff.from.providerId} decorative size={12} />
+            <ProviderBrandIcon providerId={handoff.from.providerId} decorative size={14} />
             <span>{text.from}</span>
           </span>
-          <ArrowRight size={12} />
+          <i>→</i>
           <span className="provider-handoff-route">
-            <ProviderBrandIcon providerId={handoff.to.providerId} decorative size={12} />
+            <ProviderBrandIcon providerId={handoff.to.providerId} decorative size={14} />
             <span>{text.to}</span>
           </span>
           {text.detail && <i>·</i>}

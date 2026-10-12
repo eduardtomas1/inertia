@@ -19,6 +19,7 @@ import { canStopSubagentTrace } from "../utils/subagentDisclosure";
 import { useBackgroundTaskFeed, type BackgroundTasksLoader } from "../hooks/useBackgroundTaskFeed";
 import { removeLegacyDisclosurePreferences } from "../utils/legacyDisclosurePreferences";
 import { AgentCard, CommandCard } from "./BackgroundTaskCards";
+import { TooltipButton } from "./TooltipButton";
 import "./WorkspaceSurfaces.css";
 import "./BackgroundTasksSurface.css";
 
@@ -298,7 +299,7 @@ export function BackgroundTasksSurface({
           </div>
         )}
         {items.active.length === 0 && finishedCount === 0 && (
-          <p className="background-tasks-label">No background tasks.</p>
+          <p className="background-tasks-label">No background tasks</p>
         )}
         {items.active.length > 0 && (
           <div className="background-tasks-group">
@@ -326,20 +327,20 @@ export function BackgroundTasksSurface({
                     <span className="background-task-danger">{failedCount} failed</span>
                   </>
                 )}
-                <ChevronRight size={13} aria-hidden="true" />
+                <ChevronRight size={14} aria-hidden="true" />
               </button>
               {dismissible.length > 0 && (
-                <button
-                  type="button"
+                <TooltipButton
                   className="background-task-stop background-tasks-dismiss"
+                  tooltip="Dismiss finished commands"
                   aria-label="Dismiss finished commands"
                   onClick={() => {
                     for (const run of dismissible) onDismissCommand?.(run);
                     feed?.dismissed(dismissible.map(({ id }) => id));
                   }}
                 >
-                  <Trash2 size={13} aria-hidden="true" />
-                </button>
+                  <Trash2 size={14} aria-hidden="true" />
+                </TooltipButton>
               )}
             </div>
             {finishedOpen && (

@@ -19,6 +19,7 @@ import {
   closeRightPanelSurface,
   EMPTY_RIGHT_PANEL_STATE,
   legacyRightPanelState,
+  moveRightPanelSurface,
   openRightPanelSurface,
   parseRightPanelState,
   RIGHT_PANEL_SIBLING_MIN_WIDTH,
@@ -47,6 +48,10 @@ const TOOLS_MAX_HEIGHT = 720;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+export function toolsMinimumWidth(): number {
+  return TOOLS_MIN_WIDTH;
 }
 
 function useResizeObserverTarget<T extends Element>(
@@ -156,6 +161,7 @@ export interface WorkspacePanelActions extends TerminalDockActions {
   activateSurface: (surface: WorkspacePanelTab) => void;
   closeSurface: (surface: WorkspacePanelTab) => void;
   closeOtherSurfaces: (surface: WorkspacePanelTab) => void;
+  moveSurface: (surface: WorkspacePanelTab, toIndex: number) => void;
   closeAllSurfaces: () => void;
   toggleWorkspaceTools: () => void;
 }
@@ -182,6 +188,7 @@ export interface WorkspaceLayout extends WorkspacePanelActions {
   tools: {
     width: number;
     height: number;
+    minWidth: number;
     maxWidth: number;
     maxHeight: number;
     onWidthChange: (value: number) => void;
@@ -232,6 +239,7 @@ export function useWorkspaceLayout(
   const [toolsWidth, setToolsWidth] = useState(persistedToolsWidth);
   const [toolsHeight, setToolsHeight] = useState(persistedToolsHeight);
   const [shellWidth, setShellWidth] = useState(() => window.innerWidth);
+  const toolsMinWidth = toolsMinimumWidth();
   const [workspaceBodySize, setWorkspaceBodySize] = useState(() => ({
     width: Math.max(0, window.innerWidth - 300),
     height: Math.max(0, window.innerHeight - 80),
@@ -300,6 +308,8 @@ export function useWorkspaceLayout(
       updatePanel((current) => closeRightPanelSurface(current, surface)),
     closeOtherSurfaces: (surface: WorkspacePanelTab) =>
       updatePanel((current) => closeOtherRightPanelSurfaces(current, surface)),
+    moveSurface: (surface: WorkspacePanelTab, toIndex: number) =>
+      updatePanel((current) => moveRightPanelSurface(current, surface, toIndex)),
     closeAllSurfaces: () => updatePanel(closeAllRightPanelSurfaces),
     toggleWorkspaceTools: () => updatePanel(toggleRightPanelVisibility),
   }), [updatePanel]);
@@ -319,7 +329,7 @@ export function useWorkspaceLayout(
 
   const toolsVisible =
     view === "workspace" && Boolean(workspaceScope && panelState.isOpen && hasProject);
-  const inlineMinimumWorkspaceWidth = CHAT_MIN_WIDTH + TOOLS_MIN_WIDTH + RESIZE_HANDLE_SIZE + 18;
+  const inlineMinimumWorkspaceWidth = CHAT_MIN_WIDTH + toolsMinWidth + RESIZE_HANDLE_SIZE + 18;
   const inlineSidebarMax = Math.max(
     SIDEBAR_MIN_WIDTH,
     Math.min(SIDEBAR_MAX_WIDTH, shellWidth - inlineMinimumWorkspaceWidth - RESIZE_HANDLE_SIZE),
@@ -339,7 +349,7 @@ export function useWorkspaceLayout(
     ? "inline"
     : rightPanelPresentation({
         containerWidth: inlineBodyWidth,
-        panelMinWidth: TOOLS_MIN_WIDTH,
+        panelMinWidth: toolsMinWidth,
         handleWidth: RESIZE_HANDLE_SIZE,
       });
   const minimumWorkspaceWidth = !stackedTools
@@ -355,7 +365,7 @@ export function useWorkspaceLayout(
     ),
   );
   const toolsDynamicMaxWidth = Math.max(
-    TOOLS_MIN_WIDTH,
+    toolsMinWidth,
     Math.min(
       TOOLS_MAX_WIDTH,
       workspaceBodySize.width - CHAT_MIN_WIDTH - RESIZE_HANDLE_SIZE,
@@ -376,7 +386,7 @@ export function useWorkspaceLayout(
   }, [effectiveSidebarWidth]);
   const effectiveToolsWidth = clamp(
     toolsWidth,
-    TOOLS_MIN_WIDTH,
+    toolsMinWidth,
     toolsDynamicMaxWidth,
   );
   const effectiveToolsHeight = clamp(
@@ -416,6 +426,7 @@ export function useWorkspaceLayout(
     tools: {
       width: effectiveToolsWidth,
       height: effectiveToolsHeight,
+      minWidth: toolsMinWidth,
       maxWidth: toolsDynamicMaxWidth,
       maxHeight: toolsDynamicMaxHeight,
       onHeightChange: setToolsHeight,
@@ -442,6 +453,7 @@ export function useWorkspaceLayout(
     stackedTools,
     toolsDynamicMaxHeight,
     toolsDynamicMaxWidth,
+    toolsMinWidth,
     toolsVisible,
   ]);
 }

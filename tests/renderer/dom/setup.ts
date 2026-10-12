@@ -2,6 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
 
+import { forgetExpandedFolders } from "../../../src/renderer/src/utils/filesPanelExpandedFolders";
+
 if (!window.localStorage) {
   const values = new Map<string, string>();
   const storage: Storage = {
@@ -17,4 +19,5 @@ if (!window.localStorage) {
 
 afterEach(() => {
   cleanup();
+  forgetExpandedFolders();
 });

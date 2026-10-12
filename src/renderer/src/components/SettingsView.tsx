@@ -188,7 +188,11 @@ const SettingsShell = memo(function SettingsShell({
     <main ref={rootRef} className="settings-view" aria-label="Settings" tabIndex={-1}>
       <aside className="settings-navigation">
         <SettingsSearch query={query} sections={searchSections} onQueryChange={setQuery} onChoose={openRow} />
-        {navigationShown && <nav ref={navRef} aria-label="Settings sections">
+        {navigationShown && <nav ref={navRef} aria-label="Settings sections" onWheel={(event) => {
+          const nav = event.currentTarget;
+          if (nav.scrollWidth <= nav.clientWidth || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+          nav.scrollLeft += event.deltaY;
+        }}>
           {SETTINGS_SECTIONS.map((item) => {
             const Icon = item.icon;
             const prefetch = (): void => prefetchSettingsSection(item);
@@ -203,7 +207,7 @@ const SettingsShell = memo(function SettingsShell({
                 onClick={() => navigate(item.id)}
                 key={item.id}
               >
-                <Icon size={15} />
+                <Icon size={14} />
                 <span>{item.label}</span>
               </button>
             );

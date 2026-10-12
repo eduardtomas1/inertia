@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { CommitDialog } from "../../src/renderer/src/components/CommitDialog";
-import { AppStatusOverlays } from "../../src/renderer/src/components/AppStatusOverlays";
+import { AppStatusOverlays, StatusToastStack } from "../../src/renderer/src/components/AppStatusOverlays";
 import { ProviderAuthDialog } from "../../src/renderer/src/components/ProviderAuthDialog";
 import {
   nativePreviewSuspended,
@@ -256,11 +256,7 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
-        onDismissDatabaseRecoveryNotice={vi.fn()}
-        onImportRecovery={vi.fn(async () => undefined)}
-        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
 
@@ -272,11 +268,7 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
-        onDismissDatabaseRecoveryNotice={vi.fn()}
-        onImportRecovery={vi.fn(async () => undefined)}
-        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
     await expectRestored();
@@ -287,11 +279,7 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={{ ...appUpdate, error: "The update check could not be completed." }}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
-        onDismissDatabaseRecoveryNotice={vi.fn()}
-        onImportRecovery={vi.fn(async () => undefined)}
-        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
     await expectSuspended();
@@ -301,35 +289,40 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
-        onDismissDatabaseRecoveryNotice={vi.fn()}
-        onImportRecovery={vi.fn(async () => undefined)}
-        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
     await expectRestored();
 
+    const recovery = {
+      id: "runtime-1-database-recovery",
+      outcome: "created-empty",
+      trigger: "primary-corrupt",
+      preservedCorruptPrimary: true,
+      preservedDatabaseFamilyMembers: 1,
+      invalidBackupsSkipped: 1,
+      unsupportedBackupsSkipped: 0,
+    } as const;
     view.rerender(
-      <AppStatusOverlays
-        providerAuth={{ ...providerAuth, provider: null }}
-        appUpdate={appUpdate}
-        providerQuotaNotices={providerQuotaNotices}
-        error={null}
-        onDismissError={vi.fn()}
-        databaseRecoveryNotice={{
-          id: "runtime-1-database-recovery",
-          outcome: "created-empty",
-          trigger: "primary-corrupt",
-          preservedCorruptPrimary: true,
-          preservedDatabaseFamilyMembers: 1,
-          invalidBackupsSkipped: 1,
-          unsupportedBackupsSkipped: 0,
-        }}
-        onDismissDatabaseRecoveryNotice={vi.fn()}
-        onImportRecovery={vi.fn(async () => undefined)}
-        onCopyRecoveryReport={vi.fn(async () => undefined)}
-      />,
+      <>
+        <AppStatusOverlays
+          providerAuth={{ ...providerAuth, provider: null }}
+          appUpdate={appUpdate}
+          providerQuotaNotices={providerQuotaNotices}
+          error={null}
+          databaseRecoveryNotice={recovery}
+        />
+        <StatusToastStack
+          appUpdate={appUpdate}
+          providerQuotaNotices={providerQuotaNotices}
+          error={null}
+          onDismissError={vi.fn()}
+          databaseRecoveryNotice={recovery}
+          onDismissDatabaseRecoveryNotice={vi.fn()}
+          onImportRecovery={vi.fn(async () => undefined)}
+          onCopyRecoveryReport={vi.fn(async () => undefined)}
+        />
+      </>,
     );
     expect(nativePreviewSuspended()).toBe(true);
     expect(screen.getByRole("alert", { name: "Database recovery warning" }))
@@ -345,11 +338,7 @@ describe("trusted overlay native preview suspension", () => {
         appUpdate={appUpdate}
         providerQuotaNotices={providerQuotaNotices}
         error={null}
-        onDismissError={vi.fn()}
         databaseRecoveryNotice={null}
-        onDismissDatabaseRecoveryNotice={vi.fn()}
-        onImportRecovery={vi.fn(async () => undefined)}
-        onCopyRecoveryReport={vi.fn(async () => undefined)}
       />,
     );
     await expectRestored();

@@ -96,7 +96,7 @@ test("custom mascot sprites export a template, preview, apply to the overlay, pe
     await section.getByRole("button", { name: "Import sprites" }).click();
     const preview = section.getByRole("list", { name: "Sprite preview" });
     await expect(preview.getByRole("listitem")).toHaveCount(5);
-    await expect(section).toContainText("Preview: 5 states, 1 animated. Apply to use them.");
+    await expect(section).toContainText("Preview: 5 states, 1 animated.");
     await expect(preview.getByText("Animated", { exact: true })).toHaveCount(1);
     await expect(preview.getByRole("listitem").filter({ hasText: "Working" })).toContainText("Animated");
     await loaded(app.page, ".mascot-sprite-preview img");

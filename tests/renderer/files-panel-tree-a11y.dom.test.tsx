@@ -102,7 +102,7 @@ describe("FilesPanel tree semantics", () => {
       />,
     );
     const tree = screen.getByRole("tree", { name: "Files" });
-    expect(within(tree).queryByText("Empty project.")).not.toBeInTheDocument();
-    expect(screen.getByText("Empty project.")).toBeInTheDocument();
+    expect(within(tree).queryByText("Empty project")).not.toBeInTheDocument();
+    expect(screen.getByText("Empty project")).toBeInTheDocument();
   });
 });

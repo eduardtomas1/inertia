@@ -3,6 +3,7 @@ import {
   Suspense,
   memo,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -10,23 +11,22 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
-  Activity,
   ArrowLeft,
-  BarChart3,
+  ChevronRight,
+  CircleCheck,
   Check,
   Clock,
-  ChevronDown,
-  ChevronRight,
+  Columns2,
   Folder,
-  FolderOpen,
   FolderGit2,
-  RefreshCw,
+  FolderOpen,
+  Gauge,
   GitBranch,
-  Layers3,
   Pencil,
+  RefreshCw,
+  RotateCcw,
   Search,
   Settings,
-  Share2,
   SquarePen,
   Trash2,
   X,
@@ -37,6 +37,7 @@ import { canOrganizeThread } from "../../../shared/thread-organization";
 import { projectRepositoryLimitChoices } from "../../../shared/project-repository-limit";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
+import { HintButton } from "./HintButton";
 import { agentRequestProviderName } from "../utils/agentInput";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../utils/modalFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -45,6 +46,8 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
   COLLAPSIBLE_WORK_SECTIONS,
+  WORK_ROW_COMPACT_HEIGHT,
+  WORK_ROW_HEIGHT,
   useSidebarWorkIndex,
   type PaginatedWorkSectionId,
   type WorkIndexItem,
@@ -163,6 +166,7 @@ function SidebarView({
   onChooseNewChatProject,
   onOpenMultiSpawn,
   onOpenDailyWork,
+  newChatShortcut,
   dailyWorkOpen,
   onRenameConversation,
   onMarkConversationUnread,
@@ -230,6 +234,7 @@ function SidebarView({
       || (mobile && open),
   ));
   const compact = snapshot?.settings.compactSidebar ?? false;
+  const newChatShortcutId = useId();
   const globalGrouping = snapshot?.settings.projectGrouping ?? "separate";
 
   useEffect(() => setDoneVisible(INITIAL_DONE_VISIBLE), [query]);
@@ -544,90 +549,96 @@ function SidebarView({
     setRenamingProject(project.id);
   };
 
-  const projectActions = (project: Project) => (
-    <div
-      ref={(node) => setMenuPopover(`:${project.id}`, node)}
-      id={`project-actions-${project.id}`}
-      data-project-menu-id={project.id}
-      className="project-menu"
-      role="menu"
-      aria-label={`Project actions for ${project.name}`}
-      onKeyDown={navigateMenuItems}
-    >
-      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onCreateConversation(project); }}><SquarePen size={13} />New chat in {project.name}</button>
-      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
-      {onOpenProjectSettings && <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("context-change"); onOpenProjectSettings(project); }}><Settings size={13} />Project settings</button>}
-      <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
-      <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
-      <button
-        type="button"
-        role="menuitemradio"
-        tabIndex={-1}
-        aria-checked={project.groupingMode === null}
-        onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, null); }}
+  const projectActions = (project: Project) => {
+    const running = snapshot?.runs.some((run) => (
+      run.projectId === project.id
+      && (run.status === "running" || run.status === "waiting")
+    )) ?? false;
+    const detached = snapshot?.conversations.some((conversation) => (
+      conversation.projectId === project.id
+      && detachedConversationIds.has(conversation.id)
+    )) ?? false;
+    return (
+      <div
+        ref={(node) => setMenuPopover(`:${project.id}`, node)}
+        id={`project-actions-${project.id}`}
+        data-project-menu-id={project.id}
+        className="project-menu"
+        role="menu"
+        aria-label={`Project actions for ${project.name}`}
+        onKeyDown={navigateMenuItems}
       >
-        <span className="menu-check">{project.groupingMode === null ? "✓" : ""}</span>
-        Use global ({groupingLabel(globalGrouping)})
-      </button>
-      {(["repository", "repository-path", "separate"] as const).map((mode) => (
-        <button
-          type="button"
-          role="menuitemradio"
+        <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onCreateConversation(project); }}><SquarePen size={14} />New chat in {project.name}</button>
+        <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={14} />Open folder</button>
+        {onOpenProjectSettings && <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("context-change"); onOpenProjectSettings(project); }}><Settings size={14} />Project settings</button>}
+        <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={14} />Rename</button>
+        <div role="separator" />
+        <div role="group" aria-label="Grouping behavior">
+          <button
+            type="button"
+            role="menuitemradio"
+            tabIndex={-1}
+            aria-checked={project.groupingMode === null}
+            onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, null); }}
+          >
+            <span className="menu-check">{project.groupingMode === null && <Check size={14} aria-hidden="true" />}</span>
+            Use global ({groupingLabel(globalGrouping)})
+          </button>
+          {(["repository", "repository-path", "separate"] as const).map((mode) => (
+            <button
+              type="button"
+              role="menuitemradio"
+              tabIndex={-1}
+              aria-checked={project.groupingMode === mode}
+              onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, mode); }}
+              key={mode}
+            >
+              <span className="menu-check">{project.groupingMode === mode && <Check size={14} aria-hidden="true" />}</span>
+              {groupingLabel(mode)}
+            </button>
+          ))}
+        </div>
+        <div role="separator" />
+        <div role="group" aria-label="Repository display limit">
+          {projectRepositoryLimitChoices(project.gitRepositoryLimit).map((limit) => (
+            <button
+              type="button"
+              role="menuitemradio"
+              tabIndex={-1}
+              aria-checked={project.gitRepositoryLimit === limit}
+              onClick={() => {
+                dismissMenu("selection");
+                onSetProjectGitRepositoryLimit(project, limit);
+              }}
+              key={limit}
+            >
+              <span className="menu-check">
+                {project.gitRepositoryLimit === limit && <Check size={14} aria-hidden="true" />}
+              </span>
+              Show up to {limit} repositories
+            </button>
+          ))}
+        </div>
+        <div role="separator" />
+        <HintButton
+          role="menuitem"
           tabIndex={-1}
-          aria-checked={project.groupingMode === mode}
-          onClick={() => { dismissMenu("selection"); onSetProjectGrouping(project, mode); }}
-          key={mode}
-        >
-          <span className="menu-check">{project.groupingMode === mode ? "✓" : ""}</span>
-          {groupingLabel(mode)}
-        </button>
-      ))}
-      <span className="project-menu-heading"><FolderOpen size={12} />Repository display limit</span>
-      {projectRepositoryLimitChoices(project.gitRepositoryLimit).map((limit) => (
-        <button
-          type="button"
-          role="menuitemradio"
-          tabIndex={-1}
-          aria-checked={project.gitRepositoryLimit === limit}
+          className="is-danger"
+          aria-disabled={running || detached || undefined}
+          hint={detached
+            ? "Return this project's detached chats before removing it."
+            : running ? "Stop this project's running work before removing it." : undefined}
           onClick={() => {
+            if (running || detached) return;
             dismissMenu("selection");
-            onSetProjectGitRepositoryLimit(project, limit);
+            onRemoveProject(project);
           }}
-          key={limit}
         >
-          <span className="menu-check">
-            {project.gitRepositoryLimit === limit ? "✓" : ""}
-          </span>
-          Show up to {limit} repositories
-        </button>
-      ))}
-      <button
-        type="button"
-        role="menuitem"
-        tabIndex={-1}
-        className="is-danger"
-        disabled={
-          snapshot?.runs.some((run) => (
-            run.projectId === project.id
-            && (run.status === "running" || run.status === "waiting")
-          ))
-          || snapshot?.conversations.some((conversation) => (
-            conversation.projectId === project.id
-            && detachedConversationIds.has(conversation.id)
-          ))
-        }
-        title={snapshot?.conversations.some((conversation) => (
-          conversation.projectId === project.id
-          && detachedConversationIds.has(conversation.id)
-        ))
-          ? "Return this project's detached chats before removing it."
-          : undefined}
-        onClick={() => { dismissMenu("selection"); onRemoveProject(project); }}
-      >
-        <Trash2 size={13} />Remove project
-      </button>
-    </div>
-  );
+          <Trash2 size={14} />Remove project
+        </HintButton>
+      </div>
+    );
+  };
 
   const conversationActions = (conversation: Conversation) => {
     if (!ConversationActionsMenu) return null;
@@ -786,10 +797,10 @@ function SidebarView({
             }}
             onClick={() => activateConversation(conversation)}
           >
-            <span className="activity-thread-projectline">
-              {chatFolder ? <Folder size={15} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={15} /> : <FolderGit2 size={15} aria-hidden="true" />}
-              {chatFolder ? <span className="activity-thread-project-meta" title={conversation.worktreePath ?? undefined}>Chat folder</span>
-                : <ProjectName project={project} className="activity-thread-project-meta" title={project?.path}>{projectLabel}</ProjectName>}
+            <span className="activity-thread-topline">
+              <span className="activity-thread-provider" aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
+              <span className="activity-thread-title">{conversation.title}</span>
+              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue
@@ -802,29 +813,29 @@ function SidebarView({
                 />
               </span>
             </span>
-            <span className="activity-thread-topline">
-              <span className="activity-thread-title">{conversation.title}</span>
-              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
-            </span>
-            <span className="work-thread-meta">
-              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{chatFolder ? null : repositoryLabel ?? "Local workspace"}</span>}
-              <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={15} /></span>
+            <span className="activity-thread-projectline">
+              {chatFolder ? <Folder size={14} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={14} /> : <FolderGit2 size={14} aria-hidden="true" />}
+              {chatFolder ? <span className="activity-thread-project-meta">Chat folder</span>
+                : <ProjectName project={project} className="activity-thread-project-meta">{projectLabel}</ProjectName>}
+              {conversation.branch
+                ? <span className="activity-thread-branch-meta"><GitBranch size={14} aria-hidden="true" /><span>{conversation.branch}</span></span>
+                : !chatFolder && <span className="activity-thread-branch-meta">{repositoryLabel ?? "Local workspace"}</span>}
             </span>
           </button>
         )}
         {canOrganize && <div className="thread-inline-actions">
-            <button type="button" aria-label={`Snooze ${conversation.title}`} title="Snooze thread"
+            <IconButton label="Snooze thread" aria-label={`Snooze ${conversation.title}`}
               onClick={(event) => {
                 preview.close(); setInitialSubmenu("snooze");
                 const bounds = event.currentTarget.getBoundingClientRect();
                 setMenuAnchor({ x: bounds.right, y: bounds.bottom });
                 if (conversationMenu !== conversation.id) toggleMenu(conversation.id);
-              }}><Clock size={13} /></button>
-            <button type="button" aria-label={`${conversation.settledAt ? "Reopen" : "Settle"} ${conversation.title}`}
-              title={conversation.settledAt ? "Reopen thread" : "Settle thread"}
+              }}><Clock size={14} /></IconButton>
+            <IconButton label={conversation.settledAt ? "Reopen thread" : "Settle thread"}
+              aria-label={`${conversation.settledAt ? "Reopen" : "Settle"} ${conversation.title}`}
               onClick={() => { preview.close(); if (conversation.settledAt) onRestoreConversation(conversation); else onSettleConversation(conversation); }}>
-              <Check size={13} />{conversation.settledAt ? "Reopen" : "Settle"}
-            </button>
+              {conversation.settledAt ? <RotateCcw size={14} /> : <CircleCheck size={14} />}
+            </IconButton>
         </div>}
         {conversationMenu === conversation.id && conversationActions(conversation)}
       </div>
@@ -876,10 +887,8 @@ function SidebarView({
                 });
               }}
             >
-              {expanded
-                ? <ChevronDown size={12} />
-                : <ChevronRight size={12} />}
               <span>{section.label}</span>
+              <ChevronRight size={14} aria-hidden="true" />
               <span>{section.threads.length}</span>
             </button>
           </h2>
@@ -945,21 +954,25 @@ function SidebarView({
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
             <span className="brand-name">Inertia</span>
           </button>
-          <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={17} /></IconButton>
+          <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={16} /></IconButton>
         </div>
 
-        <div className="sidebar-search-row">
-          <div className="sidebar-search-wrap">
-            <Search size={16} aria-hidden="true" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
-            {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
-          </div>
-          <IconButton label="New chat" aria-haspopup={regularProjects.length !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
+        <div className="sidebar-primary-row">
+          <button type="button" className="sidebar-primary-action" aria-describedby={newChatShortcut ? newChatShortcutId : undefined} aria-haspopup={regularProjects.length !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
             if (regularProjects.length > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
             const target = regularProjects.find((project) => project.id === (scopedProjectId ?? snapshot?.activeProjectId)) ?? regularProjects[0];
             if (target) onCreateConversation(target); else onChooseNewChatProject();
-          }}><SquarePen size={17} /></IconButton>
-          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
+          }}>
+            <SquarePen size={16} aria-hidden="true" />
+            <span>New chat</span>
+            {newChatShortcut && <kbd id={newChatShortcutId} aria-hidden="true">{newChatShortcut}</kbd>}
+          </button>
+          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={16} /></IconButton>
+        </div>
+        <div className="sidebar-search-wrap">
+          <Search size={16} aria-hidden="true" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
+          {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={14} /></IconButton>}
         </div>
         <div className="sidebar-project-navigation">
         <ProjectScopePicker projects={regularProjects} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"}
@@ -979,7 +992,7 @@ function SidebarView({
               setRenamingProject(null);
             }}
           >
-            <label htmlFor="sidebar-project-rename">Rename project</label>
+            <label htmlFor="sidebar-project-rename" className="visually-hidden">Rename project</label>
             <span>
               <input id="sidebar-project-rename" value={projectRenameDraft} autoFocus maxLength={80} onChange={(event) => setProjectRenameDraft(event.target.value)} onKeyDown={(event) => {
                 if (event.key !== "Escape") return;
@@ -992,7 +1005,7 @@ function SidebarView({
         )}
 
         <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} onScroll={updateWorkViewport} role="list" aria-label="Work">
-          {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
+          {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /></div>}
           {snapshot && (
             <div
               ref={workStreamRef}
@@ -1007,7 +1020,6 @@ function SidebarView({
             >
               {visibleWorkCount === 0 && (
                 <div className="sidebar-empty">
-                  <Activity size={19} />
                   <span>{query ? "No matching work" : regularProjects.length === 0 ? "No projects yet" : "No work yet"}</span>
                 </div>
               )}
@@ -1020,7 +1032,7 @@ function SidebarView({
                   );
                 }
                 const start = rendered.start
-                  ?? rendered.index * (compact ? 42 : 48);
+                  ?? rendered.index * (compact ? WORK_ROW_COMPACT_HEIGHT : WORK_ROW_HEIGHT);
                 return (
                   <div
                     className="work-index-virtual-item"
@@ -1036,16 +1048,16 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer sidebar-utility-footer">
-          {view !== "workspace" && view !== "home" && <button type="button" className="sidebar-destination" aria-label="Workspace" title="Back to workspace" onClick={() => navigate("workspace")}><ArrowLeft size={16} /><span>Workspace</span></button>}
-          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-label="Daily work" title="Daily work" aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
-            <DailyWorkMark size={16} /><span>Daily work</span>
-          </button>
-          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-label="Usage" title="Usage" aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
-            <BarChart3 size={16} /><span>Usage</span>
-          </button>
-          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
-            <Settings size={16} /><span>Settings</span>
-          </button>
+          {view !== "workspace" && view !== "home" && <IconButton label="Back to workspace" aria-label="Workspace" className="sidebar-destination" onClick={() => navigate("workspace")}><ArrowLeft size={16} /></IconButton>}
+          <IconButton label="Daily work" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
+            <DailyWorkMark size={16} />
+          </IconButton>
+          <IconButton label="Usage" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
+            <Gauge size={16} />
+          </IconButton>
+          <IconButton label="Settings" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
+            <Settings size={16} />
+          </IconButton>
           <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
             <SidebarUpdateControl controller={appUpdate} />

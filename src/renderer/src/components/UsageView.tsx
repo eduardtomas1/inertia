@@ -1,4 +1,4 @@
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { CircleAlert, RefreshCw } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -23,7 +23,7 @@ import {
   DailyProviderChart,
   dailyProviderMetric,
 } from "./UsageProviderChart";
-import { LoadingMark } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 import "./UsageView.css";
 
 const UsageLimitsPanel = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageLimitsPanel }));
@@ -155,7 +155,7 @@ function ModelBreakdown({ dashboard }: { dashboard: UsageDashboard }): React.JSX
             <tr key={model.key}>
               <th scope="row">
                 <span className="usage-model-identity">
-                  <ProviderMark providerId={model.providerId} size={13} />
+                  <ProviderMark providerId={model.providerId} size={14} />
                   <span>
                     <strong>{model.model}</strong>
                     <small>
@@ -235,7 +235,6 @@ function UsageDashboardContent({
     <>
       {dashboard.totals.requestCount === 0 ? (
         <section className="usage-empty-state" aria-labelledby="usage-empty-title">
-          <span>No observations</span>
           <h2 id="usage-empty-title">No terminal requests in this range</h2>
           <p>Usage will appear after Inertia records a completed, failed, cancelled, or interrupted terminal agent turn.</p>
         </section>
@@ -293,7 +292,6 @@ function UsageDashboardContent({
                       aria-pressed="false"
                       aria-disabled="true"
                       aria-describedby="usage-cost-unavailable"
-                      title={dashboard.cost.reason}
                     >
                       Cost
                     </button>
@@ -456,7 +454,7 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
           <button type="button" aria-pressed={tab === "history"} onClick={() => setTab("history")}>History</button>
           <button type="button" aria-pressed={tab === "limits"} onClick={() => setTab("limits")}>Limits</button>
         </div>
-        {tab === "limits" ? <Suspense fallback={<p>Loading limits…</p>}><UsageLimitsPanel request={request} status={status} /></Suspense> : <>
+        {tab === "limits" ? <Suspense fallback={<LoadingMark label="Loading limits" />}><UsageLimitsPanel request={request} status={status} /></Suspense> : <>
         <header className="usage-toolbar">
           <span>{dashboard
             ? `${displayDate(dashboard.range.startDate)} to ${displayDate(dashboard.range.endDate)}`
@@ -475,24 +473,22 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              className="usage-refresh-button"
-              aria-label="Refresh usage"
+            <IconButton
+              label="Refresh usage"
               disabled={loading || status !== "online"}
               onClick={() => setRefreshVersion((version) => version + 1)}
             >
-              <RefreshCw size={13} aria-hidden="true" />
-            </button>
+              <RefreshCw size={16} aria-hidden="true" />
+            </IconButton>
           </div>
         </header>
 
         {loading && <UsageSkeleton />}
         {!loading && error && (
           <div className="usage-error" role="alert">
-            <AlertCircle size={17} aria-hidden="true" />
+            <CircleAlert size={16} aria-hidden="true" />
             <span><strong>Usage could not be loaded</strong><small>{error}</small></span>
-            <button type="button" onClick={() => setRefreshVersion((version) => version + 1)} disabled={status !== "online"}>Try again</button>
+            <button type="button" className="secondary-button" onClick={() => setRefreshVersion((version) => version + 1)} disabled={status !== "online"}>Try again</button>
           </div>
         )}
         {!loading && !error && dashboard && <UsageDashboardContent dashboard={dashboard} />}

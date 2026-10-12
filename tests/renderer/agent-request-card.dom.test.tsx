@@ -77,4 +77,24 @@ describe("InputRequestCard question pager", () => {
     });
     expect(container.querySelectorAll(".agent-input-page-dots > button")).toHaveLength(2);
   });
+
+  it("shows the provider's short question header as plain text above the question", () => {
+    render(<InputRequestCard request={request} onRespond={vi.fn(async () => undefined)} />);
+
+    const group = screen.getByRole("group", { name: /Choose the implementation scope/u });
+    const header = within(group).getByText("Scope");
+    expect(header).toBeVisible();
+    expect(header).toHaveClass("agent-input-question-header");
+    expect(header.closest("legend")).not.toBeNull();
+  });
+
+  it("omits an empty question header", () => {
+    const blank: AgentInputRequest = {
+      ...request,
+      questions: [{ ...request.questions[0]!, header: "  " }],
+    };
+    const { container } = render(<InputRequestCard request={blank} onRespond={vi.fn(async () => undefined)} />);
+
+    expect(container.querySelector(".agent-input-question-header")).toBeNull();
+  });
 });

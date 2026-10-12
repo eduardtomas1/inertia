@@ -138,19 +138,9 @@ describe("model route search", () => {
     expect(unfiltered.items.map(({ key }) => key)).toEqual(routes.map(({ key }) => key));
     expect(unfiltered.emptyState).toBeNull();
 
-    expect(searchModelRoutes([], "")).toMatchObject({
-      items: [],
-      emptyState: {
-        kind: "no-models",
-        message: "No models are available yet.",
-      },
-    });
-    expect(searchModelRoutes(routes, "nonexistent route")).toMatchObject({
-      items: [],
-      emptyState: {
-        kind: "no-results",
-        message: "No models match “nonexistent route”.",
-      },
-    });
+    expect(searchModelRoutes([], "").items).toEqual([]);
+    expect(searchModelRoutes([], "").emptyState).toEqual({ kind: "no-models" });
+    expect(searchModelRoutes(routes, "nonexistent route").items).toEqual([]);
+    expect(searchModelRoutes(routes, "nonexistent route").emptyState).toEqual({ kind: "no-results" });
   });
 });

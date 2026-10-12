@@ -1,0 +1,187 @@
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+  type PointerEvent,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
+
+export const TOOLTIP_DELAY_MS = 500;
+export const TOOLTIP_WARM_MS = 400;
+const TOOLTIP_GAP = 4;
+const VIEWPORT_PADDING = 8;
+
+let warmUntil = 0;
+let lastNavigationKeyAt = Number.NEGATIVE_INFINITY;
+const NAVIGATION_KEY_WINDOW_MS = 500;
+const NAVIGATION_KEYS = new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+const trackedDocuments = new WeakSet<Document>();
+
+function trackNavigationKeys(document: Document): void {
+  if (trackedDocuments.has(document)) return;
+  trackedDocuments.add(document);
+  document.addEventListener("keydown", (event) => {
+    if (NAVIGATION_KEYS.has(event.key)) lastNavigationKeyAt = Date.now();
+  }, true);
+}
+
+function focusFollowsNavigationKey(): boolean {
+  const elapsed = Date.now() - lastNavigationKeyAt;
+  return elapsed >= 0 && elapsed < NAVIGATION_KEY_WINDOW_MS;
+}
+
+interface TooltipPosition {
+  top: number;
+  left: number;
+}
+
+export interface TooltipTriggerHandlers<T extends HTMLElement> {
+  onPointerEnter: (event: PointerEvent<T>) => void;
+  onPointerLeave: (event: PointerEvent<T>) => void;
+  onPointerDown: (event: PointerEvent<T>) => void;
+  onFocus: (event: FocusEvent<T>) => void;
+  onBlur: (event: FocusEvent<T>) => void;
+  onKeyDown: (event: KeyboardEvent<T>) => void;
+}
+
+export function useTooltip<T extends HTMLElement>(
+  triggerRef: RefObject<T | null>,
+  handlers: Partial<TooltipTriggerHandlers<T>>,
+): { open: boolean; layer: HTMLElement | null; handlers: TooltipTriggerHandlers<T>; close: () => void } {
+  const [layer, setLayer] = useState<HTMLElement | null>(null);
+  const open = layer !== null;
+  const timer = useRef<number | undefined>(undefined);
+  const openRef = useRef(false);
+
+  const clearTimer = useCallback(() => {
+    if (timer.current !== undefined) window.clearTimeout(timer.current);
+    timer.current = undefined;
+  }, []);
+
+  const close = useCallback(() => {
+    clearTimer();
+    if (openRef.current) warmUntil = Date.now() + TOOLTIP_WARM_MS;
+    openRef.current = false;
+    setLayer(null);
+  }, [clearTimer]);
+
+  const show = useCallback(() => {
+    clearTimer();
+    const reveal = () => {
+      timer.current = undefined;
+      const trigger = triggerRef.current;
+      if (!trigger?.isConnected) return;
+      openRef.current = true;
+      setLayer(trigger.closest<HTMLElement>("[popover], dialog") ?? trigger.ownerDocument.body);
+    };
+    if (Date.now() < warmUntil) reveal();
+    else timer.current = window.setTimeout(reveal, TOOLTIP_DELAY_MS);
+  }, [clearTimer, triggerRef]);
+
+  useEffect(() => clearTimer, [clearTimer]);
+
+  useEffect(() => {
+    trackNavigationKeys(triggerRef.current?.ownerDocument ?? document);
+  }, [triggerRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = () => close();
+    window.addEventListener("scroll", dismiss, { capture: true, passive: true });
+    window.addEventListener("pointerdown", dismiss, { capture: true });
+    window.addEventListener("blur", dismiss);
+    return () => {
+      window.removeEventListener("scroll", dismiss, { capture: true });
+      window.removeEventListener("pointerdown", dismiss, { capture: true });
+      window.removeEventListener("blur", dismiss);
+    };
+  }, [close, open]);
+
+  return {
+    open,
+    layer,
+    close,
+    handlers: {
+      onPointerEnter: (event) => {
+        handlers.onPointerEnter?.(event);
+        if (event.pointerType !== "touch") show();
+      },
+      onPointerLeave: (event) => {
+        handlers.onPointerLeave?.(event);
+        close();
+      },
+      onPointerDown: (event) => {
+        handlers.onPointerDown?.(event);
+        close();
+      },
+      onFocus: (event) => {
+        handlers.onFocus?.(event);
+        if (event.currentTarget.matches(":focus-visible") && focusFollowsNavigationKey()) show();
+      },
+      onBlur: (event) => {
+        handlers.onBlur?.(event);
+        close();
+      },
+      onKeyDown: (event) => {
+        handlers.onKeyDown?.(event);
+        if (event.key !== "Escape" || !openRef.current) return;
+        close();
+      },
+    },
+  };
+}
+
+export function Tooltip({
+  anchor,
+  layer,
+  label,
+  shortcut,
+}: {
+  anchor: RefObject<HTMLElement | null>;
+  layer: HTMLElement;
+  label: string;
+  shortcut?: string;
+}): React.JSX.Element | null {
+  const tooltip = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<TooltipPosition | null>(null);
+
+  useLayoutEffect(() => {
+    const element = anchor.current;
+    const trigger = element?.getBoundingClientRect();
+    const box = tooltip.current?.getBoundingClientRect();
+    if (!element || !trigger || !box) return;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+    const centered = Math.round(trigger.left + trigger.width / 2 - box.width / 2);
+    const left = Math.min(
+      Math.max(VIEWPORT_PADDING, centered),
+      Math.max(VIEWPORT_PADDING, Math.floor(viewportWidth - VIEWPORT_PADDING - box.width)),
+    );
+    const below = Math.ceil(trigger.bottom + TOOLTIP_GAP);
+    const prefersAbove = element.closest('[data-tooltip-placement="above"]') !== null;
+    const top = prefersAbove || below + box.height > viewportHeight - VIEWPORT_PADDING
+      ? Math.max(VIEWPORT_PADDING, Math.floor(trigger.top - TOOLTIP_GAP - box.height))
+      : below;
+    setPosition({ top, left });
+  }, [anchor, label, shortcut]);
+
+  return createPortal(
+    <div
+      ref={tooltip}
+      className="tooltip"
+      role="tooltip"
+      aria-hidden="true"
+      data-positioned={position ? "true" : undefined}
+      style={position ? { top: position.top, left: position.left } : undefined}
+    >
+      {label}
+      {shortcut && <kbd>{shortcut}</kbd>}
+    </div>,
+    layer,
+  );
+}

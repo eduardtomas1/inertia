@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
-test("keeps three-line Work sidebar geometry", async ({
+test("keeps two-line Work sidebar geometry", async ({
   browserName: _browserName,
 }, testInfo) => {
   const app = await createAppFixture({
@@ -95,16 +95,17 @@ test("keeps three-line Work sidebar geometry", async ({
     await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveCount(0);
     const row = sidebar.getByRole("button", { name: /^Polish compact Work rows,/u });
     await expect(row).toBeVisible();
-    const rowBox = await row.boundingBox();
-    expect(rowBox).not.toBeNull();
-    expect(rowBox!.height).toBeGreaterThanOrEqual(78);
-    expect(rowBox!.height).toBeLessThanOrEqual(84);
-    const statusCue = row.locator('[data-work-status="idle"]');
-    await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
-    const statusBox = await statusCue.boundingBox();
-    expect(statusBox).not.toBeNull();
-    expect(statusBox!.width).toBeCloseTo(10, 3);
-    expect(statusBox!.height).toBeCloseTo(10, 3);
+    const rowHeight = async (): Promise<number> => (await row.boundingBox())?.height ?? 0;
+    const lineHeights = async (): Promise<number[]> => row.evaluate((element) => [
+      ".activity-thread-topline",
+      ".activity-thread-projectline",
+    ].map((selector) => element.querySelector(selector)?.getBoundingClientRect().height ?? 0));
+    expect(await rowHeight()).toBeCloseTo(56, 0);
+    expect(await lineHeights()).toEqual([20, 18]);
+    await expect(row.locator(".activity-thread-trailing time")).toBeVisible();
+    await expect(row.locator(".activity-thread-trailing time svg")).toHaveCount(0);
+    await expect(row.locator(".activity-thread-project-meta")).toBeVisible();
+    await expect(row.locator(".activity-thread-branch-meta")).toHaveText("codex/compact-work-tab");
     for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
@@ -112,8 +113,8 @@ test("keeps three-line Work sidebar geometry", async ({
       await expect(icon).toBeVisible();
       const box = await icon.boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.width).toBeCloseTo(15, 3);
-      expect(box!.height).toBeCloseTo(15, 3);
+      expect(box!.width).toBeCloseTo(14, 3);
+      expect(box!.height).toBeCloseTo(14, 3);
       const imageSize = await icon.locator("img").first().evaluate((image) => ({
         naturalWidth: (image as HTMLImageElement).naturalWidth,
         naturalHeight: (image as HTMLImageElement).naturalHeight,
@@ -145,19 +146,18 @@ test("keeps three-line Work sidebar geometry", async ({
     await sidebarHandle.focus();
     await sidebarHandle.press("Home");
     await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "220");
-    const narrowState = await row.locator(".activity-thread-branch-meta")
-      .evaluate((branch) => {
-        const sidebarElement = branch.closest(".sidebar");
-        return {
-          branchDisplay: getComputedStyle(branch).display,
-          sidebarWidth: sidebarElement?.getBoundingClientRect().width,
-        };
-      });
-    expect(narrowState).toMatchObject({
-      branchDisplay: "flex",
-      sidebarWidth: 220,
-    });
-    await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
+    expect(await row.evaluate((element) => (
+      element.closest(".sidebar")?.getBoundingClientRect().width
+    ))).toBe(220);
+    expect(await rowHeight()).toBeCloseTo(56, 0);
+    expect(await lineHeights()).toEqual([20, 18]);
+    expect(await row.locator(".activity-thread-project-meta").evaluate((element) => (
+      element.scrollWidth <= element.clientWidth
+    ))).toBe(true);
+    await expect(row.locator(".activity-thread-trailing time")).toBeVisible();
+    expect(await sidebar.locator(".project-list").evaluate((element) => (
+      element.scrollWidth <= element.clientWidth
+    ))).toBe(true);
     const narrowLightScreenshot = testInfo.outputPath(
       "chat-index-narrow-light-220px.png",
     );
@@ -173,6 +173,7 @@ test("keeps three-line Work sidebar geometry", async ({
     await app.resizeWindow(1440, 900);
     await sidebarHandle.press("End");
     await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "420");
+    expect(await rowHeight()).toBeCloseTo(56, 0);
     await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
 
     await app.page.evaluate(() => {

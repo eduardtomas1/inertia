@@ -98,11 +98,15 @@ test("keeps provider commands in a full-width floating command surface", async (
   const commandList = page.getByRole("listbox", { name: "Composer commands" });
   const commandMenu = page.locator(".composer-command-menu");
   await expect(commandList).toBeVisible();
-  await expect(commandList.getByText("Built-in", { exact: true })).toBeVisible();
-  await expect(commandList.getByText("Provider", { exact: true })).toBeVisible();
+  await expect(commandList.getByRole("group", { name: "Built-in" })).toBeVisible();
+  await expect(commandList.getByRole("group", { name: "Provider" })).toBeVisible();
+  await expect(commandList.getByText("Built-in", { exact: true })).toHaveCount(0);
   await expect(commandList.getByRole("option", { name: /\/resume/u })).toBeVisible();
   await expect(commandList.getByRole("option", { name: /\/compact/u })).toBeVisible();
   await expect(commandList.locator('[aria-selected="true"]')).toHaveCount(1);
+  await expect.poll(() => commandMenu.evaluate((element) =>
+    element.getAnimations().every((animation) => animation.playState === "finished"),
+  )).toBe(true);
 
   const composerBox = await composer.boundingBox();
   const commandBox = await commandMenu.boundingBox();
@@ -111,9 +115,9 @@ test("keeps provider commands in a full-width floating command surface", async (
   expect(Math.abs(commandBox!.x - composerBox!.x)).toBeLessThanOrEqual(2);
   expect(Math.abs(commandBox!.width - composerBox!.width)).toBeLessThanOrEqual(2);
   expect(composerBox!.y - (commandBox!.y + commandBox!.height))
-    .toBeGreaterThanOrEqual(7);
+    .toBeGreaterThanOrEqual(3);
   expect(await commandMenu.evaluate((element) =>
-    getComputedStyle(element).borderRadius)).toBe("20px");
+    getComputedStyle(element).borderRadius)).toBe("10px");
 
   const goalCommand = commandList.getByRole("option", { name: /\/goal/u });
   await expect(goalCommand).toBeEnabled();
@@ -129,7 +133,7 @@ test("keeps provider commands in a full-width floating command surface", async (
 
   await input.fill("/resume");
   await expect(commandList.getByRole("option")).toHaveCount(1);
-  await expect(commandList.getByText("Built-in", { exact: true })).toHaveCount(0);
+  await expect(commandList.getByRole("group", { name: "Built-in" })).toHaveCount(0);
   const composerBeforeResume = await composer.boundingBox();
   expect(composerBeforeResume).not.toBeNull();
   await input.press("Tab");
@@ -146,6 +150,9 @@ test("keeps provider commands in a full-width floating command surface", async (
   await expect(resumeSurface.getByRole("option", {
     name: /Release notes handoff/u,
   })).toBeVisible();
+  await expect.poll(() => resumeSurface.evaluate((element) =>
+    element.getAnimations().every((animation) => animation.playState === "finished"),
+  )).toBe(true);
 
   const resumeBox = await resumeSurface.boundingBox();
   const composerWithResume = await composer.boundingBox();

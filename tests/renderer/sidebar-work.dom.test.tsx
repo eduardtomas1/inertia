@@ -211,10 +211,9 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
     const freeRow = screen.getByRole("button", { name: /^Weekend plans,/ });
     expect(freeRow.closest("[data-work-section]")).toHaveAttribute("data-work-section", "no-project");
-    expect(freeRow.querySelector(".activity-thread-projectline")).toHaveTextContent(/^Chat folder/u);
-    expect(freeRow.querySelector(".work-thread-meta")).toHaveTextContent(/^$/u);
+    expect(freeRow.querySelector(".activity-thread-projectline")).toHaveTextContent(/^Chat folder$/u);
     expect(freeRow).toHaveAccessibleName(/, No project,/u);
-    expect(screen.getByRole("button", { name: /^Build the app,/ }).querySelector(".work-thread-meta"))
+    expect(screen.getByRole("button", { name: /^Build the app,/ }).querySelector(".activity-thread-projectline"))
       .toHaveTextContent("acme-monorepo/apps/studio");
     expect(screen.getByRole("button", { name: /^Build the app,/ }).closest("[data-work-section]"))
       .toHaveAttribute("data-work-section", "recent");
@@ -318,7 +317,7 @@ describe("compact Work sidebar", () => {
     const footerButtons = within(view.container.querySelector(".sidebar-footer")!)
       .getAllByRole("button");
 
-    expect(footerButtons.map((button) => button.textContent)).toEqual([
+    expect(footerButtons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Daily work",
       "Usage",
       "Settings",
@@ -350,7 +349,7 @@ describe("compact Work sidebar", () => {
     };
     const row = conversation("web", "Ship the web app", new Date(), { projectId: windowsProject.id });
     renderSidebar([row], undefined, [], { projects: [windowsProject] });
-    expect(screen.getByRole("button", { name: /^Ship the web app,/ }).querySelector(".work-thread-meta"))
+    expect(screen.getByRole("button", { name: /^Ship the web app,/ }).querySelector(".activity-thread-projectline"))
       .toHaveTextContent("MyMonorepo/packages/Web");
   });
 
@@ -431,6 +430,31 @@ describe("compact Work sidebar", () => {
     fireEvent.click(recentRow);
     expect(view.onSelectConversation).toHaveBeenCalledWith(recent);
     expect(view.onViewChange).toHaveBeenCalledBefore(view.onSelectConversation);
+  });
+
+  it("keeps chats from several projects in one time order, each row naming its project", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
+    const studioNewest = conversation("studio-newest", "Studio newest", new Date(2026, 7, 11, 11));
+    const docsMiddle = conversation("docs-middle", "Docs middle", new Date(2026, 7, 11, 10), { projectId: docsProject.id });
+    const studioOlder = conversation("studio-older", "Studio older", new Date(2026, 7, 11, 9));
+    const docsYesterday = conversation("docs-yesterday", "Docs yesterday", new Date(2026, 7, 10, 9), { projectId: docsProject.id });
+    const view = renderSidebar([studioNewest, docsMiddle, studioOlder, docsYesterday], vi.fn(), [], {
+      projects: [project, docsProject],
+    });
+    const stream = view.container.querySelector(".activity-thread-stream")!;
+    expect([...stream.querySelectorAll(".activity-thread-title")].map((element) => element.textContent))
+      .toEqual(["Studio newest", "Docs middle", "Studio older", "Docs yesterday"]);
+    expect(stream.querySelectorAll("h3, .work-project-group")).toHaveLength(0);
+    expect([...stream.querySelectorAll(".activity-thread-project-meta")].map((element) => element.textContent))
+      .toEqual(["Studio", "Docs", "Studio", "Docs"]);
+    const first = screen.getByRole("button", { name: /^Studio newest,/u });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Docs middle,/u })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Studio older,/u })).toHaveFocus();
   });
 
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {
@@ -740,6 +764,31 @@ describe("compact Work sidebar", () => {
 
     expect(screen.getByRole("textbox", { name: "Rename Classic actions 79" }))
       .toHaveFocus();
+  });
+
+  it("explains why Remove project is unavailable while the project has running work", () => {
+    const startedAt = new Date(2026, 7, 11, 11, 57);
+    const running = conversation("remove-running", "Running task", startedAt, { status: "running" });
+    renderSidebar([running], vi.fn(), [{
+      id: "run-remove-running",
+      kind: "agent",
+      projectId: running.projectId,
+      conversationId: running.id,
+      actionId: null,
+      label: running.title,
+      detail: null,
+      status: "running",
+      attentionState: "acknowledged",
+      canStop: true,
+      port: null,
+      startedAt: startedAt.toISOString(),
+      finishedAt: null,
+    }]);
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
+    const remove = screen.getByRole("menuitem", { name: "Remove project" });
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    expect(remove).toHaveAccessibleDescription("Stop this project's running work before removing it.");
   });
 
   it("dismisses project actions on outside pointer and restores filter focus on Escape", () => {
@@ -1335,9 +1384,8 @@ describe("compact Work sidebar", () => {
       ["input", "needs-input", "input", "lucide-message-circle-question-mark"],
       ["failed", "failed", null, "lucide-circle-x"],
       ["completed", "completed", null, "lucide-circle-check"],
-      ["idle", "idle", null, "lucide-minus"],
     ] as const;
-    renderSidebar(statusCases.map(([id, status, attentionKind]) => conversation(
+    renderSidebar([...statusCases, ["idle", "idle", null, null] as const].map(([id, status, attentionKind]) => conversation(
       id,
       `${id} task`,
       new Date(2026, 7, 11, 9),
@@ -1349,6 +1397,9 @@ describe("compact Work sidebar", () => {
       expect(cue).not.toBeNull();
       expect(cue?.querySelector(`.${iconClass}`)).not.toBeNull();
     }
+    const idleTime = screen.getByText("idle task").closest(".activity-thread")?.querySelector(".activity-thread-trailing time");
+    expect(idleTime).not.toBeNull();
+    expect(idleTime?.querySelector("svg")).toBeNull();
   });
 
   it("labels a chat stopped by a usage limit as Limited with its own icon", () => {
@@ -1358,7 +1409,7 @@ describe("compact Work sidebar", () => {
     const latestTurn = { id: "limited-turn", status: "failed", usageLimited: true } as unknown as NonNullable<ConversationShell["latestTurn"]>;
     renderSidebar([{ ...failed, latestTurn }]);
     const cue = document.querySelector('[data-work-status="limited"]');
-    expect(cue?.querySelector(".lucide-clock-3, .lucide-clock3")).not.toBeNull();
+    expect(cue?.querySelector(".lucide-clock")).not.toBeNull();
     expect(cue?.closest(".activity-thread-status-label")).toHaveTextContent("Limited");
     expect(screen.getByRole("button", { name: /Limited task.*Limited$/u })).toBeVisible();
   });

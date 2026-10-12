@@ -155,12 +155,12 @@ test("moves one live chat between a remembered native window and the main app", 
   await expect.poll(() => popup.locator("html").evaluate((element) => {
     const styles = getComputedStyle(element);
     return {
-      background: styles.getPropertyValue("--app-bg").trim(),
+      background: styles.getPropertyValue("--bg").trim(),
       foreground: styles.getPropertyValue("--text").trim(),
       terminal: styles.getPropertyValue("--terminal-bg").trim(),
     };
   })).toEqual({
-    background: oceanDark["app-bg"],
+    background: oceanDark["surface-strong"],
     foreground: oceanDark.text,
     terminal: oceanDark["terminal-bg"],
   });

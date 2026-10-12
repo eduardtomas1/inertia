@@ -171,7 +171,7 @@ describe("Background tasks for the whole chat", () => {
     await flush();
     await act(async () => { resolveFirst(page(null)); await vi.advanceTimersByTimeAsync(0); });
     expect(screen.queryByRole("button", { name: /^Finished/u })).toBeNull();
-    expect(screen.getByText("No background tasks.")).toBeVisible();
+    expect(screen.getByText("No background tasks")).toBeVisible();
   });
 
   it("keeps showing what the transcript knows when the runtime cannot answer", async () => {

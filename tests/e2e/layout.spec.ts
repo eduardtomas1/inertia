@@ -83,7 +83,7 @@ test("starts with the chat alone and hosts surfaces in a responsive right panel"
 
     for (const size of [
       { width: 1440, height: 920, label: "wide", sheet: false },
-      { width: 900, height: 700, label: "sheet", sheet: true },
+      { width: 860, height: 700, label: "sheet", sheet: true },
       { width: 760, height: 600, label: "compact", sheet: false },
     ]) {
       await resizeWindow(size.width, size.height);
@@ -246,6 +246,41 @@ test("collapses and restores both workspace sides without losing layout", async 
   await expect(page.locator(".workspace-panel")).toBeVisible();
   await expect(page.getByRole("tab", { name: /^Files/u })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".workspace-body")).toHaveClass(/has-tools/u);
+  await expectNoViewportOverflow();
+  expect(rendererErrors).toEqual([]);
+});
+
+test("closes panel tabs with the middle button and keeps the active one in view", async () => {
+  await resizeWindow(1440, 920);
+  const panel = await ensureWorkspaceTools(page);
+  for (const name of ["Changes", "Files", "Plan", "Attachments"]) await selectWorkspaceTool(panel, name);
+  const order = async () => await page.locator(".workspace-panel [data-tab-key]")
+    .evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-tab-key")));
+
+  await panel.locator('[data-tab-key="plan"]').click({ button: "middle" });
+  await expect(panel.locator('[data-tab-key="plan"]')).toHaveCount(0);
+
+  for (const name of ["Plan", "Goal", "Usage", "Background tasks"]) await selectWorkspaceTool(panel, name);
+  const toolsHandle = page.getByRole("separator", { name: "Resize workspace tools" });
+  await toolsHandle.focus();
+  await toolsHandle.press("Home");
+  const list = panel.getByRole("tablist", { name: "Panel surfaces" });
+  await expect.poll(() => list.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  const first = (await order())[0]!;
+  await panel.locator(`[data-workspace-tab="${first}"]`).click();
+  await list.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  await page.getByRole("textbox", { name: "Message", exact: true }).focus();
+  await page.keyboard.press("ControlOrMeta+w");
+  await expect(panel.locator(`[data-tab-key="${first}"]`)).toHaveCount(0);
+  const next = (await order())[0]!;
+  await expect(panel.locator(`[data-workspace-tab="${next}"]`)).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => list.evaluate((element, key) => {
+    const tab = element.querySelector(`[data-tab-key="${key}"]`)!.getBoundingClientRect();
+    const bounds = element.getBoundingClientRect();
+    return tab.left >= bounds.left - 1 && tab.right <= bounds.right + 1;
+  }, next)).toBe(true);
+  await toolsHandle.focus();
+  await toolsHandle.press("Enter");
   await expectNoViewportOverflow();
   expect(rendererErrors).toEqual([]);
 });

@@ -54,7 +54,6 @@ export function ChatResumeControl({
         aria-label="Resume a provider chat"
         aria-busy={busy}
       >
-        <div className="composer-command-group-label">Provider chats</div>
         <ProviderResumePicker
           options={options}
           selectedConversationId={null}

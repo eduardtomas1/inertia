@@ -184,7 +184,7 @@ test("continues a usage-limited Claude chat on Codex in place with its earlier m
   await expect(page.getByText(CODEX_REPLY, { exact: true })).toBeVisible();
 
   const separator = page.getByRole("separator", {
-    name: "Context handoff: Claude · claude-sonnet-4-6 to Codex · 2 earlier messages restored",
+    name: "Context handoff: Claude · claude-sonnet-4-6 to Codex · 2 earlier messages carried",
   });
   await expect(separator).toBeVisible();
   const requestBox = await page.getByText(REQUEST, { exact: true }).boundingBox();
@@ -192,7 +192,8 @@ test("continues a usage-limited Claude chat on Codex in place with its earlier m
   const followUpBox = await page.getByText(FOLLOW_UP, { exact: true }).boundingBox();
   expect(requestBox!.y).toBeLessThan(dividerBox!.y);
   expect(dividerBox!.y).toBeLessThan(followUpBox!.y);
-  await expect(page.getByText(/Provider changed · 2 earlier messages restored/u)).toBeVisible();
+  await expect(page.locator("section.provider-handoff-row .provider-handoff-marker")).toContainText("2 earlier messages carried");
+  await expect(page.getByLabel("Provider session")).toHaveCount(0);
   await expect(composer.getByText(/Next message starts a new/u)).toHaveCount(0);
 
   const prompt = await readFile(join(app.workspaceDirectory, ".git", PROMPT_RECEIPT), "utf8");

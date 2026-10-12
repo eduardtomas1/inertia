@@ -28,6 +28,7 @@ import {
 import { formatElapsed } from "../utils/responseTimeline";
 import { isLiveSubagentTrace } from "../utils/subagentDisclosure";
 import { SubagentElapsed, subscribeLiveElapsed } from "./SubagentElapsed";
+import { TooltipButton } from "./TooltipButton";
 
 function KindLine({
   kind,
@@ -64,16 +65,17 @@ function StopButton({
   onStop: () => void;
 }): React.JSX.Element {
   return (
-    <button
-      type="button"
+    <TooltipButton
       className="background-task-stop"
       data-focus-key="stop"
+      tooltip={stopping ? "Stopping" : "Stop"}
+      describeTooltip={false}
       aria-label={`${stopping ? "Stopping" : "Stop"} ${title}`}
       disabled={stopping}
       onClick={onStop}
     >
-      <Square size={10} aria-hidden="true" />
-    </button>
+      <Square size={14} aria-hidden="true" />
+    </TooltipButton>
   );
 }
 
@@ -289,7 +291,7 @@ export const AgentCard = memo(function AgentCard({
           onClick={() => onToggle(trace.id)}
         >
           View transcript
-          <ChevronDown size={12} aria-hidden="true" />
+          <ChevronDown size={14} aria-hidden="true" />
         </button>
       </p>
       {expanded && (

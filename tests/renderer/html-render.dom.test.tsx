@@ -273,8 +273,9 @@ describe("visual replies in the response timeline", () => {
       chatMessage("notice-visual-reply", "system", "Earlier messages were not imported.", at(4)),
     ])} />);
 
-    expect(screen.getByRole("article", { name: "Agent system notice" }))
-      .toHaveTextContent("Earlier messages were not imported.");
+    const notice = screen.getByRole("article", { name: "Agent system notice" });
+    expect(notice).toHaveTextContent("Earlier messages were not imported.");
+    expect(notice.querySelector(".message-meta")).toBeNull();
     expect(screen.queryByTestId("html-render")).not.toBeInTheDocument();
   });
 
@@ -571,7 +572,7 @@ describe("visual replies in the response timeline", () => {
     const dialog = await screen.findByRole("dialog", { name: title }, { timeout: 10_000 });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(opened).toHaveBeenCalledOnce();
-    const close = screen.getByRole("button", { name: `Close ${title}` });
+    const close = screen.getByRole("button", { name: "Close" });
     await waitFor(() => expect(close).toHaveFocus());
     const dialogFrame = screen.getByTestId("html-render-dialog-frame");
     expect(dialogFrame).toHaveAttribute("title", title);

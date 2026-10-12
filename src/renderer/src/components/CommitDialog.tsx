@@ -1,4 +1,4 @@
-import { GitCommitHorizontal, Upload, X } from "lucide-react";
+import { CloudUpload, GitCommitHorizontal } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DiffReviewState,
@@ -14,8 +14,9 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { unreviewedCommitHunks } from "../lib/commitReview";
-import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
-import { IconButton, LoadingMark } from "./ui";
+import { captureModalFocus } from "../utils/modalFocus";
+import { DialogShell } from "./DialogShell";
+import { LoadingMark } from "./ui";
 
 export type CommitDialogProps = {
   open: boolean;
@@ -257,47 +258,45 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
     }
   };
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !locked) onClose(); }}>
-      <section
-        className="commit-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="commit-dialog-title"
-        onKeyDown={(event) => {
-          trapModalFocus(event, event.currentTarget);
-        }}
-      >
-        <header><span className="dialog-icon"><GitCommitHorizontal size={18} /></span><div><h2 id="commit-dialog-title">Commit changes</h2><p><strong>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")}</strong> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></p></div><IconButton label="Close commit dialog" onClick={onClose} disabled={locked}><X size={16} /></IconButton></header>
-        <div className="commit-path-heading">
-          <span>Paths to stage and commit</span>
-          <button type="button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths(status?.files.map((file) => file.path) ?? [])}>All</button>
-          <button type="button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths([])}>None</button>
-        </div>
-        <div className="commit-path-list">
-          {status?.files.map((file) => (
-            <label key={file.path}>
-              <input
-                type="checkbox"
-                checked={selectedPaths.includes(file.path)}
-                disabled={locked || reviewUnavailable}
-                onChange={(event) => setSelectedPaths((current) => event.target.checked
-                  ? [...new Set([...current, file.path])]
-                  : current.filter((path) => path !== file.path))}
-              />
-              <span><strong>{file.path}</strong><small>{file.untracked ? "Untracked" : `${file.staged ? "Staged" : ""}${file.staged && file.unstaged ? " + " : ""}${file.unstaged ? "Unstaged" : ""}`}</small></span>
-            </label>
-          ))}
-        </div>
-        <p className="commit-stage-note">Only checked paths will be staged and committed. Review marks never stage files.</p>
-        {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
-        {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
-        {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
-        <label><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(false); }} /></label>
-        <footer>
-          <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={15} />}<span>Commit</span></button>
-          <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <Upload size={15} />}<span>Commit & push</span></button>
-        </footer>
-      </section>
-    </div>
+    <DialogShell
+      className="commit-shell"
+      titleId="commit-dialog-title"
+      title="Commit changes"
+      description={<><span>{status?.branch ?? (diffParsing ? "Preparing review…" : "Detached HEAD")}</span> · {status?.files.length ?? 0} {status?.files.length === 1 ? "file" : "files"} · <span className="stat-additions">+{status?.insertions ?? 0}</span> <span className="stat-deletions">−{status?.deletions ?? 0}</span></>}
+      closeLabel="Close commit dialog"
+      closeDisabled={locked}
+      onClose={onClose}
+      onDismiss={() => { if (!locked) onClose(); }}
+      footer={<>
+        <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={14} />}<span>Commit</span></button>
+        <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <CloudUpload size={14} />}<span>Commit & push</span></button>
+      </>}
+    >
+      <div className="commit-path-heading">
+        <span>Paths to stage and commit</span>
+        <button type="button" className="text-button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths(status?.files.map((file) => file.path) ?? [])}>All</button>
+        <button type="button" className="text-button" disabled={locked || reviewUnavailable} onClick={() => setSelectedPaths([])}>None</button>
+      </div>
+      <div className="commit-path-list">
+        {status?.files.map((file) => (
+          <label key={file.path}>
+            <input
+              type="checkbox"
+              checked={selectedPaths.includes(file.path)}
+              disabled={locked || reviewUnavailable}
+              onChange={(event) => setSelectedPaths((current) => event.target.checked
+                ? [...new Set([...current, file.path])]
+                : current.filter((path) => path !== file.path))}
+            />
+            <span className="commit-path-name" title={file.path}>{file.path}</span><span className="commit-path-state">{file.untracked ? "Untracked" : `${file.staged ? "Staged" : ""}${file.staged && file.unstaged ? " + " : ""}${file.unstaged ? "Unstaged" : ""}`}</span>
+          </label>
+        ))}
+      </div>
+      <p className="commit-stage-note">Only checked paths will be staged and committed. Review marks never stage files.</p>
+      {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
+      {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
+      {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
+      <label className="dialog-field"><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(false); }} /></label>
+    </DialogShell>
   );
 }

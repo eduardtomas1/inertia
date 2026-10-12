@@ -217,6 +217,9 @@ describe("agent loading and trace DOM", () => {
     );
     expect(container.querySelector(".turn-working-copy small"))
       .toHaveTextContent("Web search");
+    expect(container.querySelector(".turn-working-copy strong"))
+      .toHaveClass("visually-hidden");
+    expect(container.querySelector(".turn-working-detail-chip")).toBeNull();
     expect(grid).toHaveAttribute("aria-hidden", "true");
     expect(grid).toHaveAttribute("data-animated", "true");
     expect(grid).toHaveAttribute("data-phase", "searching");
@@ -329,13 +332,13 @@ describe("agent loading and trace DOM", () => {
       if (!summary) throw new Error("Expected a live thinking strip.");
       const entering = (): Element | null =>
         summary.querySelector(".turn-thinking-line > .is-entering");
-      expect(summary.querySelector(".lucide-brain")).toBeInTheDocument();
+      expect(summary.querySelector(".lucide-brain")).toBeNull();
       expect(summary.querySelector(".turn-thinking-label")).toHaveTextContent("Thinking");
       expect(summary.querySelector(".turn-thinking-line")).toHaveAttribute("aria-hidden", "true");
       expect(summary.querySelector(".agent-pixel-loader")).toBeNull();
       expect(container.querySelectorAll(".agent-pixel-loader")).toHaveLength(1);
       const pulse = summary.querySelector(".turn-thinking-pulse");
-      expect(pulse?.querySelector(".lucide-brain")).toBeInTheDocument();
+      expect(pulse?.querySelector("svg")).toBeNull();
       expect(pulse?.querySelector(".turn-thinking-label")).toBeInTheDocument();
       const elapsed = pulse?.querySelector(".turn-thinking-elapsed");
       expect(elapsed).toHaveTextContent(/^·\s*\d+\.\ds$/u);
@@ -700,7 +703,7 @@ describe("agent loading and trace DOM", () => {
     expect(historical).not.toHaveAttribute("aria-live");
     expect(historical.querySelector("[aria-live]")).toBeNull();
     expect(historical.querySelector("[role=status]")).toBeNull();
-    expect(within(historical).getByTitle("Copy code")).toBeInTheDocument();
+    expect(within(historical).getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(within(historical).getByRole("button", { name: "Markdown" }))
       .toBeInTheDocument();
     expect(historical.querySelector(".response-markdown"))

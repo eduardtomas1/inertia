@@ -417,11 +417,11 @@ function startClaudeRun(
             : {}),
         },
       });
-      if (usesNativeAnthropic) {
-        await emitClaudeModelMetadata(query, emitter.rich);
-      }
       acceptingFollowUps = true;
       emitter.status("running");
+      if (usesNativeAnthropic) {
+        void emitClaudeModelMetadata(query, emitter.rich).catch(() => undefined);
+      }
       messageIterator = query[Symbol.asyncIterator]();
       let terminalDrainDeadline: number | null = null;
       let parentResumedAfterProvisional = false;
@@ -605,6 +605,7 @@ function startClaudeRun(
               // snapshots from the next turn must not be suppressed by text
               // that was emitted before the admitted follow-up was handled.
               messageProjector.resetTurnOutput();
+              emitter.textBoundary();
               continue;
             }
           } else if ((message.subtype !== "success" || message.is_error) && pendingFollowUpIds.size > 0) {

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
 import {
+  ArrowDownUp,
   ChevronDown,
   CloudDownload,
   CloudUpload,
@@ -7,12 +8,12 @@ import {
   GitBranchPlus,
   GitCommitHorizontal,
   GitPullRequest,
-  Info,
 } from "lucide-react";
 import type { GitStatusSnapshot } from "@shared/contracts";
 
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
 import { useFocusOutDismiss } from "./useFocusOutDismiss";
+import { TooltipButton } from "../TooltipButton";
 import {
   resolveQuickAction,
   type GitQuickAction,
@@ -42,7 +43,7 @@ export function GitQuickActionIcon({
     return <GitCommitHorizontal size={size} aria-hidden="true" />;
   }
   if (quickAction.label === "Push") return <CloudUpload size={size} aria-hidden="true" />;
-  return <Info size={size} aria-hidden="true" />;
+  return <ArrowDownUp size={size} aria-hidden="true" />;
 }
 
 interface GitActionsControlProps {
@@ -178,13 +179,13 @@ export function GitActionsControl({
         role="group"
         aria-label="Git actions"
       >
-        <button
+        <TooltipButton
           type="button"
           className="header-split-primary"
           aria-label={quickAction.label}
           aria-disabled={quickAction.disabled || undefined}
           aria-describedby={quickActionDisabledReason ? hintId : undefined}
-          title={quickActionDisabledReason ?? quickAction.hint ?? quickAction.label}
+          tooltip={quickActionDisabledReason ?? quickAction.hint ?? quickAction.label}
           onFocus={() => {
             if (quickAction.kind === "commit") void loadCommitDialog();
           }}
@@ -193,15 +194,15 @@ export function GitActionsControl({
           }}
           onClick={runQuickAction}
         >
-          <GitQuickActionIcon quickAction={quickAction} />
+          <GitQuickActionIcon quickAction={quickAction} size={16} />
           <span className="header-split-label">{quickAction.label}</span>
-        </button>
-        <button
+        </TooltipButton>
+        <TooltipButton
           ref={(node) => setMenuTrigger("git", node)}
           type="button"
           className="header-split-chevron"
           aria-label="More Git actions"
-          title="More Git actions"
+          tooltip="More Git actions"
           aria-expanded={menu === "git"}
           aria-haspopup="menu"
           aria-controls="workspace-header-git-menu"
@@ -213,7 +214,7 @@ export function GitActionsControl({
           }}
         >
           <ChevronDown size={14} aria-hidden="true" />
-        </button>
+        </TooltipButton>
       </div>
       {quickActionDisabledReason && (
         <span id={hintId} className="visually-hidden">{quickActionDisabledReason}</span>

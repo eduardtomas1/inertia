@@ -3,6 +3,7 @@ import type {
   ProviderInfo,
   RuntimeMutationEvent,
 } from "../../shared/contracts";
+import type { ConversationAttachmentStore } from "../../node/conversation-attachment-store";
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
@@ -29,6 +30,7 @@ interface AgentThreadRuntimeDependencies {
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   pendingInputs: Map<string, AgentInputRequest>;
+  conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;

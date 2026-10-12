@@ -796,7 +796,7 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(captured));
 const sessionId = "44444444-4444-4444-8444-444444444444";
 const configOptions = [
-  { type: "select", id: "model", name: "Model", category: "model", currentValue: "model-a", options: [{ value: "model-a", name: "Model A" }] },
+  { type: "select", id: "model", name: "Model", category: "model", currentValue: "auto", options: [{ value: "model-a", name: "Model A" }] },
   { type: "select", id: "effort-before-model", name: "Effort", category: "thought_level", currentValue: "low", options: [{ value: "low", name: "Low" }] }
 ];
 const modelAConfigOptions = [

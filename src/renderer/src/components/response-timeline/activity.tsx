@@ -10,28 +10,25 @@ import {
   useState,
 } from "react";
 import {
-  Brain,
-  BrainCircuit,
   Check,
-  CheckCircle2,
   ChevronDown,
+  ChevronRight,
   CircleDot,
-  Clock3,
+  Clock,
   Code2,
   FileText,
-  ListChecks,
   Search,
   Terminal,
   TriangleAlert,
   Wrench,
 } from "lucide-react";
 import "./ActivityGroup.css";
+import { PlanDetail } from "./PlanDetail";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import clsx from "clsx";
 import type {
   AgentActivity,
-  AgentPlan,
   AgentTurn,
 } from "@shared/contracts";
 import {
@@ -50,13 +47,22 @@ import {
   resolveActivityGroupWindow,
   summarizeActivities,
   turnStatusLabel,
+  workStatusLabel,
   workSummaryLabel,
   type ActivityAttentionSeverity,
   type ActivityWorkKind,
   type ResponseTurn,
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
+import {
+  withHtmlRenders,
+  withLiveCommentary,
+  type TurnWorkStreamEntry,
+} from "../../utils/response-timeline/execution";
+import { layeredHtmlRenders } from "../../utils/response-timeline/model";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { Tooltip, useTooltip } from "../Tooltip";
+import { LoadingMark } from "../ui";
 import { WorkingOrb } from "../working-indicator/WorkingOrb";
 import { useWorkingIndicator } from "../working-indicator/WorkingIndicatorContext";
 import {
@@ -69,6 +75,7 @@ import { messageContextMenu } from "./messageContextMenu";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
+import { HtmlRenderStreamItem } from "./html-render";
 import {
   advanceThinkingLine,
   IDLE_THINKING_LINE,
@@ -97,7 +104,6 @@ export function ReasoningSummary({
     return (
       <p className="turn-reasoning-body">
         {content}
-        {streaming && <span className="streaming-caret" aria-hidden="true" />}
       </p>
     );
   }
@@ -125,9 +131,6 @@ export function ReasoningSummary({
           )}
           {segment.body && (
             <span className="turn-reasoning-step-body">{segment.body}</span>
-          )}
-          {streaming && index === segments.length - 1 && (
-            <span className="streaming-caret" aria-hidden="true" />
           )}
         </li>
       ))}
@@ -157,50 +160,39 @@ export function LiveElapsed({
   );
 }
 
-export const MAX_ANIMATED_STREAM_WORDS = 96;
+/**
+ * Keeps the live fast path as escaped plain text. Each paragraph is a stable
+ * keyed block: settled paragraphs are split once and memoised, so an update
+ * only re-renders the tail paragraph, and a newly started one fades in.
+ */
+const StreamBlock = memo(function StreamBlock({ text }: { text: string }): React.JSX.Element {
+  return <span className="response-stream-block">{text}</span>;
+});
 
-function animatedStreamStart(content: string): number {
-  for (let size = 4_096; ; size *= 8) {
-    const from = Math.max(0, content.length - size);
-    const tokens = content.slice(from).split(/(\s+)/u).filter(Boolean);
-    let words = 0;
-    let start = content.length;
-    for (let index = tokens.length - 1; index >= (from > 0 ? 1 : 0); index -= 1) {
-      start -= tokens[index]!.length;
-      if (!/\S/u.test(tokens[index]!)) continue;
-      words += 1;
-      if (words === MAX_ANIMATED_STREAM_WORDS) return start;
-    }
-    if (from === 0) return 0;
-  }
+function settledStreamEnd(content: string): number {
+  const separator = content.lastIndexOf("\n\n");
+  if (separator < 0) return 0;
+  let end = separator + 2;
+  while (content[end] === "\n") end += 1;
+  return end;
 }
 
-/**
- * Keeps the live fast path as escaped plain text while giving newly appended
- * words stable keyed spans. Only the recent tail gets nodes, which bounds DOM
- * work during long responses and lets React preserve already animated words.
- */
 export function StreamingPlainText({
   content,
 }: {
   content: string;
 }): React.JSX.Element {
-  const animatedStart = animatedStreamStart(content);
-  let offset = animatedStart;
+  const settledEnd = settledStreamEnd(content);
+  const settled = content.slice(0, settledEnd);
+  const settledParts = useMemo(() => settled.split(/(\n{2,})/u).slice(0, -1), [settled]);
   return (
     <p>
-      {content.slice(0, animatedStart)}
-      {content.slice(animatedStart).split(/(\s+)/u).filter(Boolean).map((token) => {
-        const start = offset;
-        offset += token.length;
-        return /\S/u.test(token)
-          ? (
-              <span className="response-stream-word" key={`stream-word-${start}`}>
-                {token}
-              </span>
-            )
-          : token;
-      })}
+      {[
+        ...settledParts.map((part, index) => index % 2 === 1
+          ? part
+          : <StreamBlock key={index} text={part} />),
+        <StreamBlock key={settledParts.length} text={content.slice(settledEnd)} />,
+      ]}
     </p>
   );
 }
@@ -269,6 +261,8 @@ export const ActivityRow = memo(function ActivityRow({
 }): React.JSX.Element {
   const [detailExpanded, setDetailExpanded] = useState(false);
   const outputId = useId();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const tooltip = useTooltip(rowRef, {});
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const interrupted = isInterruptedActivity(activity);
   const attentionSeverity = activityAttentionSeverity(activity);
@@ -327,7 +321,10 @@ export const ActivityRow = memo(function ActivityRow({
       data-activity-work={workKind}
       data-activity-severity={severity}
       data-activity-visibility={visibility}
-      title={visibleTitle}
+      ref={rowRef}
+      onPointerEnter={tooltip.handlers.onPointerEnter}
+      onPointerLeave={tooltip.handlers.onPointerLeave}
+      onPointerDown={tooltip.handlers.onPointerDown}
     >
       <span
         className="agent-activity-icon"
@@ -336,7 +333,7 @@ export const ActivityRow = memo(function ActivityRow({
       >
         {runningOrb
           ? <WorkingOrb size={14} design={runningOrb.design} pace={runningOrb.pace} />
-          : <Icon size={12} />}
+          : <Icon size={14} />}
       </span>
       <span className={clsx(
         "agent-activity-copy",
@@ -381,7 +378,7 @@ export const ActivityRow = memo(function ActivityRow({
           }}
         >
           <span>{disclosureLabel}</span>
-          <ChevronDown size={11} aria-hidden="true" />
+          <ChevronDown size={14} aria-hidden="true" />
         </button>
       )}
       {showDisclosure && detailExpanded && (
@@ -389,23 +386,12 @@ export const ActivityRow = memo(function ActivityRow({
           {detailPresentation.full}
         </pre>
       )}
+      {tooltip.layer && <Tooltip anchor={rowRef} layer={tooltip.layer} label={visibleTitle} />}
     </div>
   );
 });
 
-export const PlanDetail = memo(function PlanDetail({ plan }: { plan: AgentPlan }): React.JSX.Element {
-  return (
-    <div className="turn-reasoning-detail" data-turn-plan={plan.turnId ?? "legacy"}>
-      <span><ListChecks size={13} aria-hidden="true" />Plan</span>
-      {plan.explanation && <p>{plan.explanation}</p>}
-      {plan.steps.length > 0 && (
-        <p>{plan.steps.map(({ step, status }) => `${status === "completed" ? "✓" : status === "cancelled" ? "✕" : status === "inProgress" ? "•" : "○"} ${step}`).join("\n")}</p>
-      )}
-    </div>
-  );
-});
-
-const CommentaryRow = memo(function CommentaryRow({
+export const CommentaryRow = memo(function CommentaryRow({
   entry,
   projectRoot,
   projectId,
@@ -427,8 +413,8 @@ const CommentaryRow = memo(function CommentaryRow({
   }, [entry.content, entry.streaming]);
   return (
     <article
-      className={clsx("turn-commentary-row", entry.streaming && "is-streaming")}
-      aria-label={entry.streaming ? "Live agent update" : "Agent update"}
+      className={clsx("turn-commentary-row", entry.streaming && "is-streaming", entry.answer && "is-answer")}
+      aria-label={entry.streaming ? "Live agent update" : entry.answer ? "Agent answer" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
       {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content) : undefined)}
     >
@@ -437,7 +423,7 @@ const CommentaryRow = memo(function CommentaryRow({
             <div
               className="response-markdown is-streaming is-plain-stream"
               data-stream-renderer="plain-text"
-              data-stream-motion="word-reveal"
+              data-stream-motion="block-fade"
             >
               <StreamingPlainText content={entry.content} />
             </div>
@@ -470,7 +456,6 @@ export function FollowUpRow({
       tabIndex={-1}
       {...messageContextMenu(entry.message, entry.message.content)}
     >
-      <span>You</span>
       <p>{entry.message.content}</p>
       <SentMessageAttachmentList
         attachments={entry.message.attachments}
@@ -588,7 +573,9 @@ export const ActivityGroup = memo(function ActivityGroup({
         >
           {groupOrb
             ? <WorkingOrb size={14} design={groupOrb.design} pace={groupOrb.pace} />
-            : <MarkIcon size={11} />}
+            : summary.running > 0
+              ? <LoadingMark size={14} aria-hidden="true" />
+              : <MarkIcon size={14} />}
         </span>
         <span className="turn-activity-group-parts">
           {parts.map((part) => (
@@ -605,7 +592,7 @@ export const ActivityGroup = memo(function ActivityGroup({
           ))}
         </span>
         <ChevronDown
-          size={12}
+          size={14}
           className="turn-activity-group-chevron"
           aria-hidden="true"
         />
@@ -652,6 +639,7 @@ export const ActivityGroup = memo(function ActivityGroup({
 function ExecutionStream({
   entries,
   live = false,
+  label = "Agent work transcript",
   projectRoot,
   projectId,
   conversationId,
@@ -660,8 +648,9 @@ function ExecutionStream({
   onBeforeToggle,
   onAfterToggle,
 }: {
-  entries: TurnExecutionStreamEntry[];
+  entries: TurnWorkStreamEntry[];
   live?: boolean;
+  label?: string;
   projectRoot: string;
   projectId: string;
   conversationId: string;
@@ -673,8 +662,18 @@ function ExecutionStream({
   if (entries.length === 0) return null;
   const lastIndex = entries.length - 1;
   return (
-    <div className="turn-execution-stream" role="list" aria-label="Agent work transcript">
+    <div className="turn-execution-stream" role="list" aria-label={label}>
       {entries.map((entry, index) => {
+        if (entry.kind === "html-render") {
+          return entry.message.htmlRender && (
+            <div role="listitem" key={entry.id}>
+              <HtmlRenderStreamItem
+                key={entry.message.htmlRender.renderId}
+                reference={entry.message.htmlRender}
+              />
+            </div>
+          );
+        }
         if (entry.kind === "commentary") {
           return (
             <div role="listitem" key={entry.id}>
@@ -819,7 +818,6 @@ function ThinkingSummary({
   return (
     <>
       <span className="turn-thinking-pulse">
-        <Brain size={16} className="turn-thinking-icon" aria-hidden="true" />
         <span className="turn-thinking-label" key={live ? "live" : "folded"}>
           {live
             ? "Thinking"
@@ -871,7 +869,7 @@ export function SettledWorkDetails({
   onAfterToggle,
 }: {
   id?: string;
-  entries: TurnExecutionStreamEntry[];
+  entries: TurnWorkStreamEntry[];
   turn: ResponseTurn;
   reasoningContent: string;
   includesReasoning: boolean;
@@ -897,7 +895,7 @@ export function SettledWorkDetails({
       />
       {includesReasoning && (
         <div className="turn-reasoning-detail">
-          <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+          <span>Reasoning summary</span>
           <ReasoningSummary content={reasoningContent} />
         </div>
       )}
@@ -906,6 +904,8 @@ export function SettledWorkDetails({
   );
 }
 
+const NO_HELD_FOLLOW_UPS: string[] = [];
+
 export function WorkLog({
   turn,
   autoCollapse,
@@ -913,6 +913,7 @@ export function WorkLog({
   reasoningStreaming,
   liveContent,
   liveContentStreaming,
+  heldFollowUpIds = NO_HELD_FOLLOW_UPS,
   showThinking,
   projectRoot,
   projectId,
@@ -928,6 +929,7 @@ export function WorkLog({
   reasoningStreaming: boolean;
   liveContent: string;
   liveContentStreaming: boolean;
+  heldFollowUpIds?: string[];
   showThinking: boolean;
   projectRoot: string;
   projectId: string;
@@ -961,28 +963,28 @@ export function WorkLog({
       includeCompactions: turn.isActive,
     }), previousDurableStream.current);
     previousDurableStream.current = next;
-    return next;
+    const layered = layeredHtmlRenders(turn);
+    return withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message)));
   }, [turn]);
-  // Transient text is always the final visible execution entry. Appending that
+  // Transient text is the final visible execution entry unless follow-ups
+  // were saved while it streamed; then it sits just above them. Inserting that
   // one row keeps settled commentary and activity-group identities stable
   // instead of sorting the complete workstream for every provider token. A
   // reconnect may retain the text while deliberately closing its live channel,
   // so only the current text channel gets live semantics and animation.
-  const stream = useMemo<TurnExecutionStreamEntry[]>(() => {
+  const stream = useMemo<TurnWorkStreamEntry[]>(() => {
     if (!turn.isActive || !liveContent) return durableStream;
-    return [
-      ...durableStream,
-      {
-        kind: "commentary",
-        id: `live-commentary:${turn.id}`,
-        createdAt: turn.agentTurn.updatedAt,
-        message: null,
-        content: liveContent,
-        streaming: liveContentStreaming,
-      },
-    ];
+    return withLiveCommentary(durableStream, {
+      kind: "commentary",
+      id: `live-commentary:${turn.id}`,
+      createdAt: turn.agentTurn.updatedAt,
+      message: null,
+      content: liveContent,
+      streaming: liveContentStreaming,
+    }, heldFollowUpIds);
   }, [
     durableStream,
+    heldFollowUpIds,
     liveContent,
     liveContentStreaming,
     turn.agentTurn.updatedAt,
@@ -1030,6 +1032,7 @@ export function WorkLog({
     return (
       <div className="turn-work-log is-live">
         <ExecutionStream
+          key="stream"
           entries={stream}
           live
           projectRoot={projectRoot}
@@ -1075,12 +1078,12 @@ export function WorkLog({
                       <small>{activeTraceCount}</small>
                     </>
                   )}
-              <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
+              <ChevronDown size={14} className="turn-work-chevron" aria-hidden="true" />
             </summary>
             <div className="turn-work-details" id={detailsId} hidden={!expanded}>
               {expanded && includesReasoning && (
                 <div className="turn-reasoning-detail">
-                  <span><BrainCircuit size={13} aria-hidden="true" />Reasoning summary</span>
+                  <span>Reasoning summary</span>
                   <ReasoningSummary
                     content={reasoningContent}
                     streaming={activeReasoning}
@@ -1095,7 +1098,13 @@ export function WorkLog({
     );
   }
 
-  const hasFoldableDetails = stream.length > 0 || supplementalCount > 0;
+  const exchange = stream.filter((entry) =>
+    entry.kind === "follow-up"
+    || entry.kind === "html-render"
+    || (entry.kind === "commentary" && entry.answer));
+  const workStream = exchange.length > 0
+    ? stream.filter((entry) => !exchange.includes(entry))
+    : stream;
   const status = turn.agentTurn.status === "failed" && turn.agentTurn.usageLimited
     ? "limited"
     : turn.agentTurn.status === "failed"
@@ -1103,16 +1112,26 @@ export function WorkLog({
     : turn.agentTurn.status === "cancelled" || turn.agentTurn.status === "interrupted"
       ? "stopped"
       : "completed";
+  const failureRow = status === "failed"
+    || status === "limited"
+    || failureDiagnostics.length > 0;
+  const latestFailure = failureDiagnostics.at(-1);
+  const hasFoldableDetails = workStream.length > 0
+    || supplementalCount > 0
+    || failureDiagnostics.length > 0
+    || (failureRow && attentionGroup !== null);
   const summaryContent = (
     <>
       {status === "failed"
-        ? <TriangleAlert size={13} aria-hidden="true" />
+        ? <TriangleAlert size={14} aria-hidden="true" />
         : status === "limited"
-          ? <Clock3 size={13} aria-hidden="true" />
-        : status === "stopped"
-          ? <CircleDot size={13} aria-hidden="true" />
-          : <CheckCircle2 size={13} aria-hidden="true" />}
-      <span>{workSummaryLabel(turn)}</span>
+          ? <Clock size={14} aria-hidden="true" />
+          : null}
+      <span>
+        {latestFailure
+          ? `${workStatusLabel(turn)} · ${latestFailure.title}`
+          : workSummaryLabel(turn)}
+      </span>
     </>
   );
 
@@ -1136,13 +1155,13 @@ export function WorkLog({
             {...anchorToggleHandlers}
           >
             {summaryContent}
-            <small>{expanded ? "Hide details" : "Details"}</small>
-            <ChevronDown size={13} className="turn-work-chevron" aria-hidden="true" />
+            {failureRow && <small>Details</small>}
+            <ChevronRight size={14} className="turn-work-chevron" aria-hidden="true" />
           </summary>
           <div id={detailsId} hidden={!expanded}>
             {expanded && (
               <SettledWorkDetails
-                entries={stream}
+                entries={workStream}
                 turn={turn}
                 reasoningContent={reasoningContent}
                 includesReasoning={includesReasoning}
@@ -1155,6 +1174,23 @@ export function WorkLog({
                 onAfterToggle={onAfterToggle}
               />
             )}
+            {expanded && failureRow && attentionGroup && (
+              <ActivityGroup
+                entry={attentionGroup}
+                settled
+                revealLatestFailure
+                onBeforeToggle={onBeforeToggle}
+                onAfterToggle={onAfterToggle}
+              />
+            )}
+            {expanded && failureDiagnostics.map((activity) => (
+              <Suspense fallback={null} key={activity.id}>
+                <FailureDiagnostics
+                  turn={turn.agentTurn}
+                  activity={activity}
+                />
+              </Suspense>
+            ))}
           </div>
         </details>
       )}
@@ -1163,24 +1199,26 @@ export function WorkLog({
           {summaryContent}
         </div>
       )}
-      {attentionGroup && (
+      {!failureRow && attentionGroup && (
         <ActivityGroup
           entry={attentionGroup}
           settled
-          revealLatestFailure={status === "failed" || status === "limited"}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />
       )}
-      {failureDiagnostics.map((activity) => (
-        <Suspense fallback={null} key={activity.id}>
-          <FailureDiagnostics
-            turn={turn.agentTurn}
-            activity={activity}
-            anchor={[onBeforeToggle, onAfterToggle]}
-          />
-        </Suspense>
-      ))}
+      <ExecutionStream
+        key="stream"
+        entries={exchange}
+        label="Follow-up messages"
+        projectRoot={projectRoot}
+        projectId={projectId}
+        conversationId={conversationId}
+        defaultCodeWrap={defaultCodeWrap}
+        onOpenProjectFile={onOpenProjectFile}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
     </div>
   );
 }

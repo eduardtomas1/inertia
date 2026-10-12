@@ -281,7 +281,7 @@ describe("Environment content in its workspace surfaces", () => {
 
   it("explains an empty chat and shows all available attachments without an expansion step", () => {
     const view = render(attachmentsSurface({ attachments: [] }));
-    expect(screen.getByText("Attachments you send in this chat appear here.")).toBeVisible();
+    expect(screen.getByText("No attachments")).toBeVisible();
     expect(screen.queryByRole("list")).toBeNull();
     const attachments = Array.from({ length: 9 }, (_, index) => ({
       id: `gallery-${index}`, name: `shot-${index}.png`, mimeType: "image/png" as const, size: 2048,
@@ -289,7 +289,7 @@ describe("Environment content in its workspace surfaces", () => {
     view.rerender(attachmentsSurface({ attachments }));
     expect(within(screen.getByRole("list", { name: "Chat attachments" })).getAllByRole("listitem")).toHaveLength(9);
     expect(screen.getByRole("heading", { name: "9 attachments" })).toBeVisible();
-    expect(screen.queryByText("Attachments you send in this chat appear here.")).toBeNull();
+    expect(screen.queryByText("No attachments")).toBeNull();
   });
 
   it("labels the bounded gallery truthfully and keeps split attachment headings unique", () => {
@@ -341,7 +341,7 @@ describe("Environment content in its workspace surfaces", () => {
   it("separates background tasks from the dedicated attachment browser", () => {
     render(<>{backgroundTasksSurface()}{attachmentsSurface()}</>);
     const tasks = screen.getByRole("region", { name: "Background tasks" });
-    expect(within(tasks).getByText("No background tasks.")).toBeVisible();
+    expect(within(tasks).getByText("No background tasks")).toBeVisible();
     expect(within(tasks).queryByRole("list", { name: "Chat attachments" })).toBeNull();
     const attachments = screen.getByRole("region", { name: "Attachments" });
     expect(within(attachments).getByText("reference.png")).toBeVisible();
@@ -386,7 +386,7 @@ describe("Environment content in its workspace surfaces", () => {
       />,
     );
     expect(screen.getByText("Stale")).toBeVisible();
-    expect(screen.getByText("No provider limit windows are available.")).toBeVisible();
+    expect(screen.getByText("No provider limits reported")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
     expect(onRefreshUsage).toHaveBeenCalledOnce();
 
@@ -421,7 +421,7 @@ describe("Environment content in its workspace surfaces", () => {
     expect(screen.queryByRole("button", { name: "Refresh usage" })).not.toBeInTheDocument();
 
     view.rerender(<UsageSurface usage={null} onRefreshUsage={onRefreshUsage} />);
-    expect(screen.getByText(/Usage is unavailable/iu)).toBeVisible();
+    expect(screen.getByText("No provider route selected")).toBeVisible();
   });
 
   it("moves local servers into Run with their status in text, not a dot", async () => {
@@ -472,6 +472,28 @@ describe("Environment content in its workspace surfaces", () => {
     expect(runs.onAcknowledgeRun).toHaveBeenCalledWith(failed);
     expect(runs.onDismissRun).toHaveBeenCalledWith(failed);
     expect(within(menu).getByText(/Needs attention/u)).toBeVisible();
+  });
+
+  it("names each run row action in the shared tooltip instead of a native title", async () => {
+    const failed = environmentRun({
+      id: "failed-check",
+      label: "Typecheck",
+      status: "failed",
+      canAcknowledge: true,
+      canDismiss: true,
+    });
+    render(<RunControl runs={runsModel({ checks: [failed] })} />);
+    const menu = await openRunMenu();
+    const actions = [
+      within(menu).getByRole("menuitem", { name: /^Stop Docs preview/u }),
+      within(menu).getByRole("menuitem", { name: /^Open preview for Docs preview/u }),
+      within(menu).getByRole("menuitem", { name: "Acknowledge Typecheck" }),
+      within(menu).getByRole("menuitem", { name: "Dismiss Typecheck" }),
+    ];
+    for (const action of actions) expect(action).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(actions[0]!, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent)).toContain("Stop"));
+    fireEvent.pointerLeave(actions[0]!, { pointerType: "mouse" });
   });
 
   it("moves focus to the next run action when a row disappears", async () => {

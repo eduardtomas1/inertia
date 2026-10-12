@@ -624,6 +624,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           providerSessionId,
         );
       },
+      createTurnCheckpoint: (turn, signal) => turnGitArtifacts.createTurnCheckpoint(turn, signal),
       captureGitBefore: async (input) => {
         await turnGitArtifacts.captureBefore(input);
         broadcastSnapshot();
@@ -656,6 +657,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
+    conversationAttachments: initializedConversationAttachments,
     agentBrowser: options.agentBrowser,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);

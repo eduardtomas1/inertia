@@ -18,6 +18,10 @@ import "../sidebar-work-index.css";
 const WORK_INDEX_VIRTUALIZATION_THRESHOLD = 60;
 const WORK_INDEX_INITIAL_HEIGHT = 720;
 const WORK_INDEX_OVERSCAN = 8;
+export const WORK_ROW_HEIGHT = 58;
+export const WORK_ROW_COMPACT_HEIGHT = 50;
+const WORK_SECTION_HEIGHT = 36;
+const WORK_SHOW_MORE_HEIGHT = 30;
 
 export const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
   "earlier",
@@ -161,9 +165,9 @@ export function useSidebarWorkIndex({
   const virtualized = items.length >= WORK_INDEX_VIRTUALIZATION_THRESHOLD;
   const estimateSize = useCallback((index: number): number => {
     const item = items[index];
-    if (item?.kind === "section") return 26;
-    if (item?.kind === "show-more") return 35;
-    return compact ? 70 : 84;
+    if (item?.kind === "section") return WORK_SECTION_HEIGHT;
+    if (item?.kind === "show-more") return WORK_SHOW_MORE_HEIGHT;
+    return compact ? WORK_ROW_COMPACT_HEIGHT : WORK_ROW_HEIGHT;
   }, [compact, items]);
   const { offsets, totalSize } = useMemo(() => {
     const nextOffsets: number[] = [];

@@ -1,8 +1,8 @@
-.context-compaction-icon { flex: 0 0 auto; color: var(--text-soft); }
+.context-compaction-icon { flex: 0 0 auto; color: var(--text-muted); }
 .context-compaction-icon > g {
   animation: context-compaction-pulse 2.4s ease-in-out infinite;
 }
-.composer-compact-notice.is-working .context-compaction-icon > g { animation: none; }
+.composer-compact-notice .context-compaction-icon > g { animation: none; }
 @keyframes context-compaction-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
@@ -12,5 +12,5 @@
 }
 [data-active-agent-phase="compacting"] .turn-working-copy > strong {
   color: var(--text-muted);
-  font-weight: 450;
+  font-weight: 400;
 }

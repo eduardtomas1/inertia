@@ -2,20 +2,32 @@ import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { ConversationContextPacket } from "../../shared/conversation-context";
+import {
+  MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN,
+  type ConversationContextExcerpt,
+  type ConversationContextPacket,
+} from "../../shared/conversation-context";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel,
+  finalAnswerExcerptBytes,
   scrubConversationContextMetadata,
 } from "./conversation-context-excerpts";
 import type { ContinuationRouteFilter } from "./conversation-context-source";
+import {
+  sentConversationContextReferences,
+  type SentConversationContextReference,
+} from "./conversation-context-packet-repository";
 import { prepareConversationContextPacket } from "./conversation-context-transport";
+import { contextBlockPromptBytes, providerHandoffBlockBytes } from "./provider-handoff-files";
+import { finalTurnCommands, providerHandoffReason } from "./turn-context-facts";
 
 export interface ContinuationHistoryBlock {
   label: string;
   content: string;
   /** Supplementary context dropped first when the restored history does not fit. */
   optional?: true;
+  structured?: true;
 }
 
 export interface ContinuationHistory {
@@ -23,6 +35,44 @@ export interface ContinuationHistory {
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
+}
+
+function markReferences(
+  excerpts: readonly ConversationContextExcerpt[],
+  references: readonly SentConversationContextReference[],
+): ConversationContextExcerpt[] {
+  const notes = new Map<string, string>();
+  for (const { messageId, title } of references) {
+    notes.set(messageId, `${notes.get(messageId) ?? ""}\n\n[referenced chat: ${title}]`);
+  }
+  return excerpts.map((excerpt) => {
+    const note = notes.get(excerpt.sourceMessageId);
+    return note ? { ...excerpt, content: `${excerpt.content}${note}` } : excerpt;
+  });
+}
+
+function sentReferenceBlocks(
+  references: readonly SentConversationContextReference[],
+  keptMessageIds: ReadonlySet<string>,
+  roomBytes: number,
+): ContinuationHistoryBlock[] {
+  const included: ContinuationHistoryBlock[][] = [];
+  let room = roomBytes;
+  const newest = references
+    .filter(({ messageId }) => keptMessageIds.has(messageId))
+    .slice(-MAX_CONVERSATION_CONTEXT_PACKETS_PER_TURN)
+    .reverse();
+  for (const reference of newest) {
+    const blocks = reference.sentBlocks()?.map(({ label, content, structured }) => ({
+      label, content, optional: true as const, ...(structured ? { structured } : {}),
+    }));
+    if (!blocks) continue;
+    const bytes = blocks.reduce((total, block) => total + providerHandoffBlockBytes(block), 0);
+    if (bytes > room) continue;
+    room -= bytes;
+    included.unshift(blocks);
+  }
+  return included.flat();
 }
 
 interface ContinuationHistorySourceRow {
@@ -56,13 +106,28 @@ export function readContinuationHistory(
     null,
     excludedMessageId,
     route,
+    finalAnswerExcerptBytes(capacityBytes),
   );
   if (!collected) return null;
-  const { excerpts, droppedMessageCount, withheldMessageCount } = collected;
+  const { droppedMessageCount, withheldMessageCount } = collected;
+  const references = sentConversationContextReferences(
+    database,
+    source.id,
+    collected.excerpts.filter(({ role }) => role === "user").map(({ sourceMessageId }) => sourceMessageId),
+  );
+  const excerpts = markReferences(collected.excerpts, references);
   const withheld = withheldMessageCount > 0 ? { withheldMessageCount } : {};
   if (excerpts.length === 0) {
     return { blocks: [], messageCount: 0, omittedMessageCount: 0, ...withheld };
   }
+  const commands = finalTurnCommands(database, excerpts);
+  const moved = route?.handoff
+    ? providerHandoffReason(database, source.id, route.handoff.before, route.handoff.providerId)
+    : null;
+  const supplement = {
+    ...(commands.length > 0 ? { commands } : {}),
+    ...(moved ? { moved } : {}),
+  };
   const workspaceLabel = scrubConversationContextMetadata(
     conversationContextWorkspaceLabel(source),
     "Workspace",
@@ -88,6 +153,7 @@ export function readContinuationHistory(
     consumedAt: null,
     sourceState: "available",
     excerpts,
+    ...(Object.keys(supplement).length > 0 ? { supplement } : {}),
   };
   const unavailable: ContinuationHistory = {
     blocks: [],
@@ -98,8 +164,15 @@ export function readContinuationHistory(
   if (capacityBytes <= 0) return unavailable;
   try {
     const prepared = prepareConversationContextPacket(packet, capacityBytes, "prompt", true);
+    const restored = prepared.blocks.map(({ label, content, structured }) => ({
+      label, content, ...(structured ? { structured } : {}),
+    }));
     return {
-      blocks: prepared.blocks.map(({ label, content }) => ({ label, content })),
+      blocks: [...restored, ...sentReferenceBlocks(
+        references,
+        new Set(prepared.packet.excerpts.map(({ sourceMessageId }) => sourceMessageId)),
+        capacityBytes - restored.reduce((total, block) => total + contextBlockPromptBytes(block), 0),
+      )],
       messageCount: prepared.packet.messageCount,
       omittedMessageCount: prepared.packet.droppedMessageCount,
       ...withheld,

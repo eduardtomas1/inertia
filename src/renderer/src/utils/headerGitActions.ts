@@ -140,7 +140,6 @@ export function gitSyncSummary(status: GitStatusSnapshot): string {
   if (!status.hasRemote) return "Local repository";
   if (!status.upstream) return "No upstream";
   if (status.ahead > 0 && status.behind > 0) return "Branches have diverged";
-  if (status.behind > 0) return `${status.behind} incoming ${status.behind === 1 ? "commit" : "commits"}`;
-  if (status.ahead > 0) return `${status.ahead} outgoing ${status.ahead === 1 ? "commit" : "commits"}`;
+  if (status.ahead > 0 || status.behind > 0) return "";
   return "Up to date with last fetch";
 }

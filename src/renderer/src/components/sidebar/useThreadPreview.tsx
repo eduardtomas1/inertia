@@ -16,14 +16,14 @@ function ThreadPreview({ conversation, project, anchor, onEnter, onLeave }: {
     const node = surface.current;
     if (!node) return;
     const rect = anchor.getBoundingClientRect();
-    node.style.left = `${Math.max(8, Math.min(rect.right + 8, window.innerWidth - node.offsetWidth - 8))}px`;
+    node.style.left = `${Math.max(8, Math.min(rect.right + 4, window.innerWidth - node.offsetWidth - 8))}px`;
     node.style.top = `${Math.max(8, Math.min(rect.top, window.innerHeight - node.offsetHeight - 8))}px`;
   }, [anchor]);
   return createPortal(<div ref={surface} role="tooltip" id={`thread-preview-${conversation.id}`}
     className="thread-hover-preview" onPointerEnter={onEnter} onPointerLeave={onLeave}>
     <strong>{conversation.title}</strong>
-    <span>{project ? <ProjectIcon project={project} size={13} /> : <FolderGit2 size={13} />}<ProjectName project={project}>{project?.name ?? "Project unavailable"}</ProjectName></span>
-    {conversation.branch && <span><GitBranch size={13} />{conversation.branch}</span>}
+    <span>{project ? <ProjectIcon project={project} size={14} /> : <FolderGit2 size={14} />}<ProjectName project={project}>{project?.name ?? "Project unavailable"}</ProjectName></span>
+    {conversation.branch && <span><GitBranch size={14} />{conversation.branch}</span>}
     <span><ProviderBrandIcon providerId={conversation.providerId} size={14} />{conversation.modelSelection.alias || conversation.model || "Provider default"}</span>
   </div>, document.body);
 }

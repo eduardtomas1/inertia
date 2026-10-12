@@ -1,3 +1,4 @@
+import { readSourceText } from "../helpers/source-text";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarUpdateControl } from "../../src/renderer/src/components/sidebar/SidebarUpdateControl";
@@ -202,5 +203,11 @@ describe("real update controller in the sidebar", () => {
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect(details()).toHaveTextContent("The release page could not be opened");
     expect(document.body).not.toHaveTextContent("/secret");
+  });
+  it("draws the details on the popover surface with 32px actions and no badge dot", () => {
+    const css = readSourceText("src/renderer/src/components/sidebar/SidebarUpdateControl.css");
+    expect(css).toMatch(/border: 1px solid var\(--line-soft\); border-radius: var\(--radius-sm\);/u);
+    expect(css).not.toMatch(/update-available-dot|min-height: 30px|--accent-strong|header \.icon-button \{ flex: 0 0 24px/u);
+    expect(readSourceText("src/renderer/src/components/sidebar/SidebarUpdateControl.tsx")).not.toContain("Check for a new version without leaving your work.");
   });
 });

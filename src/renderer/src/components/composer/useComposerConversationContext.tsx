@@ -38,6 +38,7 @@ export interface ComposerConversationContextController {
   isReferencing(): boolean;
   error: string | null;
   previewPacketId: string | null;
+  previewKey: string | null;
   confirmation: ConversationContextSourceOption | null;
   confirmReference(accepted: boolean): void;
   referenceChat(source: ConversationContextSourceOption): Promise<boolean>;
@@ -55,6 +56,8 @@ export function useComposerConversationContext(input: {
   contextPackets: readonly ConversationContextPacketSummary[];
   hasVisibleHistory: boolean;
   enabled: boolean;
+  latestTurnCompletedAt: string | null;
+  paused: boolean;
   onCommand?: ConversationContextCommandRunner;
 }): ComposerConversationContextController {
   const {
@@ -65,9 +68,11 @@ export function useComposerConversationContext(input: {
     workspaceKey,
     enabled,
     hasVisibleHistory,
+    latestTurnCompletedAt,
+    paused,
     onCommand,
   } = input;
-  const [previewPacketId, setPreviewPacketId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ packetId: string; key: string } | null>(null);
   const pendingRequests = useRef(new Map<string, string | null>());
   const [, refresh] = useReducer((revision: number) => revision + 1, 0);
   const [error, setError] = useState<{ conversationId: string; message: string } | null>(null);
@@ -103,7 +108,7 @@ export function useComposerConversationContext(input: {
   }, [conversationId, referencing, pendingPacketId]);
 
   useEffect(() => {
-    setPreviewPacketId(null);
+    setPreview(null);
     setError(null);
   }, [conversationId, enabled]);
 
@@ -128,9 +133,9 @@ export function useComposerConversationContext(input: {
     return contextSources.filter(({ conversationId: source }) => !referenced.has(source));
   }, [canReferenceChat, contextSources, draftContextPackets]);
 
-  const remove = async (packetId: string): Promise<void> => {
+  const remove = async (packetId: string, keepPreview = false): Promise<void> => {
     if (!enabled || !onCommand) return;
-    setPreviewPacketId((current) => current === packetId ? null : current);
+    if (!keepPreview) setPreview((current) => current?.packetId === packetId ? null : current);
     await onCommand("conversation.context.remove", {
       type: "conversation.context.remove",
       payload: { packetId, targetConversationId: conversationId },
@@ -150,40 +155,51 @@ export function useComposerConversationContext(input: {
     sourceConversationId: string,
     label: string,
     source?: ConversationContextSourceOption,
-  ): Promise<boolean> => {
-    if (!onCommand) return false;
+    acknowledged = false,
+    attempts = 1,
+  ): Promise<string | null> => {
+    if (!onCommand) return null;
     pendingRequests.current.set(conversationId, null);
     refresh();
     setError(null);
     try {
-      const acknowledgedWorkspaceDifference = source?.workspaceRelation === "different-workspace"
+      const acknowledgedWorkspaceDifference = acknowledged || (source?.workspaceRelation === "different-workspace"
         && await new Promise<boolean>((resolve) => {
           confirmationReply.current = resolve;
           setConfirmation({ conversationId, workspaceKey, source });
-        });
+        }));
       if (source?.workspaceRelation === "different-workspace" && !acknowledgedWorkspaceDifference) {
         pendingRequests.current.delete(conversationId);
-        return false;
+        return null;
       }
-      const event = await onCommand("conversation.context.create", {
-        type: "conversation.context.create",
-        payload: {
-          sourceConversationId,
-          targetConversationId: conversationId,
-          acknowledgedWorkspaceDifference,
-        },
-      });
-      if (event.type !== "request.result"
-        || event.result.kind !== "conversation.context.packet"
-        || event.result.packet.targetConversationId !== conversationId
-        || event.result.packet.sourceConversationId !== sourceConversationId
-        || event.result.packet.consumedMessageId !== null) throw new Error("Invalid chat reference response.");
-      pendingRequests.current.set(conversationId, event.result.packet.id);
-      return true;
+      const create = async (remaining: number): Promise<string> => {
+        try {
+          const event = await onCommand("conversation.context.create", {
+            type: "conversation.context.create",
+            payload: {
+              sourceConversationId,
+              targetConversationId: conversationId,
+              acknowledgedWorkspaceDifference,
+            },
+          });
+          if (event.type !== "request.result"
+            || event.result.kind !== "conversation.context.packet"
+            || event.result.packet.targetConversationId !== conversationId
+            || event.result.packet.sourceConversationId !== sourceConversationId
+            || event.result.packet.consumedMessageId !== null) throw new Error("Invalid chat reference response.");
+          return event.result.packet.id;
+        } catch (error) {
+          if (remaining <= 1) throw error;
+          return create(remaining - 1);
+        }
+      };
+      const packetId = await create(attempts);
+      pendingRequests.current.set(conversationId, packetId);
+      return packetId;
     } catch {
       pendingRequests.current.delete(conversationId);
       setError({ conversationId, message: `${label} could not be referenced.` });
-      return false;
+      return null;
     } finally {
       refresh();
     }
@@ -193,13 +209,64 @@ export function useComposerConversationContext(input: {
     source: ConversationContextSourceOption,
   ): Promise<boolean> => {
     if (!canAddReference()) return false;
-    return createReference(source.conversationId, source.conversationTitle, source);
+    return await createReference(source.conversationId, source.conversationTitle, source) !== null;
   };
 
   const referenceThisChat = async (): Promise<boolean> => {
     if (!canAddReference()) return false;
-    return createReference(conversationId, "This chat");
+    return await createReference(conversationId, "This chat") !== null;
   };
+
+  const recopying = useRef(new Set<string>());
+  const sameRelation = async (packet: ConversationContextPacketSummary): Promise<boolean> => {
+    if (isOwnConversationContext(packet)) return true;
+    const event = await onCommand!("conversation.context.source.load", {
+      type: "conversation.context.source.load",
+      payload: { sourceConversationId: packet.sourceConversationId, targetConversationId: conversationId },
+    });
+    return event.type === "request.result"
+      && event.result.kind === "conversation.context.source"
+      && event.result.source.conversationId === packet.sourceConversationId
+      && event.result.source.targetConversationId === conversationId
+      && event.result.source.workspaceRelation === packet.workspaceRelation;
+  };
+  const recopy = async (packet: ConversationContextPacketSummary): Promise<void> => {
+    pendingRequests.current.set(conversationId, null);
+    refresh();
+    try {
+      if (!await sameRelation(packet)) throw new Error("The confirmed workspace relation changed.");
+      await remove(packet.id, true);
+    } catch {
+      pendingRequests.current.delete(conversationId);
+      refresh();
+      return;
+    }
+    const packetId = await createReference(
+      packet.sourceConversationId,
+      isOwnConversationContext(packet) ? "This chat" : packet.sourceConversationTitle,
+      undefined,
+      packet.workspaceRelation === "different-workspace",
+      2,
+    );
+    setPreview((current) => current?.packetId !== packet.id
+      ? current
+      : packetId ? { ...current, packetId } : null);
+  };
+  useEffect(() => {
+    if (!enabled || !onCommand || paused || referencing) return;
+    const stale = draftContextPackets.find((packet) => {
+      const completedAt = packet.sourceConversationId === conversationId
+        ? latestTurnCompletedAt
+        : contextSources.find(({ conversationId: id }) => id === packet.sourceConversationId)
+          ?.latestTurnCompletedAt;
+      return completedAt
+        && Date.parse(completedAt) > Date.parse(packet.createdAt)
+        && !recopying.current.has(packet.id);
+    });
+    if (!stale) return;
+    recopying.current.add(stale.id);
+    void recopy(stale);
+  });
 
   return {
     contextPacketIds,
@@ -214,7 +281,8 @@ export function useComposerConversationContext(input: {
     referencing,
     isReferencing,
     error: error?.conversationId === conversationId ? error.message : null,
-    previewPacketId,
+    previewPacketId: preview?.packetId ?? null,
+    previewKey: preview?.key ?? null,
     confirmation: confirmation?.conversationId === conversationId
       && confirmation.workspaceKey === workspaceKey && enabled
       ? confirmation.source : null,
@@ -223,7 +291,7 @@ export function useComposerConversationContext(input: {
     referenceThisChat,
     togglePreview: (packetId) => {
       if (!enabled) return;
-      setPreviewPacketId((current) => current === packetId ? null : packetId);
+      setPreview((current) => current?.packetId === packetId ? null : { packetId, key: packetId });
     },
     dismissError: () => setError(null),
     remove,
@@ -247,6 +315,7 @@ export function ComposerConversationContextStrip({
           <ConversationContextPacketStrip
             packets={controller.draftContextPackets}
             disabled={disabled}
+            previewPacketId={controller.previewPacketId}
             onPreview={controller.togglePreview}
             onRemove={(packetId) => {
               void controller.remove(packetId).catch(() => undefined);
@@ -284,9 +353,10 @@ export function ComposerConversationContextPreview({
   return (
     <Suspense fallback={null}>
       <PreviewCard
-        key={`${targetConversationId}/${controller.previewPacketId}/${controller.contextPacketIds.join(",")}`}
+        key={`${targetConversationId}/${controller.previewKey}`}
         packetId={controller.previewPacketId}
         targetConversationId={targetConversationId}
+        revision={controller.contextPacketIds.join(",")}
         onCommand={onCommand}
         onDismiss={() => controller.togglePreview(controller.previewPacketId!)}
       />

@@ -77,15 +77,9 @@ describe("Minimal Workstream active pixel signal", () => {
       /\.app-shell\[data-document-visible="false"\][\s\S]*?animation-play-state:\s*paused;/gu,
     )?.join("\n") ?? "";
     for (const selector of [
-      ".plan-step.is-in-progress .plan-step-marker svg",
       '.agent-pixel-loader[data-animated="true"] > span',
       ".turn-reasoning-step.is-active::before",
-      '.subagent-status-mark[data-live="true"]::after',
-      ".agent-activity.is-running .agent-activity-icon::after",
       ".loading-mark",
-      ".daily-work-skeleton i",
-      ".daily-work-badge.is-running::before",
-      ".composer-status-dots i",
       '.send-button[data-motion-state="sending"] .composer-send-motion-icon',
     ]) {
       expect(hiddenRules).toContain(selector);
@@ -97,7 +91,6 @@ describe("Minimal Workstream active pixel signal", () => {
       /\.attachment-preview-backdrop\[data-document-visible="false"\][\s\S]*?animation-play-state:\s*paused;/u,
     )?.[0] ?? "";
 
-    expect(portalRule).toContain(".pdf-attachment-preview-loading");
-    expect(portalRule).toContain(".document-attachment-preview-loading");
+    expect(portalRule).toContain(".loading-mark");
   });
 });

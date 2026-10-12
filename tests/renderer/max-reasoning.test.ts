@@ -21,4 +21,17 @@ describe("maximum reasoning frame", () => {
     expect(isMaximumReasoning(model(["none", "disabled", "creative"]), "creative")).toBe(false);
     expect(isMaximumReasoning(model([]), null)).toBe(false);
   });
+  it("never frames a route whose highest offered level is below high", () => {
+    expect(isMaximumReasoning(model(["low", "medium"], "medium"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["low", "medium"]), "medium")).toBe(false);
+    expect(isMaximumReasoning(model(["minimal", "low"]), "low")).toBe(false);
+  });
+  it("does not treat a model's only reasoning level as a chosen maximum", () => {
+    expect(isMaximumReasoning(model(["medium"], "medium"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["medium"], "medium"), "medium")).toBe(false);
+    expect(isMaximumReasoning(model(["medium", "creative"], "medium"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["high"], "high"), null)).toBe(false);
+    expect(isMaximumReasoning(model(["high"], "high"), "high")).toBe(false);
+    expect(isMaximumReasoning(model(["max"]), "max")).toBe(false);
+  });
 });

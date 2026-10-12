@@ -1,0 +1,426 @@
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../src/renderer/src/components/lazySurfaceLoaders", () => ({
+  prefetchWorkspaceTool: () => undefined,
+}));
+
+import { WorkspacePanel, type WorkspacePanelTab } from "../../src/renderer/src/components/WorkspacePanel";
+import {
+  activateRightPanelSurface,
+  CLOSE_ACTIVE_PANEL_SURFACE_EVENT,
+  closeRightPanelSurface,
+  moveRightPanelSurface,
+  openRightPanelSurface,
+  type RightPanelState,
+} from "../../src/renderer/src/utils/rightPanelSurfaces";
+import { readSourceText } from "../helpers/source-text";
+
+function Host({
+  initial,
+  onMove,
+  unavailable = {},
+}: {
+  initial: RightPanelState;
+  onMove?: (surface: WorkspacePanelTab, toIndex: number) => void;
+  unavailable?: Partial<Record<WorkspacePanelTab, string>>;
+}): React.JSX.Element {
+  const [state, setState] = useState(initial);
+  return (
+    <>
+      <button type="button">Outside</button>
+      <WorkspacePanel
+        surfaces={state.surfaces}
+        activeSurface={state.activeSurfaceId}
+        visible={state.isOpen}
+        unavailable={unavailable}
+        onActivateSurface={(surface) => setState((current) => activateRightPanelSurface(current, surface))}
+        onOpenSurface={(surface) => setState((current) => openRightPanelSurface(current, surface))}
+        onCloseSurface={(surface) => setState((current) => closeRightPanelSurface(current, surface))}
+        onMoveSurface={(surface, toIndex) => {
+          onMove?.(surface, toIndex);
+          setState((current) => moveRightPanelSurface(current, surface, toIndex));
+        }}
+      >
+        <span>{state.activeSurfaceId} content</span>
+      </WorkspacePanel>
+    </>
+  );
+}
+
+const state = (active: WorkspacePanelTab, ...surfaces: WorkspacePanelTab[]): RightPanelState => ({
+  isOpen: true,
+  surfaces,
+  activeSurfaceId: active,
+});
+
+const tabNames = () => screen.getAllByRole("tab").map((tab) => tab.getAttribute("data-workspace-tab"));
+
+function stubTabBoxes(list: HTMLElement, width = 100, listWidth = 1000): void {
+  list.getBoundingClientRect = () => new DOMRect(0, 0, listWidth, 32);
+  list.querySelectorAll<HTMLElement>(":scope > [data-tab-key]").forEach((tab, index) => {
+    tab.getBoundingClientRect = () => new DOMRect(index * width - list.scrollLeft, 0, width, 32);
+  });
+}
+
+describe("workspace panel tab row", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reorders tabs by pointer drag past a neighbour's midpoint", () => {
+    const onMove = vi.fn();
+    render(<Host initial={state("changes", "changes", "preview", "terminal")} onMove={onMove} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list);
+    const changes = list.querySelector<HTMLElement>('[data-tab-key="changes"]')!;
+
+    fireEvent.pointerDown(changes, { button: 0, pointerId: 1, clientX: 50 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 52 });
+    expect(list.querySelector(".is-dragging")).toBeNull();
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 210 });
+    expect(tabNames()).toEqual(["preview", "changes", "terminal"]);
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 260 });
+    expect(tabNames()).toEqual(["preview", "terminal", "changes"]);
+    expect(onMove).not.toHaveBeenCalled();
+    fireEvent.pointerUp(list, { pointerId: 1, clientX: 260 });
+
+    expect(onMove).toHaveBeenCalledExactlyOnceWith("changes", 2);
+    expect(tabNames()).toEqual(["preview", "terminal", "changes"]);
+  });
+
+  it("forgets a press that was released outside the tab list", () => {
+    const onMove = vi.fn();
+    render(<Host initial={state("changes", "changes", "preview", "terminal")} onMove={onMove} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list);
+    const changes = list.querySelector<HTMLElement>('[data-tab-key="changes"]')!;
+
+    fireEvent.pointerDown(changes, { button: 0, pointerId: 1, clientX: 50 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 0, clientX: 210 });
+    expect(list.querySelector(".is-dragging")).toBeNull();
+    fireEvent.pointerUp(list, { pointerId: 1, clientX: 210 });
+
+    fireEvent.pointerDown(changes, { button: 0, pointerId: 1, clientX: 50 });
+    fireEvent.pointerLeave(list, { pointerId: 1, buttons: 1, clientX: 50 });
+    fireEvent.pointerMove(list, { pointerId: 1, buttons: 1, clientX: 210 });
+    expect(list.querySelector(".is-dragging")).toBeNull();
+    fireEvent.pointerUp(list, { pointerId: 1, clientX: 210 });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(tabNames()).toEqual(["changes", "preview", "terminal"]);
+  });
+
+  it("hides a tab the row cuts at either edge instead of fading part of it", () => {
+    render(<Host initial={state("terminal", "changes", "files", "preview", "terminal")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    Object.defineProperty(list, "clientWidth", { configurable: true, value: 250 });
+    Object.defineProperty(list, "scrollWidth", { configurable: true, value: 400 });
+    list.scrollLeft = 130;
+    stubTabBoxes(list, 100, 250);
+    fireEvent.scroll(list);
+
+    expect(list).toHaveAttribute("data-overflow-start");
+    expect(list).toHaveAttribute("data-overflow-end");
+    expect(list.style.getPropertyValue("--tab-row-clip-start")).toBe("70px");
+    expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("80px");
+
+    list.scrollLeft = 150;
+    fireEvent.scroll(list);
+    expect(list).not.toHaveAttribute("data-overflow-end");
+    expect(list.style.getPropertyValue("--tab-row-clip-start")).toBe("50px");
+    expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("0px");
+  });
+
+  it("lists every tab behind one control, marks the active one and returns focus to it", async () => {
+    render(<Host initial={state("terminal", "changes", "preview", "terminal")} />);
+    const trigger = screen.getByRole("button", { name: "All tabs" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "Panel tabs" });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Changes", "Browser", "Terminal"]);
+    expect(items.map((item) => item.getAttribute("aria-current"))).toEqual([null, null, "true"]);
+    await waitFor(() => expect(items[0]).toHaveFocus());
+    fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.click(items[1]!);
+
+    expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("menu", { name: "Panel tabs" }), { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("shows the all-tabs control only while the tab row overflows", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toContain(".workspace-panel-tablist:not([data-overflow-start], [data-overflow-end]) + .workspace-panel-overflow-anchor {\n  display: none;\n}");
+    expect(css).toContain(".panel-tab-row[data-overflow-start] {\n  mask-image: linear-gradient(to right, transparent var(--tab-row-clip-start, 0px), black var(--tab-row-clip-start, 0px));\n}");
+  });
+
+  it("cancels a drag with Escape and keeps the order", () => {
+    const onMove = vi.fn();
+    render(<Host initial={state("changes", "changes", "preview", "terminal")} onMove={onMove} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list);
+    const terminal = list.querySelector<HTMLElement>('[data-tab-key="terminal"]')!;
+
+    fireEvent.pointerDown(terminal, { button: 0, pointerId: 4, clientX: 250 });
+    fireEvent.pointerMove(list, { pointerId: 4, buttons: 1, clientX: 20 });
+    expect(tabNames()).toEqual(["terminal", "changes", "preview"]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(list, { pointerId: 4, clientX: 20 });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(tabNames()).toEqual(["changes", "preview", "terminal"]);
+  });
+
+  it("moves the focused tab with the primary modifier, Shift and an arrow", () => {
+    const onMove = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    render(<Host initial={state("preview", "changes", "preview", "terminal")} onMove={onMove} />);
+    const preview = screen.getByRole("tab", { name: "Browser" });
+    preview.focus();
+
+    expect(preview.getAttribute("aria-keyshortcuts")?.split(" "))
+      .toEqual(expect.arrayContaining(["Delete", "Control+Shift+ArrowLeft", "Meta+Shift+ArrowRight"]));
+    fireEvent.keyDown(preview, { key: "ArrowRight", metaKey: true, shiftKey: true });
+    expect(onMove).toHaveBeenLastCalledWith("preview", 2);
+    expect(screen.getByRole("status")).toHaveTextContent("Browser moved to position 3 of 3");
+    expect(tabNames()).toEqual(["changes", "terminal", "preview"]);
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Browser" }), { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    expect(onMove).toHaveBeenLastCalledWith("preview", 1);
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Browser" }), { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Browser" }), { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    expect(onMove).toHaveBeenCalledTimes(3);
+    expect(tabNames()).toEqual(["preview", "changes", "terminal"]);
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("maps a move among visible tabs onto the stored order around unavailable surfaces", () => {
+    const onMove = vi.fn();
+    render(
+      <Host
+        initial={state("changes", "changes", "agents", "preview", "terminal")}
+        unavailable={{ agents: "Unavailable" }}
+        onMove={onMove}
+      />,
+    );
+    const changes = screen.getByRole("tab", { name: "Changes" });
+    fireEvent.keyDown(changes, { key: "ArrowRight", metaKey: true, shiftKey: true });
+    expect(onMove).toHaveBeenCalledWith("changes", 2);
+    expect(tabNames()).toEqual(["preview", "changes", "terminal"]);
+  });
+
+  it("scrolls the active tab into view whenever the active surface changes", () => {
+    render(<Host initial={state("changes", "changes", "preview", "terminal", "files", "plan")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list, 100, 220);
+    expect(list.scrollLeft).toBe(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    expect(list.scrollLeft).toBe(304);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Changes" }));
+    expect(list.scrollLeft).toBe(0);
+  });
+
+  it("scrolls the active tab back into view when the hidden row is shown again", () => {
+    const observers: Array<() => void> = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) {
+        observers.push(callback);
+      }
+      observe(): void {}
+      disconnect(): void {}
+    });
+    render(<Host initial={state("plan", "changes", "preview", "terminal", "files", "plan")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    stubTabBoxes(list, 100, 220);
+    list.scrollLeft = 0;
+    act(() => {
+      for (const observer of observers) observer();
+    });
+    expect(list.scrollLeft).toBe(304);
+  });
+
+  it("lines up an active tab as wide as the row with the row's edge instead of cutting it", () => {
+    render(<Host initial={state("changes", "changes", "agents")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    const [first, second] = list.querySelectorAll<HTMLElement>(":scope > [data-tab-key]");
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 140, 32);
+    first!.getBoundingClientRect = () => new DOMRect(-list.scrollLeft, 0, 100, 32);
+    second!.getBoundingClientRect = () => new DOMRect(100 - list.scrollLeft, 0, 140, 32);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Background tasks" }));
+
+    expect(list.scrollLeft).toBe(100);
+  });
+
+  it("drops the active tab's icon before cutting its label and brings it back once the row has room", () => {
+    render(<Host initial={state("agents", "changes", "agents")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    const tab = list.querySelector<HTMLElement>('[data-tab-key="agents"]')!;
+    const label = tab.querySelector<HTMLElement>(".panel-tab-label")!;
+    const icon = tab.querySelector<SVGElement>('[role="tab"] > svg:first-child')!;
+    const size = (element: HTMLElement, property: string, value: number) => {
+      Object.defineProperty(element, property, { configurable: true, value });
+    };
+    icon.getBoundingClientRect = () => new DOMRect(0, 0, 14, 14);
+    tab.getBoundingClientRect = () => new DOMRect(0, 0, 140, 32);
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 140, 32);
+    size(list, "clientWidth", 140);
+    size(list, "scrollWidth", 240);
+    size(label, "clientWidth", 90);
+    size(label, "scrollWidth", 112);
+    fireEvent.scroll(list);
+    expect(tab).toHaveAttribute("data-compact");
+
+    size(label, "clientWidth", 104);
+    fireEvent.scroll(list);
+    expect(tab).toHaveAttribute("data-compact");
+
+    tab.getBoundingClientRect = () => new DOMRect(0, 0, 133, 32);
+    size(label, "clientWidth", 112);
+    fireEvent.scroll(list);
+    expect(tab).toHaveAttribute("data-compact");
+
+    tab.getBoundingClientRect = () => new DOMRect(0, 0, 133, 32);
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 300, 32);
+    size(list, "clientWidth", 300);
+    size(label, "clientWidth", 112);
+    fireEvent.scroll(list);
+    expect(tab).not.toHaveAttribute("data-compact");
+  });
+
+  it("gives the active tab room first and ends a cut label with an ellipsis", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    const block = (selector: string) => {
+      const start = css.indexOf(`\n${selector} {\n`);
+      expect(start).toBeGreaterThan(-1);
+      return css.slice(start, css.indexOf("\n}", start + 1));
+    };
+    expect(block(".panel-tab:is(.is-active, .active)")).toContain("flex-shrink: 0;");
+    expect(block(".panel-tab:is(.is-active, .active)")).toContain("min-width: 0;");
+    expect(block(".panel-tab:is(.is-active, .active)")).toContain("max-width: min(200px, 100%);");
+    expect(block(".workspace-panel-tabs:has(> [data-overflow-start], > [data-overflow-end])")).toContain("gap: 0;");
+    expect(block('.panel-tab[data-compact] > [role="tab"] > svg:first-child')).toContain("display: none;");
+    const label = block(".panel-tab-label");
+    expect(label).toContain("text-overflow: ellipsis;");
+    expect(label).not.toContain("mask-image");
+  });
+
+  it("puts a focusable close control over the tab icon and closes with it", () => {
+    render(<Host initial={state("preview", "changes", "preview")} />);
+    const tab = screen.getByRole("tab", { name: "Browser" }).closest<HTMLElement>(".panel-tab")!;
+    const close = within(tab).getByRole("button", { name: "Close Browser" });
+    expect(close).toHaveAttribute("tabindex", "0");
+    expect(close.closest(".panel-tab")).toBe(tab);
+    expect(screen.getByRole("button", { name: "Close Changes" })).toHaveAttribute("tabindex", "-1");
+    expect(tab.querySelector('[role="tab"] > svg:first-child')).not.toBeNull();
+
+    fireEvent.click(close);
+    expect(tabNames()).toEqual(["changes"]);
+  });
+
+  it("closes a tab with the middle button", () => {
+    render(<Host initial={state("preview", "changes", "preview")} />);
+    const tab = screen.getByRole("tab", { name: "Changes" }).closest<HTMLElement>(".panel-tab")!;
+    fireEvent(tab, new MouseEvent("auxclick", { bubbles: true, button: 1 }));
+    expect(tabNames()).toEqual(["preview"]);
+  });
+
+  it("closes the active tab on the panel's close request and keeps focus outside", () => {
+    render(<Host initial={state("preview", "changes", "preview", "terminal")} />);
+    const outside = screen.getByRole("button", { name: "Outside" });
+    outside.focus();
+    const panel = screen.getByRole("complementary", { name: "Workspace tools" });
+    let request = new Event(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, { cancelable: true });
+    act(() => {
+      panel.dispatchEvent(request);
+    });
+    expect(request.defaultPrevented).toBe(true);
+    expect(tabNames()).toEqual(["changes", "terminal"]);
+    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+    expect(outside).toHaveFocus();
+
+    for (let index = 0; index < 2; index += 1) {
+      act(() => {
+        panel.dispatchEvent(new Event(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, { cancelable: true }));
+      });
+    }
+    expect(screen.queryAllByRole("tab")).toEqual([]);
+    request = new Event(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, { cancelable: true });
+    act(() => {
+      panel.dispatchEvent(request);
+    });
+    expect(request.defaultPrevented).toBe(false);
+  });
+
+  it("marks surfaces that are already open in the add menu", async () => {
+    render(<Host initial={state("changes", "changes", "preview")} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
+    const menu = await screen.findByRole("menu", { name: "Add panel surface" });
+    const browser = await within(menu).findByRole("menuitem", { name: /^Browser/u });
+    expect(browser).not.toHaveAttribute("aria-current");
+    expect(browser).toHaveAccessibleName(/^Browser\s*, open/u);
+    expect(within(menu).getByRole("menuitem", { name: /^Terminal/u })).not.toHaveAccessibleName(/open/u);
+  });
+
+  it("swaps the tab icon for the close control on hover or keyboard focus only", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    expect(css).toContain(".panel-tab:is(:hover, :has(:focus-visible)) > .panel-tab-close {");
+    expect(css).toContain(".panel-tab:is(:hover, :has(:focus-visible)) > [role=\"tab\"] > svg:first-child {");
+    expect(css).not.toContain(".panel-tab:is(:hover, :focus-within)");
+  });
+
+  it("explains unavailable surfaces without native titles", async () => {
+    const reason = "Available after the first message creates this chat's workspace.";
+    const { unmount } = render(<Host initial={{ isOpen: true, surfaces: [], activeSurfaceId: null }} unavailable={{ files: reason }} />);
+    const row = screen.getByRole("group", { name: "Open a surface" }).querySelector<HTMLElement>(".is-unavailable")!;
+    expect(row).toHaveTextContent(reason);
+    expect(row).not.toHaveAttribute("title");
+    unmount();
+
+    render(<Host initial={state("changes", "changes")} unavailable={{ files: reason }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
+    const menu = await screen.findByRole("menu", { name: "Add panel surface" });
+    const files = await within(menu).findByRole("menuitem", { name: /^Files/u });
+    expect(files).toHaveAttribute("aria-disabled", "true");
+    expect(files).not.toHaveAttribute("title");
+    expect(files).toHaveAccessibleDescription(reason);
+  });
+
+  it("reaches an unavailable surface by arrow keys so its reason is announced, without opening it", async () => {
+    const reason = "Available after the first message creates this chat's workspace.";
+    render(<Host initial={state("changes", "changes")} unavailable={{ files: reason }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add panel surface" }));
+    const menu = await screen.findByRole("menu", { name: "Add panel surface" });
+    const files = await within(menu).findByRole("menuitem", { name: /^Files/u });
+    const items = within(menu).getAllByRole("menuitem");
+    const previous = items[items.indexOf(files) - 1]!;
+    previous.focus();
+    fireEvent.keyDown(previous, { key: "ArrowDown" });
+    expect(files).toHaveFocus();
+    expect(files).toHaveAccessibleDescription(reason);
+    fireEvent.click(files);
+    expect(tabNames()).toEqual(["changes"]);
+  });
+
+  it("keeps the add button on the 2px outside button ring", () => {
+    const css = readSourceText("src/renderer/src/styles.css");
+    const inset = /^:is\(\n(?<list>[\s\S]*?)\n\):focus-visible \{\n  outline-offset: -2px;\n\}/mu.exec(css)?.groups?.list ?? "";
+    expect(inset).toContain('[role="tab"]');
+    expect(inset).not.toContain(".workspace-panel-add");
+  });
+});

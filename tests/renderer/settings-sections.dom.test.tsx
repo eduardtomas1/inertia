@@ -171,3 +171,19 @@ describe("Settings shell", () => {
     }
   });
 });
+
+describe("Settings section tabs", () => {
+  it("turn a vertical wheel into horizontal scrolling only while the tabs overflow", () => {
+    render(<SettingsView {...settingsViewProps({ target: { section: "appearance" } })} />);
+    const navigation = screen.getByRole("navigation", { name: "Settings sections" });
+    Object.defineProperty(navigation, "clientWidth", { configurable: true, value: 400 });
+    Object.defineProperty(navigation, "scrollWidth", { configurable: true, value: 400 });
+    fireEvent.wheel(navigation, { deltaY: 120 });
+    expect(navigation.scrollLeft).toBe(0);
+    Object.defineProperty(navigation, "scrollWidth", { configurable: true, value: 900 });
+    fireEvent.wheel(navigation, { deltaY: 120 });
+    expect(navigation.scrollLeft).toBe(120);
+    fireEvent.wheel(navigation, { deltaX: 40, deltaY: 10 });
+    expect(navigation.scrollLeft).toBe(120);
+  });
+});

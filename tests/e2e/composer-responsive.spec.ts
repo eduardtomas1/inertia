@@ -143,8 +143,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       projectDecoration: "none",
       projectDecorationStyle: "solid",
     });
-    expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
-    expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);
+    expect(longHeadingGeometry.fontSize).toBe(await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--text-xl"))));
     updateProjectName(originalProject.name);
     await page.reload();
     await expect(page.getByRole("heading", {
@@ -154,8 +154,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await setWorkspaceTools(false);
 
     const dock = page.getByRole("region", { name: "Message composer" });
-    await expect(dock.getByRole("group", { name: "Chat checkout context" }))
-      .toContainText(expectedCheckoutLabel);
+    const checkoutStrip = dock.getByRole("group", { name: "Chat checkout context" });
+    await expect(checkoutStrip).toContainText(expectedCheckoutLabel);
     await expectComposerEndsAtDock(dock);
     await expectComposerReadinessContained(dock);
     const model = dock.getByRole("button", { name: /^Choose model\./u });
@@ -223,7 +223,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        surfaceBackground: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
+        surfaceImage: getComputedStyle(element.querySelector(".composer-surface")!).backgroundImage,
+        surfaceColor: getComputedStyle(element.querySelector(".composer-surface")!).backgroundColor,
+        raisedSurface: getComputedStyle(element).getPropertyValue("--surface-raised").trim(),
         inputBackground: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
@@ -271,7 +273,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.centerDelta).toBeLessThanOrEqual(1);
     expect(wideGeometry.backdropFilter).toBe("none");
     expect(["", "none"]).toContain(wideGeometry.webkitBackdropFilter);
-    expect(wideGeometry.surfaceBackground).toContain("linear-gradient");
+    const raisedChannels = [1, 3, 5].map((offset) => Number.parseInt(wideGeometry.raisedSurface.slice(offset, offset + 2), 16));
+    expect([wideGeometry.surfaceImage, wideGeometry.surfaceColor]).toEqual(["none", `rgb(${raisedChannels.join(", ")})`]);
     expect(wideGeometry.inputBackground).toBe("rgba(0, 0, 0, 0)");
     expect(wideGeometry.shellOrder).toEqual(["dock"]);
     expect(wideGeometry.readinessOutside).toBe(0);
@@ -284,8 +287,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.inputPaddingBlock).toBe("15px 4px");
     expect(wideGeometry.toolbarBorderTop).toBe("0px");
     expect(wideGeometry.toolbarBackground).toBe("rgba(0, 0, 0, 0)");
-    expect(wideGeometry.toolbarGroups).toEqual(["options", "tools", "actions"]);
-    expect(wideGeometry.checkoutText).toContain("Current checkout");
+    expect(wideGeometry.toolbarGroups).toEqual(["options", "actions"]);
+    expect(wideGeometry.checkoutText.includes("Current checkout")).toBe(false);
     expect(wideGeometry.checkoutText).toContain(expectedCheckoutLabel);
     expect(wideGeometry.textareaBorder).toBe("0px");
     expect(wideGeometry.textareaBackground).toBe("rgba(0, 0, 0, 0)");
@@ -335,18 +338,14 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           getComputedStyle(control).borderTopWidth),
         fontSizes: controls.map((control) =>
           getComputedStyle(control).fontSize),
-        iconSizes: controls.map((control) => {
-          const icon = control.querySelector<SVGElement>(
-            ".composer-setting-icon",
-          );
-          const bounds = icon?.getBoundingClientRect();
-          return bounds
-            ? { width: bounds.width, height: bounds.height }
-            : null;
-        }),
-        iconDisplays: controls.map((control) => {
+        accessSvgs: element.querySelectorAll(
+          '[data-composer-setting="access"] svg:not(.composer-setting-chevron)',
+        ).length,
+        shownIcons: controls.flatMap((control) => {
           const icon = control.querySelector<SVGElement>(".composer-setting-icon");
-          return icon ? getComputedStyle(icon).display : null;
+          return icon && getComputedStyle(icon).display !== "none"
+            ? [control.dataset.composerSetting]
+            : [];
         }),
       };
     });
@@ -356,11 +355,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.iconSizes[0]).toEqual({ width: 13, height: 13 });
-    // Only the family's first icon is shown; the rest are hidden by rule, not
-    // merely collapsed to an empty box.
-    expect(settingGeometry.iconDisplays[0]).not.toBe("none");
-    expect(settingGeometry.iconDisplays.slice(1)).toEqual(settingGeometry.iconDisplays.slice(1).map(() => "none"));
+    expect(settingGeometry.accessSvgs).toBe(0);
+    expect(settingGeometry.shownIcons.filter((setting) => setting !== "speed")).toEqual([]);
     const accessIdleBackground = await expectHoverBackground(page, accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
@@ -403,7 +399,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       await setting.trigger.click();
       await expect(setting.menu).toBeVisible();
       await page.locator(".workspace-header").click({
-        position: { x: 12, y: 12 },
+        position: { x: 12, y: 4 },
       });
       await expect(setting.menu).toBeHidden();
       await expect(setting.trigger).toBeFocused();
@@ -448,7 +444,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       (element) => element.getBoundingClientRect().height,
     ), { accept: (height) => height > initialTextareaHeight });
     expect(grownTextareaHeight).toBeGreaterThan(initialTextareaHeight);
-    expect(grownTextareaHeight).toBeLessThanOrEqual(176);
+    expect(grownTextareaHeight).toBeLessThanOrEqual(200);
     await textbox.fill("");
     await capture("composer-dock-light-default-1440x920");
     await exerciseComposerQueue({
@@ -634,7 +630,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await splitMore.click();
     await expect(splitMoreMenu).toBeVisible();
     await page.locator(".workspace-header").click({
-      position: { x: 12, y: 12 },
+      position: { x: 12, y: 4 },
     });
     await expect(splitMoreMenu).toBeHidden();
     await expect(splitMore).toBeFocused();

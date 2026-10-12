@@ -15,9 +15,9 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
       const bounds = trigger.current?.getBoundingClientRect();
       if (!bounds) return;
       const width = menu.offsetWidth;
-      menu.style.left = `${Math.max(8, Math.min(bounds.right + 2, window.innerWidth - width - 8))}px`;
+      menu.style.left = `${Math.max(8, Math.min(bounds.right + 4, window.innerWidth - width - 8))}px`;
       if (bounds.right + width > window.innerWidth - 8 && bounds.left > width + 8) {
-        menu.style.left = `${bounds.left - width - 2}px`;
+        menu.style.left = `${bounds.left - width - 4}px`;
       }
       menu.style.top = `${Math.max(8, Math.min(bounds.top, window.innerHeight - menu.offsetHeight - 8))}px`;
     };
@@ -41,7 +41,7 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
         if (event.key !== "ArrowRight") return;
         event.preventDefault(); event.stopPropagation(); setOpen(true);
         requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
-      }}>{icon}<span>{label}</span><ChevronRight size={13} className="thread-submenu-chevron" /></button>
+      }}>{icon}<span>{label}</span><ChevronRight size={14} className="thread-submenu-chevron" /></button>
     {open && <div ref={popup} role="menu" aria-label={label} className="thread-submenu"
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft") {

@@ -34,7 +34,7 @@ export function HeaderMenuGroup({
       >
         {icon}
         <span>{label}</span>
-        <ChevronRight size={13} aria-hidden="true" className="header-menu-group-chevron" />
+        <ChevronRight size={14} aria-hidden="true" className="header-menu-group-chevron" />
       </button>
       {expanded && (
         <div id={groupId} className="header-menu-group" role="group" aria-label={label}>

@@ -8,9 +8,7 @@ const css = readFileSync(
 );
 
 describe("streaming caret layout", () => {
-  it("pauses the live caret while the window is hidden", () => {
-    expect(css).toMatch(
-      /data-document-visible="false"[\s\S]*?response-markdown\.is-streaming[\s\S]*?animation-play-state:\s*paused/u,
-    );
+  it("streams without a pulsing caret", () => {
+    expect(css).not.toMatch(/streaming-caret|is-streaming[^{]*::after|animation: pulse 900ms/u);
   });
 });

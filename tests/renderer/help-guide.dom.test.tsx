@@ -83,7 +83,9 @@ describe("Help", () => {
       .toEqual(HELP_TOPICS.map(({ title }) => title));
     expect(within(dialog).getByRole("tabpanel", { name: "Getting started" }))
       .toHaveTextContent("Open a local folder or clone a repository");
-    expect(within(dialog).getByText("Topic 1 of 12")).toBeVisible();
+    expect(dialog).not.toHaveTextContent(/Topic \d+ of \d+/u);
+    expect(within(dialog).getByRole("button", { name: "Close help" })).toHaveClass("icon-button");
+    expect(within(dialog).getByRole("button", { name: /Next: Chat and composer/u })).toHaveClass("primary-button");
   });
 
   it("opens from the command palette by search", async () => {
@@ -127,7 +129,7 @@ describe("Help", () => {
       (dialog) => within(dialog).getByRole("tabpanel"),
       (dialog) => within(dialog).getByRole("button", { name: /Show welcome guide/u }),
       (dialog) => within(dialog).getByRole("button", { name: /Next: Chat and composer/u }),
-      (dialog) => within(dialog).getByRole("button", { name: "Close" }),
+      (dialog) => within(dialog).getByRole("button", { name: "Close help" }),
     ];
 
     for (const control of controls) {
@@ -166,7 +168,7 @@ describe("Help", () => {
   it("returns focus to the opener from Close and Done", async () => {
     const { opener } = renderWithSidebarButton();
     let dialog = await openFrom(opener);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close help" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(opener).toHaveFocus();
 
@@ -193,7 +195,7 @@ describe("Help", () => {
     fireEvent.keyDown(tab("Chat and composer"), { key: "ArrowUp" });
     fireEvent.keyDown(tab("Getting started"), { key: "ArrowUp" });
     expect(tab("Troubleshooting")).toHaveFocus();
-    expect(within(dialog).getByText("Topic 12 of 12")).toBeVisible();
+    expect(tab("Troubleshooting")).toHaveAttribute("aria-selected", "true");
     expect(within(dialog).queryByRole("button", { name: /Next:/u })).toBeNull();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Previous" }));
@@ -211,7 +213,7 @@ describe("Help", () => {
   it("traps Tab inside the dialog", async () => {
     const { opener } = renderWithSidebarButton();
     const dialog = await openFrom(opener);
-    const close = within(dialog).getByRole("button", { name: "Close" });
+    const close = within(dialog).getByRole("button", { name: "Close help" });
     const next = within(dialog).getByRole("button", { name: /Next: Chat and composer/u });
 
     next.focus();

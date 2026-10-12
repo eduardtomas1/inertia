@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FileEditorDialog } from "../../src/renderer/src/components/FileEditorDialog";
+import { readSourceText } from "../helpers/source-text";
 
 const file = {
   path: "src/example.ts",
@@ -33,9 +34,19 @@ describe("FileEditorDialog", () => {
   it("falls back to native plain text for oversized input without truncating the editable content", async () => {
     const content = `// ${"x".repeat(50_001)}`;
     render(<FileEditorDialog file={{ ...file, content }} canSave={() => true} onClose={vi.fn()} onSave={vi.fn()} />);
-    expect(await screen.findByText(/Plain text · highlighting unavailable/u)).toBeVisible();
+    const label = await screen.findByText("Plain text", { exact: true });
+    expect(label).toBeVisible();
     expect(screen.getByRole("textbox")).toHaveValue(content);
     expect(document.querySelector(".syntax-textarea")).not.toHaveClass("is-highlighted");
+    fireEvent.pointerEnter(label, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector("[role=\"tooltip\"]")).toHaveTextContent("Highlighting unavailable or file exceeds preview limits"));
+  });
+
+  it("keeps the Plain text label on its own backing so it never overlaps code", () => {
+    const rule = /\.syntax-textarea-mode \{([^}]*)\}/u.exec(readSourceText("src/renderer/src/components/SyntaxTextarea.css"))?.[1] ?? "";
+    expect(rule).toContain("background: var(--surface);");
+    expect(rule).toMatch(/padding: \d/u);
+    expect(rule).not.toContain("pointer-events: none");
   });
   it("saves the edited text against the exact preview digest", async () => {
     const onClose = vi.fn();
@@ -95,9 +106,11 @@ describe("FileEditorDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This file changed after it was opened",
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This file changed after it was opened");
+    expect(alert).toHaveClass("dialog-error");
+    expect(alert.closest(".dialog-shell-footer")).not.toBeNull();
+    expect(screen.queryByText("Changes are checked against the version you opened.")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });

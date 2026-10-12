@@ -64,10 +64,10 @@ function routeLabel(source: AgentGoalSource): string {
 }
 
 const actionIcons: Record<GoalActionIcon, React.JSX.Element> = {
-  play: <Play size={12} aria-hidden="true" />,
-  pause: <CirclePause size={13} aria-hidden="true" />,
-  block: <Square size={11} aria-hidden="true" />,
-  complete: <Check size={13} aria-hidden="true" />,
+  play: <Play size={14} aria-hidden="true" />,
+  pause: <CirclePause size={14} aria-hidden="true" />,
+  block: <Square size={14} aria-hidden="true" />,
+  complete: <Check size={14} aria-hidden="true" />,
 };
 
 function currentRouteGoal(workflow: AgentWorkflowState): AgentGoal | null {
@@ -279,10 +279,9 @@ export function ChatGoalControl({
       >
           <header>
             <span>
-              <Flag size={15} aria-hidden="true" />
+              <Flag size={14} aria-hidden="true" />
               <span>
                 <strong id={headingId}>{label}</strong>
-                <small>{workflow?.goalCapability.label ?? "Workflow unavailable"}</small>
               </span>
             </span>
             <IconButton
@@ -316,7 +315,7 @@ export function ChatGoalControl({
                 disabled={loading || controlsBusy}
                 onClick={() => void onRetry().catch(() => undefined)}
               >
-                <RefreshCw size={13} aria-hidden="true" />
+                <RefreshCw size={14} aria-hidden="true" />
                 Retry
               </button>
             </div>
@@ -337,7 +336,7 @@ export function ChatGoalControl({
                   && executionStatus === "idle" && (
                     <small role="status">
                       This goal is still active in Codex, but no Inertia run is
-                      connected. Resume it to continue.
+                      connected.
                     </small>
                   )}
               </section>
@@ -347,8 +346,7 @@ export function ChatGoalControl({
                   aria-label="Resume budget-limited goal"
                 >
                   <p>
-                    This budget is exhausted. Raise or remove it before
-                    resuming the goal.
+                    This budget is exhausted.
                   </p>
                   <div className="chat-goal-budget">
                     <label htmlFor={budgetId}>New token budget</label>
@@ -383,7 +381,7 @@ export function ChatGoalControl({
                         }
                       }}
                     >
-                      <Play size={12} aria-hidden="true" />
+                      <Play size={14} aria-hidden="true" />
                       Resume with new budget
                     </button>
                     <button
@@ -392,7 +390,7 @@ export function ChatGoalControl({
                       disabled={controlsBusy || submitting}
                       onClick={() => void resumeBudgetLimitedGoal(null)}
                     >
-                      <Play size={12} aria-hidden="true" />
+                      <Play size={14} aria-hidden="true" />
                       Resume without budget
                     </button>
                   </div>
@@ -420,7 +418,7 @@ export function ChatGoalControl({
                   disabled={controlsBusy || submitting}
                   onClick={() => void clearGoal()}
                 >
-                  <Trash2 size={13} aria-hidden="true" />
+                  <Trash2 size={14} aria-hidden="true" />
                   Clear
                 </button>
               </footer>
@@ -487,7 +485,7 @@ export function ChatGoalControl({
                   || parseGoalTokenBudget(tokenBudget) === undefined
                 }
               >
-                <Flag size={13} aria-hidden="true" />
+                <Flag size={14} aria-hidden="true" />
                 {nativeGoal ? "Set Codex goal" : "Save local objective"}
               </button>
             </form>

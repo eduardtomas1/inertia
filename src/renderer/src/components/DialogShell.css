@@ -1,0 +1,117 @@
+.dialog-shell {
+  display: flex;
+  width: min(var(--dialog-width, 480px), 100%);
+  max-height: calc(100dvh - 48px);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dialog-shell-header {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px 16px 12px 20px;
+}
+
+.dialog-shell-heading {
+  min-width: 0;
+  flex: 1;
+  padding-top: 6px;
+}
+
+.dialog-shell-heading > h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dialog-shell-heading > p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+  overflow-wrap: anywhere;
+}
+
+.dialog-shell-close {
+  margin-left: 4px;
+}
+
+.dialog-shell-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0 20px 4px;
+}
+
+.dialog-shell-body.is-flush {
+  padding: 0;
+}
+
+.dialog-shell-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px 20px;
+}
+
+.dialog-shell-footer-start {
+  min-width: 0;
+  flex: 1;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
+.dialog-shell-footer > :is(.primary-button, .secondary-button) {
+  min-height: var(--control-height);
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-chrome);
+}
+
+.dialog-field :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 400;
+}
+
+.dialog-field textarea {
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.dialog-field :is(input, select, textarea):focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dialog-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
+.dialog-shell-body .dialog-error {
+  margin-top: 8px;
+}

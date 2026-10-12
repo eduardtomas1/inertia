@@ -229,7 +229,7 @@ export function ZoomableAttachmentImage({
           disabled={!zoomed}
           onClick={() => zoomTo(steppedZoomScale(zoom.scale, -1))}
         >
-          <ZoomOut size={15} aria-hidden="true" />
+          <ZoomOut size={14} aria-hidden="true" />
         </button>
         <output aria-label="Zoom level">{imageZoomPercentLabel(zoom.scale)}</output>
         <button
@@ -238,7 +238,7 @@ export function ZoomableAttachmentImage({
           disabled={zoom.scale >= IMAGE_ZOOM_MAX_SCALE}
           onClick={() => zoomTo(steppedZoomScale(zoom.scale, 1))}
         >
-          <ZoomIn size={15} aria-hidden="true" />
+          <ZoomIn size={14} aria-hidden="true" />
         </button>
         <button
           type="button"

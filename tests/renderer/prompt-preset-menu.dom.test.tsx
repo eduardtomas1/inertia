@@ -115,11 +115,54 @@ describe("PromptPresetMenu", () => {
       entries={[legacyPreset]}
       currentRoute={{ ...route, fastMode: true }}
     />);
-    fireEvent.click(screen.getByRole("button", {
+    const trigger = screen.getByRole("button", {
       name: "Prompt presets, 1 saved",
-    }));
-    expect(await screen.findByTitle(/speed Standard/u))
+    });
+    expect(trigger).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(trigger);
+    expect((await screen.findByText(/speed Standard/u)).closest("button"))
       .toHaveAttribute("aria-disabled", "true");
+    expect(document.querySelectorAll(".prompt-presets small[title], .composer-popover small[title]")).toHaveLength(0);
+  });
+
+  it("lists presets without a heading and offers one line plus one button when empty", async () => {
+    const view = render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets, 2 saved" }));
+    const dialog = await screen.findByRole("dialog", { name: "Prompt presets" });
+    expect(dialog).not.toHaveTextContent("Reusable text");
+    expect(dialog.querySelector("strong")?.textContent).not.toBe("Prompt presets");
+    expect(within(dialog).getByRole("button", { name: "New" })).toHaveClass("secondary-button");
+    view.unmount();
+    render(<Harness entries={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
+    const empty = await screen.findByRole("dialog", { name: "Prompt presets" });
+    expect(empty).toHaveTextContent(/^No presets yetPresets never send automatically\.Create a preset$/u);
+    expect(empty.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("states the 30-preset limit on New and Duplicate and keeps the count as plain text", async () => {
+    const full: PromptPreset[] = Array.from({ length: 30 }, (_, index) => ({
+      ...presets[0]!,
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      name: `Preset ${index}`,
+      position: index,
+    }));
+    const onDuplicate = vi.fn(() => Promise.resolve());
+    render(<Harness entries={full} onDuplicate={onDuplicate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Prompt presets, 30 saved" }));
+    const dialog = await screen.findByRole("dialog", { name: "Prompt presets" });
+    expect(within(dialog).getByText("30/30")).toHaveClass("prompt-presets-count");
+    const create = within(dialog).getByRole("button", { name: "New" });
+    expect(create).toHaveAttribute("aria-disabled", "true");
+    expect(create).toHaveAccessibleDescription("30 presets is the limit");
+    fireEvent.click(create);
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Edit prompt preset: Preset 3" }));
+    const duplicate = screen.getByRole("button", { name: "Duplicate" });
+    expect(duplicate).toHaveAttribute("aria-disabled", "true");
+    expect(duplicate).toHaveAccessibleDescription("30 presets is the limit");
+    fireEvent.click(duplicate);
+    expect(onDuplicate).not.toHaveBeenCalled();
   });
 
   it("opens from the keyboard, applies matching text, and explains route blocks", async () => {
@@ -135,7 +178,9 @@ describe("PromptPresetMenu", () => {
       name: "New",
     })).toHaveFocus());
 
-    fireEvent.click(within(dialog).getByTitle("Insert Review lifecycle"));
+    const apply = within(dialog).getByRole("button", { name: /^Review lifecycle/u });
+    expect(apply).not.toHaveAttribute("title");
+    fireEvent.click(apply);
     expect(onApply).toHaveBeenCalledExactlyOnceWith(presets[0]);
     await waitFor(() => expect(screen.queryByRole("dialog", {
       name: "Prompt presets",
@@ -148,14 +193,17 @@ describe("PromptPresetMenu", () => {
       "model gpt-5.6-sol",
       "reasoning high",
     ].join(" · ");
-    const blocked = await screen.findByTitle(
+    const reason = await screen.findByText(
       `Available on ${blockedRouteLabel}`,
     );
+    expect(reason).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(reason, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent))
+      .toContain(`Available on ${blockedRouteLabel}`));
+    fireEvent.pointerLeave(reason, { pointerType: "mouse" });
+    const blocked = reason.closest("button")!;
     expect(blocked).toHaveAttribute("aria-disabled", "true");
-    expect(blocked).toHaveAttribute(
-      "title",
-      `Available on ${blockedRouteLabel}`,
-    );
+    expect(blocked).not.toHaveAttribute("title");
     blocked.focus();
     expect(blocked).toHaveFocus();
     fireEvent.click(blocked);
@@ -199,9 +247,11 @@ describe("PromptPresetMenu", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Prompt presets, 2 saved",
     }));
-    fireEvent.click(await screen.findByRole("button", {
+    const edit = await screen.findByRole("button", {
       name: "Edit prompt preset: Route audit",
-    }));
+    });
+    expect(edit).not.toHaveAttribute("title");
+    fireEvent.click(edit);
     const routeToggle = screen.getByRole("checkbox", {
       name: /Bound to saved model route/u,
     });
@@ -209,7 +259,7 @@ describe("PromptPresetMenu", () => {
     expect(routeToggle).toHaveAccessibleName(
       /Harness codex-app-server · backend builtin:openai · model gpt-5\.6-sol · reasoning high/u,
     );
-    expect(screen.getByText(/Saved route differs from this chat/u))
+    expect(screen.getByText("Saved route differs from this chat. Turn this off, then on again to bind to the current route."))
       .toBeVisible();
     const name = screen.getByLabelText("Name");
     fireEvent.change(name, { target: { value: "Route review" } });
@@ -226,7 +276,13 @@ describe("PromptPresetMenu", () => {
     fireEvent.click(await screen.findByRole("button", {
       name: "Edit prompt preset: Route audit",
     }));
-    fireEvent.click(screen.getByRole("button", { name: "Move Route audit up" }));
+    const moveUp = screen.getByRole("button", { name: "Move Route audit up" });
+    const moveDown = screen.getByRole("button", { name: "Move Route audit down" });
+    for (const control of [moveUp, moveDown]) expect(control).not.toHaveAttribute("title");
+    fireEvent.pointerEnter(moveUp, { pointerType: "mouse" });
+    await waitFor(() => expect([...document.querySelectorAll('[role="tooltip"]')].map(({ textContent }) => textContent)).toContain("Move up"));
+    fireEvent.pointerLeave(moveUp, { pointerType: "mouse" });
+    fireEvent.click(moveUp);
     await waitFor(() => expect(onReorder).toHaveBeenCalledWith([
       presets[1]!.id,
       presets[0]!.id,
@@ -259,7 +315,7 @@ describe("PromptPresetMenu", () => {
       "model gpt-5.6-sol",
       "reasoning xhigh",
     ].join(" · ");
-    expect(await screen.findByTitle(`Available on ${storedRouteLabel}`))
+    expect((await screen.findByText(`Available on ${storedRouteLabel}`)).closest("button"))
       .toHaveAttribute("aria-disabled", "true");
 
     fireEvent.click(screen.getByRole("button", {

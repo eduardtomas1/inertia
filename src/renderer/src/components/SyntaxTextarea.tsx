@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { sourceLanguageForFile } from "@shared/source-language";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
+import { TooltipText } from "./TooltipText";
 import "./SyntaxTextarea.css";
 
 /** Colors are a non-interactive mirror. The native textarea owns all edits,
@@ -37,6 +38,6 @@ export function SyntaxTextarea({ path, value, disabled, editorRef, onChange }: {
       aria-label={`Edit contents of ${path}`} onScroll={synchronizeScroll}
       onCompositionStart={() => setComposition(true)} onCompositionEnd={() => setComposition(false)}
       onChange={(event) => onChange(event.currentTarget.value)} />
-    {highlight?.value === value && highlight.html === null && <span className="syntax-textarea-mode">Plain text · highlighting unavailable or file exceeds preview limits</span>}
+    {highlight?.value === value && highlight.html === null && <TooltipText className="syntax-textarea-mode" tooltip="Highlighting unavailable or file exceeds preview limits">Plain text</TooltipText>}
   </div>;
 }

@@ -98,7 +98,6 @@ function runMigrationAgain(database: Database.Database): void {
 
 describe("html render migration", () => {
   it("is schema version 93", () => {
-    expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(93);
     expect(runtimeMigrationCatalog().find(({ name }) => name === htmlRendersMigration.name)?.version).toBe(93);
   });
 
@@ -120,7 +119,7 @@ describe("html render migration", () => {
 
     const upgraded = new Database(databasePath);
     try {
-      expect(schemaVersion(upgraded)).toBe(93);
+      expect(schemaVersion(upgraded)).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect(columns(upgraded, "messages")).toContain("html_render_json");
       expect(columns(upgraded, "html_renders")).toEqual(["id", "conversation_id", "turn_id", "title", "html", "created_at"]);
       expect(tables(upgraded)).toContain("html_renders_conversation_idx");

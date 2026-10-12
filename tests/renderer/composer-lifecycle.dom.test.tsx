@@ -42,7 +42,7 @@ import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 
-import { composerProps, conversation, deferred, provider } from "./composer-fixtures";
+import { composerProps, conversation, deferred, openComposerTools, provider } from "./composer-fixtures";
 
 function attachment(id: string): ChatAttachment {
   return {
@@ -105,6 +105,7 @@ describe("composer asynchronous ownership", () => {
       });
     };
     fireEvent.change(input, { target: { value: "Owned scratch prompt" } });
+    openComposerTools();
     fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Save current prompt/u }));
     expect(input).toHaveFocus();
@@ -434,6 +435,7 @@ describe("composer asynchronous ownership", () => {
 
     expect(input.compareDocumentPosition(toolbar)
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    openComposerTools(toolbar);
     expect(within(toolbar).getByRole("group", { name: "Add context" }))
       .toBeInTheDocument();
     expect(within(toolbar).getByRole("group", {
@@ -774,7 +776,8 @@ describe("composer asynchronous ownership", () => {
 
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       await act(async () => sent.resolve());
-      expect(attach).toBeDisabled();
+      if (mode === "follow-up") expect(attach).toBeEnabled();
+      else expect(attach).toBeDisabled();
       view.rerender(<Composer {...props} running sending={false} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(COMPOSER_ACTION_STALE_FALLBACK_MS); });
       vi.useRealTimers();
@@ -785,6 +788,101 @@ describe("composer asynchronous ownership", () => {
       expect(screen.getByText(imported.name)).toBeVisible();
     },
   );
+
+  it("returns the editor as soon as an active follow-up is acknowledged", async () => {
+    const current = conversation("71717171-7171-4171-8171-717171717171");
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        id: "running-turn",
+        status: "running",
+        harnessId: "codex-app-server",
+      },
+      onSend,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Also rename the file." } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledOnce());
+    await waitFor(() => expect(input.value).toBe(""));
+
+    fireEvent.change(input, { target: { value: "One more thing." } });
+    expect(input.readOnly).toBe(false);
+  });
+
+  it("keeps a non-image attachment in an unsent draft when the next turn starts", async () => {
+    const current = conversation("73737373-7373-4373-8373-737373737373");
+    const document: ChatAttachment = {
+      ...attachment("next-turn-spec"),
+      name: "spec.pdf",
+      mimeType: "application/pdf",
+    };
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "finished-turn",
+      status: "completed" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const props = composerProps(current, {
+      running: false,
+      latestTurn,
+      onReleaseAttachment,
+      onImportAttachments: async () => attachmentLease([document]),
+    });
+    const view = render(<Composer {...props} />);
+    const input = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Read this spec next." } });
+    fireEvent.paste(input, { clipboardData: { files: [new File(["%PDF"], "spec.pdf", { type: "application/pdf" })] } });
+    await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
+
+    view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
+
+    expect(screen.getByRole("button", { name: "Remove attachment spec.pdf" })).toBeVisible();
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
+    expect(input.value).toBe("Read this spec next.");
+  });
+
+  for (const key of ["Enter", "Tab"]) {
+    it(`explains why ${key} does not send a document draft once the next turn starts`, async () => {
+      const current = conversation("74747474-7474-4474-8474-747474747474");
+      const document: ChatAttachment = {
+        ...attachment(`next-turn-${key}`),
+        name: "spec.pdf",
+        mimeType: "application/pdf",
+      };
+      const onSend = vi.fn(async () => undefined);
+      const latestTurn = {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        id: "finished-turn",
+        status: "completed" as const,
+        harnessId: "codex-app-server" as const,
+      };
+      const props = composerProps(current, {
+        running: false,
+        latestTurn,
+        onSend,
+        onImportAttachments: async () => attachmentLease([document]),
+      });
+      const view = render(<Composer {...props} />);
+      const input = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: "Read this spec next." } });
+      fireEvent.paste(input, { clipboardData: { files: [new File(["%PDF"], "spec.pdf", { type: "application/pdf" })] } });
+      await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
+      view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
+
+      expect(fireEvent.keyDown(input, { key })).toBe(false);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Follow-ups while the agent is working support images only.",
+      );
+      expect(onSend).not.toHaveBeenCalled();
+      expect(input.value).toBe("Read this spec next.");
+      expect(screen.getByRole("button", { name: "Remove attachment spec.pdf" })).toBeVisible();
+    });
+  }
 
   it("keeps non-image media unavailable during an active follow-up", async () => {
     const current = conversation("16161616-1616-4616-8616-161616161616");
@@ -842,8 +940,10 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "/" } });
     const commands = await screen.findByRole("listbox", { name: "Composer commands" });
-    expect(commands).toHaveTextContent("Built-in");
-    expect(commands).toHaveTextContent("Provider");
+    expect(within(commands).getByRole("group", { name: "Built-in" })).toBeInTheDocument();
+    expect(within(commands).getByRole("group", { name: "Provider" })).toBeInTheDocument();
+    expect(commands).not.toHaveTextContent("Built-in");
+    expect(commands.querySelector(".composer-command-group-label")).toBeNull();
     expect(commands).toHaveTextContent("/goal");
     expect(commands).toHaveTextContent("/compact");
     expect(commands).toHaveTextContent("/resume");
@@ -1084,13 +1184,14 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
 
     fireEvent.change(input, { target: { value: "Stash this Fast prompt" } });
+    openComposerTools();
     fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Save current prompt/u }));
     expect(readPromptStash(window.localStorage, current.id)[0]?.route.fastMode).toBe(true);
 
     fireEvent.change(input, { target: { value: "Preset this Fast prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Prompt presets" }));
-    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create a preset" }));
     fireEvent.click(screen.getByRole("checkbox", {
       name: /Limit to current model route/u,
     }));
@@ -2191,6 +2292,7 @@ describe("composer asynchronous ownership", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
 
     fireEvent.change(input, { target: { value: "Temporary unfinished draft" } });
+    openComposerTools();
     fireEvent.click(screen.getByRole("button", { name: "Scratch prompts" }));
     fireEvent.click(screen.getByRole("menuitem", {
       name: /Save current prompt/u,
@@ -2205,7 +2307,7 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Prompt presets, 1 saved",
     }));
-    fireEvent.click(await screen.findByTitle("Insert Lifecycle review"));
+    fireEvent.click(await screen.findByRole("button", { name: /^Lifecycle review/u }));
     await waitFor(() => expect(input).toHaveValue(preset.body));
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByText("kept.png")).toBeVisible();
@@ -2245,6 +2347,7 @@ describe("composer asynchronous ownership", () => {
     });
     fireEvent.change(primaryInput, { target: { value: "Primary draft" } });
     fireEvent.change(secondaryInput, { target: { value: "Secondary draft" } });
+    openComposerTools(secondaryPane);
 
     fireEvent.click(within(secondaryPane).getByRole("button", {
       name: "Prompt presets, 1 saved",
@@ -2252,7 +2355,7 @@ describe("composer asynchronous ownership", () => {
     const dialog = await within(secondaryPane).findByRole("dialog", {
       name: "Prompt presets",
     });
-    fireEvent.click(within(dialog).getByTitle("Insert Lifecycle review"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Lifecycle review/u }));
 
     expect(primaryInput).toHaveValue("Primary draft");
     await waitFor(() => expect(secondaryInput).toHaveValue(

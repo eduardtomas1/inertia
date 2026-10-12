@@ -94,7 +94,7 @@ test.afterEach(async () => {
             connection: document.querySelector(".app-shell")?.getAttribute("data-connection-status"),
             visibility: document.visibilityState, focus: document.activeElement?.getAttribute("aria-label"),
             branchQuery: document.querySelector<HTMLInputElement>('[aria-label="Search branches"]')?.value,
-            nodes: Array.from(document.querySelectorAll('.git-branch-results, .git-branch-results button, .git-branch-load-status, .git-branch-error, .commit-dialog, .commit-dialog button, .commit-dialog header, .error-toast')).slice(0, 50).map(describe),
+            nodes: Array.from(document.querySelectorAll('.git-branch-results, .git-branch-results button, .git-branch-load-status, .git-branch-error, .commit-shell, .commit-shell button, .commit-shell header, .error-toast')).slice(0, 50).map(describe),
           };
         })),
         readDiagnostic(async () => {

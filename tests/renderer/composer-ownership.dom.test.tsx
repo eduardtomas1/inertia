@@ -448,6 +448,17 @@ describe("composer detachment ownership", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith("No preview context.", [], undefined));
   });
 
+  it("marks the preview suggestion with plus and check icons instead of text glyphs", () => {
+    render(<Composer {...composerProps(conversation("preview-marks"), { previewContextUrl: "http://127.0.0.1:4173/preview" })} />);
+    const toggle = screen.getByRole("button", { name: /Attach current preview/u });
+    expect(toggle.querySelector("svg.lucide-plus")).not.toBeNull();
+    expect(toggle).not.toHaveTextContent(/[+✓]/u);
+    fireEvent.click(toggle);
+    const attached = screen.getByRole("button", { name: /Preview attached/u });
+    expect(attached.querySelector("svg.lucide-check")).not.toBeNull();
+    expect(attached).not.toHaveTextContent(/[+✓]/u);
+  });
+
   it("scopes dismissed suggestions to their conversation and URL without affecting another pane", () => {
     const first = conversation("first-preview-owner");
     const second = conversation("second-preview-owner");
@@ -973,7 +984,7 @@ describe("image-less composer routes", () => {
     }
 
     expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
-      .toBe("Ask for follow-up changes");
+      .toBe("Message");
     fireEvent.click(screen.getByRole("button", {
       name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
     }));

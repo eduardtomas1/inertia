@@ -24,6 +24,7 @@ export type CodexItemActivity = {
 
 export interface CodexItemProjectionState {
   deltaItems: Set<string>;
+  answerBoundaryItems: Set<string>;
   outputItems: Set<string>;
   commandOutput: CodexCommandOutput;
   reasoningDeltaItems: Set<string>;
@@ -41,6 +42,19 @@ interface CodexItemProjectionHost {
     phase: "started" | "completed",
     threadId: string | null,
   ) => boolean;
+}
+
+export function endCodexAnswerBeforeText(
+  answerBoundaryItems: Set<string>,
+  itemId: string | undefined,
+  options: Pick<CodexAppServerOptions, "onTextBoundary">,
+): void {
+  if (
+    answerBoundaryItems.size === 0
+    || (itemId && answerBoundaryItems.has(itemId))
+  ) return;
+  answerBoundaryItems.clear();
+  options.onTextBoundary?.();
 }
 
 export function handleCodexHook(
@@ -156,10 +170,16 @@ export function handleCodexItem(
     const itemId = boundedText(item.id, 512);
     const text = stringValue(item.text);
     if (text && (!itemId || !state.deltaItems.has(itemId))) {
+      endCodexAnswerBeforeText(state.answerBoundaryItems, itemId, host.options);
       host.appendResultText(text);
       host.options.onText?.(text);
     }
     if (itemId) state.deltaItems.delete(itemId);
+    if (
+      itemId
+      && state.answerBoundaryItems.delete(itemId)
+      && state.answerBoundaryItems.size === 0
+    ) host.options.onTextBoundary?.();
   } else if (itemType === "plan" && method === "item/completed") {
     const text = boundedText(item.text, 128_000);
     if (text) host.options.onPlan?.(text, []);

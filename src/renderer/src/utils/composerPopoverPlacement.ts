@@ -22,7 +22,7 @@ export interface ComposerPopoverPlacement {
   horizontal: PopoverHorizontalPlacement;
 }
 
-const DEFAULT_GAP = 8;
+const DEFAULT_GAP = 4;
 const DEFAULT_PADDING = 8;
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -44,12 +44,12 @@ export function intersectPopoverRects(
 }
 
 function insetPopoverRect(bounds: PopoverRect, padding: number): PopoverRect {
-  const left = bounds.left + padding;
-  const top = bounds.top + padding;
+  const left = Math.ceil(bounds.left + padding);
+  const top = Math.ceil(bounds.top + padding);
   return {
     top,
-    right: Math.max(left, bounds.right - padding),
-    bottom: Math.max(top, bounds.bottom - padding),
+    right: Math.max(left, Math.floor(bounds.right - padding)),
+    bottom: Math.max(top, Math.floor(bounds.bottom - padding)),
     left,
   };
 }
@@ -121,8 +121,8 @@ export function calculateComposerPopoverPlacement({
     : trigger.bottom + gap;
 
   return {
-    top: clamp(top, safe.top, safe.bottom - height),
-    left,
+    top: clamp(Math.round(top), safe.top, Math.floor(safe.bottom - height)),
+    left: clamp(Math.round(left), safe.left, Math.floor(safe.right - width)),
     maxWidth,
     maxHeight,
     vertical,
@@ -154,6 +154,47 @@ export function composerPopoverBoundary(element: Element): PopoverRect {
   return intersectPopoverRects(bounds, viewportRect());
 }
 
+export function unscaledPopoverRect({
+  rect,
+  scaleX,
+  scaleY,
+  originX,
+  originY,
+}: {
+  rect: PopoverRect;
+  scaleX: number;
+  scaleY: number;
+  originX: number;
+  originY: number;
+}): PopoverRect {
+  const left = rect.left - originX * (1 - scaleX);
+  const top = rect.top - originY * (1 - scaleY);
+  return {
+    top,
+    right: left + (rect.right - rect.left) / scaleX,
+    bottom: top + (rect.bottom - rect.top) / scaleY,
+    left,
+  };
+}
+
+function layoutRect(element: HTMLElement): PopoverRect & PopoverSize {
+  const style = getComputedStyle(element);
+  const [originX = 0, originY = 0] = style.transformOrigin
+    .split(" ")
+    .map((value) => Number.parseFloat(value) || 0);
+  const matrix = style.transform && style.transform !== "none"
+    ? new DOMMatrixReadOnly(style.transform)
+    : null;
+  const rect = unscaledPopoverRect({
+    rect: element.getBoundingClientRect(),
+    scaleX: matrix?.a || 1,
+    scaleY: matrix?.d || 1,
+    originX,
+    originY,
+  });
+  return { ...rect, width: rect.right - rect.left, height: rect.bottom - rect.top };
+}
+
 function popoverSurface(popover: HTMLElement): HTMLElement {
   if (!popover.classList.contains("composer-more-layer")) return popover;
   return popover.querySelector<HTMLElement>(":scope > .composer-popover")
@@ -172,7 +213,7 @@ export function positionComposerPopover(
   }
 
   const boundary = composerPopoverBoundary(trigger);
-  const initialBounds = surface.getBoundingClientRect();
+  const initialBounds = layoutRect(surface);
   const horizontal = calculateComposerPopoverPlacement({
     trigger: trigger.getBoundingClientRect(),
     boundary,
@@ -182,7 +223,7 @@ export function positionComposerPopover(
   surface.style.maxWidth = `${horizontal.maxWidth}px`;
   surface.style.minWidth = `${constrainedWidth}px`;
 
-  const widthConstrainedBounds = surface.getBoundingClientRect();
+  const widthConstrainedBounds = layoutRect(surface);
   const borderHeight = widthConstrainedBounds.height - surface.clientHeight;
   const naturalHeight = Math.max(
     widthConstrainedBounds.height,
@@ -204,7 +245,7 @@ export function positionComposerPopover(
     `${placement.maxHeight}px`,
   );
 
-  const positionedBounds = surface.getBoundingClientRect();
+  const positionedBounds = layoutRect(surface);
   popover.style.translate = `${placement.left - positionedBounds.left}px ${
     placement.top - positionedBounds.top
   }px`;
@@ -261,6 +302,10 @@ export function observeComposerPopover(
   const schedule = (): void => {
     if (frame === null) frame = window.requestAnimationFrame(update);
   };
+  const surface = popoverSurface(popover);
+  const settle = (event: AnimationEvent): void => {
+    if (event.target === surface) schedule();
+  };
   update();
   const observer = typeof ResizeObserver === "undefined"
     ? null
@@ -274,13 +319,14 @@ export function observeComposerPopover(
   }
   for (const element of [
     trigger,
-    popoverSurface(popover),
+    surface,
     trigger.closest<HTMLElement>(".composer"),
     workspace,
     trigger.closest<HTMLElement>(".conversation-split-pane"),
   ]) {
     if (element) observer?.observe(element);
   }
+  surface.addEventListener("animationend", settle);
   window.addEventListener("resize", schedule);
   window.visualViewport?.addEventListener("resize", schedule);
   window.visualViewport?.addEventListener("scroll", schedule);
@@ -288,6 +334,7 @@ export function observeComposerPopover(
     if (frame !== null) window.cancelAnimationFrame(frame);
     observer?.disconnect();
     layoutObserver?.disconnect();
+    surface.removeEventListener("animationend", settle);
     window.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("resize", schedule);
     window.visualViewport?.removeEventListener("scroll", schedule);

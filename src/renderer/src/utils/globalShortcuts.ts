@@ -27,6 +27,50 @@ interface ShortcutTarget {
 
 type CurrentActions = { current: GlobalShortcutActions };
 
+const PANE_SELECTOR = ".conversation-pane-workspace, .workspace-body";
+const MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], dialog[open]';
+
+function isCloseTabChord(event: KeyboardEvent, platform: string): boolean {
+  const primaryModifier = platform === "darwin"
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+  return primaryModifier
+    && event.key.toLowerCase() === "w"
+    && !event.altKey
+    && !event.shiftKey
+    && !event.isComposing;
+}
+
+function closeActivePanelSurface(ownerDocument: Document, target: EventTarget | null): boolean {
+  const origin = ownerDocument.querySelector(".preview-panel[data-page-focused]")
+    ?? (target instanceof Element ? target : target instanceof Node ? target.parentElement : null);
+  const pane = origin?.closest(PANE_SELECTOR) ?? null;
+  const panel = pane
+    ? Array.from(pane.querySelectorAll<HTMLElement>(".workspace-panel"))
+      .find((entry) => entry.closest(PANE_SELECTOR) === pane) ?? null
+    : ownerDocument.querySelector<HTMLElement>(".workspace-panel:not([hidden])");
+  if (!panel || panel.hidden) return false;
+  return !panel.dispatchEvent(new Event(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, { cancelable: true }));
+}
+
+export function installWindowCloseShortcut(
+  target: Window,
+  platform: string,
+  closeWindow: () => void,
+): () => void {
+  const handleKeyDown = (event: KeyboardEvent): void => {
+    if (!isCloseTabChord(event, platform) || event.defaultPrevented) return;
+    if (event.target instanceof Element && event.target.closest(".xterm")) return;
+    const ownerDocument = target.document;
+    if (ownerDocument.querySelector(MODAL_SELECTOR)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!closeActivePanelSurface(ownerDocument, event.target)) closeWindow();
+  };
+  target.addEventListener("keydown", handleKeyDown, true);
+  return () => target.removeEventListener("keydown", handleKeyDown, true);
+}
+
 export function installGlobalShortcuts(
   target: ShortcutTarget,
   actions: CurrentActions,
@@ -52,6 +96,18 @@ export function installGlobalShortcuts(
     // chords remain available because they do not encode terminal controls.
     const terminalTarget = typeof Element !== "undefined"
       && event.target instanceof Element && event.target.closest(".xterm");
+    if (isCloseTabChord(event, platform)) {
+      const closeDocument = typeof Node !== "undefined" && event.target instanceof Node
+        ? event.target.ownerDocument
+        : typeof document !== "undefined" ? document : null;
+      if (terminalTarget || actions.current.suspended || !closeDocument) return;
+      if (closeDocument.querySelector(MODAL_SELECTOR)) return;
+      if (!closeActivePanelSurface(closeDocument, event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      ownedKeyUps.add(key);
+      return;
+    }
     if (event.ctrlKey && terminalTarget) return;
     const shortcut: AppShortcutAction | "toggle-settings" | undefined = key === "," || event.code === "Comma"
       ? "toggle-settings"
@@ -119,3 +175,4 @@ import type {
   AppKeybindings,
   AppShortcutAction,
 } from "@shared/keybindings";
+import { CLOSE_ACTIVE_PANEL_SURFACE_EVENT } from "./rightPanelSurfaces";

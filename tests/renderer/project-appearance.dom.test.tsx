@@ -87,14 +87,14 @@ describe("project colour marks", () => {
     }
     render(<Picker />);
     const trigger = screen.getByRole("button", { name: "Filter work by project" });
-    expect(trigger.querySelector(".lucide-folders")).not.toBeNull();
+    expect(trigger.querySelector(".lucide-folder")).not.toBeNull();
     expect(trigger).toHaveAccessibleDescription("Showing all projects");
     fireEvent.click(trigger);
     expect(screen.getAllByRole("option").map((option) => option.getAttribute("aria-label"))).toEqual(["All projects", "Runtime, pinned", "Website"]);
-    expect(screen.getByRole("option", { name: "All projects" }).querySelector(".lucide-folders")).not.toBeNull();
+    expect(screen.getByRole("option", { name: "All projects" }).querySelector(".lucide-folder")).not.toBeNull();
     expect(screen.getByRole("option", { name: "Runtime, pinned" }).querySelector(".project-name-tinted")).toHaveTextContent("Runtime");
     fireEvent.click(screen.getByRole("option", { name: "Runtime, pinned" }));
-    expect(trigger.querySelector(".lucide-folders")).toBeNull();
+    expect(trigger.querySelector(".lucide-folder")).toBeNull();
     expect(trigger.querySelector("svg[data-project-tinted]")).not.toBeNull();
     expect(trigger.querySelector(".project-name-tinted")).toHaveTextContent("Runtime");
     expect(trigger).toHaveAccessibleDescription("Showing Runtime");

@@ -38,12 +38,24 @@ function install() {
 }
 
 describe("mascot custom sprite settings", () => {
+  it("shows the mascot controls with only the hide and menu consequences", async () => {
+    const bridge = install();
+    await bridge.configure({ enabled: true, motion: true });
+    render(<MascotSettings />);
+    expect(await screen.findByRole("button", { name: "Move with keyboard" })).toBeVisible();
+    expect(document.body).not.toHaveTextContent("Drag to move");
+    expect(screen.getByText("Escape hides it. Right-click for animation and hide controls.")).toBeVisible();
+  });
+
+
   it("exports the template, previews a valid import, applies it and resets to the default artwork", async () => {
     const bridge = install();
     render(<MascotSettings />);
     const section = await screen.findByRole("region", { name: "Custom sprites" });
-    expect(section).toHaveTextContent("Import your own artwork for each state. The built-in mascot stays until you apply a set.");
+    expect(section).not.toHaveTextContent("Import your own artwork for each state.");
+    expect(document.body).not.toHaveTextContent("A tiny companion above your windows");
     const guide = section.querySelector("details.mascot-sprite-guide")!;
+    expect(guide).toHaveClass("setting-disclosure");
     expect(guide).toHaveProperty("open", false);
     expect(within(section).getByText("How custom sprites work")).toBeInTheDocument();
     expect(within(section).getByRole("list", { name: "Steps" }).querySelectorAll("li")).toHaveLength(4);
@@ -89,7 +101,8 @@ describe("mascot custom sprite settings", () => {
     expect(preview.querySelector("img")).toHaveAttribute("src", url("0123456789abcdef", "idle.png"));
     expect(preview.querySelector("source")).toHaveAttribute("srcset", url("0123456789abcdef", "idle.webp"));
     expect(preview.querySelector("source")).toHaveAttribute("media", "(prefers-reduced-motion: no-preference)");
-    expect(section).toHaveTextContent("Preview: 5 states, 2 animated. Apply to use them.");
+    expect(section).toHaveTextContent("Preview: 5 states, 2 animated.");
+    expect(section).not.toHaveTextContent("Apply to use them");
     expect(bridge.applySprites).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply sprites" }));
@@ -112,7 +125,7 @@ describe("mascot custom sprite settings", () => {
     await screen.findByRole("region", { name: "Custom sprites" });
     bridge.importSprites.mockResolvedValueOnce({ status: "ready", sprites: sprites("fedcba9876543210", 1) });
     fireEvent.click(screen.getByRole("button", { name: "Import sprites" }));
-    expect(await screen.findByText("Preview: 5 states, 1 animated. Apply to use them.")).toBeInTheDocument();
+    expect(await screen.findByText("Preview: 5 states, 1 animated.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Discard preview" }));
     expect(screen.queryByRole("list", { name: "Sprite preview" })).toBeNull();
     expect(screen.getByRole("list", { name: "Required files" })).toBeInTheDocument();

@@ -1,10 +1,11 @@
 import clsx from "clsx";
 import { useId, useState, type ComponentProps } from "react";
-import { AlertCircle, Check, ChevronDown, Circle, CircleSlash, Copy, ListChecks, LoaderCircle, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, Play, RotateCcw } from "lucide-react";
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
 import { ResponseMarkdown } from "./ResponseMarkdown";
+import { IconButton, LoadingMark } from "./ui";
 
 export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked" | "cancelled";
 
@@ -23,7 +24,6 @@ export type PlanMarkdownContext = Pick<
 export type PlanPanelProps = {
   steps: PlanStep[];
   title?: string;
-  summary?: string | null;
   document?: string | null;
   markdown?: PlanMarkdownContext;
   activeStepId?: string | null;
@@ -34,8 +34,8 @@ export type PlanPanelProps = {
 
 function StepIcon({ status }: { status: PlanStepStatus }): React.JSX.Element {
   if (status === "completed") return <Check size={14} aria-hidden="true" />;
-  if (status === "in-progress") return <LoaderCircle size={15} aria-hidden="true" />;
-  if (status === "blocked") return <AlertCircle size={15} aria-hidden="true" />;
+  if (status === "in-progress") return <LoadingMark size={14} aria-hidden="true" />;
+  if (status === "blocked") return <CircleAlert size={14} aria-hidden="true" />;
   if (status === "cancelled") return <CircleSlash size={14} aria-hidden="true" />;
   return <Circle size={14} aria-hidden="true" />;
 }
@@ -59,7 +59,6 @@ function PlanInlineText({ text }: { text: string }): React.JSX.Element {
 export function PlanPanel({
   steps,
   title = "Implementation plan",
-  summary,
   document,
   markdown,
   activeStepId = null,
@@ -71,7 +70,6 @@ export function PlanPanel({
   const documentId = useId();
   const planCopy = useCopiedState();
   const completed = steps.filter((step) => step.status === "completed").length;
-  const progress = steps.length > 0 ? Math.round((completed / steps.length) * 100) : 0;
   const parsed = document?.trim() ? planDocument(document) : null;
   const heading = parsed?.title ?? title;
   const body = parsed?.body ?? "";
@@ -82,35 +80,28 @@ export function PlanPanel({
     <section className="plan-panel" aria-label="Implementation plan">
       <header className="panel-toolbar plan-toolbar">
         <div className="panel-heading">
-          <ListChecks size={17} aria-hidden="true" />
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
-            <span>{completed} of {steps.length} complete</span>
+            {steps.length > 0 && <span>{completed} of {steps.length} complete</span>}
           </div>
         </div>
         <div className="plan-toolbar-actions">
           {document?.trim() && (
-            <button
-              type="button"
+            <IconButton
               className="plan-copy-button"
+              label={planCopy.error ?? (planCopy.copied ? "Copied plan" : "Copy plan")}
               aria-label={planCopy.copied ? "Copied plan" : "Copy plan"}
-              title={planCopy.error ?? (planCopy.copied ? "Copied plan" : "Copy plan")}
               disabled={planCopy.pending}
               onClick={() => void planCopy.copy(document.trim())}
             >
               {planCopy.copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-            </button>
+            </IconButton>
           )}
-          <span className="plan-percent" aria-label={`${progress}% complete`}>{progress}%</span>
         </div>
       </header>
 
-      <div className="plan-progress" role="progressbar" aria-label="Plan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
-        <span style={{ width: `${progress}%` }} />
-      </div>
-
       <div className="plan-scroll">
-        {body ? (
+        {body && (
           <div className="plan-document-shell">
             <div id={documentId} className={clsx("plan-document", collapsed && "is-collapsed")}>
               {markdown
@@ -126,26 +117,18 @@ export function PlanPanel({
                 onClick={() => setExpanded((value) => !value)}
               >
                 <span>{expanded ? "Show less" : "Show full plan"}</span>
-                <ChevronDown size={13} aria-hidden="true" />
+                <ChevronDown size={14} aria-hidden="true" />
               </button>
             )}
           </div>
-        ) : summary && <p className="plan-summary">{summary}</p>}
+        )}
 
         {steps.length === 0 ? !body && (
           <div className="panel-empty plan-empty">
-            <ListChecks size={22} aria-hidden="true" />
             <h3>No plan yet</h3>
-            <p>Switch the agent to Plan mode to build a step-by-step approach.</p>
           </div>
         ) : (
           <>
-            {body && (
-              <div className="plan-steps-heading">
-                <span>Steps</span>
-                <span>{completed} of {steps.length}</span>
-              </div>
-            )}
             <ol className="plan-steps">
               {steps.map((step, index) => {
                 const content = (
@@ -186,17 +169,17 @@ export function PlanPanel({
         )}
       </div>
 
-      {(onRefine || onImplement) && (
+      {(onRefine || onImplement) && (steps.length > 0 || body) && (
         <footer className="plan-actions">
           {onRefine && (
             <button type="button" className="secondary-button" onClick={onRefine}>
-              <RotateCcw size={15} aria-hidden="true" />
+              <RotateCcw size={14} aria-hidden="true" />
               <span>Refine plan</span>
             </button>
           )}
           {onImplement && (
             <button type="button" className="primary-button" onClick={onImplement} disabled={steps.length === 0}>
-              <Play size={15} aria-hidden="true" />
+              <Play size={14} aria-hidden="true" />
               <span>Implement</span>
             </button>
           )}

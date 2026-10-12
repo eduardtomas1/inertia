@@ -1,17 +1,11 @@
 import {
   memo,
-  useCallback,
   useId,
   useMemo,
-  useRef,
-  useState,
 } from "react";
 import {
   Check,
-  ChevronDown,
   Copy,
-  ShieldCheck,
-  TriangleAlert,
 } from "lucide-react";
 import type {
   AgentActivity,
@@ -23,6 +17,7 @@ import {
 } from "../../utils/failureDiagnostics";
 import { useCopiedState } from "../../hooks/useCopiedState";
 import { navigateDiagnosticContext } from "../../utils/diagnosticNavigation";
+import { TooltipButton } from "../TooltipButton";
 import "./failureDiagnostics.css";
 
 function DiagnosticFacts({ facts }: { facts: FailureDiagnosticFact[] }): React.JSX.Element {
@@ -41,35 +36,17 @@ function DiagnosticFacts({ facts }: { facts: FailureDiagnosticFact[] }): React.J
 const FailureDiagnostics = memo(function FailureDiagnostics({
   turn,
   activity,
-  anchor: [onBeforeToggle, onAfterToggle],
 }: {
   turn: AgentTurn;
   activity: AgentActivity;
-  anchor: readonly [before?: () => void, after?: () => void];
 }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
   const { copied, error: copyError, copy } = useCopiedState();
-  const togglePrepared = useRef(false);
   const presentation = useMemo(
     () => failureDiagnosticsPresentation(turn, activity),
     [activity, turn],
   );
   const panelId = useId();
   const headingId = useId();
-
-  const prepareToggle = useCallback(() => {
-    if (togglePrepared.current) return;
-    togglePrepared.current = true;
-    onBeforeToggle?.();
-  }, [onBeforeToggle]);
-  const toggle = (): void => {
-    prepareToggle();
-    setExpanded((current) => !current);
-    window.requestAnimationFrame(() => {
-      onAfterToggle?.();
-      togglePrepared.current = false;
-    });
-  };
 
   return (
     <section
@@ -78,73 +55,53 @@ const FailureDiagnostics = memo(function FailureDiagnostics({
       data-turn-failure-diagnostics=""
     >
       <div className="turn-failure-summary">
-        <span className="turn-failure-mark" aria-hidden="true">
-          <TriangleAlert size={15} />
-        </span>
-        <div className="turn-failure-summary-copy">
-          <span>Run failed</span>
-          <p id={headingId}>{presentation.summary}</p>
-        </div>
+        <p id={headingId}>{presentation.summary}</p>
         <div className="turn-failure-actions" aria-label="Failure diagnostic actions">
           {typeof window.inertia?.queryDiagnostics === "function" && <button type="button" className="turn-failure-action" onClick={() => navigateDiagnosticContext({
             section: "help", anchor: "diagnostics-incidents", selection: { turnId: turn.id },
           })}>View diagnostics</button>}
-          <button
-            type="button"
+          <TooltipButton
             className="turn-failure-action"
             aria-label={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy diagnostics"}
-            title={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy scrubbed diagnostics"}
+            tooltip={copied ? "Diagnostics copied" : copyError ? "Copy diagnostics failed" : "Copy scrubbed diagnostics"}
             onClick={() => void copy(presentation.copyText)}
           >
             {copied
-              ? <Check size={12} aria-hidden="true" />
-              : <Copy size={12} aria-hidden="true" />}
+              ? <Check size={14} aria-hidden="true" />
+              : <Copy size={14} aria-hidden="true" />}
             <span>{copied ? "Copied" : copyError ? "Copy failed" : "Copy"}</span>
-          </button>
-          <button
-            type="button"
-            className="turn-failure-action turn-failure-toggle"
-            aria-expanded={expanded}
-            aria-controls={panelId}
-            onClick={toggle}
-          >
-            <span>{expanded ? "Hide details" : "Technical details"}</span>
-            <ChevronDown size={12} aria-hidden="true" />
-          </button>
+          </TooltipButton>
         </div>
       </div>
-      {expanded ? (
-        <div className="turn-failure-detail" id={panelId}>
-          <div className="turn-failure-detail-grid">
-            <section aria-labelledby={`${panelId}-execution`}>
-              <h4 id={`${panelId}-execution`}>Execution</h4>
-              <DiagnosticFacts facts={presentation.executionFacts} />
-            </section>
-            {presentation.providerFacts.length > 0 ? (
-              <section aria-labelledby={`${panelId}-provider`}>
-                <h4 id={`${panelId}-provider`}>Provider &amp; process</h4>
-                <DiagnosticFacts facts={presentation.providerFacts} />
-              </section>
-            ) : null}
-          </div>
-          {presentation.cause ? (
-            <section className="turn-failure-context" aria-labelledby={`${panelId}-cause`}>
-              <h4 id={`${panelId}-cause`}>Error cause</h4>
-              <pre>{presentation.cause}</pre>
+      <div className="turn-failure-detail" id={panelId}>
+        <div className="turn-failure-detail-grid">
+          <section aria-labelledby={`${panelId}-execution`}>
+            <h4 id={`${panelId}-execution`}>Execution</h4>
+            <DiagnosticFacts facts={presentation.executionFacts} />
+          </section>
+          {presentation.providerFacts.length > 0 ? (
+            <section aria-labelledby={`${panelId}-provider`}>
+              <h4 id={`${panelId}-provider`}>Provider &amp; process</h4>
+              <DiagnosticFacts facts={presentation.providerFacts} />
             </section>
           ) : null}
-          {presentation.context ? (
-            <section className="turn-failure-context" aria-labelledby={`${panelId}-context`}>
-              <h4 id={`${panelId}-context`}>Recent provider context</h4>
-              <pre>{presentation.context}</pre>
-            </section>
-          ) : null}
-          <p className="turn-failure-privacy">
-            <ShieldCheck size={12} aria-hidden="true" />
-            <span>Scrubbed and bounded. Prompts, project paths, provider session IDs, credentials, and token values are excluded.</span>
-          </p>
         </div>
-      ) : null}
+        {presentation.cause ? (
+          <section className="turn-failure-context" aria-labelledby={`${panelId}-cause`}>
+            <h4 id={`${panelId}-cause`}>Error cause</h4>
+            <pre>{presentation.cause}</pre>
+          </section>
+        ) : null}
+        {presentation.context ? (
+          <section className="turn-failure-context" aria-labelledby={`${panelId}-context`}>
+            <h4 id={`${panelId}-context`}>Recent provider context</h4>
+            <pre>{presentation.context}</pre>
+          </section>
+        ) : null}
+        <p className="turn-failure-privacy">
+          Scrubbed and bounded. Prompts, project paths, provider session IDs, credentials, and token values are excluded.
+        </p>
+      </div>
       <span className="visually-hidden" role="status" aria-live="polite">
         {copied ? "Diagnostics copied." : ""}
       </span>

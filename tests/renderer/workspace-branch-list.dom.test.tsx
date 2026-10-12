@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import WorkspaceBranchList from "../../src/renderer/src/components/WorkspaceBranchList";
 
@@ -15,6 +15,7 @@ describe("branch picker", () => {
     render(<WorkspaceBranchList branches={branches} busy={false} onSwitch={onSwitch} onCreate={vi.fn()} />);
     const search = screen.getByRole("searchbox", { name: "Search branches" });
     expect(search).toHaveFocus();
+    expect(search.closest("label")).toHaveClass("git-branch-search");
     expect(screen.getByRole("menuitemradio", { name: /occupied/u })).toBeDisabled();
     fireEvent.change(search, { target: { value: "REMOTE" } });
     expect(screen.queryByRole("group", { name: "Local branches" })).not.toBeInTheDocument();
@@ -40,11 +41,32 @@ describe("branch picker", () => {
     expect(onRefresh).toHaveBeenCalledWith();
   });
 
+  it("shows no standing branch count and labels groups only when both are present", () => {
+    const one = [branches[0]!];
+    const { rerender } = render(<WorkspaceBranchList branches={one} busy={false} onSwitch={vi.fn()} onCreate={vi.fn()} onRefresh={vi.fn()} />);
+    expect(screen.queryByText(/branch(es)?$/u)).toBeNull();
+    expect(document.querySelector(".git-menu-section-label")).toBeNull();
+    const main = screen.getByRole("menuitemradio", { name: /main/u });
+    expect(main).not.toHaveAttribute("title");
+    expect(main).not.toHaveAttribute("aria-describedby");
+    rerender(<WorkspaceBranchList branches={branches} busy={false} onSwitch={vi.fn()} onCreate={vi.fn()} onRefresh={vi.fn()} />);
+    expect([...document.querySelectorAll(".git-menu-section-label")].map((node) => node.textContent)).toEqual(["Local", "Remote"]);
+    expect(screen.getByRole("button", { name: "Refresh branches" })).toHaveClass("icon-button");
+  });
+
+  it("reveals a truncated branch name in the shared tooltip", async () => {
+    render(<WorkspaceBranchList branches={branches} busy={false} onSwitch={vi.fn()} onCreate={vi.fn()} />);
+    const choice = screen.getByRole("menuitemradio", { name: "feature/local" });
+    fireEvent.pointerEnter(choice, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("feature/local"));
+    fireEvent.pointerLeave(choice, { pointerType: "mouse" });
+  });
+
   it("explains empty search and submits branch creation only when idle", () => {
     const onCreate = vi.fn();
     const { rerender } = render(<WorkspaceBranchList branches={branches} busy={false} onSwitch={vi.fn()} onCreate={onCreate} />);
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing" } });
-    expect(screen.getByText("No matching branches.")).toBeInTheDocument();
+    expect(screen.getByText("No matching branches")).toBeInTheDocument();
     const input = screen.getByRole("textbox", { name: "New branch name" });
     fireEvent.change(input, { target: { value: "feature/new" } });
     fireEvent.submit(input.closest("form")!);

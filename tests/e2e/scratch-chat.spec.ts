@@ -68,7 +68,7 @@ test("starts without a project, runs in separate folders, and restores after res
     const first = chats()[0]!;
     expect(first.worktree_path).toContain(join("data", "scratch"));
     expect(JSON.parse(await readFile(join(first.worktree_path, "scratch-proof.json"), "utf8"))).toEqual({ processCwd: await realpath(first.worktree_path), requestedCwd: first.worktree_path });
-    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveText("Chat folder");
+    await expect(page.getByRole("group", { name: "Chat checkout context" })).toHaveCount(0);
     ({ page } = await app.restart());
     await expect(page.getByText("A calm weekend:", { exact: false }).first()).toBeVisible();
     expect(chats()[0]!.worktree_path).toBe(first.worktree_path);

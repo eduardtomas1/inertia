@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, X } from "lucide-react";
 import type { AppShortcutAction } from "@shared/keybindings";
 import type { Project } from "@shared/contracts";
 
@@ -16,6 +16,7 @@ import { searchHelp, type HelpSearchHit, type HelpSearchResult } from "./helpSea
 import { HelpJumpButtons, HelpSearchResults, helpResultId } from "./HelpSearchResults";
 import { HELP_TOPICS, type HelpCommand, type HelpJump } from "./helpTopics";
 import { withRowProject } from "../settings/projectRowTarget";
+import { IconButton } from "../ui";
 import "./WelcomeGuide.css";
 import "./HelpGuide.css";
 
@@ -116,9 +117,7 @@ export function HelpGuide({
     <GuideDialog className="welcome-guide help-guide" labelledBy={titleId} onClose={escape}>
       <header className="welcome-guide-header">
         <h2 id={titleId} className="welcome-guide-title">Help</h2>
-        <button type="button" className="welcome-guide-skip" onClick={close}>
-          Close
-        </button>
+        <IconButton label="Close help" onClick={close}><X size={16} aria-hidden="true" /></IconButton>
       </header>
       <div className="welcome-guide-body">
         <div className="welcome-guide-step" data-step="help">
@@ -181,25 +180,20 @@ export function HelpGuide({
         </div>
       </div>
       <footer className="welcome-guide-footer">
-        {!searching && (
-          <span className="welcome-guide-count">
-            Topic {index + 1} of {HELP_TOPICS.length}
-          </span>
-        )}
         <span className="welcome-guide-actions">
           {!searching && index > 0 && (
-            <button type="button" className="welcome-guide-back" onClick={previous}>
+            <button type="button" className="secondary-button" onClick={previous}>
               Previous
             </button>
           )}
           <button
             ref={primary}
             type="button"
-            className="welcome-guide-primary"
+            className="primary-button"
             onClick={next ? () => choose(next.id) : close}
           >
             {next ? `Next: ${next.title}` : "Done"}
-            {next && <ArrowRight size={15} aria-hidden="true" />}
+            {next && <ArrowRight size={14} aria-hidden="true" />}
           </button>
         </span>
       </footer>

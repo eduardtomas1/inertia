@@ -40,7 +40,7 @@ export async function verifyBrowserEvidence({
   const primaryEvidenceToggle = primaryPreview.getByRole("button", {
     name: /Evidence/u,
   });
-  await expect(primaryEvidenceToggle).toContainText(/[1-9]\d*/u);
+  await expect(primaryEvidenceToggle).toHaveAttribute("aria-label", /^Evidence [1-9]\d*$/u);
   await primaryEvidenceToggle.click();
   const evidenceTimeline = primaryPreview.getByRole("list", {
     name: "Browser evidence timeline",
@@ -178,13 +178,8 @@ export async function verifyBrowserEvidence({
 
   await setAppearanceInPlace(app, "dark");
   await app.resizeWindow(1_050, 820);
-  await expect(primaryPreview.locator(".preview-evidence-toggle > span"))
-    .toBeHidden();
-  const compactEvidenceCount = await primaryEvidenceToggle.locator("small").innerText();
-  expect(compactEvidenceCount).toMatch(/^\d+$/u);
-  await expect(primaryEvidenceToggle).toHaveAccessibleName(
-    `Evidence ${compactEvidenceCount}`,
-  );
+  await expect(primaryEvidenceToggle.locator("small")).toHaveCount(0);
+  await expect(primaryEvidenceToggle).toHaveAccessibleName(/^Evidence \d+$/u);
   const compactEvidenceScreenshot = testInfo.outputPath(
     "inertia-browser-evidence-dark-compact.png",
   );

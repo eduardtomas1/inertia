@@ -22,7 +22,6 @@ export function ComposerSendActionsFallback({
     <button
         type="button"
         aria-label={primaryLabel}
-        title={primaryLabel}
         className={`icon-button send-button${stop || stopAndSend ? " stop-button" : ""}${
           submitting ? " send-button-loading" : ""
         }`}

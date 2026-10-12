@@ -6,6 +6,8 @@ import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
+import { IconButton } from "../ui";
+import { TooltipText } from "../TooltipText";
 import { RuntimeComposerQueuedActions } from "./RuntimeComposerQueuedActions";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
@@ -19,6 +21,8 @@ import {
   takeAllSessionQueuedMedia,
   takeComposerQueuedPrompts,
 } from "./composerQueuedPrompts";
+
+const UNCONFIRMED_SEND_REASON = "A previous send did not confirm. Check the transcript before sending again.";
 
 export { enqueueComposerPrompt };
 export { queueComposerDraft } from "./queueComposerDraft";
@@ -209,31 +213,36 @@ function LegacyComposerQueuedActions({
         }`}
         role="listitem"
       >
-        <CornerDownRight size={15} aria-hidden="true" />
+        <CornerDownRight size={14} aria-hidden="true" />
         <span className="composer-queue-copy" title={queued.content}>
           {queued.content}
         </span>
         {queued.attachments.length > 0 && (
-          <span
+          <TooltipText
             className="composer-queue-media"
-            title={queued.attachments.map(({ name }) => name).join("\n")}
+            tooltip={queued.attachments.map(({ name }) => name).join(", ")}
           >
-            <Paperclip size={13} aria-hidden="true" />
+            <Paperclip size={14} aria-hidden="true" />
             {queued.attachments.length === 1
               ? "1 image"
               : `${queued.attachments.length} images`}
-          </span>
+          </TooltipText>
         )}
-        <small
-          className="composer-queue-count"
-          title={unconfirmed
-            ? "A previous send did not confirm. Check the transcript before sending again."
-            : undefined}
-        >
-          {unconfirmed
-            ? "Send unconfirmed"
-            : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
-        </small>
+        {unconfirmed ? (
+          <>
+            <TooltipText
+              className="composer-queue-count"
+              tooltip={UNCONFIRMED_SEND_REASON}
+            >
+              Send unconfirmed
+            </TooltipText>
+            <span className="visually-hidden">{UNCONFIRMED_SEND_REASON}</span>
+          </>
+        ) : (
+          <small className="composer-queue-count">
+            {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+          </small>
+        )}
         <button
           type="button"
           className="composer-queue-send"
@@ -243,15 +252,15 @@ function LegacyComposerQueuedActions({
         >
           {sending ? "Sending…" : "Send now"}
         </button>
-        <button
-          type="button"
-          className="composer-queue-remove"
+        <IconButton
+          label="Remove"
           aria-label="Remove queued message"
+          className="composer-queue-remove"
           disabled={queueSendingId === queued.id}
           onClick={() => removeQueued(queued.id)}
         >
           <Trash2 size={14} aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

@@ -57,7 +57,7 @@ describe("visual replies outside the desktop chat", () => {
     const transcript = store.contextPackets.sourceTranscript(source.id, target.id);
     expect(transcript.messages.map(({ role, content }) => [role, content])).toEqual([
       ["user", "Chart revenue by quarter."],
-      ["assistant", "[page: Revenue by quarter]"],
+      ["assistant", "[page: Revenue by quarter] (rendered page; content not available here)"],
       ["assistant", "Q3 carried the year."],
     ]);
     expect(transcript.messages[1]).toMatchObject({ sourceMessageId: render.id, truncated: false });
@@ -65,19 +65,19 @@ describe("visual replies outside the desktop chat", () => {
     const whole = store.contextPackets.create({
       sourceConversationId: source.id, targetConversationId: target.id, acknowledgedWorkspaceDifference: false,
     });
-    expect(whole.excerpts.map(({ content }) => content)).toContain("[page: Revenue by quarter]");
+    expect(whole.excerpts.map(({ content }) => content)).toContain("[page: Revenue by quarter] (rendered page; content not available here)");
 
     const selected = store.contextPackets.create({
       sourceConversationId: source.id, targetConversationId: selectionTarget.id,
       sourceMessageIds: [render.id], acknowledgedWorkspaceDifference: false,
     });
     expect(selected.excerpts).toEqual([expect.objectContaining({
-      sourceMessageId: render.id, role: "assistant", content: "[page: Revenue by quarter]",
+      sourceMessageId: render.id, role: "assistant", content: "[page: Revenue by quarter] (rendered page; content not available here)",
     })]);
 
     const history = store.continuationHistory(source.id, 64 * 1024, "2030-03-01T10:01:00.000Z");
     expect(history?.messageCount).toBe(3);
-    expect(JSON.stringify(history)).toContain("[page: Revenue by quarter]");
+    expect(JSON.stringify(history)).toContain("[page: Revenue by quarter] (rendered page; content not available here)");
     expect(JSON.stringify([transcript, whole, selected, history])).not.toContain("secret layout");
   });
 

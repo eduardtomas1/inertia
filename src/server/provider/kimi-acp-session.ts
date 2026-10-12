@@ -9,7 +9,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 
 import { imageMediaType, readBoundedProviderImage } from "./provider-image-read";
-import { assertAcpConfigSelection } from "./acp-config-options";
+import { acpConfigSelected, assertAcpConfigSelection } from "./acp-config-options";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 
@@ -105,15 +105,17 @@ export async function configureKimiSession(
         `Kimi ACP does not advertise the selected model '${bounded(model)}'.`,
       );
     }
-    const response = await requestControl(
-      context.request(
-        acp.methods.agent.session.setConfigOption,
-        { sessionId, configId: selected.id, value: selected.value },
-      ),
-      "session/set_config_option",
-    );
-    authoritativeConfigOptions = response.configOptions;
-    assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
+    if (restored || !acpConfigSelected(authoritativeConfigOptions, selected)) {
+      const response = await requestControl(
+        context.request(
+          acp.methods.agent.session.setConfigOption,
+          { sessionId, configId: selected.id, value: selected.value },
+        ),
+        "session/set_config_option",
+      );
+      authoritativeConfigOptions = response.configOptions;
+      assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
+    }
     requestedSelections.push(selected);
   }
   if (effort) {
@@ -127,15 +129,17 @@ export async function configureKimiSession(
         `Kimi ACP does not advertise the selected reasoning effort '${bounded(effort)}'.`,
       );
     }
-    const response = await requestControl(
-      context.request(
-        acp.methods.agent.session.setConfigOption,
-        { sessionId, configId: selected.id, value: selected.value },
-      ),
-      "session/set_config_option",
-    );
-    authoritativeConfigOptions = response.configOptions;
-    assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
+    if (restored || !acpConfigSelected(authoritativeConfigOptions, selected)) {
+      const response = await requestControl(
+        context.request(
+          acp.methods.agent.session.setConfigOption,
+          { sessionId, configId: selected.id, value: selected.value },
+        ),
+        "session/set_config_option",
+      );
+      authoritativeConfigOptions = response.configOptions;
+      assertAcpConfigSelection("Kimi", authoritativeConfigOptions, selected);
+    }
     requestedSelections.push(selected);
   }
   for (const selected of requestedSelections) {

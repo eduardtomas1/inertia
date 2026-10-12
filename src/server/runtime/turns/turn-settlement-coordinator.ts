@@ -219,7 +219,7 @@ export class TurnSettlementCoordinator {
       return this.options.store.settleAgentTurn(active.turn.id, {
         status,
         runState: active.runState.snapshot(),
-        terminalAssistantMessageId: active.latestAssistantMessageId,
+        terminalAssistantMessageId: this.options.streams.terminalAssistantMessageId(active),
         providerSessionAfter: active.sessionAfter,
         terminalReason,
         checkpointId: active.checkpointId,

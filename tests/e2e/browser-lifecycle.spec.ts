@@ -55,7 +55,7 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   await expect(workspaceTools.getByRole("tab", { name: "Browser" }))
     .toHaveAttribute("aria-selected", "true");
   await expect(workspaceTools.locator(".preview-tabs").getByRole("tab"))
-    .toHaveCount(1);
+    .toHaveCount(0);
   await expect(workspaceTools.getByRole("textbox", {
     name: "Preview address",
   })).toHaveValue("");
@@ -112,7 +112,7 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     name: "Preview address",
   })).toHaveValue(agentUrl);
   await expect(sharedTools.locator(".preview-tabs").getByRole("tab"))
-    .toHaveCount(1);
+    .toHaveCount(0);
   await expect.poll(() => app.nativePreviewIsVisible(agentUrl)).toBe(true);
 
   const screenshot = await app.electronApp.evaluate(

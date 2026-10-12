@@ -188,3 +188,10 @@ Before is the branch without logos; after shows the two provider marks next to t
 
 - handoff-logos-light-1440x920: light.
 - handoff-logos-dark-1440x920: dark.
+
+## Queued messages (owner, 2026-10-12)
+
+Before is a build of main; after is this branch: the queue is a card above the composer again, as on main, with token-level polish only.
+
+- composer-queue-light-1440x920: light.
+- composer-queue-dark-1440x920: dark.

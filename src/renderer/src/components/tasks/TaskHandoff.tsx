@@ -140,9 +140,7 @@ export function TaskHandoff({
             disabled={busy}
             onChange={(event) => setChosenSelection(withModelSelectionFastMode(
               selection,
-              event.currentTarget.value === "fast"
-                ? selection.harnessId === "codex-app-server" ? "priority" : "fast"
-                : null,
+              event.currentTarget.value === "fast" ? providerModel?.fastMode?.providerValue ?? null : null,
             ))}
           >
             <option value="standard">Standard</option>

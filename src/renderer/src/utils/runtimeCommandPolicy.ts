@@ -205,6 +205,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "prompt-preset.reorder": shortMutation,
   "prompt-preset.update": shortMutation,
   "provider.auth.start": shortMutation,
+  "todo.create": shortMutation,
+  "todo.delete": shortMutation,
+  "todo.start": gitMutation,
+  "todo.update": shortMutation,
   "provider.maintenance.cancel": shortMutation,
   "provider.maintenance.refresh": {
     timeoutMs: PROVIDER_MAINTENANCE_REFRESH_REQUEST_TIMEOUT_MS,

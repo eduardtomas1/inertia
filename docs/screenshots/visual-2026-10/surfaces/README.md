@@ -167,3 +167,10 @@ The accent outline on the theme library's selected Mode and colour theme cards i
 - Turn footer on hover, light, 1440×920 (`fix-footer-hover-light-1440x920-before.png`, `fix-footer-hover-light-1440x920-after.png`): A separator dot is back between the time and Worked 1m 36s.
 - Usage limit banner, light, 1440×920 (`fix-limit-banner-light-1440x920-before.png`, `fix-limit-banner-light-1440x920-after.png`): The banner keeps its text; Continue with another model is drawn slightly larger, at the composer's control size.
 - Browser panel while a page loads, light, 1440×920 (`fix-browser-loading-light-1440x920-before.png`, `fix-browser-loading-light-1440x920-after.png`): The address row shows the loading mark at the start of the field while the page loads.
+
+## Sidebar (owner correction, 2026-10-12)
+
+Before is a build of main; after is this branch. Project grouping is gone (main's Work list order is back) and rows follow Synara's two-line layout.
+
+- sidebar-synara-light-1440x920: main vs branch, light.
+- sidebar-synara-dark-1440x920: main vs branch, dark.

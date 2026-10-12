@@ -3,6 +3,7 @@ import {
   Suspense,
   memo,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -11,14 +12,16 @@ import {
 } from "react";
 import {
   ArrowLeft,
-  ChevronDown,
   ChevronRight,
   CircleCheck,
   Check,
   Clock,
   Columns2,
+  Folder,
+  FolderGit2,
   FolderOpen,
   Gauge,
+  GitBranch,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -31,7 +34,6 @@ import {
 import clsx from "clsx";
 import type { Conversation, ConversationShell, Project, ProjectGroupingMode } from "@shared/contracts";
 import { canOrganizeThread } from "../../../shared/thread-organization";
-import { effectiveNewChatDefault } from "../../../shared/new-chat-default";
 import { projectRepositoryLimitChoices } from "../../../shared/project-repository-limit";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
@@ -79,7 +81,6 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
-import { TooltipText } from "./TooltipText";
 import { WorkStatusCue } from "./sidebar/WorkStatusCue";
 import { INTERFACE_LOCALE } from "../lib/locale";
 const SidebarUpdateControl = lazy(async () => ({
@@ -233,6 +234,7 @@ function SidebarView({
       || (mobile && open),
   ));
   const compact = snapshot?.settings.compactSidebar ?? false;
+  const newChatShortcutId = useId();
   const globalGrouping = snapshot?.settings.projectGrouping ?? "separate";
 
   useEffect(() => setDoneVisible(INITIAL_DONE_VISIBLE), [query]);
@@ -364,18 +366,6 @@ function SidebarView({
     [activityThreads, snoozeNow, scratchProjectIds],
   );
   const workSearchActive = Boolean(query.trim());
-  const workGroupedByProject = useMemo(() => !scopedProjectId && new Set(workSections
-    .filter(({ id }) => id === "recent" || id === "yesterday" || id === "earlier")
-    .flatMap(({ threads }) => threads.map(({ conversation }) => conversation.projectId))).size > 1, [scopedProjectId, workSections]);
-  const snapshotProjects = snapshot?.projects;
-  const backendDefaults = snapshot?.backendDefaults;
-  const backendProfiles = snapshot?.backendProfiles;
-  const providers = snapshot?.providers;
-  const settings = snapshot?.settings;
-  const defaultProviderByProject = useMemo(() => new Map(settings && providers ? (snapshotProjects ?? []).map((project) => [
-    project.id,
-    effectiveNewChatDefault({ backendDefaults, backendProfiles, providers }, settings, project.id).providerId,
-  ]) : []), [backendDefaults, backendProfiles, providers, settings, snapshotProjects]);
   const [
     focusWorkIdentity,
     workFocusOrder,
@@ -394,7 +384,6 @@ function SidebarView({
     doneVisible,
     enabled: true,
     expandedSections: expandedWorkSections,
-    groupByProject: workGroupedByProject,
     motionEnabled: !reducedMotion,
     navigationRef,
     searchActive: workSearchActive,
@@ -733,6 +722,7 @@ function SidebarView({
       ?? agentRequestProviderName(conversation.providerId);
     const projectLabel = workProjectLabel(project);
     const repositoryLabel = workRepositoryLabel(project);
+    const chatFolder = project?.workspaceKind === "scratch";
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
@@ -807,21 +797,29 @@ function SidebarView({
             }}
             onClick={() => activateConversation(conversation)}
           >
-            <span className="activity-thread-title">{conversation.title}</span>
-            {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
-            <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
-            {conversation.providerId !== defaultProviderByProject.get(conversation.projectId) && (
+            <span className="activity-thread-topline">
               <span className="activity-thread-provider" aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
-            )}
-            <span className="activity-thread-trailing" aria-hidden="true">
-              <WorkStatusCue
-                conversationId={conversation.id}
-                status={model.status}
-                label={statusLabels[model.status]}
-                updatedAt={conversation.updatedAt}
-                workingSince={workingSince}
-                latestTurn={(conversation as Partial<ConversationShell>).latestTurn}
-              />
+              <span className="activity-thread-title">{conversation.title}</span>
+              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
+              <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
+              <span className="activity-thread-trailing" aria-hidden="true">
+                <WorkStatusCue
+                  conversationId={conversation.id}
+                  status={model.status}
+                  label={statusLabels[model.status]}
+                  updatedAt={conversation.updatedAt}
+                  workingSince={workingSince}
+                  latestTurn={(conversation as Partial<ConversationShell>).latestTurn}
+                />
+              </span>
+            </span>
+            <span className="activity-thread-projectline">
+              {chatFolder ? <Folder size={14} aria-hidden="true" /> : project ? <ProjectIcon project={project} size={14} /> : <FolderGit2 size={14} aria-hidden="true" />}
+              {chatFolder ? <span className="activity-thread-project-meta">Chat folder</span>
+                : <ProjectName project={project} className="activity-thread-project-meta">{projectLabel}</ProjectName>}
+              {conversation.branch
+                ? <span className="activity-thread-branch-meta"><GitBranch size={14} aria-hidden="true" /><span>{conversation.branch}</span></span>
+                : !chatFolder && <span className="activity-thread-branch-meta">{repositoryLabel ?? "Local workspace"}</span>}
             </span>
           </button>
         )}
@@ -847,23 +845,6 @@ function SidebarView({
   const renderWorkIndexItem = (item: WorkIndexItem): React.JSX.Element => {
     if (item.kind === "thread") {
       return activityRow(item.conversation, item.position, item.sectionId);
-    }
-    if (item.kind === "project") {
-      const project = projectById.get(item.projectId);
-      return (
-        <div className="work-project-group" role="presentation">
-          <h3>
-            <ProjectIcon project={project} size={14} />
-            {project?.path ? (
-              <TooltipText className="work-project-name-anchor" tooltip={project.path}>
-                <ProjectName project={project} className="work-project-name">{workProjectLabel(project)}</ProjectName>
-              </TooltipText>
-            ) : (
-              <ProjectName project={project} className="work-project-name">{workProjectLabel(project)}</ProjectName>
-            )}
-          </h3>
-        </div>
-      );
     }
     if (item.kind === "show-more") {
       return (
@@ -906,10 +887,8 @@ function SidebarView({
                 });
               }}
             >
-              {expanded
-                ? <ChevronDown size={14} />
-                : <ChevronRight size={14} />}
               <span>{section.label}</span>
+              <ChevronRight size={14} aria-hidden="true" />
               <span>{section.threads.length}</span>
             </button>
           </h2>
@@ -978,18 +957,22 @@ function SidebarView({
           <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={16} /></IconButton>
         </div>
 
-        <div className="sidebar-search-row">
-          <div className="sidebar-search-wrap">
-            <Search size={16} aria-hidden="true" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
-            {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={14} /></IconButton>}
-          </div>
-          <IconButton label="New chat" shortcut={newChatShortcut} aria-haspopup={regularProjects.length !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
+        <div className="sidebar-primary-row">
+          <button type="button" className="sidebar-primary-action" aria-describedby={newChatShortcut ? newChatShortcutId : undefined} aria-haspopup={regularProjects.length !== 1 ? "dialog" : undefined} disabled={connectionStatus !== "online"} onClick={(event) => {
             if (regularProjects.length > 1 && !event.shiftKey) { onChooseNewChatProject(); return; }
             const target = regularProjects.find((project) => project.id === (scopedProjectId ?? snapshot?.activeProjectId)) ?? regularProjects[0];
             if (target) onCreateConversation(target); else onChooseNewChatProject();
-          }}><SquarePen size={16} /></IconButton>
+          }}>
+            <SquarePen size={16} aria-hidden="true" />
+            <span>New chat</span>
+            {newChatShortcut && <kbd id={newChatShortcutId} aria-hidden="true">{newChatShortcut}</kbd>}
+          </button>
           <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={16} /></IconButton>
+        </div>
+        <div className="sidebar-search-wrap">
+          <Search size={16} aria-hidden="true" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
+          {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={14} /></IconButton>}
         </div>
         <div className="sidebar-project-navigation">
         <ProjectScopePicker projects={regularProjects} selectedId={scopedProjectId} onSelect={onProjectScopeChange} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"}

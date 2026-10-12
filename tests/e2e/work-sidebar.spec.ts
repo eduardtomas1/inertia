@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
-test("keeps one-line Work sidebar geometry", async ({
+test("keeps two-line Work sidebar geometry", async ({
   browserName: _browserName,
 }, testInfo) => {
   const app = await createAppFixture({
@@ -96,12 +96,17 @@ test("keeps one-line Work sidebar geometry", async ({
     const row = sidebar.getByRole("button", { name: /^Polish compact Work rows,/u });
     await expect(row).toBeVisible();
     const rowHeight = async (): Promise<number> => (await row.boundingBox())?.height ?? 0;
-    expect(await rowHeight()).toBeCloseTo(32, 0);
+    const lineHeights = async (): Promise<number[]> => row.evaluate((element) => [
+      ".activity-thread-topline",
+      ".activity-thread-projectline",
+    ].map((selector) => element.querySelector(selector)?.getBoundingClientRect().height ?? 0));
+    expect(await rowHeight()).toBeCloseTo(56, 0);
+    expect(await lineHeights()).toEqual([20, 18]);
     await expect(row.locator(".activity-thread-trailing time")).toBeVisible();
     await expect(row.locator(".activity-thread-trailing time svg")).toHaveCount(0);
-    await expect(row).not.toContainText("codex/compact-work-tab");
-    await expect(sidebar.locator('.activity-thread-provider [data-provider-id="codex"]')).toHaveCount(0);
-    for (const providerId of ["claude", "cursor", "kimi", "opencode", "antigravity"]) {
+    await expect(row.locator(".activity-thread-project-meta")).toBeVisible();
+    await expect(row.locator(".activity-thread-branch-meta")).toHaveText("codex/compact-work-tab");
+    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();
@@ -144,7 +149,11 @@ test("keeps one-line Work sidebar geometry", async ({
     expect(await row.evaluate((element) => (
       element.closest(".sidebar")?.getBoundingClientRect().width
     ))).toBe(220);
-    expect(await rowHeight()).toBeCloseTo(32, 0);
+    expect(await rowHeight()).toBeCloseTo(56, 0);
+    expect(await lineHeights()).toEqual([20, 18]);
+    expect(await row.locator(".activity-thread-project-meta").evaluate((element) => (
+      element.scrollWidth <= element.clientWidth
+    ))).toBe(true);
     await expect(row.locator(".activity-thread-trailing time")).toBeVisible();
     expect(await sidebar.locator(".project-list").evaluate((element) => (
       element.scrollWidth <= element.clientWidth
@@ -164,13 +173,14 @@ test("keeps one-line Work sidebar geometry", async ({
     await app.resizeWindow(1440, 900);
     await sidebarHandle.press("End");
     await expect(sidebarHandle).toHaveAttribute("aria-valuenow", "420");
-    expect(await rowHeight()).toBeCloseTo(32, 0);
+    expect(await rowHeight()).toBeCloseTo(56, 0);
+    await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
 
     await app.page.evaluate(() => {
       document.documentElement.dataset.theme = "dark";
       document.documentElement.style.colorScheme = "dark";
     });
-    await expect(app.page.locator(
+    await expect(sidebar.locator(
       '.provider-brand-icon[data-provider-id="codex"] .provider-brand-icon-source',
     ).first()).toHaveCSS("filter", "invert(1)");
     await expect(sidebar.locator(

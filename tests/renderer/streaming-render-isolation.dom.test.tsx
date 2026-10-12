@@ -400,10 +400,14 @@ describe("streamed agent text", () => {
     vi.useRealTimers();
   });
 
-  it("shows the configured shortcuts in the new chat and navigation tooltips", async () => {
+  it("shows the configured shortcuts on the new chat row and in the navigation tooltip", async () => {
     const { default: App } = await import("../../src/renderer/src/App");
     await renderReadyTranscript(<App />);
-    for (const [name, shortcut] of [["New chat", "⌘N"], ["Toggle project navigation", "⌘B"]] as const) {
+    const newChat = screen.getAllByRole("button", { name: "New chat" })
+      .find((candidate) => candidate.classList.contains("sidebar-primary-action"))!;
+    expect(newChat.querySelector("kbd")).toHaveTextContent("⌘N");
+    expect(newChat).toHaveAccessibleDescription("⌘N");
+    for (const [name, shortcut] of [["Toggle project navigation", "⌘B"]] as const) {
       const button = screen.getAllByRole("button", { name })
         .find((candidate) => candidate.classList.contains("icon-button"))!;
       fireEvent.pointerEnter(button, { pointerType: "mouse" });

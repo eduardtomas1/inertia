@@ -22,6 +22,7 @@ export interface ElectronProcessEvidenceSnapshot {
   readonly launcherExitObserved: boolean;
   readonly launcherCloseObserved: boolean;
   readonly launcherExitCode: number | null;
+  readonly exitInventory: string | null;
   readonly stages: readonly { stage: ProcessStage; elapsedMs: number }[];
 }
 
@@ -35,6 +36,8 @@ export interface ElectronProcessEvidence {
 }
 
 const records = new WeakMap<ChildProcess, ElectronProcessEvidence>();
+const EXIT_INVENTORY = /^\[Inertia test exit: exit-inventory (windows=(?:\d{1,6}|unavailable) webContents=(?:\d{1,6}|unavailable) resources=(?:none|unavailable|[A-Za-z]{1,40}:\d{1,7}(?:,[A-Za-z]{1,40}:\d{1,7}){0,5}))\]$/u;
+const MAX_STDERR_LINE = 512;
 const validPid = (pid: unknown): pid is number =>
   typeof pid === "number" && Number.isSafeInteger(pid) && pid > 1;
 
@@ -48,6 +51,7 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
   let identityTimer: ReturnType<typeof setTimeout> | undefined;
   let launcherExitObserved = child.exitCode !== null || child.signalCode !== null;
   let launcherCloseObserved = false;
+  let exitInventory: string | null = null;
   const stages: { stage: ProcessStage; elapsedMs: number }[] = [];
   let observingStderr = false;
   const listeners = new Set<(stage: ProcessStage) => void>();
@@ -80,11 +84,13 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
   const onStderr = (chunk: Buffer): void => {
     for (const byte of chunk) {
       if (byte === 10) {
-        const stage = discardStderrLine ? undefined : stderrStages.get(stderrLine.replace(/\r$/u, ""));
+        const line = stderrLine.replace(/\r$/u, "");
+        const stage = discardStderrLine ? undefined : stderrStages.get(line);
         if (stage && !seenStderrStages.has(stage)) { seenStderrStages.add(stage); record(stage); }
+        if (!discardStderrLine && exitInventory === null) exitInventory = EXIT_INVENTORY.exec(line)?.[1] ?? null;
         stderrLine = ""; discardStderrLine = false;
       } else if (!discardStderrLine) {
-        if (stderrLine.length < 128) stderrLine += String.fromCharCode(byte);
+        if (stderrLine.length < MAX_STDERR_LINE) stderrLine += String.fromCharCode(byte);
         else { stderrLine = ""; discardStderrLine = true; }
       }
     }
@@ -131,6 +137,7 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
     snapshot: () => ({ launcherPid, mainPid, mainIdentity, launcherExitObserved,
       launcherCloseObserved,
       launcherExitCode: Number.isSafeInteger(child.exitCode) ? child.exitCode : null,
+      exitInventory,
       stages: stages.map((stage) => ({ ...stage })),
     }),
     stop: () => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
@@ -13,6 +13,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   Reflect.deleteProperty(window, "inertia");
 });
 

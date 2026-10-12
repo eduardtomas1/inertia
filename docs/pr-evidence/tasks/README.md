@@ -35,8 +35,8 @@ Tasks open.
 
 | Before | After |
 | --- | --- |
-| ![Before: sidebar top row](before-sidebar-light.png) | ![After: Tasks button active](tasks-sidebar-button-light.png) |
-| New chat and "Launch two chats" | The Tasks button follows "Launch two chats" and shows as current while Tasks is open |
+| ![Before: sidebar top row](before-sidebar-light.png) | ![After: Tasks row active](tasks-sidebar-button-light.png) |
+| New chat and "Launch two chats" | A Tasks row with its icon and label sits under New chat and above Search, and takes the stronger fill while Tasks is open |
 
 ## First open
 
@@ -75,8 +75,10 @@ hand-off.
 
 ## What the spec asserts
 
-- The Tasks button in the sidebar's top row opens the view with
-  `aria-current="page"`, and the header reads "Tasks".
+- The labelled Tasks row in the sidebar opens the view with
+  `aria-current="page"`, and the header reads "Tasks". The row has New chat's
+  height and left edge, Search's right edge, and sits 2 px below New chat and
+  2 px above Search.
 - Enter in the add row adds a task and keeps focus there; the count follows;
   urgent work moves to the top and shows the red mark; due and priority menus
   set "Tomorrow" and "Urgent"; the note persists across closing and reopening

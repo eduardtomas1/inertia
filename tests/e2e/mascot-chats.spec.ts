@@ -139,6 +139,9 @@ test("mascot follows three provider chats by priority, lists the others and spea
     await expect(mascot).toHaveAttribute("data-phase", "failed");
     await expect(title).toHaveText(TITLES.B);
     await expect(message).toHaveText(/^The login test still fails after reinstalling: TimeoutError waiting for selector "#submit"/u);
+    await expect(overlay.locator(".mascot-picker")).toBeVisible();
+    expect(await overlay.locator(".mascot-label").evaluate((label) => [label.textContent, label.scrollWidth <= label.clientWidth]))
+      .toEqual(["Something went wrong", true]);
     await expect.poll(rowTexts).toEqual([`${TITLES.C}· working 0/3`, `${TITLES.A}· working 3/4`]);
     await capture(app, overlay, "failure-shown-over-running", info);
 

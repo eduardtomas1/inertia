@@ -18,6 +18,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
   const handle = select(".mascot-drag");
   const bubble = select(".mascot-status");
   const button = select<HTMLButtonElement>(".mascot-open");
+  const heading = select(".mascot-heading");
   const label = select(".mascot-label");
   const time = select(".mascot-time");
   const detail = select(".mascot-detail");
@@ -189,6 +190,7 @@ export function mountMascot(root: HTMLElement, bridge: MascotBridge): () => void
     picker.hidden = !choosing && !pinned && chats.every((chat) => chat.conversationId === status.conversationId);
     picker.dataset.attention = String(otherAttention > 0);
     pickerLabel.textContent = pinned ? "Pinned" : "Auto";
+    heading.style.paddingRight = picker.hidden ? "" : `${picker.offsetWidth + 2}px`;
     picker.title = "Choose which chat the mascot shows";
     picker.setAttribute("aria-label", `Show chat: ${pinned ? `pinned to ${title.textContent}` : "most urgent"}. ${counted(total, "chat", "chats")}${attention ? `, ${counted(attention, "needs", "need")} you` : ""}`);
     picker.setAttribute("aria-expanded", String(choosing));

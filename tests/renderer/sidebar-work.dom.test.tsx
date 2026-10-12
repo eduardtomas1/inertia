@@ -130,7 +130,7 @@ function renderSidebar(
     splitConversationId?: string | null;
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
-    view?: "workspace" | "settings" | "usage" | "home";
+    view?: "workspace" | "settings" | "usage" | "tasks" | "home";
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -334,6 +334,26 @@ describe("compact Work sidebar", () => {
 
     renderSidebar([], vi.fn(), [], { dailyWorkOpen: true });
     expect(screen.getByRole("button", { name: "Daily work" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens Tasks from the top row right after Launch two chats", () => {
+    const view = renderSidebar([]);
+    const topRow = within(view.container.querySelector<HTMLElement>(".sidebar-primary-row")!);
+    const labels = topRow.getAllByRole("button").map((button) => button.getAttribute("aria-label"));
+    expect(labels.slice(-2)).toEqual(["Launch two chats", "Tasks"]);
+    const tasks = topRow.getByRole("button", { name: "Tasks" });
+    expect(tasks.querySelector(".lucide-list-todo")).not.toBeNull();
+    expect(tasks).not.toHaveAttribute("aria-current");
+    expect(tasks).not.toHaveClass("is-active");
+    fireEvent.click(tasks);
+    expect(view.onViewChange).toHaveBeenCalledWith("tasks");
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+    view.unmount();
+
+    renderSidebar([], vi.fn(), [], { view: "tasks" });
+    const active = screen.getByRole("button", { name: "Tasks" });
+    expect(active).toHaveAttribute("aria-current", "page");
+    expect(active).toHaveClass("is-active");
   });
 
   it("keeps the repository label in the original path case for Windows projects", () => {

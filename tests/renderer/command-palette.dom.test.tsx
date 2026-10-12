@@ -404,6 +404,26 @@ describe("CommandPalette behavior", () => {
     expect(onNewThreadWithoutProject).not.toHaveBeenCalled();
   });
 
+  it("opens Tasks from an action after Add project", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onOpenTasks = vi.fn();
+    render(
+      <CommandPalette open currentProjectId={project.id} projects={[project]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={onClose} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={noOp}
+        onAddProject={noOp} onOpenSettings={noOp} onOpenTasks={onOpenTasks} />,
+    );
+    const labels = screen.getAllByRole("option").map((option) => option.querySelector("strong")?.textContent);
+    expect(labels.indexOf("Open tasks")).toBe(labels.indexOf("Add project") + 1);
+    const action = screen.getByRole("option", { name: /Open tasks/u });
+    expect(action.querySelector(".lucide-list-todo")).not.toBeNull();
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "tasks");
+    await user.keyboard("{Enter}");
+    expect(onOpenTasks).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("lists actions by name only, ends without a hint band and says no matches in one line", async () => {
     const user = userEvent.setup();
     render(

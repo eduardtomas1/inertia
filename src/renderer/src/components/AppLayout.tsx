@@ -63,6 +63,7 @@ import {
   loadDailyWorkDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
+  loadTasksView,
   loadUsageView,
 } from "./lazySurfaceLoaders";
 
@@ -87,6 +88,9 @@ const Sidebar = lazy(async () => ({
 }));
 const UsageView = lazy(async () => ({
   default: (await loadUsageView()).UsageView,
+}));
+const TasksView = lazy(async () => ({
+  default: (await loadTasksView()).TasksView,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -472,6 +476,13 @@ export const AppLayout = memo(function AppLayout({
       }
     },
   });
+  const tasksActions = useStableActions({
+    request: (command: CommandWithoutId) => actions.run(command.type, command),
+    openConversation: (thread: Conversation) => {
+      actions.selectConversation(thread);
+      setView("workspace");
+    },
+  });
   const notificationActions = useStableActions({
     activate: (thread: Conversation) => {
       setDailyWorkOpen(false);
@@ -805,6 +816,21 @@ export const AppLayout = memo(function AppLayout({
               )}>
                 <UsageView {...usage} />
               </Suspense>
+            ) : view === "tasks" ? (
+              <Suspense fallback={(
+                <div className="workspace-tool-loading tasks-view-loading">
+                  <LoadingMark label="Loading tasks" />
+                </div>
+              )}>
+                <TasksView
+                  snapshot={connection.snapshot}
+                  settings={settings}
+                  status={connection.status}
+                  projectScopeId={projectScopeId}
+                  request={tasksActions.request}
+                  onOpenConversation={tasksActions.openConversation}
+                />
+              </Suspense>
             ) : (
               <WorkspaceScene {...scene} />
             )}
@@ -941,6 +967,7 @@ export const AppLayout = memo(function AppLayout({
         openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
         openSettings={actions.openSettings}
+        openTasks={() => setView("tasks")}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}

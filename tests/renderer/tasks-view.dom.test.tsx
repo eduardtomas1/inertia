@@ -629,6 +629,20 @@ describe("Tasks view", () => {
     expect(row("Clean the downloads folder").querySelector(".task-status")).toHaveClass("is-failed");
   });
 
+  it("offers Open chat instead of Hand to agent in a linked task's row menu", async () => {
+    const user = userEvent.setup();
+    const chat = conversation();
+    const view = harness(snapshot([
+      todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Clean the downloads folder", { conversationId }),
+    ], { conversations: [chat] }));
+    await user.click(screen.getByRole("button", { name: "Actions for Clean the downloads folder" }));
+    const menu = screen.getByRole("menu", { name: "Actions for Clean the downloads folder" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent))
+      .toEqual(["Rename", "Open chat", "Mark as done", "Delete"]);
+    await user.click(within(menu).getByRole("menuitem", { name: "Open chat" }));
+    expect(view.onOpenConversation).toHaveBeenCalledWith(chat);
+  });
+
   it("closes the detail with Escape and returns focus to the row", async () => {
     const user = userEvent.setup();
     harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));

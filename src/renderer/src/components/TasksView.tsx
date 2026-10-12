@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, CircleCheck, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowRight, CircleCheck, MessageSquare, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import type {
   AppSettings,
@@ -245,7 +245,16 @@ export function TasksView({
       restoreFocus: false,
       onSelect: () => openDetail(todo, "title"),
     },
-    {
+    todo.conversationId ? {
+      id: "chat",
+      label: "Open chat",
+      icon: <MessageSquare size={14} aria-hidden="true" />,
+      restoreFocus: false,
+      onSelect: () => {
+        const chat = snapshot?.conversations.find(({ id }) => id === todo.conversationId);
+        if (chat) onOpenConversation(chat);
+      },
+    } : {
       id: "agent",
       label: "Hand to agent…",
       icon: <ArrowRight size={14} aria-hidden="true" />,

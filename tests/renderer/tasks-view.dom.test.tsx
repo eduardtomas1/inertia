@@ -395,6 +395,15 @@ describe("Tasks view", () => {
     expect(screen.queryByRole("complementary", { name: "Task details" })).toBeNull();
   });
 
+  it("moves due labels on at local midnight", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(2026, 9, 12, 23, 59, 30));
+    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes", { dueDate: "2026-10-13" })]));
+    expect(row("Write release notes")).toHaveTextContent("Tomorrow");
+    await act(async () => { vi.advanceTimersByTime(31_000); });
+    expect(row("Write release notes")).toHaveTextContent("Today");
+  });
+
   it("renames from the menu by focusing and selecting the detail title", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));

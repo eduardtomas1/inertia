@@ -68,6 +68,7 @@ export function TasksView({
   const [menuAnchor, setMenuAnchor] = useState<TaskMenuAnchor>({ x: 8, y: 8 });
   const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } = useDismissibleMenu<TasksMenuName>();
+  const [day, setDay] = useState(0);
   const todos = snapshot?.todos;
   const now = new Date();
   const offline = status !== "online";
@@ -107,6 +108,13 @@ export function TasksView({
   const selected = selectedId ? todoById.get(selectedId) ?? null : null;
   const detailPresent = useDialogPresence(selected !== null);
   const detailTodo = selected ?? (detailPresent && detailId ? todoById.get(detailId) ?? null : null);
+
+  useEffect(() => {
+    const current = new Date();
+    const midnight = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
+    const timer = window.setTimeout(() => setDay(day + 1), midnight.getTime() - current.getTime());
+    return () => window.clearTimeout(timer);
+  }, [day]);
 
   useEffect(() => {
     if (!pendingConversationId) return;

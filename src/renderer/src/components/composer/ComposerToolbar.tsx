@@ -38,7 +38,6 @@ import {
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
 import { CheckoutBranchControlContext, CheckoutBranchSlot } from "../CheckoutBranchControl";
-import { conversationContextMismatch } from "../../lib/newConversation";
 import { layoutStorage } from "../../utils/layoutStorage";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
@@ -83,20 +82,18 @@ export function composerCheckoutStrip({
   scratchWorkspace,
   newChatProjectPicker,
   worktreePath,
-  checkoutDiffers,
   repository,
 }: {
   showCheckoutContext: boolean;
   scratchWorkspace: boolean;
   newChatProjectPicker: boolean;
   worktreePath: string | null;
-  checkoutDiffers: boolean;
   repository: boolean;
 }): "hidden" | "branch" | "context" {
   if (!showCheckoutContext) return "hidden";
   if (newChatProjectPicker) return "context";
   if (scratchWorkspace) return "hidden";
-  if (worktreePath || checkoutDiffers) return "context";
+  if (worktreePath) return "context";
   return repository ? "branch" : "hidden";
 }
 
@@ -282,10 +279,6 @@ export function ComposerToolbar({
     scratchWorkspace,
     newChatProjectPicker: Boolean(newChatProjectPicker),
     worktreePath: conversation.worktreePath,
-    checkoutDiffers: Boolean(checkoutGitStatus?.isRepository && (
-      checkoutGitStatus.branch === null
-      || conversationContextMismatch(checkoutModel?.project ?? null, conversation, checkoutGitStatus)
-    )),
     repository: checkoutGitStatus
       ? checkoutGitStatus.isRepository
       : Boolean(checkoutModel?.project.repositoryRoot),

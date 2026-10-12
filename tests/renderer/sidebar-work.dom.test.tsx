@@ -15,7 +15,6 @@ import type {
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
-import { TOOLTIP_DELAY_MS } from "../../src/renderer/src/components/Tooltip";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -212,11 +211,10 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("heading", { name: "No project 1" })).toBeVisible();
     const freeRow = screen.getByRole("button", { name: /^Weekend plans,/ });
     expect(freeRow.closest("[data-work-section]")).toHaveAttribute("data-work-section", "no-project");
-    expect(freeRow.querySelector(".activity-thread-title")).toHaveTextContent(/^Weekend plans$/u);
-    expect(freeRow).not.toHaveTextContent("Chat folder");
+    expect(freeRow.querySelector(".activity-thread-projectline")).toHaveTextContent(/^Chat folder$/u);
     expect(freeRow).toHaveAccessibleName(/, No project,/u);
-    expect(screen.getByRole("button", { name: /^Build the app,/ }))
-      .toHaveAccessibleName(/, Repository acme-monorepo\/apps\/studio,/u);
+    expect(screen.getByRole("button", { name: /^Build the app,/ }).querySelector(".activity-thread-projectline"))
+      .toHaveTextContent("acme-monorepo/apps/studio");
     expect(screen.getByRole("button", { name: /^Build the app,/ }).closest("[data-work-section]"))
       .toHaveAttribute("data-work-section", "recent");
     fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
@@ -351,11 +349,11 @@ describe("compact Work sidebar", () => {
     };
     const row = conversation("web", "Ship the web app", new Date(), { projectId: windowsProject.id });
     renderSidebar([row], undefined, [], { projects: [windowsProject] });
-    expect(screen.getByRole("button", { name: /^Ship the web app,/ }))
-      .toHaveAccessibleName(/, Repository MyMonorepo\/packages\/Web,/u);
+    expect(screen.getByRole("button", { name: /^Ship the web app,/ }).querySelector(".activity-thread-projectline"))
+      .toHaveTextContent("MyMonorepo/packages/Web");
   });
 
-  it("shows chronological one-line rows that name provider, project, repository, and branch", () => {
+  it("shows chronological rows with provider, project, repository, and branch metadata", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
     const recent = conversation(
@@ -404,9 +402,12 @@ describe("compact Work sidebar", () => {
     });
     expect(recentRow).toHaveAttribute("aria-current", "page");
     expect(recentRow).toHaveAccessibleName(expect.stringContaining("OpenAI"));
+    expect(recentRow).toHaveTextContent("Studio");
     expect(recentRow).toHaveAccessibleName(expect.stringContaining("acme-monorepo/apps/studio"));
-    expect(recentRow).toHaveTextContent(/^Polish compact Work rows3h$/u);
-    expect(recentRow.querySelector("[data-provider-id]")).toBeNull();
+    expect(recentRow).toHaveTextContent("codex/compact-work-tab");
+    expect(recentRow.querySelector(
+      '[data-provider-id="codex"][data-provider-brand="openai"][data-provider-icon-kind="official"]',
+    )).not.toBeNull();
 
     const yesterdayRow = screen.getByRole("button", {
       name: "Review provider metadata, Anthropic, Studio, Repository acme-monorepo/apps/studio, Branch main, Completed, New completion",
@@ -431,110 +432,29 @@ describe("compact Work sidebar", () => {
     expect(view.onViewChange).toHaveBeenCalledBefore(view.onSelectConversation);
   });
 
-  it("lays a row out as one line: title, then the relative time", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 11, 12));
-    renderSidebar([conversation("one-line", "Trim the hot path", new Date(2026, 7, 11, 10), { branch: "perf/hot-path" })]);
-    const row = screen.getByRole("button", { name: /^Trim the hot path,/u });
-    expect([...row.children].map((child) => child.className)).toEqual([
-      "activity-thread-title",
-      "activity-thread-trailing",
-    ]);
-    expect(row.querySelector(".activity-thread-title")).toHaveTextContent(/^Trim the hot path$/u);
-    expect(row.querySelector(".activity-thread-trailing time")).toHaveTextContent(/^2h$/u);
-    expect(row).not.toHaveTextContent("perf/hot-path");
-    expect(row).not.toHaveTextContent("Local workspace");
-    expect(row).toHaveAccessibleName(/, Branch perf\/hot-path,/u);
-  });
-
-  it("shows the provider mark only when a chat's provider differs from its project's default", () => {
-    const ordinary = conversation("default-provider", "Default provider chat", new Date());
-    const other = conversation("other-provider", "Other provider chat", new Date(), {
-      providerId: "claude",
-      modelSelection: providerNativeModelSelection({ providerId: "claude" }),
-    });
-    const view = renderSidebar([ordinary, other]);
-    const ordinaryRow = () => screen.getByRole("button", { name: /^Default provider chat,/u });
-    const otherRow = () => screen.getByRole("button", { name: /^Other provider chat,/u });
-    expect(ordinaryRow().querySelector(".activity-thread-provider")).toBeNull();
-    expect(otherRow().querySelector('.activity-thread-provider [data-provider-id="claude"]')).not.toBeNull();
-    const claudeDefault = snapshot([ordinary, other]);
-    view.rerenderSnapshot({ ...claudeDefault, settings: { ...claudeDefault.settings, defaultProvider: "claude" } });
-    expect(ordinaryRow().querySelector('.activity-thread-provider [data-provider-id="codex"]')).not.toBeNull();
-    expect(otherRow().querySelector(".activity-thread-provider")).toBeNull();
-  });
-
-  it("groups rows under quiet project headers only while several projects are listed", () => {
+  it("keeps chats from several projects in one time order, each row naming its project", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
     const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
     const studioNewest = conversation("studio-newest", "Studio newest", new Date(2026, 7, 11, 11));
     const docsMiddle = conversation("docs-middle", "Docs middle", new Date(2026, 7, 11, 10), { projectId: docsProject.id });
-    const studioYesterday = conversation("studio-yesterday", "Studio yesterday", new Date(2026, 7, 10, 9));
-    const view = renderSidebar([studioNewest, docsMiddle, studioYesterday], vi.fn(), [], { projects: [project, docsProject] });
-    const stream = view.container.querySelector(".activity-thread-stream")!;
-    const order = () => [...stream.querySelectorAll(".work-project-name, .activity-thread-title")]
-      .map((element) => element.textContent);
-    expect(order()).toEqual(["Studio", "Studio newest", "Docs", "Docs middle", "Studio", "Studio yesterday"]);
-    expect(stream.querySelectorAll(".work-project-group [tabindex], .work-project-group button")).toHaveLength(0);
-    const docsName = [...stream.querySelectorAll<HTMLElement>(".work-project-name")].find((name) => name.textContent === "Docs")!;
-    expect(docsName.closest("h3")).not.toHaveAttribute("title");
-    fireEvent.pointerEnter(docsName.parentElement!, { pointerType: "mouse" });
-    act(() => {
-      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    const studioOlder = conversation("studio-older", "Studio older", new Date(2026, 7, 11, 9));
+    const docsYesterday = conversation("docs-yesterday", "Docs yesterday", new Date(2026, 7, 10, 9), { projectId: docsProject.id });
+    const view = renderSidebar([studioNewest, docsMiddle, studioOlder, docsYesterday], vi.fn(), [], {
+      projects: [project, docsProject],
     });
-    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("/workspace/docs");
-    fireEvent.pointerLeave(docsName.parentElement!, { pointerType: "mouse" });
+    const stream = view.container.querySelector(".activity-thread-stream")!;
+    expect([...stream.querySelectorAll(".activity-thread-title")].map((element) => element.textContent))
+      .toEqual(["Studio newest", "Docs middle", "Studio older", "Docs yesterday"]);
+    expect(stream.querySelectorAll("h3, .work-project-group")).toHaveLength(0);
+    expect([...stream.querySelectorAll(".activity-thread-project-meta")].map((element) => element.textContent))
+      .toEqual(["Studio", "Docs", "Studio", "Docs"]);
     const first = screen.getByRole("button", { name: /^Studio newest,/u });
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowDown" });
     expect(screen.getByRole("button", { name: /^Docs middle,/u })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-    expect(screen.getByRole("button", { name: /^Studio yesterday,/u })).toHaveFocus();
-    expect(screen.getByRole("button", { name: /^Docs middle,/u }).closest(".activity-thread"))
-      .toHaveAttribute("aria-posinset", "2");
-
-    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
-    fireEvent.click(screen.getByRole("option", { name: /Studio/u }));
-    expect(order()).toEqual(["Studio newest", "Studio yesterday"]);
-  });
-
-  it("orders project groups by their best-ranked chat and continues a group across Recent and Yesterday", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 11, 12));
-    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
-    const studioNewest = conversation("studio-newest", "Studio newest", new Date(2026, 7, 11, 11));
-    const docsPinned = conversation("docs-pinned", "Docs pinned", new Date(2026, 7, 11, 8), {
-      projectId: docsProject.id,
-      pinnedAt: new Date(2026, 7, 11, 8).toISOString(),
-    });
-    const docsYesterday = conversation("docs-yesterday", "Docs yesterday", new Date(2026, 7, 10, 9), { projectId: docsProject.id });
-    const studioYesterday = conversation("studio-yesterday", "Studio yesterday", new Date(2026, 7, 10, 10));
-    const view = renderSidebar([studioNewest, docsPinned, docsYesterday, studioYesterday], vi.fn(), [], {
-      projects: [project, docsProject],
-    });
-    const stream = view.container.querySelector(".activity-thread-stream")!;
-    expect([...stream.querySelectorAll(".work-project-name, .activity-thread-title")].map((element) => element.textContent))
-      .toEqual(["Docs", "Docs pinned", "Studio", "Studio newest", "Studio yesterday", "Docs", "Docs yesterday"]);
-  });
-
-  it("counts only the projects of listed active chats before showing project headers", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 11, 12));
-    const docsProject: Project = { ...project, id: "project-docs", name: "Docs", path: "/workspace/docs" };
-    const notesProject: Project = { ...project, id: "project-notes", name: "Notes", path: "/workspace/notes" };
-    const studio = conversation("studio-active", "Studio active", new Date(2026, 7, 11, 11));
-    const docsDone = conversation("docs-done", "Docs done", new Date(2026, 7, 11, 10), {
-      projectId: docsProject.id,
-      settledAt: new Date(2026, 7, 11, 10).toISOString(),
-    });
-    const notesSnoozed = conversation("notes-snoozed", "Notes snoozed", new Date(2026, 7, 11, 9), {
-      projectId: notesProject.id,
-      snoozedUntil: new Date(2026, 7, 12, 9).toISOString(),
-    });
-    const view = renderSidebar([studio, docsDone, notesSnoozed], vi.fn(), [], { projects: [project, docsProject, notesProject] });
-    expect(screen.getByRole("button", { name: /^Studio active,/u })).toBeInTheDocument();
-    expect(view.container.querySelectorAll(".work-project-name")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /^Studio older,/u })).toHaveFocus();
   });
 
   it("keeps Work row action focus inside its menu and dismisses it predictably", () => {
@@ -1446,7 +1366,7 @@ describe("compact Work sidebar", () => {
     const row = screen.getByRole("button", {
       name: "Recover detached work, OpenAI, Unknown project, Idle",
     });
-    expect(row).toHaveTextContent(/^Recover detached work/u);
+    expect(row).toHaveTextContent("Unknown project");
 
     const search = screen.getByRole("searchbox");
     fireEvent.change(search, { target: { value: "Unknown project" } });

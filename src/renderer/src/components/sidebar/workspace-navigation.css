@@ -1,24 +1,82 @@
-.sidebar-search-row {
+.sidebar-primary-row {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+.sidebar-primary-action {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-fade);
+}
+.sidebar-primary-action > svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+.sidebar-primary-action > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-primary-action > kbd {
+  margin-left: auto;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--text-xs);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-fade);
+}
+.sidebar-primary-action:not(:disabled):hover {
+  background: var(--fill);
+}
+.sidebar-primary-action:is(:hover, :focus-visible) > kbd {
+  opacity: 1;
+}
+.sidebar-primary-row > .icon-button,
+.sidebar-project-scope > .icon-button,
+.search-clear {
+  width: 28px;
+  height: 28px;
+}
+.sidebar-primary-row > .icon-button:not(:disabled):hover {
+  color: var(--text);
+  background: var(--fill);
 }
 .sidebar-search-wrap {
   position: relative;
   display: flex;
   min-width: 0;
-  height: 32px;
-  flex: 1;
+  height: 28px;
   align-items: center;
   gap: 8px;
-  padding: 0 8px;
+  margin-top: 2px;
+  padding: 0 0 0 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-fade);
+}
+.sidebar-search-wrap:hover,
+.sidebar-search-wrap:focus-within {
+  background: var(--fill);
+}
+.sidebar-search-wrap > svg {
+  flex: 0 0 auto;
 }
 .sidebar-search-wrap input {
   min-width: 0;
+  height: 100%;
   flex: 1;
   border: 0;
   outline: 0;
@@ -27,19 +85,10 @@
   font-size: var(--text-sm);
 }
 .sidebar-search-wrap input::placeholder {
-  color: var(--text-muted);
+  color: var(--text);
 }
 .sidebar-search-wrap input::-webkit-search-cancel-button {
   display: none;
-}
-.sidebar-search-row > .icon-button,
-.search-clear {
-  width: 28px;
-  height: 28px;
-}
-.sidebar-search-row > .icon-button:not(:disabled):hover {
-  color: var(--text);
-  background: var(--fill);
 }
 .sidebar-project-navigation {
   position: relative;
@@ -54,11 +103,11 @@
 .project-scope-trigger {
   display: flex;
   min-width: 0;
-  height: 32px;
+  height: 28px;
   flex: 1;
   align-items: center;
   gap: 8px;
-  padding: 0 8px;
+  padding: 0 10px;
   border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;

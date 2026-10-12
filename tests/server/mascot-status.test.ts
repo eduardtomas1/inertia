@@ -1,73 +1,149 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentInputRequest, AgentApprovalRequest } from "../../src/shared/contracts/agent";
-import type { ConversationShell } from "../../src/shared/contracts/app";
-import { AGENT_RUN_STATES, agentTurnStatusForRunState, type AgentRunState } from "../../src/shared/run-state";
+import type { AgentActivity, AgentApprovalRequest, AgentInputRequest, ChatMessage } from "../../src/shared/contracts/agent";
+import type { WorkspaceRun } from "../../src/shared/contracts/app";
+import { AGENT_RUN_STATES } from "../../src/shared/run-state";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
+import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
+import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
 import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
-import { emptyMascotStatus, MASCOT_CHAT_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
+import {
+  mascotActivityLine, mascotApprovalLine, mascotCommand, mascotCommentaryLine, mascotPreview, mascotResultLine,
+} from "../../src/server/runtime/mascot-message";
+import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
+import { codexWebSearchActivity } from "../../src/server/codex/app-server-item-labels";
 
-function immediatePublisher(...args: Partial<ConstructorParameters<typeof MascotStatusPublisher>>): MascotStatusPublisher {
-  return new MascotStatusPublisher(args[0], args[1], args[2], (task) => task());
+const ids = (chats: readonly { conversationId: string | null }[]): Array<string | null> => chats.map(({ conversationId }) => conversationId);
+const MINUTE = 60_000;
+const owner = { conversationId: "chat", runId: "chat-run", turnId: "chat-turn" };
+
+function input(id = "question"): AgentInputRequest {
+  return { ...owner, id, providerId: "codex", autoResolutionMs: null, questions: [{
+    id: "layout", header: "Layout", question: "Should the mascot follow all chats or only the selected chat?",
+    isSecret: false, isOther: true, allowMultiple: false, options: [],
+  }] };
 }
 
-function conversation(id: string, state: AgentRunState): ConversationShell {
-  return {
-    id, projectId: "project", title: "Improve the desktop mascot", status: "idle",
-    archivedAt: null, lastViewedAt: null,
-    latestTurn: {
-      id: `${id}-turn`, runId: `${id}-run`,
-      status: agentTurnStatusForRunState(state),
-      runState: { state, revision: 1, providerState: "PRIVATE PROVIDER TEXT" },
-      completedAt: "2026-09-06T10:00:00.000Z",
-      requestedAt: "2026-09-06T09:00:00.000Z",
-      updatedAt: "2026-09-06T10:00:00.000Z",
-    },
-  } as ConversationShell;
+function said(content: string, createdAt: string, id = "message"): { type: "agent.commentary.persisted"; message: ChatMessage } {
+  return { type: "agent.commentary.persisted", message: {
+    id, conversationId: "chat", turnId: "chat-turn", role: "assistant", attachments: [], content, createdAt,
+  } as ChatMessage };
+}
+
+function did(activity: Partial<AgentActivity> & Pick<AgentActivity, "title">): { type: "agent.activity"; activity: AgentActivity } {
+  return { type: "agent.activity", activity: { ...owner, id: "activity", kind: "command", detail: null, status: "running",
+    createdAt: "2026-09-06T10:01:00.000Z", ...activity } };
 }
 
 describe("authoritative mascot status", () => {
   it.each(AGENT_RUN_STATES)("preserves exact %s state and full turn identity", (phase) => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, publish, feed } = mascotPublisher();
     publisher.replace([conversation("chat", phase)]);
     const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(phase);
     const status = {
       phase, projectId: "project", conversationId: "chat", runId: "chat-run", turnId: "chat-turn",
-      chatTitle: "Improve the desktop mascot", projectName: null, message: null, progress: null, steps: null,
-      since: terminal ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z",
+      chatTitle: "Chat chat", projectName: null, message: null, progress: null, steps: null,
+      since: terminal || phase.startsWith("waiting-") ? "2026-09-06T10:00:00.000Z" : "2026-09-06T09:00:00.000Z", quietSince: null,
       activeCount: terminal ? 0 : 1,
     };
-    expect(publish).toHaveBeenLastCalledWith(status, [status], null, { chats: 1, attention: phase.startsWith("waiting-") ? 1 : 0 }, null);
+    const shown = phase !== "cancelled";
+    expect(feed()).toEqual({
+      status: shown ? status : emptyMascotStatus(), chats: [status], rows: [], focus: null,
+      counts: { chats: 1, attention: phase.startsWith("waiting-") ? 1 : 0, others: 0 }, request: null,
+    });
+    expect(mascotFeedViolation(feed())).toBeNull();
     expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
   });
 
-  it("prioritizes actionable requests over live work and unseen outcomes", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+  it("orders needs-you before unseen failures, unseen results, and working chats, and lists the rest as rows", () => {
+    const { publisher, feed } = mascotPublisher();
     publisher.replace([
       conversation("complete", "completed"), conversation("failure", "failed"),
       conversation("working", "running"), conversation("approval", "waiting-for-approval"),
     ]);
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "waiting-for-approval", activeCount: 2 });
+    expect(feed().status).toMatchObject({ conversationId: "approval", phase: "waiting-for-approval", activeCount: 2 });
+    expect(ids(feed().rows)).toEqual(["failure", "complete", "working"]);
+    expect(feed().counts).toEqual({ chats: 4, attention: 1, others: 3 });
     publisher.update({ ...conversation("approval", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "running", activeCount: 1 });
-    publisher.update({ ...conversation("working", "running"), archivedAt: "2026-09-06T11:00:00.000Z" });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "failed", activeCount: 0 });
+    expect(feed().status).toMatchObject({ conversationId: "failure", phase: "failed", activeCount: 1 });
+    expect(ids(feed().rows)).toEqual(["complete", "working"]);
+    publisher.update({ ...conversation("failure", "failed"), lastViewedAt: "2026-09-06T11:00:00.000Z" });
+    expect(feed().status).toMatchObject({ conversationId: "complete", phase: "completed" });
+    publisher.update({ ...conversation("complete", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" });
+    expect(feed().status).toMatchObject({ conversationId: "working", phase: "running" });
+    expect(feed().rows).toEqual([]);
+    expect(mascotFeedViolation(feed())).toBeNull();
   });
 
-  it("does not replay seen results, invent completion for cancellation, or retain deleted chats", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+  it("shows a result or failure while other chats keep running instead of hiding it behind them", () => {
+    const { publisher, feed } = mascotPublisher();
+    publisher.replace([conversation("a", "running")]);
+    publisher.update(conversation("b", "running", { requestedAt: "2026-09-06T09:10:00.000Z" }));
+    expect(feed().status.conversationId).toBe("a");
+    publisher.update(conversation("b", "completed"));
+    expect(feed().status).toMatchObject({ conversationId: "b", phase: "completed" });
+    expect(ids(feed().rows)).toEqual(["a"]);
+    publisher.update(conversation("c", "failed"));
+    expect(feed().status).toMatchObject({ conversationId: "c", phase: "failed" });
+    expect(ids(feed().rows)).toEqual(["b", "a"]);
+  });
+
+  it("keeps the shown chat when another chat starts later or reaches the same priority", () => {
+    const { publisher, feed } = mascotPublisher();
+    publisher.replace([conversation("first", "running")]);
+    publisher.update(conversation("later", "running", { requestedAt: "2026-09-06T10:20:00.000Z" }));
+    expect(feed().status.conversationId).toBe("first");
+    expect(ids(feed().rows)).toEqual(["later"]);
+    publisher.update(conversation("first", "waiting-for-input"));
+    publisher.update(conversation("later", "waiting-for-approval", { updatedAt: "2026-09-06T10:25:00.000Z" }));
+    expect(feed().status).toMatchObject({ conversationId: "first", phase: "waiting-for-input" });
+    expect(ids(feed().rows)).toEqual(["later"]);
+    expect(feed().counts).toMatchObject({ attention: 2, others: 1 });
+    publisher.update(conversation("first", "running"));
+    expect(feed().status).toMatchObject({ conversationId: "later", phase: "waiting-for-approval" });
+    expect(ids(feed().rows)).toEqual(["first"]);
+    expect(mascotFeedViolation(feed())).toBeNull();
+  });
+
+  it("returns to the shown chat's equal-priority neighbours only when it resolves", () => {
+    const { publisher, feed } = mascotPublisher();
+    publisher.replace([conversation("done-a", "completed"), conversation("done-b", "completed", { updatedAt: "2026-09-06T10:05:00.000Z" })]);
+    expect(feed().status.conversationId).toBe("done-b");
+    publisher.update(conversation("done-c", "completed", { updatedAt: "2026-09-06T10:20:00.000Z" }));
+    expect(feed().status.conversationId).toBe("done-b");
+    publisher.update({ ...conversation("done-b", "completed", { updatedAt: "2026-09-06T10:05:00.000Z" }), lastViewedAt: "2026-09-06T10:21:00.000Z" });
+    expect(feed().status.conversationId).toBe("done-c");
+    expect(ids(feed().rows)).toEqual(["done-a"]);
+  });
+
+  it("does not replay seen results, hides cancelled work, and does not retain deleted chats", () => {
+    const { publisher, publish, feed } = mascotPublisher();
     publisher.replace([{ ...conversation("old", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [expect.objectContaining({ conversationId: "old", phase: "completed" })], null, { chats: 1, attention: 0 }, null);
+    expect(feed()).toMatchObject({ status: emptyMascotStatus(), chats: [{ conversationId: "old", phase: "completed" }], rows: [], counts: { chats: 1, attention: 0, others: 0 } });
     publisher.update(conversation("cancelled", "cancelled"));
-    expect(publish.mock.lastCall?.[0].phase).toBe("cancelled");
+    expect(feed().status).toEqual(emptyMascotStatus());
     publisher.replace([]);
-    expect(publish).toHaveBeenLastCalledWith(emptyMascotStatus(), [], null, { chats: 0, attention: 0 }, null);
+    expect(publish).toHaveBeenLastCalledWith({ status: emptyMascotStatus(), chats: [], rows: [], focus: null, counts: { chats: 0, attention: 0, others: 0 }, request: null });
+  });
+
+  it("counts a finished chat as seen once its run was marked seen where it is shown", () => {
+    const { publisher, feed } = mascotPublisher();
+    const chats = [conversation("done", "completed"), conversation("broken", "failed"), conversation("busy", "running")];
+    const run = (id: string, status: WorkspaceRun["status"], attentionState: WorkspaceRun["attentionState"]) => ({ id, status, attentionState });
+    publisher.replace(chats, [], [run("done-run", "running", "seen"), run("broken-run", "failed", "unseen")]);
+    expect(feed().status.conversationId).toBe("broken");
+    expect(ids(feed().rows)).toEqual(["done", "busy"]);
+    publisher.replace(chats, [], [run("done-run", "succeeded", "seen"), run("broken-run", "failed", "seen")]);
+    expect(feed().status).toMatchObject({ conversationId: "busy", phase: "running" });
+    expect(feed().rows).toEqual([]);
+    publisher.update(conversation("done", "completed"));
+    expect(feed().status.conversationId).toBe("busy");
+    const next = conversation("done", "completed", { turnId: "next-turn" });
+    publisher.update({ ...next, latestTurn: { ...next.latestTurn!, runId: "next-run" } });
+    expect(feed().status).toMatchObject({ conversationId: "done", turnId: "next-turn" });
   });
 
   it("deduplicates shell/snapshot updates including streamed text metadata changes", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, publish } = mascotPublisher();
     const chat = conversation("chat", "running");
     publisher.replace([chat]);
     publisher.update({ ...chat, latestTurn: { ...chat.latestTurn!, updatedAt: "2026-09-06T12:00:00.000Z" } });
@@ -76,259 +152,551 @@ describe("authoritative mascot status", () => {
   });
 
   it("does not switch live chat ownership when ordinary activity updates its timestamp", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, publish, feed } = mascotPublisher();
     const first = conversation("a", "running");
     const second = conversation("b", "running");
     publisher.replace([first, second]);
     publisher.update({ ...second, latestTurn: { ...second.latestTurn!, updatedAt: "2026-09-06T12:00:00.000Z" } });
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ conversationId: "a", activeCount: 2 });
+    expect(feed().status).toMatchObject({ conversationId: "a", activeCount: 2 });
     publisher.update(conversation("b", "waiting-for-input"));
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ conversationId: "b", phase: "waiting-for-input" });
+    expect(feed().status).toMatchObject({ conversationId: "b", phase: "waiting-for-input" });
   });
 });
 
-describe("mascot chat list", () => {
+describe("mascot lifetimes", () => {
+  it("lets an unseen result expire after 7 days and an unseen failure after 1 hour without another event", () => {
+    const { publisher, feed, clock } = mascotPublisher();
+    publisher.replace([conversation("done", "completed"), conversation("broken", "failed", { updatedAt: "2026-09-06T10:10:00.000Z" })]);
+    expect(feed().status.conversationId).toBe("broken");
+    expect(ids(feed().rows)).toEqual(["done"]);
+    clock.advance(39 * MINUTE);
+    expect(feed().status.conversationId).toBe("broken");
+    clock.advance(MINUTE);
+    expect(feed().status.conversationId).toBe("done");
+    expect(feed()).toMatchObject({ rows: [], counts: { chats: 2, others: 0 } });
+    clock.advance(7 * 24 * 60 * MINUTE - 71 * MINUTE);
+    expect(feed().status.conversationId).toBe("done");
+    clock.advance(MINUTE);
+    expect(feed().status).toEqual(emptyMascotStatus());
+    expect(feed().chats.map(({ phase }) => phase)).toEqual(["failed", "completed"]);
+    expect(clock.pending()).toBe(0);
+  });
+
+  it("drops a question nobody answered for 24 hours from the bubble, rows and counts", () => {
+    const { publisher, feed, clock } = mascotPublisher();
+    publisher.replace([conversation("asked", "waiting-for-input"), conversation("busy", "running")]);
+    expect(feed()).toMatchObject({ status: { conversationId: "asked" }, counts: { attention: 1, others: 1 } });
+    clock.advance(23 * 60 * MINUTE + 29 * MINUTE);
+    expect(feed().counts).toMatchObject({ attention: 1 });
+    clock.advance(MINUTE);
+    expect(feed()).toMatchObject({ status: { conversationId: "busy", activeCount: 2 }, rows: [], counts: { attention: 0, others: 0 } });
+    expect(mascotFeedViolation(feed())).toBeNull();
+  });
+
+  it("keeps a valid feed with the chat still counted as active after a lone approval expires", () => {
+    const { publisher, feed, clock } = mascotPublisher();
+    publisher.replace([conversation("chat", "waiting-for-approval", { updatedAt: "2026-09-06T10:30:00.000Z" })]);
+    clock.advance(24 * 60 * MINUTE);
+    expect(feed()).toMatchObject({ status: { phase: "idle", conversationId: null, activeCount: 1 }, rows: [], counts: { attention: 0, others: 0 } });
+    expect(feed().chats).toEqual([expect.objectContaining({ conversationId: "chat", activeCount: 1 })]);
+    expect(mascotFeedViolation(feed())).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.mascot-status", ...feed() })).not.toBeNull();
+  });
+
+  it("marks a working chat quiet after 10 minutes without an update and clears it on the next one", () => {
+    const shell = conversation("chat", "running");
+    const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    clock.advance(9 * MINUTE);
+    publisher.observe({ type: "agent.reasoning", ...owner, text: "PRIVATE" });
+    clock.advance(9 * MINUTE + 59_000);
+    expect(feed().status.quietSince).toBeNull();
+    clock.advance(1_000);
+    expect(feed().status).toMatchObject({ phase: "running", quietSince: "2026-09-06T10:39:00.000Z" });
+    expect(parseMascotStatus(feed().status)).toEqual(feed().status);
+    publisher.observe({ type: "agent.text", ...owner, text: "More words" });
+    expect(feed().status.quietSince).toBeNull();
+    publisher.update(conversation("chat", "waiting-for-input"));
+    clock.advance(60 * MINUTE);
+    expect(feed().status).toMatchObject({ phase: "waiting-for-input", quietSince: null });
+    expect(JSON.stringify(feed())).not.toContain("PRIVATE");
+  });
+});
+
+describe("mascot chat list and rows", () => {
   it("ranks switchable chats, keeps seen results available, and adds project context", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, feed } = mascotPublisher();
     const seen = { ...conversation("seen", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const live = conversation("live", "running");
     live.latestTurn = { ...live.latestTurn!, startedAt: "2026-09-06T09:30:00+00:00" };
     publisher.replace([seen, live, conversation("question", "waiting-for-input"), { ...conversation("archived", "running"), archivedAt: "2026-09-06T11:00:00.000Z" }], [{ id: "project", name: "Inertia" }]);
-    const [status, chats] = publish.mock.lastCall!;
+    const { status, chats, rows } = feed();
     expect(status).toMatchObject({ conversationId: "question", projectName: "Inertia", activeCount: 2 });
-    expect(chats.map(({ conversationId }: { conversationId: string }) => conversationId)).toEqual(["question", "live", "seen"]);
+    expect(ids(chats)).toEqual(["question", "live", "seen"]);
+    expect(ids(rows)).toEqual(["live"]);
     expect(chats[1]).toMatchObject({ since: "2026-09-06T09:30:00.000Z", activeCount: 2 });
     expect(chats[2]).toMatchObject({ phase: "completed", since: "2026-09-06T10:00:00.000Z" });
     for (const chat of chats) expect(parseMascotStatus(chat)).toEqual(chat);
     publisher.replace(Array.from({ length: 12 }, (_, index) => conversation(`chat-${index}`, "running")));
-    expect(publish.mock.lastCall?.[1]).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(feed().chats).toHaveLength(MASCOT_CHAT_LIMIT);
+  });
+
+  it("lists up to five other chats by priority and counts the rest", () => {
+    const { publisher, feed } = mascotPublisher();
+    const busy = Array.from({ length: 8 }, (_, index) => conversation(`busy-${index}`, "running", { requestedAt: `2026-09-06T09:0${index}:00.000Z` }));
+    publisher.replace([...busy, conversation("question", "waiting-for-input"), conversation("broken", "failed"), { ...conversation("seen", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" }]);
+    expect(feed().status.conversationId).toBe("question");
+    expect(ids(feed().rows)).toEqual(["broken", "busy-7", "busy-6", "busy-5", "busy-4"]);
+    expect(feed().rows).toHaveLength(MASCOT_ROW_LIMIT);
+    expect(feed().counts).toEqual({ chats: 11, attention: 1, others: 9 });
+    expect(mascotFeedViolation(feed())).toBeNull();
+  });
+
+  it("leaves the pinned chat out of the rows and lists the chat that would otherwise be shown", () => {
+    const { publisher, feed } = mascotPublisher();
+    publisher.replace([conversation("question", "waiting-for-input"), conversation("busy", "running"), conversation("done", "completed")]);
+    publisher.focus("busy", 1);
+    expect(feed()).toMatchObject({ focus: "busy", status: { conversationId: "question" }, counts: { others: 2 } });
+    expect(ids(feed().rows)).toEqual(["question", "done"]);
+    expect(mascotFeedViolation(feed())).toBeNull();
   });
 
   it("keeps a focused chat listed beyond the cap and confirms the focus only while it is listed", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, feed } = mascotPublisher();
     const pinned = { ...conversation("pinned", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const busy = Array.from({ length: 10 }, (_, index) => conversation(`busy-${index}`, "running"));
     publisher.replace([pinned, ...busy]);
-    expect(publish.mock.lastCall?.[1].map(({ conversationId }: { conversationId: string }) => conversationId)).not.toContain("pinned");
+    expect(ids(feed().chats)).not.toContain("pinned");
     publisher.focus("pinned", 1);
-    const [, chats, focus, , request] = publish.mock.lastCall!;
-    expect(request).toBe(1);
-    expect(focus).toBe("pinned");
-    expect(chats).toHaveLength(MASCOT_CHAT_LIMIT);
-    expect(chats.at(-1)).toMatchObject({ conversationId: "pinned", phase: "completed" });
+    expect(feed()).toMatchObject({ request: 1, focus: "pinned" });
+    expect(feed().chats).toHaveLength(MASCOT_CHAT_LIMIT);
+    expect(feed().chats.at(-1)).toMatchObject({ conversationId: "pinned", phase: "completed" });
     publisher.replace(busy);
-    expect(publish.mock.lastCall?.[1].map(({ conversationId }: { conversationId: string }) => conversationId)).not.toContain("pinned");
-    expect(publish.mock.lastCall?.[2]).toBeNull();
+    expect(ids(feed().chats)).not.toContain("pinned");
+    expect(feed().focus).toBeNull();
     publisher.focus("missing", 2);
-    expect(publish.mock.lastCall?.slice(2)).toEqual([null, { chats: 10, attention: 0 }, 2]);
+    expect(feed()).toMatchObject({ focus: null, counts: { chats: 10, attention: 0, others: 9 }, request: 2 });
     publisher.replace([pinned, ...busy]);
     publisher.focus("pinned", 3);
     publisher.replace(busy);
     publisher.replace([pinned, ...busy]);
-    expect(publish.mock.lastCall?.[2]).toBeNull();
-    expect(publish.mock.lastCall?.[4]).toBe(3);
+    expect(feed()).toMatchObject({ focus: null, request: 3 });
   });
 
   it("publishes the true number of chats that need you beside the capped list", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, feed } = mascotPublisher();
     const pinned = { ...conversation("pinned", "completed"), lastViewedAt: "2026-09-06T11:00:00.000Z" };
     const questions = Array.from({ length: 6 }, (_, index) => conversation(`question-${index}`, "waiting-for-input"));
     const approvals = Array.from({ length: 5 }, (_, index) => conversation(`approval-${index}`, "waiting-for-approval"));
     publisher.replace([pinned, ...questions, ...approvals, conversation("busy", "running")]);
     publisher.focus("pinned", 1);
-    const [status, chats, focus, counts] = publish.mock.lastCall!;
+    const { status, chats, rows, focus, counts } = feed();
     expect(chats).toHaveLength(MASCOT_CHAT_LIMIT);
-    expect(chats.filter(({ phase }: { phase: string }) => phase.startsWith("waiting-"))).toHaveLength(MASCOT_CHAT_LIMIT - 1);
+    expect(chats.filter(({ phase }) => phase.startsWith("waiting-"))).toHaveLength(MASCOT_CHAT_LIMIT - 1);
+    expect(rows.every(({ phase }) => phase.startsWith("waiting-"))).toBe(true);
     expect(focus).toBe("pinned");
-    expect(counts).toEqual({ chats: 13, attention: 11 });
+    expect(counts).toEqual({ chats: 13, attention: 11, others: 12 });
     expect(status.activeCount).toBe(12);
     publisher.replace([pinned, conversation("busy", "running")]);
-    expect(publish.mock.lastCall?.[3]).toEqual({ chats: 2, attention: 0 });
+    expect(feed().counts).toEqual({ chats: 2, attention: 0, others: 1 });
   });
 
   it("reads project names from the snapshot and caches lookups for unknown projects", () => {
-    const publish = vi.fn();
-    const lookup = vi.fn((id: string) => id === "new" ? "Fresh project" : null);
-    const publisher = immediatePublisher(publish, undefined, lookup);
+    const lookup = (id: string): string | null => id === "new" ? "Fresh project" : null;
+    let calls = 0;
+    const { publisher, feed } = mascotPublisher({ projectName: (id) => { calls += 1; return lookup(id); } });
     publisher.replace([conversation("a", "running"), conversation("b", "running")], [{ id: "project", name: "Inertia" }]);
-    expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName)).toEqual(["Inertia", "Inertia"]);
-    expect(lookup).not.toHaveBeenCalled();
+    expect(feed().chats.map(({ projectName }) => projectName)).toEqual(["Inertia", "Inertia"]);
+    expect(calls).toBe(0);
     publisher.update({ ...conversation("c", "running"), projectId: "new" });
     publisher.update({ ...conversation("d", "running"), projectId: "new" });
-    expect(lookup).toHaveBeenCalledOnce();
-    expect(publish.mock.lastCall?.[1]).toContainEqual(expect.objectContaining({ conversationId: "d", projectName: "Fresh project" }));
-  });
-
-  it("names many snapshot chats without a project query per chat and follows renames and removals", () => {
-    const publish = vi.fn();
-    const lookup = vi.fn((id: string) => `Stored ${id}`);
-    const publisher = immediatePublisher(publish, undefined, lookup);
-    const chats = Array.from({ length: 60 }, (_, index) => ({
-      ...conversation(`chat-${String(index).padStart(2, "0")}`, "running"), projectId: `project-${index % 3}`,
-    }));
-    const projects = [{ id: "project-0", name: "Alpha" }, { id: "project-1", name: "Beta" }, { id: "project-2", name: "Gamma" }];
-    publisher.replace(chats, projects);
-    publisher.replace(chats.map((chat) => ({ ...chat, title: `${chat.title} again` })), projects);
-    expect(lookup).not.toHaveBeenCalled();
-    expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName))
-      .toEqual(["Alpha", "Beta", "Gamma", "Alpha", "Beta", "Gamma", "Alpha", "Beta"]);
-    publisher.replace(chats, [{ id: "project-0", name: "Renamed" }, ...projects.slice(1)]);
-    expect(publish.mock.lastCall?.[1][0]).toMatchObject({ conversationId: "chat-00", projectName: "Renamed" });
-    publisher.replace(chats.filter(({ projectId }) => projectId !== "project-0"), projects.slice(1));
-    expect(publish.mock.lastCall?.[1].map(({ projectName }: { projectName: string }) => projectName)).not.toContain("Renamed");
-    publisher.replace(chats.slice(0, 2), []);
-    expect(lookup.mock.calls).toEqual([["project-0"], ["project-1"]]);
-    publisher.update({ ...chats[0]!, title: "Updated" });
-    publisher.replace(chats.slice(0, 2), [{ id: "project-0", name: "Alpha again" }, { id: "project-1", name: "Beta" }]);
-    expect(lookup).toHaveBeenCalledTimes(2);
-    expect(publish.mock.lastCall?.[1][0]).toMatchObject({ conversationId: "chat-00", projectName: "Alpha again" });
+    expect(calls).toBe(1);
+    expect(feed().chats).toContainEqual(expect.objectContaining({ conversationId: "d", projectName: "Fresh project" }));
   });
 
   it("keeps plan steps with their turn and clears them when the turn ends", () => {
-    const publish = vi.fn();
     let shell = conversation("chat", "running");
-    const publisher = immediatePublisher(publish, () => shell);
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
     publisher.replace([shell]);
     publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null, steps: [
       { step: "Sketch", status: "completed" }, { step: "Build", status: "inProgress" }, { step: "Ship", status: "pending" },
     ] } });
-    expect(publish.mock.lastCall?.[0].steps).toEqual({ completed: 1, total: 3 });
+    expect(feed().status).toMatchObject({ steps: { completed: 1, total: 3 }, message: "Build" });
     publisher.replace([shell]);
-    expect(publish.mock.lastCall?.[1][0].steps).toEqual({ completed: 1, total: 3 });
+    expect(feed().chats[0]!.steps).toEqual({ completed: 1, total: 3 });
     shell = conversation("chat", "completed");
     publisher.observe({ type: "agent.completed", ...owner, status: "completed", terminalReason: "completed", terminalAssistantMessage: null });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "completed", steps: null, progress: null });
+    expect(feed().status).toMatchObject({ phase: "completed", steps: null, progress: null, message: null });
   });
 });
 
-const owner = { conversationId: "chat", runId: "chat-run", turnId: "chat-turn" };
-function input(id = "question"): AgentInputRequest {
-  return { ...owner, id, providerId: "codex", autoResolutionMs: null, questions: [{
-    id: "layout", header: "Layout", question: "Should the mascot follow all chats or only the selected chat?",
-    isSecret: false, isOther: true, allowMultiple: false, options: [],
-  }] };
-}
-
-describe("mascot context", () => {
-  it("shows public commentary, activity, and measured plan progress without retaining reasoning or command output", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+describe("mascot bubble words", () => {
+  it("keeps the agent's own words over the plan step and tool activity, and never shows a bare tool label", () => {
+    const { publisher, feed, clock } = mascotPublisher();
     publisher.replace([conversation("chat", "running")]);
-    publisher.observe({ type: "agent.commentary.persisted", message: {
-      id: "message", conversationId: "chat", turnId: "chat-turn", role: "assistant", attachments: [],
-      content: "I’m checking the bubble layout and keyboard behavior.", createdAt: "2026-09-06T12:00:00.000Z",
-    } });
-    expect(publish.mock.lastCall?.[0].message).toBe("I’m checking the bubble layout and keyboard behavior.");
+    publisher.observe(did({ kind: "status", title: "Turn started", createdAt: "2026-09-06T10:00:00.000Z" }));
+    expect(feed().status.message).toBeNull();
+    publisher.observe(did({ title: "Command", detail: "Command:\n/bin/zsh -lc 'rg -n mascot <workspace>/src'", createdAt: "2026-09-06T10:00:01.000Z" }));
+    expect(feed().status.message).toBe("Running rg -n mascot src");
+    clock.advance(2_000);
+    publisher.observe(did({ id: "file", kind: "tool", title: "File change", detail: "Files:\nupdate: src/server/runtime/mascot-status.ts", createdAt: "2026-09-06T10:00:02.000Z" }));
+    expect(feed().status.message).toBe("Editing mascot-status.ts");
+    publisher.observe(did({ id: "file", kind: "tool", title: "File change", status: "completed", detail: "Files:\nupdate: src/server/runtime/mascot-status.ts", createdAt: "2026-09-06T10:00:02.000Z" }));
+    clock.advance(2_000);
+    expect(feed().status.message).toBe("Edited mascot-status.ts");
     publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null, steps: [
       { step: "Update the bubble", status: "completed" }, { step: "Check keyboard access", status: "inProgress" },
     ] } });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ message: "Check keyboard access", progress: "1 of 2 steps complete" });
-    const activity = { ...owner, id: "activity", title: "Run mascot_status tests", detail: "PRIVATE OUTPUT",
-      kind: "command" as const, status: "running" as const, createdAt: "2026-09-06T12:01:00.000Z" };
-    publisher.observe({ type: "agent.activity", activity });
-    expect(publish.mock.lastCall?.[0].message).toBe("Run mascot_status tests");
-    publisher.observe({ type: "agent.activity", activity: { ...activity, kind: "reasoning", title: "PRIVATE REASONING" } });
-    publisher.observe({ type: "agent.reasoning", ...owner, text: "PRIVATE REASONING" });
-    publisher.replace([conversation("chat", "running")]);
-    expect(publish.mock.lastCall?.[0].message).toBe("Run mascot_status tests");
-    expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
+    expect(feed().status).toMatchObject({ message: "Check keyboard access", progress: "1 of 2 steps complete" });
+    publisher.observe(said("Thanks. I’m checking the bubble layout and keyboard behavior.", "2026-09-06T10:00:03.000Z"));
+    expect(feed().status.message).toBe("I’m checking the bubble layout and keyboard behavior.");
+    clock.advance(2_000);
+    publisher.observe(did({ id: "next", title: "Command", detail: "Command:\nnpm test\n\nOutput:\nPRIVATE OUTPUT", createdAt: "2026-09-06T10:00:04.000Z" }));
+    publisher.observe(did({ id: "think", kind: "reasoning", title: "PRIVATE REASONING", createdAt: "2026-09-06T10:00:05.000Z" }));
+    clock.advance(2_000);
+    expect(feed().status.message).toBe("I’m checking the bubble layout and keyboard behavior.");
+    expect(JSON.stringify(feed())).not.toContain("PRIVATE");
   });
 
-  it("does not describe the missing checkpoint notice as the chat's latest work", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish, () => conversation("chat", "running"));
-    publisher.replace([conversation("chat", "running")]);
-    const activity = { ...owner, id: "activity", title: "Run mascot_status tests", detail: null,
-      kind: "command" as const, status: "running" as const, createdAt: "2026-09-06T12:01:00.000Z" };
-    publisher.observe({ type: "agent.activity", activity });
-    publisher.observe({ type: "agent.activity", activity: { ...activity, id: "notice", kind: "status",
-      status: "completed", title: "No checkpoint for this turn", detail: "Checkpoint operation timed out.",
-      createdAt: "2026-09-06T12:02:00.000Z" } });
-    expect(publish.mock.lastCall?.[0].message).toBe("Run mascot_status tests");
-    expect(JSON.stringify(publish.mock.calls)).not.toContain("No checkpoint");
-  });
-
-  it("keeps questions actionable through background updates and clears only the resolved request", () => {
-    const publish = vi.fn();
+  it("holds each message for 1.5 seconds before a message of equal or lower value replaces it", () => {
     let shell = conversation("chat", "running");
-    const publisher = immediatePublisher(publish, () => shell);
+    const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });
     publisher.replace([shell]);
+    publisher.observe(did({ id: "one", title: "npm test", detail: "Command:\nnpm test", createdAt: "2026-09-06T10:00:01.000Z" }));
+    expect(feed().status.message).toBe("Running npm test");
+    clock.advance(500);
+    publisher.observe(did({ id: "two", title: "Command", detail: "Command:\nnpm run lint", createdAt: "2026-09-06T10:00:02.000Z" }));
+    expect(feed().status.message).toBe("Running npm test");
+    clock.advance(999);
+    expect(feed().status.message).toBe("Running npm test");
+    clock.advance(1);
+    expect(feed().status.message).toBe("Running npm run lint");
+    publisher.observe(said("Lint is clean, so I’m writing the tests next.", "2026-09-06T10:00:03.000Z"));
+    expect(feed().status.message).toBe("Lint is clean, so I’m writing the tests next.");
     shell = conversation("chat", "waiting-for-input");
     publisher.observe({ type: "agent.input.requested", request: input() });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "waiting-for-input", message: input().questions[0]!.question });
-    const second = input("second");
-    second.questions[0]!.question = "Which color should the bubble use?";
-    publisher.observe({ type: "agent.input.requested", request: second });
-    publisher.observe({ type: "agent.input.resolved", ...owner, requestId: "old-request" });
-    expect(publish.mock.lastCall?.[0].message).toBe(input().questions[0]!.question);
-    publisher.observe({ type: "agent.input.resolved", ...owner, requestId: "question" });
-    expect(publish.mock.lastCall?.[0].message).toBe(second.questions[0]!.question);
-    publisher.observe({ type: "agent.input.resolved", ...owner, requestId: "second" });
-    expect(publish.mock.lastCall?.[0].message).toBeNull();
-    shell = conversation("chat", "running");
-    publisher.update(shell);
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "running", message: null });
+    expect(feed().status.message).toBe(input().questions[0]!.question);
   });
 
-  it("shows approval purpose, suppresses secret question content, and counts multiple questions", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+  it("lets a newer message through at once after the clock was set back", () => {
+    const shell = conversation("chat", "running");
+    const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    publisher.observe(did({ id: "one", title: "npm test", detail: "Command:\nnpm test", createdAt: "2026-09-06T10:00:01.000Z" }));
+    clock.advance(-60 * MINUTE);
+    publisher.observe(did({ id: "two", title: "Command", detail: "Command:\nnpm run lint", createdAt: "2026-09-06T10:00:02.000Z" }));
+    expect(feed().status.message).toBe("Running npm run lint");
+  });
+
+  it("names the approval's command and reason and keeps question text", () => {
+    const { publisher, feed } = mascotPublisher();
     publisher.replace([conversation("chat", "waiting-for-approval")]);
     const request: AgentApprovalRequest = { ...owner, id: "approve", providerId: "codex", kind: "command",
-      title: "Run the test suite", reason: "Verify the mascot changes", detail: "PRIVATE DETAIL", command: "PRIVATE COMMAND",
+      title: "Approve command", reason: "Verify the mascot changes", detail: "PRIVATE DETAIL", command: "/bin/zsh -lc 'npm test -- --token=PRIVATE_SECRET_VALUE'",
       cwd: null, networkScope: null, permissionRoots: [], availableDecisions: ["approve", "deny"] };
     publisher.observe({ type: "agent.approval.requested", request });
-    expect(publish.mock.lastCall?.[0].message).toBe("Run the test suite — Verify the mascot changes");
+    expect(feed().status.message).toBe("Run npm test -- --token=[redacted]? — Verify the mascot changes");
     publisher.update(conversation("chat", "waiting-for-input"));
     const secret = input();
     secret.questions[0] = { ...secret.questions[0]!, isSecret: true, question: "PRIVATE SECRET PROMPT" };
     secret.questions.push(input().questions[0]!);
     publisher.observe({ type: "agent.input.requested", request: secret });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ message: "Sensitive information is needed. Answer privately in the chat.", progress: "2 questions to answer" });
-    expect(JSON.stringify(publish.mock.calls)).not.toContain("PRIVATE");
+    expect(feed().status).toMatchObject({ message: "Sensitive information is needed. Answer privately in the chat.", progress: "2 questions to answer" });
+    expect(JSON.stringify(feed())).not.toContain("PRIVATE");
+  });
+
+  it("times a question or approval from when it arrived rather than from the start of the turn", () => {
+    let shell = conversation("chat", "running", { requestedAt: "2026-09-06T09:00:00.000Z", updatedAt: "2026-09-06T10:10:00.000Z" });
+    const { publisher, feed, clock } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    expect(feed().status.since).toBe("2026-09-06T09:00:00.000Z");
+    clock.advance(5 * MINUTE);
+    shell = conversation("chat", "waiting-for-input", { requestedAt: "2026-09-06T09:00:00.000Z", updatedAt: "2026-09-06T10:34:00.000Z" });
+    publisher.observe({ type: "agent.input.requested", request: input() });
+    expect(feed().status).toMatchObject({ phase: "waiting-for-input", since: "2026-09-06T10:35:00.000Z" });
+    publisher.replace([conversation("other", "waiting-for-approval", { requestedAt: "2026-09-06T08:00:00.000Z", updatedAt: "2026-09-06T10:20:00.000Z" })]);
+    expect(feed().status).toMatchObject({ conversationId: "other", since: "2026-09-06T10:20:00.000Z" });
+  });
+
+  it("keeps questions actionable through background updates and clears only the resolved request", () => {
+    let shell = conversation("chat", "running");
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    shell = conversation("chat", "waiting-for-input");
+    publisher.observe({ type: "agent.input.requested", request: input() });
+    expect(feed().status).toMatchObject({ phase: "waiting-for-input", message: input().questions[0]!.question });
+    const second = input("second");
+    second.questions[0]!.question = "Which color should the bubble use?";
+    publisher.observe({ type: "agent.input.requested", request: second });
+    publisher.observe({ type: "agent.input.resolved", ...owner, requestId: "old-request" });
+    expect(feed().status.message).toBe(input().questions[0]!.question);
+    publisher.observe({ type: "agent.input.resolved", ...owner, requestId: "question" });
+    expect(feed().status.message).toBe(second.questions[0]!.question);
+    publisher.observe({ type: "agent.input.resolved", ...owner, requestId: "second" });
+    expect(feed().status.message).toBeNull();
   });
 
   it("rejects stale turn/run context, clears old previews on a new turn, and bounds plain text", () => {
-    const publish = vi.fn();
-    const publisher = immediatePublisher(publish);
+    const { publisher, feed } = mascotPublisher();
     publisher.replace([conversation("chat", "waiting-for-input")]);
     const request = input();
-    request.questions[0]!.question = "\u202e**" + "A".repeat(10_000);
+    request.questions[0]!.question = "‮**" + "A".repeat(10_000);
     publisher.observe({ type: "agent.input.requested", request });
-    const status = publish.mock.lastCall?.[0];
-    expect(status.message.length).toBe(280);
-    expect(status.message.endsWith("…")).toBe(true);
+    const status = feed().status;
+    expect(status.message!.length).toBe(280);
+    expect(status.message!.endsWith("…")).toBe(true);
     expect(parseMascotStatus(status)).toEqual(status);
     publisher.observe({ type: "agent.input.requested", request: { ...input(), runId: "stale" } });
-    expect(publish.mock.lastCall?.[0]).toEqual(status);
-    publisher.update({ ...conversation("chat", "running"), latestTurn: { ...conversation("chat", "running").latestTurn!, id: "new-turn" } });
+    expect(feed().status).toEqual(status);
+    publisher.update(conversation("chat", "running", { turnId: "new-turn" }));
     publisher.observe({ type: "agent.input.requested", request: input() });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ turnId: "new-turn", message: null, progress: null });
+    expect(feed().status).toMatchObject({ turnId: "new-turn", message: null, progress: null });
   });
 
-  it("previews only the exact final result and replaces old activity with failure details", () => {
-    const publish = vi.fn();
+  it("does not describe the missing checkpoint notice as the chat's latest work", () => {
+    const { publisher, feed } = mascotPublisher({ lookup: () => conversation("chat", "running") });
+    publisher.replace([conversation("chat", "running")]);
+    publisher.observe(did({ title: "npm test", detail: "Command:\nnpm test" }));
+    publisher.observe(did({ id: "notice", kind: "tool", status: "completed", title: "No checkpoint for this turn",
+      detail: "Checkpoint operation timed out.", createdAt: "2026-09-06T10:02:00.000Z" }));
+    expect(feed().status.message).toBe("Running npm test");
+    expect(JSON.stringify(feed())).not.toContain("No checkpoint");
+  });
+
+  it("previews the first sentence of the exact final result and the actual failure message", () => {
     let shell = conversation("chat", "running");
-    const publisher = immediatePublisher(publish, () => shell);
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
     publisher.replace([shell]);
     shell = conversation("chat", "completed");
     const completed = { type: "agent.completed" as const, ...owner, status: "completed" as const, terminalReason: "completed",
       terminalAssistantMessage: { id: "final", conversationId: "chat", turnId: "chat-turn", role: "assistant" as const,
-        content: "The bubble now shows live progress, questions, and results. Tests passed.", attachments: [], createdAt: "2026-09-06T12:00:00.000Z" } };
+        content: "## Summary\n\nI split the **status feed** into `MascotFeed` per chat. Tests passed.\n\n- Updated files", attachments: [], createdAt: "2026-09-06T12:00:00.000Z" } };
     publisher.observe(completed);
-    expect(publish.mock.lastCall?.[0].message).toBe(completed.terminalAssistantMessage.content);
+    expect(feed().status.message).toBe("I split the status feed into MascotFeed per chat.");
     publisher.observe({ ...completed, terminalAssistantMessage: { ...completed.terminalAssistantMessage, turnId: "other-turn" } });
-    expect(publish.mock.lastCall?.[0].message).toBeNull();
+    expect(feed().status.message).toBeNull();
     shell = conversation("chat", "failed");
-    publisher.observe({ type: "agent.failed", ...owner, status: "failed", terminalReason: "provider-failed", message: "The provider connection was lost." });
-    expect(publish.mock.lastCall?.[0]).toMatchObject({ phase: "failed", message: "The provider connection was lost.", progress: null });
+    publisher.observe({ type: "agent.failed", ...owner, status: "failed", terminalReason: "provider-failed",
+      message: "TimeoutError waiting for selector \"#submit\" after 30000ms in tests/login.test.ts:88." });
+    expect(feed().status).toMatchObject({ phase: "failed", message: "TimeoutError waiting for selector \"#submit\" after 30000ms in tests/login.test.ts:88.", progress: null });
     publisher.update({ ...shell, lastViewedAt: "2026-09-06T13:00:00.000Z" });
-    expect(publish.mock.lastCall?.[0]).toEqual(emptyMascotStatus());
-    expect(publish.mock.lastCall?.[1]).toEqual([expect.objectContaining({ phase: "failed", message: "The provider connection was lost." })]);
+    expect(feed().status).toEqual(emptyMascotStatus());
+    expect(feed().chats).toEqual([expect.objectContaining({ phase: "failed", message: expect.stringContaining("TimeoutError") })]);
+  });
+
+  it("cancels its wake timer and stops publishing once closed", () => {
+    const { publisher, publish, clock } = mascotPublisher();
+    publisher.replace([conversation("done", "completed"), conversation("busy", "running")]);
+    expect(clock.pending()).toBe(1);
+    const published = publish.mock.calls.length;
+    publisher.close();
+    expect(clock.pending()).toBe(0);
+    publisher.update(conversation("late", "failed"));
+    clock.advance(8 * 24 * 60 * MINUTE);
+    expect(publish).toHaveBeenCalledTimes(published);
+    expect(clock.pending()).toBe(0);
+  });
+
+  it("never asks for a wake beyond the longest timer delay when a result is stamped far in the future", () => {
+    const clock = mascotTestClock();
+    const delays: number[] = [];
+    const { publisher, feed } = mascotPublisher({ clock: { ...clock, wake: (delay, task) => { delays.push(delay); return clock.wake(delay, task); } } });
+    const future = new Date(clock.now() + 30 * 24 * 60 * MINUTE).toISOString();
+    publisher.replace([conversation("done", "completed", { updatedAt: future, completedAt: future })]);
+    expect(feed().status.conversationId).toBe("done");
+    expect(delays).toEqual([2_147_483_647]);
+    clock.advance(2_147_483_647);
+    expect(delays).toHaveLength(2);
+    expect(delays.every((delay) => delay > 0 && delay <= 2_147_483_647)).toBe(true);
+  });
+
+  it("does not arm a timer from a flush that was already queued when it closed", async () => {
+    const publish = vi.fn();
+    const clock = mascotTestClock();
+    const publisher = new MascotStatusPublisher(publish, undefined, undefined, undefined, clock);
+    publisher.replace([conversation("done", "completed")]);
+    publisher.close();
+    await Promise.resolve();
+    expect(publish).not.toHaveBeenCalled();
+    expect(clock.pending()).toBe(0);
+  });
+
+  it("expires a result by the injected clock, not the system clock", () => {
+    const clock = mascotTestClock(Date.parse("2026-09-13T10:00:00.000Z"));
+    const { publisher, feed } = mascotPublisher({ clock });
+    publisher.replace([conversation("old", "completed")]);
+    expect(feed().status).toEqual(emptyMascotStatus());
+  });
+});
+
+describe("mascot message lines", () => {
+  it("takes the first prose sentence of a result, skipping headings, fences, rules, tables, quotes and list markers", () => {
+    expect(mascotResultLine("```ts\nconst hidden = true;\n```\n\n> **Done.** The tests pass.")).toBe("Done. The tests pass.");
+    expect(mascotResultLine("# Title\n---\n| a | b |\n- Fixed the race in `server.ts`. Then more.")).toBe("Fixed the race in server.ts.");
+    expect(mascotResultLine("1. Updated the docs")).toBe("Updated the docs");
+    expect(mascotResultLine("## Only a heading")).toBeNull();
+  });
+
+  it("asks to run a command approval's command in the same words for every provider and adds a short plain detail otherwise", () => {
+    expect(mascotApprovalLine({ kind: "command", title: "OpenCode wants to use bash", command: null, detail: "npm test", reason: null }))
+      .toBe("Run npm test?");
+    expect(mascotApprovalLine({ kind: "command", title: "Run command?", command: "git push origin main", detail: null, reason: "Publish the branch" }))
+      .toBe("Run git push origin main? — Publish the branch");
+    expect(mascotApprovalLine({ kind: "file-change", title: "Approve file changes", command: null, detail: "Allow changes under /Users/someone/project/src", reason: null }))
+      .toBe("Approve file changes — Allow changes under src");
+    expect(mascotApprovalLine({ kind: "file-change", title: "Approve file changes", command: null, detail: "Files:\nupdate: /Users/someone/project/a.ts", reason: null }))
+      .toBe("Approve file changes");
+    expect(mascotApprovalLine({ kind: "permissions", title: "Claude wants to use WebFetch", command: null, detail: "{\"url\":\"https://example.com\"}", reason: null }))
+      .toBe("Claude wants to use WebFetch");
+    expect(mascotApprovalLine({ kind: "permissions", title: "Allow network access?", command: null, detail: "Reach https://example.com/api from C:\\Users\\me\\tools", reason: null }))
+      .toBe("Allow network access? — Reach https://example.com/api from tools");
+    expect(mascotApprovalLine({ kind: "command", title: "Cursor requested permission", command: null, detail: "{\"input\":{\"command\":\"git push\"}}", reason: null }))
+      .toBe("Run git push?");
+    expect(mascotApprovalLine({ kind: "command", title: "Run", command: null, detail: "{broken", reason: null })).toBe("Run");
+  });
+
+  it("keeps code blocks, file contents and image and emphasis markup out of the agent's words", () => {
+    expect(mascotCommentaryLine("I'll update the config like this:\n```ts\nconst apiUrl = process.env.URL;\nexport default { apiUrl };\n```")).toBe("I'll update the config like this:");
+    expect(mascotCommentaryLine("Here is the file I read.\n```\nDATABASE_URL=postgres://u:pw@host/db\n```")).toBe("Here is the file I read.");
+    expect(mascotCommentaryLine("Here is the file I read.\n~~~\nDATABASE_URL=postgres://u:pw@host/db\n~~~\nNext I'll edit it.")).toBe("Here is the file I read. Next I'll edit it.");
+    expect(mascotCommentaryLine("I read the settings file.\n\n    password = hunter2\n\tTOKEN=abc")).toBe("I read the settings file.");
+    expect(mascotCommentaryLine("```\nonly code\n```")).toBeNull();
+    expect(mascotResultLine("    rm -rf node_modules && npm ci\n\nDone.")).toBe("Done.");
+    expect(mascotResultLine("![Screenshot of the page](/Users/me/shot.png)\n\nDone.")).toBe("Screenshot of the page");
+    expect(mascotResultLine("*Fixed* the _login_ bug in `auth.ts`.")).toBe("Fixed the login bug in auth.ts.");
+    expect(mascotResultLine("Renamed load_user_data to fetch_user and 2*3*4 stays.")).toBe("Renamed load_user_data to fetch_user and 2*3*4 stays.");
+  });
+
+  it("takes the agent's latest words from the end of long commentary", () => {
+    const sentences = Array.from({ length: 60 }, (_, index) => `Sentence number ${index} explains one more detail about the change I am making.`);
+    expect(mascotCommentaryLine(`${sentences.join(" ")} Next I will run the focused tests.`)).toBe("Next I will run the focused tests.");
+    expect(mascotCommentaryLine(`Intro paragraph.\n\n\`\`\`\n${"code\n".repeat(4_000)}\`\`\`\n\nNext I will run the focused tests.`)).toBe("Next I will run the focused tests.");
+    expect(mascotCommentaryLine(`${"word ".repeat(2_000)}and that was a very long thought. Done.`)).toBe("Done.");
+  });
+
+  it("never runs lines, headings, list items or table rows together into one sentence", () => {
+    expect(mascotCommentaryLine("Next steps:\n- update feed\n- add test")).toBe("add test");
+    expect(mascotCommentaryLine("I found two issues:\n\n1. The ranking flips.\n2. The row is cut.")).toBe("The ranking flips. The row is cut.");
+    expect(mascotCommentaryLine("## Plan\nNext I will run the tests.")).toBe("Next I will run the tests.");
+    expect(mascotCommentaryLine("Checking the table.\n| a | b |\n|---|---|\n| 1 | 2 |")).toBe("Checking the table.");
+    expect(mascotCommentaryLine("I changed the parser\nand the renderer")).toBe("and the renderer");
+  });
+
+  it("does not split a sentence after a common abbreviation", () => {
+    expect(mascotResultLine("Updated the config, e.g. Foo. Then ran the tests.")).toBe("Updated the config, e.g. Foo.");
+    expect(mascotResultLine("Kept the old name, i.e. Parser. Nothing else changed.")).toBe("Kept the old name, i.e. Parser.");
+    expect(mascotCommentaryLine("Fixed the imports, docs, etc. Then ran every check again.")).toBe("Fixed the imports, docs, etc. Then ran every check again.");
+  });
+
+  it("skips a result's bold label, its introduction line and setext headings, and strips comments, folds, strikes and math", () => {
+    expect(mascotResultLine("**Summary**\n\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("Here's what I changed:\n\n- Fixed ranking\n- Added tests")).toBe("Fixed ranking");
+    expect(mascotResultLine("Summary\n=======\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("Summary\n---\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("<!-- generated\nnotes -->\nI fixed the bug in the ranking.")).toBe("I fixed the bug in the ranking.");
+    expect(mascotResultLine("<details>\n<summary>\n</summary>\nAll 42 tests pass in the ranking suite.\n</details>")).toBe("All 42 tests pass in the ranking suite.");
+    expect(mascotResultLine("Fixed ~~two~~ three bugs in the ranking.")).toBe("Fixed three bugs in the ranking.");
+    expect(mascotResultLine("$$\nx^2\n$$\nThe formula now renders in the bubble.")).toBe("The formula now renders in the bubble.");
+    expect(mascotResultLine("$$x^2$$\nThe formula now renders in the bubble.")).toBe("The formula now renders in the bubble.");
+    expect(mascotResultLine("Only an introduction:")).toBe("Only an introduction:");
+  });
+
+  it("joins a short first or last sentence with its neighbour the same way for results and commentary", () => {
+    expect(mascotResultLine("Done.\n\nI changed three files: a.ts, b.ts and c.ts.")).toBe("Done. I changed three files: a.ts, b.ts and c.ts.");
+    expect(mascotResultLine("Sure! I've updated the ranking so failures show first.")).toBe("Sure! I've updated the ranking so failures show first.");
+    expect(mascotResultLine("Fixed ranking\nAdded tests")).toBe("Fixed ranking");
+    expect(mascotCommentaryLine("I looked at the publisher and the feed. Done.")).toBe("I looked at the publisher and the feed. Done.");
+  });
+
+  it("names an MCP tool with its server and an Inertia host tool in the work log's words", () => {
+    const line = (title: string, status: AgentActivity["status"] = "running"): string | null => mascotActivityLine({ kind: "tool", title, detail: null, status });
+    expect(line("mcp__github__search_issues")).toBe("Using github: search_issues");
+    expect(line("MCP · github/search_issues", "completed")).toBe("Used github: search_issues");
+    expect(line("MCP · github/search_issues", "failed")).toBe("Could not use github: search_issues");
+    expect(line("Tool · search_docs")).toBe("Using search_docs");
+    expect(line("mcp__inertia-chat-manager__inertia_render_html")).toBe("Rendering a page");
+    expect(line("inertia-chat-manager_inertia_render_html", "completed")).toBe("Rendered a page");
+    expect(line("inertia_render_html", "failed")).toBe("Could not render a page");
+  });
+
+  it("shows the command the work log shows for heredocs, a leading cd into a quoted path and escaped quotes", () => {
+    expect(mascotCommand("/bin/bash -lc \"python3 -B - <<'PY'\nfrom pathlib import Path\nPY\"")).toBe("python3 -B - <<'PY'");
+    expect(mascotCommand("cd \"/workspace/project dir\" && npm test")).toBe("npm test");
+    expect(mascotCommand("/bin/zsh -lc 'echo '\"'\"'hi'\"'\"''")).toBe("echo 'hi'");
+    expect(mascotCommand("set -euo pipefail\nexport CI=1\nnpm run check")).toBe("npm run check");
+  });
+
+  it("says which command failed and what could not be done for everything else", () => {
+    const failed = (kind: AgentActivity["kind"], title: string, detail: string | null = null): string | null =>
+      mascotActivityLine({ kind, title, detail, status: "failed" });
+    expect(failed("command", "Interrupted · Command", "Command:\nnpm test")).toBe("npm test failed");
+    expect(failed("command", "npm run lint")).toBe("npm run lint failed");
+    expect(failed("command", "Run checks")).toBe("Could not run checks");
+    expect(failed("command", "Shell")).toBe("A command failed");
+    expect(failed("file", "File change", "Files:\nupdate: /work/src/a.ts\nadd: /work/src/b.ts")).toBe("Could not edit a.ts and 1 more");
+    expect(failed("tool", "Search the web", "Query:\nelectron setShape macOS")).toBe("Could not search the web: electron setShape macOS");
+    expect(failed("tool", "Read File", "Path:\n/work/src/x.ts")).toBe("Could not read file: x.ts");
+    expect(failed("tool", "Edit README.md")).toBe("Could not edit README.md");
+    expect(failed("tool", "Edit file")).toBe("Could not edit file");
+    expect(failed("tool", "Grep")).toBe("Could not search the code");
+    expect(failed("tool", "TodoWrite")).toBe("Could not update the plan");
+    expect(failed("tool", "WebFetch")).toBe("Could not browse the web");
+  });
+
+  it("scrubs paths and secrets from provider-authored titles before showing them", () => {
+    expect(mascotActivityLine({ kind: "tool", title: "Read /Users/alice/.ssh/id_rsa", detail: null, status: "running" })).toBe("Read <path>");
+    expect(mascotActivityLine({ kind: "command", title: "PGPASSWORD=hunter2 psql -h db", detail: null, status: "running" })).toBe("PGPASSWORD=[redacted] psql -h db");
+  });
+
+  it("words each kind of step while it runs and once it is done", () => {
+    const line = (kind: AgentActivity["kind"], title: string, detail: string | null = null, status: AgentActivity["status"] = "running"): string | null =>
+      mascotActivityLine({ kind, title, detail, status });
+    const edits = "Files:\nupdate: /work/src/a.ts\nadd: /work/src/b.ts\ndelete: /work/src/c.ts";
+    expect(line("file", "File change", edits)).toBe("Editing a.ts and 2 more");
+    expect(line("file", "File change", edits, "completed")).toBe("Edited a.ts and 2 more");
+    expect(line("tool", "Task")).toBe("Delegating work");
+    expect(line("tool", "Agent", null, "completed")).toBe("Delegated work");
+    expect(line("tool", "TodoWrite")).toBe("Updating the plan");
+    expect(line("tool", "update_plan", null, "completed")).toBe("Updated the plan");
+    expect(line("tool", "WebFetch")).toBe("Browsing the web");
+    expect(line("tool", "WebSearch", null, "completed")).toBe("Browsed the web");
+    expect(line("tool", "Grep")).toBe("Searching the code");
+    expect(line("tool", "Glob", null, "completed")).toBe("Searched the code");
+    expect(line("command", "Interrupted · Command", "Command:\nnpm test", "completed")).toBe("Ran npm test");
+    const search = codexWebSearchActivity({ action: { type: "search", query: "electron setShape macOS" } } as never);
+    expect(line("tool", search.label, search.detail ?? null)).toBe("Search the web: electron setShape macOS");
+    const page = codexWebSearchActivity({ action: { type: "openPage", url: "https://www.electronjs.org/docs" } } as never);
+    expect(line("tool", page.label, page.detail ?? null, "completed")).toBe("Open web page: https://www.electronjs.org/docs");
+    expect(line("tool", "View image", "Path:\n/Users/me/project/shot.png")).toBe("View image: shot.png");
+    expect(line("tool", "MCP · github/search_issues")).toBe("Using github: search_issues");
+  });
+});
+
+describe("mascot text bounds", () => {
+  it("never cuts a character in half when it shortens text, and the boundary rejects a lone surrogate", () => {
+    const preview = mascotPreview(`${"a".repeat(278)}😀😀😀`)!;
+    expect(preview).toBe(`${"a".repeat(278)}…`);
+    expect(mascotPreview(`${"a".repeat(277)}😀😀😀`)).toBe(`${"a".repeat(277)}😀…`);
+    expect(mascotCommand(`echo ${"b".repeat(53)}😀 done`)).toBe(`echo ${"b".repeat(53)}…`);
+    const chat = { ...emptyMascotStatus(), phase: "running" as const, projectId: "p", conversationId: "c", runId: "r", turnId: "t", activeCount: 1 };
+    expect(parseMascotStatus({ ...chat, message: "ok 😀" })).not.toBeNull();
+    expect(parseMascotStatus({ ...chat, message: `${"a".repeat(278)}\ud83d…` })).toBeNull();
+    expect(parseMascotStatus({ ...chat, chatTitle: "\ude00 title" })).toBeNull();
+  });
+
+  it("publishes well-formed text when a title or the agent's words were cut inside an emoji", () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+    const title = `${"Please make the parser accept emoji in identifiers like this one".slice(0, 63)}😀`.slice(0, 64);
+    const shell = { ...conversation("chat", "running"), title };
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    publisher.observe(said(`${"x".repeat(4_000)}. Short ${"y".repeat(85)}😀😀`, "2026-09-06T10:00:01.000Z"));
+    const { status } = feed();
+    expect(lone.test(status.chatTitle!)).toBe(false);
+    expect(lone.test(status.message!)).toBe(false);
+    expect(parseMascotFeed(JSON.parse(JSON.stringify(feed())) as Record<string, unknown>)).not.toBeNull();
+    expect(mascotPreview("\ud83d and \ude00")).toBe("\ufffd and \ufffd");
+    expect(mascotPreview(`${" ".repeat(4_095)}😀`)).toBeNull();
   });
 });

@@ -29,6 +29,6 @@ export function projectCodexErrorNotification(host: CodexErrorNotificationHost, 
     host.options.onActivity?.("system", "info", "Codex is retrying after an error", activity);
     return;
   }
-  host.rememberFailure("codex-error", "Codex reported an error.", message, codexUsageLimited(error?.codexErrorInfo));
+  host.rememberFailure("codex-error", message, message, codexUsageLimited(error?.codexErrorInfo));
   host.options.onActivity?.("system", "failed", "Codex reported an error", activity);
 }

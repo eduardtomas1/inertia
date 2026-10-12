@@ -17,7 +17,7 @@ import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
 import { boundedDuration, publicProcessError, runtimeRestartDelayMs, postRuntimeWorkerCommand, clearSupervisorTimer,
-  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage } from "./runtime-supervisor-values.js";
+  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage, isRuntimeMascotStatusMessage } from "./runtime-supervisor-values.js";
 import { detachedRuntimeConnection, runtimeConnection,
   runtimeConnectionUnavailableError } from "./runtime-supervisor-connection.js";
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
@@ -655,6 +655,7 @@ export class RuntimeSupervisor {
     const event = parseRuntimeWorkerEvent(message);
     if (event?.type === "runtime.incident") return this.incidents.accept(event.incident, record.runtimeGenerationId);
     if (isRuntimeIncidentMessage(message)) return; // Invalid diagnostics cannot break lifecycle.
+    if (!event && isRuntimeMascotStatusMessage(message)) return this.onMascotStatus?.(null);
     if (!event) {
       this.lastError = "The runtime process sent an invalid lifecycle message.";
       this.rejectTestRecycle(record, this.lastError, true);
@@ -664,7 +665,7 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
-    if (event.type === "runtime.mascot-status") { this.onMascotStatus?.(event.status, event.chats, event.focus, event.counts, event.request); return; }
+    if (event.type === "runtime.mascot-status") { const { type: _type, ...feed } = event; this.onMascotStatus?.(feed); return; }
     if (event.type === "runtime.credential-request") {
       this.credentials.handle(record, event); return;
     }

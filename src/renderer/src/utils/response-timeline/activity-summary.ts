@@ -1,17 +1,15 @@
 import type { AgentActivity } from "@shared/contracts";
+import { commandDisplayText } from "@shared/activity-display";
 
 import { activityAttentionSeverity } from "./activity-attention";
+
+export { commandDisplayText, hostToolActivityTitle } from "@shared/activity-display";
 
 export type ActivityWorkKind = "command" | "read" | "search" | "edit" | "tool" | "event";
 
 export const ACTIVITY_GROUP_LIVE_WINDOW = 4;
 export const ACTIVITY_GROUP_ACTIVE_WINDOW = 4;
 
-const SHELL_WRAPPER_PATTERN =
-  /^(?:(?:\/usr)?\/bin\/)?(?:ba|z|da)?sh\s+-l?c\s+([\s\S]+)$/u;
-const LEADING_CD_PATTERN = /^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*/u;
-const SETUP_LINE_PATTERN =
-  /^(?:#|export\s+[A-Za-z_][A-Za-z0-9_]*=|set\s+[-+][a-zA-Z]+|cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*$|source\s+\S+\s*$|\.\s+\S+\s*$)/u;
 const ENV_ASSIGNMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 const GENERIC_COMMAND_TITLE_PATTERN =
   /^(?:agent command|bash|command|execute command|run command|shell|terminal)$/iu;
@@ -61,33 +59,6 @@ export function activityCommandText(
     .exec(detail);
   const command = match?.[1]?.trim();
   return command ? command : null;
-}
-
-export function unwrapShellCommand(command: string): string {
-  const trimmed = command.trim();
-  const match = SHELL_WRAPPER_PATTERN.exec(trimmed);
-  if (!match) return trimmed;
-  let body = match[1]!.trim();
-  const quote = body[0];
-  if (
-    (quote === "'" || quote === "\"")
-    && body.length >= 2
-    && body.endsWith(quote)
-  ) {
-    body = body.slice(1, -1);
-  }
-  return body.replace(/'"'"'/gu, "'").trim();
-}
-
-export function commandDisplayText(command: string): string {
-  const lines = unwrapShellCommand(command)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const meaningful = lines.find((line) => !SETUP_LINE_PATTERN.test(line))
-    ?? lines[0]
-    ?? "";
-  return meaningful.replace(LEADING_CD_PATTERN, "");
 }
 
 function commandWorkKind(command: string): ActivityWorkKind {
@@ -247,27 +218,6 @@ export function activitySummaryParts(
     label: summary.events === 1 ? "update" : "updates",
     tone: "neutral",
   }];
-}
-
-// Providers report an Inertia host tool by its wire name, bare, qualified by
-// the MCP server name (`mcp__inertia-chat-manager__` for Claude,
-// `inertia-chat-manager_` for OpenCode), or followed by an argument summary.
-// The few tools a reader sees in the work log get plain words.
-const HOST_TOOL_TITLE =
-  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
-const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
-  inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
-};
-
-/** A readable title for a known Inertia host tool call, or null to keep the provider's title. */
-export function hostToolActivityTitle(
-  activity: Pick<AgentActivity, "kind" | "title" | "status">,
-): string | null {
-  if (activity.kind !== "tool") return null;
-  const name = HOST_TOOL_TITLE.exec(activity.title.trim())?.[1];
-  const labels = name === undefined ? undefined : HOST_TOOL_LABELS[name];
-  if (!labels) return null;
-  return activity.status === "running" ? labels[0] : activity.status === "failed" ? labels[2] : labels[1];
 }
 
 export function activitySummaryLabel(parts: readonly ActivitySummaryPart[]): string {

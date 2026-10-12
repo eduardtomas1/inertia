@@ -1,6 +1,6 @@
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { GitStatusSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
+import type { GitStatusSnapshot, Project, ServerEvent, WorkspaceRun } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
 import { Composer } from "../../src/renderer/src/components/Composer";
@@ -101,6 +101,31 @@ it.each(["primary", "secondary"] as const)("reports the open launcher for the %s
 
   expect(pane().toolsOpen).toBe(false);
   expect(other().toolsOpen).toBe(false);
+});
+
+it("marks a split chat's finished run seen only while its window is focused and its latest reply is in view", () => {
+  const request = vi.fn<(command: { type: string }) => Promise<ServerEvent>>(pendingCommand);
+  const run: WorkspaceRun = {
+    id: "71717171-7171-4171-8171-717171717171", kind: "agent", projectId: project.id, conversationId: secondary.id, actionId: null,
+    label: "Codex", detail: null, status: "succeeded", attentionState: "unseen", canStop: false, port: null, startedAt: now, finishedAt: now,
+  };
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  const hook = renderHook(({ version }: { version: number }) => {
+    const primaryLayout = useConversationPaneLayout(primary.id);
+    return useSplitPaneScenes({
+      split, visible: true, conversation: primary, project, primaryLayout,
+      shared: { ...shared, request, connection: { ...connection, snapshot: { runs: [run], conversations: [], projects: [project], providers: [] } as never }, attentionObstructed: false, attentionVisibilityVersion: version },
+      openConversationInWindow: vi.fn(), openPrimaryWorkspaceRunPreview: vi.fn(),
+    });
+  }, { initialProps: { version: 0 } });
+  const pane = () => hook.result.current.splitScene!.panes.find((entry) => entry.owner === "secondary")!;
+  const marked = () => request.mock.calls.filter(([command]) => command.type === "activity.mark-seen");
+  act(() => pane().scene!.chat.onLatestContentVisibilityChange?.(true));
+  expect(marked()).toEqual([]);
+  focused.mockReturnValue(true);
+  hook.rerender({ version: 1 });
+  expect(marked()).toEqual([[{ type: "activity.mark-seen", payload: { runId: run.id } }]]);
+  focused.mockRestore();
 });
 
 it("hands the secondary pane its own checkout so a detached HEAD shows in its composer", async () => {

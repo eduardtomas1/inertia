@@ -14,6 +14,7 @@ Project paths under `/var/folders/.../T/ie-*/` are the fixture's temporary repos
 Pairs added afterwards: the Fix round group compares commit af84b28ad (the branch before the final fix round) with the final head. The terminal dock, branch menu, narrow commit dialog, Settings Codex models and welcome guide pairs compare the campaign start, 1a192a1e2, with the final head; they replace batch captures that showed a private shell prompt, had no before, did not open, were still loading or had no seeded models.
 In those added pairs the terminal runs zsh with a fixture home folder whose prompt is `$ `, the usage error is produced by answering the usage request with an error at the test transport, the loading page is a fixture route that answers after 45 seconds, and the sidebar row actions show through keyboard focus because a hovered row could not be captured reliably.
 The restart confirmation and composer More tools after captures come from the final branch head f8afff5b3, after the fix that stopped a tooltip opening with them.
+The Last round pairs compare 48ede229b with the final head c06de2fa3: the model chooser before is the gallery's earlier capture, and the checkout strip pair was captured on both builds with a chat whose saved branch, release/1.2, differs from the project's main.
 The accent outline on the theme library's selected Mode and colour theme cards is intended: it keeps main's presentation of that picker.
 
 ## Batch A: Workspace shell
@@ -167,6 +168,12 @@ The accent outline on the theme library's selected Mode and colour theme cards i
 - Turn footer on hover, light, 1440×920 (`fix-footer-hover-light-1440x920-before.png`, `fix-footer-hover-light-1440x920-after.png`): A separator dot is back between the time and Worked 1m 36s.
 - Usage limit banner, light, 1440×920 (`fix-limit-banner-light-1440x920-before.png`, `fix-limit-banner-light-1440x920-after.png`): The banner keeps its text; Continue with another model is drawn slightly larger, at the composer's control size.
 - Browser panel while a page loads, light, 1440×920 (`fix-browser-loading-light-1440x920-before.png`, `fix-browser-loading-light-1440x920-after.png`): The address row shows the loading mark at the start of the field while the page loads.
+
+## Last round
+
+- Model chooser, saved combinations, light, 1440×920 (`model-chooser-favorites-light-1440x920-before.png`, `model-chooser-favorites-light-1440x920-after.png`): Each model row ends in a star for saving the combination instead of a pin; the before is the gallery's model chooser from 48ede229b.
+- Composer checkout strip, differing branch, light, 1440×920 (`composer-checkout-strip-light-1440x920-before.png`, `composer-checkout-strip-light-1440x920-after.png`): A chat saved on release/1.2 while the project is on main: the before says Current checkout twice, as a label on the left and in the branch control; the after says it once, in the branch control.
+
 
 ## Sidebar (owner correction, 2026-10-12)
 

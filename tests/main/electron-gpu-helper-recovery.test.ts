@@ -405,6 +405,40 @@ describe("prepared close with a stalled window destroy", () => {
       "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete).");
   });
 
+  it("names the helpers and exit inventory still alive when a prepared quit is force-terminated", async () => {
+    vi.useFakeTimers();
+    const main = child(MAIN_PID);
+    const diagnostic = stubDiagnostic(async () => true);
+    diagnostic.samples.push({ pid: MAIN_PID, reason: "electron-helper-processes-before-force-stop",
+      status: "completed", output: `777 ${MAIN_PID} R< gpu-process\n778 ${MAIN_PID} R< utility/network.mojom.NetworkService`,
+      truncated: false });
+    const inventory = "windows=0 webContents=1 resources=FSReqCallback:1,Timeout:2";
+    const closing = closeWith({ main, diagnostic,
+      stderr: ["window-destroy-entered", "window-destroy-returned", `exit-inventory ${inventory}`] })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(12_000);
+    const error = await closing as ElectronFixtureCloseError;
+    expect(main.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
+    expect(error.errors.map((entry) => (entry as Error).message)).toContain(
+      "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete; "
+      + `still-running=gpu-process,utility/network.mojom.NetworkService; exit-inventory=${inventory}).`);
+    expect(error.processEvidence!.exitInventory).toBe(inventory);
+  });
+
+  it("ignores an exit inventory line that does not match the bounded format", async () => {
+    vi.useFakeTimers();
+    const main = child(MAIN_PID);
+    const diagnostic = stubDiagnostic(async () => true);
+    const closing = closeWith({ main, diagnostic,
+      stderr: ["window-destroy-entered", "window-destroy-returned", "exit-inventory windows=0 path=/Users/secret"] })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(12_000);
+    const error = await closing as ElectronFixtureCloseError;
+    expect(error.processEvidence!.exitInventory).toBeNull();
+    expect(error.errors.map((entry) => (entry as Error).message)).toContain(
+      "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete).");
+  });
+
   it("never attempts recovery when privileged cleanup was not confirmed", async () => {
     vi.useFakeTimers();
     const main = child(MAIN_PID);
@@ -452,7 +486,7 @@ describe("prepared close with a stalled window destroy", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const recovery = {
       processEvidence: { launcherPid: MAIN_PID, mainPid: MAIN_PID, mainIdentity: "captured" as const,
-        launcherExitObserved: true, launcherCloseObserved: true, launcherExitCode: 0,
+        launcherExitObserved: true, launcherCloseObserved: true, launcherExitCode: 0, exitInventory: null,
         stages: [{ stage: "gpu-helper-terminated" as const, elapsedMs: 3_000 }] },
       mainProcessSamples: stubDiagnostic(async () => true).samples,
     };

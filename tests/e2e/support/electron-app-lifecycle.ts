@@ -6,7 +6,7 @@ import type { Server } from "node:http";
 import { privilegedShutdownEnvelopeMs } from
   "../../../src/main/privileged-shutdown-deadline";
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-shutdown-deadline";
-import { createElectronMainProcessDiagnostic,
+import { createElectronMainProcessDiagnostic, survivingHelperRoles,
   type ElectronMainProcessDiagnostic, type ElectronMainProcessSample } from
   "./electron-main-process-diagnostic";
 import { electronProcessEvidence, observeElectronIdentity,
@@ -643,11 +643,16 @@ export async function closeElectronFixtureBounded(options: {
               `The Electron fixture process exited abnormally during close (exitCode=${String(childProcess.exitCode)}, signal=${String(childProcess.signalCode)}).`,
             ));
           } else if (appQuit.outcome === "forced") {
-            cleanupErrors.push(new Error(
-              options.prepareRuntimeQuit
-                ? `The Electron fixture process required forced termination during close (phase=${cleanupPhase}).`
-                : "The Electron fixture process required forced termination during close.",
-            ));
+            const survivors = survivingHelperRoles(diagnostic?.samples ?? []);
+            const exitInventory = evidence?.snapshot().exitInventory ?? null;
+            const details = [
+              ...(options.prepareRuntimeQuit ? [`phase=${cleanupPhase}`] : []),
+              ...(survivors ? [`still-running=${survivors.join(",") || "none"}`] : []),
+              ...(exitInventory ? [`exit-inventory=${exitInventory}`] : []),
+            ];
+            cleanupErrors.push(new Error(details.length > 0
+              ? `The Electron fixture process required forced termination during close (${details.join("; ")}).`
+              : "The Electron fixture process required forced termination during close."));
           }
         } catch (error) {
           cleanupErrors.push(error);

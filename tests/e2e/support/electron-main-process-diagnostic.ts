@@ -4,6 +4,9 @@ const SAMPLE_TIMEOUT_MS = 6_000;
 const MIN_SAMPLE_TIMEOUT_MS = 2_000;
 const SAMPLE_HEADROOM_MS = 250;
 const QUIT_WATCHDOG_MS = 1_000;
+const LATE_MAIN_SAMPLE_LEAD_MS = 4_500;
+const NETWORK_SERVICE_ROLE = "utility/network.mojom.NetworkService";
+const HELPER_TABLE_REASONS = ["electron-helper-processes-before-force-stop", "electron-helper-processes"];
 const MAX_SAMPLE_BYTES = 128 * 1024;
 const PROCESS_TABLE_TIMEOUT_MS = 1_000;
 const MAX_PROCESS_TABLE_BYTES = 4 * 1024 * 1024;
@@ -70,6 +73,17 @@ export function electronHelperProcesses(
   return helpers;
 }
 
+export function survivingHelperRoles(samples: readonly ElectronMainProcessSample[]): string[] | null {
+  for (const reason of HELPER_TABLE_REASONS) {
+    const table = samples.findLast((sample) => sample.reason === reason && sample.status === "completed");
+    if (!table) continue;
+    return table.output === "no-helper-processes"
+      ? []
+      : table.output.split("\n").map((row) => row.split(" ").at(-1)!).filter(Boolean);
+  }
+  return null;
+}
+
 export function mainThreadNanosleepShare(sample: string): number | null {
   const lines = sample.split(/\r?\n/u);
   const start = lines.findIndex((line) =>
@@ -127,13 +141,21 @@ export function createElectronMainProcessDiagnostic(
   const helperEvidenceWaiters = new Set<() => void>();
   const validatedHelperSamples = new Map<ElectronMainProcessSample, string>();
   let stopped = false;
-  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const watchdogs = new Set<ReturnType<typeof setTimeout>>();
   const ownsLiveMain = (): boolean => !stopped
     && Number.isSafeInteger(pid) && pid! > 0 && pid !== process.pid
     && main.pid === pid && main.exitCode === null && main.signalCode === null;
   const clearWatchdog = (): void => {
-    if (watchdog) clearTimeout(watchdog);
-    watchdog = null;
+    for (const timer of watchdogs) clearTimeout(timer);
+    watchdogs.clear();
+  };
+  const scheduleWatchdog = (delayMs: number, run: () => void): void => {
+    const timer = setTimeout(() => {
+      watchdogs.delete(timer);
+      run();
+    }, delayMs);
+    timer.unref();
+    watchdogs.add(timer);
   };
   const stop = (): void => {
     stopped = true;
@@ -256,11 +278,16 @@ export function createElectronMainProcessDiagnostic(
           : null);
       });
   };
-  const sampleHelper = (helperPid: number, deadlineAt: number, done: () => void): void => {
+  const sampleHelper = (
+    helperPid: number,
+    reason: string,
+    deadlineAt: number,
+    done: () => void,
+  ): void => {
     readHelperIdentity(helperPid, deadlineAt, (before) => {
       if (before === null || !ownsLiveMain()) return done();
       const record: ElectronMainProcessSample = {
-        pid: helperPid, reason: "gpu-helper-still-pending", status: "starting",
+        pid: helperPid, reason, status: "starting",
         output: "", truncated: false,
       };
       samples.push(record);
@@ -404,6 +431,10 @@ export function createElectronMainProcessDiagnostic(
     mainSampling = true;
     sampleProcess(pid!, reason, deadlineAt, () => { mainSampling = false; });
   };
+  const describeHelpers = (helpers: ElectronHelperProcess[]): string => helpers.length === 0
+    ? "no-helper-processes"
+    : helpers.map((helper) =>
+      `${helper.pid} ${helper.ppid} ${helper.stat} ${helper.role}`).join("\n");
   const captureHelpers = (deadlineAt: number): void => {
     if (helpersCaptured || !ownsLiveMain()) return;
     helpersCaptured = true;
@@ -415,13 +446,29 @@ export function createElectronMainProcessDiagnostic(
     samples.push(record);
     readHelperTable(record, deadlineAt, (helpers) => {
       if (!helpers) return settleHelperEvidence();
-      record.output = helpers.length === 0
-        ? "no-helper-processes"
-        : helpers.map((helper) =>
-          `${helper.pid} ${helper.ppid} ${helper.stat} ${helper.role}`).join("\n");
+      record.output = describeHelpers(helpers);
+      const network = helpers.find((helper) =>
+        helper.role === NETWORK_SERVICE_ROLE && helper.ppid === pid);
+      const sampleNetwork = (): void => {
+        settleHelperEvidence();
+        if (network && ownsLiveMain()) {
+          sampleHelper(network.pid, "network-helper-still-pending", deadlineAt, () => undefined);
+        }
+      };
       const gpu = directGpuHelpers(helpers)[0];
-      if (gpu && ownsLiveMain()) sampleHelper(gpu.pid, deadlineAt, settleHelperEvidence);
-      else settleHelperEvidence();
+      if (gpu && ownsLiveMain()) sampleHelper(gpu.pid, "gpu-helper-still-pending", deadlineAt, sampleNetwork);
+      else sampleNetwork();
+    });
+  };
+  const captureSurvivingHelpers = (deadlineAt: number): void => {
+    if (!ownsLiveMain()) return;
+    const record: ElectronMainProcessSample = {
+      pid: pid!, reason: "electron-helper-processes-before-force-stop", status: "starting",
+      output: "", truncated: false,
+    };
+    samples.push(record);
+    readHelperTable(record, deadlineAt, (helpers) => {
+      if (helpers) record.output = describeHelpers(helpers);
     });
   };
   if (platform === "darwin") main.once("exit", stop);
@@ -432,12 +479,18 @@ export function createElectronMainProcessDiagnostic(
       if (platform === "darwin" && ownsLiveMain()
         && deadlineAt - Date.now()
           >= QUIT_WATCHDOG_MS + MIN_SAMPLE_TIMEOUT_MS + SAMPLE_HEADROOM_MS) {
-        watchdog = setTimeout(() => {
-          watchdog = null;
+        scheduleWatchdog(QUIT_WATCHDOG_MS, () => {
           capture("prepared-quit-still-pending", deadlineAt);
           captureHelpers(deadlineAt);
-        }, QUIT_WATCHDOG_MS);
-        watchdog.unref();
+        });
+        const lateSampleMs = deadlineAt - Date.now() - LATE_MAIN_SAMPLE_LEAD_MS;
+        if (lateSampleMs > QUIT_WATCHDOG_MS) {
+          scheduleWatchdog(lateSampleMs, () => capture("prepared-quit-still-pending-late", deadlineAt));
+        }
+        const survivorsMs = deadlineAt - Date.now() - PROCESS_TABLE_TIMEOUT_MS - SAMPLE_HEADROOM_MS;
+        if (survivorsMs > QUIT_WATCHDOG_MS) {
+          scheduleWatchdog(survivorsMs, () => captureSurvivingHelpers(deadlineAt));
+        }
       }
       return clearWatchdog;
     },

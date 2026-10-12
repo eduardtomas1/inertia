@@ -4,7 +4,7 @@ import type { ChildProcess, spawn } from "node:child_process";
 import type { ElectronApplication } from "@playwright/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createElectronMainProcessDiagnostic, electronHelperProcesses } from
+import { createElectronMainProcessDiagnostic, electronHelperProcesses, survivingHelperRoles } from
   "../e2e/support/electron-main-process-diagnostic";
 import { closeElectronFixtureBounded, ElectronFixtureCloseError } from
   "../e2e/support/electron-app-lifecycle";
@@ -233,6 +233,89 @@ describe("bounded macOS Electron main-process evidence", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("samples the network service after the GPU helper evidence when a prepared quit stalls", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 15_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.samplers[1]!.stdout!.emit("data", Buffer.from([
+      "777 123456 S /tmp/Electron Helper (GPU) --type=gpu-process",
+      "778 123456 R /tmp/Electron Helper --type=utility --utility-sub-type=network.mojom.NetworkService",
+    ].join("\n")));
+    f.samplers[1]!.emit("close", 0, null);
+    const gpuIdentity = "123456 Sat Sep 26 20:00:00 2026";
+    const networkIdentity = "123456 Sat Sep 26 20:00:01 2026";
+    const reply = (index: number, output: string): void => {
+      f.samplers[index]!.stdout!.emit("data", Buffer.from(output));
+      f.samplers[index]!.emit("close", 0, null);
+    };
+    reply(2, gpuIdentity);
+    reply(3, "gpu stack");
+    reply(4, gpuIdentity);
+    expect(f.diagnostic.samples[2]).toMatchObject({ reason: "gpu-helper-still-pending", status: "completed" });
+    expect(f.spawnSample.mock.calls[5]!.slice(0, 2)).toEqual([
+      "/bin/ps", ["-o", "ppid=,lstart=", "-p", "778"],
+    ]);
+    reply(5, networkIdentity);
+    expect(f.spawnSample.mock.calls[6]!.slice(0, 2)).toEqual([
+      "/usr/bin/sample", ["778", "1", "10", "-file", "/dev/stdout"],
+    ]);
+    reply(6, "network stack");
+    reply(7, networkIdentity);
+    expect(f.diagnostic.samples[3]).toMatchObject({
+      pid: 778, reason: "network-helper-still-pending", status: "completed", output: "network stack",
+    });
+    f.diagnostic.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("samples the main process again and lists the surviving helpers before the kill deadline", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.diagnostic.watchQuit(Date.now() + 15_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.samplers[0]!.emit("close", 0, null);
+    f.samplers[1]!.stdout!.emit("data", Buffer.from(
+      "778 123456 R /tmp/Electron Helper --type=utility --utility-sub-type=network.mojom.NetworkService"));
+    f.samplers[1]!.emit("close", 0, null);
+    f.samplers[2]!.emit("close", 1, null);
+    expect(survivingHelperRoles(f.diagnostic.samples)).toEqual(["utility/network.mojom.NetworkService"]);
+    await vi.advanceTimersByTimeAsync(9_499);
+    expect(f.spawnSample).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.spawnSample.mock.calls[3]!.slice(0, 2)).toEqual([
+      "/usr/bin/sample", ["123456", "1", "10", "-file", "/dev/stdout"],
+    ]);
+    expect(f.diagnostic.samples.at(-1)).toMatchObject({ reason: "prepared-quit-still-pending-late", status: "sampling" });
+    f.samplers[3]!.emit("close", 0, null);
+    await vi.advanceTimersByTimeAsync(3_249);
+    expect(f.spawnSample).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.spawnSample.mock.calls[4]!.slice(0, 2)).toEqual([
+      "/bin/ps", ["-axww", "-o", "pid=,ppid=,stat=,command="],
+    ]);
+    f.samplers[4]!.stdout!.emit("data", Buffer.from([
+      "777 123456 R /tmp/Electron Helper (GPU) --type=gpu-process --token=secret",
+      "778 123456 R /tmp/Electron Helper --type=utility --utility-sub-type=network.mojom.NetworkService",
+    ].join("\n")));
+    f.samplers[4]!.emit("close", 0, null);
+    expect(f.diagnostic.samples.at(-1)).toMatchObject({
+      pid: 123456, reason: "electron-helper-processes-before-force-stop", status: "completed",
+      output: "777 123456 R gpu-process\n778 123456 R utility/network.mojom.NetworkService",
+    });
+    expect(survivingHelperRoles(f.diagnostic.samples)).toEqual(["gpu-process", "utility/network.mojom.NetworkService"]);
+    f.diagnostic.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reports no surviving helpers without a completed process table", () => {
+    expect(survivingHelperRoles([])).toBeNull();
+    expect(survivingHelperRoles([{ pid: 1, reason: "electron-helper-processes", status: "timed-out",
+      output: "", truncated: false }])).toBeNull();
+    expect(survivingHelperRoles([{ pid: 1, reason: "electron-helper-processes", status: "completed",
+      output: "no-helper-processes", truncated: false }])).toEqual([]);
+  });
+
   it.each([
     ["a reused PID", "123456 Sat Sep 26 20:00:05 2026"],
     ["an exited helper", ""],
@@ -311,7 +394,7 @@ describe("bounded macOS Electron main-process evidence", () => {
     await vi.advanceTimersByTimeAsync(11_999);
     expect(f.main.kill).not.toHaveBeenCalled();
     expect(f.spawnSample.mock.calls.map((call) => (call as unknown[])[0]))
-      .toEqual(["/usr/bin/sample", "/bin/ps"]);
+      .toEqual(["/usr/bin/sample", "/bin/ps", "/usr/bin/sample", "/bin/ps"]);
     await vi.advanceTimersByTimeAsync(1);
     const error = await closing;
     expect(f.main.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
@@ -320,6 +403,10 @@ describe("bounded macOS Electron main-process evidence", () => {
     expect(evidence[0]!.status).toContain(stopError ? "sampler-stop-failed" : "timed-out");
     expect(evidence[1]).toMatchObject({ reason: "electron-helper-processes", output: "" });
     expect(evidence[1]!.status).toContain("timed-out");
+    expect(evidence[2]!.reason).toBe("prepared-quit-still-pending-late");
+    expect(evidence[2]!.status).toContain("timed-out");
+    expect(evidence[3]).toMatchObject({ reason: "electron-helper-processes-before-force-stop", output: "" });
+    expect(evidence[3]!.status).toContain("timed-out");
   });
 
   it("accepts a slow exit after confirmed cleanup within the prepared-exit budget", async () => {

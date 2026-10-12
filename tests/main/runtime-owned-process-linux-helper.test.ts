@@ -1,5 +1,5 @@
 import * as childProcess from "node:child_process";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -147,4 +147,33 @@ linuxIt.each([
 ])("still rejects $label", async ({ source, mode }) => {
   const result = await runTransportHelper(source, undefined, mode);
   expect(result.confirmed).toBe(false);
+});
+
+linuxIt("stops waiting for exec confirmation once the guardian has exited", async () => {
+  const root = mkdtempSync(join(tmpdir(), "inertia-linux-helper-exec-exit-"));
+  const guardian = join(process.cwd(), "resources/generated/runtime-process-guardian/runtime-process-guardian");
+  const claimed = join(root, "inertia-claim");
+  copyFileSync("/bin/sleep", claimed);
+  const { spawn } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  const target = spawn(claimed, ["30"], { stdio: "ignore" });
+  const exited = new Promise<NodeJS.Signals | null>((resolve) => target.once("exit", (_code, signal) => resolve(signal)));
+  try {
+    const pid = target.pid!;
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const executable = statSync(guardian, { bigint: true });
+    const startedAt = Date.now();
+    const confirmed = await signalLinuxGuardianExactAsync({
+      pid, parentPid: process.pid, processGroupId: pid,
+      startTimeTicks: stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/u)[19]!,
+      guardianExecutableDevice: String(executable.dev),
+      guardianExecutableInode: String(executable.ino),
+    }, guardian, "exec");
+    const elapsedMs = Date.now() - startedAt;
+    expect({ confirmed, signal: await exited }).toEqual({ confirmed: false, signal: "SIGUSR2" });
+    expect(elapsedMs).toBeLessThan(1_000);
+  } finally {
+    if (target.exitCode === null && target.signalCode === null) target.kill("SIGKILL");
+    await exited;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

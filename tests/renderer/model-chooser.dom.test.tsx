@@ -269,7 +269,7 @@ describe("model chooser active route", () => {
     const initial = render(<ModelChooser routes={[fastRoute]} selectedRoute={fastRoute}
       configuration={{ accessMode: "full", interactionMode: "plan", fastMode: true }} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /^Pin Team Alpha on .+$/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
     initial.unmount();
 
     const normalRoute: ComposerModelRoute = { ...fastRoute, responseSpeed: "Standard",
@@ -291,12 +291,27 @@ describe("model chooser active route", () => {
     });
   });
 
+  it("saves a model combination with a star that fills once it is a favorite", () => {
+    const route = currentRoute();
+    render(<ModelChooser routes={[route]} selectedRoute={route}
+      configuration={{ accessMode: "supervised", interactionMode: "build" }} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    const add = screen.getByRole("button", { name: /^Add Team Alpha on .+ to favorites$/u });
+    expect(add).toHaveAttribute("aria-pressed", "false");
+    expect(add.querySelector("svg.lucide-star")).toHaveAttribute("fill", "none");
+    fireEvent.click(add);
+    const remove = screen.getByRole("button", { name: /^Remove Team Alpha on .+ from favorites$/u });
+    expect(remove).toHaveAttribute("aria-pressed", "true");
+    expect(remove.querySelector("svg.lucide-star")).toHaveAttribute("fill", "currentColor");
+    expect(screen.getByRole("button", { name: /^Favorites, 1 model/u }).querySelector("svg.lucide-star")).not.toBeNull();
+  });
+
   it("applies a starred profile shortcut from the provider source after the current configuration changes", async () => {
     const route = currentRoute();
     const initial = render(<ModelChooser routes={[route]} selectedRoute={route}
       configuration={{ accessMode: "full", interactionMode: "plan" }} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByRole("button", { name: /^Pin Team Alpha on .+$/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
     initial.unmount();
 
     const onSelect = vi.fn();

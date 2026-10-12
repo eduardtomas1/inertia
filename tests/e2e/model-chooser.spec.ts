@@ -119,7 +119,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const modelResultsAx = await modelResults.ariaSnapshot();
   expect(modelResultsAx).toContain('- grid "Model results"');
   expect(modelResultsAx).toContain('- row "');
-  expect(modelResultsAx).toContain('- button "Pin ');
+  expect(modelResultsAx).toContain('- button "Add ');
   await expect(modelResults.locator(
     ".model-chooser-row.is-active .model-chooser-row-option",
   )).toHaveAttribute("aria-current", "true");
@@ -196,14 +196,14 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await captureChooserScenario("anchored-model-chooser-1440x720");
 
   const firstFavorite = modelResults.getByRole("button", {
-    name: /^Pin .+ on .+$/u,
+    name: /^Add .+ to favorites$/u,
   }).first();
   await firstFavorite.click();
   await expect(modelResults.getByRole("button", {
-    name: /^Unpin .+ on .+$/u,
+    name: /^Remove .+ from favorites$/u,
   }).first()).toHaveAttribute("aria-pressed", "true");
   const favoritesSource = modelChooser.getByRole("button", {
-    name: /^Pinned, 1 model$/u,
+    name: /^Favorites, 1 model$/u,
   });
   await expect(favoritesSource).toBeVisible();
   await favoritesSource.click();
@@ -608,7 +608,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const catalogAx = await modelResults.ariaSnapshot();
   expect(catalogAx).toContain('- grid "Model results"');
   expect(catalogAx).toMatch(/- '?row "/u);
-  expect(catalogAx).toContain('- button "Pin Catalog Model');
+  expect(catalogAx).toContain('- button "Add Catalog Model');
   await searchModels.press("Escape");
   await expect(modelChooser).toBeHidden();
   await resizeWindow(1440, 720);

@@ -381,9 +381,7 @@
 }
 
 .task-chip .task-urgent {
-  width: 14px;
   font-weight: 600;
-  text-align: center;
 }
 
 .task-detail-agent {
@@ -576,13 +574,6 @@
   max-width: calc(100vw - 16px);
   max-height: calc(100vh - 16px);
   overflow-y: auto;
-}
-
-.tasks-menu .task-urgent {
-  width: 14px;
-  margin-left: -2px;
-  font-weight: 600;
-  text-align: center;
 }
 
 .tasks-menu .tasks-menu-check {

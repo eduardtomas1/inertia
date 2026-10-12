@@ -11,7 +11,6 @@ export interface TasksMenuItem {
   id: string;
   label: string;
   icon?: ReactNode;
-  marker?: ReactNode;
   checked?: boolean;
   danger?: boolean;
   restoreFocus?: boolean;
@@ -91,7 +90,6 @@ export function TasksMenu({
           }}
         >
           {item.icon}
-          {item.marker}
           {item.label}
           {radio && item.checked && <Check size={14} className="tasks-menu-check" aria-hidden="true" />}
         </button>

@@ -301,7 +301,6 @@ export function TasksView({
   const priorityItems = (todo: Todo): TasksMenuItem[] => PRIORITY_CHOICES.map((priority) => ({
     id: priority ?? "none",
     label: priority ? TASK_PRIORITY_LABELS[priority] : "No priority",
-    marker: priority === "urgent" ? <span className="task-urgent" aria-hidden="true">!</span> : undefined,
     checked: todo.priority === priority,
     onSelect: () => {
       if (todo.priority !== priority) updateTodo(todo.id, { priority });

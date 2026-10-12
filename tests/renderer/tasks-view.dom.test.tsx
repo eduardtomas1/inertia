@@ -455,9 +455,9 @@ describe("Tasks view", () => {
     await user.click(within(detail).getByRole("button", { name: "Priority" }));
     const priority = screen.getByRole("menu", { name: "Priority" });
     expect(within(priority).getAllByRole("menuitemradio").map((item) => item.textContent))
-      .toEqual(["!Urgent", "High", "Medium", "Low", "No priority"]);
+      .toEqual(["Urgent", "High", "Medium", "Low", "No priority"]);
     expect(within(priority).getByRole("menuitemradio", { name: "No priority" })).toHaveAttribute("aria-checked", "true");
-    await user.click(within(priority).getByRole("menuitemradio", { name: /Urgent/u }));
+    await user.click(within(priority).getByRole("menuitemradio", { name: "Urgent" }));
 
     const note = within(detail).getByRole("textbox", { name: "Note" });
     expect(note).toHaveAttribute("placeholder", "Add a note");

@@ -162,7 +162,7 @@ export function TaskDetail({
         placeholder="Add a note"
         value={note}
         maxLength={MAX_TODO_NOTE_CHARS}
-        rows={2}
+        rows={1}
         onFocus={() => { editing.current = "note"; }}
         onBlur={() => {
           editing.current = null;

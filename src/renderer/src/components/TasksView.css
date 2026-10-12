@@ -283,7 +283,6 @@
 }
 
 .task-detail-note {
-  min-height: 2.8em;
   field-sizing: content;
   resize: none;
   color: var(--text-muted);

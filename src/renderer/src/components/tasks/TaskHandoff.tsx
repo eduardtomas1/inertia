@@ -123,7 +123,7 @@ export function TaskHandoff({
             reasoningEffort: event.currentTarget.value || null,
           })}
         >
-          <option value="">Provider default</option>
+          <option value="">Default</option>
           {reasoningOptions.map((effort) => (
             <option value={effort} key={effort}>
               {reasoningOptionLabels.get(effort) ?? capitalized(effort)}

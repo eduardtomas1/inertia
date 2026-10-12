@@ -311,11 +311,22 @@ test("keeps a hostile page inside its frame", async ({ browserName: _browserName
     await expect(content.getByRole("heading", { name: HOSTILE_PAGE_TITLE })).toBeVisible();
     const frame = await inlineFrame(page, selector);
     const frameUrl = frame.url();
+    await page.evaluate(() => {
+      const links: { url: unknown; focused: boolean; activated: boolean }[] = [];
+      Reflect.set(window, "__inertiaE2eFrameLinks", links);
+      window.addEventListener("message", (event) => {
+        const data = event.data as { type?: unknown; url?: unknown } | null;
+        if (data?.type !== "inertia-html-render:open-link") return;
+        links.push({ url: data.url, focused: document.activeElement?.tagName === "IFRAME", activated: navigator.userActivation.isActive });
+      });
+    });
 
     await content.getByRole("button", { name: "Not a link" }).click();
     await content.getByRole("textbox", { name: "Access token" }).fill("secret-token");
     await content.getByRole("textbox", { name: "Access token" }).press("Enter");
     await content.getByRole("link", { name: "Real link" }).click();
+    await expect.poll(() => page.evaluate(() => Reflect.get(window, "__inertiaE2eFrameLinks")))
+      .toContainEqual({ url: HOSTILE_PAGE_LINK, focused: true, activated: true });
     await expect.poll(opened).toContain(HOSTILE_PAGE_LINK);
     expect(await opened()).toEqual([HOSTILE_PAGE_LINK]);
     expect(await frame.evaluate(() => Reflect.get(window, "parent") === window.top)).toBe(false);

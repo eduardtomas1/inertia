@@ -66,7 +66,13 @@ export class TodoRepository {
   }
 
   get(todoId: string): Todo | null {
-    return this.list().find(({ id }) => id === todoId) ?? null;
+    const row = this.database.prepare(`
+      SELECT id, title, note, priority, due_date, completed_at,
+        conversation_id, created_at, updated_at
+      FROM todos
+      WHERE id = ?
+    `).get(todoId) as TodoRow | undefined;
+    return row ? todoFromRow(row) : null;
   }
 
   create(input: TodoCreateInput): Todo {

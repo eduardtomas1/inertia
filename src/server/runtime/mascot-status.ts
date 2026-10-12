@@ -369,3 +369,20 @@ export class MascotStatusPublisher {
     });
   }
 }
+
+export function storeMascotStatus(
+  publish: ((feed: MascotFeed) => void) | undefined,
+  store: () => { conversationShell(id: string): ConversationShell | null; project(id: string): Pick<Project, "name"> },
+): MascotStatusPublisher {
+  return new MascotStatusPublisher(
+    publish,
+    (id) => store().conversationShell(id),
+    (id) => {
+      try {
+        return store().project(id).name;
+      } catch {
+        return null;
+      }
+    },
+  );
+}

@@ -4,7 +4,6 @@ import {
   ChevronRight,
   Hammer,
   ListChecks,
-  ShieldCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import type {
@@ -226,11 +225,6 @@ export function ComposerSettings({
           onKeyDown={(event) =>
             handleComposerMenuTriggerKeyDown("access", event)}
         >
-          <ShieldCheck
-            className="composer-setting-icon"
-            size={14}
-            aria-hidden="true"
-          />
           <span className="composer-setting-value">{access.label}</span>
           <ChevronDown
             className="composer-setting-chevron"

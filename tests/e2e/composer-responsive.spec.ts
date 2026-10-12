@@ -338,18 +338,14 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           getComputedStyle(control).borderTopWidth),
         fontSizes: controls.map((control) =>
           getComputedStyle(control).fontSize),
-        iconSizes: controls.map((control) => {
-          const icon = control.querySelector<SVGElement>(
-            ".composer-setting-icon",
-          );
-          const bounds = icon?.getBoundingClientRect();
-          return bounds
-            ? { width: bounds.width, height: bounds.height }
-            : null;
-        }),
-        iconDisplays: controls.map((control) => {
+        accessSvgs: element.querySelectorAll(
+          '[data-composer-setting="access"] svg:not(.composer-setting-chevron)',
+        ).length,
+        shownIcons: controls.flatMap((control) => {
           const icon = control.querySelector<SVGElement>(".composer-setting-icon");
-          return icon ? getComputedStyle(icon).display : null;
+          return icon && getComputedStyle(icon).display !== "none"
+            ? [control.dataset.composerSetting]
+            : [];
         }),
       };
     });
@@ -359,11 +355,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));
     expect(new Set(settingGeometry.fontSizes).size).toBe(1);
-    expect(settingGeometry.iconSizes[0]).toEqual({ width: 14, height: 14 });
-    // Only the family's first icon is shown; the rest are hidden by rule, not
-    // merely collapsed to an empty box.
-    expect(settingGeometry.iconDisplays[0]).not.toBe("none");
-    expect(settingGeometry.iconDisplays.slice(1)).toEqual(settingGeometry.iconDisplays.slice(1).map(() => "none"));
+    expect(settingGeometry.accessSvgs).toBe(0);
+    expect(settingGeometry.shownIcons.filter((setting) => setting !== "speed")).toEqual([]);
     const accessIdleBackground = await expectHoverBackground(page, accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(

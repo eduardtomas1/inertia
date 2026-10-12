@@ -73,6 +73,24 @@ describe("composer setting menus", () => {
     expectCheckOnChosenRowOnly(workMode);
   });
 
+  it("shows the access control as its label and chevron only, in every access mode", () => {
+    for (const accessMode of ["supervised", "auto-edit", "full"] as const) {
+      const current = conversation(`access-${accessMode}`);
+      const { unmount } = render(<Composer {...composerProps({ ...current, accessMode })} />);
+      const label = { supervised: "Supervised", "auto-edit": "Auto-accept edits", full: "Full access" }[accessMode];
+      const trigger = screen.getByRole("button", { name: `Choose project access. Current access: ${label}.` });
+      expect(trigger).toHaveTextContent(label);
+      expect(trigger.querySelector(".composer-setting-icon")).toBeNull();
+      expect([...trigger.querySelectorAll("svg")].map((icon) => icon.getAttribute("class"))).toEqual([
+        expect.stringContaining("composer-setting-chevron"),
+      ]);
+      fireEvent.click(trigger);
+      expect(within(screen.getByRole("menu", { name: "Project access" })).getByRole("menuitemradio", { name: new RegExp(label, "u") }))
+        .toHaveAttribute("aria-checked", "true");
+      unmount();
+    }
+  });
+
   it("leaves Standard speed without a description that repeats its label and without a dot", () => {
     const { container } = render(
       <div role="menu" aria-label="Response speed">

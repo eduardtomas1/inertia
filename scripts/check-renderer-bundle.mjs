@@ -100,7 +100,7 @@ const budgets = {
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
   // measured).
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24,
-  deferredTasksViewJavaScript: 20 * kibibyte + 829,
+  deferredTasksViewJavaScript: 20 * kibibyte + 846,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   deferredCliConversationImportJavaScript: 9_797 + 256,

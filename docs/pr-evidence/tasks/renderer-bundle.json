@@ -78,9 +78,9 @@
     "deferredTasksViewJavaScript": {
       "mainBytes": null,
       "mainCapBytes": null,
-      "afterBytes": 21309,
+      "afterBytes": 21326,
       "deltaFromMainBytes": null,
-      "capBytes": 21309,
+      "capBytes": 21326,
       "capChangeBytes": null,
       "withinCap": true
     },

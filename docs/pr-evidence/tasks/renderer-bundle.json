@@ -456,10 +456,10 @@
     "coreJavaScript": {
       "mainBytes": 2283172,
       "mainCapBytes": 2295798,
-      "afterBytes": 2286658,
-      "deltaFromMainBytes": 3486,
-      "capBytes": 2299284,
-      "capChangeBytes": 3486,
+      "afterBytes": 2286745,
+      "deltaFromMainBytes": 3573,
+      "capBytes": 2299371,
+      "capChangeBytes": 3573,
       "withinCap": true
     },
     "deferredPdfJavaScript": {

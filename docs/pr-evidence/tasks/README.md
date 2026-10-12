@@ -133,6 +133,6 @@ hand-off.
 See [renderer-bundle.json](renderer-bundle.json) for every closure measured on
 this machine against a build of `origin/main`. The Tasks view is its own lazy
 chunk (20,949 bytes, capped at exactly that). The workbench first load (+860),
-detached chat first load (+104), shared core (+3,486) and entry stylesheet
+detached chat first load (+104), shared core (+3,573) and entry stylesheet
 (+182) caps are main's caps plus exactly the measured growth. Every other
 closure keeps main's cap.

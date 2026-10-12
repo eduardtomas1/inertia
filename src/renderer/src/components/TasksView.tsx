@@ -84,6 +84,9 @@ export function TasksView({
     };
   }, [todos]);
   const todoById = useMemo(() => new Map((todos ?? []).map((todo) => [todo.id, todo])), [todos]);
+  const liveTodos = useRef(todoById);
+  liveTodos.current = todoById;
+  const deletedIds = useRef(new Set<string>());
   const linkedConversations = useMemo(() => {
     const linkedIds = new Set((todos ?? []).flatMap(({ conversationId }) => conversationId ? [conversationId] : []));
     return (snapshot?.conversations ?? []).filter(({ id }) => linkedIds.has(id));
@@ -123,6 +126,7 @@ export function TasksView({
     void request(command, { passive: true }).catch(() => undefined);
   }, [request]);
   const updateTodo = useCallback((id: string, patch: TodoPatch): void => {
+    if (!liveTodos.current.has(id) || deletedIds.current.has(id)) return;
     send({ type: "todo.update", payload: { id, patch } });
   }, [send]);
 
@@ -171,6 +175,7 @@ export function TasksView({
   const deleteTodo = useCallback((todo: Todo): void => {
     if (settings.confirmDestructiveActions && !window.confirm(`Delete “${todo.title}”?`)) return;
     focusTaskNeighbour(todo.id);
+    deletedIds.current.add(todo.id);
     if (selectedId === todo.id) setSelectedId(null);
     send({ type: "todo.delete", payload: { id: todo.id } });
   }, [selectedId, send, settings.confirmDestructiveActions]);

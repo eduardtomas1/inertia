@@ -446,6 +446,31 @@ describe("Tasks view", () => {
     ]);
   });
 
+  it("drops a pending note save for a task that disappeared or was deleted", async () => {
+    const user = userEvent.setup();
+    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const view = harness(snapshot([todo(first, "Write release notes"), todo(second, "Clean the downloads folder")]));
+    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    await user.type(screen.getByRole("textbox", { name: "Note" }), "Draft");
+    view.update(snapshot([todo(second, "Clean the downloads folder")]));
+    await waitFor(() => expect(document.querySelector(".task-detail")).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    const note = screen.getByRole("textbox", { name: "Note" });
+    await user.type(note, "Gone");
+    fireEvent.contextMenu(row("Clean the downloads folder"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.blur(note);
+    view.update(snapshot([]));
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const commands = view.request.mock.calls.map(([command]) => command);
+    expect(commands.map(({ type }) => type)).toEqual(["todo.update", "todo.delete"]);
+    expect(commands[0]).toEqual({ type: "todo.update", payload: { id: second, patch: { note: "Gone" } } });
+  });
+
   it("starts a task in the chosen project and opens its chat", async () => {
     const user = userEvent.setup();
     const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

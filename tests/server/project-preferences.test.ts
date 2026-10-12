@@ -111,6 +111,9 @@ describe("durable project and thread organization", () => {
     store.regenerateConversationTitle(conversation.id);
     expect(store.conversation(conversation.id).title).toBe(`Latest request ${"x".repeat(200)}`.slice(0, 64));
     expect(store.conversation(conversation.id).status).toBe("idle");
+    store.createMessage(conversation.id, `${"x".repeat(63)}😀 thanks`, "user", [], null, "2026-09-09T09:03:00.000Z");
+    store.regenerateConversationTitle(conversation.id);
+    expect(store.conversation(conversation.id).title).toBe(`${"x".repeat(63)}😀`);
     store.updateConversation(conversation.id, { status: "running" });
     expect(() => store.regenerateConversationTitle(conversation.id)).toThrow(/active work/u);
   });

@@ -1017,7 +1017,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       status: "failed",
       failure: {
         reason: "codex-error",
-        message: "Codex reported an error.",
+        message: "parent turn failed after goal mutation",
         technicalDetail: expect.stringContaining(
           "parent turn failed after goal mutation",
         ),

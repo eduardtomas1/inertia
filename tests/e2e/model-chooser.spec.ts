@@ -576,10 +576,22 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await resizeWindow(720, 640);
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
-  const catalogStartedAt = Date.now();
+  await searchModels.evaluate((input) => {
+    Reflect.set(window, "__catalogMounted", new Promise<number>((resolve) => {
+      input.addEventListener("input", () => {
+        const startedAt = performance.now();
+        const mounted = (): void => {
+          const rows = document.querySelectorAll(".model-chooser-row-option");
+          if ([...rows].some((row) => row.textContent?.includes("Catalog Model"))) resolve(performance.now() - startedAt);
+          else requestAnimationFrame(mounted);
+        };
+        mounted();
+      }, { once: true });
+    }));
+  });
   await searchModels.fill("Catalog Model");
   await expect(modelOptions.first()).toBeVisible();
-  expect(Date.now() - catalogStartedAt).toBeLessThan(1_000);
+  expect(await page.evaluate(() => Reflect.get(window, "__catalogMounted") as Promise<number>)).toBeLessThan(1_000);
   const mountedCatalogRows = await modelResults.locator(":scope > li").count();
   expect(mountedCatalogRows).toBeGreaterThan(0);
   expect(mountedCatalogRows).toBeLessThanOrEqual(40);

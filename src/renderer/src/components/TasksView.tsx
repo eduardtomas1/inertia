@@ -47,7 +47,7 @@ export interface TasksViewProps {
   settings: AppSettings;
   status: ConnectionStatus;
   projectScopeId: string | null;
-  request(command: CommandWithoutId): Promise<ServerEvent>;
+  request(command: CommandWithoutId, options?: { passive?: boolean }): Promise<ServerEvent>;
   onOpenConversation(conversation: Conversation): void;
 }
 
@@ -120,7 +120,7 @@ export function TasksView({
   }, [focusRequest?.id, selectedId, todoById, todos]);
 
   const send = useCallback((command: CommandWithoutId): void => {
-    void request(command).catch(() => undefined);
+    void request(command, { passive: true }).catch(() => undefined);
   }, [request]);
   const updateTodo = useCallback((id: string, patch: TodoPatch): void => {
     send({ type: "todo.update", payload: { id, patch } });
@@ -149,7 +149,10 @@ export function TasksView({
       setFocusRequest({ id, target: "agent" });
     }
     try {
-      await request({ type: "todo.create", payload: { id, title, note: "", priority: null, dueDate: null } });
+      await request(
+        { type: "todo.create", payload: { id, title, note: "", priority: null, dueDate: null } },
+        { passive: true },
+      );
       return true;
     } catch {
       if (handOff) {

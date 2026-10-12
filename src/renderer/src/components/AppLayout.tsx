@@ -477,7 +477,7 @@ export const AppLayout = memo(function AppLayout({
     },
   });
   const tasksActions = useStableActions({
-    request: (command: CommandWithoutId) => actions.run(command.type, command),
+    request: (command: CommandWithoutId, options?: { passive?: boolean }) => actions.run(command.type, command, options),
     openConversation: (thread: Conversation) => {
       actions.selectConversation(thread);
       setView("workspace");

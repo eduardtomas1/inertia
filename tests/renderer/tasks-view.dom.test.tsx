@@ -427,6 +427,25 @@ describe("Tasks view", () => {
     expect(within(detail).getByRole("button", { name: "Priority: Urgent" })).toBeVisible();
   });
 
+  it("saves task edits quietly and starts a task as a normal action", async () => {
+    const user = userEvent.setup();
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const view = harness(snapshot([todo(id, "Write release notes")]));
+    const add = screen.getByRole("textbox", { name: "Add a task" });
+    await user.type(add, "Ship it{Enter}");
+    await user.click(screen.getByRole("checkbox", { name: "Write release notes" }));
+    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(sent(view.request, "todo.start")).toHaveLength(1));
+    const options = (view.request.mock.calls as unknown as [CommandWithoutId, unknown][])
+      .map(([command, option]) => [command.type, option]);
+    expect(options).toEqual([
+      ["todo.create", { passive: true }],
+      ["todo.update", { passive: true }],
+      ["todo.start", undefined],
+    ]);
+  });
+
   it("starts a task in the chosen project and opens its chat", async () => {
     const user = userEvent.setup();
     const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

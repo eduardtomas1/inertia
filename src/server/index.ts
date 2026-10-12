@@ -2,7 +2,7 @@ import { usageLimitsRuntime } from "./usage/runtime";
 import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
 import { createCliConversationCommandHandler } from "./runtime/commands/cli-conversation-commands";
 import { githubIssuePublisher } from "./git/github-issue-report";
-import { MascotStatusPublisher } from "./runtime/mascot-status";
+import { storeMascotStatus } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
@@ -142,17 +142,7 @@ export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
-  const mascotStatus = new MascotStatusPublisher(
-    options.onMascotStatus,
-    (id) => store.conversationShell(id),
-    (id) => {
-      try {
-        return store.project(id).name;
-      } catch {
-        return null;
-      }
-    },
-  );
+  const mascotStatus = storeMascotStatus(options.onMascotStatus, () => store);
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
   const {
@@ -407,7 +397,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
     }));
-    mascotStatus.replace(conversations, snapshot.projects);
+    mascotStatus.replace(conversations, snapshot.projects, snapshot.runs);
     const runs = snapshot.runs.map((run) => ({
       ...run,
       canStop: canStopWorkspaceRun(run),
@@ -1204,6 +1194,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
         projectIdentities.dispose();
         snapshotBroadcasts.close();
+        mascotStatus.close();
         secureFileAuthorities.clear();
         try {
           await runRuntimeShutdownPhases({

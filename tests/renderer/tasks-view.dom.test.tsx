@@ -670,7 +670,7 @@ describe("Tasks view", () => {
 });
 
 describe("Tasks stylesheet", () => {
-  const css = readFileSync("src/renderer/src/components/TasksView.css", "utf8");
+  const css = readFileSync("src/renderer/src/components/TasksView.css", "utf8").replaceAll("\r\n", "\n");
 
   it("uses semantic colour tokens only so preset and custom themes apply", () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/iu);

@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { FolderOpen } from "lucide-react";
+import clsx from "clsx";
 import type { AppSettings, AppSnapshot, ModelSelection } from "@shared/contracts";
 import { effectiveNewChatDefault } from "@shared/new-chat-default";
 import {
@@ -103,7 +104,7 @@ export function TaskHandoff({
   return (
     <div className="task-handoff" role="group" aria-labelledby={labelId}>
       <p className="task-handoff-label" id={labelId}>Hand it to an agent</p>
-      <div className="task-handoff-row">
+      <div className="task-handoff-grid">
         <ModelChooser
           routes={routes}
           selectedRoute={selectedModelSearchRoute(routes, selection)}
@@ -116,6 +117,7 @@ export function TaskHandoff({
         />
         <select
           aria-label="Reasoning"
+          className={clsx("task-handoff-control", !fastAvailable && "is-wide")}
           value={selection.reasoningEffort ?? ""}
           disabled={busy || reasoningOptions.length === 0}
           onChange={(event) => setChosenSelection({
@@ -133,6 +135,7 @@ export function TaskHandoff({
         {fastAvailable && (
           <select
             aria-label="Speed"
+            className="task-handoff-control"
             value={fastModeProviderValue(selection) ? "fast" : "standard"}
             disabled={busy}
             onChange={(event) => setChosenSelection(withModelSelectionFastMode(
@@ -146,11 +149,9 @@ export function TaskHandoff({
             <option value="fast">Fast</option>
           </select>
         )}
-      </div>
-      <div className="task-handoff-row">
         <select
           aria-label="Project"
-          className="task-handoff-project"
+          className="task-handoff-control"
           value={target?.kind === "folder" ? "folder" : projectId ?? ""}
           disabled={busy}
           onChange={(event) => {
@@ -166,7 +167,7 @@ export function TaskHandoff({
             <option value="folder">{projectNameFromPath(target.path)}</option>
           )}
         </select>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => void pickFolder()}>
+        <button type="button" className="task-handoff-control" disabled={busy} onClick={() => void pickFolder()}>
           <FolderOpen size={14} aria-hidden="true" />
           Folder…
         </button>

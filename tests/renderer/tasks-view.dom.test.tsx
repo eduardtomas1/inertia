@@ -530,6 +530,19 @@ describe("Tasks view", () => {
     expect(title).toHaveFocus();
     await act(async () => undefined);
   });
+
+  it("lets the closed detail fade out inert before removing it", async () => {
+    const user = userEvent.setup();
+    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
+    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    await user.click(screen.getByRole("button", { name: "Close task details" }));
+    const leaving = document.querySelector(".task-detail");
+    expect(leaving).toHaveClass("is-leaving");
+    expect(leaving).toHaveAttribute("aria-hidden", "true");
+    expect(leaving).toHaveAttribute("inert");
+    expect(document.querySelector(".tasks-layout")).not.toHaveClass("has-detail");
+    await waitFor(() => expect(document.querySelector(".task-detail")).toBeNull());
+  });
 });
 
 describe("Tasks stylesheet", () => {
@@ -540,8 +553,9 @@ describe("Tasks stylesheet", () => {
     expect(css).not.toMatch(/\b(?:rgb|rgba|hsl|hsla|oklch)\(/u);
   });
 
-  it("stays plain: no shadows, uppercase labels or pill shapes", () => {
-    expect(css).not.toMatch(/box-shadow|text-transform|999px/u);
+  it("stays plain: no shadows beyond the popover token, uppercase labels or pill shapes", () => {
+    expect(css.match(/box-shadow:[^;]*;/gu) ?? []).toEqual(["box-shadow: var(--shadow-float);"]);
+    expect(css).not.toMatch(/text-transform|999px/u);
   });
 
   it("adapts to narrow containers, reduced motion and forced colours", () => {

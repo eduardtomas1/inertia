@@ -260,7 +260,7 @@ describe("ModelChooserRow", () => {
     expect(html).not.toContain('title="Only some settings carry over."');
   });
 
-  it("selects rows with the strong fill, without an inner focus ring, accent marks or badges", () => {
+  it("selects rows with the strong fill, without an inner focus ring, badges or accent marks other than the saved star", () => {
     const rules = parseCssRules(readRendererCss("styles.css"));
     expect(declarationsFor(rules, ".model-chooser-row").get("min-height")).toBe("var(--model-row-height)");
     expect(declarationsFor(rules, ".model-chooser-row.is-active").get("background")).toBe("var(--fill-strong)");
@@ -278,6 +278,10 @@ describe("ModelChooserRow", () => {
     expect(declarationsFor(rules, ".model-chooser-palette").get("bottom")).toBe("calc(100% + var(--popover-offset))");
     const css = readRendererCss("styles.css");
     const chooserCss = css.slice(css.indexOf("/* Reusable model chooser result row."), css.indexOf("@container conversation-workspace (min-height: 0px)"));
-    expect(chooserCss).not.toContain("--accent-strong");
+    const savedStar = '.model-chooser-row-favorite[aria-pressed="true"] {\n  color: var(--accent-strong);\n}';
+    expect(declarationsFor(rules, '.model-chooser-row-favorite[aria-pressed="true"]').get("color")).toBe("var(--accent-strong)");
+    expect(declarationsFor(rules, ".model-chooser-row-favorite").get("color")).toBe("var(--text-muted)");
+    expect(chooserCss).toContain(savedStar);
+    expect(chooserCss.replace(savedStar, "")).not.toContain("--accent");
   });
 });

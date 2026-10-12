@@ -10965,7 +10965,7 @@ button.sent-attachment-open:hover {
 }
 
 .model-chooser-row-favorite[aria-pressed="true"] {
-  color: var(--text);
+  color: var(--accent-strong);
 }
 
 @container (max-width: 420px) {

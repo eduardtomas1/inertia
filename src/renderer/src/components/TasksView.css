@@ -324,8 +324,8 @@
 .task-detail-title:focus-visible,
 .task-detail-note:focus-visible,
 .task-add:has(.task-add-input:focus-visible) {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: -1px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .task-detail-note:focus {

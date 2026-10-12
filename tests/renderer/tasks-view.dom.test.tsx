@@ -688,7 +688,7 @@ describe("Tasks stylesheet", () => {
       return start < 0 ? "" : css.slice(start, css.indexOf("}", start));
     };
     expect(rule(".task-detail-title:focus-visible,\n.task-detail-note:focus-visible,\n.task-add:has(.task-add-input:focus-visible)"))
-      .toContain("outline: 1px solid var(--focus-ring);");
+      .toContain("outline: 2px solid var(--focus-ring);");
     const forced = css.slice(css.indexOf("@media (forced-colors: active)"));
     expect(forced).toMatch(/\.task-add:has\(\.task-add-input:focus-visible\) \{\s*outline: 2px solid Highlight;/u);
   });

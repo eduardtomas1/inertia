@@ -22,6 +22,7 @@ const FOCUSABLE = "button:not(:disabled), select:not(:disabled), input:not(:disa
 export interface TaskDetailProps {
   todo: Todo;
   now: Date;
+  leaving: boolean;
   status: TaskStatusWord | null;
   canOpenChat: boolean;
   focusTarget: TaskFocusTarget | null;
@@ -43,6 +44,7 @@ function anchorBelow(element: HTMLElement): TaskMenuAnchor {
 export function TaskDetail({
   todo,
   now,
+  leaving,
   status,
   canOpenChat,
   focusTarget,
@@ -125,8 +127,10 @@ export function TaskDetail({
 
   return (
     <aside
-      className="task-detail"
+      className={clsx("task-detail", leaving && "is-leaving")}
       aria-label="Task details"
+      aria-hidden={leaving || undefined}
+      inert={leaving || undefined}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
         event.preventDefault();

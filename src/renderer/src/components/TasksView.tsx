@@ -36,6 +36,7 @@ import {
   taskStatusWord,
   type TaskStatusWord,
 } from "./tasks/taskModel";
+import { useDialogPresence } from "./DialogPresence";
 import { LoadingMark } from "./ui";
 import "./TasksView.css";
 
@@ -62,6 +63,7 @@ export function TasksView({
 }: TasksViewProps): React.JSX.Element {
   const addInputRef = useRef<HTMLInputElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ id: string; target: TaskFocusTarget } | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<TaskMenuAnchor>({ x: 8, y: 8 });
   const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
@@ -100,6 +102,8 @@ export function TasksView({
     [snapshot?.projects],
   );
   const selected = selectedId ? todoById.get(selectedId) ?? null : null;
+  const detailPresent = useDialogPresence(selected !== null);
+  const detailTodo = selected ?? (detailPresent && detailId ? todoById.get(detailId) ?? null : null);
 
   useEffect(() => {
     if (!pendingConversationId) return;
@@ -124,6 +128,7 @@ export function TasksView({
 
   const openDetail = useCallback((todo: Todo, target: TaskFocusTarget | null = null): void => {
     setSelectedId(todo.id);
+    setDetailId(todo.id);
     setFocusRequest(target ? { id: todo.id, target } : null);
   }, []);
   const closeDetail = useCallback((): void => {
@@ -140,6 +145,7 @@ export function TasksView({
     const id = crypto.randomUUID();
     if (handOff) {
       setSelectedId(id);
+      setDetailId(id);
       setFocusRequest({ id, target: "agent" });
     }
     try {
@@ -278,8 +284,8 @@ export function TasksView({
     );
   }
 
-  const linkedConversation = selected?.conversationId
-    ? snapshot.conversations.find(({ id }) => id === selected.conversationId) ?? null
+  const linkedConversation = detailTodo?.conversationId
+    ? snapshot.conversations.find(({ id }) => id === detailTodo.conversationId) ?? null
     : null;
 
   return (
@@ -308,17 +314,18 @@ export function TasksView({
             setMenuTrigger={(id, node) => setMenuTrigger(`row:${id}`, node)}
           />
         </section>
-        {selected && (
+        {detailTodo && (
           <TaskDetail
-            key={selected.id}
-            todo={selected}
+            key={detailTodo.id}
+            todo={detailTodo}
             now={now}
-            status={statusFor(selected)}
+            leaving={selected === null}
+            status={statusFor(detailTodo)}
             canOpenChat={linkedConversation !== null}
-            focusTarget={focusRequest?.id === selected.id ? focusRequest.target : null}
+            focusTarget={focusRequest?.id === detailTodo.id ? focusRequest.target : null}
             openMenu={menu === "due" || menu === "priority" ? menu : null}
             onFocusHandled={focusHandled}
-            onUpdate={(patch) => updateTodo(selected.id, patch)}
+            onUpdate={(patch) => updateTodo(detailTodo.id, patch)}
             onClose={closeDetail}
             onOpenChat={() => {
               if (linkedConversation) onOpenConversation(linkedConversation);
@@ -335,7 +342,7 @@ export function TasksView({
                   snapshot.activeProjectId,
                 )}
                 disabled={offline}
-                onStart={(target, selection) => startTodo(selected, target, selection)}
+                onStart={(target, selection) => startTodo(detailTodo, target, selection)}
               />
             )}
           />

@@ -1,7 +1,7 @@
 {
   "baseline": "5d653908c6554d1277b5beda080b8ba3dacfc905",
   "platform": "macOS 27.0.1 arm64, Node 22.23.2, same package-lock.json",
-  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of main at 5d653908 and of the branch (shared task contracts plus the Tasks renderer). Every closure the branch does not grow keeps main's exact cap. mainWorkbenchFirstLoadJavaScript, detachedChatFirstLoadJavaScript, entryCss and coreJavaScript are main's cap plus the measured growth. The Tasks view is its own lazy chunk (todo-*.js) capped at its exact measured size and subtracted from core.",
+  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of main at 5d653908 (re-measured on origin/main ee291ad0, a test-only dependency bump, with identical bytes) and of the final branch. Every closure the branch does not grow keeps main's exact cap. mainWorkbenchFirstLoadJavaScript, detachedChatFirstLoadJavaScript, entryCss and coreJavaScript are main's cap plus the measured growth. The Tasks view is its own lazy chunk (todo-*.js) capped at its exact measured size and subtracted from core.",
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
       "mainBytes": 1141,
@@ -78,9 +78,9 @@
     "deferredTasksViewJavaScript": {
       "mainBytes": null,
       "mainCapBytes": null,
-      "afterBytes": 21326,
+      "afterBytes": 20949,
       "deltaFromMainBytes": null,
-      "capBytes": 21326,
+      "capBytes": 20949,
       "capChangeBytes": null,
       "withinCap": true
     },
@@ -204,19 +204,19 @@
     "mainWorkbenchFirstLoadJavaScript": {
       "mainBytes": 869161,
       "mainCapBytes": 870201,
-      "afterBytes": 869967,
-      "deltaFromMainBytes": 806,
-      "capBytes": 871007,
-      "capChangeBytes": 806,
+      "afterBytes": 870021,
+      "deltaFromMainBytes": 860,
+      "capBytes": 871061,
+      "capChangeBytes": 860,
       "withinCap": true
     },
     "detachedChatFirstLoadJavaScript": {
       "mainBytes": 666025,
       "mainCapBytes": 669074,
-      "afterBytes": 666110,
-      "deltaFromMainBytes": 85,
-      "capBytes": 669159,
-      "capChangeBytes": 85,
+      "afterBytes": 666129,
+      "deltaFromMainBytes": 104,
+      "capBytes": 669178,
+      "capChangeBytes": 104,
       "withinCap": true
     },
     "entryCss": {
@@ -456,10 +456,10 @@
     "coreJavaScript": {
       "mainBytes": 2283172,
       "mainCapBytes": 2295798,
-      "afterBytes": 2284795,
-      "deltaFromMainBytes": 1623,
-      "capBytes": 2297421,
-      "capChangeBytes": 1623,
+      "afterBytes": 2286658,
+      "deltaFromMainBytes": 3486,
+      "capBytes": 2299284,
+      "capChangeBytes": 3486,
       "withinCap": true
     },
     "deferredPdfJavaScript": {

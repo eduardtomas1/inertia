@@ -52,6 +52,10 @@
   color: var(--text);
   background: var(--fill);
 }
+.sidebar-primary-row > .icon-button.is-active {
+  color: var(--text);
+  background: var(--fill-strong);
+}
 .sidebar-search-wrap {
   position: relative;
   display: flex;

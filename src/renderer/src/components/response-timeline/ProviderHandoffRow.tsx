@@ -1,6 +1,7 @@
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { ProviderHandoffItem } from "../../utils/response-timeline/model";
 import { PROVIDER_HANDOFF_TITLE, providerHandoffText } from "../../utils/providerHandoff";
+import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import "./ContextCompactionRow.css";
 import "./ProviderHandoffRow.css";
 
@@ -26,9 +27,15 @@ export function ProviderHandoffRow({
         <small className="context-compaction-marker provider-handoff-marker" aria-hidden="true">
           <span>{PROVIDER_HANDOFF_TITLE}</span>
           <i>·</i>
-          <span className="provider-handoff-route">{text.from}</span>
+          <span className="provider-handoff-route">
+            <ProviderBrandIcon providerId={handoff.from.providerId} decorative size={14} />
+            <span>{text.from}</span>
+          </span>
           <i>→</i>
-          <span className="provider-handoff-route">{text.to}</span>
+          <span className="provider-handoff-route">
+            <ProviderBrandIcon providerId={handoff.to.providerId} decorative size={14} />
+            <span>{text.to}</span>
+          </span>
           {text.detail && <i>·</i>}
           {text.detail && <span>{text.detail}</span>}
         </small>

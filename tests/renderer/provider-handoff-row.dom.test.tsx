@@ -135,6 +135,24 @@ describe("provider handoff divider", () => {
     expect(row.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("shows each provider's mark beside its name without adding to the accessible name", () => {
+    timeline([claude, codex]);
+    const separator = screen.getByRole("separator", {
+      name: "Context handoff: Claude · claude-sonnet-4-6 to Codex · gpt-5.6 · 2 earlier messages carried",
+    });
+    const routes = [...separator.querySelectorAll<HTMLElement>(".provider-handoff-route")];
+    expect(routes.map((route) => route.textContent)).toEqual(["Claude · claude-sonnet-4-6", "Codex · gpt-5.6"]);
+    expect(routes.map((route) => route.querySelector(".provider-brand-icon")?.getAttribute("data-provider-id"))).toEqual(["claude", "codex"]);
+    for (const route of routes) {
+      const mark = route.querySelector<HTMLElement>(".provider-brand-icon")!;
+      expect(route.firstElementChild).toBe(mark);
+      expect(mark).toHaveAttribute("aria-hidden", "true");
+      expect(mark).not.toHaveAttribute("role");
+      expect(mark).not.toHaveAttribute("aria-label");
+      expect(mark.style.getPropertyValue("--provider-icon-size")).toBe("14px");
+    }
+  });
+
   it("leaves the session recovery note off the receiving turn because the divider carries it", () => {
     timeline([claude, codex]);
     const receiving = document.querySelector<HTMLElement>('[data-turn-id="turn-codex"]')!;

@@ -55,7 +55,7 @@ export function TaskDetail({
   onToggleMenu,
   setMenuTrigger,
 }: TaskDetailProps): React.JSX.Element {
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
   const agentRef = useRef<HTMLDivElement>(null);
   const [title, setTitle] = useState(todo.title);
   const [note, setNote] = useState(todo.note);
@@ -134,18 +134,19 @@ export function TaskDetail({
       }}
     >
       <div className="task-detail-heading">
-        <input
+        <textarea
           ref={titleRef}
           className="task-detail-title"
           aria-label="Title"
           value={title}
           maxLength={MAX_TODO_TITLE_CHARS}
+          rows={1}
           onFocus={() => { editing.current = "title"; }}
           onBlur={() => {
             editing.current = null;
             saveTitle();
           }}
-          onChange={(event) => setTitle(event.currentTarget.value)}
+          onChange={(event) => setTitle(event.currentTarget.value.replace(/[\r\n]+/gu, " "))}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
             event.preventDefault();

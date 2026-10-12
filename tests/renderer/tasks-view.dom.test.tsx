@@ -364,13 +364,15 @@ describe("Tasks view", () => {
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const title = within(screen.getByRole("complementary", { name: "Task details" })).getByRole("textbox", { name: "Title" });
     await waitFor(() => expect(title).toHaveFocus());
-    const field = title as HTMLInputElement;
+    const field = title as HTMLTextAreaElement;
     expect([field.selectionStart, field.selectionEnd]).toEqual([0, "Write release notes".length]);
     await user.keyboard("Write the release notes{Enter}");
     expect(sent(view.request, "todo.update")).toEqual([{
       type: "todo.update",
       payload: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", patch: { title: "Write the release notes" } },
     }]);
+    fireEvent.change(title, { target: { value: "Write the notes\nfor 0.0.72" } });
+    expect(title).toHaveValue("Write the notes for 0.0.72");
   });
 
   it("deletes from the menu after the destructive-action confirmation", async () => {

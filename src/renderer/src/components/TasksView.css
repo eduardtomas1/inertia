@@ -277,6 +277,8 @@
 
 .task-detail-title {
   flex: 1;
+  field-sizing: content;
+  resize: none;
   font-size: var(--text-md);
   font-weight: 600;
   line-height: var(--leading-heading);

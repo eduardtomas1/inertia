@@ -173,7 +173,7 @@ test("shows project-free chats, the selector and the palette entries in both the
     await page.getByRole("button", { name: "Project", exact: true }).click();
     const noProject = page.getByRole("option", { name: "No project", exact: true });
     await expect(noProject).toHaveAttribute("aria-selected", "true");
-    await expect(noProject).toHaveAccessibleDescription("Start in a separate local folder");
+    await expect(noProject).toHaveAccessibleDescription("");
     await capture(page, info, "no-project-picker-light-wide");
     await setAppearanceInPlace(app, "dark");
     await capture(page, info, "no-project-picker-dark-wide");

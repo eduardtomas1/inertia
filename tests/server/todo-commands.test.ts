@@ -29,6 +29,10 @@ afterEach(() => {
 });
 
 const socket = {} as WebSocket;
+const providersOn = {
+  enableProviders: true,
+  providers: [{ id: "codex", canRun: true }] satisfies Partial<ProviderInfo>[],
+};
 
 function fixture(options: {
   start?: boolean;
@@ -72,6 +76,7 @@ function fixture(options: {
     turns,
     backendProfileController: { readiness: vi.fn(async () => null) },
     enableProviders: options.enableProviders ?? false,
+    verifyProviderInstallation: vi.fn(async () => { order.push("verify"); }),
     providerInfo: () => (options.providers ?? []) as ProviderInfo[],
     broadcastSnapshot: vi.fn(() => { order.push("snapshot"); }),
     send: vi.fn((_socket: WebSocket, event: ServerEvent) => {
@@ -137,7 +142,7 @@ describe("todo command handler", () => {
   });
 
   it("starts a chat for the task, links it and dispatches the task as the first turn", async () => {
-    const { store, project, creation, turns, run, startPayload } = fixture();
+    const { store, project, creation, turns, dependencies, run, startPayload } = fixture(providersOn);
     const id = randomUUID();
     const title = `${"x".repeat(119)}😀 and more`;
     store.todos.create({ id, title, note: "  Check the Linux lane.  " });
@@ -163,18 +168,48 @@ describe("todo command handler", () => {
     });
     expect(store.shellSnapshot().activeConversationId).toBe(activeBefore);
     expect(store.todos.get(id)).toMatchObject({ conversationId: conversation.id, completedAt: null });
+    expect(dependencies.verifyProviderInstallation).toHaveBeenCalledWith("codex");
     expect(turns.queue).toHaveBeenCalledWith({
       conversationId: conversation.id,
       content: todoPromptContent({ title, note: "  Check the Linux lane.  " }),
       activateConversation: false,
+      contextRequestId: command.requestId,
+      turnCheckpoint: true,
+      skills: [],
     });
     expect(turns.start).toHaveBeenCalledWith("turn-1");
     expect(turns.failBeforeStart).not.toHaveBeenCalled();
-    expect(order).toEqual(["snapshot", "request.result"]);
+    expect(order).toEqual(["verify", "snapshot", "request.result"]);
     expect(events).toEqual([{
       type: "request.result",
       requestId: command.requestId,
       result: { kind: "todo.started", conversationId: conversation.id },
+    }]);
+  });
+
+  it("records the task as the chat's first message without starting a provider when providers are off", async () => {
+    const { store, turns, dependencies, run, startPayload } = fixture();
+    const id = randomUUID();
+    store.todos.create({ id, title: "Clean the downloads folder", note: "Only the CleanShot files" });
+    const activeBefore = store.shellSnapshot().activeConversationId;
+
+    const { command, events, order } = await run("todo.start", startPayload(id));
+
+    const conversationId = store.todos.get(id)?.conversationId;
+    expect(conversationId).toBeTruthy();
+    expect(store.conversationDetail(conversationId!)?.messages).toEqual([expect.objectContaining({
+      role: "user",
+      content: "Clean the downloads folder\n\nOnly the CleanShot files",
+    })]);
+    expect(store.shellSnapshot().activeConversationId).toBe(activeBefore);
+    expect(dependencies.verifyProviderInstallation).not.toHaveBeenCalled();
+    expect(turns.queue).not.toHaveBeenCalled();
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(order).toEqual(["snapshot", "request.result"]);
+    expect(events).toEqual([{
+      type: "request.result",
+      requestId: command.requestId,
+      result: { kind: "todo.started", conversationId },
     }]);
   });
 
@@ -196,7 +231,7 @@ describe("todo command handler", () => {
   });
 
   it("fails the first turn and keeps the linked chat when the turn cannot start", async () => {
-    const { store, turns, dependencies, run, startPayload } = fixture({ start: false });
+    const { store, turns, dependencies, run, startPayload } = fixture({ ...providersOn, start: false });
     const id = randomUUID();
     store.todos.create({ id, title: "Start fails" });
 
@@ -205,7 +240,7 @@ describe("todo command handler", () => {
     const conversationId = store.todos.get(id)?.conversationId;
     expect(conversationId).toBeTruthy();
     expect(turns.failBeforeStart).toHaveBeenCalledWith(conversationId, "The task's chat could not start.");
-    expect(order).toEqual(["snapshot", "request.error"]);
+    expect(order).toEqual(["verify", "snapshot", "request.error"]);
     expect(events).toEqual([expect.objectContaining({
       type: "request.error",
       message: "The chat was created, but its first turn could not start.",
@@ -216,7 +251,7 @@ describe("todo command handler", () => {
   it("keeps the new chat and reports the failure when the task disappears before it is linked", async () => {
     let store!: RuntimeStore;
     let id = "";
-    const context = fixture({ beforeCreate: () => { store.todos.delete(id); } });
+    const context = fixture({ ...providersOn, beforeCreate: () => { store.todos.delete(id); } });
     store = context.store;
     id = randomUUID();
     store.todos.create({ id, title: "Deleted mid-start" });
@@ -227,7 +262,7 @@ describe("todo command handler", () => {
       type: "request.error",
       message: "The chat was created, but the task could not be linked to it.",
     })]);
-    expect(order).toEqual(["snapshot", "request.error"]);
+    expect(order).toEqual(["verify", "snapshot", "request.error"]);
     expect(store.shellSnapshot().conversations.map(({ title }) => title)).toEqual(["Deleted mid-start"]);
     expect(context.turns.queue).not.toHaveBeenCalled();
   });

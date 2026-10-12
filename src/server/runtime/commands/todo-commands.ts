@@ -25,6 +25,7 @@ export interface TodoCommandDependencies {
   turns: Pick<TurnController, "queue" | "start" | "failBeforeStart">;
   backendProfileController: Pick<BackendProfileController, "readiness">;
   enableProviders: boolean;
+  verifyProviderInstallation?(providerId: ProviderInfo["id"]): Promise<void>;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -45,6 +46,7 @@ async function assertRouteReady(
 ): Promise<void> {
   if (!dependencies.enableProviders) return;
   const { providerId, selection } = dependencies.creation.canonicalSelection(payload);
+  await dependencies.verifyProviderInstallation?.(providerId);
   const provider = dependencies.providerInfo().find(({ id }) => id === providerId);
   const readiness = await dependencies.backendProfileController.readiness(selection, provider);
   if (readiness && !readiness.ready) {
@@ -82,14 +84,24 @@ export function createTodoCommandHandler(
       } catch {
         throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
       }
-      const queued = dependencies.turns.queue({
-        conversationId: conversation.id,
-        content: todoPromptContent(linked),
-        activateConversation: false,
-      });
-      if (!dependencies.turns.start(queued.turn.id)) {
-        dependencies.turns.failBeforeStart(conversation.id, "The task's chat could not start.");
-        throw new RuntimeRequestError("The chat was created, but its first turn could not start.");
+      const content = todoPromptContent(linked);
+      if (dependencies.enableProviders) {
+        const queued = dependencies.turns.queue({
+          conversationId: conversation.id,
+          content,
+          activateConversation: false,
+          contextRequestId: command.requestId,
+          turnCheckpoint: true,
+          skills: [],
+        });
+        if (!dependencies.turns.start(queued.turn.id)) {
+          dependencies.turns.failBeforeStart(conversation.id, "The task's chat could not start.");
+          throw new RuntimeRequestError("The chat was created, but its first turn could not start.");
+        }
+      } else {
+        dependencies.store.createMessage(conversation.id, content, "user", [], null, undefined, {
+          activateConversation: false,
+        });
       }
     } finally {
       dependencies.broadcastSnapshot();

@@ -85,6 +85,7 @@ function PaletteAndHelp({ props }: { props: ReturnType<typeof hostProps> }): Rea
         createConversationIn={vi.fn()}
         importProject={async () => undefined}
         openSettings={vi.fn()}
+        openTasks={vi.fn()}
       />
       <HelpGuideHost projects={[]} currentProjectId={null} {...props} />
     </>

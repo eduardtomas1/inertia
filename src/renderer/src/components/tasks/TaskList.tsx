@@ -58,9 +58,15 @@ function TaskRow({
       className={clsx("task-row", selected && "is-selected", menuOpen && "has-menu")}
       data-task-id={todo.id}
       onContextMenu={(event) => {
-        if ((event.target as HTMLElement).closest("input")) return;
         event.preventDefault();
         onOpenMenu(todo, { x: event.clientX, y: event.clientY });
+      }}
+      onKeyDown={(event) => {
+        if (!menuKey(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onOpenMenu(todo, { x: bounds.left + 24, y: bounds.bottom });
       }}
     >
       <input
@@ -77,13 +83,6 @@ function TaskRow({
         data-task-title={todo.id}
         aria-current={selected ? "true" : undefined}
         onClick={() => onOpen(todo)}
-        onKeyDown={(event) => {
-          if (!menuKey(event)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          const bounds = event.currentTarget.getBoundingClientRect();
-          onOpenMenu(todo, { x: bounds.left + 24, y: bounds.bottom });
-        }}
       >
         <span className="task-title-text">{todo.title}</span>
         {due && <span className="task-due">{due}</span>}

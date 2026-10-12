@@ -357,6 +357,26 @@ describe("Tasks view", () => {
     expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
   });
 
+  it("opens the row menu from the circle too, by right-click or the menu keys", async () => {
+    const user = userEvent.setup();
+    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
+    const check = screen.getByRole("checkbox", { name: "Write release notes" });
+    fireEvent.contextMenu(check, { clientX: 20, clientY: 50 });
+    expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    check.focus();
+    await user.keyboard("{Shift>}{F10}{/Shift}");
+    expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
+    await user.keyboard("{Escape}");
+
+    check.focus();
+    fireEvent.keyDown(check, { key: "ContextMenu" });
+    expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
+    expect(check).not.toBeChecked();
+  });
+
   it("renames from the menu by focusing and selecting the detail title", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));

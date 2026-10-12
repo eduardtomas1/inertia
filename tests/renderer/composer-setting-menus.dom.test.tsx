@@ -125,16 +125,26 @@ describe("composer setting menus", () => {
     expectCheckOnChosenRowOnly(mode);
   });
 
-  it("keeps the Chat tools pill as it was before the restyle", async () => {
+  it("opens the More tools tray to its options only, without a Chat tools label", async () => {
     const current = conversation("chat-tools");
     render(<Composer {...composerProps(current, {
       providers: [{ ...reasoningProvider, agentThreadManagement: { state: "supported", detail: "Agents can read other chats." } }],
     })} />);
-    const more = screen.queryByRole("button", { name: /More tools/u });
-    if (more) fireEvent.click(more);
-    const pill = await screen.findByLabelText("Agent chat tools: supported");
-    expect(pill).toHaveClass("composer-pill", "composer-action-control", "is-active");
-    expect(pill).not.toHaveClass("composer-tools-status");
-    expect(pill).toHaveAttribute("title", "Agents can read other chats.");
+    fireEvent.click(screen.getByRole("button", { name: "More tools" }));
+    const tray = screen.getByRole("group", { name: "Add context" });
+    expect(tray.closest(".composer-more-tools")).not.toHaveAttribute("hidden");
+    expect(tray).not.toHaveTextContent("Chat tools");
+    expect(screen.queryByLabelText(/Agent chat tools/u)).toBeNull();
+    expect((await within(tray).findAllByRole("button")).length).toBeGreaterThan(0);
+  });
+
+  it("leaves out the More tools button when chat tools support is the only thing it would show", () => {
+    const current = conversation("chat-tools-only");
+    render(<Composer {...composerProps(current, {
+      providers: [{ ...reasoningProvider, agentThreadManagement: { state: "supported", detail: "Agents can read other chats." } }],
+      promptPresetsEnabled: false,
+      promptStashEnabled: false,
+    })} />);
+    expect(screen.queryByRole("button", { name: "More tools" })).toBeNull();
   });
 });

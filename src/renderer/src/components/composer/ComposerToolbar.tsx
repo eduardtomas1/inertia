@@ -3,7 +3,6 @@ import {
   ChevronDown,
   Ellipsis,
   FolderGit2,
-  MessagesSquare,
   Paperclip,
   Play,
   Wrench,
@@ -286,8 +285,7 @@ export function ComposerToolbar({
   const toolsId = useId();
   const [toolsOpen, setToolsOpen] = useState(() => layoutStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open");
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
-  const hasTools = promptPresetsEnabled || promptStashEnabled || actions.length > 0
-    || Boolean(selectedProvider?.agentThreadManagement);
+  const hasTools = promptPresetsEnabled || promptStashEnabled || actions.length > 0;
   return (
     <div
       className="composer-toolbar"
@@ -421,21 +419,6 @@ export function ComposerToolbar({
           role="group"
           aria-label="Add context"
         >
-          {selectedProvider?.agentThreadManagement && (
-            <span
-              className={clsx(
-                "composer-pill composer-action-control",
-                selectedProvider.agentThreadManagement.state === "supported"
-                  ? "is-active"
-                  : undefined,
-              )}
-              aria-label={`Agent chat tools: ${selectedProvider.agentThreadManagement.state}`}
-              title={selectedProvider.agentThreadManagement.detail}
-            >
-              <MessagesSquare size={14} aria-hidden="true" />
-              <span>Chat tools</span>
-            </span>
-          )}
         {promptPresetsEnabled && (
           <Suspense fallback={null}>
             <PromptPresetMenu

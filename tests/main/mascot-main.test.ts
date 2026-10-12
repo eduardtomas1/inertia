@@ -463,9 +463,9 @@ describe("mascot window ownership", () => {
     };
     hover(20, 296);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
-    hover(120, 175);
+    hover(120, 191);
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(false, { forward: true });
-    hover(4, 161); // Transparent rounded corner of the status bubble.
+    hover(4, 177); // Transparent rounded corner of the status bubble.
     expect(overlay.setIgnoreMouseEvents).toHaveBeenLastCalledWith(true, { forward: true });
     hover(120, 260);
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 260 });
@@ -612,9 +612,9 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    overlay.setBounds({ x: 2000, y: 2000, width: 240, height: 316 });
+    overlay.setBounds({ x: 2000, y: 2000, width: 240, height: 334 });
     vi.advanceTimersByTime(400);
-    expect(overlay.getBounds()).toEqual({ x: 1200, y: 584, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 1200, y: 566, width: 240, height: 334 });
     expect(vi.getTimerCount()).toBe(0);
     app.mascot.runtimePhase("restarting");
     expect(app.mascot.snapshot().status).toEqual(emptyMascotStatus("unavailable"));
@@ -639,7 +639,7 @@ describe("mascot window ownership", () => {
     expect(app.mascot.snapshot().dragging).toBe(true);
     const sends = overlay.webContents.send.mock.calls.length;
     vi.advanceTimersByTime(16);
-    expect(overlay.getBounds()).toEqual({ x: 980, y: 440, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 980, y: 440, width: 240, height: 334 });
     vi.advanceTimersByTime(1000); // Holding still must not drop, save, or broadcast.
     expect(saved().positions).toEqual([]);
     expect(overlay.webContents.send).toHaveBeenCalledTimes(sends);
@@ -649,10 +649,10 @@ describe("mascot window ownership", () => {
     harness.displays.push({ workArea: { x: -1920, y: -200, width: 1920, height: 1080 } });
     harness.cursor = { x: -1, y: 20 };
     vi.advanceTimersByTime(16);
-    expect(overlay.getBounds()).toEqual({ x: -121, y: -240, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: -121, y: -240, width: 240, height: 334 });
     harness.cursor = { x: -1900, y: -190 };
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay); // Flush the last cursor sample.
-    expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 334 });
     expect(saved().positions).toEqual([{ display: null, x: -1920, y: -200 }]);
     expect(app.mascot.snapshot()).toMatchObject({ dragging: false, status: { phase: "running" } });
     expect(vi.getTimerCount()).toBe(0);
@@ -675,10 +675,10 @@ describe("mascot window ownership", () => {
     for (const x of [1438, 1439, 1440, 1441, 1440, 1439, 1441]) {
       harness.cursor = { x, y: 420 };
       vi.advanceTimersByTime(16);
-      expect(overlay.getBounds()).toEqual({ x: x - 120, y: 160, width: 240, height: 316 });
+      expect(overlay.getBounds()).toEqual({ x: x - 120, y: 160, width: 240, height: 334 });
     }
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
-    expect(overlay.getBounds()).toEqual({ x: 1440, y: 160, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 1440, y: 160, width: 240, height: 334 });
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -735,11 +735,11 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble & { bounds: Rectangle; setBounds: ReturnType<typeof vi.fn>; setShape: ReturnType<typeof vi.fn> };
-    expect(harness.options[1]).toMatchObject({ width: 240, height: 155 });
+    expect(harness.options[1]).toMatchObject({ width: 240, height: 157 });
     expect(harness.options[1]).not.toHaveProperty("x");
     const bottom = overlay.bounds.y + overlay.bounds.height;
-    await app.invoke(MASCOT_IPC.action, ["bubble", 192], overlay);
-    expect(overlay.bounds).toEqual({ x: 0, y: bottom - 316, width: 240, height: 316 });
+    await app.invoke(MASCOT_IPC.action, ["bubble", 210], overlay);
+    expect(overlay.bounds).toEqual({ x: 0, y: bottom - 334, width: 240, height: 334 });
     await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
     expect(overlay.bounds).toEqual({ x: 0, y: bottom - 240, width: 240, height: 240 });
     const calls = overlay.setBounds.mock.calls.length;
@@ -753,7 +753,7 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble & { bounds: Rectangle };
-    expect(harness.options[1]).toMatchObject({ width: 240, height: 316 });
+    expect(harness.options[1]).toMatchObject({ width: 240, height: 334 });
     const before = { ...overlay.bounds };
     await app.invoke(MASCOT_IPC.action, ["bubble", 116], overlay);
     expect(overlay.bounds).toEqual(before);
@@ -899,28 +899,28 @@ describe("mascot window presence, input region and placement memory", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble & { setShape: ReturnType<typeof vi.fn> };
     expect(overlay.setShape).toHaveBeenLastCalledWith([
-      { x: 4, y: 161, width: 232, height: 33 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+      { x: 4, y: 177, width: 232, height: 35 }, { x: 108, y: 210, width: 36, height: 36 }, { x: 89, y: 232, width: 60, height: 88 },
     ]);
     const shown = chat("shown", "waiting-for-input");
     const rows = [chat("a", "failed"), chat("b", "running")];
     app.mascot.observe(feed(shown, [shown, ...rows], null, { chats: 9, attention: 1, others: 7 }, null, rows));
     expect(overlay.setShape).toHaveBeenLastCalledWith([
-      { x: 4, y: 36, width: 232, height: 158 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+      { x: 4, y: 45, width: 232, height: 167 }, { x: 108, y: 210, width: 36, height: 36 }, { x: 89, y: 232, width: 60, height: 88 },
     ]);
     const calls = overlay.setShape.mock.calls.length;
     app.mascot.observe(feed(shown, [shown, ...rows], null, { chats: 9, attention: 1, others: 7 }, null, rows));
     expect(overlay.setShape).toHaveBeenCalledTimes(calls);
-    await app.invoke(MASCOT_IPC.action, ["bubble", 192], overlay);
+    await app.invoke(MASCOT_IPC.action, ["bubble", 210], overlay);
     expect(overlay.setShape).toHaveBeenLastCalledWith([
-      { x: 4, y: 0, width: 232, height: 194 }, { x: 108, y: 192, width: 36, height: 36 }, { x: 89, y: 214, width: 60, height: 88 },
+      { x: 4, y: 0, width: 232, height: 212 }, { x: 108, y: 210, width: 36, height: 36 }, { x: 89, y: 232, width: 60, height: 88 },
     ]);
-    for (const height of [30, 193, 116.5, "116", null]) {
+    for (const height of [32, 211, 116.5, "116", null]) {
       await expect(app.invoke(MASCOT_IPC.action, ["bubble", height], overlay)).rejects.toThrow("Invalid");
     }
-    await expect(app.invoke(MASCOT_IPC.action, ["bubble", 31])).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["bubble", 33])).rejects.toThrow("untrusted");
     await expect(app.invoke(MASCOT_IPC.action, ["bubble"], overlay)).rejects.toThrow("untrusted");
-    await app.invoke(MASCOT_IPC.action, ["bubble", 31], overlay);
-    expect(overlay.setShape.mock.lastCall![0][0]).toEqual({ x: 4, y: 161, width: 232, height: 33 });
+    await app.invoke(MASCOT_IPC.action, ["bubble", 33], overlay);
+    expect(overlay.setShape.mock.lastCall![0][0]).toEqual({ x: 4, y: 177, width: 232, height: 35 });
   });
 
   it("passes clicks through the empty corners of the figure box on macOS", async () => {
@@ -933,11 +933,11 @@ describe("mascot window presence, input region and placement memory", () => {
       return overlay.setIgnoreMouseEvents.mock.lastCall?.[0] ?? false;
     };
     expect(hover(120, 100)).toBe(true);
-    expect(hover(120, 175)).toBe(false);
+    expect(hover(120, 191)).toBe(false);
     expect(hover(120, 260)).toBe(false);
     expect(hover(76, 300)).toBe(true);
     expect(hover(160, 220)).toBe(true);
-    expect(hover(90, 215)).toBe(false);
+    expect(hover(90, 233)).toBe(false);
     overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 76, y: 300 });
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     expect(app.mascot.snapshot().dragging).toBe(false);
@@ -946,8 +946,8 @@ describe("mascot window presence, input region and placement memory", () => {
     expect(hover(120, 100)).toBe(false);
     const rows = [chat("a", "failed"), chat("b", "running"), chat("c", "running")];
     app.mascot.observe(feed(chat("shown", "waiting-for-input"), [chat("shown", "waiting-for-input"), ...rows], null, { chats: 4, attention: 1, others: 3 }, null, rows));
-    await app.invoke(MASCOT_IPC.action, ["bubble", 156], overlay);
-    expect(hover(120, 40)).toBe(false);
+    await app.invoke(MASCOT_IPC.action, ["bubble", 165], overlay);
+    expect(hover(120, 49)).toBe(false);
   });
 
   it("remembers the position per display and restores it when an unplugged display returns", async () => {
@@ -962,18 +962,18 @@ describe("mascot window presence, input region and placement memory", () => {
     await app.invoke(MASCOT_IPC.action, ["pickup", app.gesture()], overlay);
     harness.cursor = { x: 2500, y: 500 };
     await app.invoke(MASCOT_IPC.action, ["drop", app.gesture()], overlay);
-    expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 334 });
     expect(saved(app.directory).positions).toEqual([{ display: "2", x: 2380, y: 240 }]);
     harness.displays = [primary];
     harness.displayListeners.get("display-removed")!();
-    expect(overlay.getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 334 });
     vi.advanceTimersByTime(400);
     expect(saved(app.directory).positions).toEqual([{ display: "2", x: 2380, y: 240 }]);
     await app.invoke(MASCOT_IPC.action, ["left"]);
     expect(saved(app.directory).positions).toEqual([{ display: "1", x: 1184, y: 240 }, { display: "2", x: 2380, y: 240 }]);
     harness.displays = [primary, external];
     harness.displayListeners.get("display-added")!();
-    expect(overlay.getBounds()).toEqual({ x: 1184, y: 240, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 1184, y: 240, width: 240, height: 334 });
     await app.invoke(MASCOT_IPC.action, ["reset-position"]);
     expect(saved(app.directory).positions).toEqual([]);
   });
@@ -994,12 +994,12 @@ describe("mascot window presence, input region and placement memory", () => {
     harness.displayListeners.get("display-removed")!();
     harness.displays = [primary, external];
     harness.displayListeners.get("display-added")!();
-    expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 316 });
+    expect(overlay.getBounds()).toEqual({ x: 2380, y: 240, width: 240, height: 334 });
     app.mascot.suspend();
     harness.displays = [primary];
     app.mascot.attach();
     await vi.waitFor(() => expect(harness.windows).toHaveLength(3));
-    expect((harness.windows[2] as WindowDouble).getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 316 });
+    expect((harness.windows[2] as WindowDouble).getBounds()).toEqual({ x: 1200, y: 240, width: 240, height: 334 });
   });
 
   it("opens a chat listed in the rows, leaves the pinned chat out of them, and rejects a row that changed", async () => {

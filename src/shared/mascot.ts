@@ -65,7 +65,7 @@ export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
 export const MASCOT_ACTIONS: readonly MascotAction[] = [
   "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop", "pin", "bubble", "show",
 ];
-export const MASCOT_COMPACT_HEIGHT = 31;
+export const MASCOT_COMPACT_HEIGHT = 33;
 export const MASCOT_LABELS: Record<MascotPhase, string> = {
   idle: "Ready when you are",
   unavailable: "Reconnecting to Inertia",
@@ -105,7 +105,7 @@ export function mascotTier(phase: MascotPhase): number {
 
 export function mascotBubbleHeight(rows: number, others: number): number {
   const lines = Math.min(rows, MASCOT_ROW_LIMIT) + Number(others > rows);
-  return 116 + (lines ? 4 + 12 * lines : 0);
+  return 116 + (lines ? 4 + 15 * lines : 0);
 }
 
 export function parseMascotStatus(value: unknown): MascotStatus | null {

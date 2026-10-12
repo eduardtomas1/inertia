@@ -323,7 +323,7 @@ describe("mascot rows, words and announcements", () => {
     expect(buttons[1]).toHaveAccessibleName("Open Fix flaky login test, failed");
     expect(buttons.some((row) => row.querySelector("img, svg, i"))).toBe(false);
     expect(group.querySelector(".mascot-more")).toHaveTextContent("2 more");
-    expect(view.container.querySelector<HTMLElement>(".mascot-status")!.style.height).toBe("192px");
+    expect(view.container.querySelector<HTMLElement>(".mascot-status")!.style.height).toBe("210px");
     expect(view.container.querySelector(".mascot-detail")).toHaveTextContent("");
     buttons[1]!.focus();
     fireEvent.click(buttons[1]!);
@@ -332,7 +332,7 @@ describe("mascot rows, words and announcements", () => {
     expect(document.activeElement).toBe(buttons[1]);
     expect(within(group).getAllByRole("button")).toHaveLength(2);
     expect(group.querySelector<HTMLElement>(".mascot-more")!.hidden).toBe(true);
-    expect(view.container.querySelector<HTMLElement>(".mascot-status")!.style.height).toBe("144px");
+    expect(view.container.querySelector<HTMLElement>(".mascot-status")!.style.height).toBe("150px");
     fireEvent.click(screen.getByRole("button", { name: /Show chat/ }));
     expect(group.hidden).toBe(true);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
@@ -363,15 +363,15 @@ describe("mascot rows, words and announcements", () => {
     const app = fixture();
     renderMascot();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
-    expect(app.bubble.mock.calls).toEqual([[31]]);
+    expect(app.bubble.mock.calls).toEqual([[33]]);
     const shown = chat("shown", "waiting-for-input");
     const rows = Array.from({ length: 5 }, (_, index) => chat(`r${index}`, "running"));
     app.list(shown, [shown, ...rows], null, { chats: 7, attention: 1, others: 6 }, rows);
     app.list(shown, [shown, ...rows], null, { chats: 7, attention: 1, others: 6 }, rows);
-    expect(app.bubble.mock.calls).toEqual([[31], [192]]);
+    expect(app.bubble.mock.calls).toEqual([[33], [210]]);
     app.list(emptyMascotStatus(), [shown]);
     fireEvent.click(screen.getByRole("button", { name: /Show chat/ }));
-    expect(app.bubble.mock.calls).toEqual([[31], [192], [31], [116]]);
+    expect(app.bubble.mock.calls).toEqual([[33], [210], [33], [116]]);
   });
 
   it("shows one short line at idle and the quiet state of a working chat", async () => {
@@ -382,7 +382,7 @@ describe("mascot rows, words and announcements", () => {
     const main = view.container.querySelector("main")!;
     const bubble = view.container.querySelector<HTMLElement>(".mascot-status")!;
     expect(main.dataset.compact).toBe("true");
-    expect(bubble.style.height).toBe("31px");
+    expect(bubble.style.height).toBe("33px");
     expect(view.container.querySelector(".mascot-label")).toHaveTextContent("Ready when you are");
     expect(view.container.querySelector(".mascot-message")).toHaveTextContent("");
     app.update("running", true, { since: "2026-09-06T10:00:00.000Z", quietSince: "2026-09-06T10:10:00.000Z" });

@@ -3,10 +3,10 @@ import type { Rectangle } from "electron";
 import { parseMascotPreferences, type MascotPreferences } from "../shared/mascot.js";
 import type { WindowBoundsDisplay } from "./window-bounds.js";
 
-export const MASCOT_SIZE = { width: 240, height: 316 };
-export const MASCOT_FIGURE = { x: 72, y: 212, width: 96, height: 98 };
-export const MASCOT_ARTWORK = { x: 89, y: 214, width: 60, height: 88 };
-export const MASCOT_BUBBLE_BOTTOM = 192;
+export const MASCOT_SIZE = { width: 240, height: 334 };
+export const MASCOT_FIGURE = { x: 72, y: 230, width: 96, height: 98 };
+export const MASCOT_ARTWORK = { x: 89, y: 232, width: 60, height: 88 };
+export const MASCOT_BUBBLE_BOTTOM = 210;
 const LEGACY_HEIGHT = 240;
 const POSITION_LIMIT = 8;
 

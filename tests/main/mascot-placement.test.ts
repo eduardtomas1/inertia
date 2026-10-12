@@ -22,36 +22,36 @@ describe("mascot placement and contracts", () => {
     expect(supportsMascotPlacement("linux", { WAYLAND_DISPLAY: "wayland-0" }, "x11")).toBe(true);
   });
   it("clamps the entire overlay after drag, monitor removal, and scale changes", () => {
-    expect(mascotBounds({ x: -2000, y: -300 }, [primary, secondary])).toEqual({ x: -1920, y: -200, width: 240, height: 316 });
-    expect(mascotBounds({ x: -1800, y: -150 }, [primary])).toEqual({ x: 0, y: 24, width: 240, height: 316 });
-    expect(mascotBounds({ x: 1439, y: 899 }, [primary])).toEqual({ x: 1200, y: 584, width: 240, height: 316 });
-    expect(mascotBounds(null, [primary])).toEqual({ x: 1176, y: 560, width: 240, height: 316 });
+    expect(mascotBounds({ x: -2000, y: -300 }, [primary, secondary])).toEqual({ x: -1920, y: -200, width: 240, height: 334 });
+    expect(mascotBounds({ x: -1800, y: -150 }, [primary])).toEqual({ x: 0, y: 24, width: 240, height: 334 });
+    expect(mascotBounds({ x: 1439, y: 899 }, [primary])).toEqual({ x: 1200, y: 566, width: 240, height: 334 });
+    expect(mascotBounds(null, [primary])).toEqual({ x: 1176, y: 542, width: 240, height: 334 });
   });
 
   it("remembers one position per display and restores it when that display returns", () => {
     const left = { id: 2, workArea: { x: -1920, y: -200, width: 1920, height: 1080 } };
     const main = { id: 1, ...primary };
-    let positions = rememberMascotPosition([], { x: -1000, y: 100, width: 240, height: 316 }, [main, left]);
-    positions = rememberMascotPosition(positions, { x: 400, y: 300, width: 240, height: 316 }, [main, left]);
+    let positions = rememberMascotPosition([], { x: -1000, y: 100, width: 240, height: 334 }, [main, left]);
+    positions = rememberMascotPosition(positions, { x: 400, y: 300, width: 240, height: 334 }, [main, left]);
     expect(positions).toEqual([{ display: "1", x: 400, y: 300 }, { display: "2", x: -1000, y: 100 }]);
-    positions = rememberMascotPosition(positions, { x: -1500, y: 0, width: 240, height: 316 }, [main, left]);
+    positions = rememberMascotPosition(positions, { x: -1500, y: 0, width: 240, height: 334 }, [main, left]);
     expect(positions).toEqual([{ display: "2", x: -1500, y: 0 }, { display: "1", x: 400, y: 300 }]);
     expect(mascotPosition(positions, [main])).toEqual({ x: 400, y: 300 });
     expect(mascotPosition(positions, [main, left])).toEqual({ x: -1500, y: 0 });
     expect(mascotPosition(positions, [{ id: 3, ...primary }])).toEqual({ x: -1500, y: 0 });
-    expect(mascotBounds(mascotPosition(positions, [{ id: 3, ...primary }]), [{ id: 3, ...primary }])).toEqual({ x: 0, y: 24, width: 240, height: 316 });
+    expect(mascotBounds(mascotPosition(positions, [{ id: 3, ...primary }]), [{ id: 3, ...primary }])).toEqual({ x: 0, y: 24, width: 240, height: 334 });
     expect(mascotPosition([], [main])).toBeNull();
-    expect(mascotDisplay({ x: 1300, y: 700, width: 240, height: 316 }, [main, left])).toBe("1");
-    expect(mascotDisplay({ x: -300, y: 0, width: 240, height: 316 }, [main, left])).toBe("2");
-    expect(mascotDisplay({ x: 0, y: 0, width: 240, height: 316 }, [primary])).toBeNull();
+    expect(mascotDisplay({ x: 1300, y: 700, width: 240, height: 334 }, [main, left])).toBe("1");
+    expect(mascotDisplay({ x: -300, y: 0, width: 240, height: 334 }, [main, left])).toBe("2");
+    expect(mascotDisplay({ x: 0, y: 0, width: 240, height: 334 }, [primary])).toBeNull();
     const many = Array.from({ length: 10 }, (_, index) => ({ id: index + 10, workArea: { x: index * 2000, y: 0, width: 2000, height: 1000 } }));
     let all: ReturnType<typeof rememberMascotPosition> = [];
-    for (const display of many) all = rememberMascotPosition(all, { x: display.workArea.x, y: 0, width: 240, height: 316 }, many);
+    for (const display of many) all = rememberMascotPosition(all, { x: display.workArea.x, y: 0, width: 240, height: 334 }, many);
     expect(all).toHaveLength(8);
     const edid = 0x4c2d * 2 ** 40 + 0x1234 * 2 ** 8 + 1;
     expect(Number.isSafeInteger(edid)).toBe(false);
     const linux = [{ id: edid, workArea: { x: 0, y: 0, width: 1920, height: 1080 } }];
-    const remembered = rememberMascotPosition([], { x: 300, y: 400, width: 240, height: 316 }, linux);
+    const remembered = rememberMascotPosition([], { x: 300, y: 400, width: 240, height: 334 }, linux);
     const directory = mkdtempSync(join(tmpdir(), "mascot-edid-"));
     try {
       const path = join(directory, "state.json");
@@ -74,7 +74,7 @@ describe("mascot placement and contracts", () => {
       writeMascotWindowState(path, { ...state, positions: [] });
       expect(readMascotWindowState(path).positions).toEqual([]);
       writeFileSync(path, JSON.stringify({ preferences: { enabled: true, motion: true }, position: { x: 1200, y: 660 } }));
-      expect(readMascotWindowState(path)).toEqual({ preferences: { enabled: true, motion: true }, positions: [{ display: null, x: 1200, y: 584 }] });
+      expect(readMascotWindowState(path)).toEqual({ preferences: { enabled: true, motion: true }, positions: [{ display: null, x: 1200, y: 566 }] });
       writeFileSync(path, JSON.stringify({ preferences: { enabled: true, motion: true }, positions: [
         { display: 7, x: 1, y: 2 }, { display: "8", x: 3, y: 4 }, { display: "9", x: 1.5, y: 2 }, null, { display: "x".repeat(41), x: 1, y: 1 },
         { display: "1e3", x: 1, y: 1 }, { display: null, x: 5, y: 6 },
@@ -90,13 +90,13 @@ describe("mascot placement and contracts", () => {
   it("uses the cursor's destination display in DIP across seams, gaps, and vertical arrangements", () => {
     const right = { workArea: { x: 1440, y: 100, width: 1280, height: 720 } };
     expect(mascotBounds({ x: 1321, y: 0 }, [primary, right], { x: 1441, y: 260 }))
-      .toEqual({ x: 1440, y: 100, width: 240, height: 316 });
+      .toEqual({ x: 1440, y: 100, width: 240, height: 334 });
     const above = { workArea: { x: 0, y: -1080, width: 1920, height: 1040 } };
     expect(mascotBounds({ x: 0, y: -270 }, [primary, above], { x: 120, y: -10 }))
-      .toEqual({ x: 0, y: -356, width: 240, height: 316 });
+      .toEqual({ x: 0, y: -374, width: 240, height: 334 });
     expect(mascotBounds({ x: 0, y: 0 }, [{ workArea: { x: -500, y: 40, width: 160, height: 200 } }]))
       .toEqual({ x: -500, y: 40, width: 160, height: 200 });
-    expect(mascotBounds(null, [])).toEqual({ x: 760, y: 428, width: 240, height: 316 });
+    expect(mascotBounds(null, [])).toEqual({ x: 760, y: 410, width: 240, height: 334 });
   });
 
   it("rejects malformed preferences, unknown phases, extra payload, and broken identity", () => {

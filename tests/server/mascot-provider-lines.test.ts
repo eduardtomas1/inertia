@@ -106,7 +106,7 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
   it("Codex: commands, file changes, the agent's words, plans and command approvals", () => {
     const turn = mascotTurn("codex");
     const state: CodexItemProjectionState = {
-      deltaItems: new Set(), outputItems: new Set(), commandOutput: new CodexCommandOutput(), reasoningDeltaItems: new Set(),
+      deltaItems: new Set(), answerBoundaryItems: new Set(), outputItems: new Set(), commandOutput: new CodexCommandOutput(), reasoningDeltaItems: new Set(),
       itemActivities: new Map(), completedPlanItemIds: new Set(), maxTrackedActivities: 100,
     };
     const host = {

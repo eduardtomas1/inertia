@@ -127,6 +127,6 @@ it("hands the secondary pane its own checkout so a detached HEAD shows in its co
       <Composer {...composerProps(secondary)} />
     </CheckoutBranchControlProvider>,
   );
-  expect(screen.getByRole("group", { name: "Chat checkout context" })).toHaveTextContent(/^Current checkout/u);
+  expect(screen.getByRole("group", { name: "Chat checkout context" })).toHaveClass("is-branch-only");
   expect(await screen.findByRole("button", { name: "Detached HEAD, create or check out a branch" })).toBeInTheDocument();
 });

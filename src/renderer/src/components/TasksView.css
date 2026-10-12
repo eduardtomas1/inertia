@@ -207,7 +207,7 @@
   font-size: var(--text-base);
 }
 
-.task-add:focus-within {
+.task-add:has(.task-add-input:focus-visible) {
   background: var(--fill);
 }
 

@@ -74,8 +74,11 @@ export function TasksView({
     const all = todos ?? [];
     return {
       openTodos: all.filter(({ completedAt }) => completedAt === null).sort(compareTodos),
-      doneTodos: all.filter(({ completedAt }) => completedAt !== null)
-        .sort((left, right) => (right.completedAt ?? "").localeCompare(left.completedAt ?? "")),
+      doneTodos: all.filter(({ completedAt }) => completedAt !== null).sort((left, right) => {
+        const leftDone = left.completedAt ?? "";
+        const rightDone = right.completedAt ?? "";
+        return leftDone < rightDone ? 1 : leftDone > rightDone ? -1 : 0;
+      }),
     };
   }, [todos]);
   const todoById = useMemo(() => new Map((todos ?? []).map((todo) => [todo.id, todo])), [todos]);

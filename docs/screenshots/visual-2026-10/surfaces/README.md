@@ -181,3 +181,10 @@ Before is a build of main; after is this branch. Project grouping is gone (main'
 
 - sidebar-synara-light-1440x920: main vs branch, light.
 - sidebar-synara-dark-1440x920: main vs branch, dark.
+
+## Handoff divider logos (owner, 2026-10-12)
+
+Before is the branch without logos; after shows the two provider marks next to the provider names. Nothing else on the divider changed.
+
+- handoff-logos-light-1440x920: light.
+- handoff-logos-dark-1440x920: dark.

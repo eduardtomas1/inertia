@@ -101,7 +101,7 @@ interface AppLayoutActions {
   run: (
     key: string,
     command: CommandWithoutId,
-    options?: { reportError?: boolean },
+    options?: { reportError?: boolean; passive?: boolean },
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
   openGlobalChat: () => void;

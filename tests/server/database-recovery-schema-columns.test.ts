@@ -22,6 +22,7 @@ const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold"
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 96) database.exec("DROP TABLE todos");
   if (version < 94) database.exec("DROP TABLE agent_context_reads");
   if (version < 93) database.exec("DROP TABLE html_renders; ALTER TABLE messages DROP COLUMN html_render_json");
   if (version < 92) database.exec("DROP TABLE cli_conversation_imports; DROP INDEX agent_turns_provider_session_before_idx; DROP INDEX agent_turns_provider_session_after_idx; ALTER TABLE agent_turns DROP COLUMN origin");
@@ -87,13 +88,16 @@ describe("database health check for settings and subagent columns", () => {
       version: 95,
       sql: "DROP TRIGGER conversation_context_packets_immutable; ALTER TABLE conversation_context_packets DROP COLUMN supplement_json",
     },
+    { version: 96, sql: "DROP TABLE todos" },
+    { version: 96, sql: "ALTER TABLE todos DROP COLUMN note" },
+    { version: 96, sql: "DROP INDEX todos_conversation_idx" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

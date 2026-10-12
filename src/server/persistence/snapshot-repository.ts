@@ -63,6 +63,7 @@ import {
 } from "./conversation-history";
 import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
+import { TodoRepository } from "./todo-repository";
 import { cachedStatement } from "./statement-cache";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
 import {
@@ -93,9 +94,11 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
 
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
+  readonly todos: TodoRepository;
 
   constructor(private readonly context: SnapshotPersistenceContext) {
     this.promptPresets = new PromptPresetRepository(context.database);
+    this.todos = new TodoRepository(context.database);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -142,6 +145,7 @@ export class SnapshotRepository {
       runs: (this.context.database.prepare("SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200").all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
+      todos: this.todos.list(),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -182,6 +186,7 @@ export class SnapshotRepository {
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
+      todos: this.todos.list(),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,

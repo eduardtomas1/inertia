@@ -336,13 +336,21 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("button", { name: "Daily work" })).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("opens Tasks from the top row right after Launch two chats", () => {
+  it("opens Tasks from its own labelled row between New chat and Search", () => {
     const view = renderSidebar([]);
-    const topRow = within(view.container.querySelector<HTMLElement>(".sidebar-primary-row")!);
-    const labels = topRow.getAllByRole("button").map((button) => button.getAttribute("aria-label"));
-    expect(labels.slice(-2)).toEqual(["Launch two chats", "Tasks"]);
-    const tasks = topRow.getByRole("button", { name: "Tasks" });
-    expect(tasks.querySelector(".lucide-list-todo")).not.toBeNull();
+    const primaryRow = view.container.querySelector<HTMLElement>(".sidebar-primary-row")!;
+    expect(within(primaryRow).queryByRole("button", { name: "Tasks" })).toBeNull();
+    const tasks = screen.getByRole("button", { name: "Tasks" });
+    expect(tasks).toHaveClass("sidebar-primary-action");
+    expect(tasks).not.toHaveAttribute("aria-label");
+    expect(tasks.querySelector("span")).toHaveTextContent(/^Tasks$/u);
+    expect(tasks.querySelector(".lucide-list-todo")).toHaveAttribute("aria-hidden", "true");
+    expect(tasks.previousElementSibling).toBe(primaryRow);
+    expect(tasks.nextElementSibling).toHaveClass("sidebar-search-wrap");
+    const order = [...view.container.querySelectorAll<HTMLElement>("button, input")]
+      .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim());
+    const start = order.indexOf("New chat");
+    expect(order.slice(start, start + 4)).toEqual(["New chat", "Launch two chats", "Tasks", "Search projects and conversations"]);
     expect(tasks).not.toHaveAttribute("aria-current");
     expect(tasks).not.toHaveClass("is-active");
     fireEvent.click(tasks);

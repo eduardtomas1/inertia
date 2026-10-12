@@ -104,6 +104,18 @@ async function capture(info: TestInfo, name: string, clip?: Locator): Promise<vo
   await info.attach(name, { path, contentType: "image/png" });
 }
 
+async function expectTasksRowBetweenNewChatAndSearch(tasks: Locator): Promise<void> {
+  const sidebar = app.page.locator(".sidebar");
+  const newChat = await sidebar.locator(".sidebar-primary-row").getByRole("button", { name: "New chat", exact: true }).boundingBox();
+  const row = await tasks.boundingBox();
+  const search = await sidebar.locator(".sidebar-search-wrap").boundingBox();
+  expect(row!.height).toBeCloseTo(newChat!.height, 1);
+  expect(row!.x).toBeCloseTo(newChat!.x, 1);
+  expect(row!.x + row!.width).toBeCloseTo(search!.x + search!.width, 1);
+  expect(row!.y).toBeCloseTo(newChat!.y + newChat!.height + 2, 1);
+  expect(search!.y).toBeCloseTo(row!.y + row!.height + 2, 1);
+}
+
 async function expectAlignedHandOff(agent: Locator): Promise<void> {
   const boxes = await agent.locator(".selected-model-chip, .task-handoff-control").evaluateAll((elements) =>
     elements.map((element) => {
@@ -137,9 +149,10 @@ async function expectAlignedHandOff(agent: Locator): Promise<void> {
 test("adds, orders, schedules and finishes tasks from the sidebar", async ({ browserName: _browserName }, info) => {
   const page = app.page;
   await app.resizeWindow(1440, 1100);
-  const destination = page.locator(".sidebar-primary-row").getByRole("button", { name: "Tasks", exact: true });
+  const destination = page.locator(".sidebar").getByRole("button", { name: "Tasks", exact: true });
   await destination.click();
   await expect(destination).toHaveAttribute("aria-current", "page");
+  await expectTasksRowBetweenNewChatAndSearch(destination);
   const view = page.getByRole("main", { name: "Tasks" });
   await expect(view.getByText("Add anything you need to do", { exact: true })).toBeVisible();
   await expect(page.locator(".workspace-header")).toContainText("Tasks");
@@ -256,7 +269,7 @@ test("Start hands the task to an agent", async ({ browserName: _browserName }, i
   }
   await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
 
-  const destination = page.locator(".sidebar-primary-row").getByRole("button", { name: "Tasks", exact: true });
+  const destination = page.locator(".sidebar").getByRole("button", { name: "Tasks", exact: true });
   await destination.click();
   const row = view.locator(".task-row", { hasText: title });
   await expect(row.locator(".task-status")).toHaveText("Working");

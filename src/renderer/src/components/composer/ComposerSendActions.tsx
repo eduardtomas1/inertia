@@ -96,8 +96,7 @@ export function ComposerSendActions({
   const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
-    const composer = primaryRef.current?.closest<HTMLElement>(".composer");
-    setQueueHost(composer?.querySelector<HTMLElement>(".composer-queue-slot") ?? composer ?? null);
+    setQueueHost(primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
   }, [conversationId]);
   const focusedElement = document.activeElement;
   const focusedGroup = focusedElement?.closest(".composer-actions");

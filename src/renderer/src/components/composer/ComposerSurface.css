@@ -201,9 +201,6 @@
   color: inherit;
   font-weight: 400;
 }
-.composer-queue-slot:empty {
-  display: none;
-}
 .composer-handoff-notice {
   display: flex;
   min-width: 0;

@@ -953,7 +953,6 @@ export const Composer = memo(function Composer({
       >
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
-        <div className="composer-queue-slot" />
         {limitResetRow}
         {goal && (
           <Suspense fallback={null}>

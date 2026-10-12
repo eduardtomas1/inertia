@@ -13,20 +13,39 @@
   }
 }
 
+.composer:has(> .composer-queue) {
+  margin-top: 48px;
+}
+
+.composer:has(> .composer-queue > [role="status"]) {
+  margin-top: 72px;
+}
+
 .composer-queue {
+  position: absolute;
+  z-index: -2;
+  right: 0;
+  bottom: calc(100% + 4px);
+  left: 0;
   min-width: 0;
-  border-bottom: 1px solid var(--line-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
 }
 
 .composer-queue-item {
   display: flex;
   min-width: 0;
-  height: 36px;
+  height: 42px;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 0 18px;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
+  padding: 0 8px 0 12px;
+}
+
+.composer-queue-item > svg {
+  flex: 0 0 auto;
 }
 
 .composer-queue-copy {
@@ -34,6 +53,8 @@
   flex: 1 1 auto;
   overflow: hidden;
   color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -44,46 +65,50 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
-  color: var(--text-faint);
   font-size: var(--text-xs);
   white-space: nowrap;
 }
 
-.composer-queue .composer-queue-send,
+.composer-queue-send {
+  height: var(--control-height-small);
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+
+.composer-queue-send:hover:not(:disabled) {
+  background: var(--fill);
+}
+
+.composer-queue-send:active:not(:disabled) {
+  background: var(--fill-strong);
+  transform: scale(0.97);
+}
+
 .composer-queue .composer-queue-remove {
-  width: 24px;
-  height: 24px;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-fade);
-}
-
-.composer-queue-item:is(:hover, :focus-within) :is(.composer-queue-send, .composer-queue-remove) {
-  opacity: 1;
-}
-
-.composer-queue-item:is(:hover, :focus-within) :is(.composer-queue-send, .composer-queue-remove):disabled {
-  opacity: var(--disabled-opacity);
+  width: var(--control-height-small);
+  height: var(--control-height-small);
 }
 
 .composer-queue > [role="status"] {
   display: block;
-  padding: 0 18px 8px;
+  overflow: hidden;
+  padding: 0 12px 8px;
   color: var(--status-failed);
   font-size: var(--text-xs);
-}
-
-@media (hover: none) {
-  .composer-queue .composer-queue-send,
-  .composer-queue .composer-queue-remove {
-    opacity: 1;
-  }
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @container (max-width: 480px) {
-  .composer-queue-item {
-    padding-left: 14px;
-  }
-
   .composer-queue-count {
     display: none;
   }

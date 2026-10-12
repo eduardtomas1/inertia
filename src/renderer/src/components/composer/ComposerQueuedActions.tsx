@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, Paperclip, Trash2 } from "lucide-react";
+import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 
 import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
@@ -213,6 +213,7 @@ function LegacyComposerQueuedActions({
         }`}
         role="listitem"
       >
+        <CornerDownRight size={14} aria-hidden="true" />
         <span className="composer-queue-copy" title={queued.content}>
           {queued.content}
         </span>
@@ -227,7 +228,7 @@ function LegacyComposerQueuedActions({
               : `${queued.attachments.length} images`}
           </TooltipText>
         )}
-        {unconfirmed && !sending ? (
+        {unconfirmed ? (
           <>
             <TooltipText
               className="composer-queue-count"
@@ -239,20 +240,18 @@ function LegacyComposerQueuedActions({
           </>
         ) : (
           <small className="composer-queue-count">
-            {sending
-              ? "Sending…"
-              : queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
+            {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
           </small>
         )}
-        <IconButton
-          label="Send now"
-          aria-label="Send queued message now"
+        <button
+          type="button"
           className="composer-queue-send"
+          aria-label="Send queued message now"
           disabled={!canSendQueuedNow || queueSendingId !== null}
           onClick={() => void sendQueued(queued.id, "manual")}
         >
-          <ArrowUp size={14} aria-hidden="true" />
-        </IconButton>
+          {sending ? "Sending…" : "Send now"}
+        </button>
         <IconButton
           label="Remove"
           aria-label="Remove queued message"

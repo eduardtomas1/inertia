@@ -141,7 +141,7 @@ describe("composer shell", () => {
     expect(screen.getByRole("button", { name: "Send message" })).toBeVisible();
   });
 
-  it("renders queued messages as plain rows at the top of the composer", async () => {
+  it("attaches a queued message to the composer as its own row with a visible Send now action", async () => {
     const current = conversation("queued-chat");
     window.localStorage.setItem(
       `inertia:queued-prompts:v2:${current.id}`,
@@ -150,11 +150,13 @@ describe("composer shell", () => {
     render(<Composer {...composerProps(current, { running: true })} />);
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     const composer = screen.getByRole("region", { name: "Message composer" });
-    expect(queue.parentElement).toHaveClass("composer-queue-slot");
-    expect(queue.parentElement?.parentElement).toBe(composer);
-    expect(queue.compareDocumentPosition(screen.getByRole("textbox", { name: "Message" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(queue).getByRole("listitem")).toHaveTextContent(/^Run the release checksQueued$/u);
-    expect(within(queue).getByRole("button", { name: "Send queued message now" })).toHaveTextContent("");
+    expect(queue.parentElement).toBe(composer);
+    expect(composer.querySelector(".composer-queue-slot")).toBeNull();
+    const row = within(queue).getByRole("listitem");
+    expect(row.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    expect(row.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    expect(row).toHaveTextContent(/^Run the release checksQueuedSend now$/u);
+    expect(within(queue).getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Send now");
     expect(within(queue).getByRole("button", { name: "Remove queued message" })).toHaveTextContent("");
   });
 });

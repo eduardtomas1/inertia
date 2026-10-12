@@ -86,7 +86,7 @@ async function requestElectronQuit(
   mode: "prepared" | "application",
 ): Promise<number | null> {
   if (!current) return null;
-  return await current.evaluate(({ BrowserWindow, app }, quitMode) => {
+  return await current.evaluate(({ BrowserWindow, app, webContents }, quitMode) => {
     const runtime = Reflect.get(
       globalThis,
       "__inertiaTestRuntime",
@@ -123,9 +123,24 @@ async function requestElectronQuit(
         app.once("activate", () => mark("activated-after-cleanup"));
       }
     } catch { mark("quit-events-observer-unavailable"); }
+    const count = (read: () => number): string => {
+      try { return String(read()); } catch { return "unavailable"; }
+    };
+    const resources = (): string => {
+      try {
+        const counts = new Map<string, number>();
+        for (const name of process.getActiveResourcesInfo()) {
+          if (/^[A-Za-z]{1,40}$/u.test(name)) counts.set(name, (counts.get(name) ?? 0) + 1);
+        }
+        return [...counts].sort(([left], [right]) => (left < right ? -1 : 1)).slice(0, 6)
+          .map(([name, total]) => `${name}:${total}`).join(",") || "none";
+      } catch { return "unavailable"; }
+    };
     try {
       const exit = process.exit;
       process.exit = function (...args): never {
+        mark(`exit-inventory windows=${count(() => BrowserWindow.getAllWindows().length)} `
+          + `webContents=${count(() => webContents.getAllWebContents().length)} resources=${resources()}`);
         // Node waits for attached debuggers inside process.exit. Detach the
         // test inspector here, after privileged cleanup and window destruction,
         // so Playwright's debugger cannot keep the clean process resident.

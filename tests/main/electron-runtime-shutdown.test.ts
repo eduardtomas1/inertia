@@ -21,9 +21,11 @@ function fixture(windows: unknown[], writeFails = false) {
   const quit = vi.fn();
   vi.stubGlobal("__inertiaTestRuntime", { finishPreparedQuit: finish, quit });
   const app = new EventEmitter();
+  vi.spyOn(process, "getActiveResourcesInfo").mockReturnValue(["Timeout", "FSReqCallback", "Timeout"]);
   const current = {
     evaluate: async (operation: (electron: unknown, mode: unknown) => unknown, mode: unknown) =>
-      operation({ app, BrowserWindow: { getAllWindows: () => windows } }, mode),
+      operation({ app, BrowserWindow: { getAllWindows: () => windows },
+        webContents: { getAllWebContents: () => [{}, {}] } }, mode),
   } as unknown as ElectronApplication;
   return { write, closeInspector, exit, exitFailure, finish, quit, current, app };
 }
@@ -68,6 +70,7 @@ it.each([false, true])("forwards prepared exit and sole-window destruction uncha
   expect(f.write.mock.calls).toEqual([
     [2, "[Inertia test exit: window-destroy-entered]\n"],
     [2, "[Inertia test exit: window-destroy-returned]\n"],
+    [2, "[Inertia test exit: exit-inventory windows=1 webContents=2 resources=FSReqCallback:1,Timeout:2]\n"],
     [2, "[Inertia test exit: process-exit-called]\n"],
   ]);
 });
@@ -89,6 +92,34 @@ it("does not close the inspector when privileged cleanup rejects the prepared qu
   await expect(finishElectronPreparedQuit(f.current)).rejects.toThrow("cleanup unconfirmed");
   expect(f.closeInspector).not.toHaveBeenCalled();
   expect(f.exit).not.toHaveBeenCalled();
+});
+
+it("reports an unavailable exit inventory without preventing the exit", async () => {
+  const f = fixture([]);
+  vi.mocked(process.getActiveResourcesInfo).mockImplementation(() => { throw new Error("private failure"); });
+  const current = {
+    evaluate: async (operation: (electron: unknown, mode: unknown) => unknown, mode: unknown) =>
+      operation({ app: f.app, BrowserWindow: { getAllWindows: () => { throw new Error("gone"); } } }, mode),
+  } as unknown as ElectronApplication;
+  await finishElectronPreparedQuit(current);
+  expect(() => process.exit(0)).toThrow(f.exitFailure);
+  expect(f.exit).toHaveBeenCalledExactlyOnceWith(0);
+  expect(f.write.mock.calls.map((call) => call[1])).toEqual([
+    "[Inertia test exit: window-observer-unavailable]\n",
+    "[Inertia test exit: exit-inventory windows=unavailable webContents=unavailable resources=unavailable]\n",
+    "[Inertia test exit: process-exit-called]\n",
+  ]);
+});
+
+it("bounds the exit inventory to well-formed resource names", async () => {
+  const f = fixture([]);
+  vi.mocked(process.getActiveResourcesInfo).mockReturnValue([
+    "A", "B", "C", "D", "E", "F", "G", "/Users/secret", "x".repeat(41),
+  ]);
+  await finishElectronPreparedQuit(f.current);
+  expect(() => process.exit(0)).toThrow(f.exitFailure);
+  expect(f.write.mock.calls.map((call) => call[1])).toContain(
+    "[Inertia test exit: exit-inventory windows=0 webContents=2 resources=A:1,B:1,C:1,D:1,E:1,F:1]\n");
 });
 
 it("does not report a completed process exit if closing the inspector fails", async () => {
@@ -127,6 +158,7 @@ it("distinguishes synchronous quit listeners from a returning Electron exit call
   process.exit(0);
   expect(f.write.mock.calls.map((call) => call[1])).toEqual([
     "[Inertia test exit: window-identity-unavailable]\n",
+    "[Inertia test exit: exit-inventory windows=0 webContents=2 resources=FSReqCallback:1,Timeout:2]\n",
     "[Inertia test exit: process-exit-called]\n",
     "[Inertia test exit: app-quit-entered]\n",
     "existing listener",

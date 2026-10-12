@@ -45,7 +45,8 @@ describe("task due dates", () => {
     expect(todoDuePresetDate("next-week", thursday)).toBe("2027-01-04");
 
     const sunday = new Date(2026, 9, 18, 8);
-    expect(todoDuePresetDate("next-week", sunday)).toBe("2026-10-19");
+    expect(todoDuePresetDate("tomorrow", sunday)).toBe("2026-10-19");
+    expect(todoDuePresetDate("next-week", sunday)).toBe("2026-10-26");
     const monday = new Date(2026, 9, 12, 8);
     expect(todoDuePresetDate("next-week", monday)).toBe("2026-10-19");
   });

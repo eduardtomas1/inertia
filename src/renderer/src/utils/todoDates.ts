@@ -26,7 +26,8 @@ export function todoDuePresetDate(preset: TodoDuePreset, now = new Date()): stri
   const today = startOfLocalDay(now);
   if (preset === "today") return localDateKey(today);
   if (preset === "tomorrow") return localDateKey(addLocalDays(today, 1));
-  return localDateKey(addLocalDays(today, (8 - today.getDay()) % 7 || 7));
+  const untilMonday = (8 - today.getDay()) % 7 || 7;
+  return localDateKey(addLocalDays(today, untilMonday === 1 ? 8 : untilMonday));
 }
 
 export function todoDueLabel(dueDate: string, now = new Date()): string {

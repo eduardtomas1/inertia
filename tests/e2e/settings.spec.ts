@@ -12,6 +12,7 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { openTerminalDock } from "./support/workspace-tools";
 import { setAppearance } from "./support/appearance";
 import { expectBorderlessSettingsRows, expectFlatSettingsSections } from "./support/settings-assertions";
+import { expectContextRingFitsItsNumber } from "./support/usage-ring";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -497,12 +498,11 @@ test("persists composer usage modes without losing the followed transcript", asy
       strokeWidth: value ? getComputedStyle(value).strokeWidth : null,
     };
   });
-  expect(ringGeometry.width).toBeGreaterThanOrEqual(23);
-  expect(ringGeometry.width).toBeLessThanOrEqual(31);
-  expect(ringGeometry.height).toBe(ringGeometry.width);
+  expect([ringGeometry.width, ringGeometry.height]).toEqual([28, 28]);
   expect(ringGeometry.animations).toBe(0);
-  expect(ringGeometry.strokeWidth).toBe("1.65px");
+  expect(ringGeometry.strokeWidth).toBe("2px");
   expect(ringGeometry.width).toBeLessThan(ringGeometry.sendWidth);
+  await expectContextRingFitsItsNumber(compact.locator(".usage-popover-trigger .usage-context-ring"));
   const contextRingScreenshot = testInfo.outputPath(
     "context-ring-near-limit-1440x920.png",
   );

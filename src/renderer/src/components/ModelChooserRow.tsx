@@ -4,7 +4,7 @@ import {
   type JSX,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { Check, Pin } from "lucide-react";
+import { Check, Star } from "lucide-react";
 
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { TooltipButton } from "./TooltipButton";
@@ -289,14 +289,14 @@ export const ModelChooserFavoriteButton = memo(function ModelChooserFavoriteButt
   return (
     <TooltipButton
       className="model-chooser-row-favorite"
-      aria-label={`${row.favorite ? "Unpin" : "Pin"} ${row.displayName} on ${row.backendProfileName}`}
+      aria-label={`${row.favorite ? "Remove" : "Add"} ${row.displayName} on ${row.backendProfileName} ${row.favorite ? "from" : "to"} favorites`}
       aria-pressed={row.favorite}
-      tooltip={row.favorite ? "Unpin model" : "Pin model"}
+      tooltip={row.favorite ? "Remove from favorites" : "Add to favorites"}
       describeTooltip={false}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => activateModelChooserFavorite(event, row, onFavoriteToggle)}
     >
-      <Pin size={14} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
+      <Star size={14} fill={row.favorite ? "currentColor" : "none"} aria-hidden="true" />
     </TooltipButton>
   );
 });

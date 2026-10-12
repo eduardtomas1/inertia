@@ -1,7 +1,7 @@
 import {
   CloudCog,
-  Pin,
   Plug,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -39,7 +39,7 @@ export type ModelSourceRailGlyph =
 export function modelSourceRailItemGlyph(
   item: ModelSourceRailItem,
 ): ModelSourceRailGlyph {
-  if (item.filter.kind === "favorites") return { kind: "icon", Icon: Pin };
+  if (item.filter.kind === "favorites") return { kind: "icon", Icon: Star };
   if (item.filter.kind === "provider") {
     return { kind: "provider", providerId: item.filter.providerId };
   }

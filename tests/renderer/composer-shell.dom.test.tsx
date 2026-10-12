@@ -64,14 +64,12 @@ describe("composer shell", () => {
       scratchWorkspace: false,
       newChatProjectPicker: false,
       worktreePath: null,
-      checkoutDiffers: false,
       repository: true,
     };
     expect(composerCheckoutStrip(base)).toBe("branch");
     expect(composerCheckoutStrip({ ...base, repository: false })).toBe("hidden");
     expect(composerCheckoutStrip({ ...base, worktreePath: "/work/studio-worktree" })).toBe("context");
-    expect(composerCheckoutStrip({ ...base, checkoutDiffers: true })).toBe("context");
-    expect(composerCheckoutStrip({ ...base, scratchWorkspace: true, checkoutDiffers: true })).toBe("hidden");
+    expect(composerCheckoutStrip({ ...base, scratchWorkspace: true })).toBe("hidden");
     expect(composerCheckoutStrip({ ...base, scratchWorkspace: true, newChatProjectPicker: true })).toBe("context");
     expect(composerCheckoutStrip({ ...base, showCheckoutContext: false, worktreePath: "/work/x" })).toBe("hidden");
 
@@ -87,12 +85,15 @@ describe("composer shell", () => {
     fireEvent.click(await within(quiet).findByRole("button", { name: "Branch main" }));
     expect(within(quiet).getByRole("button", { name: "Branch main" })).toHaveAttribute("aria-expanded", "true");
     view.rerender(
-      <CheckoutBranchControlProvider value={checkoutModel("feature/other")}>
+      <CheckoutBranchControlProvider value={{ ...checkoutModel("feature/other"), conversation: current }}>
         <Composer {...composerProps(current)} />
       </CheckoutBranchControlProvider>,
     );
-    expect(screen.getByRole("group", { name: "Chat checkout context" })).toHaveTextContent(/^Current checkout/u);
-    expect(screen.getByRole("group", { name: "Chat checkout context" })).not.toHaveClass("is-branch-only");
+    const differing = screen.getByRole("group", { name: "Chat checkout context" });
+    expect(differing).toHaveClass("is-branch-only");
+    expect(await within(differing).findByRole("button", { name: "Checkout context differs, current branch main" }))
+      .toHaveTextContent("Current checkout · main");
+    expect(differing.textContent?.match(/Current checkout/gu)).toHaveLength(1);
     view.rerender(
       <CheckoutBranchControlProvider value={checkoutModel("main")}>
         <Composer {...composerProps({ ...current, worktreePath: "/work/studio-worktree" })} />

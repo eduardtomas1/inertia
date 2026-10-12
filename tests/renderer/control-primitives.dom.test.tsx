@@ -355,7 +355,7 @@ describe("icon primitives", () => {
     const retired = new Set([
       "AlertCircle", "AlertTriangle", "CheckCircle2", "Clock3", "Edit3", "FolderSearch", "Folders", "Globe2",
       "LifeBuoy", "LockKeyhole", "PlugZap", "SquareArrowOutUpRight", "Clipboard", "BarChart3", "Bot", "Brain",
-      "BrainCircuit", "Command", "Network", "Share2", "Star", "WandSparkles", "Table2", "WrapText", "Compass",
+      "BrainCircuit", "Command", "Network", "Share2", "WandSparkles", "Table2", "WrapText", "Compass",
       "MessageSquareX", "ArrowUpRight", "LoaderCircle", "Activity", "FilePenLine", "FileSearch",
       "TerminalSquare", "SquareTerminal",
     ]);

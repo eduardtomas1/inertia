@@ -246,7 +246,14 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     expect(claudeLine("TaskCreate", { subject: "Ship the mascot" })).toBe("Updating the plan");
     expect(claudeLine("TaskList", {})).toBe("Listing tasks");
     expect(claudeLine("ListMcpResourcesTool", {})).toBe("Listing resources");
-    expect(claudeLine("TodoWrite", { todos: [{ content: "Ship", status: "in_progress", activeForm: "Shipping" }] }, "TodoWrite-progress")).toBe("Ship");
+    const progress = [{ content: "Ship", status: "in_progress", activeForm: "Shipping" }];
+    claudeLine("TodoWrite", { todos: progress }, "TodoWrite-progress");
+    projector.observe({
+      type: "user", uuid: "user-TodoWrite-progress", session_id: "session", parent_tool_use_id: null,
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "TodoWrite-progress", content: "ok" }] },
+      tool_use_result: { oldTodos: [], newTodos: progress },
+    } as unknown as SDKMessage, false);
+    expect(claude.line()).toBe("Ship");
 
     const opencode = mascotTurn("opencode");
     const state = createOpenCodeEventState();

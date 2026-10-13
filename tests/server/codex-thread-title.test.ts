@@ -173,7 +173,7 @@ describe("Codex thread title generation", () => {
     expect(run.request("turn/interrupt")?.params).toEqual({ threadId: "title-thread", turnId: "title-turn" });
   });
 
-  it.each(["hang", "deaf"] as const)(
+  it.each(["hang", "slow-start", "deaf"] as const)(
     "interrupts the hidden turn and stops the process tree on cancellation (%s interrupt)",
     async (scenario) => {
       const controller = new AbortController();

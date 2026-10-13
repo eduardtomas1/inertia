@@ -236,6 +236,7 @@ export async function generateCodexThreadTitle(
       const threadId = boundedText(objectValue(opened.thread)?.id, 512);
       if (!threadId || !isIsolatedThread(opened)) return undefined;
       watcher.threadId = threadId;
+      turnStarted = true;
       const started = await client.request("turn/start", {
         threadId,
         input: [{ type: "text", text: titleRequest(options.prompt), text_elements: [] }],
@@ -245,7 +246,6 @@ export async function generateCodexThreadTitle(
       });
       const turnId = boundedText(objectValue(started.turn)?.id, 512);
       if (!turnId) return undefined;
-      turnStarted = true;
       watcher.start(turnId);
       const answer = await watcher.outcome;
       if (!watcher.completed) await interruptTurn(client, { threadId, turnId });

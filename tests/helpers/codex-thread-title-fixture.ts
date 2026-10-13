@@ -12,6 +12,7 @@ export type CodexThreadTitleScenario =
   | "error"
   | "approval"
   | "hang"
+  | "slow-start"
   | "deaf"
   | "overflow"
   | "persistent-thread"
@@ -73,6 +74,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sandbox: readOnly ? { type: "readOnly", networkAccess: false } : { type: "workspaceWrite", writableRoots: [], networkAccess: false },
       reasoningEffort: null,
     } });
+  }
+  if (message.method === "turn/start" && scenario === "slow-start") {
+    return setTimeout(() => send({ id: message.id, result: { turn: turn("inProgress") } }), 500);
   }
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: turn("inProgress") } });

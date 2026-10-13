@@ -1,4 +1,5 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
 import { HtmlRenderRepository } from "./persistence/html-render-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
@@ -364,6 +365,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  get restartContinuations() { return new RestartContinuationRepository(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return {

@@ -52,6 +52,14 @@
   color: var(--text);
   background: var(--fill);
 }
+.sidebar-tasks-action {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.sidebar-tasks-action.is-active,
+.sidebar-tasks-action.is-active:hover {
+  background: var(--fill-strong);
+}
 .sidebar-search-wrap {
   position: relative;
   display: flex;

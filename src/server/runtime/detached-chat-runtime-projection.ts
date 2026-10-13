@@ -85,6 +85,7 @@ export function projectDetachedChatSnapshot(
     backendDefaults: [],
     settings: projectedSettings(snapshot.settings),
     promptPresets: [],
+    todos: [],
     activeProjectId: project?.id ?? null,
     activeConversationId: conversation?.id ?? null,
     ...(snapshot.sync ? { sync: snapshot.sync } : {}),

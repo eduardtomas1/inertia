@@ -111,6 +111,7 @@ function snapshot(): AppSnapshot {
       },
     },
     promptPresets: [{ id: "secret-preset" }] as unknown as NonNullable<AppSnapshot["promptPresets"]>,
+    todos: [{ id: "secret-task" }] as unknown as NonNullable<AppSnapshot["todos"]>,
     activeProjectId: OTHER_PROJECT,
     activeConversationId: OTHER_CONVERSATION,
   };
@@ -167,6 +168,7 @@ describe("detached chat runtime authority", () => {
     expect(projected.maintenanceOperations).toEqual([]);
     expect(projected.backendDefaults).toEqual([]);
     expect(projected.promptPresets).toEqual([]);
+    expect(projected.todos).toEqual([]);
     expect(projected).not.toHaveProperty("databaseBackup");
     expect(projected.settings).toMatchObject({
       theme: "dark",
@@ -419,6 +421,15 @@ describe("detached chat runtime authority", () => {
       requestId: REQUEST,
       payload: { presetId: REQUEST, expectedRevision: 1 },
     })).not.toBeNull();
+    for (const command of [
+      { type: "todo.create", requestId: REQUEST, payload: { id: REQUEST, title: "Task", note: "", priority: null, dueDate: null } },
+      { type: "todo.update", requestId: REQUEST, payload: { id: REQUEST, patch: { completed: true } } },
+      { type: "todo.delete", requestId: REQUEST, payload: { id: REQUEST } },
+      { type: "todo.start", requestId: REQUEST, payload: { id: REQUEST, conversation: { projectId: PROJECT } } },
+    ] satisfies ClientCommand[]) {
+      expect(rejection(command)).not.toBeNull();
+      expect(mainRejection(command)).toBeNull();
+    }
   });
 
   it("allows only search mentions in the owning workspace", () => {

@@ -363,6 +363,7 @@ export class RuntimeStore {
   }
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
+  get todos() { return this.snapshotRepository.todos; }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return {

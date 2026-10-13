@@ -172,6 +172,7 @@ export default defineConfig({
             const compactNames: Record<string, string> = {
               attentionVisibility: "chat",
               BackgroundTasksSurface: "tasks",
+              TasksView: "todo",
               BrowserEvidenceTimeline: "evidence",
               "external-link": "link",
               "terminal-turn-projection": "turn",

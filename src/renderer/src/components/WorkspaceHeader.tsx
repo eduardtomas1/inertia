@@ -237,7 +237,9 @@ export function WorkspaceHeader({
       ? "Settings"
       : view === "usage"
         ? "Usage"
-        : conversation?.title ?? project?.name ?? "Workspace";
+        : view === "tasks"
+          ? "Tasks"
+          : conversation?.title ?? project?.name ?? "Workspace";
   const showProjectCrumb = view === "workspace" && project !== null && conversation !== null;
   const newChatInProjectLabel = project?.workspaceKind === "scratch" ? "New chat without a project" : `New chat in ${project?.name}`;
   const titleMenuAvailable = view === "workspace"

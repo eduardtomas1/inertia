@@ -30,6 +30,17 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   [92, "agent_turns", ["origin"]],
   [93, "messages", ["html_render_json"]],
   [95, "conversation_context_packets", ["supplement_json"]],
+  [96, "todos", [
+    "id",
+    "title",
+    "note",
+    "priority",
+    "due_date",
+    "completed_at",
+    "conversation_id",
+    "created_at",
+    "updated_at",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -71,6 +82,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [92, ["cli_conversation_imports"]],
   [93, ["html_renders"]],
   [94, ["agent_context_reads"]],
+  [96, ["todos"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -84,5 +96,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [93, "html_renders_turn_idx"],
     [94, "agent_context_reads_identity_idx"],
     [94, "agent_context_reads_target_idx"],
+    [96, "todos_conversation_idx"],
   ],
 };

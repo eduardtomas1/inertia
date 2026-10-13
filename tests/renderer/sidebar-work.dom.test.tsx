@@ -130,7 +130,7 @@ function renderSidebar(
     splitConversationId?: string | null;
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
-    view?: "workspace" | "settings" | "usage" | "home";
+    view?: "workspace" | "settings" | "usage" | "tasks" | "home";
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -334,6 +334,34 @@ describe("compact Work sidebar", () => {
 
     renderSidebar([], vi.fn(), [], { dailyWorkOpen: true });
     expect(screen.getByRole("button", { name: "Daily work" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens Tasks from its own labelled row between New chat and Search", () => {
+    const view = renderSidebar([]);
+    const primaryRow = view.container.querySelector<HTMLElement>(".sidebar-primary-row")!;
+    expect(within(primaryRow).queryByRole("button", { name: "Tasks" })).toBeNull();
+    const tasks = screen.getByRole("button", { name: "Tasks" });
+    expect(tasks).toHaveClass("sidebar-primary-action");
+    expect(tasks).not.toHaveAttribute("aria-label");
+    expect(tasks.querySelector("span")).toHaveTextContent(/^Tasks$/u);
+    expect(tasks.querySelector(".lucide-list-todo")).toHaveAttribute("aria-hidden", "true");
+    expect(tasks.previousElementSibling).toBe(primaryRow);
+    expect(tasks.nextElementSibling).toHaveClass("sidebar-search-wrap");
+    const order = [...view.container.querySelectorAll<HTMLElement>("button, input")]
+      .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim());
+    const start = order.indexOf("New chat");
+    expect(order.slice(start, start + 4)).toEqual(["New chat", "Launch two chats", "Tasks", "Search projects and conversations"]);
+    expect(tasks).not.toHaveAttribute("aria-current");
+    expect(tasks).not.toHaveClass("is-active");
+    fireEvent.click(tasks);
+    expect(view.onViewChange).toHaveBeenCalledWith("tasks");
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+    view.unmount();
+
+    renderSidebar([], vi.fn(), [], { view: "tasks" });
+    const active = screen.getByRole("button", { name: "Tasks" });
+    expect(active).toHaveAttribute("aria-current", "page");
+    expect(active).toHaveClass("is-active");
   });
 
   it("keeps the repository label in the original path case for Windows projects", () => {

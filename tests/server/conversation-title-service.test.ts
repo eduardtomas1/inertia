@@ -338,7 +338,6 @@ describe("conversation title sources", () => {
       store: {
         assertConversationProvider,
         conversationPath: vi.fn(() => "/workspace/chat"),
-        cliConversationImport: vi.fn(() => null),
       },
       providers: { codexControlContext, claudeSkills: vi.fn() },
     });

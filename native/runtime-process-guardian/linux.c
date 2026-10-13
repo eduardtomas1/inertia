@@ -791,6 +791,9 @@ static int exact_signal_mode(int argc, char **argv) {
         || (!strcmp(action, "release") && named_status(pid, "inertia-exitok"))) {
         close(pidfd); return 0;
       }
+      if (!strcmp(action, "exec") && pidfd_exited(pidfd)) {
+        close(pidfd); return 4;
+      }
       if (!strcmp(action, "release")) {
         errno = 0;
         if (syscall(SYS_pidfd_send_signal, pidfd, 0, NULL, 0) < 0 && errno == ESRCH) {

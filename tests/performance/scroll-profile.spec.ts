@@ -37,6 +37,7 @@ const rows = Number(process.env.INERTIA_SCROLL_ROWS ?? (scenario === "sidebar" ?
 const sidebarConversations = Number(process.env.INERTIA_SCROLL_SIDEBAR_CHATS ?? (scenario === "sidebar" ? 500 : 0));
 const traceEnabled = process.env.INERTIA_SCROLL_TRACE === "1";
 const commitCounting = process.env.INERTIA_SCROLL_COMMITS === "1";
+const coverageSampling = process.env.INERTIA_SCROLL_COVERAGE === "1";
 const ablations = (process.env.INERTIA_SCROLL_ABLATE ?? "").split(",").filter(Boolean);
 const appRoot = resolve(process.env.INERTIA_SCROLL_APP_ROOT ?? ".");
 const runLabel = process.env.INERTIA_SCROLL_LABEL ?? `${scenario}-${rows}`;
@@ -114,9 +115,9 @@ async function measurePass(
     await session.send("Profiler.start");
   }
   if (commitCounting) await page.evaluate(() => (Reflect.get(window, "__scrollProfileCommits") as { start(): void }).start());
-  await page.evaluate(({ scroll, row }) => {
-    (Reflect.get(window, "__scrollProfileFrames") as { start(a: string, b: string): void }).start(scroll, row);
-  }, selectors);
+  await page.evaluate(({ scroll, row, coverage }) => {
+    (Reflect.get(window, "__scrollProfileFrames") as { start(a: string, b: string, c: boolean): void }).start(scroll, row, coverage);
+  }, { ...selectors, coverage: coverageSampling });
   const startedAt = performance.now();
   const extra = await action();
   const actionMs = performance.now() - startedAt;
@@ -419,6 +420,7 @@ test("profiles scrolling", async () => {
       sidebarConversations,
       traceEnabled,
       commitCounting,
+      coverageSampling,
       ablations,
       appRoot,
       cssOverride,

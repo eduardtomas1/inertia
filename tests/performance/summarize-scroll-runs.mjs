@@ -18,6 +18,8 @@ const metrics = [
   ["over25Ms", (frames) => frames.framesOver25Ms],
   ["maxFrameMs", (frames) => frames.maximumFrameMs],
   ["rowMounts", (frames) => frames.rowMounts],
+  ["blankOver10PctFrames", (frames) => frames.blankFrames?.sampled ? frames.blankFrames.over10Pct / frames.blankFrames.sampled * 100 : 0],
+  ["meanBlankPct", (frames) => frames.blankFrames?.meanBlankPct ?? 0],
 ];
 
 function stats(values) {

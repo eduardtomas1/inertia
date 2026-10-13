@@ -95,6 +95,7 @@ export interface FrameRecording {
   scrollEvents: number;
   rowMounts: number;
   rowUnmounts: number;
+  blankFrames: { sampled: number; over10Pct: number; over50Pct: number; meanBlankPct: number };
   longTasks: number[];
   longAnimationFrames: Array<{
     startTime: number;
@@ -117,7 +118,7 @@ export interface FrameRecording {
 
 export function installFrameRecorder(): void {
   type Recorder = {
-    start(scrollSelector: string, rowSelector: string): void;
+    start(scrollSelector: string, rowSelector: string, coverage: boolean): void;
     stop(): unknown;
   };
   if (Reflect.get(window, "__scrollProfileFrames")) return;
@@ -132,17 +133,38 @@ export function installFrameRecorder(): void {
   let longTasks: number[] = [];
   let loafs: unknown[] = [];
   let scrollTarget: Element | null = null;
+  let coverageRows = "";
+  let coverageEnabled = false;
+  let blankFractions: number[] = [];
+  const sampleCoverage = (): void => {
+    if (!scrollTarget) return;
+    const viewport = scrollTarget.getBoundingClientRect();
+    const spans = Array.from(scrollTarget.querySelectorAll(coverageRows), (row) => {
+      const bounds = row.getBoundingClientRect();
+      return [Math.max(viewport.top, bounds.top), Math.min(viewport.bottom, bounds.bottom)] as const;
+    }).filter(([top, bottom]) => bottom > top).sort((left, right) => left[0] - right[0]);
+    let covered = 0;
+    let cursor = viewport.top;
+    for (const [top, bottom] of spans) {
+      const start = Math.max(cursor, top);
+      if (bottom > start) covered += bottom - start;
+      cursor = Math.max(cursor, bottom);
+    }
+    blankFractions.push(viewport.height > 0 ? 1 - covered / viewport.height : 0);
+  };
   let observers: PerformanceObserver[] = [];
   let mutation: MutationObserver | null = null;
   const onScroll = (): void => { scrollEvents += 1; };
   const frame = (now: number): void => {
     if (!running) return;
     intervals.push(now - previous);
+    if (coverageEnabled) sampleCoverage();
     previous = now;
     handle = requestAnimationFrame(frame);
   };
   const recorder: Recorder = {
-    start(scrollSelector, rowSelector) {
+    start(scrollSelector, rowSelector, coverage) {
+      coverageRows = rowSelector; coverageEnabled = coverage; blankFractions = [];
       intervals = []; scrollEvents = 0; rowMounts = 0; rowUnmounts = 0; longTasks = []; loafs = [];
       scrollTarget = document.querySelector(scrollSelector);
       scrollTarget?.addEventListener("scroll", onScroll, { passive: true });
@@ -227,6 +249,12 @@ export function installFrameRecorder(): void {
         scrollEvents,
         rowMounts,
         rowUnmounts,
+        blankFrames: {
+          sampled: blankFractions.length,
+          over10Pct: blankFractions.filter((value) => value > 0.1).length,
+          over50Pct: blankFractions.filter((value) => value > 0.5).length,
+          meanBlankPct: blankFractions.length ? blankFractions.reduce((sum, value) => sum + value, 0) / blankFractions.length * 100 : 0,
+        },
         longTasks,
         longAnimationFrames: loafs,
         intervals: intervals.map((value) => Number(value.toFixed(2))),

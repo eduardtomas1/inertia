@@ -9,6 +9,7 @@ import { NativeUsageReader } from "./native";
 import { NativeSubscriptionReader } from "./native-subscriptions";
 import { USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE } from "../../node/backend-secret-reference";
 import { createLimitResetRuntime } from "../runtime/limit-reset-runtime";
+import { createRestartContinuationRuntime } from "../runtime/restart-continuation-runtime";
 import type { TurnInteractionCommandDependencies } from "../runtime/commands/turn-interaction-commands";
 
 interface ResumeRuntimeOptions {
@@ -29,5 +30,7 @@ export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManag
   });
   const limitReset = createLimitResetRuntime(resume.dependencies, service, { signal, track: resume.track });
   limitReset.start();
-  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler] };
+  const restartContinuation = createRestartContinuationRuntime(resume.dependencies, { signal, track: resume.track });
+  restartContinuation.start();
+  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler], restartContinuation };
 }

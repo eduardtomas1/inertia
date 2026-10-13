@@ -35,6 +35,7 @@ import {
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
+import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
   agentTurnFromRow,
   normalizeAgentTurnUsage,
@@ -301,6 +302,9 @@ export class TurnLedgerRepository {
           WHERE id=? AND conversation_id=? AND state='dispatching'
         `).run(turn.id, input.limitResetPlanId, input.conversationId);
         if (accepted.changes !== 1) throw new Error("The reset plan no longer owns this dispatch.");
+      }
+      if (input.restartContinuationPlanId) {
+        completeRestartContinuationPlan(this.context.database, input.restartContinuationPlanId, input.conversationId, turn.id);
       }
       if (input.queuedMessageId) {
         const accepted = this.context.database.prepare(`

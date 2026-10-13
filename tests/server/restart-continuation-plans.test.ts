@@ -10,6 +10,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 
+const settledAt = () => { const at = new Date().toISOString(); return { startedAt: at, completedAt: at }; };
 let directory: string;
 let databasePath: string;
 let store: RuntimeStore;
@@ -182,6 +183,26 @@ describe("restart continuation plan repository", () => {
     store.restartContinuations.complete(done!, "next-turn");
     expect(store.restartContinuations.cancel(done!, "Too late.")).toBe(false);
     expect(store.restartContinuations.forConversation(second.conversationId)).toMatchObject({ state: "completed", error: null });
+  });
+
+  it("completes a claimed plan in the same transaction as the continuation turn", () => {
+    const chat = chatWithTurn();
+    store.updateAgentTurnLifecycle(chat.turnId, { status: "interrupted", terminalReason: "app-update", ...settledAt() });
+    const [plan] = store.restartContinuations.createForConversations([planInput(chat)]);
+    const conversation = store.conversation(chat.conversationId);
+    const run = store.createWorkspaceRun({ kind: "agent", projectId, conversationId: chat.conversationId,
+      label: "Task", detail: null, status: "running", port: null });
+    const continuation = () => store.beginAgentTurn({ conversationId: chat.conversationId, runId: run.id,
+      content: "Continue from where you stopped.", providerId: conversation.providerId, modelSelection: conversation.modelSelection,
+      model: "gpt-test", reasoningEffort: conversation.reasoningEffort, interactionMode: conversation.interactionMode,
+      accessMode: conversation.accessMode, configurationRevision: 0, association: "authoritative",
+      restartContinuationPlanId: plan!.id }).turn;
+    expect(continuation).toThrow("no longer owns");
+    expect(store.latestAgentTurnForConversation(chat.conversationId)?.id).toBe(chat.turnId);
+    expect(store.conversationDetail(chat.conversationId)!.messages.map(({ content }) => content)).toEqual(["Refactor the parser."]);
+    store.restartContinuations.claim(plan!);
+    const turn = continuation();
+    expect(store.restartContinuations.forConversation(chat.conversationId)).toMatchObject({ state: "completed", turnId: turn.id });
   });
 
   it("deletes a chat's plan with the chat", () => {

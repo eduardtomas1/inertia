@@ -120,6 +120,14 @@ export function mergeProjectionPlans(
   return [...merged.values()];
 }
 
+export function latestPlanDocument(plans: readonly AgentPlan[]): string | null {
+  for (let index = plans.length - 1; index >= 0; index -= 1) {
+    const explanation = plans[index]!.explanation;
+    if (explanation?.trim()) return explanation;
+  }
+  return null;
+}
+
 export function compareSubagentTraces(
   left: SubagentTrace,
   right: SubagentTrace,

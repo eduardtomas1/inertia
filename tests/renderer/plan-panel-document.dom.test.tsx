@@ -5,7 +5,8 @@ import type { AgentPlan } from "../../src/shared/contracts";
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
 import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
 import { EMPTY_STREAMING_AGENT_SOURCE } from "../../src/renderer/src/hooks/useStreamingAgentState";
-import { latestPlanDocument, planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
+import { planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
+import { latestPlanDocument } from "../../src/renderer/src/utils/terminalTurnProjection";
 
 const markdown = { projectRoot: "/workspace", projectId: "project", defaultCodeWrap: true };
 const plan = [

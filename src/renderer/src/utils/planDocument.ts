@@ -1,5 +1,3 @@
-import type { AgentPlan } from "@shared/contracts";
-
 const HEADING = /^\s{0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/u;
 const PLAN_PREFIX = /^plan\s*[:\-–—]\s*/iu;
 const INLINE = /`([^`\n]+)`|\*\*([^*\n]+)\*\*/gu;
@@ -15,14 +13,6 @@ export function planDocument(markdown: string): PlanDocument {
     title: heading.charAt(0).toLocaleUpperCase() + heading.slice(1),
     body: lines.slice(1).join("\n").trim(),
   };
-}
-
-export function latestPlanDocument(plans: readonly AgentPlan[]): string | null {
-  for (let index = plans.length - 1; index >= 0; index -= 1) {
-    const explanation = plans[index]!.explanation;
-    if (explanation?.trim()) return explanation;
-  }
-  return null;
 }
 
 export function planDocumentIsLong(body: string): boolean {

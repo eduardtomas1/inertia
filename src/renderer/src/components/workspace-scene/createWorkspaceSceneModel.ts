@@ -56,7 +56,7 @@ import { buildWorkspaceSurfaceSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
-import { latestPlanDocument } from "../../utils/planDocument";
+import { latestPlanDocument } from "../../utils/terminalTurnProjection";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";

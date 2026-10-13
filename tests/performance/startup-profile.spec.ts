@@ -190,7 +190,8 @@ function launchEnvironment(fixture: Fixture, dataDirectory: string, profileDirec
     INERTIA_WORKSPACE_DIR: fixture.workspaces[0]!,
     INERTIA_TEST_PROVIDER_BIN_DIR: fixture.providerBin,
     INERTIA_STARTUP_OBSERVER_SCRIPT: OBSERVER_SCRIPT,
-    ...(MAIN_CPU_PROFILE ? { NODE_OPTIONS: `--cpu-prof --cpu-prof-dir=${mainProfileDirectory}` } : {}),
+    INERTIA_STARTUP_QUIT_FILE: MODE === "playwright" ? "0" : "1",
+    ...(MAIN_CPU_PROFILE ? { INERTIA_STARTUP_MAIN_CPU_PROFILE_DIR: mainProfileDirectory } : {}),
     ...(WORKER_CPU_PROFILE ? { INERTIA_STARTUP_WORKER_CPU_PROFILE_DIR: workerProfileDirectory } : {}),
   };
 }
@@ -208,7 +209,7 @@ async function summarizeProfiles(profileDirectory: string, record: LaunchRecord)
     const kept = join(OUTPUT_DIRECTORY, `${LABEL}-${record.temperature}-r${record.round}-${kind}.cpuprofile`);
     await cp(path, kept);
     record.cpuProfiles[`${kind}Path`] = kept;
-    record.cpuProfiles[kind] = await summarizeCpuProfileFile(path, { windowMs: kind === "main" ? (record.harness.composerMs ?? 4_000) + 500 : 6_000 });
+    record.cpuProfiles[kind] = await summarizeCpuProfileFile(path);
   }
 }
 
@@ -278,27 +279,38 @@ async function profileRendererReload(page: Page, record: LaunchRecord): Promise<
   await session.detach();
 }
 
+async function ensureProfileDirectories(profileDirectory: string): Promise<void> {
+  const base = profileDirectory.split("/").at(-1)!;
+  if (MAIN_CPU_PROFILE) await mkdir(join(profileDirectory, "..", `${base}-main-cpu`), { recursive: true });
+  if (WORKER_CPU_PROFILE) await mkdir(join(profileDirectory, "..", `${base}-worker-cpu`), { recursive: true });
+}
+
 async function launchWithSpawn(fixture: Fixture, dataDirectory: string, profileDirectory: string, record: LaunchRecord, traceFile: string | null): Promise<void> {
   const args = [".", `--user-data-dir=${profileDirectory}`];
   if (traceFile) {
-    args.push(`--trace-startup=${TRACE_CATEGORIES}`, `--trace-startup-file=${traceFile}`, `--trace-startup-duration=${TRACE_SECONDS}`);
+    args.push(`--trace-startup=${TRACE_CATEGORIES}`, `--trace-startup-file=${traceFile}`, `--trace-startup-duration=${TRACE_SECONDS}`, "--trace-startup-format=json");
   }
   record.launchRequestedAt = Date.now();
   const child: ChildProcess = spawn(electronExecutable(), args, {
     env: launchEnvironment(fixture, dataDirectory, profileDirectory),
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
     shell: false,
   });
   let stderr = "";
-  child.stderr?.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4_000); });
-  const exited = new Promise<number | null>((resolveExit) => child.once("exit", (code) => resolveExit(code)));
+  const capture = (chunk: Buffer): void => { stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4_000); };
+  child.stdout?.on("data", capture);
+  child.stderr?.on("data", capture);
+  let exitCode: number | null | undefined;
+  const exited = new Promise<number | null>((resolveExit) => child.once("exit", (code) => { exitCode = code; resolveExit(code); }));
   let runtimePid: number | null = null;
   try {
     const marks = await waitForFiles(dataDirectory, ["startup-marks-main-", "startup-marks-worker-"], MARKS_TIMEOUT_MS + 15_000);
     record.mainMarks = marks["startup-marks-main-"] ?? null;
     record.workerMarks = marks["startup-marks-worker-"] ?? null;
     runtimePid = (record.workerMarks as { pid?: number } | null)?.pid ?? null;
-    if (!record.mainMarks || !record.workerMarks) throw new Error(`Startup marks were not written. stderr: ${stderr}`);
+    if (!record.mainMarks || !record.workerMarks) {
+      throw new Error(`Startup marks were not written (main ${Boolean(record.mainMarks)}, worker ${Boolean(record.workerMarks)}, exit ${String(exitCode)}, files ${(await readdir(dataDirectory)).join(",")}). output: ${stderr}`);
+    }
     if (traceFile) {
       const deadline = Date.now() + (TRACE_SECONDS + 20) * 1_000;
       while (Date.now() < deadline && !(await stat(traceFile).then((value) => value.size > 0).catch(() => false))) {
@@ -307,9 +319,17 @@ async function launchWithSpawn(fixture: Fixture, dataDirectory: string, profileD
       await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
     }
   } finally {
-    child.kill("SIGTERM");
-    const code = await Promise.race([exited, new Promise<"timeout">((resolveWait) => setTimeout(() => resolveWait("timeout"), 20_000))]);
+    const quitRequestedAt = Date.now();
+    await writeFile(join(dataDirectory, "startup-quit-request"), "");
+    let code = await Promise.race([exited, new Promise<"timeout">((resolveWait) => setTimeout(() => resolveWait("timeout"), 6_000))]);
+    record.harness.quitMs = Date.now() - quitRequestedAt;
+    await rm(join(dataDirectory, "startup-quit-request"), { force: true });
     if (code === "timeout") {
+      child.kill("SIGTERM");
+      code = await Promise.race([exited, new Promise<"timeout">((resolveWait) => setTimeout(() => resolveWait("timeout"), 3_000))]);
+    }
+    if (code === "timeout") {
+      (record as unknown as { output: string }).output = stderr.slice(-2_000);
       child.kill("SIGKILL");
       record.shutdown = "sigterm-timeout";
     } else {
@@ -317,7 +337,10 @@ async function launchWithSpawn(fixture: Fixture, dataDirectory: string, profileD
     }
     if (runtimePid !== null) {
       await waitForRuntimeProcessExit(runtimePid).catch(() => undefined);
-      if (processExists(runtimePid)) record.shutdown += ":runtime-still-running";
+      if (processExists(runtimePid)) {
+        record.shutdown += ":runtime-still-running";
+        process.kill(runtimePid, "SIGKILL");
+      }
     }
   }
 }
@@ -336,6 +359,7 @@ test("profiles startup from launch to a usable chat", async () => {
       await cp(fixture.template, dataDirectory, { recursive: true });
       for (const temperature of ["cold", "warm"] as const) {
         await removeMarks(dataDirectory);
+        await ensureProfileDirectories(profileDirectory);
         const quietWaitMs = await waitForQuietMachine();
         const record: LaunchRecord = {
           mode: MODE, round, temperature, launchRequestedAt: 0,
@@ -365,7 +389,8 @@ test("profiles startup from launch to a usable chat", async () => {
       }
     }
   } finally {
-    await rm(fixture.root, { recursive: true, force: true, maxRetries: 3 });
+    if (process.env.INERTIA_STARTUP_KEEP_FIXTURE === "1") console.log(`Kept fixture ${fixture.root}`);
+    else await rm(fixture.root, { recursive: true, force: true, maxRetries: 3 });
   }
   expect(records.length).toBe(RUNS * 2);
 });

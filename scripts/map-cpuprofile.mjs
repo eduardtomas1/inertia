@@ -11,12 +11,16 @@ if (!profilePath) {
 const windowUs = windowArgument ? Number(windowArgument) * 1_000 : Number.POSITIVE_INFINITY;
 const top = topArgument ? Number(topArgument) : 25;
 const profile = JSON.parse(readFileSync(profilePath, "utf8"));
-const outDirectory = resolve("out");
+const outDirectory = resolve(process.env.INERTIA_PROFILE_OUT_DIR ?? "out");
 
 function localPath(url) {
   if (!url) return null;
-  if (url.startsWith("file://")) return fileURLToPath(url);
-  const scheme = /^inertia(?:-canary)?:\/\/app\/(.+)$/u.exec(url);
+  if (url.startsWith("file://")) {
+    const path = fileURLToPath(url);
+    const marker = path.lastIndexOf("/out/");
+    return marker >= 0 ? join(outDirectory, path.slice(marker + 5)) : path;
+  }
+  const scheme = /^inertia(?:-canary)?:\/\/[a-z]+\/(.+)$/u.exec(url);
   if (scheme) return join(outDirectory, "renderer", scheme[1]);
   return null;
 }

@@ -65,7 +65,7 @@ function fixture(options: {
   };
   const order: string[] = [];
   const turns = {
-    queue: vi.fn(() => ({ turn: { id: "turn-1" } })),
+    queue: vi.fn((_request: { conversationId: string; content: string }) => ({ turn: { id: "turn-1" } })),
     start: vi.fn(() => options.start ?? true),
     failBeforeStart: vi.fn(() => true),
   };

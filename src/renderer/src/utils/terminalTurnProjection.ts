@@ -129,7 +129,8 @@ export function latestPlanDocument(
   if (newest.explanation?.trim()) return newest.explanation;
   if (!newest.turnId) return null;
   const order = new Map(turns.map(({ id }, index) => [id, index]));
-  const start = order.get(newest.turnId) ?? turns.length;
+  const loadedPlan = plans.some(({ turnId }) => turnId !== null && order.has(turnId));
+  const start = order.get(newest.turnId) ?? (loadedPlan ? turns.length : -1);
   const planned = new Set<number>();
   const documents = new Map<number, string>();
   for (const plan of plans) {

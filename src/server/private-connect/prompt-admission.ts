@@ -1,3 +1,5 @@
+import type { RuntimeStore } from "../database";
+import { isUntitledConversationTitle, quickConversationTitle } from "../runtime/conversation-title";
 import type { TurnController } from "../runtime/turns/turn-controller";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 
@@ -11,6 +13,7 @@ interface PrivateConnectIsolatedRuns {
 }
 
 export interface PrivateConnectPromptAdmissionDependencies {
+  store: Pick<RuntimeStore, "conversation" | "hasConversationMessages" | "updateConversation">;
   authority: PrivateConnectPromptAuthority;
   turns: Pick<
     TurnController,
@@ -42,6 +45,9 @@ export function queuePrivateConnectPrompt(
     ) {
       throw new Error("This conversation already has an active agent task.");
     }
+    const deriveInitialTitle = isUntitledConversationTitle(
+      dependencies.store.conversation(conversationId).title,
+    ) && !dependencies.store.hasConversationMessages(conversationId);
     queued = dependencies.turns.queue({
       conversationId,
       content,
@@ -51,6 +57,13 @@ export function queuePrivateConnectPrompt(
       skills: [],
       rendererOwnerId: null,
     });
+    const title = deriveInitialTitle ? quickConversationTitle(content) : "";
+    if (
+      title
+      && isUntitledConversationTitle(dependencies.store.conversation(conversationId).title)
+    ) {
+      dependencies.store.updateConversation(conversationId, { title });
+    }
     dependencies.onQueued(conversationId);
     if (!dependencies.turns.start(queued.turn.id)) {
       throw new Error("The remote turn could not start.");

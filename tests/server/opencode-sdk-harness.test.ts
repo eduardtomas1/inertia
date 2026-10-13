@@ -880,6 +880,38 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     }));
   });
 
+  it("surfaces only the root session's generated title", async () => {
+    const root = portableFixtureRoot("OpenCode session titles");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "opencode");
+    writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "session-titles"));
+    const manager = ProviderManager.createForTests(
+      { commands: { opencode: command } },
+      new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
+    );
+    const events: Array<Record<string, unknown>> = [];
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "opencode",
+      conversationId: "opencode-session-titles",
+      cwd: root,
+      prompt: "Continue",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "opencode-lifecycle-session",
+    }), {
+      onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
+    })).resolves.toMatchObject({ status: "completed", text: "Done" });
+    expect(events.filter(({ type }) => type === "session-title")).toEqual([
+      expect.objectContaining({
+        providerId: "opencode",
+        conversationId: "opencode-session-titles",
+        sessionId: "opencode-lifecycle-session",
+        title: "Login redirect loop",
+      }),
+    ]);
+  });
+
   it("fails closed when buffered out-of-order deltas exceed the per-part bound", async () => {
     const root = portableFixtureRoot("OpenCode buffered delta overflow");
     roots.push(root);

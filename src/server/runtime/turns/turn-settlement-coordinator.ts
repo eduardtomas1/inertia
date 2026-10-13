@@ -340,7 +340,9 @@ export class TurnSettlementCoordinator {
       runStartedAt: active.runStartedAt,
       status,
     }));
-    effects.run("orchestration", () => this.options.hooks.onTurnSettled?.(active.turn));
+    effects.run("orchestration", () => this.options.hooks.onTurnSettled?.(active.turn, {
+      providerSessionTitle: active.providerSessionTitle ?? null,
+    }));
     effects.run("turn-follow-up", () => active.onSettled?.(status, active.turn.id));
   }
 }

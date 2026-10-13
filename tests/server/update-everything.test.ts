@@ -1,0 +1,474 @@
+import { randomUUID } from "node:crypto";
+
+import type WebSocket from "ws";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { publicRuntimeError } from "../../src/server/runtime-errors";
+import {
+  createRuntimeCommandExecutor,
+  defineRuntimeCommandHandler,
+  RUNTIME_COMMAND_TYPES,
+} from "../../src/server/runtime/commands/command-router";
+import { createUpdatesCommandHandler } from "../../src/server/runtime/commands/updates-commands";
+import {
+  runUpdateEverything,
+  type UpdateEverythingDependencies,
+  type UpdatesRunRequest,
+} from "../../src/server/runtime/update-everything";
+import { updateInterruptionStub } from "../../src/server/runtime/update-everything-stubs";
+import {
+  isHeld,
+  release,
+  UPDATE_HOLD_SAFETY_RELEASE_MS,
+} from "../../src/server/runtime/update-hold";
+import {
+  ProviderInstallationLeaseCoordinator,
+  providerInstallationIdentity,
+} from "../../src/server/provider/installation-lease";
+import {
+  ProviderMaintenanceController,
+  ProviderMaintenanceError,
+} from "../../src/server/provider/maintenance-controller";
+import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import { clientCommandSchema } from "../../src/shared/contracts/client-command";
+import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
+import type {
+  ProviderMaintenanceOperation,
+  ProviderMaintenanceProviderId,
+} from "../../src/shared/provider-maintenance";
+import { providerMaintenanceJournalTestDouble } from "../support/provider-maintenance-journal";
+
+afterEach(() => {
+  release();
+  vi.useRealTimers();
+});
+
+const CODEX_CHAT = "11111111-1111-4111-8111-111111111111";
+const CLAUDE_CHAT = "22222222-2222-4222-8222-222222222222";
+const CURSOR_CHAT = "33333333-3333-4333-8333-333333333333";
+
+type Terminal = Pick<ProviderMaintenanceOperation, "status" | "message"> & {
+  afterVersion?: string | null;
+};
+
+function operation(
+  providerId: ProviderMaintenanceProviderId,
+  update: Partial<ProviderMaintenanceOperation> = {},
+): ProviderMaintenanceOperation {
+  return {
+    id: randomUUID(),
+    providerId,
+    status: "queued",
+    startedAt: null,
+    finishedAt: null,
+    beforeVersion: "1.0.0",
+    afterVersion: null,
+    targetVersion: "2.0.0",
+    message: "Waiting to start the provider update.",
+    output: null,
+    outputTruncated: false,
+    ...update,
+  };
+}
+
+function fixture(options: {
+  running?: string[];
+  providers?: Record<string, ProviderMaintenanceProviderId>;
+  outcomes?: Partial<Record<ProviderMaintenanceProviderId, Terminal | Error>>;
+  plans?: (conversationIds: readonly string[]) => readonly string[];
+} = {}) {
+  const order: string[] = [];
+  const providerOf = options.providers ?? {
+    [CODEX_CHAT]: "codex",
+    [CLAUDE_CHAT]: "claude",
+    [CURSOR_CHAT]: "cursor",
+  };
+  const operations = new Map<string, ProviderMaintenanceOperation>();
+  const settling = new Map<string, () => void>();
+  const maintenance = {
+    current: vi.fn((providerId: ProviderMaintenanceProviderId) => [{ installedVersion: `${providerId}-installed` }]),
+    startUpdate: vi.fn(async (providerId: ProviderMaintenanceProviderId) => {
+      order.push(`start:${providerId}:held=${isHeld()}`);
+      const outcome = options.outcomes?.[providerId] ?? { status: "succeeded", message: "Provider updated.", afterVersion: "2.0.0" };
+      if (outcome instanceof Error) throw outcome;
+      const started = operation(providerId);
+      operations.set(started.id, started);
+      settling.set(started.id, () => {
+        operations.set(started.id, { ...started, afterVersion: null, ...outcome, finishedAt: new Date().toISOString() });
+      });
+      return started;
+    }),
+    settled: vi.fn(async (operationId: string) => {
+      await Promise.resolve();
+      settling.get(operationId)?.();
+      order.push(`settled:${operations.get(operationId)?.providerId}`);
+      return operations.get(operationId) ?? null;
+    }),
+  };
+  const turns = {
+    activeConversationIds: vi.fn(() => options.running ?? [CODEX_CHAT, CLAUDE_CHAT, CURSOR_CHAT]),
+    interruptForUpdate: vi.fn(async (conversationIds: readonly string[], interruption: { continues: readonly string[] }) => {
+      order.push(`interrupt:${conversationIds.join(",")}:continues=${interruption.continues.join(",")}:held=${isHeld()}`);
+    }),
+  };
+  const restartContinuation = {
+    createPlans: vi.fn((conversationIds: readonly string[]) => {
+      order.push(`plans:${conversationIds.join(",")}:held=${isHeld()}`);
+      return options.plans ? options.plans(conversationIds) : conversationIds;
+    }),
+    arm: vi.fn(() => { order.push(`arm:held=${isHeld()}`); }),
+  };
+  const store = {
+    conversation: vi.fn((conversationId: string) => {
+      const providerId = providerOf[conversationId];
+      if (!providerId) throw new Error("missing");
+      return { providerId };
+    }),
+  };
+  const dependencies = {
+    store,
+    turns,
+    maintenance,
+    restartContinuation,
+  } as unknown as UpdateEverythingDependencies;
+  const run = (request: Partial<UpdatesRunRequest> = {}) => runUpdateEverything(dependencies, {
+    providerIds: ["codex", "claude"],
+    includeApp: false,
+    continueChats: true,
+    ...request,
+  });
+  return { order, maintenance, turns, restartContinuation, dependencies, run };
+}
+
+describe("update everything orchestration", () => {
+  it("plans, interrupts, then updates providers one at a time under the hold and releases it", async () => {
+    const subject = fixture({ plans: (ids) => ids.filter((id) => id === CODEX_CHAT) });
+
+    const result = await subject.run();
+
+    expect(subject.order).toEqual([
+      `plans:${CODEX_CHAT},${CLAUDE_CHAT}:held=true`,
+      `interrupt:${CODEX_CHAT},${CLAUDE_CHAT}:continues=${CODEX_CHAT}:held=true`,
+      "start:codex:held=true",
+      "settled:codex",
+      "start:claude:held=true",
+      "settled:claude",
+      "arm:held=false",
+    ]);
+    expect(result).toEqual({
+      kind: "updates.run",
+      providers: [
+        { providerId: "codex", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null },
+        { providerId: "claude", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null },
+      ],
+      interruptedConversationIds: [CODEX_CHAT, CLAUDE_CHAT],
+      readyForAppInstall: false,
+    });
+    expect(isHeld()).toBe(false);
+    expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
+  });
+
+  it("interrupts every running chat when Inertia itself restarts", async () => {
+    const subject = fixture({ running: [CODEX_CHAT, CURSOR_CHAT, "deleted-chat"] });
+
+    const result = await subject.run({ providerIds: ["codex"], includeApp: true });
+
+    expect(result.interruptedConversationIds).toEqual([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith(
+      [CODEX_CHAT, CURSOR_CHAT, "deleted-chat"],
+      { continues: [CODEX_CHAT, CURSOR_CHAT, "deleted-chat"] },
+    );
+  });
+
+  it("leaves chats on other providers running and skips chats it cannot resolve", async () => {
+    const subject = fixture({ running: [CODEX_CHAT, CURSOR_CHAT, "deleted-chat"] });
+
+    const result = await subject.run({ providerIds: ["codex"] });
+
+    expect(result.interruptedConversationIds).toEqual([CODEX_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT], { continues: [CODEX_CHAT] });
+  });
+
+  it("does not plan continuations when the user turned them off", async () => {
+    const subject = fixture();
+
+    await subject.run({ continueChats: false });
+
+    expect(subject.restartContinuation.createPlans).not.toHaveBeenCalled();
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith(
+      [CODEX_CHAT, CLAUDE_CHAT],
+      { continues: [] },
+    );
+  });
+
+  it("keeps updating the rest when one provider fails, stays unchanged or is cancelled", async () => {
+    const subject = fixture({
+      outcomes: {
+        codex: new ProviderMaintenanceError("This installation cannot be updated safely from Inertia. Review the official update instructions."),
+        claude: { status: "failed", message: "Provider update command failed." },
+        kimi: { status: "unchanged", message: "Update completed, but the installed version still appears unchanged.", afterVersion: "1.0.0" },
+        opencode: { status: "cancelled", message: "Provider update cancelled." },
+      },
+    });
+
+    const result = await subject.run({ providerIds: ["codex", "claude", "kimi", "opencode", "cursor"] });
+
+    expect(result.providers).toEqual([
+      { providerId: "codex", outcome: "failed", beforeVersion: "codex-installed", afterVersion: null, error: "This installation cannot be updated safely from Inertia. Review the official update instructions." },
+      { providerId: "claude", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: "Provider update command failed." },
+      { providerId: "kimi", outcome: "unchanged", beforeVersion: "1.0.0", afterVersion: "1.0.0", error: null },
+      { providerId: "opencode", outcome: "skipped", beforeVersion: "1.0.0", afterVersion: null, error: "Provider update cancelled." },
+      { providerId: "cursor", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null },
+    ]);
+    expect(subject.maintenance.startUpdate).toHaveBeenCalledTimes(5);
+    expect(isHeld()).toBe(false);
+  });
+
+  it("keeps the hold for the app install and releases it only when the renderer finishes without installing", async () => {
+    const subject = fixture();
+
+    const result = await subject.run({ includeApp: true });
+
+    expect(result.readyForAppInstall).toBe(true);
+    expect(isHeld()).toBe(true);
+    expect(subject.restartContinuation.arm).not.toHaveBeenCalled();
+  });
+
+  it("releases a forgotten app-install hold after ten minutes and arms the continuations", async () => {
+    vi.useFakeTimers();
+    const subject = fixture();
+
+    await subject.run({ includeApp: true });
+    vi.advanceTimersByTime(UPDATE_HOLD_SAFETY_RELEASE_MS - 1);
+    expect(isHeld()).toBe(true);
+    vi.advanceTimersByTime(1);
+
+    expect(isHeld()).toBe(false);
+    expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a second run while one is in progress without interrupting anything", async () => {
+    const subject = fixture();
+    await subject.run({ includeApp: true });
+
+    await expect(subject.run()).rejects.toThrow("Inertia is updating.");
+
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledOnce();
+    expect(isHeld()).toBe(true);
+  });
+
+  it("releases the hold and reports the failure when chats cannot be interrupted", async () => {
+    const subject = fixture();
+    subject.turns.interruptForUpdate.mockRejectedValueOnce(new Error("interrupt failed"));
+
+    await expect(subject.run({ includeApp: true })).rejects.toThrow("interrupt failed");
+
+    expect(subject.maintenance.startUpdate).not.toHaveBeenCalled();
+    expect(isHeld()).toBe(false);
+    expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
+  });
+});
+
+describe("update everything with the real maintenance controller", () => {
+  function controllerFixture() {
+    const leases = new ProviderInstallationLeaseCoordinator();
+    let version = "1.0.0";
+    const target = () => ({ providerId: "codex" as const, executable: "/tools/codex", installedVersion: version, installed: true });
+    const blockers = vi.fn();
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      installationLeases: leases,
+      maintenanceAdmissionTimeoutMs: 200,
+      target,
+      refreshTarget: async () => target(),
+      resolveCapabilities: async () => ({
+        providerId: "codex",
+        packageName: null,
+        installMethod: "provider-managed",
+        updateAvailability: "available",
+        update: {
+          executable: "/tools/codex",
+          args: ["update"],
+          lockKey: "native:codex",
+          installMethod: "provider-managed",
+          label: "Update Codex",
+        },
+        instructionsUrl: "https://example.test/update",
+      }),
+      runAction: async () => {
+        version = "2.0.0";
+        return {
+          status: "succeeded",
+          exitCode: 0,
+          signal: null,
+          message: "Provider update command completed.",
+          cleanupConfirmed: true,
+          output: null,
+          outputTruncated: false,
+        };
+      },
+      onBlockers: blockers,
+    });
+    const runningChat = leases.acquireUse(providerInstallationIdentity({
+      providerId: "codex",
+      executable: "/tools/codex",
+      installationRootIdentity: null,
+      packageIdentity: null,
+      version: "1.0.0",
+      environmentIdentity: "runtime-provider-environment",
+    }), { kind: "provider-run", operationId: "running-codex-turn" });
+    return { controller, blockers, runningChat };
+  }
+
+  it("updates without waiting on installation owners because the interrupted turns released them", async () => {
+    const { controller, blockers, runningChat } = controllerFixture();
+    const interruptForUpdate = vi.fn(async () => {
+      expect(runningChat.release({ cleanupConfirmed: true })).toBe(true);
+    });
+
+    const result = await runUpdateEverything({
+      store: { conversation: () => ({ providerId: "codex" }) },
+      turns: { activeConversationIds: () => [CODEX_CHAT], interruptForUpdate },
+      maintenance: controller,
+      restartContinuation: { createPlans: (ids) => ids, arm: () => undefined },
+    } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true });
+
+    expect(result.providers).toEqual([
+      { providerId: "codex", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null },
+    ]);
+    expect(blockers).not.toHaveBeenCalled();
+    expect(controller.hasBlockingAuthority("codex")).toBe(false);
+  });
+
+  it("would have waited on and failed against a chat that kept running", async () => {
+    const { controller, blockers, runningChat } = controllerFixture();
+
+    const result = await runUpdateEverything({
+      store: { conversation: () => ({ providerId: "claude" }) },
+      turns: { activeConversationIds: () => [CLAUDE_CHAT], interruptForUpdate: async () => undefined },
+      maintenance: controller,
+      restartContinuation: { createPlans: (ids) => ids, arm: () => undefined },
+    } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true });
+
+    expect(result.interruptedConversationIds).toEqual([]);
+    expect(result.providers[0]).toMatchObject({ providerId: "codex", outcome: "failed" });
+    expect(blockers).toHaveBeenCalled();
+    runningChat.release({ cleanupConfirmed: true });
+  });
+});
+
+describe("update interruption stub", () => {
+  it("stops each chat and waits for its provider cleanup", async () => {
+    const turns = {
+      activeConversationIds: vi.fn(() => [CODEX_CHAT]),
+      cancel: vi.fn(() => true),
+      waitForProviderCleanup: vi.fn(async () => true),
+    };
+    const subject = updateInterruptionStub(turns as never);
+
+    expect(subject.activeConversationIds()).toEqual([CODEX_CHAT]);
+    await subject.interruptForUpdate([CODEX_CHAT, CLAUDE_CHAT], { continues: [] });
+
+    expect(turns.cancel.mock.calls).toEqual([[CODEX_CHAT], [CLAUDE_CHAT]]);
+    expect(turns.waitForProviderCleanup).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT], expect.any(Number));
+  });
+});
+
+describe("updates command handler", () => {
+  function handlerFixture() {
+    const subject = fixture();
+    const events: ServerEvent[] = [];
+    const send = vi.fn((_socket: WebSocket, event: ServerEvent) => { events.push(event); });
+    const handler = createUpdatesCommandHandler({ ...subject.dependencies, send });
+    const execute = createRuntimeCommandExecutor({
+      handlers: [
+        handler,
+        defineRuntimeCommandHandler(
+          RUNTIME_COMMAND_TYPES.filter((type) => !handler.commandTypes?.includes(type)),
+          async () => "not-handled",
+        ),
+      ],
+      send,
+      broadcastSnapshot: vi.fn(),
+      publicError: publicRuntimeError,
+    });
+    const run = async (type: ClientCommand["type"], payload: unknown) => {
+      const command = clientCommandSchema.parse({ type, requestId: randomUUID(), payload });
+      events.length = 0;
+      await execute({} as WebSocket, command);
+      return { command, events: [...events] };
+    };
+    return { ...subject, handler, run };
+  }
+
+  it("owns exactly the update commands", () => {
+    expect([...(handlerFixture().handler.commandTypes ?? [])].sort()).toEqual(["updates.finish", "updates.run"]);
+  });
+
+  it("answers a run with a result the renderer accepts", async () => {
+    const subject = handlerFixture();
+
+    const { command, events } = await subject.run("updates.run", {
+      providerIds: ["codex"],
+      includeApp: true,
+      continueChats: true,
+    });
+
+    expect(events).toHaveLength(1);
+    expect(serverEventSchema.safeParse(events[0]).success).toBe(true);
+    expect(events[0]).toEqual({
+      type: "request.result",
+      requestId: command.requestId,
+      result: {
+        kind: "updates.run",
+        providers: [{ providerId: "codex", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null }],
+        interruptedConversationIds: [CODEX_CHAT, CLAUDE_CHAT, CURSOR_CHAT],
+        readyForAppInstall: true,
+      },
+    });
+    expect(isHeld()).toBe(true);
+  });
+
+  it("finishes without an install by releasing the hold once, and keeps it for an install", async () => {
+    const subject = handlerFixture();
+    await subject.run("updates.run", { providerIds: [], includeApp: true, continueChats: true });
+
+    const installing = await subject.run("updates.finish", { installed: true });
+    expect(installing.events).toEqual([{ type: "request.ok", requestId: installing.command.requestId }]);
+    expect(isHeld()).toBe(true);
+
+    const finished = await subject.run("updates.finish", { installed: false });
+    expect(finished.events).toEqual([{ type: "request.ok", requestId: finished.command.requestId }]);
+    expect(isHeld()).toBe(false);
+    await subject.run("updates.finish", { installed: false });
+    expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
+  });
+
+  it("reports a run refused during another run as a request error", async () => {
+    const subject = handlerFixture();
+    await subject.run("updates.run", { providerIds: ["codex"], includeApp: true, continueChats: true });
+
+    const { command, events } = await subject.run("updates.run", { providerIds: ["codex"], includeApp: false, continueChats: true });
+
+    expect(events).toEqual([{ type: "request.error", requestId: command.requestId, message: "Inertia is updating." }]);
+  });
+
+  it("accepts only distinct maintenance providers and some work to do", () => {
+    const parse = (payload: unknown) => clientCommandSchema.safeParse({
+      type: "updates.run",
+      requestId: randomUUID(),
+      payload,
+    }).success;
+    expect(parse({ providerIds: ["codex", "antigravity"], includeApp: false, continueChats: false })).toBe(true);
+    expect(parse({ providerIds: [], includeApp: true, continueChats: true })).toBe(true);
+    expect(parse({ providerIds: [], includeApp: false, continueChats: true })).toBe(false);
+    expect(parse({ providerIds: ["codex", "codex"], includeApp: false, continueChats: true })).toBe(false);
+    expect(parse({ providerIds: ["custom"], includeApp: false, continueChats: true })).toBe(false);
+    expect(parse({ providerIds: ["codex"], includeApp: false })).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      type: "updates.finish",
+      requestId: randomUUID(),
+      payload: { installed: false, extra: true },
+    }).success).toBe(false);
+  });
+});

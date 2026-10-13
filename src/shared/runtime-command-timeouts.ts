@@ -73,3 +73,5 @@ export const GIT_REFRESH_REQUEST_TIMEOUT_MS = GIT_READ_REQUEST_TIMEOUT_MS;
 // bounds while still settling a genuinely stalled request.
 export const PROVIDER_REFRESH_REQUEST_TIMEOUT_MS = 45_000;
 export const PROVIDER_MAINTENANCE_REFRESH_REQUEST_TIMEOUT_MS = 30_000;
+
+export const UPDATES_RUN_REQUEST_TIMEOUT_MS = 45 * 60_000;

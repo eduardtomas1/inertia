@@ -246,6 +246,12 @@ export class ProviderMaintenanceController {
     return this.operations.get(operationId) ?? null;
   }
 
+  async settled(operationId: string): Promise<ProviderMaintenanceOperation | null> {
+    const active = [...this.active.values()].find(({ operation }) => operation.id === operationId);
+    await active?.completion?.catch(() => undefined);
+    return this.operations.get(operationId) ?? null;
+  }
+
   /**
    * Renderer-safe, bounded projection of updates that still own runtime work.
    * Command output is intentionally omitted from full synchronization; live

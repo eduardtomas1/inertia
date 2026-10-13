@@ -10,10 +10,14 @@ import { NativeSubscriptionReader } from "./native-subscriptions";
 import { USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE } from "../../node/backend-secret-reference";
 import { createLimitResetRuntime } from "../runtime/limit-reset-runtime";
 import type { TurnInteractionCommandDependencies } from "../runtime/commands/turn-interaction-commands";
+import type { ProviderMaintenanceController } from "../provider/maintenance-controller";
+import { createUpdatesCommandHandler } from "../runtime/commands/updates-commands";
+import { restartContinuationStub, updateInterruptionStub } from "../runtime/update-everything-stubs";
 
 interface ResumeRuntimeOptions {
   dependencies: TurnInteractionCommandDependencies;
   track<T>(operation: () => Promise<T>): Promise<T>;
+  providerMaintenance: ProviderMaintenanceController;
 }
 
 export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManager, backends: BackendProfileController, providerInfo: () => ProviderInfo[], cwd: string, signal: AbortSignal, enabled: boolean, credentials: BackendCredentialBroker | undefined, send: (socket: WebSocket, event: ServerEvent) => void,
@@ -29,5 +33,9 @@ export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManag
   });
   const limitReset = createLimitResetRuntime(resume.dependencies, service, { signal, track: resume.track });
   limitReset.start();
-  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler] };
+  const updates = createUpdatesCommandHandler({
+    store, turns: updateInterruptionStub(resume.dependencies.turns), maintenance: resume.providerMaintenance,
+    restartContinuation: restartContinuationStub, send,
+  });
+  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler, updates] };
 }

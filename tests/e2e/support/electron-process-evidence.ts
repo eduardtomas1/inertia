@@ -38,6 +38,22 @@ export interface ElectronProcessEvidence {
 const records = new WeakMap<ChildProcess, ElectronProcessEvidence>();
 const EXIT_INVENTORY = /^\[Inertia test exit: exit-inventory (windows=(?:\d{1,6}|unavailable) webContents=(?:\d{1,6}|unavailable) resources=(?:none|unavailable|[A-Za-z]{1,40}:\d{1,7}(?:,[A-Za-z]{1,40}:\d{1,7}){0,5}))\]$/u;
 const MAX_STDERR_LINE = 512;
+const STDERR_STAGES = new Map<string, ProcessStage>([
+  ["[Inertia test exit: window-destroy-entered]", "window-destroy-entered"],
+  ["[Inertia test exit: window-destroy-returned]", "window-destroy-returned"],
+  ["[Inertia test exit: process-exit-called]", "process-exit-called"],
+  ["[Inertia test exit: app-quit-entered]", "app-quit-entered"],
+  ["[Inertia test exit: app-quit-tail-observed]", "app-quit-tail-observed"],
+  ["[Inertia test exit: native-exit-returned]", "native-exit-returned"],
+  ["[Inertia test exit: window-created-after-cleanup]", "window-created-after-cleanup"],
+  ["[Inertia test exit: activated-after-cleanup]", "activated-after-cleanup"],
+  ["[Inertia test exit: quit-events-observer-unavailable]", "quit-events-observer-unavailable"],
+  ["[Inertia test exit: window-identity-unavailable]", "window-identity-unavailable"],
+  ["[Inertia test exit: window-observer-unavailable]", "window-observer-unavailable"],
+  ["[Inertia test exit: process-exit-observer-unavailable]", "process-exit-observer-unavailable"],
+  ["Waiting for the debugger to disconnect...", "debugger-disconnect-wait"],
+]);
+const REPORTED_EXIT_STAGES = new Set<ProcessStage>(STDERR_STAGES.values());
 const validPid = (pid: unknown): pid is number =>
   typeof pid === "number" && Number.isSafeInteger(pid) && pid > 1;
 
@@ -63,21 +79,6 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
     }
     for (const listener of listeners) listener(stage);
   };
-  const stderrStages = new Map<string, ProcessStage>([
-    ["[Inertia test exit: window-destroy-entered]", "window-destroy-entered"],
-    ["[Inertia test exit: window-destroy-returned]", "window-destroy-returned"],
-    ["[Inertia test exit: process-exit-called]", "process-exit-called"],
-    ["[Inertia test exit: app-quit-entered]", "app-quit-entered"],
-    ["[Inertia test exit: app-quit-tail-observed]", "app-quit-tail-observed"],
-    ["[Inertia test exit: native-exit-returned]", "native-exit-returned"],
-    ["[Inertia test exit: window-created-after-cleanup]", "window-created-after-cleanup"],
-    ["[Inertia test exit: activated-after-cleanup]", "activated-after-cleanup"],
-    ["[Inertia test exit: quit-events-observer-unavailable]", "quit-events-observer-unavailable"],
-    ["[Inertia test exit: window-identity-unavailable]", "window-identity-unavailable"],
-    ["[Inertia test exit: window-observer-unavailable]", "window-observer-unavailable"],
-    ["[Inertia test exit: process-exit-observer-unavailable]", "process-exit-observer-unavailable"],
-    ["Waiting for the debugger to disconnect...", "debugger-disconnect-wait"],
-  ]);
   const seenStderrStages = new Set<ProcessStage>();
   let stderrLine = "";
   let discardStderrLine = false;
@@ -85,7 +86,7 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
     for (const byte of chunk) {
       if (byte === 10) {
         const line = stderrLine.replace(/\r$/u, "");
-        const stage = discardStderrLine ? undefined : stderrStages.get(line);
+        const stage = discardStderrLine ? undefined : STDERR_STAGES.get(line);
         if (stage && !seenStderrStages.has(stage)) { seenStderrStages.add(stage); record(stage); }
         if (!discardStderrLine && exitInventory === null) exitInventory = EXIT_INVENTORY.exec(line)?.[1] ?? null;
         stderrLine = ""; discardStderrLine = false;
@@ -152,6 +153,10 @@ export function electronProcessEvidence(child: ChildProcess): ElectronProcessEvi
   };
   records.set(child, evidence);
   return evidence;
+}
+
+export function reportedExitStages(snapshot: ElectronProcessEvidenceSnapshot): ProcessStage[] {
+  return snapshot.stages.map(({ stage }) => stage).filter((stage) => REPORTED_EXIT_STAGES.has(stage));
 }
 
 export function observeElectronIdentity(current: ElectronApplication, child: ChildProcess): void {

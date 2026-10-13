@@ -388,10 +388,11 @@ describe("prepared close with a stalled window destroy", () => {
   });
 
   it.each([
-    ["after window destroy returned", { stderr: ["window-destroy-entered", "window-destroy-returned"] }],
-    ["before window destroy was entered", { stderr: ["app-quit-entered"] }],
-    ["on Linux", { platform: "linux" as const }],
-  ])("still force-terminates and fails a main-process hang %s", async (_label, variant) => {
+    ["after window destroy returned", { stderr: ["window-destroy-entered", "window-destroy-returned"] },
+      "window-destroy-entered,window-destroy-returned"],
+    ["before window destroy was entered", { stderr: ["app-quit-entered"] }, "app-quit-entered"],
+    ["on Linux", { platform: "linux" as const }, "window-destroy-entered"],
+  ])("still force-terminates and fails a main-process hang %s", async (_label, variant, exitStages) => {
     vi.useFakeTimers();
     const main = child(MAIN_PID);
     const diagnostic = stubDiagnostic(async () => true);
@@ -402,7 +403,7 @@ describe("prepared close with a stalled window destroy", () => {
     expect(main.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
     expect(error).toBeInstanceOf(ElectronFixtureCloseError);
     expect((error as ElectronFixtureCloseError).errors.map((entry) => (entry as Error).message)).toContain(
-      "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete).");
+      `The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete; exit-stages=${exitStages}).`);
   });
 
   it("names the helpers and exit inventory still alive when a prepared quit is force-terminated", async () => {
@@ -421,7 +422,8 @@ describe("prepared close with a stalled window destroy", () => {
     expect(main.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
     expect(error.errors.map((entry) => (entry as Error).message)).toContain(
       "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete; "
-      + `still-running=gpu-process,utility/network.mojom.NetworkService; exit-inventory=${inventory}).`);
+      + `still-running=gpu-process,utility/network.mojom.NetworkService; exit-inventory=${inventory}; `
+      + "exit-stages=window-destroy-entered,window-destroy-returned).");
     expect(error.processEvidence!.exitInventory).toBe(inventory);
   });
 
@@ -436,7 +438,8 @@ describe("prepared close with a stalled window destroy", () => {
     const error = await closing as ElectronFixtureCloseError;
     expect(error.processEvidence!.exitInventory).toBeNull();
     expect(error.errors.map((entry) => (entry as Error).message)).toContain(
-      "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete).");
+      "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete; "
+      + "exit-stages=window-destroy-entered,window-destroy-returned).");
   });
 
   it("never attempts recovery when privileged cleanup was not confirmed", async () => {

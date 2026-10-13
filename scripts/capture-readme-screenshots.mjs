@@ -156,6 +156,13 @@ async function capture(page, filename) {
   console.log(`Captured ${filename}`);
 }
 
+async function waitForBranchMenus(page, count) {
+  await page.waitForFunction(
+    (expected) => document.querySelectorAll("button.checkout-branch-button").length >= expected,
+    count,
+  );
+}
+
 async function closeWorkspaceTools(page) {
   const toggle = page.locator("[data-panel-layout-controls] [data-right-panel-toggle]");
   if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
@@ -277,6 +284,7 @@ async function seedShowcaseData(patch, companionPatch) {
   const requestedAt = new Date(Date.now() - 70_000).toISOString();
   const startedAt = new Date(Date.now() - 69_500).toISOString();
   const assistantAt = new Date(Date.now() - 64_000).toISOString();
+  const companionAssistantAt = new Date(Date.now() - 66_000).toISOString();
   const completedAt = new Date(Date.now() - 63_000).toISOString();
   const modelSelection = {
     harnessId: "codex-app-server",
@@ -389,7 +397,7 @@ async function seedShowcaseData(patch, companionPatch) {
     database.prepare(`
       INSERT INTO projects (id, name, path, color, status, created_at, updated_at)
       VALUES (?, 'Fernway', ?, '#6f76d9', 'ready', ?, ?)
-    `).run(projectId, workspaceDirectory, now, now);
+    `).run(projectId, workspaceDirectory, requestedAt, requestedAt);
     database.prepare(`
       INSERT INTO projects (id, name, path, color, status, created_at, updated_at)
       VALUES (?, 'Fernway API', ?, '#4f9f8c', 'ready', ?, ?)
@@ -571,7 +579,7 @@ async function seedShowcaseData(patch, companionPatch) {
       companionAssistantMessageId,
       companionConversationId,
       "Booking requests are now limited per account, and the payment webhooks are untouched.\n\n- `POST /bookings` allows 20 requests a minute for each account.\n- Sign-up and login keep their existing limits.\n- Webhook routes skip the limiter entirely.\n\nNew tests cover the limit, the reset window and the webhook exemption.",
-      assistantAt,
+      companionAssistantAt,
       companionTurnId,
     );
     database.prepare(`
@@ -802,6 +810,7 @@ try {
   await page.locator('.app-shell[data-connection-status="online"]').waitFor();
   await closeWorkspaceTools(page);
   await page.getByRole("button", { name: "More Git actions", exact: true }).waitFor();
+  await waitForBranchMenus(page, 1);
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("");
   await page.mouse.move(1100, 350);
@@ -848,6 +857,7 @@ try {
   await page.getByRole("menuitem", { name: "Add this chat to split view", exact: true }).click();
   await page.getByRole("main", { name: "Split conversation workspace" }).waitFor();
   await page.getByText("Webhook routes skip the limiter entirely.", { exact: true }).waitFor();
+  await waitForBranchMenus(page, 2);
   await page.evaluate(() => document.activeElement?.blur());
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-split-workspace.png");
@@ -872,6 +882,7 @@ try {
   await page.getByRole("radio", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.getByRole("button", { name: "More Git actions", exact: true }).waitFor();
+  await waitForBranchMenus(page, 1);
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-light.png");
 

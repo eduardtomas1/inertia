@@ -122,6 +122,37 @@ describe("runtime interruption note", () => {
     } finally { await chat.close(); }
   });
 
+  it("tells the first turn after an app update interruption about it, once, without a restart", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Refactor the parser." });
+      runtime.controller.start(first.turn.id);
+      emitTurnControllerTestSubagent(runtime, {
+        sequence: 1, providerTaskId: "task-1", status: "running", isLive: true,
+        description: "Audit the tokenizer edge cases",
+      });
+      await flushTurnControllerTestPromises();
+      await expect(runtime.controller.interruptForUpdate([runtime.conversationId])).resolves.toBe(true);
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
+
+      const second = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue from where you stopped." });
+      runtime.controller.start(second.turn.id);
+      expect(runtime.provider.input?.prompt).toContain(notice);
+      expect(runtime.provider.input?.prompt).toContain(JSON.stringify({
+        interruptedRequest: "Refactor the parser.",
+        lostTasks: ["Audit the tokenizer edge cases"],
+        moreLostTasks: 0,
+      }));
+      runtime.provider.resolve({ status: "completed" });
+      await flushTurnControllerTestPromises();
+      await runtime.controller.drainSettlementTasks();
+
+      const third = runtime.controller.queue({ conversationId: runtime.conversationId, content: "And the tests." });
+      runtime.controller.start(third.turn.id);
+      expect(runtime.provider.input?.prompt).not.toContain(notice);
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
+
   it("keeps the request and task labels from a different endpoint", async () => {
     const chat = await interruptedChat("unclean");
     try {

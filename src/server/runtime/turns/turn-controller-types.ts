@@ -271,6 +271,7 @@ export type TurnTerminalCause =
   | "runtime-shutdown"
   | "runtime-crash"
   | "runtime-restart"
+  | "app-update"
   | "turn-timeout"
   | "renderer-disconnected"
   | "turn-start-failed"

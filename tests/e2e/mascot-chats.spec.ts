@@ -61,7 +61,7 @@ test("mascot follows three provider chats by priority, lists the others and spea
         .observe(element, { childList: true, characterData: true, subtree: true });
     }, BARE);
     await expect(mascot).toHaveAttribute("data-compact", "true");
-    await expect(overlay.locator(".mascot-label")).toHaveText("Ready when you are");
+    await expect(overlay.locator(".mascot-label")).toHaveText("Ready");
     await expect(message).toBeHidden();
     await expect(overlay.locator(".mascot-footer")).toBeHidden();
     await capture(app, overlay, "idle", info);

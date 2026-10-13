@@ -206,6 +206,7 @@ function SidebarView({
   const [initialSubmenu, setInitialSubmenu] = useState<"snooze" | undefined>();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const renameOriginalRef = useRef("");
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [doneVisible, setDoneVisible] = useState(INITIAL_DONE_VISIBLE);
@@ -677,6 +678,7 @@ function SidebarView({
         onSettleConversation={onSettleConversation}
         onSnoozeConversation={onSnoozeConversation}
         onStartRename={() => {
+          renameOriginalRef.current = conversation.title;
           setRenameDraft(conversation.title);
           setRenaming(conversation.id);
         }}
@@ -689,7 +691,8 @@ function SidebarView({
       className="conversation-rename"
       onSubmit={(event) => {
         event.preventDefault();
-        if (renameDraft.trim()) onRenameConversation(conversation, renameDraft.trim());
+        const title = renameDraft.trim();
+        if (title && title !== renameOriginalRef.current) onRenameConversation(conversation, title);
         setRenaming(null);
       }}
     >

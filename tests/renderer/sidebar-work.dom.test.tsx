@@ -181,6 +181,7 @@ function renderSidebar(
   );
   return {
     onCreateConversation: sidebarProps.onCreateConversation,
+    onRenameConversation: sidebarProps.onRenameConversation,
     onChooseNewChatProject: sidebarProps.onChooseNewChatProject,
     onSelectConversation,
     onSnoozeConversation,
@@ -1095,6 +1096,31 @@ describe("compact Work sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Earlier 1" }));
     expect(screen.queryByRole("textbox", { name: "Rename Rename before expiry" }))
       .not.toBeInTheDocument();
+  });
+
+  it("keeps a generated title that lands while an untouched row rename is open", () => {
+    const updatedAt = new Date();
+    const view = renderSidebar([conversation("titled", "Fix login bug", updatedAt)]);
+    const startRename = (): HTMLInputElement => {
+      fireEvent.contextMenu(screen.getByRole("button", { name: /^(Fix login bug|Login bug fix),/u }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename thread" }));
+      return screen.getByRole("textbox", { name: /^Rename / });
+    };
+
+    const untouched = startRename();
+    view.rerenderSnapshot(snapshot([conversation("titled", "Login bug fix", updatedAt)]));
+    expect(untouched).toHaveValue("Fix login bug");
+    fireEvent.submit(untouched.closest("form")!);
+    expect(view.onRenameConversation).not.toHaveBeenCalled();
+
+    const typed = startRename();
+    fireEvent.change(typed, { target: { value: "  Repair sign-in  " } });
+    fireEvent.submit(typed.closest("form")!);
+    expect(view.onRenameConversation).toHaveBeenCalledOnce();
+    expect(view.onRenameConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "titled" }),
+      "Repair sign-in",
+    );
   });
 
   it("keeps snoozed work reachable so it can be unsnoozed", () => {

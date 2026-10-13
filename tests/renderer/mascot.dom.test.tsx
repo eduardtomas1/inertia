@@ -93,7 +93,7 @@ describe("mascot chat context and chooser", () => {
   it("lists chats, pins a choice, flags other chats that need attention, and returns to automatic", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const question = chat("q", "waiting-for-input");
     const working = chat("w", "running");
     app.list(question, [question, working]);
@@ -129,7 +129,7 @@ describe("mascot chat context and chooser", () => {
   it("names every chat choice by title, project, and an age ordinal for exact twins", async () => {
     const app = fixture();
     renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const project = "A very long project name that keeps going well past the chooser width";
     const chats = [
       chat("newer", "running", { chatTitle: "Fix login", projectName: "Alpha", since: "2026-09-06T10:05:00.000Z" }),
@@ -161,7 +161,7 @@ describe("mascot chat context and chooser", () => {
   it("keeps keyboard focus on a chooser row through every live list update", async () => {
     const app = fixture();
     renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const [a, b, c, d] = ["a", "b", "c", "d"].map((id) => chat(id, "running"));
     app.list(a!, [a!, b!, c!, d!]);
     const picker = screen.getByRole("button", { name: /Show chat/ });
@@ -221,7 +221,7 @@ describe("mascot chat context and chooser", () => {
   it("moves keyboard focus to the open button when choosing Auto hides the focused picker", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const a = chat("a", "running");
     app.list(a, [a], "a");
     const picker = view.container.querySelector<HTMLButtonElement>(".mascot-picker")!;
@@ -243,7 +243,7 @@ describe("mascot chat context and chooser", () => {
   ] as const)("moves %s from the open chooser's picker to the edge row", async (key, expected) => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const [a, b, c] = ["a", "b", "c"].map((id) => chat(id, "running"));
     app.list(a!, [a!, b!, c!]);
     const picker = view.container.querySelector<HTMLButtonElement>(".mascot-picker")!;
@@ -258,7 +258,7 @@ describe("mascot chat context and chooser", () => {
   it("moves keyboard focus to the mascot when the hidden picker leaves no chat to open", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     app.list(emptyMascotStatus(), [], "gone");
     const picker = view.container.querySelector<HTMLButtonElement>(".mascot-picker")!;
     expect(picker.hidden).toBe(false);
@@ -274,7 +274,7 @@ describe("mascot chat context and chooser", () => {
   it("states every count with its meaning in the picker and leaves the footer to the shown chat", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const detail = (): string => view.container.querySelector(".mascot-detail")!.textContent!;
     const picker = (): string => view.container.querySelector<HTMLElement>(".mascot-picker")!.getAttribute("aria-label")!;
     const bubble = (): string => view.container.querySelector<HTMLElement>(".mascot-open")!.getAttribute("aria-label")!;
@@ -305,7 +305,7 @@ describe("mascot rows, words and announcements", () => {
   it("lists up to five other chats as plain rows that each open their chat, and counts the rest", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const shown = chat("shown", "waiting-for-input", { message: "Which port should the fixture server use?" });
     const rows = [
       chat("ask", "waiting-for-input", { chatTitle: "Pick a name" }),
@@ -345,7 +345,7 @@ describe("mascot rows, words and announcements", () => {
   it("names each row's state with the chooser's words", async () => {
     const app = fixture();
     renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const shown = chat("shown", "waiting-for-input");
     const rows = (["waiting-for-approval", "queued", "starting", "delegated", "retrying", "cancelling"] as const)
       .map((phase) => chat(phase, phase, { chatTitle: phase }));
@@ -362,7 +362,7 @@ describe("mascot rows, words and announcements", () => {
   it("reports the drawn bubble height once per change, including the chooser opened from idle", async () => {
     const app = fixture();
     renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     expect(app.bubble.mock.calls).toEqual([[33]]);
     const shown = chat("shown", "waiting-for-input");
     const rows = Array.from({ length: 5 }, (_, index) => chat(`r${index}`, "running"));
@@ -383,7 +383,7 @@ describe("mascot rows, words and announcements", () => {
     const bubble = view.container.querySelector<HTMLElement>(".mascot-status")!;
     expect(main.dataset.compact).toBe("true");
     expect(bubble.style.height).toBe("33px");
-    expect(view.container.querySelector(".mascot-label")).toHaveTextContent("Ready when you are");
+    expect(view.container.querySelector(".mascot-label")).toHaveTextContent("Ready");
     expect(view.container.querySelector(".mascot-message")).toHaveTextContent("");
     app.update("running", true, { since: "2026-09-06T10:00:00.000Z", quietSince: "2026-09-06T10:10:00.000Z" });
     expect(main.dataset.compact).toBe("false");
@@ -397,7 +397,7 @@ describe("mascot rows, words and announcements", () => {
   it("shows a single thought balloon while the thinking artwork is shown", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const main = view.container.querySelector("main")!;
     for (const [phase, artwork] of [["queued", "thinking"], ["waiting-for-input", "thinking"], ["waiting-for-approval", "thinking"], ["running", "working"], ["completed", "idea"], ["failed", "idle"]] as const) {
       app.update(phase);
@@ -408,7 +408,7 @@ describe("mascot rows, words and announcements", () => {
   it("announces state changes with the message that needs you, the result or the failure, but not every activity update", async () => {
     const app = fixture();
     renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const region = screen.getByRole("status");
     expect(screen.getAllByRole("status")).toHaveLength(1);
     const heard: string[] = [];
@@ -429,8 +429,8 @@ describe("mascot rows, words and announcements", () => {
     observer.disconnect();
     expect(heard).toEqual([
       "Working. Fix login",
-      "Your input needed. Fix login. Which port should the server use?",
-      "Your input needed. Fix login. Should I also fix the retry?",
+      "Input needed. Fix login. Which port should the server use?",
+      "Input needed. Fix login. Should I also fix the retry?",
       "Work complete. Fix login. Fixed the race.",
       "Work failed. Fix login. npm test failed",
     ]);
@@ -441,7 +441,7 @@ describe("mascot rendering", () => {
   it("renders an applied custom sprite set and returns to the bundled artwork on reset", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const main = view.container.querySelector("main")!;
     const image = view.container.querySelector<HTMLImageElement>(".mascot-activity")!;
     const pickup = view.container.querySelector<HTMLImageElement>(".mascot-pickup")!;
@@ -474,7 +474,7 @@ describe("mascot rendering", () => {
   it("stays static at idle, pauses active work, and uses reduced-motion posters", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const image = view.container.querySelector("img")!;
     expect(image.dataset.animated).toBe("false");
     app.update("running");
@@ -492,7 +492,7 @@ describe("mascot rendering", () => {
   it("finishes the completion cue once and retains readable terminal labels", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     vi.useFakeTimers();
     app.update("completed");
     expect(view.container.querySelector("img")?.dataset.animated).toBe("true");
@@ -506,7 +506,7 @@ describe("mascot rendering", () => {
   it("announces real questions as text with the chat name and a contextual action", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     app.update("waiting-for-input", true, { chatTitle: "Improve mascot", message: "Use <img onerror=alert(1)> in the example?", progress: "2 questions to answer" });
     expect(screen.getByRole("status")).toHaveTextContent("Use <img onerror=alert(1)> in the example?");
     expect(view.container.querySelectorAll("img")).toHaveLength(2);
@@ -523,7 +523,7 @@ describe("mascot rendering", () => {
   it("supports keyboard positioning and explicit chat activation, and Escape only ends keyboard moving", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     app.update("running");
     const button = screen.getByRole("button", { name: /Working.*Open chat/ });
     expect(button.title).not.toMatch(/Escape/u);
@@ -548,7 +548,7 @@ describe("mascot rendering", () => {
   it("keeps activity current while held and returns to the latest state without replaying a finished cue", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     vi.useFakeTimers();
     const activity = view.container.querySelector<HTMLImageElement>(".mascot-activity")!;
     const pickup = view.container.querySelector<HTMLImageElement>(".mascot-pickup")!;
@@ -574,7 +574,7 @@ describe("mascot rendering", () => {
   it("shows the static pickup pose for paused, reduced-motion, and hidden surfaces", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const pickup = view.container.querySelector<HTMLImageElement>(".mascot-pickup")!;
     app.interaction(true);
     app.update("running", false);
@@ -594,7 +594,7 @@ describe("mascot rendering", () => {
   it.each(["pointerup", "pointercancel", "lostpointercapture", "released move", "blur", "unmount"])("captures a mouse pickup and releases exactly once on %s", async (ending) => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const handle = view.container.querySelector<HTMLElement>(".mascot-drag")!;
     handle.setPointerCapture = vi.fn();
     handle.hasPointerCapture = () => true;
@@ -621,7 +621,7 @@ describe("mascot rendering", () => {
   it("does not start a custom drag for right click, a secondary pointer, or compositor placement", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const handle = view.container.querySelector<HTMLElement>(".mascot-drag")!;
     handle.setPointerCapture = vi.fn();
     fireEvent.pointerDown(handle, { button: 2, pointerType: "mouse", isPrimary: true });
@@ -635,7 +635,7 @@ describe("mascot rendering", () => {
   it("keeps the new mouse capture when an old drop snapshot or pickup failure arrives", async () => {
     const app = fixture();
     const view = renderMascot();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready when you are"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ready"));
     const handle = view.container.querySelector<HTMLElement>(".mascot-drag")!;
     handle.setPointerCapture = vi.fn();
     handle.hasPointerCapture = () => true;

@@ -66,3 +66,58 @@ describe("workspace header project crumb", () => {
     expect(screen.getByRole("button", { name: title })).toHaveAccessibleDescription("Chat actions · double-click to rename");
   });
 });
+
+describe("workspace header rename", () => {
+  function renameHarness() {
+    const callbacks = props({});
+    const onRenameConversation = vi.fn();
+    const noop = vi.fn();
+    const conversationMenu = {
+      activeConversationId: callbacks.conversation!.id, detachedChatLimitReached: false, isDetached: false,
+      runs: [], splitConversationIds: new Set<string>(), onAcknowledgeRun: noop, onArchiveConversation: noop,
+      onCloseConversationSplit: noop, onDeleteConversation: noop, onDismissRun: noop,
+      onOpenConversationInSplit: noop, onOpenConversationInWindow: noop, onPinConversation: noop,
+      onRestoreConversation: noop, onSettleConversation: noop, onSnoozeConversation: noop,
+    };
+    const header = (title: string) => (
+      <WorkspaceHeader
+        {...callbacks}
+        conversation={{ ...callbacks.conversation!, title }}
+        conversationMenu={conversationMenu}
+        onRenameConversation={onRenameConversation}
+      />
+    );
+    const view = render(header("Fix login bug"));
+    return {
+      onRenameConversation,
+      startRename(): HTMLInputElement {
+        fireEvent.keyDown(screen.getByRole("button", { name: /Fix login bug|Login bug fix/u }), { key: "F2" });
+        return screen.getByRole("textbox", { name: "Chat title" });
+      },
+      retitle(title: string) {
+        view.rerender(header(title));
+      },
+    };
+  }
+
+  it("keeps a generated title that lands while an untouched rename is open", () => {
+    const harness = renameHarness();
+    const blurred = harness.startRename();
+    expect(blurred).toHaveValue("Fix login bug");
+    harness.retitle("Login bug fix");
+    fireEvent.blur(blurred);
+    expect(harness.onRenameConversation).not.toHaveBeenCalled();
+
+    const entered = harness.startRename();
+    harness.retitle("Login bug fixed");
+    fireEvent.keyDown(entered, { key: "Enter" });
+    expect(harness.onRenameConversation).not.toHaveBeenCalled();
+
+    const typed = harness.startRename();
+    harness.retitle("Login fix");
+    fireEvent.change(typed, { target: { value: "  Repair sign-in  " } });
+    fireEvent.keyDown(typed, { key: "Enter" });
+    expect(harness.onRenameConversation).toHaveBeenCalledOnce();
+    expect(harness.onRenameConversation).toHaveBeenCalledWith("Repair sign-in");
+  });
+});

@@ -128,16 +128,12 @@ export async function installScreenOpenProbe(page: Page): Promise<void> {
         },
       });
     }
-    try {
-      new PerformanceObserver((list) => {
-        if (!armed) return;
-        for (const entry of list.getEntries()) {
-          armed.longTasks.push({ start: entry.startTime, duration: entry.duration });
-        }
-      }).observe({ entryTypes: ["longtask"] });
-    } catch {
-      undefined;
-    }
+    new PerformanceObserver((list) => {
+      if (!armed) return;
+      for (const entry of list.getEntries()) {
+        armed.longTasks.push({ start: entry.startTime, duration: entry.duration });
+      }
+    }).observe({ entryTypes: ["longtask"] });
     const visible = (element: Element): boolean => {
       if (!element.isConnected) return false;
       if (!element.checkVisibility({ checkOpacity: true, visibilityProperty: true })) return false;

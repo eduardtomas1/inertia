@@ -72,6 +72,7 @@ export function PlanPanel({
   const documentId = useId();
   const planCopy = useCopiedState();
   const completed = steps.filter((step) => step.status === "completed").length;
+  const counted = steps.filter((step) => step.status !== "cancelled").length;
   const parsed = document?.trim() ? planDocument(document) : null;
   const heading = parsed?.title ?? title;
   const body = parsed?.body ?? "";
@@ -84,7 +85,7 @@ export function PlanPanel({
         <div className="panel-heading">
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
-            {steps.length > 0 && <span>{completed} of {steps.length} complete</span>}
+            {counted > 0 && <span>{completed} of {counted} complete</span>}
           </div>
         </div>
         <div className="plan-toolbar-actions">

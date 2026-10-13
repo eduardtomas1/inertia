@@ -15,13 +15,18 @@ import {
   providerInstallationIdentity,
 } from
   "../../src/server/provider/installation-lease";
-import { ProviderMaintenanceJournal } from
+import {
+  ProviderMaintenanceJournal,
+  validateProviderMaintenanceJournalStorage,
+} from
   "../../src/server/provider/maintenance-journal";
 import {
   recoverProviderMaintenanceJournal,
   type ProviderMaintenanceRecoveryRuntime,
 } from
   "../../src/server/provider/maintenance-recovery";
+import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from
+  "../../src/shared/provider-maintenance";
 
 const roots: string[] = [];
 const FIRST_GENERATION = "00000000-0000-4000-8000-000000000001:1";
@@ -83,6 +88,41 @@ describe("ProviderMaintenanceJournal", () => {
     expect(reopened.retireVerified("maintenance-1", observed)).toBe(true);
     expect(journal(dataDirectory).pending()).toEqual([]);
   });
+
+  it.each(PROVIDER_MAINTENANCE_PROVIDER_IDS)(
+    "reads back the %s record from durable storage",
+    (providerId) => {
+      const dataDirectory = root();
+      const coordinates = {
+        providerId,
+        executable: `/tools/${providerId}`,
+        installationRootIdentity: null,
+        packageIdentity: null,
+        environmentIdentity: "test-environment",
+      };
+      const owning = providerInstallationIdentity({
+        ...coordinates,
+        version: "1.0.0",
+      });
+      const observed = providerInstallationIdentity({
+        ...coordinates,
+        version: "2.0.0",
+      });
+      expect(journal(dataDirectory).begin(`${providerId}-update`, owning))
+        .toBe(true);
+
+      expect(() => validateProviderMaintenanceJournalStorage(dataDirectory))
+        .not.toThrow();
+      const reopened = journal(dataDirectory, SECOND_GENERATION);
+      expect(reopened.pending()).toEqual([expect.objectContaining({
+        operationId: `${providerId}-update`,
+        installationIdentity: owning,
+      })]);
+      expect(reopened.markVerified(`${providerId}-update`, observed)).toBe(true);
+      expect(reopened.retireVerified(`${providerId}-update`, observed)).toBe(true);
+      expect(journal(dataDirectory).pending()).toEqual([]);
+    },
+  );
 
   it("discards an unpublished atomic transient and rejects integrity damage", () => {
     const dataDirectory = root();

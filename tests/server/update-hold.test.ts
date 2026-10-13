@@ -1,4 +1,7 @@
+import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { TerminalManager } from "../../src/server/terminal";
 
 import {
   cleanupTurnControllerTestDirectories,
@@ -97,5 +100,26 @@ describe("update hold turn admission", () => {
       await runtime.controller.dispose();
       runtime.store.close();
     }
+  });
+});
+
+describe("update hold terminal admission", () => {
+  it("refuses new terminals until the hold is released", () => {
+    const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+    const spawnTerminal = vi.fn(() => {
+      throw new Error("spawn reached");
+    });
+    const manager = new TerminalManager({ spawnTerminal });
+
+    hold();
+    expect(() => manager.create(owner, process.cwd(), 80, 24)).toThrow("Inertia is updating.");
+    expect(() => manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24))
+      .toThrow("Inertia is updating.");
+    expect(spawnTerminal).not.toHaveBeenCalled();
+
+    release();
+    expect(() => manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24))
+      .toThrow("Unable to start a terminal");
+    expect(spawnTerminal).toHaveBeenCalledOnce();
   });
 });

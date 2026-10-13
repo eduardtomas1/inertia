@@ -15,7 +15,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { linuxProcessCanExecute } from "../../src/node/runtime-owned-process-posix";
 import { TerminalManager } from "../../src/server/terminal";
-import { hold, release } from "../../src/server/runtime/update-hold";
 
 async function waitFor(
   description: string,
@@ -125,38 +124,6 @@ describe("TerminalManager", () => {
       commandLine,
       expect.any(Object),
     );
-  });
-
-  it("refuses new terminals while Inertia is updating", () => {
-    const terminal = fakeTerminal();
-    const owner = {
-      readyState: 1,
-      bufferedAmount: 0,
-      send: vi.fn(),
-    } as unknown as WebSocket;
-    const spawnTerminal = vi.fn(() => terminal.pty);
-    const manager = new TerminalManager({ spawnTerminal });
-
-    hold();
-    try {
-      expect(() => manager.create(owner, process.cwd(), 80, 24))
-        .toThrow("Inertia is updating.");
-      expect(() => manager.createProcess(
-        owner,
-        process.cwd(),
-        "test-shell",
-        [],
-        {},
-        80,
-        24,
-      )).toThrow("Inertia is updating.");
-      expect(spawnTerminal).not.toHaveBeenCalled();
-    } finally {
-      release();
-    }
-
-    manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24);
-    expect(spawnTerminal).toHaveBeenCalledOnce();
   });
 
   it("atomically blocks PTY creation during update preparation", () => {

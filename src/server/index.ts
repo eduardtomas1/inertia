@@ -684,7 +684,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   queuedMessages.start();
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
-    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance,
+    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
   });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [

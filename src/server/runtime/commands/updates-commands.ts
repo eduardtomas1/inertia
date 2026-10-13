@@ -27,7 +27,7 @@ export function createUpdatesCommandHandler(
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
-          result: await runUpdateEverything(dependencies, command.payload),
+          result: await runUpdateEverything(dependencies, command.payload, socket),
         });
         return "handled";
       case "updates.finish":

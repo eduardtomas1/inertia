@@ -1,3 +1,5 @@
+import type WebSocket from "ws";
+
 import type { ClientCommand } from "../../shared/contracts";
 import type {
   ProviderMaintenanceOperation,
@@ -6,8 +8,9 @@ import type {
 import type { UpdateProviderResult, UpdatesRunResult } from "../../shared/updates";
 import type { RuntimeStore } from "../database";
 import type { ProviderMaintenanceController } from "../provider/maintenance-controller";
+import type { RuntimeUpdatePreparationGate } from "../runtime-update-preparation";
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
-import { hold, isHeld, release, scheduleSafetyRelease, UPDATE_HOLD_MESSAGE } from "./update-hold";
+import { hold, isAwaitingFinish, isHeld, release, scheduleSafetyRelease, UPDATE_HOLD_MESSAGE } from "./update-hold";
 
 export type UpdatesRunRequest = Extract<ClientCommand, { type: "updates.run" }>["payload"];
 
@@ -26,6 +29,7 @@ export interface UpdateEverythingDependencies {
   turns: UpdateInterruptionController;
   maintenance: Pick<ProviderMaintenanceController, "current" | "startUpdate" | "settled">;
   restartContinuation: RestartContinuationPlanner;
+  preparation: Pick<RuntimeUpdatePreparationGate, "isAdmissionClosed">;
 }
 
 const OUTCOMES: Record<ProviderMaintenanceOperation["status"], UpdateProviderResult["outcome"]> = {
@@ -82,10 +86,21 @@ async function updateProvider(
 export async function runUpdateEverything(
   dependencies: UpdateEverythingDependencies,
   request: UpdatesRunRequest,
+  owner: Pick<WebSocket, "readyState" | "once" | "off">,
 ): Promise<UpdatesRunResult> {
-  if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+  if (isHeld() && !isAwaitingFinish()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
   const conversationIds = interruptedConversationIds(dependencies, request);
-  hold(() => dependencies.restartContinuation.arm());
+  let returned = false;
+  let ownerClosed = owner.readyState > 1;
+  const closed = (): void => {
+    ownerClosed = true;
+    if (returned && !dependencies.preparation.isAdmissionClosed()) release(generation);
+  };
+  const generation = hold(() => {
+    owner.off("close", closed);
+    dependencies.restartContinuation.arm();
+  });
+  owner.once("close", closed);
   let readyForAppInstall = false;
   try {
     if (request.continueChats) dependencies.restartContinuation.createPlans(conversationIds);
@@ -102,8 +117,9 @@ export async function runUpdateEverything(
       readyForAppInstall,
     };
   } finally {
-    if (readyForAppInstall) scheduleSafetyRelease();
-    else release();
+    returned = true;
+    if (readyForAppInstall && !ownerClosed) scheduleSafetyRelease();
+    else release(generation);
   }
 }
 

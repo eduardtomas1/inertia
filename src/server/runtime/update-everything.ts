@@ -13,14 +13,11 @@ export type UpdatesRunRequest = Extract<ClientCommand, { type: "updates.run" }>[
 
 export interface UpdateInterruptionController {
   activeConversationIds(): string[];
-  interruptForUpdate(
-    conversationIds: readonly string[],
-    options: { continues: readonly string[] },
-  ): Promise<void>;
+  interruptForUpdate(conversationIds: readonly string[]): Promise<boolean>;
 }
 
 export interface RestartContinuationPlanner {
-  createPlans(conversationIds: readonly string[]): readonly string[];
+  createPlans(conversationIds: readonly string[]): string[];
   arm(): void;
 }
 
@@ -91,10 +88,8 @@ export async function runUpdateEverything(
   hold(() => dependencies.restartContinuation.arm());
   let readyForAppInstall = false;
   try {
-    const continues = request.continueChats
-      ? dependencies.restartContinuation.createPlans(conversationIds)
-      : [];
-    await dependencies.turns.interruptForUpdate(conversationIds, { continues });
+    if (request.continueChats) dependencies.restartContinuation.createPlans(conversationIds);
+    await dependencies.turns.interruptForUpdate(conversationIds);
     const providers: UpdateProviderResult[] = [];
     for (const providerId of request.providerIds) {
       providers.push(await updateProvider(dependencies.maintenance, providerId));

@@ -18,7 +18,7 @@ export function updateInterruptionStub(
     activeConversationIds: () => turns.activeConversationIds(),
     interruptForUpdate: async (conversationIds) => {
       for (const conversationId of conversationIds) turns.cancel(conversationId);
-      await turns.waitForProviderCleanup(conversationIds, Date.now() + PROVIDER_CLEANUP_WAIT_MS);
+      return await turns.waitForProviderCleanup(conversationIds, Date.now() + PROVIDER_CLEANUP_WAIT_MS) !== false;
     },
   };
 }

@@ -75,7 +75,7 @@ function fixture(options: {
   running?: string[];
   providers?: Record<string, ProviderMaintenanceProviderId>;
   outcomes?: Partial<Record<ProviderMaintenanceProviderId, Terminal | Error>>;
-  plans?: (conversationIds: readonly string[]) => readonly string[];
+  plans?: (conversationIds: readonly string[]) => string[];
 } = {}) {
   const order: string[] = [];
   const providerOf = options.providers ?? {
@@ -107,14 +107,15 @@ function fixture(options: {
   };
   const turns = {
     activeConversationIds: vi.fn(() => options.running ?? [CODEX_CHAT, CLAUDE_CHAT, CURSOR_CHAT]),
-    interruptForUpdate: vi.fn(async (conversationIds: readonly string[], interruption: { continues: readonly string[] }) => {
-      order.push(`interrupt:${conversationIds.join(",")}:continues=${interruption.continues.join(",")}:held=${isHeld()}`);
+    interruptForUpdate: vi.fn(async (conversationIds: readonly string[]) => {
+      order.push(`interrupt:${conversationIds.join(",")}:held=${isHeld()}`);
+      return true;
     }),
   };
   const restartContinuation = {
     createPlans: vi.fn((conversationIds: readonly string[]) => {
       order.push(`plans:${conversationIds.join(",")}:held=${isHeld()}`);
-      return options.plans ? options.plans(conversationIds) : conversationIds;
+      return options.plans ? options.plans(conversationIds) : [...conversationIds];
     }),
     arm: vi.fn(() => { order.push(`arm:held=${isHeld()}`); }),
   };
@@ -148,7 +149,7 @@ describe("update everything orchestration", () => {
 
     expect(subject.order).toEqual([
       `plans:${CODEX_CHAT},${CLAUDE_CHAT}:held=true`,
-      `interrupt:${CODEX_CHAT},${CLAUDE_CHAT}:continues=${CODEX_CHAT}:held=true`,
+      `interrupt:${CODEX_CHAT},${CLAUDE_CHAT}:held=true`,
       "start:codex:held=true",
       "settled:codex",
       "start:claude:held=true",
@@ -174,10 +175,8 @@ describe("update everything orchestration", () => {
     const result = await subject.run({ providerIds: ["codex"], includeApp: true });
 
     expect(result.interruptedConversationIds).toEqual([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith(
-      [CODEX_CHAT, CURSOR_CHAT, "deleted-chat"],
-      { continues: [CODEX_CHAT, CURSOR_CHAT, "deleted-chat"] },
-    );
+    expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
   });
 
   it("leaves chats on other providers running and skips chats it cannot resolve", async () => {
@@ -186,7 +185,8 @@ describe("update everything orchestration", () => {
     const result = await subject.run({ providerIds: ["codex"] });
 
     expect(result.interruptedConversationIds).toEqual([CODEX_CHAT]);
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT], { continues: [CODEX_CHAT] });
+    expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
   });
 
   it("does not plan continuations when the user turned them off", async () => {
@@ -195,10 +195,7 @@ describe("update everything orchestration", () => {
     await subject.run({ continueChats: false });
 
     expect(subject.restartContinuation.createPlans).not.toHaveBeenCalled();
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith(
-      [CODEX_CHAT, CLAUDE_CHAT],
-      { continues: [] },
-    );
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT]);
   });
 
   it("keeps updating the rest when one provider fails, stays unchanged or is cancelled", async () => {
@@ -322,20 +319,20 @@ describe("update everything with the real maintenance controller", () => {
 
   it("updates without waiting on installation owners because the interrupted turns released them", async () => {
     const { controller, blockers, runningChat } = controllerFixture();
-    const interruptForUpdate = vi.fn(async () => {
-      expect(runningChat.release({ cleanupConfirmed: true })).toBe(true);
-    });
+    const interruptForUpdate = vi.fn(async () => runningChat.release({ cleanupConfirmed: true }));
 
     const result = await runUpdateEverything({
       store: { conversation: () => ({ providerId: "codex" }) },
       turns: { activeConversationIds: () => [CODEX_CHAT], interruptForUpdate },
       maintenance: controller,
-      restartContinuation: { createPlans: (ids) => ids, arm: () => undefined },
+      restartContinuation: { createPlans: (ids: readonly string[]) => [...ids], arm: () => undefined },
     } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true });
 
     expect(result.providers).toEqual([
       { providerId: "codex", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null },
     ]);
+    expect(interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
+    await expect(interruptForUpdate.mock.results[0]!.value).resolves.toBe(true);
     expect(blockers).not.toHaveBeenCalled();
     expect(controller.hasBlockingAuthority("codex")).toBe(false);
   });
@@ -345,9 +342,9 @@ describe("update everything with the real maintenance controller", () => {
 
     const result = await runUpdateEverything({
       store: { conversation: () => ({ providerId: "claude" }) },
-      turns: { activeConversationIds: () => [CLAUDE_CHAT], interruptForUpdate: async () => undefined },
+      turns: { activeConversationIds: () => [CLAUDE_CHAT], interruptForUpdate: async () => true },
       maintenance: controller,
-      restartContinuation: { createPlans: (ids) => ids, arm: () => undefined },
+      restartContinuation: { createPlans: (ids: readonly string[]) => [...ids], arm: () => undefined },
     } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true });
 
     expect(result.interruptedConversationIds).toEqual([]);
@@ -367,7 +364,7 @@ describe("update interruption stub", () => {
     const subject = updateInterruptionStub(turns as never);
 
     expect(subject.activeConversationIds()).toEqual([CODEX_CHAT]);
-    await subject.interruptForUpdate([CODEX_CHAT, CLAUDE_CHAT], { continues: [] });
+    await expect(subject.interruptForUpdate([CODEX_CHAT, CLAUDE_CHAT])).resolves.toBe(true);
 
     expect(turns.cancel.mock.calls).toEqual([[CODEX_CHAT], [CLAUDE_CHAT]]);
     expect(turns.waitForProviderCleanup).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT], expect.any(Number));

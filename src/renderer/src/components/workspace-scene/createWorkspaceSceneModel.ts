@@ -56,6 +56,7 @@ import { buildWorkspaceSurfaceSummary } from "../../utils/environmentSummary";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
+import { latestPlanDocument } from "../../utils/planDocument";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
@@ -984,7 +985,7 @@ export function createWorkspaceSceneModel({
       },
       plan: {
         steps: planSteps,
-        document: latestPlan?.explanation ?? null,
+        document: latestPlanDocument(projection.plans),
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,
           projectId: project.id,

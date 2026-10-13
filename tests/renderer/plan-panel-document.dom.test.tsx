@@ -1,8 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import type { AgentPlan } from "../../src/shared/contracts";
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
-import { planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
+import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
+import { EMPTY_STREAMING_AGENT_SOURCE } from "../../src/renderer/src/hooks/useStreamingAgentState";
+import { latestPlanDocument, planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
 
 const markdown = { projectRoot: "/workspace", projectId: "project", defaultCodeWrap: true };
 const plan = [
@@ -64,5 +67,38 @@ describe("plan panel document", () => {
     expect(screen.queryByText("No plan yet")).toBeNull();
     expect(screen.queryByRole("button", { name: "Show full plan" })).toBeNull();
     expect(screen.getByText("One paragraph.")).toBeTruthy();
+  });
+
+  it("keeps the plan document while a later run reports progress on its steps", () => {
+    const record = (runId: string, explanation: string | null, steps: AgentPlan["steps"]): AgentPlan => ({
+      conversationId: "conversation",
+      runId,
+      turnId: `${runId}-turn`,
+      explanation,
+      steps,
+    });
+    const plans = [
+      record("plan-run", "# Plan: Ship the fix\n## Context\nThe adapter drops progress.", [
+        { step: "Inspect the adapter", status: "pending" },
+        { step: "Write the projection", status: "pending" },
+        { step: "Run the tests", status: "pending" },
+      ]),
+      record("build-run", null, [
+        { step: "Inspect the adapter", status: "completed" },
+        { step: "Write the projection", status: "completed" },
+        { step: "Run the tests", status: "inProgress" },
+      ]),
+    ];
+    const { result } = renderHook(() => usePlanSteps(plans, [], "running", EMPTY_STREAMING_AGENT_SOURCE));
+    const { container } = render(<PlanPanel document={latestPlanDocument(plans)} markdown={markdown} steps={result.current} />);
+
+    expect(screen.getByRole("heading", { level: 2, name: "Ship the fix" })).toBeTruthy();
+    expect(container.querySelector(".plan-document h2")?.textContent).toBe("Context");
+    expect(screen.getByText("2 of 3 complete")).toBeTruthy();
+    expect([...container.querySelectorAll("[data-plan-step-status]")].map((step) => step.getAttribute("data-plan-step-status")))
+      .toEqual(["completed", "completed", "in-progress"]);
+    expect(latestPlanDocument([...plans, record("revised-run", "# Plan: Revised", [])])).toBe("# Plan: Revised");
+    expect(latestPlanDocument([record("blank-run", "  ", [])])).toBeNull();
+    expect(latestPlanDocument([])).toBeNull();
   });
 });

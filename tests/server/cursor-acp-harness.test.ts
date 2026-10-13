@@ -940,6 +940,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(questions).toEqual(["Which scopes?"]);
     expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement", "Verify"]));
     expect(planExplanations).toContain("Review the final diff.");
+    expect(planExplanations.at(-1)).toBe("");
     expect(reasoning).toEqual(["Checking"]);
     expect(activities).toContainEqual(expect.objectContaining({
       activityId: "tool-4",

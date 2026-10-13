@@ -1,3 +1,4 @@
+import { MAX_AGENT_PLAN_STEPS } from "../../shared/agent-plan";
 import { boundedText, objectValue, stringValue, type JsonObject } from "./protocol";
 import type { AgentPlanStep } from "../provider/interactions";
 
@@ -9,7 +10,7 @@ export interface ParsedCodexPlan {
 export function parseCodexPlan(params: JsonObject): ParsedCodexPlan {
   const steps: AgentPlanStep[] = [];
   if (Array.isArray(params.plan)) {
-    for (const value of params.plan.slice(0, 50)) {
+    for (const value of params.plan.slice(0, MAX_AGENT_PLAN_STEPS)) {
       const planStep = objectValue(value);
       const step = boundedText(planStep?.step, 1_000);
       const status = stringValue(planStep?.status);

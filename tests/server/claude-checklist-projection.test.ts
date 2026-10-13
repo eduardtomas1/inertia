@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
+import { MAX_AGENT_PLAN_STEPS } from "../../src/shared/agent-plan";
 import {
   createAgentHarnessEmitter,
   type AgentHarnessEvent,
@@ -156,9 +157,9 @@ describe("Claude checklist projection", () => {
       })),
     }));
     const [plan] = claude.plans();
-    expect(plan?.steps).toHaveLength(100);
+    expect(plan?.steps).toHaveLength(MAX_AGENT_PLAN_STEPS);
     expect(plan?.steps[0]?.step).toHaveLength(1_000);
-    expect(plan?.steps[99]).toEqual({ step: "Step 99", status: "pending" });
+    expect(plan?.steps.at(-1)).toEqual({ step: `Step ${MAX_AGENT_PLAN_STEPS - 1}`, status: "pending" });
   });
 
   it("does not let a subagent's checklist replace the run's plan", () => {

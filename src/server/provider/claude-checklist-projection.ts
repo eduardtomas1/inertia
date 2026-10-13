@@ -1,3 +1,4 @@
+import { MAX_AGENT_PLAN_STEPS } from "../../shared/agent-plan";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import {
   boundedClaudeIdentifier as boundedIdentifier,
@@ -7,7 +8,6 @@ import {
 } from "./claude-message-projector-support";
 import type { AgentPlanStep } from "./interactions";
 
-const MAX_CLAUDE_CHECKLIST_STEPS = 100;
 const MAX_CLAUDE_CHECKLIST_STEP_CHARS = 1_000;
 const CLAUDE_TASK_TOOLS: ReadonlySet<string> = new Set(["TaskCreate", "TaskUpdate", "TaskList"]);
 
@@ -72,7 +72,7 @@ export class ClaudeChecklistProjection {
       const id = boundedIdentifier(task?.id);
       const step = checklistText(task?.subject) ?? checklistText(call.input.subject);
       if (!id || !step) return;
-      if (!this.tasks.has(id) && this.tasks.size >= MAX_CLAUDE_CHECKLIST_STEPS) return;
+      if (!this.tasks.has(id) && this.tasks.size >= MAX_AGENT_PLAN_STEPS) return;
       this.tasks.set(id, { step, status: "pending" });
     } else if (call.name === "TaskUpdate") {
       const id = boundedIdentifier(call.input.taskId);
@@ -90,7 +90,7 @@ export class ClaudeChecklistProjection {
       if (!Array.isArray(record.tasks)) return;
       this.tasks.clear();
       for (const value of record.tasks) {
-        if (this.tasks.size >= MAX_CLAUDE_CHECKLIST_STEPS) break;
+        if (this.tasks.size >= MAX_AGENT_PLAN_STEPS) break;
         const task = checklistTask(value);
         if (task) this.tasks.set(task.id, task.step);
       }
@@ -107,7 +107,7 @@ export class ClaudeChecklistProjection {
     if (!Array.isArray(todos)) return;
     const steps: AgentPlanStep[] = [];
     for (const value of todos) {
-      if (steps.length >= MAX_CLAUDE_CHECKLIST_STEPS) break;
+      if (steps.length >= MAX_AGENT_PLAN_STEPS) break;
       const todo = objectValue(value);
       const step = checklistText(todo?.content);
       const status = checklistStatus(todo?.status);

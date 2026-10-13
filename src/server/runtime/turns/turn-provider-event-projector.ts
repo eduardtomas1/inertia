@@ -1,3 +1,4 @@
+import { MAX_AGENT_PLAN_STEPS } from "../../../shared/agent-plan";
 import type {
   AgentPlan,
   AgentRunState,
@@ -196,9 +197,11 @@ export class TurnProviderEventProjector {
           conversationId: active.conversation.id,
           runId: active.turn.runId,
           turnId: active.turn.id,
-          explanation: explanation ?? stored?.explanation ?? null,
+          explanation: event.explanation === null
+            ? stored?.explanation ?? null
+            : explanation,
           steps: event.steps.length > 0 || !explanation || !stored
-            ? event.steps
+            ? event.steps.slice(0, MAX_AGENT_PLAN_STEPS)
             : stored.steps,
         };
         this.options.agentPlans.set(active.conversation.id, plan);

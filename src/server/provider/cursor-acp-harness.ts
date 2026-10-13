@@ -936,7 +936,7 @@ function handleCursorUpdate(
       }
       return;
     case "plan_removed":
-      emitter.rich({ type: "plan", explanation: null, steps: [] });
+      emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
       // The enclosing notification handler retains the bounded command set.

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { MAX_AGENT_PLAN_STEPS } from "../../src/shared/agent-plan";
 import type { AgentPlan, SubagentTrace } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
 import type {
@@ -339,6 +340,27 @@ describe("TurnProviderEventProjector plan updates", () => {
       explanation: "# Plan",
       steps: [],
     }));
+  });
+
+  it("clears the document when the provider removes the plan", () => {
+    const { plan, upsertAgentPlan, broadcast } = planProjector();
+    plan("# Plan", [{ step: "Inspect", status: "completed" }]);
+    plan("", []);
+
+    const expected = expect.objectContaining({ explanation: null, steps: [] });
+    expect(upsertAgentPlan).toHaveBeenLastCalledWith(expected);
+    expect(broadcast).toHaveBeenLastCalledWith({ type: "agent.plan.updated", plan: expected });
+  });
+
+  it("stores and broadcasts the same bounded checklist", () => {
+    const { plan, upsertAgentPlan, broadcast, agentPlans } = planProjector();
+    const steps = Array.from({ length: 80 }, (_, index) => ({ step: `Step ${index + 1}`, status: "pending" as const }));
+    plan(null, steps);
+
+    const live = agentPlans.get("conversation-1")!;
+    expect(live.steps).toEqual(steps.slice(0, MAX_AGENT_PLAN_STEPS));
+    expect(upsertAgentPlan).toHaveBeenLastCalledWith(live);
+    expect(broadcast).toHaveBeenLastCalledWith({ type: "agent.plan.updated", plan: live });
   });
 
   it("does not carry a plan from another run into a new one", () => {

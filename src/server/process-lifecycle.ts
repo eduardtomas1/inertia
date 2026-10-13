@@ -907,8 +907,9 @@ export async function terminateProcessTreeAndWait(
     const taskkill = async (
       forced: boolean,
       phaseDeadlineAt: number,
+      phaseBudgetMs = waitMs,
     ): Promise<boolean | null> => {
-      const remainingMs = Math.min(waitMs, phaseDeadlineAt - Date.now());
+      const remainingMs = Math.min(phaseBudgetMs, phaseDeadlineAt - Date.now());
       if (remainingMs <= 0) return null;
       return await terminateWindowsProcessTree(
         pid,
@@ -922,7 +923,7 @@ export async function terminateProcessTreeAndWait(
     let gracefulAccepted = false;
     if (!sequence.forcedTerminated && !sequence.fallbackReached) {
       if (force) {
-        sequence.forcedTerminated = await taskkill(true, closeDeadlineAt) === true;
+        sequence.forcedTerminated = await taskkill(true, closeDeadlineAt, Infinity) === true;
       } else if (await taskkill(false, gracefulDeadlineAt) === true) {
         gracefulAccepted = true;
       } else if (child.exitCode === null && child.signalCode === null) {

@@ -81,19 +81,34 @@ export function createTodoCommandHandler(
       let linked: Todo;
       try {
         linked = dependencies.store.todos.link(todo.id, conversation.id);
-      } catch {
-        throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+      } catch (error) {
+        if (dependencies.store.conversationWorktrees.get(conversation.id)?.ownsWorktree) {
+          throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+        }
+        dependencies.store.deleteConversation(conversation.id);
+        throw error;
       }
+      dependencies.store.conversationTitleLocks.add(conversation.id);
       const content = todoPromptContent(linked);
       if (dependencies.enableProviders) {
-        const queued = dependencies.turns.queue({
-          conversationId: conversation.id,
-          content,
-          activateConversation: false,
-          contextRequestId: command.requestId,
-          turnCheckpoint: true,
-          skills: [],
-        });
+        let queued: ReturnType<TodoCommandDependencies["turns"]["queue"]>;
+        try {
+          queued = dependencies.turns.queue({
+            conversationId: conversation.id,
+            content,
+            activateConversation: false,
+            contextRequestId: command.requestId,
+            turnCheckpoint: true,
+            skills: [],
+          });
+        } catch {
+          if (!dependencies.store.latestAgentTurnForConversation(conversation.id)) {
+            dependencies.store.createMessage(conversation.id, content, "user", [], null, undefined, {
+              activateConversation: false,
+            });
+          }
+          throw new RuntimeRequestError("The chat was created, but its first turn could not start.");
+        }
         if (!dependencies.turns.start(queued.turn.id)) {
           dependencies.turns.failBeforeStart(conversation.id, "The task's chat could not start.");
           throw new RuntimeRequestError("The chat was created, but its first turn could not start.");

@@ -38,6 +38,19 @@ describe("scrubCommandSecrets", () => {
     expect(scrubCommandSecrets(scrubbed)).toBe(scrubbed);
   });
 
+  it.each([
+    ["curl -H 'X-My-Service-Api-Key: abc123' https://x", "curl -H 'X-My-Service-Api-Key: [redacted]' https://x"],
+    ["curl -H \"Authorization: Bearer abc123\" https://x", "curl -H \"Authorization: [redacted]\" https://x"],
+  ])("redacts the credential header in %j", (command, scrubbed) => {
+    expect(scrubCommandSecrets(command)).toBe(scrubbed);
+  });
+
+  it("scrubs a long run of header-like characters in linear time", () => {
+    const startedAt = performance.now();
+    scrubCommandSecrets("a-".repeat(50_000));
+    expect(performance.now() - startedAt).toBeLessThan(100);
+  });
+
   it("still applies the shared secret patterns", () => {
     expect(scrubCommandSecrets("curl -H 'Authorization: Bearer abcdefghijklmnop' https://x")).not.toContain("abcdefghijklmnop");
   });

@@ -16,6 +16,7 @@ import Database from "better-sqlite3";
 
 import { authoritativeRunStateSchemaIsValid } from "./authoritative-run-state-schema";
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
+import { contextPacketTriggersAreValid } from "./context-packet-triggers-schema";
 import {
   type DatabaseSchemaRequirements,
   DATABASE_SCHEMA_REQUIREMENTS,
@@ -159,6 +160,7 @@ function validateOpenDatabase(
   runStateSchemaIsValid: DatabaseSchemaValidator,
   suspendTimingSchemaIsValid: DatabaseSchemaValidator,
   todosSchemaIsValid: DatabaseSchemaValidator,
+  contextPacketTriggersAreValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -420,6 +422,7 @@ function validateOpenDatabase(
     return "inconsistent";
   }
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "inconsistent";
+  if (version >= 61 && !contextPacketTriggersAreValid(database)) return "inconsistent";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
   if (version >= 96 && !todosSchemaIsValid(database)) return "inconsistent";
@@ -452,6 +455,7 @@ function validateDatabase(
       authoritativeRunStateSchemaIsValid,
       systemSuspendTimingSchemaIsValid,
       todosCountLimitTriggerIsValid,
+      contextPacketTriggersAreValid,
     );
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -481,6 +485,7 @@ function validateDatabaseOffThread(
     const authoritativeRunStateSchemaIsValid = ${authoritativeRunStateSchemaIsValid.toString()};
     const systemSuspendTimingSchemaIsValid = ${systemSuspendTimingSchemaIsValid.toString()};
     const todosCountLimitTriggerIsValid = ${todosCountLimitTriggerIsValid.toString()};
+    const contextPacketTriggersAreValid = ${contextPacketTriggersAreValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -497,6 +502,7 @@ function validateDatabaseOffThread(
         authoritativeRunStateSchemaIsValid,
         systemSuspendTimingSchemaIsValid,
         todosCountLimitTriggerIsValid,
+        contextPacketTriggersAreValid,
       );
     } catch {
       result = "corrupt";

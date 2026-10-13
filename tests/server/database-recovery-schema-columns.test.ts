@@ -20,6 +20,12 @@ afterEach(() => {
 
 const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold", "notify_only_in_background"];
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
+const contextPacketTriggers = [
+  "conversation_context_packets_immutable",
+  "conversation_context_packets_consume_once",
+  "conversation_context_packets_discard_source_drafts",
+  "conversation_context_packets_draft_limit",
+];
 
 function labelSchema(database: Database.Database, version: number): void {
   if (version < 96) database.exec("DROP TABLE todos");
@@ -88,6 +94,8 @@ describe("database health check for settings and subagent columns", () => {
       version: 95,
       sql: "DROP TRIGGER conversation_context_packets_immutable; ALTER TABLE conversation_context_packets DROP COLUMN supplement_json",
     },
+    ...contextPacketTriggers.map((trigger) => ({ version: 95, sql: `DROP TRIGGER ${trigger}` })),
+    ...contextPacketTriggers.map((trigger) => ({ version: 96, sql: `DROP TRIGGER ${trigger}` })),
     { version: 96, sql: "DROP TABLE todos" },
     { version: 96, sql: "ALTER TABLE todos DROP COLUMN note" },
     { version: 96, sql: "DROP INDEX todos_conversation_idx" },
@@ -114,6 +122,18 @@ describe("database health check for settings and subagent columns", () => {
     new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
     const primary = new Database(databasePath);
     primary.exec("ALTER TABLE app_state DROP COLUMN notify_only_in_background");
+    const manager = new DatabaseBackupManager(primary, databasePath);
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    primary.close();
+  });
+
+  it.each(contextPacketTriggers)("rejects a backup missing %s during off-thread validation", async (trigger) => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-columns-"));
+    directories.push(directory);
+    const databasePath = join(directory, "inertia.sqlite");
+    new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
+    const primary = new Database(databasePath);
+    primary.exec(`DROP TRIGGER ${trigger}`);
     const manager = new DatabaseBackupManager(primary, databasePath);
     await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
     primary.close();

@@ -64,20 +64,33 @@ describe("plan document on the latest history page", () => {
       turnId: "turn-5", explanation: "# Plan: Ship the fix" })]);
     expect(page.plans.at(-1)?.runId).toBe("run-59");
     expect(new Set(page.plans.map(({ runId }) => runId)).size).toBe(page.plans.length);
+    expect(parseServerEvent(result(page))).toEqual(result(page));
 
     const older = store.conversationHistory(conversation.id, { before: page.history!.older! })!;
     expect(older.plans.filter(({ runId }) => runId === "run-5")).toHaveLength(1);
+    expect(parseServerEvent(result(older))).toEqual(result(older));
+  });
+
+  it("includes a single plan more than one page back as the newest plan", () => {
+    const { store, conversation } = planned(5, []);
+    const page = store.conversationHistory(conversation.id)!;
+    expect(page.agentTurns.some(({ id }) => id === "turn-5")).toBe(false);
+    expect(page.plans).toEqual([expect.objectContaining({ runId: "run-5", turnId: "turn-5" })]);
+    expect(parseServerEvent(result(page))).toEqual(result(page));
   });
 
   it("leaves out a document separated from the newest plan by turns without a plan", () => {
     const { store, conversation } = planned(5, range(11, 59));
-    expect(store.conversationHistory(conversation.id)!.plans.some(({ runId }) => runId === "run-5")).toBe(false);
+    const page = store.conversationHistory(conversation.id)!;
+    expect(page.plans.some(({ runId }) => runId === "run-5")).toBe(false);
+    expect(parseServerEvent(result(page))).toEqual(result(page));
   });
 
   it("adds nothing when the documented plan is already on the latest page", () => {
     const { store, conversation } = planned(50, range(51, 59));
-    expect(store.conversationHistory(conversation.id)!.plans.map(({ runId }) => runId))
-      .toEqual(range(50, 59).map((index) => `run-${index}`));
+    const page = store.conversationHistory(conversation.id)!;
+    expect(page.plans.map(({ runId }) => runId)).toEqual(range(50, 59).map((index) => `run-${index}`));
+    expect(parseServerEvent(result(page))).toEqual(result(page));
   });
 });
 

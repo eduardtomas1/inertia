@@ -162,7 +162,7 @@ const CONVERSATION_DETAIL_ID_COLLECTIONS = [
 ] as const;
 
 const CONVERSATION_DETAIL_TURN_RUN_COLLECTIONS = [
-  "activities", "subagents", "reasonings", "plans",
+  "activities", "subagents", "reasonings",
 ] as const;
 
 export function conversationDetailCollectionsCoherent(
@@ -210,6 +210,8 @@ export function conversationDetailCollectionsCoherent(
     && CONVERSATION_DETAIL_TURN_RUN_COLLECTIONS.every((key) =>
       (value[key] as IdentityRecord[]).every((entry) => entry.turnId === null
         || turnsById.get(entry.turnId)?.runId === entry.runId))
+    && plans.every((plan) => plan.turnId === null || !turnsById.has(plan.turnId)
+      || turnsById.get(plan.turnId)?.runId === plan.runId)
     && turns.every((turn) => {
       const userMessage = messagesById.get(turn.userMessageId);
       const terminalMessage = turn.terminalAssistantMessageId === null

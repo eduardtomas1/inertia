@@ -140,13 +140,14 @@ export class ProjectRepository {
     return next;
   }
 
-  remove(projectId: string): void {
+  remove(projectId: string): string[] {
     this.context.requireProject(projectId);
     const state = this.context.database.prepare("SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
+    const conversationIds = this.context.database.prepare("SELECT id FROM conversations WHERE project_id = ?").pluck().all(projectId) as string[];
     this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
     const activeProjectId = state?.active_project_id ?? null;
-    if (activeProjectId !== null && activeProjectId !== projectId) return;
-    this.selectRegularProject();
+    if (activeProjectId === null || activeProjectId === projectId) this.selectRegularProject();
+    return conversationIds;
   }
 
   select(projectId: string): void {

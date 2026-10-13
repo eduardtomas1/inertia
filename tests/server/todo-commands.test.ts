@@ -331,6 +331,43 @@ describe("todo command handler", () => {
     expect(store.shellSnapshot().conversations.map(({ title }) => title)).toEqual(["Deleted mid-start"]);
   });
 
+  it("removes the new empty chat and reports a clear message when linking fails outside the task store", async () => {
+    const context = fixture(providersOn);
+    const id = randomUUID();
+    context.store.todos.create({ id, title: "Link fails" });
+    vi.spyOn(context.store.todos, "link").mockImplementation(() => { throw new Error("SQLITE_BUSY: database is locked"); });
+
+    const { events, order } = await context.run("todo.start", context.startPayload(id));
+
+    expect(events).toEqual([expect.objectContaining({
+      type: "request.error",
+      message: "The chat was created, but the task could not be linked to it.",
+    })]);
+    expect(order).toEqual(["verify", "snapshot", "request.error"]);
+    expect(context.store.shellSnapshot().conversations).toEqual([]);
+    expect(context.turns.queue).not.toHaveBeenCalled();
+  });
+
+  it("reports the kept chat when the empty chat cannot be removed after linking fails", async () => {
+    let store!: RuntimeStore;
+    let id = "";
+    const context = fixture({ ...providersOn, beforeCreate: () => { store.todos.delete(id); } });
+    store = context.store;
+    id = randomUUID();
+    store.todos.create({ id, title: "Delete fails" });
+    vi.spyOn(store, "deleteConversation").mockImplementation(() => { throw new Error("SQLITE_BUSY: database is locked"); });
+
+    const { events, order } = await context.run("todo.start", context.startPayload(id));
+
+    expect(events).toEqual([expect.objectContaining({
+      type: "request.error",
+      message: "The chat was created, but the task could not be linked to it.",
+    })]);
+    expect(order).toEqual(["verify", "snapshot", "request.error"]);
+    expect(store.shellSnapshot().conversations.map(({ title }) => title)).toEqual(["Delete fails"]);
+    expect(context.turns.queue).not.toHaveBeenCalled();
+  });
+
   it("refuses a second start of the same task while the first is still creating its chat", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

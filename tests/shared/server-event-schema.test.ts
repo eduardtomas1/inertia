@@ -1719,6 +1719,12 @@ describe("server event remaining discriminant and identity boundary", () => {
     });
     expect(parseServerEvent(published)).toEqual(published);
   });
+  it("rejects an off-page plan whose run belongs to a loaded turn", () => {
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready",
+      detail: { ...conversationDetail, plans: [{ ...conversationDetail.plans[0], turnId: "turn-older" }] },
+    }))).toThrow("Malformed server event");
+  });
   it.each(["activities", "subagents", "reasonings"] as const)("rejects detail %s whose turn is outside the loaded page", (collection) => {
     expect(() => parseServerEvent(event({
       kind: "conversation.detail", conversationId: conversation.id, state: "ready",

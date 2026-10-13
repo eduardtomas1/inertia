@@ -85,7 +85,7 @@ if (tagCommit !== expectedCommit) fail("the release tag no longer points to the 
 if (eventSha !== tagObject && eventSha !== tagCommit) fail("the event SHA identifies neither the tag object nor its peeled commit");
 if (git("status", "--porcelain") !== "") fail("the exact-tag checkout is not clean");
 
-if (mainRef !== "") {
+if (mainRef !== "" && !tag.startsWith("canary-")) {
   try {
     git("merge-base", "--is-ancestor", expectedCommit, mainRef);
   } catch (error) {

@@ -432,7 +432,7 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
-  it("rejects a release commit that the main branch does not contain", async () => {
+  it("rejects a stable release commit that the main branch does not contain", async () => {
     const fixture = await mkdtemp(join(tmpdir(), "inertia-release-main-"));
     const tag = "v1.2.3";
     const git = (...args: string[]): string => execFileSync("git", args, {
@@ -447,7 +447,7 @@ describe("cross-platform packaged behavior contract", () => {
       },
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
-    const validate = (commit: string, mainRef: string) => spawnSync(
+    const validate = (commit: string, mainRef: string, releaseTag = tag) => spawnSync(
       process.execPath,
       [join(repositoryRoot, "scripts/validate-release.mjs")],
       {
@@ -458,8 +458,8 @@ describe("cross-platform packaged behavior contract", () => {
           RELEASE_EVENT_SHA: commit,
           RELEASE_EXPECTED_COMMIT: commit,
           RELEASE_MAIN_REF: mainRef,
-          RELEASE_REF: `refs/tags/${tag}`,
-          RELEASE_TAG: tag,
+          RELEASE_REF: `refs/tags/${releaseTag}`,
+          RELEASE_TAG: releaseTag,
           RELEASE_VERIFY_REMOTE: "",
         },
       },
@@ -480,6 +480,7 @@ describe("cross-platform packaged behavior contract", () => {
       git("add", "side.txt");
       git("commit", "--quiet", "-m", "unmerged release source");
       git("tag", "--annotate", "--message", "release", tag);
+      git("tag", "--annotate", "--message", "canary", "canary-v1.2.3");
       const sideCommit = git("rev-parse", "HEAD^{commit}");
 
       const unmerged = validate(sideCommit, "refs/heads/trunk");
@@ -497,6 +498,12 @@ describe("cross-platform packaged behavior contract", () => {
       const optionLike = validate(sideCommit, "--all");
       expect(optionLike.status).not.toBe(0);
       expect(optionLike.stderr).toContain("RELEASE_MAIN_REF must be empty or a full Git ref");
+
+      const canary = validate(sideCommit, "refs/heads/trunk", "canary-v1.2.3");
+      expect(canary.status, canary.stderr).toBe(0);
+      const canaryOptionLike = validate(sideCommit, "--all", "canary-v1.2.3");
+      expect(canaryOptionLike.status).not.toBe(0);
+      expect(canaryOptionLike.stderr).toContain("RELEASE_MAIN_REF must be empty or a full Git ref");
 
       git("branch", "--force", "trunk", "side");
       const merged = validate(sideCommit, "refs/heads/trunk");

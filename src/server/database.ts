@@ -412,7 +412,7 @@ export class RuntimeStore {
 
   removeProject(projectId: string): void {
     this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
-    this.projectRepository.remove(projectId);
+    for (const conversationId of this.projectRepository.remove(projectId)) this.conversationTitleLocks.delete(conversationId);
   }
 
   selectProject(projectId: string): void {
@@ -853,6 +853,7 @@ export class RuntimeStore {
 
   deleteConversation(conversationId: string): void {
     this.conversationRepository.delete(conversationId);
+    this.conversationTitleLocks.delete(conversationId);
   }
 
   createMessage(

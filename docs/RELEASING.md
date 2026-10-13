@@ -9,7 +9,9 @@ make a cross-host universal bundle incomplete.
 
 Canary releases are the same source and version discipline under the distinct
 `canary-vMAJOR.MINOR.PATCH` tag namespace. They are prereleases and are never
-marked as GitHub's latest stable release. The release workflow packages Canary
+marked as GitHub's latest stable release. A stable tag must point to a commit
+that `main` already contains, while a Canary tag may come from any branch.
+The release workflow packages Canary
 with its own application ID, product/executable names, protocol scheme,
 Chromium partition, profile/data/workspace/temp roots, updater cache, generic
 feed, metadata channel, and artifact names. A Canary process ignores packaged

@@ -20,6 +20,7 @@ import { htmlRendersMigration } from "./html-renders";
 import { agentContextReadsMigration } from "./agent-context-reads";
 import { conversationContextTransportV3Migration } from "./conversation-context-transport-v3";
 import { todosMigration } from "./todos";
+import { restartContinuationPlansMigration } from "./restart-continuation-plans";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -43,4 +44,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   agentContextReadsMigration,
   conversationContextTransportV3Migration,
   todosMigration,
+  restartContinuationPlansMigration,
 ];

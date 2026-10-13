@@ -207,6 +207,7 @@ export interface TurnSettledEvidence {
 export interface QueueTurnRequest {
   queuedMessageId?: string;
   limitResetPlanId?: string;
+  restartContinuationPlanId?: string;
   conversationId: string;
   /** Authenticated Private Connect origin, supplied only by the privileged gateway. */
   privateConnectDeviceId?: string;
@@ -271,6 +272,7 @@ export type TurnTerminalCause =
   | "runtime-shutdown"
   | "runtime-crash"
   | "runtime-restart"
+  | "app-update"
   | "turn-timeout"
   | "renderer-disconnected"
   | "turn-start-failed"

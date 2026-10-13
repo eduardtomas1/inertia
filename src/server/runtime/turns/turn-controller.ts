@@ -86,6 +86,7 @@ import {
   settleQueuedAdoptionFailure,
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
+import { UPDATE_INTERRUPTION_CLEANUP_MS, updateInterruptionMessage } from "./turn-update-interruption";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
@@ -1007,6 +1008,16 @@ export class TurnController {
     if (!active || active.runState.isTerminal()) return false;
     requestProviderCancellation(this.providers, conversationId);
     return this.settle(active, "failed", "unsupported-interaction", message);
+  }
+
+  async interruptForUpdate(conversationIds: readonly string[]): Promise<boolean> {
+    for (const conversationId of conversationIds) {
+      const active = this.activeByConversation.get(conversationId);
+      if (!active || active.runState.isTerminal()) continue;
+      requestProviderCancellation(this.providers, conversationId);
+      this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id));
+    }
+    return await this.waitForProviderCleanup(conversationIds, Date.now() + UPDATE_INTERRUPTION_CLEANUP_MS);
   }
 
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {

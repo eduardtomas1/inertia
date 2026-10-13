@@ -15,7 +15,6 @@ import {
   type UpdateEverythingDependencies,
   type UpdatesRunRequest,
 } from "../../src/server/runtime/update-everything";
-import { updateInterruptionStub } from "../../src/server/runtime/update-everything-stubs";
 import {
   isHeld,
   release,
@@ -351,23 +350,6 @@ describe("update everything with the real maintenance controller", () => {
     expect(result.providers[0]).toMatchObject({ providerId: "codex", outcome: "failed" });
     expect(blockers).toHaveBeenCalled();
     runningChat.release({ cleanupConfirmed: true });
-  });
-});
-
-describe("update interruption stub", () => {
-  it("stops each chat and waits for its provider cleanup", async () => {
-    const turns = {
-      activeConversationIds: vi.fn(() => [CODEX_CHAT]),
-      cancel: vi.fn(() => true),
-      waitForProviderCleanup: vi.fn(async () => true),
-    };
-    const subject = updateInterruptionStub(turns as never);
-
-    expect(subject.activeConversationIds()).toEqual([CODEX_CHAT]);
-    await expect(subject.interruptForUpdate([CODEX_CHAT, CLAUDE_CHAT])).resolves.toBe(true);
-
-    expect(turns.cancel.mock.calls).toEqual([[CODEX_CHAT], [CLAUDE_CHAT]]);
-    expect(turns.waitForProviderCleanup).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT], expect.any(Number));
   });
 });
 

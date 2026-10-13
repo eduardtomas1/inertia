@@ -2154,6 +2154,7 @@ describe("runtime migration catalog", () => {
       { version: 94 },
       { version: 95 },
       { version: 96 },
+      { version: 97 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2169,6 +2170,9 @@ describe("runtime migration catalog", () => {
     ).get()).toEqual({ name: "system_suspend_intervals" });
     expect(migrated.prepare(
       "SELECT COUNT(*) AS count FROM todos",
+    ).get()).toEqual({ count: 0 });
+    expect(migrated.prepare(
+      "SELECT COUNT(*) AS count FROM restart_continuation_plans",
     ).get()).toEqual({ count: 0 });
     expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
       name: string;

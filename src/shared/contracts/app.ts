@@ -30,6 +30,7 @@ import { DEFAULT_QUOTA_WARNINGS, type QuotaWarningSettings } from "../quota-warn
 import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
+import type { Todo } from "../todos";
 
 export type { ProviderId } from "../provider";
 
@@ -334,6 +335,7 @@ export interface AppSnapshot {
   settings: AppSettings;
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
+  todos?: Todo[];
   activeProjectId: string | null;
   activeConversationId: string | null;
   /** Present on authoritative runtime snapshots; optional for legacy fixtures. */

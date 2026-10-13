@@ -43,6 +43,7 @@ import {
   validProviderRunOwnershipSchema,
 } from "./provider-run-ownership-schema";
 import { systemSuspendTimingSchemaIsValid } from "./system-suspend-schema";
+import { todosCountLimitTriggerIsValid } from "./todos-schema";
 import { validUsageDashboardIndex } from "./usage-dashboard-index-schema";
 import {
   DATABASE_BACKUP_INTERVAL_MS,
@@ -157,6 +158,7 @@ function validateOpenDatabase(
   usageDashboardIndexIsValid: DatabaseSchemaValidator,
   runStateSchemaIsValid: DatabaseSchemaValidator,
   suspendTimingSchemaIsValid: DatabaseSchemaValidator,
+  todosSchemaIsValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -420,6 +422,7 @@ function validateOpenDatabase(
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "inconsistent";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
+  if (version >= 96 && !todosSchemaIsValid(database)) return "inconsistent";
   for (const [introducedAt, index] of schemaRequirements.indexes) {
     if (version >= introducedAt && !database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
@@ -448,6 +451,7 @@ function validateDatabase(
       validUsageDashboardIndex,
       authoritativeRunStateSchemaIsValid,
       systemSuspendTimingSchemaIsValid,
+      todosCountLimitTriggerIsValid,
     );
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -476,6 +480,7 @@ function validateDatabaseOffThread(
     const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()};
     const authoritativeRunStateSchemaIsValid = ${authoritativeRunStateSchemaIsValid.toString()};
     const systemSuspendTimingSchemaIsValid = ${systemSuspendTimingSchemaIsValid.toString()};
+    const todosCountLimitTriggerIsValid = ${todosCountLimitTriggerIsValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -491,6 +496,7 @@ function validateDatabaseOffThread(
         validUsageDashboardIndex,
         authoritativeRunStateSchemaIsValid,
         systemSuspendTimingSchemaIsValid,
+        todosCountLimitTriggerIsValid,
       );
     } catch {
       result = "corrupt";

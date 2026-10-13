@@ -1917,6 +1917,37 @@ describe("server event remaining discriminant and identity boundary", () => {
       filesystemPath: "/private/context.txt",
     }])).toThrow("Malformed server event");
   });
+  it("accepts only unique, structurally safe, bounded tasks", () => {
+    const todo = {
+      id: "22222222-2222-4222-8222-222222222222",
+      title: "Write the release notes",
+      note: "",
+      priority: null,
+      dueDate: null,
+      completedAt: null,
+      conversationId: null,
+      createdAt: checkedAt,
+      updatedAt: checkedAt,
+    };
+    const parseTodos = (todos: unknown): unknown => parseServerEvent({
+      type: "snapshot.updated",
+      snapshot: snapshot({ todos }),
+    });
+    expect(parseTodos([todo, { ...todo, id: "33333333-3333-4333-8333-333333333333", priority: "urgent", dueDate: "2026-10-13" }])).toBeTruthy();
+    expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot() })).toBeTruthy();
+    for (const invalid of [
+      [todo, { ...todo }],
+      [{ ...todo, dueDate: "2026-02-30" }],
+      [{ ...todo, priority: "soon" }],
+      [{ ...todo, title: "" }],
+      [{ ...todo, filesystemPath: "/private/context.txt" }],
+      Array.from({ length: 201 }, (_, index) => ({ ...todo, id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222` })),
+      Array.from({ length: 50 }, (_, index) => ({ ...todo, id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222`, note: "\u0001".repeat(2_000) })),
+      { length: 0 },
+    ]) expect(() => parseTodos(invalid)).toThrow("Malformed server event");
+    expect(parseServerEvent(event({ kind: "todo.started", conversationId: conversation.id }))).toBeTruthy();
+    expect(() => parseServerEvent(event({ kind: "todo.started" }))).toThrow("Malformed server event");
+  });
   it("rejects mismatched and duplicate event-local identities", () => {
     const skill = workflow.skills[0]; const attachment = conversationDetail.messages[0].attachments[0];
     const duplicateEvents = [

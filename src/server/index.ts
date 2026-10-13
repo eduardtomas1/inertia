@@ -94,6 +94,7 @@ import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
+import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -686,6 +687,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
+      createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,

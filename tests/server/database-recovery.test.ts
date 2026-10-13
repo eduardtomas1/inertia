@@ -1775,6 +1775,31 @@ describe("database backup and startup recovery", () => {
     primary.close();
   });
 
+  it("validates the task count limit trigger off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "task trigger validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec("DROP TRIGGER todos_count_limit;");
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      CREATE TRIGGER todos_count_limit
+        BEFORE INSERT ON todos
+        WHEN (SELECT COUNT(*) FROM todos) >= 200
+        BEGIN
+          SELECT RAISE(ABORT, 'task count limit exceeded');
+        END;
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
   it("rejects corrupted suspend interval values off thread", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

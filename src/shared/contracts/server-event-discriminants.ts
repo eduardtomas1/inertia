@@ -33,6 +33,12 @@ import {
   promptPresetsSerializedBytes,
   type PromptPreset,
 } from "../prompt-presets";
+import {
+  MAX_TODOS,
+  MAX_TODOS_SERIALIZED_BYTES,
+  todoSchema,
+  todosSerializedBytes,
+} from "../todos";
 
 function exhaustiveOptions<T extends string>(
   options: Record<T, true>,
@@ -130,6 +136,18 @@ function promptPresetCollectionCoherent(value: unknown): boolean {
     && presets.every(({ position }, index) => position === index)
     && promptPresetsSerializedBytes(presets as PromptPreset[])
       <= MAX_PROMPT_PRESETS_SERIALIZED_BYTES;
+}
+
+function todoCollectionCoherent(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_TODOS) return false;
+  const parsed = value.map((entry) => todoSchema.safeParse(entry));
+  if (parsed.some((result) => !result.success)) return false;
+  const todos = parsed.flatMap((result) => result.success
+    ? [result.data]
+    : []);
+  return new Set(todos.map(({ id }) => id)).size === todos.length
+    && todosSerializedBytes(todos) <= MAX_TODOS_SERIALIZED_BYTES;
 }
 
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
@@ -236,7 +254,8 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
     && (value.activeProjectId === null || projectIds.has(value.activeProjectId))
     && (value.activeConversationId === null
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
-    && promptPresetCollectionCoherent(value.promptPresets);
+    && promptPresetCollectionCoherent(value.promptPresets)
+    && todoCollectionCoherent(value.todos);
 }
 
 export function pullRequestCapabilityStateCoherent(

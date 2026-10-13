@@ -22,6 +22,7 @@ import {
   FolderOpen,
   Gauge,
   GitBranch,
+  ListTodo,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -70,7 +71,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
@@ -969,6 +970,10 @@ function SidebarView({
           </button>
           <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={16} /></IconButton>
         </div>
+        <button type="button" className={clsx("sidebar-primary-action sidebar-tasks-action", view === "tasks" && "is-active")} aria-current={view === "tasks" ? "page" : undefined} onFocus={() => void loadTasksView()} onPointerDown={() => void loadTasksView()} onPointerEnter={() => void loadTasksView()} onClick={() => navigate("tasks")}>
+          <ListTodo size={16} aria-hidden="true" />
+          <span>Tasks</span>
+        </button>
         <div className="sidebar-search-wrap">
           <Search size={16} aria-hidden="true" />
           <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />

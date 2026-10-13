@@ -9,7 +9,7 @@ import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-s
 import { createElectronMainProcessDiagnostic, survivingHelperRoles,
   type ElectronMainProcessDiagnostic, type ElectronMainProcessSample } from
   "./electron-main-process-diagnostic";
-import { electronProcessEvidence, observeElectronIdentity,
+import { electronProcessEvidence, observeElectronIdentity, reportedExitStages,
   type ElectronProcessEvidence, type ElectronProcessEvidenceSnapshot } from "./electron-process-evidence";
 import { forceStopWindowsElectronLauncher,
   type WindowsElectronProcessDependencies } from "./electron-windows-process";
@@ -644,11 +644,14 @@ export async function closeElectronFixtureBounded(options: {
             ));
           } else if (appQuit.outcome === "forced") {
             const survivors = survivingHelperRoles(diagnostic?.samples ?? []);
-            const exitInventory = evidence?.snapshot().exitInventory ?? null;
+            const processEvidence = evidence?.snapshot() ?? null;
+            const exitInventory = processEvidence?.exitInventory ?? null;
+            const exitStages = processEvidence ? reportedExitStages(processEvidence) : [];
             const details = [
               ...(options.prepareRuntimeQuit ? [`phase=${cleanupPhase}`] : []),
               ...(survivors ? [`still-running=${survivors.join(",") || "none"}`] : []),
               ...(exitInventory ? [`exit-inventory=${exitInventory}`] : []),
+              ...(exitStages.length > 0 ? [`exit-stages=${exitStages.join(",")}`] : []),
             ];
             cleanupErrors.push(new Error(details.length > 0
               ? `The Electron fixture process required forced termination during close (${details.join("; ")}).`

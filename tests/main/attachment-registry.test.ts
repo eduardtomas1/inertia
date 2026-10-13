@@ -98,6 +98,12 @@ afterEach(async () => {
 });
 
 describe("main-owned attachment registry", () => {
+  it("decodes imports in process without scanning system fonts, like the import utility", async () => {
+    expect(process.env.DISABLE_SYSTEM_FONTS_LOAD).toBe("1");
+    const { GlobalFonts } = await import("@napi-rs/canvas");
+    expect(GlobalFonts.families).toHaveLength(0);
+  });
+
   it.each([
     ["directory", "import"], ["directory", "release"], ["directory", "dispose"],
     ["link", "import"], ["link", "release"], ["link", "dispose"],

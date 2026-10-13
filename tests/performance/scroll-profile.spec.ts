@@ -28,7 +28,7 @@ import {
   streamingAppServer,
   streamingCompletionGatePaths,
 } from "../helpers/desktop-benchmark-streaming-fixture";
-import { installFrameRecorder, reactCommitCounterSource, type FrameRecording } from "./scroll-profile-page";
+import { ablationSource, installFrameRecorder, reactCommitCounterSource, type FrameRecording } from "./scroll-profile-page";
 import { seedScrollProfile } from "./scroll-profile-seed";
 
 const execFileAsync = promisify(execFile);
@@ -37,6 +37,7 @@ const rows = Number(process.env.INERTIA_SCROLL_ROWS ?? (scenario === "sidebar" ?
 const sidebarConversations = Number(process.env.INERTIA_SCROLL_SIDEBAR_CHATS ?? (scenario === "sidebar" ? 500 : 0));
 const traceEnabled = process.env.INERTIA_SCROLL_TRACE === "1";
 const commitCounting = process.env.INERTIA_SCROLL_COMMITS === "1";
+const ablations = (process.env.INERTIA_SCROLL_ABLATE ?? "").split(",").filter(Boolean);
 const appRoot = resolve(process.env.INERTIA_SCROLL_APP_ROOT ?? ".");
 const runLabel = process.env.INERTIA_SCROLL_LABEL ?? `${scenario}-${rows}`;
 const outputDirectory = resolve(process.env.INERTIA_SCROLL_OUTPUT ?? join("performance-results", "scroll-profile", runLabel));
@@ -322,12 +323,13 @@ test("profiles scrolling", async () => {
     });
     let page = await electronApp.firstWindow();
     await page.locator('.app-shell[data-connection-status="online"]').waitFor({ timeout: 60_000 });
-    if (commitCounting) {
-      await electronApp.context().addInitScript({ content: reactCommitCounterSource });
+    if (commitCounting || ablations.length > 0) {
+      if (commitCounting) await electronApp.context().addInitScript({ content: reactCommitCounterSource });
+      if (ablations.length > 0) await electronApp.context().addInitScript({ content: ablationSource(ablations) });
       await page.reload();
       page = await electronApp.firstWindow();
       await page.locator('.app-shell[data-connection-status="online"]').waitFor({ timeout: 60_000 });
-      expect(await page.evaluate(() => Boolean(Reflect.get(window, "__scrollProfileCommits")))).toBe(true);
+      if (commitCounting) expect(await page.evaluate(() => Boolean(Reflect.get(window, "__scrollProfileCommits")))).toBe(true);
     }
     await page.getByRole("textbox", { name: "Message" }).first().waitFor({ timeout: 60_000 });
     const nativeWindow = await electronApp.browserWindow(page);
@@ -409,6 +411,7 @@ test("profiles scrolling", async () => {
       await finishStream(page, workspace, 1);
       results.push(await measurePass(page, session, "sidebar-wheel-up-after-stream", sidebar, () => wheelGesture(page, session, sidebar.scroll, "up", distance)));
     }
+    meta.ablationCounts = await page.evaluate(() => Reflect.get(window, "__scrollProfileAblations") ?? null);
     await session.detach().catch(() => undefined);
     await writeFile(join(outputDirectory, "summary.json"), `${JSON.stringify({
       scenario,
@@ -416,6 +419,7 @@ test("profiles scrolling", async () => {
       sidebarConversations,
       traceEnabled,
       commitCounting,
+      ablations,
       appRoot,
       cssOverride,
       host: { platform: platform(), release: release(), cpu: cpus()[0]?.model, cores: cpus().length },

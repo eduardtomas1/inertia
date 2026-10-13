@@ -153,7 +153,8 @@ function analyzeTrace(path) {
     selfByName.set(name, (selfByName.get(name) ?? 0) + selfDur);
   }
   const isTopLevel = (event) => event.name === "RunTask" || event.name === "ThreadControllerImpl::RunTask";
-  const tasks = main.filter((event) => isTopLevel(event) && !(event.parent && isTopLevel(event.parent)));
+  const profilerStartup = (event) => (children.get(event) ?? []).some((child) => child.name === "CpuProfiler::StartProfiling" || profilerStartup(child));
+  const tasks = main.filter((event) => isTopLevel(event) && !(event.parent && isTopLevel(event.parent)) && !profilerStartup(event));
   const taskDurations = tasks.map((event) => event.dur / 1000).sort((left, right) => left - right);
   const breakdown = (root) => {
     const totals = new Map();

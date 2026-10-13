@@ -235,3 +235,33 @@ export function installFrameRecorder(): void {
   };
   Reflect.set(window, "__scrollProfileFrames", recorder);
 }
+
+export function ablationSource(ablations: readonly string[]): string {
+  return `
+(() => {
+  const ablations = new Set(${JSON.stringify(ablations)});
+  const skipped = { remember: 0, minimapScrollIntoView: 0 };
+  window.__scrollProfileAblations = skipped;
+  if (ablations.has("remember")) {
+    const add = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (type, listener, options) {
+      if (type === "scroll" && typeof listener === "function" && listener.name === "remember") {
+        skipped.remember += 1;
+        return;
+      }
+      return add.call(this, type, listener, options);
+    };
+  }
+  if (ablations.has("minimap-scroll-into-view")) {
+    const scrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (options) {
+      if (this.closest && this.closest(".timeline-minimap")) {
+        skipped.minimapScrollIntoView += 1;
+        return;
+      }
+      return scrollIntoView.call(this, options);
+    };
+  }
+})();
+`;
+}

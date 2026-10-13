@@ -248,7 +248,7 @@ describe("todo command handler", () => {
     expect(dependencies.broadcastSnapshot).toHaveBeenCalledOnce();
   });
 
-  it("keeps the new chat and reports the failure when the task disappears before it is linked", async () => {
+  it("removes the new empty chat and reports the failure when the task disappears before it is linked", async () => {
     let store!: RuntimeStore;
     let id = "";
     const context = fixture({ ...providersOn, beforeCreate: () => { store.todos.delete(id); } });
@@ -260,11 +260,30 @@ describe("todo command handler", () => {
 
     expect(events).toEqual([expect.objectContaining({
       type: "request.error",
-      message: "The chat was created, but the task could not be linked to it.",
+      message: "That task no longer exists.",
     })]);
     expect(order).toEqual(["verify", "snapshot", "request.error"]);
-    expect(store.shellSnapshot().conversations.map(({ title }) => title)).toEqual(["Deleted mid-start"]);
+    expect(context.creation.create).toHaveBeenCalledOnce();
+    expect(store.shellSnapshot().conversations).toEqual([]);
     expect(context.turns.queue).not.toHaveBeenCalled();
+  });
+
+  it("keeps a new chat that owns its worktree when the task disappears before it is linked", async () => {
+    let store!: RuntimeStore;
+    let id = "";
+    const context = fixture({ ...providersOn, beforeCreate: () => { store.todos.delete(id); } });
+    store = context.store;
+    id = randomUUID();
+    store.todos.create({ id, title: "Deleted mid-start" });
+    vi.spyOn(store.conversationWorktrees, "get").mockReturnValue({ ownsWorktree: true } as never);
+
+    const { events } = await context.run("todo.start", context.startPayload(id));
+
+    expect(events).toEqual([expect.objectContaining({
+      type: "request.error",
+      message: "The chat was created, but the task could not be linked to it.",
+    })]);
+    expect(store.shellSnapshot().conversations.map(({ title }) => title)).toEqual(["Deleted mid-start"]);
   });
 
   it("refuses a second start of the same task while the first is still creating its chat", async () => {

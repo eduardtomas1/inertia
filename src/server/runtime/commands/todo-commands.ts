@@ -81,8 +81,12 @@ export function createTodoCommandHandler(
       let linked: Todo;
       try {
         linked = dependencies.store.todos.link(todo.id, conversation.id);
-      } catch {
-        throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+      } catch (error) {
+        if (dependencies.store.conversationWorktrees.get(conversation.id)?.ownsWorktree) {
+          throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+        }
+        dependencies.store.deleteConversation(conversation.id);
+        throw error;
       }
       const content = todoPromptContent(linked);
       if (dependencies.enableProviders) {

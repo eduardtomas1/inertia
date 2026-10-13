@@ -40,6 +40,47 @@ function result(detail: ConversationDetail): ServerEvent {
     conversationId: detail.conversation.id, state: "ready", detail } };
 }
 
+describe("plan document on the latest history page", () => {
+  function planned(documentTurn: number, planTurns: Iterable<number>) {
+    const { store, conversation } = fixture();
+    for (let index = 0; index < 60; index++) answer(store, conversation.id, index, `Answer ${index}`);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (const index of [documentTurn, ...planTurns]) {
+      vi.setSystemTime(Date.UTC(2030, 0, 2, 0, 0, index));
+      store.upsertAgentPlan({ conversationId: conversation.id, runId: `run-${index}`, turnId: `turn-${index}`,
+        explanation: index === documentTurn ? "# Plan: Ship the fix" : null,
+        steps: [{ step: "Ship the fix", status: index === documentTurn ? "pending" : "inProgress" }] });
+    }
+    vi.useRealTimers();
+    return { store, conversation };
+  }
+  const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => from + index);
+
+  it("includes the document of a plan on an older page when consecutive plan turns lead to the newest plan", () => {
+    const { store, conversation } = planned(5, range(6, 59));
+    const page = store.conversationHistory(conversation.id)!;
+    expect(page.agentTurns.some(({ id }) => id === "turn-5")).toBe(false);
+    expect(page.plans.filter(({ runId }) => runId === "run-5")).toEqual([expect.objectContaining({
+      turnId: "turn-5", explanation: "# Plan: Ship the fix" })]);
+    expect(page.plans.at(-1)?.runId).toBe("run-59");
+    expect(new Set(page.plans.map(({ runId }) => runId)).size).toBe(page.plans.length);
+
+    const older = store.conversationHistory(conversation.id, { before: page.history!.older! })!;
+    expect(older.plans.filter(({ runId }) => runId === "run-5")).toHaveLength(1);
+  });
+
+  it("leaves out a document separated from the newest plan by turns without a plan", () => {
+    const { store, conversation } = planned(5, range(11, 59));
+    expect(store.conversationHistory(conversation.id)!.plans.some(({ runId }) => runId === "run-5")).toBe(false);
+  });
+
+  it("adds nothing when the documented plan is already on the latest page", () => {
+    const { store, conversation } = planned(50, range(51, 59));
+    expect(store.conversationHistory(conversation.id)!.plans.map(({ runId }) => runId))
+      .toEqual(range(50, 59).map((index) => `run-${index}`));
+  });
+});
+
 describe("bounded conversation history", () => {
   it("scopes legacy history rows through the conversation-turn index instead of scanning the chat", () => {
     const { conversation, databasePath } = fixture();

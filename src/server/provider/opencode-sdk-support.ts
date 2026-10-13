@@ -96,8 +96,8 @@ export function todoStep(value: unknown): AgentPlanStep[] {
   const todo = objectValue(value);
   const content = stringValue(todo?.content);
   if (!content) return [];
-  const status = todo?.status === "completed"
-    ? "completed"
+  const status = todo?.status === "completed" || todo?.status === "cancelled"
+    ? todo.status
     : todo?.status === "in_progress" ? "inProgress" : "pending";
   return [{ step: bounded(content), status }];
 }

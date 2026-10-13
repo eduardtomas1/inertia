@@ -2,6 +2,7 @@ import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { parseClaudeRateLimitEvent } from "./claude-usage";
+import { markdownPlanSteps } from "./markdown-plan-steps";
 
 export const MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS = 1024 * 1024;
 export const MAX_CLAUDE_TRACKED_MESSAGE_IDS = 4_096;
@@ -373,14 +374,5 @@ export function claudePlanSteps(markdown: string): Array<{
   step: string;
   status: "pending";
 }> {
-  const parsed = markdown
-    .split("\n")
-    .map((line) => line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/u)?.[1]?.trim())
-    .filter((value): value is string => Boolean(value));
-  return (parsed.length > 0 ? parsed : [markdown])
-    .slice(0, 100)
-    .map((step) => ({
-      step: boundedClaudeEventText(step),
-      status: "pending",
-    }));
+  return markdownPlanSteps(markdown, MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS);
 }

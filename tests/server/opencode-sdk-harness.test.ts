@@ -241,6 +241,7 @@ describe("OpenCode SDK harness", { concurrent: false }, () => {
     expect(evaluate("edit", "src/index.ts")).toBe(expected);
     expect(evaluate("edit", ".opencode/plans/plan.md")).toBe(expected);
     expect(evaluate("question", "*")).toBe("allow");
+    expect(evaluate("todowrite", "*")).toBe("allow");
     expect(evaluate(`${INERTIA_HOST_MCP_NAME}_send_message`, "*")).toBe("allow");
   });
 

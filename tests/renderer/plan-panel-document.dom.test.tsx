@@ -1,8 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import type { AgentPlan } from "../../src/shared/contracts";
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
+import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
+import { EMPTY_STREAMING_AGENT_SOURCE } from "../../src/renderer/src/hooks/useStreamingAgentState";
 import { planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
+import { latestPlanDocument } from "../../src/renderer/src/utils/terminalTurnProjection";
 
 const markdown = { projectRoot: "/workspace", projectId: "project", defaultCodeWrap: true };
 const plan = [
@@ -59,10 +63,94 @@ describe("plan panel document", () => {
     expect(container.querySelector(".panel-heading > svg")).toBeNull();
   });
 
+  it("shows Implement and Refine disabled while the plan actions are busy", () => {
+    const steps = [{ id: "step", title: "Write the projection", status: "pending" as const }];
+    const { rerender } = render(<PlanPanel steps={steps} actionsDisabled onRefine={() => undefined} onImplement={() => undefined} />);
+    expect((screen.getByRole("button", { name: "Implement" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Refine plan" }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<PlanPanel steps={steps} onRefine={() => undefined} onImplement={() => undefined} />);
+    expect((screen.getByRole("button", { name: "Implement" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Refine plan" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("shows a document-only plan without the empty state", () => {
     render(<PlanPanel document={"# Plan: Short\nOne paragraph."} markdown={markdown} steps={[]} />);
     expect(screen.queryByText("No plan yet")).toBeNull();
     expect(screen.queryByRole("button", { name: "Show full plan" })).toBeNull();
     expect(screen.getByText("One paragraph.")).toBeTruthy();
+  });
+
+  it("keeps the plan document while a later run reports progress on its steps", () => {
+    const record = (runId: string, explanation: string | null, steps: AgentPlan["steps"]): AgentPlan => ({
+      conversationId: "conversation",
+      runId,
+      turnId: `${runId}-turn`,
+      explanation,
+      steps,
+    });
+    const plans = [
+      record("plan-run", "# Plan: Ship the fix\n## Context\nThe adapter drops progress.", [
+        { step: "Inspect the adapter", status: "pending" },
+        { step: "Write the projection", status: "pending" },
+        { step: "Run the tests", status: "pending" },
+      ]),
+      record("build-run", null, [
+        { step: "Inspect the adapter", status: "completed" },
+        { step: "Write the projection", status: "completed" },
+        { step: "Run the tests", status: "inProgress" },
+      ]),
+    ];
+    const { result } = renderHook(() => usePlanSteps(plans, [], "running", EMPTY_STREAMING_AGENT_SOURCE));
+    const turns = [{ id: "plan-run-turn" }, { id: "build-run-turn" }];
+    const { container } = render(<PlanPanel document={latestPlanDocument(plans, turns)} markdown={markdown} steps={result.current} />);
+
+    expect(screen.getByRole("heading", { level: 2, name: "Ship the fix" })).toBeTruthy();
+    expect(container.querySelector(".plan-document h2")?.textContent).toBe("Context");
+    expect(screen.getByText("2 of 3 complete")).toBeTruthy();
+    expect([...container.querySelectorAll("[data-plan-step-status]")].map((step) => step.getAttribute("data-plan-step-status")))
+      .toEqual(["completed", "completed", "in-progress"]);
+    expect(latestPlanDocument([...plans, record("revised-run", "# Plan: Revised", [])], [...turns, { id: "revised-run-turn" }]))
+      .toBe("# Plan: Revised");
+    expect(latestPlanDocument([record("blank-run", "  ", [])], [{ id: "blank-run-turn" }])).toBeNull();
+    expect(latestPlanDocument([], [])).toBeNull();
+  });
+
+  describe("pairs the document with the newest checklist", () => {
+    const record = (turnId: string, explanation: string | null): AgentPlan => ({
+      conversationId: "conversation",
+      runId: `${turnId}-run`,
+      turnId,
+      explanation,
+      steps: [{ step: "Run the tests", status: explanation ? "pending" : "inProgress" }],
+    });
+    const turns = (...ids: string[]) => ids.map((id) => ({ id }));
+    const planned = record("plan", "# Plan: Ship the fix");
+
+    it("keeps the document for the build turn's checklist", () => {
+      expect(latestPlanDocument([planned, record("build", null)], turns("plan", "build"))).toBe("# Plan: Ship the fix");
+    });
+
+    it("keeps the document through a continue turn that also reports the checklist", () => {
+      expect(latestPlanDocument(
+        [planned, record("build", null), record("continue", null)],
+        turns("plan", "build", "continue"),
+      )).toBe("# Plan: Ship the fix");
+    });
+
+    it("drops the document when turns without a plan separate it from the checklist", () => {
+      expect(latestPlanDocument(
+        [planned, record("checklist", null)],
+        turns("plan", "question", "answer", "checklist"),
+      )).toBeNull();
+    });
+
+    it("keeps a document whose turn is on an older page when every loaded turn before the checklist has a plan", () => {
+      expect(latestPlanDocument([planned, record("build", null)], turns("build"))).toBe("# Plan: Ship the fix");
+      expect(latestPlanDocument([planned, record("build", null)], turns("question", "build"))).toBeNull();
+    });
+
+    it("keeps the document while the checklist turn is not yet in the loaded turns", () => {
+      expect(latestPlanDocument([planned, record("build", null)], turns("plan"))).toBe("# Plan: Ship the fix");
+    });
   });
 });

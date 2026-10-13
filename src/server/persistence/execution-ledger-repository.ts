@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
+import { MAX_AGENT_PLAN_STEPS } from "../../shared/agent-plan";
 import type {
   AgentActivity,
   AgentPlan,
@@ -127,7 +128,7 @@ export class ExecutionLedgerRepository {
       runId: plan.runId,
       turnId: plan.turnId,
       explanation: plan.explanation,
-      stepsJson: JSON.stringify(plan.steps.slice(0, 50)),
+      stepsJson: JSON.stringify(plan.steps.slice(0, MAX_AGENT_PLAN_STEPS)),
       updatedAt: new Date().toISOString(),
     });
   }

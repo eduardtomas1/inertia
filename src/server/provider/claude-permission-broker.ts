@@ -12,6 +12,13 @@ import type { AgentApprovalDecision, AgentInputRequest, AgentPlanStep } from "./
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
+const CLAUDE_CHECKLIST_TOOLS: ReadonlySet<string> = new Set([
+  "TodoWrite",
+  "TaskCreate",
+  "TaskUpdate",
+  "TaskList",
+  "TaskGet",
+]);
 
 interface PendingApproval {
   resolve: (decision: AgentApprovalDecision) => void;
@@ -51,6 +58,9 @@ export class ClaudePermissionBroker {
       return deny(
         "Provider-native tools are unavailable for this exact backend and model.",
       );
+    }
+    if (CLAUDE_CHECKLIST_TOOLS.has(toolName) && !mcpServer) {
+      return { behavior: "allow", updatedInput: toolInput };
     }
     if (toolName === "AskUserQuestion") {
       if (this.inputs.size >= MAX_PENDING_INTERACTIONS) {

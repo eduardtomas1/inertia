@@ -86,6 +86,7 @@ export interface CodexAppServerOptions {
   onInputRequest?: (request: AgentInputRequest) => void;
   onInputResolved?: (requestId: string) => void;
   onPlan?: (explanation: string | null, steps: AgentPlanStep[]) => void;
+  onPlanItem?: (text: string) => void;
   onGoalUpdated?: (threadId: string, goal: ProviderGoalSnapshot) => void;
   onGoalCleared?: (threadId: string) => void;
   onReasoning?: (text: string) => void;

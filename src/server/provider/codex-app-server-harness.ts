@@ -28,6 +28,7 @@ import {
   type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
+import { markdownPlanSteps } from "./markdown-plan-steps";
 
 export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
   lifecycle: {
@@ -58,6 +59,7 @@ export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
 } as const satisfies CodexAppServerHarnessCapabilities;
 
 const MAX_CODEX_COMPACTION_CANDIDATES = 32;
+const MAX_CODEX_PLAN_STEP_CHARS = 1_000;
 const CODEX_COMPACTION_PERSISTENCE_RETRY_MS = 250;
 const CODEX_COMPACTION_TURN_SUFFIX_LIMIT =
   MAX_CODEX_COMPACTION_CANDIDATES + 1;
@@ -122,6 +124,7 @@ function startCodexRun(
   emitter.status("starting");
   let runningEmitted = false;
   let runningTransitionRequired = false;
+  let planStepsReported = false;
   const emitRunning = (): void => {
     if (runningEmitted && !runningTransitionRequired) return;
     runningEmitted = true;
@@ -189,7 +192,15 @@ function startCodexRun(
       onApprovalResolved: (requestId, decision) => emitter.codex({ type: "approval-resolved", requestId, decision }),
       onInputRequest: (request) => emitter.codex({ type: "input", request }),
       onInputResolved: (requestId) => emitter.codex({ type: "input-resolved", requestId }),
-      onPlan: (explanation, steps) => emitter.codex({ type: "plan", explanation, steps }),
+      onPlan: (explanation, steps) => {
+        if (steps.length > 0) planStepsReported = true;
+        emitter.codex({ type: "plan", explanation, steps });
+      },
+      onPlanItem: (text) => emitter.codex({
+        type: "plan",
+        explanation: text,
+        steps: planStepsReported ? [] : markdownPlanSteps(text, MAX_CODEX_PLAN_STEP_CHARS),
+      }),
       onGoalUpdated: emitter.goalUpdated,
       onGoalCleared: emitter.goalCleared,
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),

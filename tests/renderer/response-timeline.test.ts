@@ -1176,6 +1176,66 @@ describe("authoritative response timeline", () => {
     }
   });
 
+  it("leaves a plan whose turn is on an older history page out of the compatibility section", () => {
+    const latest = agentTurn("latest", "latest-user");
+    const olderPagePlan = {
+      conversationId,
+      runId: "older-run",
+      turnId: "older-turn",
+      explanation: "Plan from an older page",
+      steps: [{ step: "Implement", status: "completed" as const }],
+    };
+    const legacyPlan = {
+      conversationId,
+      runId: "legacy-run",
+      turnId: null,
+      explanation: "Unowned legacy plan",
+      steps: [],
+    };
+    const input = {
+      turns: [latest],
+      messages: [message("latest-user", latest.id, "user", "Latest", latest.requestedAt)],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    };
+
+    const paged = buildResponseTimeline({ ...input, plans: [olderPagePlan] });
+    expect(paged.map(({ kind }) => kind)).toEqual(["turn"]);
+    expect(timelineTurn(paged, latest.id).plans).toEqual([]);
+
+    const legacy = buildResponseTimeline({ ...input, plans: [olderPagePlan, legacyPlan] });
+    expect(legacy[0]?.kind).toBe("compatibility");
+    if (legacy[0]?.kind === "compatibility") {
+      expect(legacy[0].compatibility.plans).toEqual([legacyPlan]);
+    }
+  });
+
+  it("keeps the plan of a loaded turn that could not be built in the compatibility section", () => {
+    const authoritative = agentTurn("authoritative", "authoritative-user");
+    const malformed = agentTurn("malformed", "missing-user");
+    const malformedPlan = {
+      conversationId,
+      runId: malformed.runId,
+      turnId: malformed.id,
+      explanation: "Plan of a malformed turn",
+      steps: [],
+    };
+    const timeline = buildResponseTimeline({
+      turns: [authoritative, malformed],
+      messages: [message("authoritative-user", authoritative.id, "user", "Request", authoritative.requestedAt)],
+      activities: [],
+      reasonings: [],
+      plans: [malformedPlan],
+      checkpoints: [],
+    });
+
+    expect(timeline[0]?.kind).toBe("compatibility");
+    if (timeline[0]?.kind === "compatibility") {
+      expect(timeline[0].compatibility.plans).toEqual([malformedPlan]);
+    }
+  });
+
   it("quarantines inferred turns and every unowned record in one compatibility section", () => {
     const authoritative = agentTurn("authoritative", "authoritative-user");
     const inferred = agentTurn("inferred", "inferred-user", { association: "inferred" });

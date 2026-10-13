@@ -1,5 +1,4 @@
 import type { AgentTurn, Conversation } from "../../shared/contracts";
-import { importedResumeCwd } from "../cli-import/resume-cwd";
 import { generateCodexThreadTitle } from "../codex/thread-title";
 import type { RuntimeStore } from "../database";
 import { readClaudeSessionTitle } from "../provider/claude-session-title";
@@ -14,10 +13,8 @@ import {
 } from "./conversation-title";
 import type { TurnSettledEvidence } from "./turns/turn-controller-types";
 
-const MAX_GENERATION_PROMPT_CHARS = 4_000;
-
 export interface ConversationTitleSources {
-  claude(input: { conversationId: string; sessionId: string }): Promise<string | undefined>;
+  claude(input: { sessionId: string }): Promise<string | undefined>;
   codex(input: {
     conversationId: string;
     model?: string;
@@ -29,6 +26,7 @@ export interface ConversationTitleSources {
 export interface ConversationTitleServiceDependencies {
   conversation(conversationId: string): Pick<Conversation, "title" | "archivedAt" | "providerSessionId">;
   firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null;
+  isTaskConversation(conversationId: string): boolean;
   updateTitle(conversationId: string, title: string): void;
   sources: ConversationTitleSources;
   isExternalTurn(turn: AgentTurn): boolean;
@@ -48,7 +46,11 @@ export function createConversationTitleService(
   const generated = new Set<string>();
 
   const replaceableFirstMessage = (conversationId: string) => {
-    if (applied.has(conversationId) || dependencies.signal.aborted) return null;
+    if (
+      applied.has(conversationId)
+      || dependencies.signal.aborted
+      || dependencies.isTaskConversation(conversationId)
+    ) return null;
     const message = dependencies.firstUserMessage(conversationId, QUICK_TITLE_SCANNED_CHARS);
     if (!message) return null;
     const conversation = dependencies.conversation(conversationId);
@@ -69,10 +71,11 @@ export function createConversationTitleService(
     if (providerSessionTitle) return async () => providerSessionTitle;
     const sessionId = turn.providerSessionAfter ?? current.conversation.providerSessionId;
     if (turn.providerId === "claude" && sessionId) {
-      return () => dependencies.sources.claude({ conversationId: turn.conversationId, sessionId });
+      return () => dependencies.sources.claude({ sessionId });
     }
     if (
       turn.providerId !== "codex"
+      || turn.status !== "completed"
       || turn.userMessageId !== current.message.id
       || generated.has(turn.conversationId)
       || dependencies.isExternalTurn(turn)
@@ -81,7 +84,7 @@ export function createConversationTitleService(
     return () => dependencies.sources.codex({
       conversationId: turn.conversationId,
       ...(turn.model === "provider-default" ? {} : { model: turn.model }),
-      prompt: current.message.content.slice(0, MAX_GENERATION_PROMPT_CHARS),
+      prompt: current.message.content,
       signal: dependencies.signal,
     });
   };
@@ -114,16 +117,12 @@ export function createConversationTitleService(
 }
 
 export function conversationTitleSources(dependencies: {
-  store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath" | "cliConversationImport">;
+  store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath">;
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
 }): ConversationTitleSources {
-  const { store } = dependencies;
-  const contact = new ConversationProviderContact(store, dependencies.providers);
+  const contact = new ConversationProviderContact(dependencies.store, dependencies.providers);
   return {
-    claude: async ({ conversationId, sessionId }) => {
-      const dir = importedResumeCwd(store, conversationId, sessionId, store.conversationPath(conversationId));
-      return await readClaudeSessionTitle(sessionId, dir);
-    },
+    claude: ({ sessionId }) => readClaudeSessionTitle(sessionId),
     codex: async ({ conversationId, model, prompt, signal }) => {
       const context = await contact.codexControl(conversationId);
       return await generateCodexThreadTitle({ ...context, model, prompt, signal })
@@ -136,7 +135,7 @@ export function createConversationTitleRuntime(dependencies: {
   store: Pick<
     RuntimeStore,
     | "assertConversationProvider" | "conversation" | "firstUserMessage" | "updateConversation"
-    | "conversationPath" | "cliConversationImport"
+    | "conversationPath" | "todos"
   >;
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
   backendProfileController: Pick<BackendProfileController, "isExternalSelection">;
@@ -148,6 +147,8 @@ export function createConversationTitleRuntime(dependencies: {
   return createConversationTitleService({
     conversation: (conversationId) => store.conversation(conversationId),
     firstUserMessage: (conversationId, maxChars) => store.firstUserMessage(conversationId, maxChars),
+    isTaskConversation: (conversationId) =>
+      store.todos.list().some((todo) => todo.conversationId === conversationId),
     updateTitle: (conversationId, title) => {
       store.updateConversation(conversationId, { title });
       dependencies.broadcastSnapshot();

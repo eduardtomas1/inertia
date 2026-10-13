@@ -188,6 +188,20 @@ describe("Codex thread title generation", () => {
     },
   );
 
+  it("drops the connection soon after a cancellation that never gets a turn acknowledged", async () => {
+    const controller = new AbortController();
+    const run = titleRun("silent-start", { signal: controller.signal });
+    const rejection = expect(run.result).rejects.toThrow("cancelled");
+
+    await waitFor("the hidden title turn to start", () => run.methods().includes("turn/start"));
+    const cancelledAt = Date.now();
+    controller.abort();
+    await rejection;
+    await run.stopped();
+    expect(Date.now() - cancelledAt).toBeLessThan(5_000);
+    expect(run.request("turn/interrupt")).toBeUndefined();
+  });
+
   it("rejects an already cancelled request without starting a process", async () => {
     const controller = new AbortController();
     controller.abort();

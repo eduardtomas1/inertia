@@ -17,7 +17,10 @@ describe("quick conversation titles", () => {
     ["Run \\$review literally", "Run \\$review literally"],
     ["```ts\nconst a = 1;\n```\nWhy does this fail", "Why does this fail"],
     ["~~~\nlog output\n~~~\nExplain the log", "Explain the log"],
-    ["Why does `parseConfig()` crash on empty input", "Why does crash on empty input"],
+    ["Why does `parseConfig()` crash on empty input", "Why does parseConfig() crash on empty"],
+    ["`only inline code`", "only inline code"],
+    ["Use ~~~ to fence the log output", "Use ~~~ to fence the log"],
+    ["```\nunterminated\nFirst prose line", ""],
     ["See https://example.com/a?b=c for details", "See for details"],
     ["Look at\thttp://x.test/path    please", "Look at please"],
     ["Summarize   the\u0007 report", "Summarize the report"],
@@ -30,7 +33,6 @@ describe("quick conversation titles", () => {
     "   \n\t",
     "```\nonly code\n```",
     "https://example.com/only",
-    "`only inline code`",
     "$review",
   ])("returns an empty title for %j", (content) => {
     expect(quickConversationTitle(content)).toBe("");

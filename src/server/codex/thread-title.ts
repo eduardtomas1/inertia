@@ -213,9 +213,14 @@ export async function generateCodexThreadTitle(
   const connection = new AbortController();
   const watcher = new TitleTurnWatcher();
   let turnStarted = false;
+  let connectionGrace: NodeJS.Timeout | undefined;
   const stop = (): void => {
-    if (turnStarted) watcher.stop();
-    else connection.abort();
+    if (!turnStarted) {
+      connection.abort();
+      return;
+    }
+    watcher.stop();
+    connectionGrace ??= setTimeout(() => connection.abort(), TITLE_INTERRUPT_GRACE_MS);
   };
   const deadline = setTimeout(stop, timeoutMs);
   options.signal?.addEventListener("abort", stop, { once: true });
@@ -258,6 +263,7 @@ export async function generateCodexThreadTitle(
     return undefined;
   } finally {
     clearTimeout(deadline);
+    clearTimeout(connectionGrace);
     options.signal?.removeEventListener("abort", stop);
     watcher.stop();
   }

@@ -738,7 +738,7 @@ describe("attachment send handoff", () => {
     await expect(createTurnInteractionCommandHandler(runtime)({} as never, command))
       .resolves.toBe("handled");
     expect(runtime.store.updateConversation).toHaveBeenCalledWith(conversationId, {
-      title: "please fix this crash in today",
+      title: "please fix this parser.ts crash in",
     });
   });
 

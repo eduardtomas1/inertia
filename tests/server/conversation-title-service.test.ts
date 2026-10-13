@@ -24,6 +24,7 @@ function turn(overrides: Partial<AgentTurn> = {}): AgentTurn {
     providerId: "codex",
     userMessageId: firstMessageId,
     model: "gpt-test",
+    status: "completed",
     providerSessionAfter: null,
     modelSelection: {},
     ...overrides,
@@ -45,6 +46,7 @@ function fixture(overrides: Partial<ConversationTitleServiceDependencies> = {}) 
   const dependencies: ConversationTitleServiceDependencies = {
     conversation: vi.fn(() => ({ ...state })),
     firstUserMessage: vi.fn(() => ({ id: firstMessageId, content: firstPrompt })),
+    isTaskConversation: vi.fn(() => false),
     updateTitle: vi.fn((_id: string, title: string) => {
       state.title = title;
     }),
@@ -90,7 +92,7 @@ describe("conversation title service", () => {
     expect(subject.dependencies.sources.codex).toHaveBeenCalledOnce();
   });
 
-  it("caps the Codex prompt and replaces an untitled placeholder", async () => {
+  it("sends the whole first message and replaces an untitled placeholder", async () => {
     const content = "```\ncode only\n```" + "x".repeat(5_000);
     const subject = fixture({
       firstUserMessage: vi.fn(() => ({ id: firstMessageId, content })),
@@ -99,9 +101,17 @@ describe("conversation title service", () => {
     subject.service.onTurnSettled(turn(), { providerSessionTitle: null });
     await settled();
     expect(subject.dependencies.sources.codex).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: content.slice(0, 4_000),
+      prompt: content,
     }));
     expect(subject.state.title).toBe("Login redirect loop");
+  });
+
+  it("keeps the title of a chat started from a task", async () => {
+    const subject = fixture({ isTaskConversation: vi.fn(() => true) });
+    subject.service.onTurnSettled(turn(), { providerSessionTitle: "OpenCode title" });
+    await settled();
+    expect(subject.dependencies.sources.codex).not.toHaveBeenCalled();
+    expect(subject.dependencies.updateTitle).not.toHaveBeenCalled();
   });
 
   it("lets a rename made during generation win", async () => {
@@ -134,6 +144,7 @@ describe("conversation title service", () => {
 
   it.each([
     ["a later turn", turn({ userMessageId: "44444444-4444-4444-8444-444444444444" })],
+    ["a failed first turn", turn({ status: "failed" })],
     ["a provider without generated titles", turn({ providerId: "cursor" })],
   ])("does not generate a Codex title for %s", async (_label, settledTurn) => {
     const subject = fixture();
@@ -186,7 +197,7 @@ describe("conversation title service", () => {
       userMessageId: "44444444-4444-4444-8444-444444444444",
     }), { providerSessionTitle: null });
     await settled();
-    expect(claude).toHaveBeenNthCalledWith(2, { conversationId, sessionId });
+    expect(claude).toHaveBeenNthCalledWith(2, { sessionId });
     expect(subject.state.title).toBe("Login redirect investigation");
     subject.state.title = "Fix the login redirect loop";
     subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
@@ -200,7 +211,7 @@ describe("conversation title service", () => {
     subject.state.providerSessionId = sessionId;
     subject.service.onTurnSettled(turn({ providerId: "claude" }), { providerSessionTitle: null });
     await settled();
-    expect(subject.dependencies.sources.claude).toHaveBeenCalledWith({ conversationId, sessionId });
+    expect(subject.dependencies.sources.claude).toHaveBeenCalledWith({ sessionId });
   });
 
   it("applies a provider session title from any settle while the guard holds", async () => {
@@ -284,7 +295,6 @@ describe("conversation title sources", () => {
       store: {
         assertConversationProvider: vi.fn(),
         conversationPath: vi.fn(() => workspace),
-        cliConversationImport: vi.fn(() => null),
       },
       providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() },
     });
@@ -299,18 +309,17 @@ describe("conversation title sources", () => {
     message: { role: "user", content: "Fix the login redirect loop" },
   };
 
-  it("reads Claude's generated session title from the chat's working directory", async () => {
+  it("reads Claude's generated session title from its session file", async () => {
     const sources = claudeFixture([
       userLine,
       { type: "ai-title", aiTitle: "Login redirect investigation", sessionId },
     ]);
-    await expect(sources.claude({ conversationId, sessionId }))
-      .resolves.toBe("Login redirect investigation");
+    await expect(sources.claude({ sessionId })).resolves.toBe("Login redirect investigation");
   });
 
   it("returns nothing before Claude has written a title", async () => {
     const sources = claudeFixture([userLine]);
-    await expect(sources.claude({ conversationId, sessionId })).resolves.toBeUndefined();
+    await expect(sources.claude({ sessionId })).resolves.toBeUndefined();
   });
 
   it("generates a Codex title through the chat's control context", async () => {

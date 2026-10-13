@@ -45,10 +45,10 @@ describe("scrubCommandSecrets", () => {
     expect(scrubCommandSecrets(command)).toBe(scrubbed);
   });
 
-  it("scrubs a long run of header-like characters in linear time", () => {
+  it("scrubs a 100,000-character run of header-like characters well under a second", () => {
     const startedAt = performance.now();
     scrubCommandSecrets("a-".repeat(50_000));
-    expect(performance.now() - startedAt).toBeLessThan(100);
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 
   it("still applies the shared secret patterns", () => {

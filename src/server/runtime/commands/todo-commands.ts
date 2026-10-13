@@ -3,6 +3,7 @@ import type WebSocket from "ws";
 import type { ClientCommand, ProviderInfo, ServerEvent } from "../../../shared/contracts";
 import { todoPromptContent, type Todo } from "../../../shared/todos";
 import type { RuntimeStore } from "../../database";
+import { TodoRepositoryError } from "../../persistence/todo-repository";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type {
@@ -82,11 +83,14 @@ export function createTodoCommandHandler(
       try {
         linked = dependencies.store.todos.link(todo.id, conversation.id);
       } catch (error) {
-        if (dependencies.store.conversationWorktrees.get(conversation.id)?.ownsWorktree) {
-          throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+        const unlinked = new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+        if (dependencies.store.conversationWorktrees.get(conversation.id)?.ownsWorktree) throw unlinked;
+        try {
+          dependencies.store.deleteConversation(conversation.id);
+        } catch {
+          throw unlinked;
         }
-        dependencies.store.deleteConversation(conversation.id);
-        throw error;
+        throw error instanceof TodoRepositoryError ? error : unlinked;
       }
       dependencies.store.conversationTitleLocks.add(conversation.id);
       const content = todoPromptContent(linked);

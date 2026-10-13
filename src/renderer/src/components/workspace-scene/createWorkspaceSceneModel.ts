@@ -985,7 +985,7 @@ export function createWorkspaceSceneModel({
       },
       plan: {
         steps: planSteps,
-        document: latestPlanDocument(projection.plans),
+        document: latestPlanDocument(projection.plans, projection.turns),
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,
           projectId: project.id,

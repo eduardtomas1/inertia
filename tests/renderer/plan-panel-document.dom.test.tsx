@@ -101,15 +101,56 @@ describe("plan panel document", () => {
       ]),
     ];
     const { result } = renderHook(() => usePlanSteps(plans, [], "running", EMPTY_STREAMING_AGENT_SOURCE));
-    const { container } = render(<PlanPanel document={latestPlanDocument(plans)} markdown={markdown} steps={result.current} />);
+    const turns = [{ id: "plan-run-turn" }, { id: "build-run-turn" }];
+    const { container } = render(<PlanPanel document={latestPlanDocument(plans, turns)} markdown={markdown} steps={result.current} />);
 
     expect(screen.getByRole("heading", { level: 2, name: "Ship the fix" })).toBeTruthy();
     expect(container.querySelector(".plan-document h2")?.textContent).toBe("Context");
     expect(screen.getByText("2 of 3 complete")).toBeTruthy();
     expect([...container.querySelectorAll("[data-plan-step-status]")].map((step) => step.getAttribute("data-plan-step-status")))
       .toEqual(["completed", "completed", "in-progress"]);
-    expect(latestPlanDocument([...plans, record("revised-run", "# Plan: Revised", [])])).toBe("# Plan: Revised");
-    expect(latestPlanDocument([record("blank-run", "  ", [])])).toBeNull();
-    expect(latestPlanDocument([])).toBeNull();
+    expect(latestPlanDocument([...plans, record("revised-run", "# Plan: Revised", [])], [...turns, { id: "revised-run-turn" }]))
+      .toBe("# Plan: Revised");
+    expect(latestPlanDocument([record("blank-run", "  ", [])], [{ id: "blank-run-turn" }])).toBeNull();
+    expect(latestPlanDocument([], [])).toBeNull();
+  });
+
+  describe("pairs the document with the newest checklist", () => {
+    const record = (turnId: string, explanation: string | null): AgentPlan => ({
+      conversationId: "conversation",
+      runId: `${turnId}-run`,
+      turnId,
+      explanation,
+      steps: [{ step: "Run the tests", status: explanation ? "pending" : "inProgress" }],
+    });
+    const turns = (...ids: string[]) => ids.map((id) => ({ id }));
+    const planned = record("plan", "# Plan: Ship the fix");
+
+    it("keeps the document for the build turn's checklist", () => {
+      expect(latestPlanDocument([planned, record("build", null)], turns("plan", "build"))).toBe("# Plan: Ship the fix");
+    });
+
+    it("keeps the document through a continue turn that also reports the checklist", () => {
+      expect(latestPlanDocument(
+        [planned, record("build", null), record("continue", null)],
+        turns("plan", "build", "continue"),
+      )).toBe("# Plan: Ship the fix");
+    });
+
+    it("drops the document when turns without a plan separate it from the checklist", () => {
+      expect(latestPlanDocument(
+        [planned, record("checklist", null)],
+        turns("plan", "question", "answer", "checklist"),
+      )).toBeNull();
+    });
+
+    it("keeps a document whose turn is on an older page when every loaded turn before the checklist has a plan", () => {
+      expect(latestPlanDocument([planned, record("build", null)], turns("build"))).toBe("# Plan: Ship the fix");
+      expect(latestPlanDocument([planned, record("build", null)], turns("question", "build"))).toBeNull();
+    });
+
+    it("keeps the document while the checklist turn is not yet in the loaded turns", () => {
+      expect(latestPlanDocument([planned, record("build", null)], turns("plan"))).toBe("# Plan: Ship the fix");
+    });
   });
 });

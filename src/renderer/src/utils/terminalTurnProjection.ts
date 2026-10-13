@@ -120,10 +120,28 @@ export function mergeProjectionPlans(
   return [...merged.values()];
 }
 
-export function latestPlanDocument(plans: readonly AgentPlan[]): string | null {
-  for (let index = plans.length - 1; index >= 0; index -= 1) {
-    const explanation = plans[index]!.explanation;
-    if (explanation?.trim()) return explanation;
+export function latestPlanDocument(
+  plans: readonly AgentPlan[],
+  turns: readonly { id: string }[],
+): string | null {
+  const newest = plans.at(-1);
+  if (!newest) return null;
+  if (newest.explanation?.trim()) return newest.explanation;
+  if (!newest.turnId) return null;
+  const order = new Map(turns.map(({ id }, index) => [id, index]));
+  const start = order.get(newest.turnId) ?? turns.length;
+  const planned = new Set<number>();
+  const documents = new Map<number, string>();
+  for (const plan of plans) {
+    if (!plan.turnId) continue;
+    const position = plan.turnId === newest.turnId ? start : order.get(plan.turnId) ?? -1;
+    planned.add(position);
+    if (plan.explanation?.trim()) documents.set(position, plan.explanation);
+  }
+  for (let index = start; index >= -1; index -= 1) {
+    if (index >= 0 && index < start && !planned.has(index)) return null;
+    const document = documents.get(index);
+    if (document) return document;
   }
   return null;
 }

@@ -1066,7 +1066,7 @@ function SidebarView({
           </IconButton>
           <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
-            <SidebarUpdateControl controller={appUpdate} everything={updateEverything} />
+            <SidebarUpdateControl controller={appUpdate} everything={updateEverything} snapshot={snapshot} />
           </Suspense>}
         </div>
       </aside>

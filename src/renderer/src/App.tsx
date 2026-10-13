@@ -206,7 +206,6 @@ export default function App(): React.JSX.Element {
     [sendCommand],
   );
   const updateEverything = useStableController(useUpdateEverything({
-    snapshot: connection.snapshot,
     statuses: providerMaintenance.statuses,
     operations: providerMaintenance.operations,
     appStatus: appUpdate.status,

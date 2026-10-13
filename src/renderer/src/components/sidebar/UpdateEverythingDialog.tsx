@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { UpdateEverythingPlan, UpdateEverythingRequest } from "../../hooks/useUpdateEverything";
+import type { UpdateEverythingRequest } from "../../utils/updateEverythingRun";
+import type { UpdateEverythingPlan } from "./updateEverythingPlan";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus } from "../../utils/modalFocus";
 import { DialogShell } from "../DialogShell";

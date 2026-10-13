@@ -1,5 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
+import type { AppSnapshot } from "@shared/contracts";
 import type { AppUpdateController } from "../../hooks/useAppUpdate";
 import type { UpdateEverythingController } from "../../hooks/useUpdateEverything";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -9,14 +10,15 @@ import { IconButton } from "../ui";
 import { UpdateStatusIcon } from "./UpdateStatusIcon";
 import { UpdateRestartConfirmation } from "./UpdateRestartConfirmation";
 import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
+import { updateEverythingPlan, updateEverythingProgress } from "./updateEverythingPlan";
 import "./SidebarUpdateControl.css";
 const UpdateReleaseNotes = lazy(async () => ({
   default: (await import("./UpdateReleaseNotes")).UpdateReleaseNotes,
 }));
 
 /** Presentation only. The existing main-process updater remains the authority. */
-export function SidebarUpdateControl({ controller, everything }: {
-  controller: AppUpdateController; everything?: UpdateEverythingController;
+export function SidebarUpdateControl({ controller, everything, snapshot = null }: {
+  controller: AppUpdateController; everything?: UpdateEverythingController; snapshot?: AppSnapshot | null;
 }): React.JSX.Element {
   const { status } = controller;
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
@@ -38,8 +40,10 @@ export function SidebarUpdateControl({ controller, everything }: {
   const popupId = useId();
   const checking = controller.checking || status?.state === "checking" || pending === "check";
   const showChecking = checking || (latched && !reducedMotion);
-  const everythingPlan = everything?.plan ?? null;
-  const everythingProgress = everything?.progress ?? null;
+  const everythingPlan = useMemo(() => everything && !everything.phase ? updateEverythingPlan({
+    snapshot, statuses: everything.statuses, operations: everything.operations, appStatus: status,
+  }) : null, [everything, snapshot, status]);
+  const everythingProgress = everything?.phase ? updateEverythingProgress(everything.phase, everything.operations, snapshot) : null;
   const everythingLabel = everythingPlan
     ? updateEverythingLabel(everythingPlan.app !== null, everythingPlan.providers.map((provider) => provider.label)) : null;
   const presentation: ReturnType<typeof updatePresentation> = everythingProgress

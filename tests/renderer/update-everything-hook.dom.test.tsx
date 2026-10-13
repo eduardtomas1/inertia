@@ -11,7 +11,8 @@ import type {
 import type { AppUpdateStatus } from "../../src/shared/desktop";
 import type { AgentRunState } from "../../src/shared/run-state";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
-import { updateEverythingPlan, useUpdateEverything } from "../../src/renderer/src/hooks/useUpdateEverything";
+import { useUpdateEverything } from "../../src/renderer/src/hooks/useUpdateEverything";
+import { updateEverythingPlan, updateEverythingProgress } from "../../src/renderer/src/components/sidebar/updateEverythingPlan";
 import { updateStatus } from "../support/app-update-fixture";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -145,12 +146,22 @@ describe("update everything plan", () => {
     expect(updateEverythingPlan({ snapshot: snapshot(conversations), statuses, operations: NO_OPERATIONS, appStatus: null }))
       .toMatchObject({ runningChats: 3, continuingChats: 1 });
   });
+
+  it("names the provider being updated, then the app", () => {
+    const phase = { kind: "providers", providerIds: ["codex", "claude"] } as const;
+    expect(updateEverythingProgress(phase, NO_OPERATIONS, snapshot())).toBe("Updating Codex…");
+    expect(updateEverythingProgress(phase, new Map([["claude", operation("claude", "queued")]]), snapshot())).toBe("Updating Claude Code…");
+    expect(updateEverythingProgress(phase, new Map([
+      ["codex", operation("codex", "queued")], ["claude", operation("claude", "running")],
+    ]), snapshot())).toBe("Updating Claude Code…");
+    expect(updateEverythingProgress({ kind: "app" }, NO_OPERATIONS, snapshot())).toBe("Updating Inertia…");
+  });
 });
 
 function harness(appStatus: AppUpdateStatus | null, request: (command: CommandWithoutId) => Promise<ServerEvent>) {
-  return renderHook(({ status, operations }) => useUpdateEverything({
-    snapshot: snapshot(), statuses: statusMap(maintenance("codex"), maintenance("claude")), operations, appStatus: status, request,
-  }), { initialProps: { status: appStatus, operations: NO_OPERATIONS as ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation> } });
+  return renderHook(({ status }) => useUpdateEverything({
+    statuses: statusMap(maintenance("codex"), maintenance("claude")), operations: NO_OPERATIONS, appStatus: status, request,
+  }), { initialProps: { status: appStatus } });
 }
 
 const providersOnly = { providerIds: ["codex", "claude"] as ProviderMaintenanceProviderId[], includeApp: false, continueChats: true };
@@ -191,7 +202,7 @@ describe("update everything run", () => {
     act(() => { running = hook.result.current.run(withApp).then(() => { finished = true; }); });
     await vi.waitFor(() => expect(statusListener).not.toBeNull());
     expect(install).not.toHaveBeenCalled();
-    expect(hook.result.current.progress).toBe("Updating Inertia…");
+    expect(hook.result.current.phase).toEqual({ kind: "app" });
     await act(async () => { statusListener?.(updateStatus({ state: "downloaded" })); await running; });
     expect(finished).toBe(true);
     expect(install).toHaveBeenCalledOnce();
@@ -217,7 +228,7 @@ describe("update everything run", () => {
     const hook = harness(updateStatus({ state: "downloaded" }), request);
     await act(async () => hook.result.current.run(withApp));
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
-    expect(hook.result.current.progress).toBeNull();
+    expect(hook.result.current.phase).toBeNull();
     expect(hook.result.current.error ?? "").not.toContain("/private/path");
   });
 
@@ -256,20 +267,17 @@ describe("update everything run", () => {
     expect(hook.result.current.error).toBeNull();
   });
 
-  it("never starts two runs at once and reports which provider is updating", async () => {
+  it("never starts two runs at once and reports the running phase", async () => {
     const response = deferred<ServerEvent>();
     const request = vi.fn((command: CommandWithoutId) => command.type === "updates.run" ? response.promise : Promise.resolve(ok));
     const hook = harness(null, request);
     let first!: Promise<void>;
     act(() => { first = hook.result.current.run(providersOnly); });
     await act(async () => hook.result.current.run(providersOnly));
-    expect(request).toHaveBeenCalledOnce();
-    expect(hook.result.current.plan).toBeNull();
-    expect(hook.result.current.progress).toBe("Updating Codex…");
-    hook.rerender({ status: null, operations: new Map([["claude", operation("claude", "running")]]) });
-    expect(hook.result.current.progress).toBe("Updating Claude Code…");
+    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+    expect(hook.result.current.phase).toEqual({ kind: "providers", providerIds: ["codex", "claude"] });
     await act(async () => { response.resolve(runResult(false)); await first; });
-    expect(hook.result.current.progress).toBeNull();
+    expect(hook.result.current.phase).toBeNull();
     expect(request).toHaveBeenCalledTimes(2);
   });
 });

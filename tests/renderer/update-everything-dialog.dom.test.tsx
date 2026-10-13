@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UpdateEverythingDialog } from "../../src/renderer/src/components/sidebar/UpdateEverythingDialog";
 import { runningChatsSentence, updateEverythingLabel } from "../../src/renderer/src/components/sidebar/appUpdatePresentation";
-import type { UpdateEverythingPlan } from "../../src/renderer/src/hooks/useUpdateEverything";
+import type { UpdateEverythingPlan } from "../../src/renderer/src/components/sidebar/updateEverythingPlan";
 
 const STORAGE_KEY = "inertia:update-everything:continue";
 

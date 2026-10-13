@@ -5,6 +5,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
 import { usageResultValidators } from "./usage-results-schema";
+import { updatesRunResultSchema } from "./client-command/updates";
 import { backgroundTasksResult } from "./background-tasks-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
@@ -1110,6 +1111,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
+  "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "todo.started": (value) => stringField(value, "conversationId"),

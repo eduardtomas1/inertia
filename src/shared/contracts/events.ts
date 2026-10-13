@@ -3,6 +3,7 @@ import type { BackgroundTasksResult } from "../background-tasks";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
 import type { MessageQueueResult } from "../queued-messages";
+import type { UpdatesRunResult } from "./client-command/updates";
 import type {
   AgentGoal,
   AgentWorkflowState,
@@ -213,6 +214,7 @@ export type ServerEvent =
         | MessageSendAcceptance
         | MessageQueueResult
         | LimitResetResult
+        | UpdatesRunResult
         | BackgroundTasksResult
         | ConversationCompactionResult
         | DuoPreparedResult

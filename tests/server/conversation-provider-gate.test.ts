@@ -171,6 +171,7 @@ describe("conversation provider gate", () => {
       expect(contact.lastIndexOf("assertConversationProvider(", call)).toBeGreaterThan(-1);
     }
     expect(calling(/withCodexControlClient\(/u)).toEqual([
+      "server/codex/thread-title.ts",
       "server/codex-metadata.ts",
       "server/runtime/agent-workflow-controller.ts",
       "server/usage/native.ts",

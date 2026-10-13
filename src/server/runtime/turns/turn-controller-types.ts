@@ -195,9 +195,13 @@ export interface TurnControllerHooks {
    * records failure independently and never blindly replays a callback against
    * a newer active turn.
    */
-  onTurnSettled?(turn: AgentTurn): void | Promise<void>;
+  onTurnSettled?(turn: AgentTurn, settlement: TurnSettledEvidence): void | Promise<void>;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
+}
+
+export interface TurnSettledEvidence {
+  providerSessionTitle: string | null;
 }
 
 export interface QueueTurnRequest {
@@ -318,6 +322,7 @@ export interface ActiveTurn {
   } | null;
   providerStopStarted: boolean;
   sessionAfter: string | null;
+  providerSessionTitle?: string;
   freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;

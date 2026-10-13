@@ -420,6 +420,7 @@ export class RuntimeStore {
 
   markConversationUnread(conversationId: string): void { this.conversationRepository.markUnread(conversationId); }
   regenerateConversationTitle(conversationId: string): void { this.conversationRepository.regenerateTitle(conversationId); }
+  firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null { return this.conversationRepository.firstUserMessage(conversationId, maxChars); }
 
   createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
   importedCliConversation(providerId: "codex" | "claude", sessionId: string): string | null { return importedCliConversation(this.database, providerId, sessionId); }

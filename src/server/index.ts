@@ -21,6 +21,7 @@ import { RuntimeStore } from "./database";
 import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
+import { createConversationTitleRuntime } from "./runtime/conversation-title-service";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
@@ -591,6 +592,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     })),
     track: trackRuntimeOperation,
   };
+  const conversationTitles = createConversationTitleRuntime({
+    store, providers, backendProfileController, broadcastSnapshot, signal: runtimeLifetimeAbort.signal,
+    track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+  });
   let queuedMessages: ReturnType<typeof createQueuedMessageRuntime> | undefined;
   turns = new TurnController(
     store,
@@ -631,8 +636,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
-      onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+      onTurnSettled: (turn, settlement) => dispatchSettledTurnOwners(turn, [
         (settled) => queuedMessages?.onTurnSettled(settled),
+        (settled) => conversationTitles.onTurnSettled(settled, settlement),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
@@ -977,6 +983,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
     queuePrompt: (conversationId, content, deviceId) => queuePrivateConnectPrompt({
+      store,
       authority: providerTerminalResumes,
       turns,
       isolatedRuns,

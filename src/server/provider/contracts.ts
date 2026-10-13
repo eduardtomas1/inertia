@@ -263,6 +263,12 @@ export interface ProviderSessionEvent extends ProviderEventBase {
   sessionId: string;
 }
 
+export interface ProviderSessionTitleEvent extends ProviderEventBase {
+  type: "session-title";
+  sessionId: string;
+  title: string;
+}
+
 export interface ProviderApprovalEvent extends ProviderEventBase {
   type: "approval";
   request: AgentApprovalRequest;
@@ -379,6 +385,7 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent
   | ProviderInputEvent

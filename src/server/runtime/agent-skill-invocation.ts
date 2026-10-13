@@ -6,19 +6,33 @@ function shellVariableReference(name: string): boolean {
   return SHELL_VARIABLE.test(name.replace(/[.:-]+$/u, ""));
 }
 
+function isPotentialSkillToken(
+  content: string,
+  index: number,
+  name: string,
+): boolean {
+  const previous = content[index - 1];
+  const next = content[index + name.length + 1];
+  const startsToken = index === 0
+    || (previous !== "\\" && !SKILL_NAME_CONTINUATION.test(previous ?? ""));
+  const endsToken = next === undefined
+    || !SKILL_NAME_CONTINUATION.test(next);
+  return startsToken && endsToken && !shellVariableReference(name);
+}
+
 export function containsPotentialSkillInvocation(content: string): boolean {
   for (const match of content.matchAll(POTENTIAL_SKILL_TOKEN)) {
-    const index = match.index;
-    const name = match[1]!;
-    const previous = content[index - 1];
-    const next = content[index + name.length + 1];
-    const startsToken = index === 0
-      || (previous !== "\\" && !SKILL_NAME_CONTINUATION.test(previous ?? ""));
-    const endsToken = next === undefined
-      || !SKILL_NAME_CONTINUATION.test(next);
-    if (startsToken && endsToken && !shellVariableReference(name)) return true;
+    if (isPotentialSkillToken(content, match.index, match[1]!)) return true;
   }
   return false;
+}
+
+export function withoutPotentialSkillInvocations(content: string): string {
+  return content.replace(
+    POTENTIAL_SKILL_TOKEN,
+    (token: string, name: string, index: number) =>
+      isPotentialSkillToken(content, index, name) ? " " : token,
+  );
 }
 
 export function skillDiscoveryIsFresh(

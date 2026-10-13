@@ -18,6 +18,7 @@ import type {
   ProviderHostToolBridge,
   ProviderSteerInput,
   ProviderSessionEvent,
+  ProviderSessionTitleEvent,
   ProviderStatusEvent,
   ProviderSubagentEvent,
   ProviderTextEvent,
@@ -222,6 +223,7 @@ export type AgentHarnessCoreEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderSessionTitleEvent
   | ProviderGoalUpdatedEvent
   | ProviderGoalClearedEvent
   | ProviderSubagentEvent;
@@ -373,6 +375,7 @@ export interface AgentHarnessEmitter {
     providerState?: string,
   ) => void;
   session: (sessionId: string) => void;
+  sessionTitle: (sessionId: string, title: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
   goalCleared: (sessionId: string) => void;
   subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
@@ -453,6 +456,12 @@ export function createAgentHarnessEmitter(
       ...(providerState ? { providerState } : {}),
     }),
     session: (sessionId) => emit({ ...base, type: "session", sessionId }),
+    sessionTitle: (sessionId, title) => emit({
+      ...base,
+      type: "session-title",
+      sessionId,
+      title,
+    }),
     goalUpdated: (sessionId, goal) => emit({
       ...base,
       type: "goal-updated",

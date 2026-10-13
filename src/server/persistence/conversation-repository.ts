@@ -168,6 +168,16 @@ export class ConversationRepository {
     this.update(conversationId, { title });
   }
 
+  firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null {
+    this.context.requireConversation(conversationId);
+    const message = this.context.database.prepare(`
+      SELECT id, substr(content, 1, ?) AS content FROM messages
+      WHERE conversation_id = ? AND role = 'user'
+      ORDER BY created_at ASC, id ASC LIMIT 1
+    `).get(maxChars, conversationId) as { id: string; content: string } | undefined;
+    return message ?? null;
+  }
+
   hasTurns(conversationId: string): boolean {
     this.context.requireConversation(conversationId);
     return this.context.database.prepare(

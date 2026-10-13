@@ -98,6 +98,7 @@ import {
   objectValue,
   openCodeRequestRefused,
   openCodeRuntimeFailure,
+  openCodeSessionTitle,
   resolveOpenCodeAgent,
   resolveOpenCodeModel,
   safeError,
@@ -673,6 +674,8 @@ function startOpenCodeRun(
             failureState,
             failInteraction,
           );
+          const sessionTitle = openCodeSessionTitle(safeEvent, sessionId);
+          if (sessionTitle) emitter.sessionTitle(sessionTitle.sessionId, sessionTitle.title);
           if (
             awaitingParentContinuation
             && !hasLiveDescendants

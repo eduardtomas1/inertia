@@ -20,6 +20,7 @@ type LifecycleScenario =
   | "out-of-order-parts"
   | "out-of-order-buffer-overflow"
   | "snapshot-ordering"
+  | "session-titles"
   | "next-events"
   | "assistant-error"
   | "unowned-session-error"
@@ -379,6 +380,15 @@ const server = http.createServer((req, res) => {
       if (scenario === "out-of-order-buffer-overflow") setTimeout(() => {
         sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "buffered-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
         sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "buffered-assistant", partID: "buffered-text", field: "text", delta: "x".repeat(256 * 1024 + 1) } });
+      }, 10);
+      if (scenario === "session-titles") setTimeout(() => {
+        sendEvent({ type: "session.updated", properties: { sessionID, info: { ...session, title: "New session - 2026-10-13T10:00:00.000Z" } } });
+        sendEvent({ type: "session.updated", properties: { sessionID: "child-session", info: { ...session, id: "child-session", parentID: sessionID, title: "Child task title" } } });
+        sendEvent({ type: "session.updated", properties: { sessionID: "foreign-session", info: { ...session, id: "foreign-session", title: "Foreign title" } } });
+        sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "titled-assistant", parentID: parsed.messageID, sessionID, role: "assistant" } } });
+        sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "titled-text", sessionID, messageID: "titled-assistant", type: "text", text: "Done" } } });
+        sendEvent({ type: "session.updated", properties: { sessionID, info: { ...session, title: "Login redirect loop" } } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "idle" } } });
       }, 10);
       if (scenario === "snapshot-ordering") setTimeout(() => {
         sendEvent({ type: "message.part.delta", properties: { sessionID, messageID: "snapshot-assistant", partID: "snapshot-first", field: "text", delta: " stale delta" } });

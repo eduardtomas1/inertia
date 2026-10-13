@@ -67,15 +67,15 @@ export const MASCOT_ACTIONS: readonly MascotAction[] = [
 ];
 export const MASCOT_COMPACT_HEIGHT = 33;
 export const MASCOT_LABELS: Record<MascotPhase, string> = {
-  idle: "Ready when you are",
-  unavailable: "Reconnecting to Inertia",
+  idle: "Ready",
+  unavailable: "Reconnecting",
   queued: "Queued",
   starting: "Starting",
   running: "Working",
   delegated: "Delegated work",
   retrying: "Retrying",
   "waiting-for-approval": "Approval needed",
-  "waiting-for-input": "Your input needed",
+  "waiting-for-input": "Input needed",
   cancelling: "Stopping",
   completed: "Work complete",
   failed: "Work failed",

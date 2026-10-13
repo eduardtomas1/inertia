@@ -7,7 +7,7 @@ import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
-import { publicRuntimeError } from "../../src/server/runtime-errors";
+import { publicRuntimeError, RuntimeRequestError } from "../../src/server/runtime-errors";
 import {
   createRuntimeCommandExecutor,
   defineRuntimeCommandHandler,
@@ -246,6 +246,50 @@ describe("todo command handler", () => {
       message: "The chat was created, but its first turn could not start.",
     })]);
     expect(dependencies.broadcastSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the task's prompt in the linked chat when the first turn cannot be queued", async () => {
+    const { store, turns, run, startPayload } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Queue fails", note: "Runtime is closing" });
+    turns.queue.mockImplementation(() => { throw new RuntimeRequestError("The local runtime is shutting down."); });
+
+    const { events, order } = await run("todo.start", startPayload(id));
+
+    const conversationId = store.todos.get(id)?.conversationId;
+    expect(conversationId).toBeTruthy();
+    expect(store.conversationDetail(conversationId!)?.messages).toEqual([expect.objectContaining({
+      role: "user", content: "Queue fails\n\nRuntime is closing", turnId: null,
+    })]);
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(order).toEqual(["verify", "snapshot", "request.error"]);
+    expect(events).toEqual([expect.objectContaining({
+      type: "request.error",
+      message: "The chat was created, but its first turn could not start.",
+    })]);
+  });
+
+  it("does not repeat the prompt when the first turn was recorded before queueing failed", async () => {
+    const { store, turns, run, startPayload } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Adoption fails" });
+    turns.queue.mockImplementation((request: { conversationId: string; content: string }) => {
+      store.beginAgentTurn({ id: randomUUID(), runId: randomUUID(), conversationId: request.conversationId,
+        content: request.content, providerId: "codex", harnessId: "codex-app-server",
+        backendProfileId: "native:codex:app-server", model: "gpt-5", reasoningEffort: "high",
+        interactionMode: "build", accessMode: "auto-edit", configurationRevision: 1,
+        association: "authoritative" });
+      throw new Error("Adoption failed.");
+    });
+
+    const { events } = await run("todo.start", startPayload(id));
+
+    const conversationId = store.todos.get(id)?.conversationId;
+    expect(store.conversationDetail(conversationId!)?.messages.map(({ content }) => content)).toEqual(["Adoption fails"]);
+    expect(events).toEqual([expect.objectContaining({
+      type: "request.error",
+      message: "The chat was created, but its first turn could not start.",
+    })]);
   });
 
   it("removes the new empty chat and reports the failure when the task disappears before it is linked", async () => {

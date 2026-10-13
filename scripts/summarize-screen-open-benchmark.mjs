@@ -309,9 +309,63 @@ function summarizeProfiles() {
   return result;
 }
 
+function gitProcesses(path) {
+  const processes = new Map();
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.event === "start") {
+      processes.set(event.sid, { startedAt: Date.parse(event.time), argv: event.argv.slice(1).join(" "), ms: null });
+    } else if (event.event === "exit" && processes.has(event.sid)) {
+      processes.get(event.sid).ms = Number((event.t_abs * 1000).toFixed(1));
+    }
+  }
+  return [...processes.values()].sort((left, right) => left.startedAt - right.startedAt);
+}
+
+function summarizeGitTraces() {
+  const traceDirectory = existsSync(join(directory, "profiles")) ? join(directory, "profiles") : directory;
+  const traces = readdirSync(traceDirectory).filter((name) => /^run-\d+-git-trace2\.jsonl$/u.test(name));
+  const result = {};
+  for (const name of traces) {
+    const run = Number(/run-(\d+)/u.exec(name)[1]);
+    const reportPath = join(traceDirectory, `run-${run}.json`);
+    if (!existsSync(reportPath)) continue;
+    const report = JSON.parse(readFileSync(reportPath, "utf8"));
+    const processes = gitProcesses(join(traceDirectory, name));
+    const samples = report.steps.flatMap((step) => ["cold", "warm"]
+      .filter((phase) => step[phase])
+      .map((phase) => ({ id: `${step.id}-${phase}`, inputAt: step[phase].inputAtEpochMs, paintAt: step[phase].paintAtEpochMs })))
+      .sort((left, right) => left.inputAt - right.inputAt);
+    result[`run-${run}`] = Object.fromEntries(samples.map((sample, index) => {
+      const end = Math.min(samples[index + 1]?.inputAt ?? Infinity, sample.inputAt + 5_000);
+      const inside = processes.filter((process) => process.startedAt >= sample.inputAt && process.startedAt < end);
+      return [sample.id, {
+        count: inside.length,
+        totalMs: Number(inside.reduce((total, process) => total + (process.ms ?? 0), 0).toFixed(1)),
+        lastExitAfterInputMs: inside.length
+          ? Number(Math.max(...inside.map((process) => process.startedAt + (process.ms ?? 0) - sample.inputAt)).toFixed(1))
+          : null,
+        processes: inside.map((process) => ({
+          argv: process.argv.slice(0, 120),
+          startAfterInputMs: Number((process.startedAt - sample.inputAt).toFixed(1)),
+          ms: process.ms,
+        })),
+      }];
+    }));
+  }
+  return result;
+}
+
 const runs = summarizeRuns();
 const profiles = summarizeProfiles();
-const output = { directory, runs, profiles };
+const git = summarizeGitTraces();
+const output = { directory, runs, profiles, git };
 writeFileSync(join(directory, "summary.json"), `${JSON.stringify(output, null, 2)}\n`);
 if (runs) {
   writeFileSync(join(directory, "summary.md"), `${markdownTable(runs)}\n`);

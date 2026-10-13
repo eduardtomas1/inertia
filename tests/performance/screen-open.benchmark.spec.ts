@@ -29,6 +29,7 @@ import {
 const RUNS = Number.parseInt(process.env.INERTIA_SCREEN_OPEN_RUNS ?? "5", 10);
 const PROFILE = process.env.INERTIA_SCREEN_OPEN_PROFILE === "1";
 const ONLY = process.env.INERTIA_SCREEN_OPEN_ONLY?.split(",").filter(Boolean) ?? null;
+const GIT_TRACE = process.env.INERTIA_SCREEN_OPEN_GIT_TRACE === "1";
 const OUTPUT = resolve(process.env.INERTIA_SCREEN_OPEN_OUTPUT ?? "performance-results/screen-open");
 const IDLE_BEFORE_FIRST_OPEN_MS = 2_000;
 const HOME_CHAT = "screen-open fixture";
@@ -317,15 +318,28 @@ async function measureStep(
 
 async function installDetachedPaintWatcher(app: AppFixture, text: string): Promise<void> {
   await app.page.context().addInitScript((expectedText) => {
-    const scope = globalThis as typeof globalThis & { __detachedPaint?: Promise<number> };
+    const scope = globalThis as typeof globalThis & {
+      __detachedPaint?: Promise<number>;
+      __detachedMilestones?: Record<string, number>;
+    };
+    const milestones: Record<string, number> = {};
+    scope.__detachedMilestones = milestones;
+    const stamp = (name: string): void => {
+      milestones[name] ??= performance.now();
+    };
     scope.__detachedPaint = new Promise<number>((resolvePaint) => {
       const ready = (): boolean => {
         const shell = document.querySelector(".detached-chat-shell");
-        return shell !== null
-          && (shell.textContent ?? "").includes(expectedText)
+        if (!shell) return false;
+        stamp("shell");
+        if (!shell.querySelector(".detached-chat-loading")) stamp("snapshot");
+        if (shell.querySelector(".chat-workspace")) stamp("chatWorkspace");
+        if (shell.querySelector(".message-scroll")) stamp("messageScroll");
+        return (shell.textContent ?? "").includes(expectedText)
           && shell.querySelector('[aria-busy="true"]') === null;
       };
       const finish = (): void => {
+        stamp("content");
         requestAnimationFrame(() => requestAnimationFrame(() => {
           resolvePaint(performance.timeOrigin + performance.now());
         }));
@@ -364,7 +378,10 @@ async function measureDetachedWindow(app: AppFixture, title: string, lastText: s
   await item.click();
   const popup = await opened;
   const popupTiming = await popup.evaluate(async () => {
-    const scope = globalThis as typeof globalThis & { __detachedPaint?: Promise<number> };
+    const scope = globalThis as typeof globalThis & {
+      __detachedPaint?: Promise<number>;
+      __detachedMilestones?: Record<string, number>;
+    };
     if (!scope.__detachedPaint) throw new Error("The detached paint watcher is missing.");
     const paintedAt = await scope.__detachedPaint;
     const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
@@ -375,6 +392,7 @@ async function measureDetachedWindow(app: AppFixture, title: string, lastText: s
       domContentLoadedMs: navigation?.domContentLoadedEventEnd ?? null,
       loadMs: navigation?.loadEventEnd ?? null,
       firstContentfulPaintMs: contentful?.startTime ?? null,
+      milestones: scope.__detachedMilestones ?? {},
     };
   });
   await expect(popup.locator(".detached-chat-shell")).toContainText(lastText);
@@ -386,6 +404,8 @@ async function measureDetachedWindow(app: AppFixture, title: string, lastText: s
     navigationToDomContentLoadedMs: round(popupTiming.domContentLoadedMs),
     navigationToFirstContentfulPaintMs: round(popupTiming.firstContentfulPaintMs),
     navigationToContentPaintMs: round(popupTiming.paintedAt - popupTiming.timeOrigin),
+    navigationMilestonesMs: Object.fromEntries(Object.entries(popupTiming.milestones)
+      .map(([name, value]) => [name, round(value)])),
   };
   await Promise.all([
     popup.waitForEvent("close"),
@@ -411,10 +431,14 @@ for (let run = 1; run <= (PROFILE ? 1 : RUNS); run += 1) {
     const directory = PROFILE ? join(OUTPUT, "profiles") : OUTPUT;
     await mkdir(directory, { recursive: true });
     const loadBefore = loadavg();
+    const gitTracePath = join(directory, `run-${run}-git-trace2.jsonl`);
+    const gitConfigPath = join(directory, `run-${run}-git-trace2.gitconfig`);
+    if (GIT_TRACE) await writeFile(gitConfigPath, `[trace2]\n\teventTarget = ${gitTracePath}\n\teventBrief = false\n`);
     const app = await createAppFixture({
       name: "screen-open",
       initialState: "conversation",
       seedSecondProject: true,
+      ...(GIT_TRACE ? { additionalEnvironment: { GIT_CONFIG_GLOBAL: gitConfigPath } } : {}),
       beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
         seedScreenOpenFixture(testDirectory, workspaceDirectory);
       },

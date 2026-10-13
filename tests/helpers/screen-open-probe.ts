@@ -44,6 +44,8 @@ export interface ScreenOpenCommand {
 }
 
 export interface ScreenOpenSample {
+  inputAtEpochMs: number;
+  paintAtEpochMs: number;
   inputToPaintMs: number;
   inputToContentMs: number;
   inputToShellMs: number | null;
@@ -314,6 +316,8 @@ export function summarizeScreenOpen(observation: ScreenOpenObservation): ScreenO
       };
     });
   return {
+    inputAtEpochMs: round(observation.timeOrigin + start),
+    paintAtEpochMs: round(observation.timeOrigin + observation.paintedAt),
     inputToPaintMs: round(observation.paintedAt - start),
     inputToContentMs: round(observation.contentVisibleAt - start),
     inputToShellMs: observation.shellVisibleAt === null ? null : round(observation.shellVisibleAt - start),

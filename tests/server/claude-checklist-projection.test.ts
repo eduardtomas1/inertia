@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
@@ -8,11 +8,20 @@ import {
   createAgentHarnessEmitter,
   type AgentHarnessEvent,
 } from "../../src/server/provider/agent-harness";
+import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { ClaudeMessageProjector } from "../../src/server/provider/claude-message-projector";
 import { ClaudeUsageLedger } from "../../src/server/provider/claude-usage";
 import { CappedProviderBuffer } from "../../src/server/provider/io";
 import type { AgentPlanStep } from "../../src/server/provider/interactions";
-import { CLAUDE_PROTOCOL_SESSION_ID } from "../helpers/claude-agent-sdk-protocol";
+import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
+import {
+  CLAUDE_PROTOCOL_SESSION_ID,
+  claudeSuccessResult,
+  claudeSystem,
+  fixtureClaudeQuery,
+} from "../helpers/claude-agent-sdk-protocol";
+import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
+import { nativeProviderRunInput } from "./model-route-fixture";
 
 function projector(): { observe: (message: unknown) => void; plans: () => Array<{ explanation: string | null; steps: AgentPlanStep[] }> } {
   const events: AgentHarnessEvent[] = [];
@@ -62,6 +71,14 @@ function toolUse(name: string, id: string, input: unknown, parentToolUseId: stri
   };
 }
 
+function todos(...items: Array<[string, string]>) {
+  return items.map(([content, status]) => ({ content, status, activeForm: content }));
+}
+
+function todoWrite(id: string, items: unknown) {
+  return [toolUse("TodoWrite", id, { todos: items }), toolResult(id, { oldTodos: [], newTodos: items })] as const;
+}
+
 function toolResult(id: string, structured: unknown, isError = false) {
   sequence += 1;
   return {
@@ -93,22 +110,21 @@ describe("Claude checklist projection", () => {
     });
     expect(claude.plans()).toEqual([]);
 
-    const first = toolUse("TodoWrite", "todo-1", {
-      todos: [
-        { content: "Inspect the adapter", status: "completed", activeForm: "Inspecting the adapter" },
-        { content: "Write the projection", status: "in_progress", activeForm: "Writing the projection" },
-        { content: "Run the tests", status: "pending", activeForm: "Running the tests" },
-      ],
-    });
+    const [first, firstResult] = todoWrite("todo-1", todos(
+      ["Inspect the adapter", "completed"],
+      ["Write the projection", "in_progress"],
+      ["Run the tests", "pending"],
+    ));
     claude.observe(first);
     claude.observe({ ...first, uuid: "assistant-repeat" });
-    claude.observe(toolUse("TodoWrite", "todo-2", {
-      todos: [
-        { content: "Inspect the adapter", status: "completed", activeForm: "Inspecting the adapter" },
-        { content: "Write the projection", status: "completed", activeForm: "Writing the projection" },
-        { content: "Run the tests", status: "in_progress", activeForm: "Running the tests" },
-      ],
-    }));
+    expect(claude.plans()).toEqual([]);
+    claude.observe(firstResult);
+    claude.observe({ ...firstResult, uuid: "user-repeat" });
+    for (const message of todoWrite("todo-2", todos(
+      ["Inspect the adapter", "completed"],
+      ["Write the projection", "completed"],
+      ["Run the tests", "in_progress"],
+    ))) claude.observe(message);
 
     expect(claude.plans()).toEqual([
       {
@@ -130,17 +146,29 @@ describe("Claude checklist projection", () => {
     ]);
   });
 
-  it("ignores malformed TodoWrite input and keeps only well-formed items", () => {
+  it("does not update the plan from a TodoWrite call that failed or has no structured result", () => {
     const claude = projector();
-    claude.observe(toolUse("TodoWrite", "todo-bad-1", { todos: "Inspect" }));
-    claude.observe(toolUse("TodoWrite", "todo-bad-2", null));
-    claude.observe(toolUse("TodoWrite", "todo-bad-3", { todos: [{ content: 4, status: "pending" }, { content: "Ship", status: "shipped" }] }));
+    claude.observe(toolUse("TodoWrite", "todo-failed", { todos: todos(["Inspect", "completed"]) }));
+    claude.observe(toolResult("todo-failed", { oldTodos: [], newTodos: todos(["Inspect", "completed"]) }, true));
+    claude.observe(toolUse("TodoWrite", "todo-text", { todos: todos(["Inspect", "completed"]) }));
+    claude.observe(toolResult("todo-text", "<tool_use_error>InputValidationError</tool_use_error>"));
+    claude.observe(toolUse("TodoWrite", "todo-pending", { todos: todos(["Inspect", "completed"]) }));
+    expect(claude.plans()).toEqual([]);
+  });
+
+  it("ignores malformed TodoWrite results and keeps only well-formed items", () => {
+    const claude = projector();
+    for (const [id, items] of [
+      ["todo-bad-1", "Inspect"],
+      ["todo-bad-2", null],
+      ["todo-bad-3", [{ content: 4, status: "pending" }, { content: "Ship", status: "shipped" }]],
+    ] as const) for (const message of todoWrite(id, items)) claude.observe(message);
     expect(claude.plans()).toEqual([]);
 
-    claude.observe(toolUse("TodoWrite", "todo-mixed", {
-      todos: [null, { content: "  ", status: "pending" }, { content: "Ship", status: "pending" }],
-    }));
-    claude.observe(toolUse("TodoWrite", "todo-clear", { todos: [] }));
+    for (const message of todoWrite("todo-mixed", [null, { content: "  ", status: "pending" }, { content: "Ship", status: "pending" }])) {
+      claude.observe(message);
+    }
+    for (const message of todoWrite("todo-clear", [])) claude.observe(message);
     expect(claude.plans()).toEqual([
       { explanation: null, steps: [{ step: "Ship", status: "pending" }] },
       { explanation: null, steps: [] },
@@ -149,24 +177,68 @@ describe("Claude checklist projection", () => {
 
   it("bounds the number of steps and the length of each step", () => {
     const claude = projector();
-    claude.observe(toolUse("TodoWrite", "todo-large", {
-      todos: Array.from({ length: 150 }, (_, index) => ({
-        content: index === 0 ? "x".repeat(5_000) : `Step ${index}`,
-        status: "pending",
-        activeForm: `Doing ${index}`,
-      })),
-    }));
+    for (const message of todoWrite("todo-large", Array.from({ length: 150 }, (_, index) => ({
+      content: index === 0 ? "x".repeat(5_000) : `Step ${index}`,
+      status: "pending",
+      activeForm: `Doing ${index}`,
+    })))) claude.observe(message);
     const [plan] = claude.plans();
     expect(plan?.steps).toHaveLength(MAX_AGENT_PLAN_STEPS);
     expect(plan?.steps[0]?.step).toHaveLength(1_000);
     expect(plan?.steps.at(-1)).toEqual({ step: `Step ${MAX_AGENT_PLAN_STEPS - 1}`, status: "pending" });
   });
 
+  it("reads only the bounded prefix of an oversized malformed checklist", () => {
+    const claude = projector();
+    const read = (length: number, valid: (index: number) => unknown) => {
+      let highest = -1;
+      const items = new Proxy(Array.from({ length }, (_, index) => valid(index)), {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/u.test(key)) highest = Math.max(highest, Number(key));
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      return { items, highest: () => highest };
+    };
+    const malformedThenValid = (index: number) => index < MAX_AGENT_PLAN_STEPS
+      ? { content: 7, status: "pending" }
+      : { content: `Step ${index}`, status: "pending", activeForm: "Doing" };
+    const todoItems = read(100_000, malformedThenValid);
+    for (const message of todoWrite("todo-oversized", todoItems.items)) claude.observe(message);
+    const taskItems = read(100_000, (index) => index < MAX_AGENT_PLAN_STEPS
+      ? { id: String(index), subject: 7, status: "pending" }
+      : { id: String(index), subject: `Task ${index}`, status: "pending" });
+    claude.observe(toolUse("TaskList", "list-oversized", {}));
+    claude.observe(toolResult("list-oversized", { tasks: taskItems.items }));
+
+    expect(claude.plans()).toEqual([]);
+    expect(todoItems.highest()).toBeLessThan(MAX_AGENT_PLAN_STEPS);
+    expect(taskItems.highest()).toBeLessThan(MAX_AGENT_PLAN_STEPS);
+  });
+
+  it("does not attribute one structured result to several tool results in the same message", () => {
+    const claude = projector();
+    claude.observe(toolUse("TaskCreate", "create-a", { subject: "Inspect", description: "Inspect" }));
+    claude.observe(toolUse("TaskCreate", "create-b", { subject: "Verify", description: "Verify" }));
+    const combined = toolResult("create-a", { task: { id: "1", subject: "Inspect" } });
+    claude.observe({
+      ...combined,
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "create-a", content: "ok" },
+          { type: "tool_result", tool_use_id: "create-b", content: "ok" },
+        ],
+      },
+    });
+    expect(claude.plans()).toEqual([]);
+  });
+
   it("does not let a subagent's checklist replace the run's plan", () => {
     const claude = projector();
-    claude.observe(toolUse("TodoWrite", "child-todo", {
-      todos: [{ content: "Child work", status: "in_progress", activeForm: "Working" }],
-    }, "parent-agent"));
+    const items = todos(["Child work", "in_progress"]);
+    claude.observe(toolUse("TodoWrite", "child-todo", { todos: items }, "parent-agent"));
+    claude.observe({ ...toolResult("child-todo", { oldTodos: [], newTodos: items }), parent_tool_use_id: "parent-agent" });
     expect(claude.plans()).toEqual([]);
   });
 
@@ -247,5 +319,60 @@ describe("Claude checklist projection", () => {
     claude.observe(toolUse("TaskList", "list-bad", {}));
     claude.observe(toolResult("list-bad", { tasks: "none" }));
     expect(claude.plans()).toEqual([]);
+  });
+
+  describe("across runs of one Claude session", () => {
+    const roots: string[] = [];
+    afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
+
+    it("applies a TaskUpdate to a task created in an earlier run", async () => {
+      const root = portableFixtureRoot("Claude checklist across runs");
+      roots.push(root);
+      const runs: SDKMessage[][] = [
+        [
+          toolUse("TaskCreate", "create-1", { subject: "Inspect", description: "Inspect" }),
+          toolResult("create-1", { task: { id: "1", subject: "Inspect" } }),
+          toolUse("TaskCreate", "create-2", { subject: "Verify", description: "Verify" }),
+          toolResult("create-2", { task: { id: "2", subject: "Verify" } }),
+        ] as unknown as SDKMessage[],
+        [
+          toolUse("TaskUpdate", "update-1", { taskId: "1", status: "completed" }),
+          toolResult("update-1", { success: true, taskId: "1", updatedFields: ["status"] }),
+        ] as unknown as SDKMessage[],
+      ];
+      let started = 0;
+      const harness = createClaudeAgentSdkHarness({
+        createQuery: () => {
+          const messages = runs[started++]!;
+          return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+            yield claudeSystem("init");
+            yield* messages;
+            yield claudeSuccessResult("Done", "completed");
+          })());
+        },
+      });
+      const manager = ProviderManager.createForTests(
+        { commands: { claude: process.execPath } },
+        new AgentHarnessRegistry([harness]),
+      );
+      const plans: AgentPlanStep[][] = [];
+      const run = (index: number, sessionId?: string) => manager.run(nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-checklist-across-runs",
+        cwd: root,
+        prompt: `Run ${index}`,
+        interactionMode: "build",
+        access: "supervised",
+        ...(sessionId ? { sessionId } : {}),
+      }), { onPlan: ({ steps }) => plans.push(steps) });
+
+      await expect(run(1)).resolves.toMatchObject({ status: "completed", sessionId: CLAUDE_PROTOCOL_SESSION_ID });
+      await expect(run(2, CLAUDE_PROTOCOL_SESSION_ID)).resolves.toMatchObject({ status: "completed" });
+
+      expect(plans.at(-1)).toEqual([
+        { step: "Inspect", status: "completed" },
+        { step: "Verify", status: "pending" },
+      ]);
+    });
   });
 });

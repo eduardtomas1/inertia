@@ -1,6 +1,6 @@
 import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
-import { ClaudeChecklistProjection } from "./claude-checklist-projection";
+import { ClaudeChecklistProjection, type ClaudeChecklistTasks } from "./claude-checklist-projection";
 import {
   boundedClaudeEventText as bounded,
   boundedClaudeIdentifier as boundedIdentifier,
@@ -24,8 +24,12 @@ export class ClaudeToolActivityProjection {
   private readonly activities = new Map<string, ClaudeToolActivity>();
   private readonly checklist: ClaudeChecklistProjection;
 
-  constructor(private readonly emitter: AgentHarnessEmitter) {
-    this.checklist = new ClaudeChecklistProjection(emitter);
+  constructor(
+    private readonly emitter: AgentHarnessEmitter,
+    checklistTasks?: () => ClaudeChecklistTasks,
+  ) {
+    const tasks: ClaudeChecklistTasks = new Map();
+    this.checklist = new ClaudeChecklistProjection(emitter, checklistTasks ?? (() => tasks));
   }
 
   isCompleted(activityId: string): boolean {

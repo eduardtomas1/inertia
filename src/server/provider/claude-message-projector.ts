@@ -31,6 +31,7 @@ import {
 } from "./claude-message-projector-support";
 import { ClaudeMessageStreamCorrelation } from "./claude-message-stream-correlation";
 import { isClaudeQueuedCompletionAck } from "./claude-delegate-lifecycle";
+import type { ClaudeChecklistTasks } from "./claude-checklist-projection";
 import { ClaudeToolActivityProjection } from "./claude-tool-activity-projection";
 
 export {
@@ -50,6 +51,7 @@ interface ClaudeMessageProjectorOptions {
   contextUsage: () => unknown;
   acceptContextUsage: (usage: unknown) => void;
   refreshContextUsage: () => void;
+  checklistTasks?: () => ClaudeChecklistTasks;
 }
 
 
@@ -87,7 +89,7 @@ export class ClaudeMessageProjector {
   private thinkingProgressActive = false;
 
   constructor(private readonly options: ClaudeMessageProjectorOptions) {
-    this.tools = new ClaudeToolActivityProjection(options.emitter);
+    this.tools = new ClaudeToolActivityProjection(options.emitter, options.checklistTasks);
   }
 
   observe(message: SDKMessage, provesRequestedCompaction: boolean): void {

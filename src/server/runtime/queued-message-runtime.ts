@@ -10,6 +10,7 @@ import { createTurnInteractionCommandHandler, type TurnInteractionCommandDepende
 import {
   awaitMessageSendPreparation, MessageSendPreparationTimeoutError, messageSendPreparationDeadline,
 } from "./commands/message-send-preparation";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
 
 const ADMISSION_RETRY_MS = 1_000;
 
@@ -62,6 +63,10 @@ export function createQueuedMessageRuntime(
     if (!store.queuedMessages.routeMatches(first, conversation)) {
       store.queuedMessages.block(conversationId, first.id, "This chat's model, access or workspace changed. Remove and queue the message again.");
       changed(conversationId);
+      return;
+    }
+    if (isHeld()) {
+      retryAfterAdmission(conversationId);
       return;
     }
     if (!store.queuedMessages.claim(conversationId, first.id)) return;
@@ -225,6 +230,9 @@ export function createQueuedMessageRuntime(
       && command.type !== "message.queue.send" && command.type !== "message.queue.stop-and-send") return "not-handled";
     const { conversationId } = command.payload;
     store.conversation(conversationId);
+    if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send") && isHeld()) {
+      throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    }
     if (command.type === "message.queue.enqueue") {
       await enqueue(command.payload, command.requestId);
       void schedule(conversationId).catch(() => undefined);

@@ -80,6 +80,7 @@ import {
   waitForProviderCleanupBarriers,
 } from "./turn-admission-coordinator";
 import { queuePairedTurns } from "./turn-paired-queue";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 import {
   adoptLiveTurn,
   settleQueuedAdoptionFailure,
@@ -543,6 +544,7 @@ export class TurnController {
     if (this.closing) {
       throw new RuntimeRequestError("The local runtime is shutting down.");
     }
+    if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     this.admissions.assertQueueAuthority(request.conversationId, admission);
     if (
       !request.goalStart
@@ -583,6 +585,7 @@ export class TurnController {
     launchId: string,
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
   ): [QueuedTurn, QueuedTurn] {
+    if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     return queuePairedTurns({
       store: this.store,
       providers: this.providers,

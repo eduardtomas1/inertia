@@ -47,6 +47,7 @@ import {
 import { ConversationContextService } from "../conversation-context-service";
 import { isUntitledConversationTitle, quickConversationTitle } from "../conversation-title";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 
 type MessageSendStage =
   | "conversation-state"
@@ -156,6 +157,7 @@ export function createTurnInteractionCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "message.send": {
+        if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
         let messageSendStage: MessageSendStage = "conversation-state";
         let conversation: ReturnType<RuntimeStore["conversation"]>;
         let contextPacketIds: readonly string[] = [];

@@ -17,6 +17,7 @@ import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/con
 import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller";
 import { join } from "node:path";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { hold, release } from "../../src/server/runtime/update-hold";
 
 afterEach(cleanupTurnControllerTestDirectories);
 async function fixture(
@@ -530,6 +531,31 @@ describe("durable runtime message queue", () => {
       expect(f.admission.refusals).toBe(1);
       expect(f.provider.runCount).toBe(2);
     } finally { await f.close(); }
+  });
+
+  it("keeps queued messages waiting while Inertia is updating and sends them after the hold ends", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      hold();
+      try {
+        f.provider.resolve({ status: "completed" }); await f.drain();
+        expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+        await expect(f.command("message.queue.send", id)).rejects.toThrow("Inertia is updating.");
+        await expect(f.stopAndSend(randomUUID(), initial.turn.id)).rejects.toThrow("Inertia is updating.");
+        expect(f.store.queuedMessages.list(f.conversationId).map((entry) => entry.id)).toEqual([id]);
+        expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+        expect(f.provider.runCount).toBe(1);
+      } finally {
+        release();
+      }
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"), { timeout: 5_000 });
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { release(); await f.close(); }
   });
 
   it("returns a claimed head to waiting when runtime shutdown interrupts its dispatch", async () => {

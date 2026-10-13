@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queuePrivateConnectPrompt } from "../../../src/server/private-connect/prompt-admission";
+import { hold, release } from "../../../src/server/runtime/update-hold";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const deviceId = "33333333-3333-4333-8333-333333333333";
@@ -51,6 +52,23 @@ function fixture() {
 }
 
 describe("Private Connect prompt admission", () => {
+  afterEach(() => release());
+
+  it("refuses a remote prompt while Inertia is updating", () => {
+    const subject = fixture();
+    hold();
+
+    expect(() => queuePrivateConnectPrompt(
+      subject.dependencies,
+      conversationId,
+      "Continue remotely",
+      deviceId,
+    )).toThrow("Inertia is updating.");
+
+    expect(subject.acquire).not.toHaveBeenCalled();
+    expect(subject.queue).not.toHaveBeenCalled();
+  });
+
   it("rejects a resumed provider terminal before a remote turn is queued", () => {
     const subject = fixture();
     subject.acquire.mockReturnValue(false);

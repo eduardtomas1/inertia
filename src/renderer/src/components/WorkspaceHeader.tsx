@@ -255,8 +255,8 @@ export function WorkspaceHeader({
   };
   const commitRename = (value: string): void => {
     setRenaming(null);
-    if (!conversation || !onRenameConversation) return;
-    const resolution = resolveRenameCommit({ title: value, originalTitle: conversation.title });
+    if (!conversation || !onRenameConversation || !renaming) return;
+    const resolution = resolveRenameCommit({ title: value, originalTitle: renaming.title });
     if (resolution.action === "commit") onRenameConversation(resolution.title);
     window.requestAnimationFrame(() => titleButtonRef.current?.focus());
   };

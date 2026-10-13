@@ -1,23 +1,28 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 import type { AppUpdateController } from "../../hooks/useAppUpdate";
+import type { UpdateEverythingController } from "../../hooks/useUpdateEverything";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
+import { updateEverythingLabel, updatePercent, updatePresentation, type UpdateAction } from "./appUpdatePresentation";
 import { IconButton } from "../ui";
 import { UpdateStatusIcon } from "./UpdateStatusIcon";
 import { UpdateRestartConfirmation } from "./UpdateRestartConfirmation";
+import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
 import "./SidebarUpdateControl.css";
 const UpdateReleaseNotes = lazy(async () => ({
   default: (await import("./UpdateReleaseNotes")).UpdateReleaseNotes,
 }));
 
 /** Presentation only. The existing main-process updater remains the authority. */
-export function SidebarUpdateControl({ controller }: { controller: AppUpdateController }): React.JSX.Element {
+export function SidebarUpdateControl({ controller, everything }: {
+  controller: AppUpdateController; everything?: UpdateEverythingController;
+}): React.JSX.Element {
   const { status } = controller;
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<string | null>(null);
+  const [everythingOpen, setEverythingOpen] = useState(false);
   const [pending, setPending] = useState<UpdateAction | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [openingRelease, setOpeningRelease] = useState(false);
@@ -33,7 +38,14 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
   const popupId = useId();
   const checking = controller.checking || status?.state === "checking" || pending === "check";
   const showChecking = checking || (latched && !reducedMotion);
-  const presentation = updatePresentation(status, showChecking);
+  const everythingPlan = everything?.plan ?? null;
+  const everythingProgress = everything?.progress ?? null;
+  const everythingLabel = everythingPlan
+    ? updateEverythingLabel(everythingPlan.app !== null, everythingPlan.providers.map((provider) => provider.label)) : null;
+  const presentation: ReturnType<typeof updatePresentation> = everythingProgress
+    ? { icon: "installing", action: "none", label: everythingProgress, actionLabel: everythingProgress }
+    : everythingLabel && pending === null ? { icon: "available", action: "everything", label: everythingLabel, actionLabel: everythingLabel }
+      : updatePresentation(status, showChecking);
   const percent = updatePercent(status?.progress?.percent);
   const disabled = pending !== null || presentation.action === "none" || (presentation.action === "release" && openingRelease);
   useNativePreviewSuspension(open || confirmation !== null);
@@ -91,7 +103,7 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
 
   const enter = (): void => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    if (confirmation === null) setOpen(true);
+    if (confirmation === null && !everythingOpen) setOpen(true);
   };
   const pointerEnter = (): void => {
     pointerInside.current = true;
@@ -119,7 +131,7 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
       finally { releaseInFlight.current = false; setOpeningRelease(false); }
       return;
     }
-    if (actionInFlight.current || action === "none") return;
+    if (actionInFlight.current || action === "none" || action === "everything") return;
     actionInFlight.current = true;
     setPending(action);
     try {
@@ -131,6 +143,11 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
   };
   const activate = (): void => {
     if (disabled) return;
+    if (presentation.action === "everything") {
+      close();
+      setEverythingOpen(true);
+      return;
+    }
     if (presentation.action === "install" && status?.latestVersion) {
       close();
       setConfirmation(status.latestVersion);
@@ -173,14 +190,14 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
         animate={!reducedMotion && (presentation.icon === "checking" || presentation.icon === "installing")}
         onIteration={() => { if (!checking) setLatched(false); }} />
     </button>
-    <span className="update-status-announcement" role="status" aria-live="polite">{status?.message ?? ""}</span>
+    <span className="update-status-announcement" role="status" aria-live="polite">{everythingProgress ?? status?.message ?? ""}</span>
     {open && <div ref={popup} id={popupId} popover="manual" className="sidebar-update-details" role="dialog"
       aria-label="Application update details" onPointerEnter={pointerEnter} onPointerLeave={leave}
       onToggle={(event) => { if (event.newState === "closed") close(); }}>
       <header><div><strong>{presentation.label}</strong>
         {currentVersion && <small>{status?.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed {currentVersion}</small>}</div>
         <IconButton label="Close update details" onClick={() => close(true)}><X size={16} /></IconButton></header>
-      {(controller.error ?? status?.message) && <p className="update-detail-message">{controller.error ?? status?.message}</p>}
+      {(everything?.error ?? controller.error ?? status?.message) && <p className="update-detail-message">{everything?.error ?? controller.error ?? status?.message}</p>}
       {status?.freshness === "cached" && <p className="update-detail-muted">Showing the last successful check. Release information may be out of date.</p>}
       {status?.state === "downloading" && <div className="update-detail-progress" role="progressbar" aria-label="Update download progress"
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? "Waiting for download progress" : `${percent}%`}>
@@ -205,6 +222,11 @@ export function SidebarUpdateControl({ controller }: { controller: AppUpdateCont
         if (!readyToConfirm || actionInFlight.current) return;
         setConfirmation(null);
         void run("install");
+      }} />}
+    {everythingOpen && everythingPlan && everything && <UpdateEverythingDialog plan={everythingPlan}
+      restoreFocus={focusTrigger} onClose={() => setEverythingOpen(false)} onUpdate={(request) => {
+        setEverythingOpen(false);
+        void everything.run(request);
       }} />}
   </div>;
 }

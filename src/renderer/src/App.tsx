@@ -31,6 +31,7 @@ import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useHelpGuideOpen } from "./hooks/useHelpGuideOpen";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
+import { useUpdateEverything } from "./hooks/useUpdateEverything";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { usePlanSteps } from "./hooks/usePlanSteps";
@@ -204,6 +205,13 @@ export default function App(): React.JSX.Element {
       sendCommand(withRequestId(command)),
     [sendCommand],
   );
+  const updateEverything = useStableController(useUpdateEverything({
+    snapshot: connection.snapshot,
+    statuses: providerMaintenance.statuses,
+    operations: providerMaintenance.operations,
+    appStatus: appUpdate.status,
+    request,
+  }));
   const project = useMemo(
     () => activeWorkspaceProject(connection.snapshot),
     [connection.snapshot],
@@ -1055,6 +1063,7 @@ export default function App(): React.JSX.Element {
       settings={settings}
       connection={connection}
       appUpdate={appUpdate}
+      updateEverything={updateEverything}
       providerQuotaNotices={providerQuotaNotices}
       workspaceLayout={workspaceLayout}
       view={view}

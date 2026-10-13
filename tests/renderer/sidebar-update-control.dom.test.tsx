@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarUpdateControl } from "../../src/renderer/src/components/sidebar/SidebarUpdateControl";
 import { useAppUpdate } from "../../src/renderer/src/hooks/useAppUpdate";
+import type { UpdateEverythingController, UpdateEverythingPlan } from "../../src/renderer/src/hooks/useUpdateEverything";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
 import { updateStatus } from "../support/app-update-fixture";
@@ -11,7 +12,9 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   return { promise: new Promise<T>((done) => { resolve = done; }), resolve: (value) => resolve(value) };
 }
-function Harness(): React.JSX.Element { return <SidebarUpdateControl controller={useAppUpdate()} />; }
+function Harness({ everything }: { everything?: UpdateEverythingController }): React.JSX.Element {
+  return <SidebarUpdateControl controller={useAppUpdate()} everything={everything} />;
+}
 let listener: (value: AppUpdateStatus) => void;
 let sequence = 0;
 const check = vi.fn<() => Promise<AppUpdateStatus>>();
@@ -209,5 +212,64 @@ describe("real update controller in the sidebar", () => {
     expect(css).toMatch(/border: 1px solid var\(--line-soft\); border-radius: var\(--radius-sm\);/u);
     expect(css).not.toMatch(/update-available-dot|min-height: 30px|--accent-strong|header \.icon-button \{ flex: 0 0 24px/u);
     expect(readSourceText("src/renderer/src/components/sidebar/SidebarUpdateControl.tsx")).not.toContain("Check for a new version without leaving your work.");
+  });
+});
+
+function everythingPlan(overrides: Partial<UpdateEverythingPlan> = {}): UpdateEverythingPlan {
+  return { app: { from: "1.2.2", to: "1.2.3" }, releasePageVersion: null,
+    providers: [{ providerId: "codex", label: "Codex", from: "0.112.0", to: "0.113.0" }], runningChats: 0, continuingChats: 0, ...overrides };
+}
+function everythingController(overrides: Partial<UpdateEverythingController> = {}): UpdateEverythingController {
+  return { plan: everythingPlan(), progress: null, error: null, run: vi.fn(async () => undefined), dismissError: vi.fn(), ...overrides };
+}
+describe("update everything mode in the sidebar", () => {
+  it.each([
+    [everythingPlan(), "Update Inertia and Codex"],
+    [everythingPlan({ providers: [...everythingPlan().providers, { providerId: "claude", label: "Claude Code", from: "2.1.283", to: "2.1.295" }] }), "Update Inertia and 2 providers"],
+    [everythingPlan({ app: null }), "Update Codex"],
+    [everythingPlan({ app: null, providers: [...everythingPlan().providers, { providerId: "kimi", label: "Kimi Code", from: "1.0.0", to: "1.1.0" }] }), "Update 2 providers"],
+  ])("labels the control for its items", (plan, label) => {
+    render(<Harness everything={everythingController({ plan })} />); publish();
+    expect(trigger()).toHaveAccessibleName(label);
+    expect(trigger()).toHaveAttribute("data-update-state", "available");
+  });
+  it("opens the dialog instead of downloading and starts the run with the dialog's payload", async () => {
+    const everything = everythingController();
+    render(<Harness everything={everything} />); publish();
+    fireEvent.click(trigger());
+    expect(download).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Update Inertia and Codex?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Update" })));
+    expect(everything.run).toHaveBeenCalledExactlyOnceWith({ providerIds: ["codex"], includeApp: true, continueChats: true });
+    expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
+  });
+  it("closes the dialog with Escape and keeps the hover details closed while it is open", () => {
+    render(<Harness everything={everythingController()} />); publish();
+    fireEvent.click(trigger());
+    fireEvent.pointerEnter(screen.getByRole("dialog"));
+    expect(screen.queryByRole("dialog", { name: "Application update details" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Escape" });
+    expect(trigger()).toHaveFocus();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("shows progress, refuses another click while running, and surfaces the run error", () => {
+    const { rerender } = render(<Harness everything={everythingController({ plan: null, progress: "Updating Codex…" })} />); publish();
+    expect(trigger()).toHaveAccessibleName("Updating Codex…");
+    expect(trigger()).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(trigger());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(download).not.toHaveBeenCalled();
+    expect(document.querySelector(".update-status-announcement")).toHaveTextContent("Updating Codex…");
+    rerender(<Harness everything={everythingController({ error: "Inertia is updating." })} />);
+    fireEvent.keyDown(trigger(), { key: "ArrowUp" });
+    expect(details()).toHaveTextContent("Inertia is updating.");
+  });
+  it("keeps today's app-only flow without provider updates", async () => {
+    download.mockResolvedValue(updateStatus({ state: "downloading" }));
+    render(<Harness everything={everythingController({ plan: null })} />); publish();
+    expect(trigger()).toHaveAccessibleName("Update 1.2.3 ready to download");
+    await act(async () => fireEvent.click(trigger()));
+    expect(download).toHaveBeenCalledOnce();
   });
 });

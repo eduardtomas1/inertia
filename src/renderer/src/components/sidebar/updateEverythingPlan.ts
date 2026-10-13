@@ -22,6 +22,7 @@ export interface UpdateEverythingPlan {
   providers: readonly UpdateEverythingProvider[];
   runningChats: number;
   continuingChats: number;
+  workspaceRuns: number;
 }
 
 function activeOperation(operation: ProviderMaintenanceOperation | undefined): boolean {
@@ -63,12 +64,15 @@ export function updateEverythingPlan({ snapshot, statuses, operations, appStatus
   });
   if (!candidates.some(versionedUpdate)) return null;
   const app = inAppUpdate(appStatus);
+  const workspaceRuns = app ? (snapshot?.runs ?? []).filter((run) => run.kind !== "agent"
+    && (run.status === "running" || run.status === "waiting")).length : 0;
+  const restarts = app !== null && workspaceRuns === 0;
   const providerIds = new Set(candidates.map(({ providerId }) => providerId));
   let runningChats = 0;
   let continuingChats = 0;
   for (const conversation of snapshot?.conversations ?? []) {
     const turn = conversation.latestTurn;
-    if (!turn || (!app && !providerIds.has(turn.providerId))) continue;
+    if (!turn || (!restarts && !providerIds.has(turn.providerId))) continue;
     const state = agentRunStateForTurn(turn);
     if (isAgentRunTerminalState(state)) continue;
     runningChats += 1;
@@ -88,6 +92,7 @@ export function updateEverythingPlan({ snapshot, statuses, operations, appStatus
     })),
     runningChats,
     continuingChats,
+    workspaceRuns,
   };
 }
 

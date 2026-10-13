@@ -53,7 +53,7 @@ async function runningChat() {
   return { runtime, firstTurnId: first.turn.id, continuation, close };
 }
 
-const preparation = { isAdmissionClosed: () => false };
+const preparation = { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null };
 const owner = (): WebSocket => Object.assign(new EventEmitter(), { readyState: 1 }) as unknown as WebSocket;
 
 function maintenance(duringUpdate: () => Promise<void>) {

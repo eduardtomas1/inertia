@@ -44,12 +44,12 @@ export function useUpdateEverything({ statuses, operations, appStatus, request }
       ? { kind: "download" } : { kind: "providers", providerIds: payload.providerIds });
     try {
       const { runUpdateEverything } = await import("../utils/updateEverythingRun");
-      await runUpdateEverything({
+      setError(await runUpdateEverything({
         payload,
         request,
         appStatus: () => appStatusRef.current,
         onPhase: setPhase,
-      });
+      }));
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "The update could not be completed.");
     } finally {

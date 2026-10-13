@@ -21,10 +21,16 @@ describe("update everything contract", () => {
       kind: "updates.run",
       providers: [{ providerId: "codex", outcome: "updated", beforeVersion: "0.112.0", afterVersion: "0.113.0", error: null }],
       interruptedConversationIds: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
-      readyForAppInstall: true,
+      readyForAppInstall: false,
+      appInstallBlocker: "Close active terminals before restarting to update.",
     };
     expect(parseServerEvent({ type: "request.result", requestId: REQUEST, result })).toEqual({ type: "request.result", requestId: REQUEST, result });
+    expect(parseServerEvent({ type: "request.result", requestId: REQUEST, result: { ...result, appInstallBlocker: null } }))
+      .toMatchObject({ result: { appInstallBlocker: null } });
     expect(() => parseServerEvent({ type: "request.result", requestId: REQUEST, result: { ...result, readyForAppInstall: "yes" } })).toThrow();
+    expect(() => parseServerEvent({ type: "request.result", requestId: REQUEST, result: { ...result, appInstallBlocker: 1 } })).toThrow();
+    const { appInstallBlocker: _blocker, ...withoutBlocker } = result;
+    expect(() => parseServerEvent({ type: "request.result", requestId: REQUEST, result: withoutBlocker })).toThrow();
     expect(() => parseServerEvent({
       type: "request.result", requestId: REQUEST,
       result: { ...result, providers: [{ ...result.providers[0], outcome: "maybe" }] },

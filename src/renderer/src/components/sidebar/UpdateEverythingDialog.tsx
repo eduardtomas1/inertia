@@ -5,7 +5,7 @@ import type { UpdateEverythingPlan } from "./updateEverythingPlan";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { captureModalFocus } from "../../utils/modalFocus";
 import { DialogShell } from "../DialogShell";
-import { runningChatsSentence, updateEverythingLabel } from "./appUpdatePresentation";
+import { restartBlockersSentence, runningChatsSentence, updateEverythingLabel } from "./appUpdatePresentation";
 import "./UpdateEverythingDialog.css";
 
 const CONTINUE_STORAGE_KEY = "inertia:update-everything:continue";
@@ -46,6 +46,7 @@ export function UpdateEverythingDialog({ plan, onClose, onUpdate, restoreFocus }
   }, [restoreFocus]);
   const label = updateEverythingLabel(plan.app !== null, plan.providers.map((provider) => provider.label));
   const sentence = runningChatsSentence(plan.runningChats, plan.continuingChats, continueChats);
+  const blockers = plan.app ? restartBlockersSentence(plan.workspaceRuns) : null;
   return createPortal(
     <DialogShell className="update-everything-dialog" titleId={titleId} title={`${label}?`}
       closeLabel="Close update" onClose={onClose}
@@ -69,6 +70,7 @@ export function UpdateEverythingDialog({ plan, onClose, onUpdate, restoreFocus }
       </ul>
       {!plan.app && plan.releasePageVersion && <p>Inertia {plan.releasePageVersion} is on the release page; this build cannot update itself.</p>}
       {sentence && <p>{sentence}</p>}
+      {blockers && <p>{blockers}</p>}
       {plan.runningChats > 0 && <label className="update-everything-continue">
         <input type="checkbox" checked={continueChats} onChange={(event) => {
           setContinueChats(event.target.checked);

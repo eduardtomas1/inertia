@@ -29,8 +29,14 @@ export interface UpdateEverythingDependencies {
   turns: UpdateInterruptionController;
   maintenance: Pick<ProviderMaintenanceController, "current" | "startUpdate" | "settled">;
   restartContinuation: RestartContinuationPlanner;
-  preparation: Pick<RuntimeUpdatePreparationGate, "isAdmissionClosed">;
+  preparation: Pick<RuntimeUpdatePreparationGate, "isAdmissionClosed" | "restartBlockerBesidesAgentTurns">;
 }
+
+const RESTART_BLOCKERS: Record<NonNullable<ReturnType<RuntimeUpdatePreparationGate["restartBlockerBesidesAgentTurns"]>>, string> = {
+  "database-recovery": "Wait for database recovery to finish before restarting.",
+  "agent-work": "Wait for workspace runs to finish before restarting to update.",
+  terminal: "Close active terminals before restarting to update.",
+};
 
 const OUTCOMES: Record<ProviderMaintenanceOperation["status"], UpdateProviderResult["outcome"]> = {
   queued: "failed",
@@ -44,10 +50,11 @@ const OUTCOMES: Record<ProviderMaintenanceOperation["status"], UpdateProviderRes
 function interruptedConversationIds(
   dependencies: UpdateEverythingDependencies,
   request: UpdatesRunRequest,
+  appRestarts: boolean,
 ): string[] {
   const providerIds = new Set<string>(request.providerIds);
   return dependencies.turns.activeConversationIds().filter((conversationId) => {
-    if (request.includeApp) return true;
+    if (appRestarts) return true;
     try {
       return providerIds.has(dependencies.store.conversation(conversationId).providerId);
     } catch {
@@ -89,7 +96,8 @@ export async function runUpdateEverything(
   owner: Pick<WebSocket, "readyState" | "once" | "off">,
 ): Promise<UpdatesRunResult> {
   if (isHeld() && !isAwaitingFinish()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
-  const conversationIds = interruptedConversationIds(dependencies, request);
+  const blocker = request.includeApp ? dependencies.preparation.restartBlockerBesidesAgentTurns() : null;
+  const conversationIds = interruptedConversationIds(dependencies, request, request.includeApp && !blocker);
   let returned = false;
   let ownerClosed = owner.readyState > 1;
   const closed = (): void => {
@@ -109,12 +117,13 @@ export async function runUpdateEverything(
     for (const providerId of request.providerIds) {
       providers.push(await updateProvider(dependencies.maintenance, providerId));
     }
-    readyForAppInstall = request.includeApp;
+    readyForAppInstall = request.includeApp && !blocker;
     return {
       kind: "updates.run",
       providers,
       interruptedConversationIds: conversationIds,
       readyForAppInstall,
+      appInstallBlocker: blocker ? RESTART_BLOCKERS[blocker] : null,
     };
   } finally {
     returned = true;

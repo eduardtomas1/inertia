@@ -183,9 +183,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
     databaseRecoveryActive: () => recoveryImportAdmission.isActive(),
-    agentWorkActive: () => turns.activeConversationIds().length > 0
+    agentWorkActive: (ignoringTurns = false) => (!ignoringTurns && turns.activeConversationIds().length > 0)
       || isolatedRuns.activeCount() > 0
-      || store.hasRecordedActiveWorkspaceRun(),
+      || store.hasRecordedActiveWorkspaceRun(ignoringTurns),
     terminalActivity: () => terminals.hasUpdateBlockingActivity(),
     providerMaintenanceActive: () => providerMaintenance.hasBlockingAuthority(),
     providerRefreshActive: () => activeProviderRefreshes > 0,

@@ -51,12 +51,12 @@ export async function runUpdateEverything({ payload, request, appStatus, onPhase
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   appStatus: () => AppUpdateStatus | null;
   onPhase: (phase: UpdateEverythingPhase) => void;
-}): Promise<void> {
+}): Promise<string | null> {
   let app = payload.includeApp ? appStatus() : null;
   if (app?.state === "available") {
     onPhase({ kind: "download" });
     app = await downloadApp();
-    if (app.state !== "downloaded") return;
+    if (app.state !== "downloaded") return null;
   }
   onPhase({ kind: "providers", providerIds: payload.providerIds });
   const result = updatesRunResult(await request({ type: "updates.run", payload }));
@@ -72,4 +72,5 @@ export async function runUpdateEverything({ payload, request, appStatus, onPhase
   }
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
+  return result.appInstallBlocker;
 }

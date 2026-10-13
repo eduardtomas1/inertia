@@ -7,6 +7,7 @@ import type {
   ProviderMaintenanceProviderId,
   ProviderMaintenanceStatus,
   ServerEvent,
+  WorkspaceRun,
 } from "../../src/shared/contracts";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
 import type { AgentRunState } from "../../src/shared/run-state";
@@ -47,9 +48,10 @@ function chat(id: string, providerId: ProviderMaintenanceProviderId, state: Agen
   } as unknown as ConversationShell;
 }
 
-function snapshot(conversations: ConversationShell[] = []): AppSnapshot {
+function snapshot(conversations: ConversationShell[] = [], runs: Partial<WorkspaceRun>[] = []): AppSnapshot {
   return {
     conversations,
+    runs,
     providers: [{ id: "codex", label: "Codex" }, { id: "claude", label: "Claude" }, { id: "cursor", label: "Cursor" }],
     settings: { providerIdentityLabels: { claude: "Claude Code" } },
   } as unknown as AppSnapshot;
@@ -57,10 +59,10 @@ function snapshot(conversations: ConversationShell[] = []): AppSnapshot {
 
 const NO_OPERATIONS = new Map<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>();
 
-function runResult(readyForAppInstall: boolean): ServerEvent {
+function runResult(readyForAppInstall: boolean, appInstallBlocker: string | null = null): ServerEvent {
   return {
     type: "request.result", requestId: "request",
-    result: { kind: "updates.run", providers: [], interruptedConversationIds: [], readyForAppInstall },
+    result: { kind: "updates.run", providers: [], interruptedConversationIds: [], readyForAppInstall, appInstallBlocker },
   };
 }
 
@@ -148,6 +150,21 @@ describe("update everything plan", () => {
       .toMatchObject({ runningChats: 7, continuingChats: 4 });
     expect(updateEverythingPlan({ snapshot: snapshot(conversations), statuses, operations: NO_OPERATIONS, appStatus: null }))
       .toMatchObject({ runningChats: 6, continuingChats: 3 });
+  });
+
+  it("counts workspace runs that would refuse the restart and then expects only updated providers' chats to stop", () => {
+    const conversations = [chat("a", "codex", "running"), chat("b", "claude", "running")];
+    const runs = [
+      { kind: "check", status: "running" }, { kind: "service", status: "waiting" },
+      { kind: "agent", status: "running" }, { kind: "check", status: "succeeded" },
+    ] as const;
+    const statuses = statusMap(maintenance("codex"));
+    expect(updateEverythingPlan({ snapshot: snapshot(conversations, [...runs]), statuses, operations: NO_OPERATIONS, appStatus: updateStatus() }))
+      .toMatchObject({ workspaceRuns: 2, runningChats: 1, continuingChats: 1 });
+    expect(updateEverythingPlan({ snapshot: snapshot(conversations, [runs[2], runs[3]]), statuses, operations: NO_OPERATIONS, appStatus: updateStatus() }))
+      .toMatchObject({ workspaceRuns: 0, runningChats: 2, continuingChats: 2 });
+    expect(updateEverythingPlan({ snapshot: snapshot(conversations, [...runs]), statuses, operations: NO_OPERATIONS, appStatus: null }))
+      .toMatchObject({ workspaceRuns: 0, runningChats: 1 });
   });
 
   it("names the provider being updated, then the app", () => {
@@ -270,6 +287,16 @@ describe("update everything run", () => {
     const hook = harness(updateStatus({ state: "downloaded" }), request);
     await act(async () => hook.result.current.run(withApp));
     expect(hook.result.current.error).toBe("The update restart could not be started safely.");
+  });
+
+  it("reports why the runtime kept the app out of the run and releases the hold", async () => {
+    const message = "Close active terminals before restarting to update.";
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false, message) : ok);
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(install).not.toHaveBeenCalled();
+    expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
+    expect(hook.result.current.error).toBe(message);
   });
 
   it("skips the app when the runtime is not ready for it", async () => {

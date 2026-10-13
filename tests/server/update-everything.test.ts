@@ -135,7 +135,10 @@ function fixture(options: {
       return { providerId };
     }),
   };
-  const preparation = { isAdmissionClosed: vi.fn(() => false) };
+  const preparation = {
+    isAdmissionClosed: vi.fn(() => false),
+    restartBlockerBesidesAgentTurns: vi.fn((): "database-recovery" | "agent-work" | "terminal" | null => null),
+  };
   const dependencies = {
     store,
     turns,
@@ -175,6 +178,7 @@ describe("update everything orchestration", () => {
       ],
       interruptedConversationIds: [CODEX_CHAT, CLAUDE_CHAT],
       readyForAppInstall: false,
+      appInstallBlocker: null,
     });
     expect(isHeld()).toBe(false);
     expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
@@ -198,6 +202,32 @@ describe("update everything orchestration", () => {
     expect(result.interruptedConversationIds).toEqual([CODEX_CHAT]);
     expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT]);
     expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
+  });
+
+  it.each([
+    ["terminal", "Close active terminals before restarting to update."],
+    ["agent-work", "Wait for workspace runs to finish before restarting to update."],
+    ["database-recovery", "Wait for database recovery to finish before restarting."],
+  ] as const)("stops only the updated providers' chats when a %s would refuse the restart anyway", async (blocker, message) => {
+    const subject = fixture();
+    subject.preparation.restartBlockerBesidesAgentTurns.mockReturnValue(blocker);
+
+    const result = await subject.run({ providerIds: ["codex"], includeApp: true });
+
+    expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
+    expect(result).toMatchObject({ interruptedConversationIds: [CODEX_CHAT], readyForAppInstall: false, appInstallBlocker: message });
+    expect(isHeld()).toBe(false);
+    expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
+  });
+
+  it("reports no app blocker when the restart can proceed or the app is not part of the run", async () => {
+    const subject = fixture();
+    await expect(subject.run({ includeApp: true })).resolves.toMatchObject({ readyForAppInstall: true, appInstallBlocker: null });
+    release();
+    subject.preparation.restartBlockerBesidesAgentTurns.mockReturnValue("terminal");
+    await expect(subject.run()).resolves.toMatchObject({ readyForAppInstall: false, appInstallBlocker: null });
+    expect(subject.turns.interruptForUpdate).toHaveBeenLastCalledWith([CODEX_CHAT, CLAUDE_CHAT]);
   });
 
   it("does not plan continuations when the user turned them off", async () => {
@@ -396,7 +426,7 @@ describe("update everything with the real maintenance controller", () => {
       turns: { activeConversationIds: () => [CODEX_CHAT], interruptForUpdate },
       maintenance: controller,
       restartContinuation: { createPlans: (ids: readonly string[]) => [...ids], arm: () => undefined },
-      preparation: { isAdmissionClosed: () => false },
+      preparation: { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null },
     } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true }, socket());
 
     expect(result.providers).toEqual([
@@ -416,7 +446,7 @@ describe("update everything with the real maintenance controller", () => {
       turns: { activeConversationIds: () => [CLAUDE_CHAT], interruptForUpdate: async () => true },
       maintenance: controller,
       restartContinuation: { createPlans: (ids: readonly string[]) => [...ids], arm: () => undefined },
-      preparation: { isAdmissionClosed: () => false },
+      preparation: { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null },
     } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true }, socket());
 
     expect(result.interruptedConversationIds).toEqual([]);
@@ -477,6 +507,7 @@ describe("updates command handler", () => {
         providers: [{ providerId: "codex", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null }],
         interruptedConversationIds: [CODEX_CHAT, CLAUDE_CHAT, CURSOR_CHAT],
         readyForAppInstall: true,
+        appInstallBlocker: null,
       },
     });
     expect(isHeld()).toBe(true);

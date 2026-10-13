@@ -95,6 +95,7 @@ export function updateEverythingProgress(
   operations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>,
   snapshot: AppSnapshot | null,
 ): string {
+  if (phase.kind === "download") return "Downloading Inertia…";
   if (phase.kind === "app") return "Updating Inertia…";
   const current = phase.providerIds.find((providerId) => operations.get(providerId)?.status === "running")
     ?? phase.providerIds.find((providerId) => activeOperation(operations.get(providerId)))

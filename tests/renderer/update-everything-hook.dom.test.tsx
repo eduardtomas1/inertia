@@ -192,20 +192,49 @@ describe("update everything run", () => {
     expect(request.mock.calls.map(([command]) => command.type)).toEqual(["updates.run"]);
   });
 
-  it("waits for a pending download to finish before installing", async () => {
-    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
-    download.mockResolvedValue(updateStatus({ state: "downloading" }));
-    install.mockResolvedValue(updateStatus({ state: "installing" }));
+  it("finishes the download before the run starts, so the hold never covers it", async () => {
+    const order: string[] = [];
+    const request = vi.fn(async (command: CommandWithoutId) => {
+      order.push(command.type);
+      return command.type === "updates.run" ? runResult(true) : ok;
+    });
+    download.mockImplementation(async () => { order.push("download"); return updateStatus({ state: "downloading" }); });
+    install.mockImplementation(async () => { order.push("install"); return updateStatus({ state: "installing" }); });
     const hook = harness(updateStatus(), request);
     let finished = false;
     let running!: Promise<void>;
     act(() => { running = hook.result.current.run(withApp).then(() => { finished = true; }); });
     await vi.waitFor(() => expect(statusListener).not.toBeNull());
+    expect(request).not.toHaveBeenCalled();
     expect(install).not.toHaveBeenCalled();
-    expect(hook.result.current.phase).toEqual({ kind: "app" });
+    expect(hook.result.current.phase).toEqual({ kind: "download" });
+    expect(updateEverythingProgress({ kind: "download" }, NO_OPERATIONS, snapshot())).toBe("Downloading Inertia…");
     await act(async () => { statusListener?.(updateStatus({ state: "downloaded" })); await running; });
     expect(finished).toBe(true);
-    expect(install).toHaveBeenCalledOnce();
+    expect(order).toEqual(["download", "updates.run", "install"]);
+  });
+
+  it.each([
+    ["fails", updateStatus({ state: "failed", message: "The update could not be downloaded. Try again when your connection is stable." })],
+    ["is cancelled", updateStatus({ state: "cancelled", message: "The update download was cancelled." })],
+  ])("starts no run when the download %s", async (_name, settled) => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+    download.mockResolvedValue(settled);
+    const hook = harness(updateStatus(), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(request).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+    expect(hook.result.current.phase).toBeNull();
+    expect(hook.result.current.error).toBeNull();
+  });
+
+  it("starts no run when the download cannot be started", async () => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+    download.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
+    const hook = harness(updateStatus(), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(request).not.toHaveBeenCalled();
+    expect(hook.result.current.error).toBe("The update download could not be started.");
   });
 
   it("installs an already downloaded update directly", async () => {
@@ -238,15 +267,6 @@ describe("update everything run", () => {
     const hook = harness(updateStatus({ state: "downloaded" }), request);
     await act(async () => hook.result.current.run(withApp));
     expect(hook.result.current.error).toBe("The update restart could not be started safely.");
-  });
-
-  it("does not install after a failed download and releases the hold", async () => {
-    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
-    download.mockResolvedValue(updateStatus({ state: "failed" }));
-    const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
-    expect(install).not.toHaveBeenCalled();
-    expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
   });
 
   it("skips the app when the runtime is not ready for it", async () => {

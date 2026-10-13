@@ -2,6 +2,7 @@ import type { ProviderMaintenanceProviderId, ServerEvent } from "@shared/contrac
 import type { UpdatesRunResult } from "@shared/updates";
 import type { AppUpdateStatus } from "@shared/desktop";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
+import type { UpdateEverythingPhase } from "../hooks/useUpdateEverything";
 
 export interface UpdateEverythingRequest {
   providerIds: ProviderMaintenanceProviderId[];
@@ -35,30 +36,36 @@ async function invoke(action: () => Promise<AppUpdateStatus>, message: string): 
   }
 }
 
-async function installApp(status: AppUpdateStatus | null): Promise<boolean> {
-  if (status?.state === "available") {
-    const started = await invoke(() => window.inertia.downloadAppUpdate(), "The update download could not be started.");
-    if ((await settledDownload(started)).state !== "downloaded") return false;
-  } else if (status?.state !== "downloaded") {
-    return false;
-  }
+async function downloadApp(): Promise<AppUpdateStatus> {
+  const started = await invoke(() => window.inertia.downloadAppUpdate(), "The update download could not be started.");
+  return await settledDownload(started);
+}
+
+async function installApp(): Promise<boolean> {
   const result = await invoke(() => window.inertia.installAppUpdate(), "The update restart could not be started safely.");
   return result.state === "installing" && result.installBlocker === null;
 }
 
-export async function runUpdateEverything({ payload, request, appStatus, onAppStep }: {
+export async function runUpdateEverything({ payload, request, appStatus, onPhase }: {
   payload: UpdateEverythingRequest;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   appStatus: () => AppUpdateStatus | null;
-  onAppStep: () => void;
+  onPhase: (phase: UpdateEverythingPhase) => void;
 }): Promise<void> {
+  let app = payload.includeApp ? appStatus() : null;
+  if (app?.state === "available") {
+    onPhase({ kind: "download" });
+    app = await downloadApp();
+    if (app.state !== "downloaded") return;
+  }
+  onPhase({ kind: "providers", providerIds: payload.providerIds });
   const result = updatesRunResult(await request({ type: "updates.run", payload }));
   let installed = false;
   let failure: unknown = null;
-  if (payload.includeApp && result.readyForAppInstall) {
-    onAppStep();
+  if (payload.includeApp && result.readyForAppInstall && app?.state === "downloaded") {
+    onPhase({ kind: "app" });
     try {
-      installed = await installApp(appStatus());
+      installed = await installApp();
     } catch (cause) {
       failure = cause;
     }

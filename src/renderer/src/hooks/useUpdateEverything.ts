@@ -11,6 +11,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { UpdateEverythingRequest } from "../utils/updateEverythingRun";
 
 export type UpdateEverythingPhase =
+  | { kind: "download" }
   | { kind: "providers"; providerIds: readonly ProviderMaintenanceProviderId[] }
   | { kind: "app" };
 
@@ -39,14 +40,15 @@ export function useUpdateEverything({ statuses, operations, appStatus, request }
     if (inFlight.current) return;
     inFlight.current = true;
     setError(null);
-    setPhase({ kind: "providers", providerIds: payload.providerIds });
+    setPhase(payload.includeApp && appStatusRef.current?.state === "available"
+      ? { kind: "download" } : { kind: "providers", providerIds: payload.providerIds });
     try {
       const { runUpdateEverything } = await import("../utils/updateEverythingRun");
       await runUpdateEverything({
         payload,
         request,
         appStatus: () => appStatusRef.current,
-        onAppStep: () => setPhase({ kind: "app" }),
+        onPhase: setPhase,
       });
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "The update could not be completed.");

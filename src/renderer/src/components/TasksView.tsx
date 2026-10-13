@@ -49,6 +49,7 @@ export interface TasksViewProps {
   projectScopeId: string | null;
   request(command: CommandWithoutId, options?: { passive?: boolean }): Promise<ServerEvent>;
   onOpenConversation(conversation: Conversation): void;
+  onError(message: string): void;
 }
 
 const PRIORITY_CHOICES: readonly (TodoPriority | null)[] = ["urgent", "high", "medium", "low", null];
@@ -60,6 +61,7 @@ export function TasksView({
   projectScopeId,
   request,
   onOpenConversation,
+  onError,
 }: TasksViewProps): React.JSX.Element {
   const addInputRef = useRef<HTMLInputElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -375,6 +377,7 @@ export function TasksView({
                 )}
                 disabled={offline}
                 onStart={(target, selection) => startTodo(detailTodo, target, selection)}
+                onError={onError}
               />
             )}
           />

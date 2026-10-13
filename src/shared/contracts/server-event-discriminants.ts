@@ -210,8 +210,9 @@ export function conversationDetailCollectionsCoherent(
     && CONVERSATION_DETAIL_TURN_RUN_COLLECTIONS.every((key) =>
       (value[key] as IdentityRecord[]).every((entry) => entry.turnId === null
         || turnsById.get(entry.turnId)?.runId === entry.runId))
-    && plans.every((plan) => plan.turnId === null || !turnsById.has(plan.turnId)
-      || turnsById.get(plan.turnId)?.runId === plan.runId)
+    && plans.every((plan) => plan.turnId === null || (turnsById.has(plan.turnId)
+      ? turnsById.get(plan.turnId)?.runId === plan.runId
+      : !turns.some((turn) => turn.runId === plan.runId)))
     && turns.every((turn) => {
       const userMessage = messagesById.get(turn.userMessageId);
       const terminalMessage = turn.terminalAssistantMessageId === null

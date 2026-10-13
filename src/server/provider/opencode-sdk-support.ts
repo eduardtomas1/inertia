@@ -18,6 +18,7 @@ import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer } from "./io";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
+const DEFAULT_OPENCODE_SESSION_TITLE = /^(?:New session|Child session) - /u;
 
 export function openCodeApprovalDisplay(
   properties: Record<string, unknown>,
@@ -131,6 +132,20 @@ export function openCodeEventSessionId(event: Event): string | undefined {
       || event.type === "session.deleted"
       ? stringValue(info?.id)
       : undefined);
+}
+
+export function openCodeSessionTitle(
+  event: Event,
+  sessionId: string | undefined,
+): { sessionId: string; title: string } | undefined {
+  if (!sessionId || event.type !== "session.updated") return undefined;
+  const info = objectValue((event.properties as Record<string, unknown>).info);
+  const title = stringValue(info?.id) === sessionId
+    ? stringValue(info?.title)?.trim()
+    : undefined;
+  return title && !DEFAULT_OPENCODE_SESSION_TITLE.test(title)
+    ? { sessionId, title: bounded(title) }
+    : undefined;
 }
 
 export function isOpenCodeIdleEvent(event: Event): boolean {

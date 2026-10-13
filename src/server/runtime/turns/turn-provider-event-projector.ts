@@ -128,6 +128,9 @@ export class TurnProviderEventProjector {
           continuationIdentity: active.turn.continuationIdentity,
         });
         break;
+      case "session-title":
+        active.providerSessionTitle = event.title;
+        break;
       case "activity": {
         this.options.streams.closeAssistantSegment(active);
         if (event.kind !== "reasoning" || event.phase !== "started") {

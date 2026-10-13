@@ -315,6 +315,33 @@ describe("TurnController terminal truthfulness", () => {
     value.store.close();
   });
 
+  it("hands the provider's latest session title to settled-turn owners without publishing it", async () => {
+    const evidence: unknown[] = [];
+    const value = await runtime("codex", {
+      onTurnSettled: (_turn, settlement) => {
+        evidence.push(settlement);
+      },
+    });
+    const first = value.controller.queue({ conversationId: value.conversationId, content: "Name this chat." });
+    expect(value.controller.start(first.turn.id)).toBe(true);
+    const base = identity(value);
+    const publishedBefore = value.events.length;
+    value.provider.emit({ ...base, type: "session-title", sessionId: "provider-session", title: "Early title" });
+    value.provider.emit({ ...base, type: "session-title", sessionId: "provider-session", title: "Login redirect loop" });
+    expect(value.events).toHaveLength(publishedBefore);
+    value.provider.resolve({ text: "Done." });
+    await flushPromises();
+    const second = value.controller.queue({ conversationId: value.conversationId, content: "Again." });
+    expect(value.controller.start(second.turn.id)).toBe(true);
+    value.provider.resolve({ text: "Done again." });
+    await flushPromises();
+    expect(evidence).toEqual([
+      { providerSessionTitle: "Login redirect loop" },
+      { providerSessionTitle: null },
+    ]);
+    value.store.close();
+  });
+
   it("settles both durable sides when the second paired adoption throws", async () => {
     const onStructuredContextCaptured = vi.fn()
       .mockImplementationOnce(() => undefined)

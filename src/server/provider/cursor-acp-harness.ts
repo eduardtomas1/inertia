@@ -1020,8 +1020,8 @@ function cursorPlanSteps(
     step: bounded(entry.content),
     status: entry.status === "in_progress"
       ? "inProgress"
-      : entry.status === "completed"
-        ? "completed"
+      : entry.status === "completed" || entry.status === "cancelled"
+        ? entry.status
         : "pending",
   }));
 }

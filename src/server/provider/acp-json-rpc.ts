@@ -23,7 +23,7 @@ function validPlanEntry(value: unknown): boolean {
   return Boolean(entry
     && typeof entry.content === "string"
     && ["high", "medium", "low"].includes(String(entry.priority))
-    && ["pending", "in_progress", "completed"].includes(String(entry.status)));
+    && ["pending", "in_progress", "completed", "cancelled"].includes(String(entry.status)));
 }
 
 function validContentBlock(value: unknown): boolean {

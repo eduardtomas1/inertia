@@ -118,6 +118,16 @@ describe("durable project and thread organization", () => {
     expect(() => store.regenerateConversationTitle(conversation.id)).toThrow(/active work/u);
   });
 
+  it("reads a bounded prefix of the first user message, never later or assistant messages", () => {
+    const { store, conversation } = fixture();
+    expect(store.firstUserMessage(conversation.id, 8)).toBeNull();
+    store.createMessage(conversation.id, "Assistant greeting", "assistant", [], null, "2026-09-09T08:59:00.000Z");
+    const first = store.createMessage(conversation.id, "😀First request text", "user", [], null, "2026-09-09T09:00:00.000Z");
+    store.createMessage(conversation.id, "Second request", "user", [], null, "2026-09-09T09:01:00.000Z");
+    expect(store.firstUserMessage(conversation.id, 8)).toEqual({ id: first.id, content: "😀First r" });
+    expect(() => store.firstUserMessage("11111111-1111-4111-8111-111111111111", 8)).toThrow();
+  });
+
   it("rejects unbounded and malformed settings, duplicate action IDs and executable control characters", () => {
     const defaults = defaultProjectPreferences();
     expect(projectPreferencesSchema.safeParse({ ...defaults, unknown: true }).success).toBe(false);

@@ -29,6 +29,7 @@ export interface TaskHandoffProps {
   defaultProjectId: string | null;
   disabled: boolean;
   onStart: (target: TaskStartTarget, selection: ModelSelection) => Promise<void>;
+  onError: (message: string) => void;
 }
 
 function capitalized(value: string): string {
@@ -41,6 +42,7 @@ export function TaskHandoff({
   defaultProjectId,
   disabled,
   onStart,
+  onError,
 }: TaskHandoffProps): React.JSX.Element {
   const labelId = useId();
   const projects = useMemo(
@@ -88,6 +90,10 @@ export function TaskHandoff({
     && routeSupportsNativeFastModeIdentity(selection);
   const busy = disabled || starting;
 
+  const report = (error: unknown): void => {
+    onError(error instanceof Error ? error.message : "That action could not be completed.");
+  };
+
   const pickFolder = async (): Promise<void> => {
     const path = await window.inertia.selectDirectory();
     if (!path) return;
@@ -98,7 +104,7 @@ export function TaskHandoff({
   const start = (): void => {
     if (!target || !ready) return;
     setStarting(true);
-    void onStart(target, selection).catch(() => undefined).finally(() => setStarting(false));
+    void onStart(target, selection).catch(report).finally(() => setStarting(false));
   };
 
   return (
@@ -165,7 +171,7 @@ export function TaskHandoff({
             <option value="folder">{projectNameFromPath(target.path)}</option>
           )}
         </select>
-        <button type="button" className="task-handoff-control" disabled={busy} onClick={() => void pickFolder()}>
+        <button type="button" className="task-handoff-control" disabled={busy} onClick={() => void pickFolder().catch(report)}>
           <FolderOpen size={14} aria-hidden="true" />
           Folder…
         </button>

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProviderManager } from "../../src/server/providers";
+import { MAX_AGENT_PLAN_STEPS } from "../../src/shared/agent-plan";
 import { removePortableFixture } from "../helpers/portable-provider-fixture";
 import { fakeAppServer as createFakeAppServer } from "../helpers/codex-app-server-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
@@ -75,6 +76,36 @@ describe("Codex App Server plans", { concurrent: false }, () => {
         steps: [],
       },
     ]);
+    await manager.disposeAll();
+  });
+
+  it("skips malformed plan items and bounds oversized ones", async () => {
+    const fake = createFakeAppServer(roots);
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "plan-malformed";
+    const manager = trackedManager(fake.command);
+    const plans: Array<{ explanation: string | null; steps: Array<{ step: string; status: string }> }> = [];
+
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-plan-malformed",
+      cwd: fake.root,
+      prompt: "Plan the fix",
+      interactionMode: "plan",
+      access: "full",
+    }), {
+      onPlan: (event) => plans.push({ explanation: event.explanation, steps: event.steps }),
+    });
+
+    expect(result).toMatchObject({ status: "completed", text: "Done" });
+    expect(plans).toHaveLength(2);
+    const [oversized, many] = plans;
+    expect(oversized!.explanation).toHaveLength(128_000);
+    expect(oversized!.steps).toHaveLength(1);
+    expect(oversized!.steps[0]!.step).toHaveLength(1_000);
+    expect(many!.steps).toHaveLength(MAX_AGENT_PLAN_STEPS);
+    expect(many!.steps[0]!.step).toHaveLength(1_000);
+    expect(many!.steps.at(-1)).toEqual({ step: `Step ${MAX_AGENT_PLAN_STEPS}`, status: "pending" });
     await manager.disposeAll();
   });
 });

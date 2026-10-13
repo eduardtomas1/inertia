@@ -432,6 +432,19 @@ if (message.method === "turn/start") {
     ]);
     return;
   }
+  if (process.env.INERTIA_APP_SERVER_SCENARIO === "plan-malformed") {
+    const many = Array.from({ length: 80 }, (_, index) => (index + 1) + ". " + (index === 0 ? "s".repeat(5000) : "Step " + (index + 1))).join("\\n");
+    sendBatch([
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "plan-number", type: "plan", text: 42 } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "plan-missing", type: "plan" } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "plan-blank", type: "plan", text: "  \\n\\u0000 " } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "plan-oversized", type: "plan", text: "# Plan\\n\\n" + "x".repeat(200000) } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "plan-many", type: "plan", text: many } } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId, item: { id: "message-plan", type: "agentMessage", text: "Done", phase: "final_answer" } } },
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "capped-command-output") {
     sendBatch([
       { method: "item/started", params: { startedAtMs: Date.now(), threadId, turnId, item: { id: "command-capped", type: "commandExecution", command: "npm test", status: "inProgress" } } },

@@ -993,6 +993,7 @@ export function createWorkspaceSceneModel({
           defaultCodeWrap: settings.defaultCodeWrap,
           onOpenProjectFile: workspaceTools.openTurnFile,
         },
+        actionsDisabled: workflow.loading,
         ...(canUpdatePlan ? {
           onRefine: () => {
             void actions.updateConversation({ interactionMode: "plan" })

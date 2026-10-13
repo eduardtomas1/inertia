@@ -28,6 +28,7 @@ export type PlanPanelProps = {
   markdown?: PlanMarkdownContext;
   activeStepId?: string | null;
   onSelectStep?: (stepId: string) => void;
+  actionsDisabled?: boolean;
   onRefine?: () => void;
   onImplement?: () => void;
 };
@@ -63,6 +64,7 @@ export function PlanPanel({
   markdown,
   activeStepId = null,
   onSelectStep,
+  actionsDisabled = false,
   onRefine,
   onImplement,
 }: PlanPanelProps): React.JSX.Element {
@@ -172,13 +174,13 @@ export function PlanPanel({
       {(onRefine || onImplement) && (steps.length > 0 || body) && (
         <footer className="plan-actions">
           {onRefine && (
-            <button type="button" className="secondary-button" onClick={onRefine}>
+            <button type="button" className="secondary-button" onClick={onRefine} disabled={actionsDisabled}>
               <RotateCcw size={14} aria-hidden="true" />
               <span>Refine plan</span>
             </button>
           )}
           {onImplement && (
-            <button type="button" className="primary-button" onClick={onImplement} disabled={steps.length === 0}>
+            <button type="button" className="primary-button" onClick={onImplement} disabled={actionsDisabled || steps.length === 0}>
               <Play size={14} aria-hidden="true" />
               <span>Implement</span>
             </button>

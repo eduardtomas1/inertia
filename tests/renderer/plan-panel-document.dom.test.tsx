@@ -63,6 +63,16 @@ describe("plan panel document", () => {
     expect(container.querySelector(".panel-heading > svg")).toBeNull();
   });
 
+  it("shows Implement and Refine disabled while the plan actions are busy", () => {
+    const steps = [{ id: "step", title: "Write the projection", status: "pending" as const }];
+    const { rerender } = render(<PlanPanel steps={steps} actionsDisabled onRefine={() => undefined} onImplement={() => undefined} />);
+    expect((screen.getByRole("button", { name: "Implement" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Refine plan" }) as HTMLButtonElement).disabled).toBe(true);
+    rerender(<PlanPanel steps={steps} onRefine={() => undefined} onImplement={() => undefined} />);
+    expect((screen.getByRole("button", { name: "Implement" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Refine plan" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("shows a document-only plan without the empty state", () => {
     render(<PlanPanel document={"# Plan: Short\nOne paragraph."} markdown={markdown} steps={[]} />);
     expect(screen.queryByText("No plan yet")).toBeNull();

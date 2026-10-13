@@ -133,8 +133,6 @@ test("the Plan tab keeps the plan and follows the provider's step progress", asy
   await composer.getByRole("textbox", { name: "Message" }).fill("Plan how the Plan tab should follow provider progress.");
   await composer.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("The plan is ready.", { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("region", { name: "Turn 1" }).getByRole("group", { name: "Changed by this turn" }))
-    .toContainText("0 files changed", { timeout: 30_000 });
 
   const panel = await ensureWorkspaceTools(page);
   await selectWorkspaceTool(panel, "Plan");

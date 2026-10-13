@@ -104,7 +104,7 @@ describe("update everything with restart continuation", () => {
       expect(runtime.provider.runCount).toBe(1);
       expect(runtime.store.restartContinuations.forConversation(runtime.conversationId)).toMatchObject({ state: "waiting" });
 
-      finishUpdateEverything(false);
+      finishUpdateEverything();
       await continuation.scheduler.tick();
       await flushTurnControllerTestPromises();
       expect(runtime.provider.runCount).toBe(2);

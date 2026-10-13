@@ -21,7 +21,9 @@ function readContinueChats(): boolean {
 function saveContinueChats(value: boolean): void {
   try {
     window.localStorage.setItem(CONTINUE_STORAGE_KEY, String(value));
-  } catch { /* Storage can be unavailable in hardened renderer sessions. */ }
+  } catch {
+    return;
+  }
 }
 
 function versionLine(label: string, from: string | null, to: string | null): string {

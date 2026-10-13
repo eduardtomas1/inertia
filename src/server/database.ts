@@ -365,7 +365,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
-  get restartContinuations() { return new RestartContinuationRepository(this.database); }
+  get restartContinuations() { return RestartContinuationRepository.for(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return {

@@ -278,6 +278,15 @@ describe("update everything mode in the sidebar", () => {
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect(details()).toHaveTextContent("Inertia is updating.");
   });
+  it("closes the dialog when its plan goes away so it never reopens on its own", () => {
+    const { rerender } = render(<EverythingHarness everything={everythingController()} />); publish();
+    fireEvent.click(trigger());
+    expect(screen.getByRole("heading", { name: "Update Inertia and Codex?" })).toBeInTheDocument();
+    rerender(<EverythingHarness everything={everythingController({}, [])} />);
+    expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
+    rerender(<EverythingHarness everything={everythingController()} />);
+    expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
+  });
   it("keeps today's app-only flow without provider updates", async () => {
     download.mockResolvedValue(updateStatus({ state: "downloading" }));
     render(<EverythingHarness everything={everythingController({}, [{ ...CODEX, versionStatus: "current", latestVersion: "0.112.0" }])} />); publish();

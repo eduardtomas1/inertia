@@ -41,5 +41,5 @@ export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManag
     store, turns: resume.dependencies.turns, maintenance: resume.providerMaintenance, restartContinuation,
     preparation: resume.updatePreparation, send,
   });
-  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler, updates], restartContinuation };
+  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler, updates] };
 }

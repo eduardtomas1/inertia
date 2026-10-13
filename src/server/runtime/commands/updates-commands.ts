@@ -31,7 +31,7 @@ export function createUpdatesCommandHandler(
         });
         return "handled";
       case "updates.finish":
-        finishUpdateEverything(command.payload.installed);
+        finishUpdateEverything();
         dependencies.send(socket, { type: "request.ok", requestId: command.requestId });
         return "handled";
       default:

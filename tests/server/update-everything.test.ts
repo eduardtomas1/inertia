@@ -274,6 +274,23 @@ describe("update everything orchestration", () => {
     expect(isHeld()).toBe(false);
   });
 
+  it("keeps an unchanged update's message only when the update reports a problem", async () => {
+    const quarantined = "Update completed, but Inertia could not verify the installed version. The installation remains quarantined.";
+    const subject = fixture({
+      outcomes: {
+        codex: { status: "unchanged", message: "Update completed, but the installed version still appears unchanged.", afterVersion: "1.0.0" },
+        claude: { status: "unchanged", message: quarantined },
+      },
+    });
+
+    const result = await subject.run();
+
+    expect(result.providers.map(({ outcome, error }) => ({ outcome, error }))).toEqual([
+      { outcome: "unchanged", error: null },
+      { outcome: "unchanged", error: quarantined },
+    ]);
+  });
+
   it("keeps the hold for the app install and releases it only when the renderer finishes without installing", async () => {
     const subject = fixture();
 
@@ -525,12 +542,9 @@ describe("updates command handler", () => {
     expect(isHeld()).toBe(true);
   });
 
-  it("finishes without an install by releasing the hold once, and keeps it for an install", async () => {
+  it("finishes without an install by releasing the hold once", async () => {
     const subject = handlerFixture();
     await subject.run("updates.run", { providerIds: [], includeApp: true, continueChats: true });
-
-    const installing = await subject.run("updates.finish", { installed: true });
-    expect(installing.events).toEqual([{ type: "request.ok", requestId: installing.command.requestId }]);
     expect(isHeld()).toBe(true);
 
     const finished = await subject.run("updates.finish", { installed: false });
@@ -580,6 +594,11 @@ describe("updates command handler", () => {
       type: "updates.finish",
       requestId: randomUUID(),
       payload: { installed: false, extra: true },
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      type: "updates.finish",
+      requestId: randomUUID(),
+      payload: { installed: true },
     }).success).toBe(false);
   });
 });

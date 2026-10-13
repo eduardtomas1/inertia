@@ -68,6 +68,8 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
   }, [checking, reducedMotion]);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
   useEffect(() => { dismissEverythingError?.(); }, [dismissEverythingError, offeredItems, status?.revision]);
+  const everythingPlanGone = everythingPlan === null;
+  useEffect(() => { if (everythingPlanGone) setEverythingOpen(false); }, [everythingPlanGone]);
   useEffect(() => {
     if (!open) return;
     const dismissOutside = (event: PointerEvent): void => {

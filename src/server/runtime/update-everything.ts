@@ -7,7 +7,7 @@ import type {
 } from "../../shared/provider-maintenance";
 import type { UpdateProviderResult, UpdatesRunResult } from "../../shared/updates";
 import type { RuntimeStore } from "../database";
-import type { ProviderMaintenanceController } from "../provider/maintenance-controller";
+import { PROVIDER_UPDATE_UNCHANGED_MESSAGE, type ProviderMaintenanceController } from "../provider/maintenance-controller";
 import type { RuntimeUpdatePreparationGate } from "../runtime-update-preparation";
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { hold, isAwaitingFinish, isHeld, release, scheduleSafetyRelease, UPDATE_HOLD_MESSAGE } from "./update-hold";
@@ -95,7 +95,8 @@ async function updateProvider(
     outcome,
     beforeVersion: operation.beforeVersion,
     afterVersion: operation.afterVersion,
-    error: outcome === "failed" || outcome === "skipped" ? operation.message : null,
+    error: outcome === "updated" || (outcome === "unchanged" && operation.message === PROVIDER_UPDATE_UNCHANGED_MESSAGE)
+      ? null : operation.message,
   };
 }
 
@@ -141,6 +142,6 @@ export async function runUpdateEverything(
   }
 }
 
-export function finishUpdateEverything(installed: boolean): void {
-  if (!installed) release();
+export function finishUpdateEverything(): void {
+  release();
 }

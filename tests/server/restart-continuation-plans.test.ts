@@ -100,6 +100,14 @@ describe("restart continuation plan migration", () => {
 });
 
 describe("restart continuation plan repository", () => {
+  it("reuses one repository per open database", () => {
+    expect(store.restartContinuations).toBe(store.restartContinuations);
+    const other = new RuntimeStore(join(directory, "other.sqlite"), directory, { recoverInterruptedRuns: false });
+    try {
+      expect(other.restartContinuations).not.toBe(store.restartContinuations);
+    } finally { other.close(); }
+  });
+
   it("creates one waiting plan per chat in one transaction and replaces an older plan", () => {
     const first = chatWithTurn("First");
     const second = chatWithTurn("Second");

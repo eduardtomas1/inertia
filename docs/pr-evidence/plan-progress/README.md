@@ -50,9 +50,11 @@ message by hand.
 - After the plan turn, the Plan tab shows the plan's title "Reflect provider
   progress" as its heading, renders the body as markdown (an h2 "Context" and
   its paragraph), lists the three numbered steps as pending, reads "0 of 3
-  complete" and offers Implement.
-- Implement sends "Implement the plan above and validate the result." and the
-  database records the two turns as `plan` then `build`.
+  complete" and offers Implement, which becomes enabled once the agent
+  workflow refresh has finished.
+- Implement is pressed without waiting for the plan turn's change capture,
+  sends "Implement the plan above and validate the result." and the database
+  records the two turns as `plan` then `build`.
 - While the build turn runs, the Plan tab still shows the same document and
   heading, the steps read completed, completed and in progress, the count reads
   "2 of 3 complete", and there is no Implement button.
@@ -63,11 +65,15 @@ message by hand.
 
 ## Behaviour notes
 
-- The spec waits for the plan turn's "0 files changed" line before pressing
-  Implement. While Inertia is still capturing that turn's changes, the Implement
-  button is already shown but the runtime refuses the mode change with "Stop the
-  active run or review before changing its agent configuration." This is the
-  same on main and is not changed here.
+- After the first turn the chat's provider thread id changes, so Inertia
+  refreshes the agent workflow, and that refresh reserves the chat while it asks
+  the provider for its native goal. A mode change sent during that refresh was
+  refused with "Stop the active run or review before changing its agent
+  configuration." Implement and Refine plan are now shown disabled while the
+  workflow loads. The change capture was not the cause: in the current capture
+  Implement is enabled while the transcript still reads "Capturing changes…".
+- The committed screenshots were taken before this fix; the Plan tab in a fresh
+  capture is identical, so they were not retaken.
 
 ## Runs on this machine
 

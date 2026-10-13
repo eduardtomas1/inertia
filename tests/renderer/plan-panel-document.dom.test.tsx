@@ -157,6 +157,13 @@ describe("plan panel document", () => {
       expect(latestPlanDocument([planned, record("build", null)], turns("plan"))).toBe("# Plan: Ship the fix");
     });
 
+    it("does not pair a live checklist whose turn is not loaded yet with a document on an older page", () => {
+      const live = record("build", null);
+      expect(latestPlanDocument([planned, live], turns("question", "answer"), [planned])).toBeNull();
+      expect(latestPlanDocument([planned, live], turns("plan"), [planned])).toBe("# Plan: Ship the fix");
+      expect(latestPlanDocument([planned, live], turns("question", "answer"), [planned, live])).toBe("# Plan: Ship the fix");
+    });
+
     it("keeps the document of a newest plan and its checklist when both turns are on an older page", () => {
       expect(latestPlanDocument([record("old", "# Plan: Old")], turns("question", "answer"))).toBe("# Plan: Old");
       expect(latestPlanDocument([planned, record("build", null)], turns("question", "answer"))).toBe("# Plan: Ship the fix");

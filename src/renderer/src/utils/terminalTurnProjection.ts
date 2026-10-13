@@ -123,14 +123,16 @@ export function mergeProjectionPlans(
 export function latestPlanDocument(
   plans: readonly AgentPlan[],
   turns: readonly { id: string }[],
+  persisted: readonly AgentPlan[] = plans,
 ): string | null {
   const newest = plans.at(-1);
   if (!newest) return null;
   if (newest.explanation?.trim()) return newest.explanation;
   if (!newest.turnId) return null;
   const order = new Map(turns.map(({ id }, index) => [id, index]));
+  const live = !persisted.some(({ runId, turnId }) => runId === newest.runId && turnId === newest.turnId);
   const loadedPlan = plans.some(({ turnId }) => turnId !== null && order.has(turnId));
-  const start = order.get(newest.turnId) ?? (loadedPlan ? turns.length : -1);
+  const start = order.get(newest.turnId) ?? (live || loadedPlan ? turns.length : -1);
   const planned = new Set<number>();
   const documents = new Map<number, string>();
   for (const plan of plans) {

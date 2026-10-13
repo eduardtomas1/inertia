@@ -6,7 +6,7 @@ import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 const POLL_MS = 5_000;
 const RETRY_BASE_MS = 5_000;
 const MAX_ATTEMPTS = 3;
-const CONTINUABLE_STATUSES: ReadonlySet<string> = new Set(["queued", "starting", "running"]);
+const CONTINUABLE_STATUSES: ReadonlySet<string> = new Set(["starting", "running"]);
 const UPDATING = "Inertia is updating.";
 const UNCONFIRMED = "The continuation could not be confirmed.";
 

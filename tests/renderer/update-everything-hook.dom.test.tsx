@@ -139,12 +139,15 @@ describe("update everything plan", () => {
       chat("d", "codex", "running", { pendingInput: true }),
       chat("e", "cursor", "completed"),
       chat("f", "kimi", null),
+      chat("g", "codex", "delegated"),
+      chat("h", "codex", "retrying"),
+      chat("i", "codex", "queued"),
     ];
     const statuses = statusMap(maintenance("codex"));
     expect(updateEverythingPlan({ snapshot: snapshot(conversations), statuses, operations: NO_OPERATIONS, appStatus: updateStatus() }))
-      .toMatchObject({ runningChats: 4, continuingChats: 2 });
+      .toMatchObject({ runningChats: 7, continuingChats: 4 });
     expect(updateEverythingPlan({ snapshot: snapshot(conversations), statuses, operations: NO_OPERATIONS, appStatus: null }))
-      .toMatchObject({ runningChats: 3, continuingChats: 1 });
+      .toMatchObject({ runningChats: 6, continuingChats: 3 });
   });
 
   it("names the provider being updated, then the app", () => {

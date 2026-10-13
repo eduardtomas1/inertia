@@ -6,7 +6,7 @@ import type {
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
 import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "@shared/provider-maintenance";
-import { agentRunStateForTurn, isAgentRunTerminalState } from "@shared/run-state";
+import { agentRunStateForTurn, agentTurnStatusForRunState, isAgentRunTerminalState } from "@shared/run-state";
 import type { UpdateEverythingPhase } from "../../hooks/useUpdateEverything";
 
 export interface UpdateEverythingProvider {
@@ -72,7 +72,8 @@ export function updateEverythingPlan({ snapshot, statuses, operations, appStatus
     const state = agentRunStateForTurn(turn);
     if (isAgentRunTerminalState(state)) continue;
     runningChats += 1;
-    if ((state === "running" || state === "starting") && !conversation.pendingApproval && !conversation.pendingInput) {
+    const status = agentTurnStatusForRunState(state);
+    if ((status === "running" || status === "starting") && !conversation.pendingApproval && !conversation.pendingInput) {
       continuingChats += 1;
     }
   }

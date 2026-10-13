@@ -40,10 +40,16 @@ function settle(turnId: string, status: "interrupted" | "cancelled" | "completed
   store.updateAgentTurnLifecycle(turnId, { status, terminalReason, startedAt: at, completedAt: at });
 }
 
-function runningChat(title = "Running task") {
+function queuedChat(title = "Queued task") {
   const conversationId = store.createConversation(projectId, title, { model: "gpt-test" }).id;
   const turn = begin(conversationId);
   return { conversationId, turnId: turn.id };
+}
+
+function runningChat(title = "Running task", status: "starting" | "running" = "running") {
+  const chat = queuedChat(title);
+  store.updateAgentTurnLifecycle(chat.turnId, { status });
+  return chat;
 }
 
 function plannedChat(title?: string) {
@@ -89,8 +95,9 @@ afterEach(() => {
 describe("restart continuation plans", () => {
   it("plans only running chats that can continue on their own", () => {
     const running = runningChat("Running");
+    const starting = runningChat("Starting", "starting");
+    const notStarted = queuedChat("Not started");
     const approval = runningChat("Approval");
-    store.updateAgentTurnLifecycle(approval.turnId, { status: "running" });
     store.updateAgentTurnLifecycle(approval.turnId, { status: "waiting-for-approval" });
     const asking = runningChat("Asking");
     pending.add(asking.conversationId);
@@ -103,9 +110,10 @@ describe("restart continuation plans", () => {
     settle(finished.turnId, "completed", "provider-completed");
     const empty = store.createConversation(projectId, "Empty", { model: "gpt-test" }).id;
 
-    expect(scheduler.createPlans([running.conversationId, approval.conversationId, asking.conversationId,
-      archived.conversationId, queued.conversationId, finished.conversationId, empty, "missing", running.conversationId]))
-      .toEqual([running.conversationId]);
+    expect(scheduler.createPlans([running.conversationId, approval.conversationId, asking.conversationId, notStarted.conversationId,
+      archived.conversationId, queued.conversationId, finished.conversationId, empty, "missing", running.conversationId, starting.conversationId]))
+      .toEqual([running.conversationId, starting.conversationId]);
+    expect(plan(notStarted.conversationId)).toBeNull();
     expect(plan(running.conversationId)).toMatchObject({ interruptedTurnId: running.turnId, state: "waiting" });
     expect(plan(approval.conversationId)).toBeNull();
   });

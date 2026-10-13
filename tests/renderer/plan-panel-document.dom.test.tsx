@@ -149,6 +149,10 @@ describe("plan panel document", () => {
       expect(latestPlanDocument([planned, record("build", null)], turns("question", "build"))).toBeNull();
     });
 
+    it("keeps the document of a newest plan whose turn is on an older page", () => {
+      expect(latestPlanDocument([planned], turns("question", "answer"))).toBe("# Plan: Ship the fix");
+    });
+
     it("keeps the document while the checklist turn is not yet in the loaded turns", () => {
       expect(latestPlanDocument([planned, record("build", null)], turns("plan"))).toBe("# Plan: Ship the fix");
     });

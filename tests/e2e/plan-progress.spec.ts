@@ -140,9 +140,11 @@ test("the Plan tab keeps the plan and follows the provider's step progress", asy
   await expectPlanDocument(plan);
   await expect(plan.getByText("0 of 3 complete", { exact: true })).toBeVisible();
   await expectSteps(plan, ["pending", "pending", "pending"]);
+  const implement = plan.getByRole("button", { name: "Implement", exact: true });
+  await expect(implement).toBeEnabled();
   await capture(info, "plan-proposed-light-1440x1100");
 
-  await plan.getByRole("button", { name: "Implement", exact: true }).click();
+  await implement.click();
   await expect(page.locator(".message.is-user").last()).toContainText("Implement the plan above and validate the result.");
   await expect.poll(turnModes).toEqual(["plan", "build"]);
   await selectWorkspaceTool(panel, "Plan");

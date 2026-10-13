@@ -245,7 +245,7 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await state("running");
     await state("failed");
     await capture(overlay, "error", info);
-    await overlay.getByRole("button", { name: /Something went wrong.*View issue/ }).click();
+    await overlay.getByRole("button", { name: /Work failed.*View issue/ }).click();
     await expect(main.getByRole("heading", { name: "Mascot runtime fixture", level: 1 })).toBeVisible();
     await expect.poll(() => store.shellSnapshot().activeConversationId).toBe(chat.id);
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "idle");
@@ -275,7 +275,19 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "failed");
     await expect(overlay.locator(".mascot-title")).toHaveText("Mascot runtime fixture");
     await capture(overlay, "pinned", info);
-    await overlay.getByRole("button", { name: /Something went wrong.*View issue/ }).click();
+    store.updateAgentTurnLifecycle(secondTurn.turn.id, {
+      status: agentTurnStatusForRunState("waiting-for-input"), runState: { state: "waiting-for-input", providerState: null, revision: 2 },
+      startedAt: secondTurn.turn.requestedAt, updatedAt: new Date().toISOString(),
+    });
+    store.selectConversation(originalConversationId);
+    await main.reload();
+    await expect(picker).toHaveAttribute("data-attention", "true");
+    await expect(picker).toHaveText("Pinned");
+    await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "failed");
+    expect(await overlay.locator(".mascot-label").evaluate((label) => [label.textContent, label.scrollWidth <= label.clientWidth]))
+      .toEqual(["Work failed", true]);
+    await capture(overlay, "pinned-attention", info);
+    await overlay.getByRole("button", { name: /Work failed.*View issue/ }).click();
     await expect(main.getByRole("heading", { name: "Mascot runtime fixture", level: 1 })).toBeVisible();
     await picker.click();
     await chooser.getByRole("button", { name: /Most urgent chat/ }).click();

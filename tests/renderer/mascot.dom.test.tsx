@@ -432,7 +432,7 @@ describe("mascot rows, words and announcements", () => {
       "Your input needed. Fix login. Which port should the server use?",
       "Your input needed. Fix login. Should I also fix the retry?",
       "Work complete. Fix login. Fixed the race.",
-      "Something went wrong. Fix login. npm test failed",
+      "Work failed. Fix login. npm test failed",
     ]);
   });
 });
@@ -500,7 +500,7 @@ describe("mascot rendering", () => {
     expect(view.container.querySelector("img")?.dataset.animated).toBe("false");
     expect(screen.getByRole("status")).toHaveTextContent("Work complete");
     app.update("failed");
-    expect(screen.getByRole("status")).toHaveTextContent("Something went wrong");
+    expect(screen.getByRole("status")).toHaveTextContent("Work failed");
   });
 
   it("announces real questions as text with the chat name and a contextual action", async () => {

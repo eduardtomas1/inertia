@@ -20,6 +20,7 @@ import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import type { ProjectAppearancePatch } from "@shared/project-preferences";
 
 import type { useAppUpdate } from "../app-update";
+import type { UpdateEverythingController } from "../hooks/useUpdateEverything";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
 import { useProjectScope } from "../hooks/useProjectScope";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
@@ -165,6 +166,7 @@ interface AppLayoutProps {
   settings: AppSettings;
   connection: Connection;
   appUpdate: AppUpdate;
+  updateEverything?: UpdateEverythingController;
   providerQuotaNotices: ProviderQuotaNoticeController;
   workspaceLayout: WorkspaceLayout;
   view: AppView;
@@ -278,6 +280,7 @@ export const AppLayout = memo(function AppLayout({
   settings,
   connection,
   appUpdate,
+  updateEverything,
   providerQuotaNotices,
   workspaceLayout,
   view,
@@ -636,6 +639,7 @@ export const AppLayout = memo(function AppLayout({
             projectScopeId={projectScopeId}
             onProjectScopeChange={setProjectScopeId}
             appUpdate={appUpdate}
+            updateEverything={updateEverything}
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}

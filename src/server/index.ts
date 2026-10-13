@@ -977,6 +977,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
     queuePrompt: (conversationId, content, deviceId) => queuePrivateConnectPrompt({
+      store,
       authority: providerTerminalResumes,
       turns,
       isolatedRuns,

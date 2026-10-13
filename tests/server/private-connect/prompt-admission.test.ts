@@ -12,7 +12,21 @@ function fixture() {
   const queue = vi.fn(() => ({ turn: { id: turnId } }));
   const start = vi.fn(() => true);
   const failBeforeStart = vi.fn();
+  let title = "Existing title";
+  let hasMessages = false;
+  const store = {
+    conversation: vi.fn(() => ({ title })),
+    hasConversationMessages: vi.fn(() => hasMessages),
+    updateConversation: vi.fn((_id: string, update: { title: string }) => {
+      title = update.title;
+    }),
+  };
+  queue.mockImplementation(() => {
+    hasMessages = true;
+    return { turn: { id: turnId } };
+  });
   const dependencies = {
+    store,
     authority: { acquire, release },
     turns: {
       failBeforeStart,
@@ -25,6 +39,9 @@ function fixture() {
   } as unknown as Parameters<typeof queuePrivateConnectPrompt>[0];
   return {
     dependencies,
+    store,
+    setTitle: (next: string) => { title = next; },
+    title: () => title,
     acquire,
     release,
     queue,
@@ -88,5 +105,55 @@ describe("Private Connect prompt admission", () => {
       "The remote turn could not start.",
     );
     expect(subject.release).toHaveBeenCalledWith(conversationId);
+  });
+
+  it("gives an untitled chat a quick title from its first remote prompt", () => {
+    const subject = fixture();
+    subject.setTitle("New chat");
+    subject.dependencies.onQueued = vi.fn(() => {
+      expect(subject.title()).toBe("Review the failing upload test");
+    });
+
+    queuePrivateConnectPrompt(
+      subject.dependencies,
+      conversationId,
+      "Review the failing upload test\nwith more detail",
+      deviceId,
+    );
+
+    expect(subject.store.updateConversation).toHaveBeenCalledWith(conversationId, {
+      title: "Review the failing upload test",
+    });
+    expect(subject.dependencies.onQueued).toHaveBeenCalledOnce();
+  });
+
+  it("keeps existing titles, earlier history and prompts with no usable text", () => {
+    const titled = fixture();
+    queuePrivateConnectPrompt(titled.dependencies, conversationId, "Continue remotely", deviceId);
+    expect(titled.store.updateConversation).not.toHaveBeenCalled();
+
+    const withHistory = fixture();
+    withHistory.setTitle("New thread");
+    withHistory.store.hasConversationMessages.mockReturnValue(true);
+    queuePrivateConnectPrompt(withHistory.dependencies, conversationId, "Continue remotely", deviceId);
+    expect(withHistory.store.updateConversation).not.toHaveBeenCalled();
+
+    const codeOnly = fixture();
+    codeOnly.setTitle("New chat");
+    queuePrivateConnectPrompt(codeOnly.dependencies, conversationId, "```\nconst a = 1;\n```", deviceId);
+    expect(codeOnly.store.updateConversation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a title chosen while the remote turn was being queued", () => {
+    const subject = fixture();
+    subject.setTitle("New chat");
+    subject.queue.mockImplementation(() => {
+      subject.setTitle("Renamed meanwhile");
+      return { turn: { id: turnId } };
+    });
+
+    queuePrivateConnectPrompt(subject.dependencies, conversationId, "Continue remotely", deviceId);
+
+    expect(subject.store.updateConversation).not.toHaveBeenCalled();
   });
 });

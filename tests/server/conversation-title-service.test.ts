@@ -134,7 +134,6 @@ describe("conversation title service", () => {
 
   it.each([
     ["a later turn", turn({ userMessageId: "44444444-4444-4444-8444-444444444444" })],
-    ["an unresolved default model", turn({ model: "provider-default" })],
     ["a provider without generated titles", turn({ providerId: "cursor" })],
   ])("does not generate a Codex title for %s", async (_label, settledTurn) => {
     const subject = fixture();
@@ -142,6 +141,15 @@ describe("conversation title service", () => {
     await settled();
     expect(subject.dependencies.sources.codex).not.toHaveBeenCalled();
     expect(subject.dependencies.track).not.toHaveBeenCalled();
+  });
+
+  it("generates a Codex title without a model when the chat uses the provider default", async () => {
+    const subject = fixture();
+    subject.service.onTurnSettled(turn({ model: "provider-default" }), { providerSessionTitle: null });
+    await settled();
+    expect(subject.dependencies.sources.codex).toHaveBeenCalledOnce();
+    expect(vi.mocked(subject.dependencies.sources.codex).mock.calls[0]![0]).not.toHaveProperty("model");
+    expect(subject.state.title).toBe("Login redirect loop");
   });
 
   it("does not generate a Codex title for an external backend turn", async () => {

@@ -20,7 +20,7 @@ export interface ConversationTitleSources {
   claude(input: { conversationId: string; sessionId: string }): Promise<string | undefined>;
   codex(input: {
     conversationId: string;
-    model: string;
+    model?: string;
     prompt: string;
     signal: AbortSignal;
   }): Promise<string | undefined>;
@@ -74,14 +74,13 @@ export function createConversationTitleService(
     if (
       turn.providerId !== "codex"
       || turn.userMessageId !== current.message.id
-      || turn.model === "provider-default"
       || generated.has(turn.conversationId)
       || dependencies.isExternalTurn(turn)
     ) return null;
     generated.add(turn.conversationId);
     return () => dependencies.sources.codex({
       conversationId: turn.conversationId,
-      model: turn.model,
+      ...(turn.model === "provider-default" ? {} : { model: turn.model }),
       prompt: current.message.content.slice(0, MAX_GENERATION_PROMPT_CHARS),
       signal: dependencies.signal,
     });

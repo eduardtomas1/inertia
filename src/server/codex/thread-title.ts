@@ -63,7 +63,7 @@ export interface CodexThreadTitleOptions {
   executable: string;
   environment: NodeJS.ProcessEnv;
   cwd: string;
-  model: string;
+  model?: string;
   prompt: string;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -155,9 +155,13 @@ function disabledMcpServers(config: JsonObject): JsonObject {
   return Object.fromEntries(Object.keys(servers).map((name) => [name, { enabled: false }]));
 }
 
+function modelParams(options: CodexThreadTitleOptions): JsonObject {
+  return options.model ? { model: options.model } : {};
+}
+
 function threadStartParams(options: CodexThreadTitleOptions, config: JsonObject): JsonObject {
   return {
-    model: options.model,
+    ...modelParams(options),
     cwd: options.cwd,
     sandbox: "read-only",
     runtimeWorkspaceRoots: [],
@@ -235,7 +239,7 @@ export async function generateCodexThreadTitle(
       const started = await client.request("turn/start", {
         threadId,
         input: [{ type: "text", text: titleRequest(options.prompt), text_elements: [] }],
-        model: options.model,
+        ...modelParams(options),
         effort: "low",
         outputSchema: TITLE_OUTPUT_SCHEMA,
       });

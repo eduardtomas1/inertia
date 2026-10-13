@@ -26,7 +26,7 @@ const AWS_CONFIGURE_SECRET = new RegExp(
   "gu",
 );
 const SECRET_HEADER =
-  /(\b(?:(?:Proxy-)?Authorization|(?:X-)?[A-Za-z0-9-]*(?:Api-?Key|Auth-?Token|Access-?Token|Secret|Token))\s*:\s*)(?:(?:Bearer|Basic|Token|Digest|Bot)\s+)?[^\s'"]+/giu;
+  /((?:\b(?:Proxy-)?Authorization|Api-?Key|Auth-?Token|Access-?Token|Secret|Token)\s*:\s*)(?:(?:Bearer|Basic|Token|Digest|Bot)\s+)?[^\s'"]+/giu;
 
 export function scrubCommandSecrets(command: string): string {
   return scrubSubagentSecrets(command)

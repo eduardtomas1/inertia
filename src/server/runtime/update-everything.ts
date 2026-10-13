@@ -32,11 +32,15 @@ export interface UpdateEverythingDependencies {
   preparation: Pick<RuntimeUpdatePreparationGate, "isAdmissionClosed" | "restartBlockerBesidesAgentTurns">;
 }
 
-const RESTART_BLOCKERS: Record<NonNullable<ReturnType<RuntimeUpdatePreparationGate["restartBlockerBesidesAgentTurns"]>>, string> = {
+type RestartBlocker = NonNullable<ReturnType<RuntimeUpdatePreparationGate["restartBlockerBesidesAgentTurns"]>>;
+
+const RESTART_BLOCKERS: Record<RestartBlocker, string> = {
   "database-recovery": "Wait for database recovery to finish before restarting.",
   "agent-work": "Wait for workspace runs to finish before restarting to update.",
   terminal: "Close active terminals before restarting to update.",
 };
+
+const AGENT_WORK_DID_NOT_STOP = "Active agent work did not stop in time.";
 
 const OUTCOMES: Record<ProviderMaintenanceOperation["status"], UpdateProviderResult["outcome"]> = {
   queued: "failed",
@@ -61,6 +65,11 @@ function interruptedConversationIds(
       return false;
     }
   });
+}
+
+function appInstallBlocker(blocker: RestartBlocker | null, stopped: boolean): string | null {
+  if (blocker) return RESTART_BLOCKERS[blocker];
+  return stopped ? null : AGENT_WORK_DID_NOT_STOP;
 }
 
 async function updateProvider(
@@ -112,18 +121,18 @@ export async function runUpdateEverything(
   let readyForAppInstall = false;
   try {
     if (request.continueChats) dependencies.restartContinuation.createPlans(conversationIds);
-    await dependencies.turns.interruptForUpdate(conversationIds);
+    const stopped = await dependencies.turns.interruptForUpdate(conversationIds);
     const providers: UpdateProviderResult[] = [];
     for (const providerId of request.providerIds) {
       providers.push(await updateProvider(dependencies.maintenance, providerId));
     }
-    readyForAppInstall = request.includeApp && !blocker;
+    readyForAppInstall = request.includeApp && !blocker && stopped;
     return {
       kind: "updates.run",
       providers,
       interruptedConversationIds: conversationIds,
       readyForAppInstall,
-      appInstallBlocker: blocker ? RESTART_BLOCKERS[blocker] : null,
+      appInstallBlocker: request.includeApp ? appInstallBlocker(blocker, stopped) : null,
     };
   } finally {
     returned = true;

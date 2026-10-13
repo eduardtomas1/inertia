@@ -230,6 +230,18 @@ describe("update everything orchestration", () => {
     expect(subject.turns.interruptForUpdate).toHaveBeenLastCalledWith([CODEX_CHAT, CLAUDE_CHAT]);
   });
 
+  it("keeps the app out of the run when interrupted chats do not stop in time, and still updates providers", async () => {
+    const subject = fixture();
+    subject.turns.interruptForUpdate.mockResolvedValue(false);
+
+    const app = await subject.run({ includeApp: true });
+
+    expect(app).toMatchObject({ readyForAppInstall: false, appInstallBlocker: "Active agent work did not stop in time." });
+    expect(app.providers.map(({ outcome }) => outcome)).toEqual(["updated", "updated"]);
+    expect(isHeld()).toBe(false);
+    await expect(subject.run()).resolves.toMatchObject({ readyForAppInstall: false, appInstallBlocker: null });
+  });
+
   it("does not plan continuations when the user turned them off", async () => {
     const subject = fixture();
 

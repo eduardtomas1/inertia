@@ -1,0 +1,158 @@
+import type { AgentTurn, Conversation } from "../../shared/contracts";
+import { importedResumeCwd } from "../cli-import/resume-cwd";
+import { generateCodexThreadTitle } from "../codex/thread-title";
+import type { RuntimeStore } from "../database";
+import { readClaudeSessionTitle } from "../provider/claude-session-title";
+import type { ProviderManager } from "../providers";
+import type { BackendProfileController } from "./backends/backend-profile-controller";
+import {
+  isUntitledConversationTitle,
+  normalizeGeneratedTitle,
+  QUICK_TITLE_SCANNED_CHARS,
+  quickConversationTitle,
+} from "./conversation-title";
+import type { TurnSettledEvidence } from "./turns/turn-controller-types";
+
+const MAX_GENERATION_PROMPT_CHARS = 4_000;
+
+export interface ConversationTitleSources {
+  claude(input: { conversationId: string; sessionId: string }): Promise<string | undefined>;
+  codex(input: {
+    conversationId: string;
+    model: string;
+    prompt: string;
+    signal: AbortSignal;
+  }): Promise<string | undefined>;
+}
+
+export interface ConversationTitleServiceDependencies {
+  conversation(conversationId: string): Pick<Conversation, "title" | "archivedAt" | "providerSessionId">;
+  firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null;
+  updateTitle(conversationId: string, title: string): void;
+  sources: ConversationTitleSources;
+  isExternalTurn(turn: AgentTurn): boolean;
+  track(operation: () => Promise<void>): Promise<void>;
+  signal: AbortSignal;
+}
+
+export interface ConversationTitleService {
+  onTurnSettled(turn: AgentTurn, settlement: TurnSettledEvidence): void;
+}
+
+export function createConversationTitleService(
+  dependencies: ConversationTitleServiceDependencies,
+): ConversationTitleService {
+  const applied = new Set<string>();
+  const pending = new Set<string>();
+  const generated = new Set<string>();
+
+  const replaceableFirstMessage = (conversationId: string) => {
+    if (applied.has(conversationId) || dependencies.signal.aborted) return null;
+    const message = dependencies.firstUserMessage(conversationId, QUICK_TITLE_SCANNED_CHARS);
+    if (!message) return null;
+    const conversation = dependencies.conversation(conversationId);
+    const replaceable = conversation.archivedAt === null && (
+      isUntitledConversationTitle(conversation.title)
+      || conversation.title === quickConversationTitle(message.content)
+    );
+    return replaceable ? { message, conversation } : null;
+  };
+
+  const titleSource = (
+    turn: AgentTurn,
+    settlement: TurnSettledEvidence,
+  ): (() => Promise<string | undefined>) | null => {
+    const current = replaceableFirstMessage(turn.conversationId);
+    if (!current) return null;
+    const { providerSessionTitle } = settlement;
+    if (providerSessionTitle) return async () => providerSessionTitle;
+    const sessionId = turn.providerSessionAfter ?? current.conversation.providerSessionId;
+    if (turn.providerId === "claude" && sessionId) {
+      return () => dependencies.sources.claude({ conversationId: turn.conversationId, sessionId });
+    }
+    if (
+      turn.providerId !== "codex"
+      || turn.userMessageId !== current.message.id
+      || turn.model === "provider-default"
+      || generated.has(turn.conversationId)
+      || dependencies.isExternalTurn(turn)
+    ) return null;
+    generated.add(turn.conversationId);
+    return () => dependencies.sources.codex({
+      conversationId: turn.conversationId,
+      model: turn.model,
+      prompt: current.message.content.slice(0, MAX_GENERATION_PROMPT_CHARS),
+      signal: dependencies.signal,
+    });
+  };
+
+  return {
+    onTurnSettled(turn, settlement) {
+      const { conversationId } = turn;
+      if (pending.has(conversationId)) return;
+      let read: (() => Promise<string | undefined>) | null;
+      try {
+        read = titleSource(turn, settlement);
+      } catch {
+        return;
+      }
+      if (!read) return;
+      const source = read;
+      pending.add(conversationId);
+      void Promise.resolve()
+        .then(() => dependencies.track(async () => {
+          const title = normalizeGeneratedTitle(await source() ?? "");
+          const current = title ? replaceableFirstMessage(conversationId) : null;
+          if (!title || !current) return;
+          applied.add(conversationId);
+          if (current.conversation.title !== title) dependencies.updateTitle(conversationId, title);
+        }))
+        .catch(() => undefined)
+        .finally(() => pending.delete(conversationId));
+    },
+  };
+}
+
+export function conversationTitleSources(dependencies: {
+  store: Pick<RuntimeStore, "conversationPath" | "cliConversationImport">;
+  providers: Pick<ProviderManager, "codexControlContext">;
+}): ConversationTitleSources {
+  const { store, providers } = dependencies;
+  return {
+    claude: async ({ conversationId, sessionId }) => {
+      const dir = importedResumeCwd(store, conversationId, sessionId, store.conversationPath(conversationId));
+      return await readClaudeSessionTitle(sessionId, dir);
+    },
+    codex: async ({ conversationId, model, prompt, signal }) => {
+      const context = await providers.codexControlContext(store.conversationPath(conversationId));
+      return await generateCodexThreadTitle({ ...context, model, prompt, signal })
+        .finally(() => { context.installationUse.abandonBeforeSpawn(); });
+    },
+  };
+}
+
+export function createConversationTitleRuntime(dependencies: {
+  store: Pick<
+    RuntimeStore,
+    "conversation" | "firstUserMessage" | "updateConversation" | "conversationPath" | "cliConversationImport"
+  >;
+  providers: Pick<ProviderManager, "codexControlContext">;
+  backendProfileController: Pick<BackendProfileController, "isExternalSelection">;
+  broadcastSnapshot(): void;
+  track(operation: () => Promise<void>): Promise<void>;
+  signal: AbortSignal;
+}): ConversationTitleService {
+  const { store, backendProfileController } = dependencies;
+  return createConversationTitleService({
+    conversation: (conversationId) => store.conversation(conversationId),
+    firstUserMessage: (conversationId, maxChars) => store.firstUserMessage(conversationId, maxChars),
+    updateTitle: (conversationId, title) => {
+      store.updateConversation(conversationId, { title });
+      dependencies.broadcastSnapshot();
+    },
+    sources: conversationTitleSources(dependencies),
+    isExternalTurn: (turn) => backendProfileController.isExternalSelection(turn.modelSelection),
+    track: dependencies.track,
+    signal: dependencies.signal,
+  });
+}

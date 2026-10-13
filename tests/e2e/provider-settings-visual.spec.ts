@@ -107,9 +107,13 @@ async function distanceFromRail(row: Locator): Promise<number> {
 async function expectHoverQuieterThanSelection(rail: Locator): Promise<void> {
   const selected = rail.locator(".provider-settings-list-row.is-selected");
   const other = rail.locator(".provider-settings-list-row:not(.is-selected)").first();
-  await other.hover();
-  const hovered = await distanceFromRail(other);
-  expect(hovered).toBeGreaterThan(0);
+  let hovered = 0;
+  await expect(async () => {
+    await other.hover();
+    expect(await other.evaluate((element) => element.matches(":hover"))).toBe(true);
+    hovered = await distanceFromRail(other);
+    expect(hovered).toBeGreaterThan(0);
+  }).toPass();
   expect(hovered).toBeLessThan(await distanceFromRail(selected));
   await page.mouse.move(0, 0);
 }

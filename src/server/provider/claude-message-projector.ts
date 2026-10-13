@@ -444,10 +444,12 @@ export class ClaudeMessageProjector {
     const content = Array.isArray(message.message.content)
       ? message.message.content
       : [];
-    for (const block of content) {
+    const results = content.flatMap((block) => {
       const result = objectValue(block);
-      if (result?.type !== "tool_result") continue;
-      this.tools.result(result);
+      return result?.type === "tool_result" ? [result] : [];
+    });
+    for (const result of results) {
+      this.tools.result(result, results.length === 1 ? message.tool_use_result : undefined);
     }
     if (uuid) this.seenUserMessages.add(uuid);
   }

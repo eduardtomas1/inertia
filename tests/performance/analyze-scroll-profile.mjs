@@ -53,7 +53,6 @@ function bucketFor(location, url, functionName) {
 
 function analyzeCpuProfile(path) {
   const profile = JSON.parse(readFileSync(path, "utf8"));
-  const byId = new Map(profile.nodes.map((node) => [node.id, node]));
   const parent = new Map();
   for (const node of profile.nodes) for (const child of node.children ?? []) parent.set(child, node.id);
   const selfUs = new Map();

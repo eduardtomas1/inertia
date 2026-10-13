@@ -687,7 +687,7 @@ describe("provider image request budgets", () => {
 
 describe("attachment send handoff", () => {
   it.each([
-    ["New\nchat", "New chat", false],
+    ["New  chat", "New chat", false],
     ["New\tthread", "New thread", true],
   ] as const)("keeps the first title for %j as %j (providers: %s)", async (content, expectedTitle, enableProviders) => {
     let hasMessages = false;
@@ -725,7 +725,7 @@ describe("attachment send handoff", () => {
     expect(runtime.store.updateConversation).toHaveBeenCalledOnce();
   });
 
-  it("creates a single-line title from a multiline first message", async () => {
+  it("creates a short title from the first line of a multiline first message", async () => {
     const runtime = dependencies({
       queue: vi.fn(() => null),
       relinquishAll: vi.fn(async () => undefined),
@@ -734,11 +734,11 @@ describe("attachment send handoff", () => {
     const original = runtime.store.conversation(conversationId);
     vi.mocked(runtime.store.conversation).mockReturnValue({ ...original, title: "New chat" });
     const command = messageCommand();
-    command.payload.content = "Please fix this:\n\n- first issue\r\n- second issue";
+    command.payload.content = "$review please fix this `parser.ts` crash in https://example.com/log today now:\n\n- first issue\r\n- second issue";
     await expect(createTurnInteractionCommandHandler(runtime)({} as never, command))
       .resolves.toBe("handled");
     expect(runtime.store.updateConversation).toHaveBeenCalledWith(conversationId, {
-      title: "Please fix this: - first issue - second issue",
+      title: "please fix this crash in today",
     });
   });
 
@@ -770,12 +770,12 @@ describe("attachment send handoff", () => {
     const original = runtime.store.conversation(conversationId);
     vi.mocked(runtime.store.conversation).mockReturnValue({ ...original, title: "New chat" });
     const command = messageCommand();
-    command.payload.content = "a".repeat(63) + "🌍" + "tail";
+    command.payload.content = "a".repeat(59) + "🌍" + "tail";
     await expect(createTurnInteractionCommandHandler(runtime)(
       {} as never, command,
     )).resolves.toBe("handled");
     expect(runtime.store.updateConversation).toHaveBeenCalledWith(conversationId, {
-      title: "a".repeat(63) + "🌍",
+      title: "a".repeat(59) + "🌍",
     });
   });
 

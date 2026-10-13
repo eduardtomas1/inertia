@@ -45,6 +45,7 @@ import {
   messageSendPreparationDeadline,
 } from "./message-send-preparation";
 import { ConversationContextService } from "../conversation-context-service";
+import { isUntitledConversationTitle, quickConversationTitle } from "../conversation-title";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
 
 type MessageSendStage =
@@ -756,7 +757,7 @@ export function createTurnInteractionCommandHandler(
           }
           // A real first-message title can itself equal an untitled placeholder.
           // Capture history before queue/createMessage persists this message.
-          deriveInitialTitle = (conversation.title === "New chat" || conversation.title === "New thread")
+          deriveInitialTitle = isUntitledConversationTitle(conversation.title)
             && !dependencies.store.hasConversationMessages(conversation.id);
           queued = dependencies.enableProviders
             ? dependencies.turns.queue({
@@ -826,9 +827,9 @@ export function createTurnInteractionCommandHandler(
             );
           }
           const currentTitle = dependencies.store.conversation(conversation.id).title;
-          if (deriveInitialTitle && (currentTitle === "New chat" || currentTitle === "New thread")) {
+          if (deriveInitialTitle && isUntitledConversationTitle(currentTitle)) {
             dependencies.store.updateConversation(conversation.id, {
-              title: Array.from(command.payload.content.replace(/\s+/gu, " ").trim().slice(0, 128)).slice(0, 64).join("") || "New chat",
+              title: quickConversationTitle(command.payload.content) || "New chat",
             });
           }
           dependencies.send(socket, queued

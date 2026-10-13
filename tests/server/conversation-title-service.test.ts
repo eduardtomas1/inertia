@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentTurn } from "../../src/shared/contracts";
 import {
   conversationTitleSources,
+  createConversationTitleRuntime,
   createConversationTitleService,
   type ConversationTitleServiceDependencies,
 } from "../../src/server/runtime/conversation-title-service";
@@ -46,7 +47,7 @@ function fixture(overrides: Partial<ConversationTitleServiceDependencies> = {}) 
   const dependencies: ConversationTitleServiceDependencies = {
     conversation: vi.fn(() => ({ ...state })),
     firstUserMessage: vi.fn(() => ({ id: firstMessageId, content: firstPrompt })),
-    isTaskConversation: vi.fn(() => false),
+    keepsOwnTitle: vi.fn(() => false),
     updateTitle: vi.fn((_id: string, title: string) => {
       state.title = title;
     }),
@@ -107,11 +108,24 @@ describe("conversation title service", () => {
   });
 
   it("keeps the title of a chat started from a task", async () => {
-    const subject = fixture({ isTaskConversation: vi.fn(() => true) });
+    const subject = fixture({ keepsOwnTitle: vi.fn(() => true) });
     subject.service.onTurnSettled(turn(), { providerSessionTitle: "OpenCode title" });
     await settled();
     expect(subject.dependencies.sources.codex).not.toHaveBeenCalled();
     expect(subject.dependencies.updateTitle).not.toHaveBeenCalled();
+  });
+
+  it("keeps a task chat's title after its task is deleted", async () => {
+    const keepsOwnTitle = vi.fn(() => true);
+    const subject = fixture({ keepsOwnTitle });
+    vi.mocked(subject.dependencies.sources.claude).mockResolvedValue("Login redirect investigation");
+    subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
+    await settled();
+    keepsOwnTitle.mockReturnValue(false);
+    subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
+    await settled();
+    expect(subject.dependencies.updateTitle).not.toHaveBeenCalled();
+    expect(subject.state.title).toBe("Fix the login redirect loop");
   });
 
   it("lets a rename made during generation win", async () => {
@@ -265,6 +279,55 @@ describe("conversation title service", () => {
     finish("Login redirect loop");
     await settled();
     expect(aborted.dependencies.updateTitle).not.toHaveBeenCalled();
+  });
+});
+
+describe("conversation title runtime", () => {
+  function runtime(store: { managed?: boolean; locked?: boolean; taskLinked?: boolean }) {
+    const updateConversation = vi.fn();
+    const operations: Array<Promise<void>> = [];
+    const service = createConversationTitleRuntime({
+      store: {
+        assertConversationProvider: vi.fn(),
+        conversation: vi.fn(() => ({ title: "Fix the login redirect loop", archivedAt: null, providerSessionId: null })),
+        firstUserMessage: vi.fn(() => ({ id: firstMessageId, content: firstPrompt })),
+        updateConversation,
+        conversationPath: vi.fn(() => "/workspace/chat"),
+        cliConversationImport: vi.fn(() => null),
+        todos: { list: vi.fn(() => store.taskLinked ? [{ conversationId }] : []) },
+        agentThreadManagement: { managed: vi.fn(() => store.managed ? { childConversationId: conversationId } : null) },
+        conversationTitleLocks: new Set(store.locked ? [conversationId] : []),
+      } as never,
+      providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() },
+      backendProfileController: { isExternalSelection: vi.fn(() => false) },
+      broadcastSnapshot: vi.fn(),
+      track: (operation) => {
+        const tracked = operation();
+        operations.push(tracked);
+        return tracked;
+      },
+      signal: new AbortController().signal,
+    });
+    service.onTurnSettled(turn({ providerId: "opencode" }), { providerSessionTitle: "Login redirect investigation" });
+    return { updateConversation, operations };
+  }
+
+  it("renames an ordinary chat whose title is still its quick title", async () => {
+    const subject = runtime({});
+    await settled();
+    await Promise.all(subject.operations);
+    expect(subject.updateConversation).toHaveBeenCalledWith(conversationId, { title: "Login redirect investigation" });
+  });
+
+  it.each([
+    ["an agent-created chat", { managed: true }],
+    ["a chat whose title was locked", { locked: true }],
+    ["a chat started from a task", { taskLinked: true }],
+  ])("never renames %s", async (_label, store) => {
+    const subject = runtime(store);
+    await settled();
+    await Promise.all(subject.operations);
+    expect(subject.updateConversation).not.toHaveBeenCalled();
   });
 });
 

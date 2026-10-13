@@ -27,7 +27,7 @@ export interface ConversationTitleSources {
 export interface ConversationTitleServiceDependencies {
   conversation(conversationId: string): Pick<Conversation, "title" | "archivedAt" | "providerSessionId">;
   firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null;
-  isTaskConversation(conversationId: string): boolean;
+  keepsOwnTitle(conversationId: string): boolean;
   updateTitle(conversationId: string, title: string): void;
   sources: ConversationTitleSources;
   isExternalTurn(turn: AgentTurn): boolean;
@@ -47,11 +47,11 @@ export function createConversationTitleService(
   const generated = new Set<string>();
 
   const replaceableFirstMessage = (conversationId: string) => {
-    if (
-      applied.has(conversationId)
-      || dependencies.signal.aborted
-      || dependencies.isTaskConversation(conversationId)
-    ) return null;
+    if (applied.has(conversationId) || dependencies.signal.aborted) return null;
+    if (dependencies.keepsOwnTitle(conversationId)) {
+      applied.add(conversationId);
+      return null;
+    }
     const message = dependencies.firstUserMessage(conversationId, QUICK_TITLE_SCANNED_CHARS);
     if (!message) return null;
     const conversation = dependencies.conversation(conversationId);
@@ -139,7 +139,8 @@ export function createConversationTitleRuntime(dependencies: {
   store: Pick<
     RuntimeStore,
     | "assertConversationProvider" | "conversation" | "firstUserMessage" | "updateConversation"
-    | "conversationPath" | "cliConversationImport" | "todos"
+    | "conversationPath" | "cliConversationImport" | "todos" | "agentThreadManagement"
+    | "conversationTitleLocks"
   >;
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
   backendProfileController: Pick<BackendProfileController, "isExternalSelection">;
@@ -151,8 +152,9 @@ export function createConversationTitleRuntime(dependencies: {
   return createConversationTitleService({
     conversation: (conversationId) => store.conversation(conversationId),
     firstUserMessage: (conversationId, maxChars) => store.firstUserMessage(conversationId, maxChars),
-    isTaskConversation: (conversationId) =>
-      store.todos.list().some((todo) => todo.conversationId === conversationId),
+    keepsOwnTitle: (conversationId) => store.conversationTitleLocks.has(conversationId)
+      || store.agentThreadManagement.managed(conversationId) !== null
+      || store.todos.list().some((todo) => todo.conversationId === conversationId),
     updateTitle: (conversationId, title) => {
       store.updateConversation(conversationId, { title });
       dependencies.broadcastSnapshot();

@@ -144,6 +144,7 @@ export class RuntimeStore {
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
+  readonly conversationTitleLocks = new Set<string>();
   constructor(
     databasePath: string,
     _defaultWorkspacePath: string,

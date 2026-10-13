@@ -88,6 +88,7 @@ export function createTodoCommandHandler(
         dependencies.store.deleteConversation(conversation.id);
         throw error;
       }
+      dependencies.store.conversationTitleLocks.add(conversation.id);
       const content = todoPromptContent(linked);
       if (dependencies.enableProviders) {
         let queued: ReturnType<TodoCommandDependencies["turns"]["queue"]>;

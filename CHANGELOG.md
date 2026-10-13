@@ -14,7 +14,7 @@ mascot follows several chats at once.
 - **Tasks** is a plain to-do list on its own labelled row at the top of the
   sidebar, under **New chat**, and in the command palette (**Open tasks**).
   Each task has a note, a due date and a priority; urgent tasks come first,
-  and finished tasks fold behind **Done**. Every window shows the same list.
+  and finished tasks fold behind **Done**.
 - Open a task and choose **Hand it to an agent**: pick the provider, model,
   reasoning effort, speed and a project or any folder, then **Start**. Inertia
   adds the folder as a project if needed, opens a chat there with the task's

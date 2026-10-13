@@ -829,7 +829,6 @@ export const AppLayout = memo(function AppLayout({
                   projectScopeId={projectScopeId}
                   request={tasksActions.request}
                   onOpenConversation={tasksActions.openConversation}
-                  onError={setActionError}
                 />
               </Suspense>
             ) : (

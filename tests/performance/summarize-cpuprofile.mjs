@@ -35,6 +35,13 @@ async function locate(frame) {
 for (const path of profiles) {
   const profile = JSON.parse(readFileSync(path, "utf8"));
   const nodes = new Map(profile.nodes.map((node) => [node.id, node]));
+  const parents = new Map();
+  for (const node of profile.nodes) for (const child of node.children ?? []) parents.set(child, node.id);
+  const caller = (id) => {
+    let current = parents.get(id);
+    while (current !== undefined && !nodes.get(current).callFrame.url) current = parents.get(current);
+    return current === undefined ? null : nodes.get(current);
+  };
   const self = new Map();
   let total = 0;
   profile.samples.forEach((id, index) => {
@@ -45,12 +52,13 @@ for (const path of profiles) {
   const byLocation = new Map();
   for (const [id, ms] of self) {
     const node = nodes.get(id);
-    const key = await locate(node.callFrame);
+    const parent = !node.callFrame.url && !node.callFrame.functionName.startsWith("(") ? caller(id) : null;
+    const key = parent ? `${node.callFrame.functionName} <- ${await locate(parent.callFrame)}` : await locate(node.callFrame);
     byLocation.set(key, (byLocation.get(key) ?? 0) + ms);
   }
   const busy = total - (byLocation.get("(idle)") ?? 0);
   console.log(`\n${basename(path)}: ${total.toFixed(1)} ms sampled, ${busy.toFixed(1)} ms busy`);
-  for (const [key, ms] of [...byLocation].sort((a, b) => b[1] - a[1]).slice(0, 25)) {
+  for (const [key, ms] of [...byLocation].filter(([key]) => key !== "(idle)").sort((a, b) => b[1] - a[1]).slice(0, 25)) {
     console.log(`${ms.toFixed(1).padStart(8)} ms ${(100 * ms / Math.max(1, busy)).toFixed(1).padStart(5)}%  ${key}`);
   }
 }

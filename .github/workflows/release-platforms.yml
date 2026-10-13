@@ -54,9 +54,11 @@ jobs:
             exit 1
           fi
           event_sha="${PUSH_EVENT_SHA:-$release_sha}"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           RELEASE_REF="$release_ref" \
             RELEASE_EVENT_SHA="$event_sha" \
             RELEASE_EXPECTED_COMMIT="$release_sha" \
+            RELEASE_MAIN_REF=refs/remotes/origin/main \
             node scripts/validate-release.mjs
           printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
 
@@ -72,7 +74,22 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release_identity.outputs.release_sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Reject released migration tamper since the previous stable release
+        env:
+          RELEASE_SHA: ${{ needs.release_identity.outputs.release_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          released_tags="$(git tag --merged "$RELEASE_SHA" --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname)"
+          previous_tag="$(grep -vxF -- "$RELEASE_TAG" <<< "$released_tags" | head -n 1 || true)"
+          if [[ -z "$previous_tag" ]]; then
+            echo "No earlier stable release tag precedes $RELEASE_TAG, so released migrations cannot be compared." >&2
+            exit 1
+          fi
+          echo "Comparing released migrations with $previous_tag."
+          node scripts/verify-database-lineage.mjs --base-ref "refs/tags/$previous_tag"
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
       - name: Verify shared release quality once
@@ -109,7 +126,7 @@ jobs:
             platform: windows-x64
             arch: x64
             package_script: package:release:win
-            timeout_minutes: 100
+            timeout_minutes: 130
             app_path: release/win-unpacked/Inertia.exe
             windows_asset_suffix: ""
           - label: Windows ARM64
@@ -164,6 +181,14 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
           Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
 
+      - name: Exclude the workspace from Microsoft Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+
       - name: Validate exact tag and commit
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
@@ -202,6 +227,10 @@ jobs:
       - name: Enforce the isolated browser-evidence CPU budget
         run: npm run test:browser-evidence-cpu-budget
 
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
       - name: Build the application bundle for the desktop benchmark
         run: npm run build:bundle
 
@@ -211,7 +240,7 @@ jobs:
 
       - name: Measure release-candidate desktop workloads under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run benchmark:desktop:built
 
       - name: Run the complete release unit suite
         if: runner.os != 'Windows'
@@ -431,7 +460,7 @@ jobs:
 
       - name: Smoke native packaged app under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run test:package-smoke
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:package-smoke
 
       - name: Smoke final macOS and Linux release containers
         if: runner.os == 'macOS'
@@ -439,7 +468,7 @@ jobs:
 
       - name: Smoke final Linux AppImage default and fallback launches under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run test:release-container-smoke
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:release-container-smoke
 
       - name: Verify complete macOS bundle signature
         if: runner.os == 'macOS'
@@ -475,10 +504,6 @@ jobs:
       # These phases share the native desktop and must never overlap. Keep
       # release certification aligned with PR/main CI: foreground first, then
       # isolated apps, then destructive recovery, with distinct diagnostics.
-      - name: Prepare Electron end-to-end binary
-        id: electron_test_binary
-        run: node -e "console.log(require('electron'))"
-
       - name: Run display-sensitive Electron end-to-end tests
         if: runner.os != 'Linux'
         run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
@@ -498,15 +523,15 @@ jobs:
 
       - name: Run display-sensitive Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       - name: Run isolated Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Stage exact release assets and checksums
         env:
@@ -538,6 +563,15 @@ jobs:
         with:
           name: release-test-results-${{ matrix.platform }}
           path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Keep Xvfb server log
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-xvfb-log-${{ matrix.platform }}
+          path: ${{ runner.temp }}/xvfb.log
           if-no-files-found: ignore
           retention-days: 7
 

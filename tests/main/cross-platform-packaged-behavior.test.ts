@@ -37,7 +37,7 @@ describe("cross-platform packaged behavior contract", () => {
       "INERTIA_RELEASE_CHANNEL:",
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
-      "run: xvfb-run --auto-servernum npm run test:package-smoke",
+      'run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:package-smoke',
       "node scripts/release-assets.mjs finalize",
       "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
       "node scripts/prepare-canary-feed.mjs",
@@ -60,14 +60,14 @@ describe("cross-platform packaged behavior contract", () => {
       "run: npm exec -- playwright test --project=display-sensitive",
       "run: npm exec -- playwright test --project=isolated",
       "run: npm exec -- playwright test --project=runtime-recovery",
-      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive",
-      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated",
-      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery",
+      'run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=display-sensitive',
+      'run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=isolated',
+      'run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=runtime-recovery',
       'run: npm run "${{ matrix.release_package_script }}"',
       'node scripts/release-assets.mjs stage "$RELEASE_PLATFORM"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
-      "run: xvfb-run --auto-servernum npm run test:package-smoke",
+      'run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:package-smoke',
     ]) {
       expect(workflow).toContain(expected);
     }
@@ -184,7 +184,7 @@ describe("cross-platform packaged behavior contract", () => {
       "node scripts/validate-release.mjs",
       "run: npm run test:browser-evidence-cpu-budget",
       "run: npm run test:package-smoke",
-      "run: xvfb-run --auto-servernum npm run test:package-smoke",
+      'run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:package-smoke',
       "codesign --verify --deep --strict",
       "xcrun stapler validate",
       "Get-AuthenticodeSignature",
@@ -284,7 +284,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflowStep(
       workflow,
       "Measure release-candidate desktop workloads under Xvfb",
-    )).toContain("xvfb-run --auto-servernum npm run benchmark:desktop:built");
+    )).toContain('xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run benchmark:desktop:built');
     expect(workflowStep(workflow, "Keep release benchmark evidence"))
       .toContain("name: release-performance-${{ matrix.platform }}");
 
@@ -429,6 +429,81 @@ describe("cross-platform packaged behavior contract", () => {
     } finally {
       await rm(fixture, { recursive: true, force: true });
       await rm(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a release commit that the main branch does not contain", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "inertia-release-main-"));
+    const tag = "v1.2.3";
+    const git = (...args: string[]): string => execFileSync("git", args, {
+      cwd: fixture,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_EMAIL: "release-test@example.invalid",
+        GIT_AUTHOR_NAME: "Release Test",
+        GIT_COMMITTER_EMAIL: "release-test@example.invalid",
+        GIT_COMMITTER_NAME: "Release Test",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    const validate = (commit: string, mainRef: string) => spawnSync(
+      process.execPath,
+      [join(repositoryRoot, "scripts/validate-release.mjs")],
+      {
+        cwd: fixture,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RELEASE_EVENT_SHA: commit,
+          RELEASE_EXPECTED_COMMIT: commit,
+          RELEASE_MAIN_REF: mainRef,
+          RELEASE_REF: `refs/tags/${tag}`,
+          RELEASE_TAG: tag,
+          RELEASE_VERIFY_REMOTE: "",
+        },
+      },
+    );
+
+    try {
+      await writeFile(join(fixture, "package.json"), JSON.stringify({ version: "1.2.3" }));
+      await writeFile(join(fixture, "package-lock.json"), JSON.stringify({
+        version: "1.2.3",
+        packages: { "": { version: "1.2.3" } },
+      }));
+      git("init", "--quiet");
+      git("add", "package.json", "package-lock.json");
+      git("commit", "--quiet", "-m", "main source");
+      git("branch", "trunk");
+      git("checkout", "--quiet", "-b", "side");
+      await writeFile(join(fixture, "side.txt"), "unmerged\n");
+      git("add", "side.txt");
+      git("commit", "--quiet", "-m", "unmerged release source");
+      git("tag", "--annotate", "--message", "release", tag);
+      const sideCommit = git("rev-parse", "HEAD^{commit}");
+
+      const unmerged = validate(sideCommit, "refs/heads/trunk");
+      expect(unmerged.status).not.toBe(0);
+      expect(unmerged.stderr).toContain(
+        "the frozen release commit is not contained in refs/heads/trunk",
+      );
+
+      const missing = validate(sideCommit, "refs/heads/absent");
+      expect(missing.status).not.toBe(0);
+      expect(missing.stderr).toContain(
+        "the frozen release commit could not be checked against refs/heads/absent",
+      );
+
+      const optionLike = validate(sideCommit, "--all");
+      expect(optionLike.status).not.toBe(0);
+      expect(optionLike.stderr).toContain("RELEASE_MAIN_REF must be empty or a full Git ref");
+
+      git("branch", "--force", "trunk", "side");
+      const merged = validate(sideCommit, "refs/heads/trunk");
+      expect(merged.status, merged.stderr).toBe(0);
+      expect(validate(sideCommit, "").status).toBe(0);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
     }
   });
 });

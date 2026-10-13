@@ -10,7 +10,11 @@ const root = resolve(rootArgument);
 const metrics = [
   ["p95FrameMs", (frames) => frames.p95FrameMs],
   ["p99FrameMs", (frames) => frames.p99FrameMs],
-  ["missedPct", (frames) => frames.frames > 0 ? frames.estimatedMissedFrames / (frames.frames + frames.estimatedMissedFrames) * 100 : 0],
+  ["missedVsyncPct", (frames) => {
+    const vsync = 1_000 / (frames.displayFrequency || 60);
+    const missed = frames.intervals.reduce((total, value) => total + Math.max(0, Math.round(value / vsync) - 1), 0);
+    return missed / Math.max(1, frames.intervals.length + missed) * 100;
+  }],
   ["over25Ms", (frames) => frames.framesOver25Ms],
   ["maxFrameMs", (frames) => frames.maximumFrameMs],
   ["rowMounts", (frames) => frames.rowMounts],
@@ -32,7 +36,12 @@ for (const prefix of prefixes) {
     const summary = JSON.parse(readFileSync(join(root, run, "summary.json"), "utf8"));
     for (const result of summary.results) {
       if (!passes.has(result.pass)) passes.set(result.pass, []);
-      passes.get(result.pass).push(result.frames);
+      const recorded = JSON.parse(readFileSync(join(root, run, `${result.pass}.frames.json`), "utf8"));
+      passes.get(result.pass).push({
+        ...result.frames,
+        intervals: recorded.intervals,
+        displayFrequency: summary.environment?.displayFrequency,
+      });
     }
   }
   console.log(`\n## ${prefix} (${runs.length} runs: ${runs.join(", ")})`);

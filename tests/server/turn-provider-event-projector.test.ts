@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { SubagentTrace } from "../../src/shared/contracts";
+import type { AgentPlan, SubagentTrace } from "../../src/shared/contracts";
 import type { RuntimeStore } from "../../src/server/database";
 import type {
   ProviderActivityEvent,
@@ -248,5 +248,114 @@ describe("TurnProviderEventProjector reasoning order", () => {
       "persist-plan",
       "agent.plan.updated",
     ]);
+  });
+});
+
+describe("TurnProviderEventProjector plan updates", () => {
+  function planProjector() {
+    const upsertAgentPlan = vi.fn();
+    const broadcast = vi.fn();
+    const agentPlans = new Map<string, AgentPlan>();
+    const projector = new TurnProviderEventProjector({
+      store: { upsertAgentPlan } as unknown as RuntimeStore,
+      hooks: {
+        broadcast,
+        broadcastConversationShell: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+      } as unknown as TurnControllerHooks,
+      agentPlans,
+      streams: {
+        closeAssistantSegment: vi.fn(() => false),
+        flush: vi.fn(() => true),
+      } as never,
+      activities: { flushPending: vi.fn() } as never,
+      interactions: {} as never,
+      scheduler: defaultTurnScheduler(),
+      now: () => "2030-01-01T00:00:01.000Z",
+      transition: () => false,
+      observeSubagent: () => false,
+    });
+    const active = {
+      conversation: { id: "conversation-1" },
+      turn: { id: "turn-1", runId: "run-1", providerId: "cursor" },
+    } as ActiveTurn;
+    const plan = (
+      explanation: string | null,
+      steps: AgentPlan["steps"],
+    ) => projector.project(active, {
+      providerId: "cursor",
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      type: "plan",
+      explanation,
+      steps,
+    });
+    return { plan, upsertAgentPlan, broadcast, agentPlans, active, projector };
+  }
+
+  it("keeps the plan document when a checklist update arrives without one", () => {
+    const { plan, upsertAgentPlan, broadcast } = planProjector();
+    plan("# Plan\n- Inspect\n- Ship", [
+      { step: "Inspect", status: "pending" },
+      { step: "Ship", status: "pending" },
+    ]);
+    plan(null, [
+      { step: "Inspect", status: "completed" },
+      { step: "Ship", status: "inProgress" },
+    ]);
+
+    const expected = {
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      explanation: "# Plan\n- Inspect\n- Ship",
+      steps: [
+        { step: "Inspect", status: "completed" },
+        { step: "Ship", status: "inProgress" },
+      ],
+    };
+    expect(upsertAgentPlan).toHaveBeenLastCalledWith(expected);
+    expect(broadcast).toHaveBeenLastCalledWith({ type: "agent.plan.updated", plan: expected });
+  });
+
+  it("keeps reported step statuses when a document arrives without steps", () => {
+    const { plan, upsertAgentPlan } = planProjector();
+    plan(null, [{ step: "Inspect", status: "completed" }]);
+    plan("Review the final diff.", []);
+
+    expect(upsertAgentPlan).toHaveBeenLastCalledWith(expect.objectContaining({
+      explanation: "Review the final diff.",
+      steps: [{ step: "Inspect", status: "completed" }],
+    }));
+  });
+
+  it("clears the steps when the provider reports an empty checklist", () => {
+    const { plan, upsertAgentPlan } = planProjector();
+    plan("# Plan", [{ step: "Inspect", status: "completed" }]);
+    plan(null, []);
+
+    expect(upsertAgentPlan).toHaveBeenLastCalledWith(expect.objectContaining({
+      explanation: "# Plan",
+      steps: [],
+    }));
+  });
+
+  it("does not carry a plan from another run into a new one", () => {
+    const { plan, upsertAgentPlan, agentPlans } = planProjector();
+    agentPlans.set("conversation-1", {
+      conversationId: "conversation-1",
+      runId: "run-0",
+      turnId: "turn-0",
+      explanation: "# Earlier plan",
+      steps: [{ step: "Earlier", status: "pending" }],
+    });
+    plan(null, [{ step: "Inspect", status: "inProgress" }]);
+
+    expect(upsertAgentPlan).toHaveBeenLastCalledWith(expect.objectContaining({
+      runId: "run-1",
+      explanation: null,
+      steps: [{ step: "Inspect", status: "inProgress" }],
+    }));
   });
 });

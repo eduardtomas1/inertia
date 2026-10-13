@@ -186,12 +186,20 @@ export class TurnProviderEventProjector {
         this.options.streams.closeAssistantSegment(active);
         this.options.streams.flush(active, "reasoning");
         this.options.activities.flushPending(active);
+        const previous = this.options.agentPlans.get(active.conversation.id);
+        const stored = previous?.runId === active.turn.runId
+          && previous.turnId === active.turn.id
+          ? previous
+          : null;
+        const explanation = event.explanation?.trim() ? event.explanation : null;
         const plan: AgentPlan = {
           conversationId: active.conversation.id,
           runId: active.turn.runId,
           turnId: active.turn.id,
-          explanation: event.explanation,
-          steps: event.steps,
+          explanation: explanation ?? stored?.explanation ?? null,
+          steps: event.steps.length > 0 || !explanation || !stored
+            ? event.steps
+            : stored.steps,
         };
         this.options.agentPlans.set(active.conversation.id, plan);
         this.options.store.upsertAgentPlan(plan);

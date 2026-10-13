@@ -315,7 +315,7 @@ it("keeps every Xvfb server alive across clients and its log as failure evidence
   expect(jobsWithXvfb).toBe(4);
 });
 
-it("releases only commits on main and compares migrations with the previous stable release", () => {
+it("hands the main ref to the release validator for stable ancestry and compares migrations with the previous stable release", () => {
   const release = parse(source(".github/workflows/release-platforms.yml"));
   const freeze = release.jobs.release_identity.steps.find((step: { id?: string }) => step.id === "freeze");
   expect(freeze.run).toContain("git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main");

@@ -1,4 +1,5 @@
 import type { AgentTurn, Conversation } from "../../shared/contracts";
+import { importedResumeCwd } from "../cli-import/resume-cwd";
 import { generateCodexThreadTitle } from "../codex/thread-title";
 import type { RuntimeStore } from "../database";
 import { readClaudeSessionTitle } from "../provider/claude-session-title";
@@ -14,7 +15,7 @@ import {
 import type { TurnSettledEvidence } from "./turns/turn-controller-types";
 
 export interface ConversationTitleSources {
-  claude(input: { sessionId: string }): Promise<string | undefined>;
+  claude(input: { conversationId: string; sessionId: string }): Promise<string | undefined>;
   codex(input: {
     conversationId: string;
     model?: string;
@@ -71,7 +72,7 @@ export function createConversationTitleService(
     if (providerSessionTitle) return async () => providerSessionTitle;
     const sessionId = turn.providerSessionAfter ?? current.conversation.providerSessionId;
     if (turn.providerId === "claude" && sessionId) {
-      return () => dependencies.sources.claude({ sessionId });
+      return () => dependencies.sources.claude({ conversationId: turn.conversationId, sessionId });
     }
     if (
       turn.providerId !== "codex"
@@ -117,12 +118,15 @@ export function createConversationTitleService(
 }
 
 export function conversationTitleSources(dependencies: {
-  store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath">;
+  store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath" | "cliConversationImport">;
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
 }): ConversationTitleSources {
   const contact = new ConversationProviderContact(dependencies.store, dependencies.providers);
   return {
-    claude: ({ sessionId }) => readClaudeSessionTitle(sessionId),
+    claude: ({ conversationId, sessionId }) => readClaudeSessionTitle(
+      sessionId,
+      importedResumeCwd(dependencies.store, conversationId, sessionId, dependencies.store.conversationPath(conversationId)),
+    ),
     codex: async ({ conversationId, model, prompt, signal }) => {
       const context = await contact.codexControl(conversationId);
       return await generateCodexThreadTitle({ ...context, model, prompt, signal })
@@ -135,7 +139,7 @@ export function createConversationTitleRuntime(dependencies: {
   store: Pick<
     RuntimeStore,
     | "assertConversationProvider" | "conversation" | "firstUserMessage" | "updateConversation"
-    | "conversationPath" | "todos"
+    | "conversationPath" | "cliConversationImport" | "todos"
   >;
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
   backendProfileController: Pick<BackendProfileController, "isExternalSelection">;

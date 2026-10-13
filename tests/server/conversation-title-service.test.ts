@@ -197,7 +197,7 @@ describe("conversation title service", () => {
       userMessageId: "44444444-4444-4444-8444-444444444444",
     }), { providerSessionTitle: null });
     await settled();
-    expect(claude).toHaveBeenNthCalledWith(2, { sessionId });
+    expect(claude).toHaveBeenNthCalledWith(2, { conversationId, sessionId });
     expect(subject.state.title).toBe("Login redirect investigation");
     subject.state.title = "Fix the login redirect loop";
     subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
@@ -211,7 +211,7 @@ describe("conversation title service", () => {
     subject.state.providerSessionId = sessionId;
     subject.service.onTurnSettled(turn({ providerId: "claude" }), { providerSessionTitle: null });
     await settled();
-    expect(subject.dependencies.sources.claude).toHaveBeenCalledWith({ sessionId });
+    expect(subject.dependencies.sources.claude).toHaveBeenCalledWith({ conversationId, sessionId });
   });
 
   it("applies a provider session title from any settle while the guard holds", async () => {
@@ -279,11 +279,11 @@ describe("conversation title sources", () => {
     generateCodexThreadTitle.mockReset();
   });
 
-  function claudeFixture(lines: readonly Record<string, unknown>[]) {
+  function claudeFixture(lines: readonly Record<string, unknown>[], sessionWorkspace = "workspace") {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "inertia-title-source-")));
     roots.push(root);
     const workspace = join(root, "workspace");
-    const projects = join(root, "config", "projects", workspace.replace(/[^a-zA-Z0-9]/gu, "-"));
+    const projects = join(root, "config", "projects", join(root, sessionWorkspace).replace(/[^a-zA-Z0-9]/gu, "-"));
     mkdirSync(workspace);
     mkdirSync(projects, { recursive: true });
     writeFileSync(
@@ -291,13 +291,15 @@ describe("conversation title sources", () => {
       lines.map((line) => JSON.stringify(line)).join("\n") + "\n",
     );
     process.env.CLAUDE_CONFIG_DIR = join(root, "config");
-    return conversationTitleSources({
+    const conversationPath = vi.fn(() => workspace);
+    return Object.assign(conversationTitleSources({
       store: {
         assertConversationProvider: vi.fn(),
-        conversationPath: vi.fn(() => workspace),
+        conversationPath,
+        cliConversationImport: vi.fn(() => null),
       },
       providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() },
-    });
+    }), { conversationPath });
   }
 
   const userLine = {
@@ -314,12 +316,21 @@ describe("conversation title sources", () => {
       userLine,
       { type: "ai-title", aiTitle: "Login redirect investigation", sessionId },
     ]);
-    await expect(sources.claude({ sessionId })).resolves.toBe("Login redirect investigation");
+    await expect(sources.claude({ conversationId, sessionId })).resolves.toBe("Login redirect investigation");
+    expect(sources.conversationPath).toHaveBeenCalledWith(conversationId);
+  });
+
+  it("reads the session only from the chat's own Claude project directory", async () => {
+    const sources = claudeFixture([
+      userLine,
+      { type: "ai-title", aiTitle: "Login redirect investigation", sessionId },
+    ], "other-workspace");
+    await expect(sources.claude({ conversationId, sessionId })).resolves.toBeUndefined();
   });
 
   it("returns nothing before Claude has written a title", async () => {
     const sources = claudeFixture([userLine]);
-    await expect(sources.claude({ sessionId })).resolves.toBeUndefined();
+    await expect(sources.claude({ conversationId, sessionId })).resolves.toBeUndefined();
   });
 
   it("generates a Codex title through the chat's control context", async () => {
@@ -338,6 +349,7 @@ describe("conversation title sources", () => {
       store: {
         assertConversationProvider,
         conversationPath: vi.fn(() => "/workspace/chat"),
+        cliConversationImport: vi.fn(() => null),
       },
       providers: { codexControlContext, claudeSkills: vi.fn() },
     });

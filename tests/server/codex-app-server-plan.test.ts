@@ -1,5 +1,4 @@
 // @inertia-test-suite portable
-// @inertia-harness codex-app-server
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProviderManager } from "../../src/server/providers";

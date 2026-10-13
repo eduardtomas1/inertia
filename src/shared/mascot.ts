@@ -78,7 +78,7 @@ export const MASCOT_LABELS: Record<MascotPhase, string> = {
   "waiting-for-input": "Your input needed",
   cancelling: "Stopping",
   completed: "Work complete",
-  failed: "Something went wrong",
+  failed: "Work failed",
   cancelled: "Work cancelled",
   interrupted: "Work interrupted",
 };

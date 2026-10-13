@@ -25,6 +25,8 @@ const LAUNCHES = Number(process.env.INERTIA_CONTENT_BENCHMARK_LAUNCHES ?? 5);
 const WARM_CYCLES = Number(process.env.INERTIA_CONTENT_BENCHMARK_WARM_CYCLES ?? 2);
 const OLDER_PAGES = Number(process.env.INERTIA_CONTENT_BENCHMARK_OLDER_PAGES ?? 24);
 const INSTRUMENTED = process.env.INERTIA_CONTENT_BENCHMARK_INSTRUMENTED !== "0";
+const TRACE_PAGES = (process.env.INERTIA_CONTENT_BENCHMARK_TRACE_PAGES ?? "").split(",").filter(Boolean).map(Number);
+const CPU_THROTTLE = Number(process.env.INERTIA_CONTENT_BENCHMARK_CPU_THROTTLE ?? 1);
 const reportPath = resolve(process.env.INERTIA_CONTENT_BENCHMARK_REPORT
   ?? `performance-results/content-loading-desktop-${process.platform}-${process.arch}.json`);
 const profileDirectory = join(dirname(reportPath), "content-loading-profiles");
@@ -60,6 +62,10 @@ async function launch(dataDirectory: string, workspace: string, profile: string,
   await page.locator('.app-shell[data-connection-status="online"]').waitFor({ timeout: 60_000 });
   await page.getByRole("textbox", { name: "Message" }).first().waitFor({ timeout: 60_000 });
   await expect.poll(() => page.evaluate(() => Boolean(Reflect.get(window, "__contentBench")))).toBe(true);
+  if (CPU_THROTTLE > 1) {
+    const session = await page.context().newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
+  }
   return { electronApp, page, startupMs: performance.now() - startedAt };
 }
 
@@ -82,8 +88,8 @@ async function settleIdle(page: Page): Promise<void> {
   });
 }
 
-async function openChat(page: Page, title: string, marker: string): Promise<OpenChatSample> {
-  return await page.evaluate(async ({ title, marker }) => {
+async function openChat(page: Page, title: string, marker: string, rowPrefix: string): Promise<OpenChatSample> {
+  return await page.evaluate(async ({ title, marker, rowPrefix }) => {
     const bench = Reflect.get(window, "__contentBench") as {
       log: FrameRecord[]; longTasks: { start: number; duration: number }[]; commits: CommitRecord[]; census: boolean;
     };
@@ -93,24 +99,29 @@ async function openChat(page: Page, title: string, marker: string): Promise<Open
     if (!button) throw new Error(`Sidebar row ${title} is missing.`);
     const logStart = bench.log.length;
     const commitStart = bench.commits.length;
-    const visibleMarker = () => {
+    const visibleAnswer = (accept: (text: string) => boolean) => {
       const scroller = document.querySelector<HTMLElement>(".message-scroll");
       if (!scroller) return false;
       const bounds = scroller.getBoundingClientRect();
       return [...scroller.querySelectorAll("h2")].some((heading) => {
-        if (heading.textContent?.trim() !== marker) return false;
-        const rect = heading.getBoundingClientRect();
+        if (!accept(heading.textContent?.trim() ?? "")) return false;
+        const rect = (heading.parentElement ?? heading).getBoundingClientRect();
         return rect.bottom > bounds.top && rect.top < bounds.bottom && rect.height > 0;
       });
     };
+    const scrollState = () => {
+      const scroller = document.querySelector<HTMLElement>(".message-scroll");
+      return scroller ? { scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight, clientHeight: scroller.clientHeight } : null;
+    };
+    const departure = scrollState();
     const startedAt = performance.now();
     button.click();
     let visibleAt: number | null = null;
     while (performance.now() - startedAt < 30_000) {
       await nextFrame();
-      if (visibleMarker()) { visibleAt = performance.now(); break; }
+      if (visibleAnswer((text) => text.startsWith(rowPrefix))) { visibleAt = performance.now(); break; }
     }
-    if (visibleAt === null) throw new Error(`The latest answer of ${title} never became visible.`);
+    if (visibleAt === null) throw new Error(`No answer of ${title} became visible.`);
     await new Promise((resolvePaint) => requestAnimationFrame(() => setTimeout(resolvePaint, 0)));
     const paintedAt = performance.now();
     const commitsToPaint = bench.commits.length - commitStart;
@@ -133,6 +144,9 @@ async function openChat(page: Page, title: string, marker: string): Promise<Open
       ? Number(/^(\d+) conversation turns$/u.exec(feed.getAttribute("aria-label") ?? "")?.[1] ?? 0)
       : document.querySelectorAll(".response-static-item").length;
     return {
+      landedAtLatest: visibleAnswer((text) => text === marker),
+      departure,
+      arrival: scrollState(),
       clickToVisibleMs: visibleAt - startedAt,
       clickToPaintMs: paintedAt - startedAt,
       clickToSettledMs: settledAt - startedAt,
@@ -155,7 +169,7 @@ async function openChat(page: Page, title: string, marker: string): Promise<Open
       renderedRows: document.querySelectorAll(".response-virtual-item, .response-static-item").length,
       censusCommits: bench.census ? bench.commits.slice(commitStart) : [],
     };
-  }, { title, marker });
+  }, { title, marker, rowPrefix });
 }
 
 async function loadOlderPage(page: Page): Promise<OlderPageSample | null> {
@@ -164,6 +178,11 @@ async function loadOlderPage(page: Page): Promise<OlderPageSample | null> {
       log: FrameRecord[]; longTasks: { start: number; duration: number }[]; commits: CommitRecord[]; census: boolean;
     };
     const nextFrame = () => new Promise<number>((resolveFrame) => requestAnimationFrame(resolveFrame));
+    const afterPaint = () => new Promise<number>((resolvePaint) => requestAnimationFrame((frameAt) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => resolvePaint(frameAt);
+      channel.port2.postMessage(null);
+    }));
     const scroller = document.querySelector<HTMLElement>(".message-scroll");
     if (!scroller) throw new Error("Transcript is missing.");
     const turns = () => {
@@ -204,11 +223,12 @@ async function loadOlderPage(page: Page): Promise<OlderPageSample | null> {
     let maxFrameMs = 0;
     let longFrameCount = 0;
     let shiftMax = 0;
+    const shiftFrames: (number | null)[] = [];
     let stableFrames = 0;
     let lastTop: number | null = null;
     let settledAt = startedAt;
     while (performance.now() - startedAt < 30_000) {
-      const frameAt = await nextFrame();
+      const frameAt = await afterPaint();
       const interval = frameAt - previousFrame;
       previousFrame = frameAt;
       maxFrameMs = Math.max(maxFrameMs, interval);
@@ -217,6 +237,7 @@ async function loadOlderPage(page: Page): Promise<OlderPageSample | null> {
       if (countAt === null) continue;
       const top = anchorTop();
       if (top !== null && initialTop !== null) shiftMax = Math.max(shiftMax, Math.abs(top - initialTop));
+      if (shiftFrames.length < 12) shiftFrames.push(top !== null && initialTop !== null ? Math.round(top - initialTop) : null);
       stableFrames = top !== null && lastTop !== null && Math.abs(top - lastTop) < 0.5 ? stableFrames + 1 : 0;
       lastTop = top;
       const lastCommit = bench.commits.at(-1)?.t ?? 0;
@@ -239,6 +260,7 @@ async function loadOlderPage(page: Page): Promise<OlderPageSample | null> {
       turnsBefore: before,
       turnsAfter: turns(),
       anchorShiftMaxPx: shiftMax,
+      anchorShiftFrames: shiftFrames,
       anchorShiftFinalPx: finalTop !== null && initialTop !== null ? finalTop - initialTop : Number.NaN,
       longFrameCount,
       maxFrameMs,
@@ -262,6 +284,27 @@ async function profile<T>(page: Page, name: string | null, operation: () => Prom
     const { profile: cpuProfile } = await session.send("Profiler.stop");
     await mkdir(profileDirectory, { recursive: true });
     await writeFile(join(profileDirectory, `${name}.cpuprofile`), JSON.stringify(cpuProfile));
+    await session.detach();
+  }
+}
+
+async function trace<T>(page: Page, name: string | null, operation: () => Promise<T>): Promise<T> {
+  if (!name) return await operation();
+  const session = await page.context().newCDPSession(page);
+  const events: unknown[] = [];
+  session.on("Tracing.dataCollected", ({ value }) => { events.push(...value); });
+  const complete = new Promise<void>((resolveComplete) => session.once("Tracing.tracingComplete", () => resolveComplete()));
+  await session.send("Tracing.start", {
+    categories: "devtools.timeline,disabled-by-default-devtools.screenshot,blink.user_timing",
+    transferMode: "ReportEvents",
+  });
+  try {
+    return await operation();
+  } finally {
+    await session.send("Tracing.end");
+    await complete;
+    await mkdir(profileDirectory, { recursive: true });
+    await writeFile(join(profileDirectory, `${name}.trace.json`), JSON.stringify({ traceEvents: events }));
     await session.detach();
   }
 }
@@ -290,19 +333,20 @@ async function runLaunch(root: string, seed: string, workspace: string, fixture:
         const chat = fixture.chats[size];
         const cold = !opened.has(size);
         const sample = await profile(page, instrumented && cycle === 0 ? `open-${size}-cold` : null,
-          () => openChat(page, chat.title, chat.lastAnswerMarker));
+          () => openChat(page, chat.title, chat.lastAnswerMarker, chat.rowPrefix));
         opened.add(size);
         open.push({ size, cold, sample });
         await settleIdle(page);
       }
     }
     const large = fixture.chats[2_000];
-    await openChat(page, large.title, large.lastAnswerMarker);
+    await openChat(page, large.title, large.lastAnswerMarker, large.rowPrefix);
     await settleIdle(page);
     const older: OlderPageSample[] = [];
     for (let pageIndex = 0; pageIndex < OLDER_PAGES; pageIndex += 1) {
       const name = instrumented && [0, 1, 2, OLDER_PAGES - 2, OLDER_PAGES - 1].includes(pageIndex) ? `older-page-${pageIndex + 1}` : null;
-      const sample = await profile(page, name, () => loadOlderPage(page));
+      const traceName = instrumented && TRACE_PAGES.includes(pageIndex + 1) ? `older-page-${pageIndex + 1}` : null;
+      const sample = await trace(page, traceName, () => profile(page, traceName ? null : name, () => loadOlderPage(page)));
       if (!sample) break;
       older.push(sample);
       await settleIdle(page);
@@ -311,9 +355,9 @@ async function runLaunch(root: string, seed: string, workspace: string, fixture:
     if (older.length) {
       const turnsBeforeSwitch = older.at(-1)!.turnsAfter;
       const small = fixture.chats[300];
-      await openChat(page, small.title, small.lastAnswerMarker);
+      await openChat(page, small.title, small.lastAnswerMarker, small.rowPrefix);
       await settleIdle(page);
-      const reopen = await openChat(page, large.title, large.lastAnswerMarker);
+      const reopen = await openChat(page, large.title, large.lastAnswerMarker, large.rowPrefix);
       reopenAfterOlder = { turnsBeforeSwitch, turnsAfterReopen: reopen.loadedTurns, reopenMs: reopen.clickToVisibleMs };
     }
     return { startupMs: launched.startupMs, loadBefore, loadAfter: loadavg(), initialFrames, open, older, reopenAfterOlder };
@@ -342,6 +386,7 @@ function summarizeOpen(launches: LaunchResult[]) {
         longTaskMaxMs: distribution(samples.map(({ longTaskMaxMs }) => longTaskMaxMs)),
         commitsToPaint: distribution(samples.map(({ commitsToPaint }) => commitsToPaint)),
         commitsToSettled: distribution(samples.map(({ commitsToSettled }) => commitsToSettled)),
+        landedAtLatest: `${samples.filter(({ landedAtLatest }) => landedAtLatest).length}/${samples.length}`,
         loadedTurns: samples[0]!.loadedTurns,
         mountedRows: distribution(samples.map(({ renderedRows }) => renderedRows)),
         rawClickToVisibleMs: samples.map(({ clickToVisibleMs }) => Number(clickToVisibleMs.toFixed(1))),
@@ -387,6 +432,7 @@ test("records chat open and older-history paging costs", async () => {
       platform: `${process.platform}-${process.arch}`,
       cpu: cpus()[0]?.model,
       launches: LAUNCHES,
+      rendererCpuThrottle: CPU_THROTTLE,
       warmCycles: WARM_CYCLES,
       fixture,
       startupMs: distribution(launches.map(({ startupMs }) => startupMs)),

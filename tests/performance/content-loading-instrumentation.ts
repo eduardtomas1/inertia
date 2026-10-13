@@ -106,6 +106,9 @@ export interface CommitRecord {
 }
 
 export interface OpenChatSample {
+  landedAtLatest: boolean;
+  departure: { scrollTop: number; scrollHeight: number; clientHeight: number } | null;
+  arrival: { scrollTop: number; scrollHeight: number; clientHeight: number } | null;
   clickToVisibleMs: number;
   clickToPaintMs: number;
   clickToSettledMs: number;
@@ -131,6 +134,7 @@ export interface OlderPageSample {
   turnsBefore: number;
   turnsAfter: number;
   anchorShiftMaxPx: number;
+  anchorShiftFrames: (number | null)[];
   anchorShiftFinalPx: number;
   longFrameCount: number;
   maxFrameMs: number;

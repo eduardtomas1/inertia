@@ -16,7 +16,7 @@ export type ContentLoadingChatSize = typeof CONTENT_LOADING_CHAT_MESSAGES[number
 
 export interface ContentLoadingFixture {
   projectId: string;
-  chats: Record<ContentLoadingChatSize, { id: string; title: string; turns: number; lastAnswerMarker: string }>;
+  chats: Record<ContentLoadingChatSize, { id: string; title: string; turns: number; lastAnswerMarker: string; rowPrefix: string }>;
   fillerChatCount: number;
   archivedChatCount: number;
   imageCount: number;
@@ -29,6 +29,8 @@ export interface ContentLoadingFixtureOptions {
 }
 
 const BIG_OUTPUT_CHARS = 32 * 1024;
+const TURN_SPACING_MS = 5_000;
+const CHAT_SPACING_MS = 60_000;
 
 function png(width: number, height: number, seed: number): Buffer {
   const chunk = (type: string, data: Buffer) => {
@@ -148,7 +150,7 @@ function seedChat(
   const conversation = store.createConversation(projectId, title);
   let lastAnswerMarker = "";
   for (let index = 0; index < turns; index += 1) {
-    const at = (offset: number) => new Date(baseTime + index * 60_000 + offset).toISOString();
+    const at = (offset: number) => new Date(baseTime + index * TURN_SPACING_MS + offset).toISOString();
     const attachment = imageTurns.get(index);
     const { turn } = store.beginAgentTurn({
       id: `${prefix}-turn-${String(index).padStart(4, "0")}`,
@@ -236,22 +238,22 @@ export async function seedContentLoadingRuntime(
   try {
     store.updateSettings({ autoScrollToFinalAnswer: false });
     const project = store.createProject("Content loading fixture", workspace);
-    const baseTime = Date.now() - 30 * 24 * 60 * 60_000;
+    const baseTime = Date.now() - 5 * 60 * 60_000;
     for (let index = 0; index < archivedChats; index += 1) {
-      const chat = seedChat(store, project.id, `Archived chat ${index}`, 5, baseTime + index * 600_000, new Map(), `archived-${index}`);
+      const chat = seedChat(store, project.id, `Archived chat ${index}`, 5, baseTime + index * CHAT_SPACING_MS, new Map(), `archived-${index}`);
       store.archiveConversation(chat.id, true);
     }
     for (let index = 0; index < fillerChats; index += 1) {
-      seedChat(store, project.id, `Filler chat ${index}`, 3, baseTime + (archivedChats + index) * 600_000, new Map(), `filler-${index}`);
+      seedChat(store, project.id, `Filler chat ${index}`, 3, baseTime + (archivedChats + index) * CHAT_SPACING_MS, new Map(), `filler-${index}`);
     }
     const chats = {} as ContentLoadingFixture["chats"];
-    let offset = (archivedChats + fillerChats) * 600_000;
+    let offset = (archivedChats + fillerChats) * CHAT_SPACING_MS;
     for (const size of CONTENT_LOADING_CHAT_MESSAGES) {
       const turns = size / 2;
       const title = `History ${size} messages`;
       const chat = seedChat(store, project.id, title, turns, baseTime + offset, imagesByChat.get(size) ?? new Map(), `history-${size}`);
-      offset += turns * 60_000 + 600_000;
-      chats[size] = { id: chat.id, title, turns, lastAnswerMarker: chat.lastAnswerMarker };
+      offset += turns * TURN_SPACING_MS + CHAT_SPACING_MS;
+      chats[size] = { id: chat.id, title, turns, lastAnswerMarker: chat.lastAnswerMarker, rowPrefix: `history-${size} answer ` };
     }
     store.selectConversation(chats[50].id);
     return { projectId: project.id, chats, fillerChatCount: fillerChats, archivedChatCount: archivedChats, imageCount };

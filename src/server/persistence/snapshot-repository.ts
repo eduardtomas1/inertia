@@ -65,6 +65,7 @@ import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import { TodoRepository } from "./todo-repository";
 import { cachedStatement } from "./statement-cache";
+import { withLatestPlanDocument } from "./latest-plan-document";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
 import {
   MESSAGE_PROJECTION_COLUMNS,
@@ -231,6 +232,7 @@ export class SnapshotRepository {
     };
     const page = (records: HistoryPageRecords, omittedTurnIds: string[] = []): ConversationDetail | null => {
       const detail: ConversationDetail = { ...shared, ...records,
+        ...(latest ? { plans: withLatestPlanDocument(this.context.database, conversationId, records.plans) } : {}),
         history: { older: scope.older, ...(omittedTurnIds.length ? { omittedTurnIds } : {}) } };
       return Buffer.byteLength(JSON.stringify(detail), "utf8") <= MAX_CONVERSATION_HISTORY_BYTES ? detail : null;
     };

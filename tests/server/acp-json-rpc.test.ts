@@ -4,6 +4,19 @@ import { describe, expect, it } from "vitest";
 import { parseAcpSessionNotification } from "../../src/server/provider/acp-json-rpc";
 
 describe("ACP session update validation", () => {
+  it("accepts plan entries the agent cancelled", () => {
+    for (const update of [
+      { sessionUpdate: "plan", entries: [{ content: "Rewrite", priority: "low", status: "cancelled" }] },
+      { sessionUpdate: "plan_update", plan: { type: "items", planId: "plan-1", entries: [{ content: "Rewrite", priority: "low", status: "cancelled" }] } },
+    ]) {
+      expect(parseAcpSessionNotification({ sessionId: "session-1", update }).update).toEqual(update);
+    }
+    expect(() => parseAcpSessionNotification({
+      sessionId: "session-1",
+      update: { sessionUpdate: "plan", entries: [{ content: "Rewrite", priority: "low", status: "skipped" }] },
+    })).toThrow("ACP sent a malformed session update envelope.");
+  });
+
   it("accepts bounded compaction lifecycle and retained-summary frames", () => {
     expect(parseAcpSessionNotification({
       sessionId: "session-1",

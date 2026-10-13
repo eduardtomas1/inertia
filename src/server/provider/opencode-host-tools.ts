@@ -47,6 +47,7 @@ export function openCodePermissions(
     { permission: "*", pattern: "*", action: "ask" },
     ...(access === "auto-edit" ? [{ permission: "edit", pattern: "*", action: "allow" } as const] : []),
     { permission: "question", pattern: "*", action: "allow" },
+    { permission: "todowrite", pattern: "*", action: "allow" },
     {
       // OpenCode 1.18.18's McpCatalog.toolName emits
       // `${sanitize(server)}_${sanitize(tool)}` and evaluates the last

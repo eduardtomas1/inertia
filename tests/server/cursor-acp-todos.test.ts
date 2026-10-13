@@ -164,6 +164,18 @@ describe("Cursor ACP todo snapshots", { concurrent: false }, () => {
     ]);
   });
 
+  it("keeps cancelled ACP plan entries cancelled", async () => {
+    const turn = await runTurns({
+      first: [
+        { plan: [{ content: "E", priority: "medium", status: "completed" }, { content: "F", priority: "low", status: "cancelled" }, { content: "G", priority: "high", status: "in_progress" }] },
+      ],
+    });
+
+    await expect(turn("first")).resolves.toEqual([
+      ["E:completed", "F:cancelled", "G:inProgress"],
+    ]);
+  });
+
   it("keeps cancelled native todos cancelled across later updates", async () => {
     const turn = await runTurns({
       first: [

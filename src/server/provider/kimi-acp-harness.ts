@@ -1038,7 +1038,7 @@ function handleKimiUpdate(
       }
       return;
     case "plan_removed":
-      emitter.rich({ type: "plan", explanation: null, steps: [] });
+      emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
       return;

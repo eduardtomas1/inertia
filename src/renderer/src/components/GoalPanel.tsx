@@ -428,11 +428,12 @@ function PlanRelationship({
     );
   }
   const completed = plan.steps.filter(({ status }) => status === "completed").length;
+  const counted = plan.steps.filter(({ status }) => status !== "cancelled").length;
   const active = plan.steps.find(({ status }) => status === "inProgress");
   return (
     <div className="goal-panel-plan">
       <div>
-        <strong>{completed} of {plan.steps.length} plan steps complete</strong>
+        <strong>{completed} of {counted} plan steps complete</strong>
         <span>{active?.step ?? plan.explanation ?? "No active plan step"}</span>
       </div>
     </div>

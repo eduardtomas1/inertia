@@ -2,6 +2,7 @@ import { render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { AgentPlan } from "../../src/shared/contracts";
+import { GoalPanel } from "../../src/renderer/src/components/GoalPanel";
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
 import { PlanDetail } from "../../src/renderer/src/components/response-timeline/PlanDetail";
 import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
@@ -25,10 +26,15 @@ describe("cancelled native plan steps", () => {
     expect(result.current.map(({ status }) => status)).toEqual(["completed", "cancelled"]);
 
     render(<PlanPanel steps={result.current} />);
-    expect(screen.getByText("1 of 2 complete")).toBeTruthy();
+    expect(screen.getByText("1 of 1 complete")).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(document.querySelector('[data-plan-step-status="cancelled"]')).not.toBeNull();
+  });
+
+  it("counts a plan whose remaining steps are done as complete", () => {
+    render(<GoalPanel workflow={null} plan={plan} subagents={[]} turns={[]} />);
+    expect(screen.getByText("1 of 1 plan steps complete")).toBeTruthy();
   });
 
   it("does not mark cancelled steps done in the turn plan detail", () => {

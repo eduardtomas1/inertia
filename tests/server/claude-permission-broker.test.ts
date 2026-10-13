@@ -1,26 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
+import {
+  createAgentHarnessEmitter,
+  type AgentHarnessEvent,
+} from "../../src/server/provider/agent-harness";
 import { ClaudePermissionBroker } from "../../src/server/provider/claude-permission-broker";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const HOST_TOOL = `mcp__${INERTIA_HOST_MCP_NAME}__inertia_create_conversation`;
 
-function broker(providerNativeToolsAvailable: boolean): ClaudePermissionBroker {
+function broker(
+  providerNativeToolsAvailable: boolean,
+  interactionMode: "build" | "plan" = "build",
+  events: AgentHarnessEvent[] = [],
+): ClaudePermissionBroker {
   return new ClaudePermissionBroker({
     input: nativeProviderRunInput({
       providerId: "claude",
       conversationId: "claude-permission-broker",
       cwd: "/workspace",
       prompt: "Use the tools",
-      interactionMode: "build",
+      interactionMode,
       access: "supervised",
     }),
     emitter: createAgentHarnessEmitter(
       "claude",
       "claude-permission-broker",
-      undefined,
+      { onEvent: (event) => events.push(event) },
       "claude-permission-broker-run",
       "claude-permission-broker-turn",
     ),
@@ -56,5 +63,22 @@ describe("Claude permission broker", () => {
   ])("denies a malformed question request instead of failing the callback", async (input, message) => {
     await expect(broker(true).canUseTool("AskUserQuestion", input, callbackOptions()))
       .resolves.toEqual({ behavior: "deny", message });
+  });
+
+  it.each([
+    ["TodoWrite", { todos: [{ content: "Ship", status: "in_progress", activeForm: "Shipping" }] }],
+    ["TaskCreate", { subject: "Ship", description: "Ship the change" }],
+    ["TaskUpdate", { taskId: "1", status: "completed" }],
+    ["TaskList", {}],
+    ["TaskGet", { taskId: "1" }],
+  ] as const)("lets Claude keep its own %s checklist without asking the user", async (toolName, input) => {
+    for (const mode of ["build", "plan"] as const) {
+      const events: AgentHarnessEvent[] = [];
+      await expect(broker(true, mode, events).canUseTool(toolName, input, callbackOptions()))
+        .resolves.toEqual({ behavior: "allow", updatedInput: input });
+      expect(events).toEqual([]);
+    }
+    await expect(broker(false).canUseTool(toolName, input, callbackOptions()))
+      .resolves.toMatchObject({ behavior: "deny" });
   });
 });

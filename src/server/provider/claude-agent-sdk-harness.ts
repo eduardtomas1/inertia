@@ -22,6 +22,7 @@ import {
 } from "./claude-owned-query";
 import { emitClaudeModelMetadata } from "./claude-agent-sdk-metadata";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
+import { ClaudeChecklistSessions } from "./claude-checklist-projection";
 import { ClaudeRunEventBudget } from "./claude-event-budget";
 import {
   createAgentHarnessEmitter,
@@ -163,6 +164,7 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
   const terminalSubagentDrainTimeoutMs = claudeTerminalSubagentDrainTimeout(
     options.terminalSubagentDrainTimeoutMs,
   );
+  const checklistSessions = new ClaudeChecklistSessions();
   return {
     id: "claude-agent-sdk",
     providerId: "claude",
@@ -175,6 +177,7 @@ export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOption
       stopTaskTimeoutMs,
       terminalSubagentDrainTimeoutMs,
       options.skillFilesystem,
+      checklistSessions,
     ),
   };
 }
@@ -186,6 +189,7 @@ function startClaudeRun(
   stopTaskTimeoutMs: number,
   terminalSubagentDrainTimeoutMs: number,
   skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
+  checklistSessions: ClaudeChecklistSessions,
 ): AgentHarnessRun {
   const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
@@ -218,6 +222,7 @@ function startClaudeRun(
   const pendingFollowUpIds = new Set<string>();
   let sessionId = options.input.sessionId;
   let authoritativeSessionId = options.input.sessionId;
+  let checklistTasks = checklistSessions.tasks(sessionId);
   let pendingSessionReset: { outgoingId: string; candidateId?: string } | undefined;
   let contextUsageGeneration = 0;
   let latestContextUsage: unknown;
@@ -301,6 +306,7 @@ function startClaudeRun(
       latestContextUsage = usage;
     },
     refreshContextUsage,
+    checklistTasks: () => checklistTasks,
   });
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
@@ -528,6 +534,7 @@ function startClaudeRun(
           && record.session_id !== sessionId
         ) {
           sessionId = record.session_id;
+          checklistTasks = checklistSessions.tasks(sessionId);
           emitter.session(sessionId);
         }
         const hadLiveTaskTrace = subagentTracker.hasLiveTasks();

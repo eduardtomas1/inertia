@@ -182,7 +182,7 @@ export function handleCodexItem(
     ) host.options.onTextBoundary?.();
   } else if (itemType === "plan" && method === "item/completed") {
     const text = boundedText(item.text, 128_000);
-    if (text) host.options.onPlan?.(text, []);
+    if (text) host.options.onPlanItem?.(text);
     if (
       activityId
       && state.completedPlanItemIds.size < state.maxTrackedActivities

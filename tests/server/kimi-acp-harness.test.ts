@@ -349,6 +349,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     promptId = message.id;
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Inspecting" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: [{ content: "Inspect", priority: "medium", status: "completed" }, { content: "Implement", priority: "high", status: "in_progress" }] } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan_removed", planId: "plan-1" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Run checks", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "completed", rawOutput: "green" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 125, size: 1000 } } });
@@ -409,6 +410,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const questions: string[] = [];
     const approvals: string[] = [];
     const plans: string[] = [];
+    const planExplanations: Array<string | null> = [];
     const thoughts: string[] = [];
     const usage: Array<number | null> = [];
     const metadata: Array<Array<{
@@ -441,7 +443,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
-      onPlan: ({ steps }) => plans.push(...steps.map(({ step }) => step)),
+      onPlan: ({ explanation, steps }) => {
+        planExplanations.push(explanation);
+        plans.push(...steps.map(({ step }) => step));
+      },
       onReasoning: ({ text }) => thoughts.push(text),
       onUsage: ({ usage: value }) => usage.push(value.usedTokens),
       onMetadata: ({ metadata: value }) => {
@@ -460,6 +465,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     ]);
     expect(approvals).toEqual([]);
     expect(plans).toEqual(["Inspect", "Implement"]);
+    expect(planExplanations).toEqual([null, ""]);
     expect(thoughts).toEqual(["Inspecting"]);
     expect(usage).toEqual([125, 125]);
     expect(metadata.at(-1)).toEqual(expect.arrayContaining([

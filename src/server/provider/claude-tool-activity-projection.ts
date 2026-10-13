@@ -1,5 +1,6 @@
 import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
+import { ClaudeChecklistProjection, type ClaudeChecklistTasks } from "./claude-checklist-projection";
 import {
   boundedClaudeEventText as bounded,
   boundedClaudeIdentifier as boundedIdentifier,
@@ -21,8 +22,15 @@ export class ClaudeToolActivityProjection {
   private readonly completed = new BoundedStringSet(MAX_TRACKED_MESSAGE_IDS);
   private readonly projectedPlans = new BoundedStringSet(MAX_TRACKED_MESSAGE_IDS);
   private readonly activities = new Map<string, ClaudeToolActivity>();
+  private readonly checklist: ClaudeChecklistProjection;
 
-  constructor(private readonly emitter: AgentHarnessEmitter) {}
+  constructor(
+    private readonly emitter: AgentHarnessEmitter,
+    checklistTasks?: () => ClaudeChecklistTasks,
+  ) {
+    const tasks: ClaudeChecklistTasks = new Map();
+    this.checklist = new ClaudeChecklistProjection(emitter, checklistTasks ?? (() => tasks));
+  }
 
   isCompleted(activityId: string): boolean {
     return this.completed.has(activityId);
@@ -61,6 +69,7 @@ export class ClaudeToolActivityProjection {
         if (activityId) this.projectedPlans.add(activityId);
       }
     }
+    this.checklist.start(name, activityId, input);
     if (activityId && this.completed.has(activityId)) return;
     const command = name === "Bash" && typeof input?.command === "string" && input.command
       ? input.command
@@ -82,9 +91,11 @@ export class ClaudeToolActivityProjection {
     });
   }
 
-  result(result: Record<string, unknown>): void {
+  result(result: Record<string, unknown>, output?: unknown): void {
     const activityId = boundedIdentifier(result.tool_use_id);
-    if (!activityId || this.completed.has(activityId)) return;
+    if (!activityId) return;
+    this.checklist.result(activityId, result.is_error === true, output);
+    if (this.completed.has(activityId)) return;
     const activity = this.activities.get(activityId);
     // Replayed history and malformed out-of-order results must not create
     // ghost transcript activities without a matching provider tool call.

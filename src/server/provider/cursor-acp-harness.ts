@@ -936,7 +936,7 @@ function handleCursorUpdate(
       }
       return;
     case "plan_removed":
-      emitter.rich({ type: "plan", explanation: null, steps: [] });
+      emitter.rich({ type: "plan", explanation: "", steps: [] });
       return;
     case "available_commands_update":
       // The enclosing notification handler retains the bounded command set.
@@ -1020,8 +1020,8 @@ function cursorPlanSteps(
     step: bounded(entry.content),
     status: entry.status === "in_progress"
       ? "inProgress"
-      : entry.status === "completed"
-        ? "completed"
+      : entry.status === "completed" || entry.status === "cancelled"
+        ? entry.status
         : "pending",
   }));
 }

@@ -274,10 +274,11 @@ describe("conversation title sources", () => {
     process.env.CLAUDE_CONFIG_DIR = join(root, "config");
     return conversationTitleSources({
       store: {
+        assertConversationProvider: vi.fn(),
         conversationPath: vi.fn(() => workspace),
         cliConversationImport: vi.fn(() => null),
       },
-      providers: { codexControlContext: vi.fn() },
+      providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() },
     });
   }
 
@@ -315,15 +316,18 @@ describe("conversation title sources", () => {
     }));
     generateCodexThreadTitle.mockResolvedValue("Login redirect loop");
     const signal = new AbortController().signal;
+    const assertConversationProvider = vi.fn();
     const sources = conversationTitleSources({
       store: {
+        assertConversationProvider,
         conversationPath: vi.fn(() => "/workspace/chat"),
         cliConversationImport: vi.fn(() => null),
       },
-      providers: { codexControlContext },
+      providers: { codexControlContext, claudeSkills: vi.fn() },
     });
     await expect(sources.codex({ conversationId, model: "gpt-test", prompt: firstPrompt, signal }))
       .resolves.toBe("Login redirect loop");
+    expect(assertConversationProvider).toHaveBeenCalledWith(conversationId, "codex");
     expect(codexControlContext).toHaveBeenCalledWith("/workspace/chat");
     expect(generateCodexThreadTitle).toHaveBeenCalledWith({
       executable: "/bin/codex",
@@ -335,5 +339,12 @@ describe("conversation title sources", () => {
       signal,
     });
     expect(abandonBeforeSpawn).toHaveBeenCalledOnce();
+
+    assertConversationProvider.mockImplementation(() => {
+      throw new Error("This chat now uses another provider.");
+    });
+    await expect(sources.codex({ conversationId, model: "gpt-test", prompt: firstPrompt, signal }))
+      .rejects.toThrow("another provider");
+    expect(generateCodexThreadTitle).toHaveBeenCalledOnce();
   });
 });

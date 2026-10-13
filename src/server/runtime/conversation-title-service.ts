@@ -5,6 +5,7 @@ import type { RuntimeStore } from "../database";
 import { readClaudeSessionTitle } from "../provider/claude-session-title";
 import type { ProviderManager } from "../providers";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
+import { ConversationProviderContact } from "./conversation-provider-contact";
 import {
   isUntitledConversationTitle,
   normalizeGeneratedTitle,
@@ -114,17 +115,18 @@ export function createConversationTitleService(
 }
 
 export function conversationTitleSources(dependencies: {
-  store: Pick<RuntimeStore, "conversationPath" | "cliConversationImport">;
-  providers: Pick<ProviderManager, "codexControlContext">;
+  store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath" | "cliConversationImport">;
+  providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
 }): ConversationTitleSources {
-  const { store, providers } = dependencies;
+  const { store } = dependencies;
+  const contact = new ConversationProviderContact(store, dependencies.providers);
   return {
     claude: async ({ conversationId, sessionId }) => {
       const dir = importedResumeCwd(store, conversationId, sessionId, store.conversationPath(conversationId));
       return await readClaudeSessionTitle(sessionId, dir);
     },
     codex: async ({ conversationId, model, prompt, signal }) => {
-      const context = await providers.codexControlContext(store.conversationPath(conversationId));
+      const context = await contact.codexControl(conversationId);
       return await generateCodexThreadTitle({ ...context, model, prompt, signal })
         .finally(() => { context.installationUse.abandonBeforeSpawn(); });
     },
@@ -134,9 +136,10 @@ export function conversationTitleSources(dependencies: {
 export function createConversationTitleRuntime(dependencies: {
   store: Pick<
     RuntimeStore,
-    "conversation" | "firstUserMessage" | "updateConversation" | "conversationPath" | "cliConversationImport"
+    | "assertConversationProvider" | "conversation" | "firstUserMessage" | "updateConversation"
+    | "conversationPath" | "cliConversationImport"
   >;
-  providers: Pick<ProviderManager, "codexControlContext">;
+  providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
   backendProfileController: Pick<BackendProfileController, "isExternalSelection">;
   broadcastSnapshot(): void;
   track(operation: () => Promise<void>): Promise<void>;

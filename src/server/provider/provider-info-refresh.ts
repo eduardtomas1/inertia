@@ -9,6 +9,7 @@ import { PROVIDER_METADATA_TIMEOUT_MS } from "./metadata";
 import { MAX_PROBE_DEADLINE_MS, slowMachineProbeDeadline } from "./probe-deadline";
 
 const DETECTION_TIMEOUT_MS = 4_000;
+const MAX_RETRY_DETECTION_TIMEOUT_MS = 16_000;
 const DETECTION_RETRY_DELAYS_MS = [1_000, 3_000, 9_000];
 
 export interface ProviderInfoRefreshDependencies {
@@ -238,7 +239,7 @@ export function createProviderInfoRefresh(
       const id = previous.provider.id;
       const detection = await dependencies.providers.detect(id, {
         cwd: dependencies.defaultWorkspacePath,
-        timeoutMs: DETECTION_TIMEOUT_MS * 2 ** attempt,
+        timeoutMs: Math.min(MAX_RETRY_DETECTION_TIMEOUT_MS, DETECTION_TIMEOUT_MS * 2 ** attempt),
         refreshEnvironment: false,
         signal: dependencies.lifetimeSignal,
       });

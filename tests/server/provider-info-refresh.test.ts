@@ -468,6 +468,8 @@ describe("provider info refresh ownership", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(runtime.detect).toHaveBeenCalledTimes(4);
+      expect(runtime.detect.mock.calls.map((call) => (call as unknown as [string, { timeoutMs: number }])[1].timeoutMs))
+        .toEqual([4_000, 8_000, 16_000, 16_000]);
       expect(runtime.codex()).toMatchObject({
         installState: "installed",
         canRun: false,

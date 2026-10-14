@@ -227,7 +227,7 @@ export function createProviderInfoRefresh(
         && attempt < retryDelaysMs.length
         && owners.get(id) === owner
         && !dependencies.isClosed()
-        && dependencies.providers.metadataReadFailed(id)
+        && dependencies.providers.metadataReadTimedOut(id)
       ) {
         later(id, attempt, async () => await settle(detection, attempt + 1), () => undefined);
       }

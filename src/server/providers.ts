@@ -916,8 +916,8 @@ export class ProviderManager {
     return this.metadataCache.current(providerId);
   }
 
-  metadataReadFailed(providerId: ProviderId): boolean {
-    return this.metadataCache.lastReadFailed(providerId);
+  metadataReadTimedOut(providerId: ProviderId): boolean {
+    return this.metadataCache.lastReadTimedOut(providerId);
   }
 
   cachedMetadataForSelection(selectionInput: ModelSelection): ProviderMetadata {

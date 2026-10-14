@@ -413,6 +413,15 @@ export function validateProviderRateLimits(value: unknown): ProviderRateLimit[] 
   }).slice(0, MAX_RATE_LIMITS);
 }
 
+function timedOut(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
+    if (/timed out/iu.test(current.message)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
 function timestamp(value: string | null): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -500,7 +509,7 @@ export class ProviderMetadataCache {
   private readonly entries = new Map<string, CachedProviderMetadata>();
   private readonly nativeScopeKeys = new Map<ProviderId, string>();
   private readonly inFlight = new Map<string, InFlightRefresh>();
-  private readonly failedReads = new Set<string>();
+  private readonly timedOutReads = new Set<string>();
   private readonly probeLatencies = new Map<ProviderId, number>();
   private readonly persistence?: ProviderMetadataPersistence;
   private readonly reader: typeof readProviderMetadata;
@@ -528,8 +537,8 @@ export class ProviderMetadataCache {
     return this.currentScoped(this.nativeScope(providerId));
   }
 
-  lastReadFailed(providerId: ProviderId): boolean {
-    return this.failedReads.has(currentProviderMetadataScopeKey(this.nativeScope(providerId)));
+  lastReadTimedOut(providerId: ProviderId): boolean {
+    return this.timedOutReads.has(currentProviderMetadataScopeKey(this.nativeScope(providerId)));
   }
 
   processCleanupConfirmed(providerId?: ProviderId): boolean {
@@ -692,7 +701,7 @@ export class ProviderMetadataCache {
     }
     if (learned) {
       entry.revision += 1;
-      this.failedReads.delete(currentProviderMetadataScopeKey(scope));
+      this.timedOutReads.delete(currentProviderMetadataScopeKey(scope));
     }
     this.persist(entry);
     return this.currentScoped(scope);
@@ -815,7 +824,8 @@ export class ProviderMetadataCache {
       }
       if (signal?.aborted) return;
       if (entry.revision !== revision) return;
-      this.failedReads.add(currentProviderMetadataScopeKey(scope));
+      if (timedOut(error)) this.timedOutReads.add(currentProviderMetadataScopeKey(scope));
+      else this.timedOutReads.delete(currentProviderMetadataScopeKey(scope));
       for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
       for (const field of fields) if (entry[field].values.length > 0) entry[field].stale = true;
       this.persist(entry);
@@ -823,7 +833,7 @@ export class ProviderMetadataCache {
     }
     // The reader settled its owned process tree, so earlier doubt is lifted.
     this.cleanupUnconfirmedProviders.delete(scope.providerId);
-    this.failedReads.delete(currentProviderMetadataScopeKey(scope));
+    this.timedOutReads.delete(currentProviderMetadataScopeKey(scope));
 
     if (entry.revision !== revision) return;
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;

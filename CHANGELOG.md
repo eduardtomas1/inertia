@@ -123,7 +123,6 @@ mascot follows several chats at once.
   the context tool, takes linear time; a 32 KB command took about 0.9 s.
   Claude chat titles are read from the chat's own project folder instead of
   every Claude project.
-
 - **Update everything**: when updates are available, the update control in
   the sidebar offers Inertia and every installed provider together, for
   example **Update Inertia and 2 providers** or **Update Codex**. The dialog

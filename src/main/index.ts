@@ -2,6 +2,7 @@ import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
+import { MascotFeedMemory } from "./mascot-feed-memory.js";
 import { DeferredWindowCreation } from "./deferred-window-creation.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
@@ -162,7 +163,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 const shownNotifications = new Set<Notification>();
 let mascotMain: MascotMain | null = null;
-let mascotFeed: Parameters<MascotMain["observe"]>[0] | null = null;
+const mascotFeed = new MascotFeedMemory();
 const mainWindowCreation = new MainWindowCreation();
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
@@ -787,7 +788,7 @@ async function createMainWindow(): Promise<void> {
     feedRejected: () => runtimeDiagnostics?.record("mascot.feed-rejected"),
   });
   mascotMain.attach();
-  if (firstMascot && mascotFeed) mascotMain.observe(mascotFeed);
+  if (firstMascot) mascotFeed.replay(mascotMain);
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
     window.webContents,
   );
@@ -1089,10 +1090,11 @@ async function bootstrap(): Promise<void> {
       }));
       return child;
     },
-    onMascotStatus: (feed) => { mascotFeed = feed; return feed ? mascotMain?.observe(feed) : mascotMain?.reject(); },
+    onMascotStatus: (feed) => { mascotFeed.status(feed); return feed ? mascotMain?.observe(feed) : mascotMain?.reject(); },
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {
+      mascotFeed.runtimePhase(snapshot.phase);
       mascotMain?.runtimePhase(snapshot.phase);
       appUpdateRuntimeReadiness.observe(snapshot);
       suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);

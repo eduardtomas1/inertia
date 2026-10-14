@@ -14,6 +14,7 @@ import type {
   SubagentTrace,
   TurnGitArtifact,
 } from "../../src/shared/contracts";
+import { virtualWindowCoversViewport } from "../../src/renderer/src/components/response-timeline/useViewportSyncedVirtualizer";
 import { taskTrace } from "./background-task-fixtures";
 import {
   buildResponseTimeline,
@@ -391,6 +392,27 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(shortEstimate).toBeLessThan(320);
     expect(longEstimate).toBeGreaterThan(shortEstimate * 8);
     expect(longEstimate).toBeLessThanOrEqual(12_400);
+  });
+
+  it("prices Markdown blocks by the rendered answer typography", () => {
+    const lead = Array.from({ length: 8 }, (_, index) =>
+      `Paragraph ${index} keeps this answer above the minimum row height.`).join("\n\n");
+    const estimate = (body: string): number =>
+      estimateTimelineRowSize(buildItem({ id: "typography", answer: `${lead}\n\n${body}` }));
+    const list = (items: number): string =>
+      Array.from({ length: items }, (_, index) => `- Item ${index}`).join("\n");
+    const table = (rows: number): string => [
+      "| File | Status |",
+      "| --- | --- |",
+      ...Array.from({ length: rows }, (_, index) => `| src/file-${index}.ts | modified |`),
+    ].join("\n");
+    const wrapped = (lines: number): string => "word ".repeat(18 * lines).trim();
+
+    expect(estimate(wrapped(3)) - estimate(wrapped(1))).toBe(2 * 23);
+    expect(estimate(list(6)) - estimate(list(1))).toBe(5 * (23 + 6));
+    expect(estimate(table(5)) - estimate(table(1))).toBe(4 * 36);
+    expect(estimate("# Heading") - estimate("## Heading")).toBe(30 - 24);
+    expect(estimate("## Heading") - estimate("### Heading")).toBe(24 - 20);
   });
 
   it("estimates a settled follow-up exchange that stays visible outside the work details", () => {
@@ -971,5 +993,30 @@ describe("quiet-ledger timeline virtualization estimates", () => {
       memoInput(settled, baseProps, [working]),
       memoInput(settled, baseProps, [working, settledTrace]),
     )).toBe(false);
+  });
+});
+
+describe("virtual window viewport coverage", () => {
+  const rendered = { start: 1_000, end: 6_000, totalSize: 40_000 };
+
+  it("lets a scroll inside the rendered rows paint before React re-renders", () => {
+    expect(virtualWindowCoversViewport(rendered, 1_000, 700, 40_000)).toBe(true);
+    expect(virtualWindowCoversViewport(rendered, 5_300, 700, 40_000)).toBe(true);
+  });
+
+  it("renders synchronously when the viewport leaves the rendered rows", () => {
+    expect(virtualWindowCoversViewport(rendered, 999, 700, 40_000)).toBe(false);
+    expect(virtualWindowCoversViewport(rendered, 5_301, 700, 40_000)).toBe(false);
+    expect(virtualWindowCoversViewport(rendered, 20_000, 700, 40_000)).toBe(false);
+  });
+
+  it("renders synchronously after a measurement changed the layout", () => {
+    expect(virtualWindowCoversViewport(rendered, 2_000, 700, 39_880)).toBe(false);
+  });
+
+  it("renders synchronously before anything was rendered or measured", () => {
+    expect(virtualWindowCoversViewport(null, 2_000, 700, 40_000)).toBe(false);
+    expect(virtualWindowCoversViewport(rendered, null, 700, 40_000)).toBe(false);
+    expect(virtualWindowCoversViewport(rendered, 2_000, undefined, 40_000)).toBe(false);
   });
 });

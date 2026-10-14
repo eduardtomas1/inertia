@@ -10,8 +10,8 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { resolveMessageSearchDestination, useMessageSearchFocus } from "./useMessageSearchFocus";
+import { useViewportSyncedVirtualizer } from "./useViewportSyncedVirtualizer";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -488,7 +488,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     estimateKey,
     timeline,
   ]);
-  const virtualizer = useVirtualizer({
+  const [virtualizer, measureVirtualRow] = useViewportSyncedVirtualizer({
     count: timeline.length,
     enabled: virtualized,
     getScrollElement: () => props.scrollElementRef?.current ?? null,
@@ -1212,7 +1212,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
                   aria-posinset={virtualItem.index + 1}
                   aria-setsize={timeline.length}
                   aria-label={responseTimelineArticleLabel(item, props.providerIdentityLabels)}
-                  ref={virtualizer.measureElement}
+                  ref={measureVirtualRow}
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >
                   {renderItem(item)}

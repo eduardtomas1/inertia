@@ -644,10 +644,12 @@ export function ChatWorkspace({
       || navigationRef.current.conversationId !== event.conversationId
     ) return;
 
-    pendingFinalAnswerNavigationRef.current = {
-      conversationId: event.conversationId,
-      followsLatest: event.followsLatest,
-    };
+    if (navigationRef.current.mode !== (event.followsLatest ? "follow-latest" : "reading-history")) {
+      pendingFinalAnswerNavigationRef.current = {
+        conversationId: event.conversationId,
+        followsLatest: event.followsLatest,
+      };
+    }
     dispatchNavigation({
       type: "reader.scrolled",
       conversationId: event.conversationId,

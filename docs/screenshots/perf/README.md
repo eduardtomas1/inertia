@@ -246,3 +246,63 @@ The plan's 50% target for a single forced Claude refresh at normal speed is not 
 
 - Reusing the `--version` answer for an unchanged executable file: worth about 330 ms of the 2.34 s refresh at 1x (14%), but the probe is also the liveness and identity proof the installation authority settles on, and a broken binary with an unchanged file would then be classified by the sign-in check instead ("Sign in required" rather than "Detection failed"). Not done.
 - Starting the sign-in check or the SDK session alongside the version probe: would hand credentials to a candidate before it answered `--version`, and the best case still leaves the SDK session on the critical path (about 37% at 1x). Not done.
+
+## PW2: older content
+
+Content loading: `tests/performance/content-loading.benchmark.spec.ts` (`playwright.content-benchmark.config.ts`), production build, M5 Pro, 5 launches per run, chats of 50, 300 and 2,000 messages, all 24 older pages of the 2,000-message chat. `INERTIA_CONTENT_BENCHMARK_OLDER_TRIGGER=scroll` replaces the click on "Load earlier messages" with a reader scrolling up 120 px per frame. Median/p95 in ms; runs with a 1-minute load above 6 were discarded and repeated. Raw JSON stays in the untracked `performance-results/`.
+
+### Load older pages near the top and prefetch the next one (kept)
+
+Before: older messages appeared only after a click on "Load earlier
+messages" at the very top. After: scrolling up (wheel, touch, scrollbar
+or keyboard) to within one viewport of the top requests the next page,
+and the page before it is fetched at idle and held until it is asked
+for. The button stays for keyboard users and as the fallback.
+
+Reader scrolling up through the 2,000-message chat (load 2.6-3.4):
+
+| | Before | After |
+| --- | --- | --- |
+| Older pages loaded without a click | 0 of 24 | 24 of 24, 40 turns each |
+| Reader reached the top and waited | 5 of 5 launches, nothing loads | never |
+| Time from one viewport of the top to new turns | needs a click (click to turns 39.8/45.0) | 38.0/46.8 |
+| First page (no prefetch yet) | 36.4/36.8 after the click | 55.9/57.5, while the reader is still a viewport away |
+| Pages 2-24 (prefetched) | 35.8-44.8 after each click | 33.4-44.7 |
+| Detail requests in flight at once | 1 | 1 |
+| Anchor drift after settling | 0 px | 0 px |
+
+While the reader keeps scrolling, one frame per page shows the tracked row 53-102 px off before the anchor restore lands (the click path shows the same one-frame sample at 188-283 px). `npm run benchmark:desktop:built`, 3 runs before and 6 after (load 1.8-3.6): long-conversation p95 frame 8.6 -> 8.5 ms, jump to latest 43.1 -> 42.1 ms, first window and shutdown within noise; reader navigation 141.9/175.1 -> 150.4/183.6 ms in both after series, not explained yet.
+
+### Tried, dropped
+
+#### Keep the last three chats' loaded pages (branch `work/perf-fix-content-cache`)
+
+Acceptance was a warm reopen of the 2,000-message chat at least 25 ms
+faster. Painting the cached detail removes the detail round trip, but the
+reopen still waits for the snapshot round trip and the full-app re-render
+it causes, so at 60 Hz it saves one frame, not two. Load 2.2-4.3.
+
+| | Before | After |
+| --- | --- | --- |
+| Open 2,000-message chat, warm | 68.1/70.6 | 48.3/52.2 |
+| Open 300-message chat, warm | 67.0/67.8 | 46.9/50.0 |
+| Open 50-message chat, warm | 58.0/69.2 | 40.4/49.5 |
+| Turns shown after loading 1,000, switching away and back | 40 | 1,000 |
+
+Seeding the cache during render instead of in a layout effect made the
+2,000-message reopen slower (69.2/87.4), so that variant was dropped too.
+
+#### Reuse row estimates when older pages are prepended (branch `work/perf-fix-content-pages`)
+
+Acceptance was page 24 within 20% of page 1. Result to turns in the DOM,
+two runs of 5 launches, load 1.6-4.3:
+
+| | Before | After (run 1) | After (run 2) |
+| --- | --- | --- | --- |
+| Page 1 | 20.1/20.4 | 18.9/21.0 | 18.6/20.0 |
+| Page 24 | 27.9/28.1 | 22.7/24.9 | 24.5/25.8 |
+| Page 24 over page 1 | +39% | +20% | +32% |
+| All pages, click to turns | 39.8/45.0 | 37.9/41.2 | 38.0/41.0 |
+
+The remaining growth is layout reads in the viewport's anchor restore and
+garbage collection from rebuilding the whole timeline per page.

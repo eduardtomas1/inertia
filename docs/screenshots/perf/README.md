@@ -204,3 +204,45 @@ The screens stay in their own chunks and no renderer budget changed. Against 3f3
 | Warm startup first window (ms) | 297.6, 279.8, 302.0 | 279.1, 290.3, 301.0 |
 
 The benchmark opens the split immediately after the terminal. With a 1.5 s pause inserted before the split (local experiment, not committed) the split takes 388.3 ms before and 292.0 ms after, so the split itself is not slower; its time depends on what is still in flight when it starts, and the terminal now finishes about 300 ms sooner.
+
+## PW6: provider refresh
+
+Instrument: `tests/performance/provider-refresh.benchmark.test.ts` (`INERTIA_PROVIDER_REFRESH_RUNS=3 npx vitest run --config vitest.benchmark.config.ts tests/performance/provider-refresh.benchmark.test.ts`; `INERTIA_PROVIDER_REFRESH_SCALES` picks the slow-down factors). It drives the production `ProviderManager`, `detectProvider`, `ProviderMetadataCache` and `createProviderInfoRefresh` against a fake Claude CLI (`tests/helpers/claude-refresh-fixture.ts`) that answers `--version`, `auth status --json` and the pinned Agent SDK control protocol (`initialize`, `get_usage`), with every process owned by the macOS runtime guardian as in the app. No real provider CLI runs. The fake's delays are assumptions, not measurements of the real CLI: process start 150 ms, sign-in check 400 ms, SDK `initialize` 1,000 ms, usage read 500 ms, exit after EOF 150 ms. "5x" and "10x" multiply every delay (a slow or saturated machine, emulated by delays, never by CPU load). "With Cursor" adds a fake `cursor-agent` (start 300 ms, `status` 800 ms, same factor) to show one slower provider beside Claude. Times are from the start of the refresh, median of 3 runs (1 run at 20x), Apple M5 Pro, 1-minute load 2.1 to 2.5. States are the provider label the renderer would show (`providerStateLabel`). Raw JSON stays in the untracked `performance-results/`.
+
+The pipeline for one Claude refresh, before and after: three processes, strictly in sequence. `claude --version` (credential-free), then `claude auth status --json` (credentialed, only after the version answer identified the executable), then one SDK session that answers the model catalog and the usage windows together (`initialize` and `get_usage` in parallel); the Usage screen and skills discovery are separate reads and are not part of a refresh. About 100 ms pass between one fake process exiting and the next one starting (guardian, ownership journal and the fake's own Node start). "Refresh" and "Refresh all providers" force the catalog read; launch, post-turn and idle reads honour the catalog TTL (5 minutes) and the usage TTL.
+
+| Deadline | Before | After |
+| --- | --- | --- |
+| `--version` | 4 s | 4 s |
+| `auth status`, `acp`/`app-server`/`serve --help` | 4 s | 4 s, stretched by the version answer's latency over 500 ms (1.25 s answer: 10 s), at most 30 s |
+| SDK catalog and usage session | 6 s, all answers dropped on timeout | 6 s, stretched the same way, at most 30 s; an answered catalog is kept when usage misses the deadline |
+| Timed-out detection retries (1, 3, 9 s apart) | 4 s each | 8, 16, 16 s |
+| Failed catalog read | kept stale until the next refresh or turn | retried in the background 1, 3, 9 s later with 2x, 4x, 8x the deadline |
+| Post-turn and idle catalog reads | 6 s | stretched by the latest detection's version latency |
+
+Results, Connected / models shown / settled (last state change), and the processes the fake Claude saw:
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| 1x launch | 1.14 / 2.57 / 2.57 s, 3 processes, Connected with models | 1.10 / 2.52 / 2.52 s, 3 processes, same |
+| 1x Refresh (forced catalog) | 0.92 / 0.92 / 2.34 s, 3 processes | 0.93 / 0.93 / 2.36 s, 3 processes |
+| 1x launch with Cursor | 2.19 / 3.61 / 3.61 s | 1.10 / 2.50 / 2.50 s |
+| 5x launch | 3.94 / 10.57 / 10.57 s | 3.94 / 10.55 / 10.55 s |
+| 5x Refresh | 3.74 / 3.74 / 10.36 s | 3.74 / 3.74 / 10.37 s |
+| 5x launch with Cursor | 7.97 / 14.60 / 16.78 s | 3.91 / 10.53 / 10.53 s |
+| 10x launch | never; Checking, then Connection issue at 37.9 s, 4 version and 4 sign-in processes, no models | 7.44 / 20.56 / 20.56 s, 3 processes, Connected with models |
+| 10x Refresh | never; Connection issue at 37.7 s, no models | 7.24 / 7.24 / 20.37 s, Connected with models |
+| 10x launch with Cursor | never; Connection issue at 42.4 s | 7.47 / 20.59 / 20.59 s |
+| 20x launch | never; Connection issue at 43.9 s | 14.45 / 39.83 / 39.83 s, Connected with models |
+| 20x Refresh | never; Connection issue at 43.7 s | 14.23 / 14.23 / 39.62 s, Connected with models |
+
+State sequences: before, 10x and 20x go Checking ("slow to respond; checking again") three times and end on Connection issue, because every retry gave the sign-in check the same 4 s while it needed 5.5 s (11 s at 20x). After, every scale goes Checking, Connected, Connected with models at launch, and stays Connected with the cached models throughout a refresh. Nothing reports Not responding, Detection failed or Connection issue at 5x, 10x or 20x.
+
+With a second, slower provider installed, Claude used to stay Checking until every provider's detection finished, because the broad refresh published all providers together; it now publishes each provider as its own detection completes (Connected 50 to 51% sooner at 1x and 5x, models 28 to 31% sooner) and a provider whose detection fails no longer turns every other provider into "Agent discovery failed". The launch sends a few more snapshots as providers arrive (6 instead of 3 in the 1x Cursor scenario; arrivals in the same event-loop turn share one broadcast).
+
+The plan's 50% target for a single forced Claude refresh at normal speed is not met: 2.34 s before, 2.36 s after. The three processes are strictly ordered by design (the credentialed sign-in check only after the credential-free version probe identified the executable; the catalog read only for a signed-in, runnable install), and the SDK session alone is 1.42 of the 2.34 s. Measured for a decision, not shipped: a refresh that honours the catalog and usage TTLs when the executable, version and sign-in are unchanged finishes in 0.93 s at 1x, 3.74 s at 5x and 7.24 s at 10x (60 to 64% less), because it skips the SDK session; it re-reads at once when the version, executable or sign-in changed, but it can show usage windows up to the usage TTL old after a press of Refresh. That is a product decision.
+
+### Provider refresh: tried and dropped
+
+- Reusing the `--version` answer for an unchanged executable file: worth about 330 ms of the 2.34 s refresh at 1x (14%), but the probe is also the liveness and identity proof the installation authority settles on, and a broken binary with an unchanged file would then be classified by the sign-in check instead ("Sign in required" rather than "Detection failed"). Not done.
+- Starting the sign-in check or the SDK session alongside the version probe: would hand credentials to a candidate before it answered `--version`, and the best case still leaves the SDK session on the critical path (about 37% at 1x). Not done.

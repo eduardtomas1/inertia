@@ -315,6 +315,53 @@ describe("provider metadata cache", () => {
     });
   });
 
+  it("hands the requested deadline to the provider read and reports a failed read", async () => {
+    const read = vi.fn()
+      .mockRejectedValueOnce(new Error("Claude metadata discovery timed out."))
+      .mockResolvedValueOnce({ models: [model("model-a")] });
+    const cache = new ProviderMetadataCache({ read });
+
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, {
+      force: true, timeoutMs: 18_000,
+    });
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(read.mock.calls[0]).toHaveLength(7);
+    expect(read.mock.calls[0]![6]).toBe(18_000);
+    expect(cache.lastReadFailed("claude")).toBe(true);
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
+    expect(read.mock.calls[1]![6]).toBe(6_000);
+    expect(cache.lastReadFailed("claude")).toBe(false);
+  });
+
+  it("stops reporting a failed read once a run supplies the catalog", async () => {
+    const cache = new ProviderMetadataCache({
+      read: vi.fn().mockRejectedValueOnce(new Error("Claude metadata discovery timed out.")),
+    });
+
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
+    expect(cache.lastReadFailed("claude")).toBe(true);
+    cache.learn("claude", claudeExecutable, { models: [model("model-a")] }, "provider");
+
+    expect(cache.lastReadFailed("claude")).toBe(false);
+  });
+
+  it("gives later reads the deadline measured by the latest detection", async () => {
+    const read = vi.fn(async () => ({}));
+    const cache = new ProviderMetadataCache({ read });
+
+    cache.correlate("claude", {
+      executable: claudeExecutable, version: "2.1.200", authState: "authenticated", probeLatencyMs: 2_000,
+    });
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true, fields: ["rateLimits"] });
+    cache.correlate("claude", {
+      executable: claudeExecutable, version: "2.1.200", authState: "authenticated", probeLatencyMs: 90,
+    });
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true, fields: ["rateLimits"] });
+
+    expect(read.mock.calls.map((call) => (call as unknown[])[6])).toEqual([24_000, 6_000]);
+  });
+
   it("bounds untrusted inventories, merges sparse rate updates, and never probes Cursor outside an ACP session", async () => {
     const models = validateProviderModels(Array.from({ length: 150 }, (_, index) => ({
       ...model(`model-${index}`),

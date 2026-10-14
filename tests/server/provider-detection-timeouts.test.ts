@@ -158,7 +158,7 @@ if ((hangs[stage] ?? 0) !== 0) {
     });
     expect(route(runtime.codex())).toEqual({ ready: true });
     expect(fake.calls().filter((call) => call === "login")).toHaveLength(2);
-    expect(runtime.requestedTimeouts).toEqual([4_000, 4_000]);
+    expect(runtime.requestedTimeouts).toEqual([4_000, 8_000]);
   }, 30_000);
 
   it("keeps a definite signed-out answer as Sign in without retrying", async () => {
@@ -217,6 +217,50 @@ if ((hangs[stage] ?? 0) !== 0) {
     ));
     expect(kimi).toMatchObject({ installState: "installed", authState: "unknown", canRun: true });
     expect(kimi.probeTimedOut).toBeUndefined();
+  });
+
+  it("gives the sign-in check a longer deadline when the version probe shows a slow machine", async () => {
+    const root = portableFixtureRoot("slow machine sign-in deadline");
+    roots.push(root);
+    const executable = join(root, "claude");
+    const authDeadlines: number[] = [];
+    const detection = await detectProvider("claude", { command: executable, cwd: root, timeoutMs: 400 }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args, _environment, _cwd, timeoutMs) => {
+        if (args[0] === "--version") {
+          await new Promise((resolve) => setTimeout(resolve, 1_250));
+          return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0, output: "2.1.200 (Claude Code)" };
+        }
+        authDeadlines.push(timeoutMs);
+        const answersAfterMs = 600;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(answersAfterMs, timeoutMs)));
+        return answersAfterMs > timeoutMs
+          ? { started: true, timedOut: true, cleanupConfirmed: true, exitCode: null, output: "" }
+          : { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0, output: '{"loggedIn":true}' };
+      },
+    });
+
+    expect(authDeadlines).toHaveLength(1);
+    expect(authDeadlines[0]).toBeGreaterThanOrEqual(1_000);
+    expect(detection).toMatchObject({ installState: "installed", authState: "authenticated", canRun: true });
+    expect(detection.probeLatencyMs).toBeGreaterThanOrEqual(1_250);
+  });
+
+  it("keeps the normal sign-in deadline after a fast version probe", async () => {
+    const root = portableFixtureRoot("fast machine sign-in deadline");
+    roots.push(root);
+    const executable = join(root, "claude");
+    const authDeadlines: number[] = [];
+    await detectProvider("claude", { command: executable, cwd: root, timeoutMs: 400 }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args, _environment, _cwd, timeoutMs) => {
+        if (args[0] !== "--version") authDeadlines.push(timeoutMs);
+        return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0,
+          output: args[0] === "--version" ? "2.1.200 (Claude Code)" : '{"loggedIn":true}' };
+      },
+    });
+
+    expect(authDeadlines).toEqual([400]);
   });
 
   it("retries an OpenCode isolation proof timeout instead of asking for an update", async () => {

@@ -2,6 +2,7 @@ import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
+import { DeferredWindowCreation } from "./deferred-window-creation.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -161,6 +162,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 const shownNotifications = new Set<Notification>();
 let mascotMain: MascotMain | null = null;
+let mascotFeed: Parameters<MascotMain["observe"]>[0] | null = null;
 const mainWindowCreation = new MainWindowCreation();
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
@@ -772,6 +774,7 @@ async function createMainWindow(): Promise<void> {
 
   mainWindow = window;
   registerEditContextMenu(window, isTrustedRendererLocation);
+  const firstMascot = !mascotMain;
   mascotMain ??= new MascotMain({
     mainWindow: () => mainWindow, rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
     registerProtocol: (session) => registerRendererProtocol(session.protocol),
@@ -784,6 +787,7 @@ async function createMainWindow(): Promise<void> {
     feedRejected: () => runtimeDiagnostics?.record("mascot.feed-rejected"),
   });
   mascotMain.attach();
+  if (firstMascot && mascotFeed) mascotMain.observe(mascotFeed);
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
     window.webContents,
   );
@@ -978,11 +982,8 @@ async function bootstrap(): Promise<void> {
   );
 
   registerRendererProtocol(releaseChannel.sessionPartition ? session.fromPartition(releaseChannel.sessionPartition).protocol : undefined);
-  // Paint the secure renderer while private attachment storage is reconciled.
-  // The renderer can show its bounded starting state until the runtime-ready
-  // signal arrives; orphan cleanup no longer blocks the first window.
-  const [, , , attachmentStorage, conversationAttachmentStore] = await Promise.all([
-    createWindow(),
+  const windowCreation = new DeferredWindowCreation(createWindow);
+  const [, , attachmentStorage, conversationAttachmentStore] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),
     mkdir(defaultWorkspacePath, { recursive: true }),
     createAttachmentStorageSession(attachmentStorageRoot(), {
@@ -1088,7 +1089,7 @@ async function bootstrap(): Promise<void> {
       }));
       return child;
     },
-    onMascotStatus: (feed) => feed ? mascotMain?.observe(feed) : mascotMain?.reject(),
+    onMascotStatus: (feed) => { mascotFeed = feed; return feed ? mascotMain?.observe(feed) : mascotMain?.reject(); },
     onIncident: (incident) => runtimeDiagnostics?.recordIncident(incident),
     onRestartRequested: (event, generation) => runtimeDiagnostics?.recordRestartRequested(event, generation),
     onStateChange: (snapshot) => {
@@ -1179,6 +1180,8 @@ async function bootstrap(): Promise<void> {
       }),
     });
   }
+  await windowCreation.start();
+  liveDarwinRecovery.observe(runtimeSupervisor.snapshot(), runtimeSupervisor);
 }
 
 void startApplicationWithUpdateHandoff({

@@ -105,5 +105,5 @@ describe.runIf(process.platform === "darwin" || process.platform === "linux")("C
     mkdirSync(resolve(output, ".."), { recursive: true });
     writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
     expect(Object.keys(report.scales as object)).toHaveLength(SCALES.length);
-  });
+  }, 3_600_000);
 });

@@ -286,7 +286,7 @@ async function ensureProfileDirectories(profileDirectory: string): Promise<void>
 }
 
 async function launchWithSpawn(fixture: Fixture, dataDirectory: string, profileDirectory: string, record: LaunchRecord, traceFile: string | null): Promise<void> {
-  const args = [".", `--user-data-dir=${profileDirectory}`];
+  const args = [".", `--user-data-dir=${profileDirectory}`, ...(process.platform === "darwin" ? ["--use-mock-keychain"] : [])];
   if (traceFile) {
     args.push(`--trace-startup=${TRACE_CATEGORIES}`, `--trace-startup-file=${traceFile}`, `--trace-startup-duration=${TRACE_SECONDS}`, "--trace-startup-format=json");
   }

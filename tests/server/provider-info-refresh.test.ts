@@ -6,8 +6,8 @@ import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   PROVIDER_IDS,
   PROVIDER_INFO,
+  ProviderManager,
   type ProviderDetection,
-  type ProviderManager,
 } from "../../src/server/providers";
 import { createProviderInfoRefresh } from
   "../../src/server/provider/provider-info-refresh";
@@ -243,6 +243,72 @@ describe("provider info refresh ownership", () => {
     expect(providers.metadata).toHaveBeenCalledWith("claude", "/workspace", expect.objectContaining({
       force: true, probeLatencyMs: 2_400,
     }));
+  });
+
+  describe("broad refreshes", () => {
+    function broadRuntime(detect: (providerId: ProviderInfo["id"]) => Promise<ProviderDetection>) {
+      let providerInfo = initialProviderSnapshots();
+      const lifetime = new AbortController();
+      const manager = ProviderManager.createForTests({
+        lifetimeSignal: lifetime.signal,
+        metadataCache: new ProviderMetadataCache({ read: async () => ({}) }),
+        detectProvider: async (providerId) => await detect(providerId),
+      });
+      const refresh = createProviderInfoRefresh({
+        enabled: true, providers: manager, defaultWorkspacePath: "/workspace",
+        lifetimeSignal: lifetime.signal,
+        providerInfo: () => providerInfo,
+        replaceProviderInfo: (value) => { providerInfo = value; },
+        broadcastSnapshot: vi.fn(), isClosed: () => lifetime.signal.aborted,
+        track: async (operation) => await operation(), onActivityChange: vi.fn(),
+      });
+      return {
+        refresh,
+        provider: (id: ProviderInfo["id"]) => providerInfo.find((candidate) => candidate.id === id)!,
+        close: () => lifetime.abort(new Error("The runtime is shutting down.")),
+      };
+    }
+    const absent = (providerId: ProviderInfo["id"]): ProviderDetection => ({
+      provider: PROVIDER_INFO[providerId], available: false, installState: "not-installed",
+      authState: "unknown", canRun: false, cleanupConfirmed: true, statusMessage: "CLI not found",
+    });
+
+    it("publishes each provider as soon as its own detection completes", async () => {
+      const slow = deferred<ProviderDetection>();
+      const runtime = broadRuntime(async (providerId) => providerId === "cursor"
+        ? await slow.promise
+        : providerId === "claude"
+          ? detection("claude", "2.1.200", "authenticated", true)
+          : absent(providerId));
+
+      const refreshing = runtime.refresh(undefined, true);
+      await vi.waitFor(() => {
+        expect(runtime.provider("claude")).toMatchObject({ authState: "authenticated", canRun: true });
+      }, { timeout: 1_000 });
+      expect(runtime.provider("cursor")).toMatchObject({ installState: "checking", authState: "checking" });
+      slow.resolve(absent("cursor"));
+      await refreshing;
+      expect(runtime.provider("cursor")).toMatchObject({ installState: "not-installed" });
+      runtime.close();
+    });
+
+    it("keeps every other provider's result when one provider's detection fails", async () => {
+      const runtime = broadRuntime(async (providerId) => {
+        if (providerId === "kimi") throw new Error("Injected Kimi discovery failure");
+        return providerId === "claude"
+          ? detection("claude", "2.1.200", "authenticated", true)
+          : absent(providerId);
+      });
+
+      await runtime.refresh(undefined, true).catch(() => undefined);
+
+      expect(runtime.provider("claude")).toMatchObject({ authState: "authenticated", canRun: true });
+      expect(runtime.provider("codex")).toMatchObject({ installState: "not-installed" });
+      expect(runtime.provider("kimi")).toMatchObject({
+        installState: "error", authState: "error", canRun: false, statusMessage: "Agent discovery failed",
+      });
+      runtime.close();
+    });
   });
 
   describe("background detection retries", () => {

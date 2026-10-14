@@ -61,6 +61,7 @@ import {
   type ProviderSteerInput,
 } from "./provider/contracts";
 import { detectProvider, detectProviders } from "./provider/discovery";
+import { detectAllProviders, type DetectAllProvidersOptions } from "./provider/detect-all-providers";
 import {
   ProviderMetadataCache,
   type ProviderMetadata,
@@ -820,26 +821,12 @@ export class ProviderManager {
     );
   }
 
-  detectAll(
-    options: Omit<ProviderDetectionOptions, "command"> = {},
-  ): Promise<ProviderDetection[]> {
-    return this.trackAuxiliary(async () => await this.detectAllProviders(options));
-  }
-
-  private async detectAllProviders(
-    options: Omit<ProviderDetectionOptions, "command">,
-  ): Promise<ProviderDetection[]> {
-    if (options.refreshEnvironment) await providerEnvironment(true);
-    if (this.lifetimeSignal.aborted) {
-      throw new Error("Provider discovery was cancelled.");
-    }
-    const settled = await Promise.allSettled(PROVIDER_IDS.map((id) =>
-      this.detect(id, { ...options, refreshEnvironment: false })));
-    const failed = settled.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (failed) throw failed.reason;
-    return settled.map((result) => (result as PromiseFulfilledResult<ProviderDetection>).value);
+  detectAll(options: DetectAllProvidersOptions = {}): Promise<ProviderDetection[]> {
+    return this.trackAuxiliary(async () => await detectAllProviders(
+      async (id, detectionOptions) => await this.detect(id, detectionOptions),
+      this.lifetimeSignal,
+      options,
+    ));
   }
 
   authLaunch(providerId: ProviderId, cwd = process.cwd()): Promise<ProviderAuthLaunch> {

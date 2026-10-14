@@ -72,6 +72,7 @@ describe("provider info refresh ownership", () => {
         return await otherRead.promise;
       }),
       providerCapabilityContract: vi.fn(() => undefined),
+      metadataReadFailed: () => false,
     } as unknown as ProviderManager;
     const published: ProviderInfo[][] = [];
     const activity = vi.fn();
@@ -128,6 +129,7 @@ describe("provider info refresh ownership", () => {
         return await finishBroadEnrichment.promise;
       }),
       providerCapabilityContract: vi.fn(() => undefined),
+      metadataReadFailed: () => false,
     } as unknown as ProviderManager;
     const broadcastSnapshot = vi.fn(() => structuredClone(providerInfo));
     const refresh = createProviderInfoRefresh({
@@ -195,6 +197,7 @@ describe("provider info refresh ownership", () => {
       cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
       metadata,
       providerCapabilityContract: () => undefined,
+      metadataReadFailed: () => false,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -220,7 +223,51 @@ describe("provider info refresh ownership", () => {
     });
   });
 
-  it("passes the measured version probe latency to the catalog read", async () => {
+  it("retries a failed catalog read in the background with a longer deadline", async () => {
+    let providerInfo = initialProviderSnapshots();
+    const recoveredModel = {
+      id: "recovered", label: "Recovered", description: "Fixture model",
+      isDefault: true, inputModalities: ["text" as const],
+      reasoningOptions: [], defaultReasoningEffort: "",
+    };
+    const deadlines: number[] = [];
+    const read = vi.fn(async (...args: unknown[]) => {
+      deadlines.push(args[6] as number);
+      if (deadlines.length === 1) throw new Error("Claude metadata discovery timed out.");
+      return { models: [recoveredModel] };
+    });
+    const cache = new ProviderMetadataCache({ read });
+    const detected = detection("claude", "1", "authenticated", true);
+    const providers = {
+      detect: vi.fn(async () => detected),
+      cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
+      metadata: vi.fn(async (id: ProviderInfo["id"], cwd: string, options: object) => (
+        await cache.metadata(id, detected.executable!, {}, cwd, options)
+      )),
+      metadataReadFailed: (id: ProviderInfo["id"]) => cache.lastReadFailed(id),
+      providerCapabilityContract: () => undefined,
+    } as unknown as ProviderManager;
+    const refresh = createProviderInfoRefresh({
+      enabled: true, providers, defaultWorkspacePath: "/workspace",
+      lifetimeSignal: new AbortController().signal,
+      providerInfo: () => providerInfo,
+      replaceProviderInfo: (value) => { providerInfo = value; },
+      broadcastSnapshot: vi.fn(), isClosed: () => false,
+      track: async (operation) => await operation(), onActivityChange: vi.fn(),
+      detectionRetryDelaysMs: [10, 10, 10],
+    });
+
+    await refresh("claude", true, true);
+    expect(providerInfo.find(({ id }) => id === "claude")).toMatchObject({ canRun: true, models: [] });
+
+    await vi.waitFor(() => {
+      expect(providerInfo.find(({ id }) => id === "claude")?.models).toMatchObject([recoveredModel]);
+    }, { timeout: 1_000 });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(deadlines[1]).toBeGreaterThan(deadlines[0]!);
+  });
+
+  it("scales the catalog read deadline with the measured version probe latency", async () => {
     let providerInfo = initialProviderSnapshots();
     const empty = { models: [], rateLimits: [], metadataState: providerInfo[0]!.metadataState };
     const providers = {
@@ -228,6 +275,7 @@ describe("provider info refresh ownership", () => {
       cachedMetadata: vi.fn(() => empty),
       metadata: vi.fn(async () => empty),
       providerCapabilityContract: vi.fn(() => undefined),
+      metadataReadFailed: () => false,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -241,7 +289,7 @@ describe("provider info refresh ownership", () => {
     await refresh("claude", true, true);
 
     expect(providers.metadata).toHaveBeenCalledWith("claude", "/workspace", expect.objectContaining({
-      force: true, probeLatencyMs: 2_400,
+      force: true, timeoutMs: 28_800,
     }));
   });
 
@@ -354,6 +402,7 @@ describe("provider info refresh ownership", () => {
         cachedMetadata: vi.fn(() => empty),
         metadata: vi.fn(async () => empty),
         providerCapabilityContract: vi.fn(() => undefined),
+        metadataReadFailed: () => false,
       } as unknown as ProviderManager;
       const refresh = createProviderInfoRefresh({
         enabled: true, providers, defaultWorkspacePath: "/workspace",

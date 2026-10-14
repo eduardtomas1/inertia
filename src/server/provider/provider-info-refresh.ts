@@ -5,6 +5,8 @@ import type { ProviderManager, ProviderDetection } from "../providers";
 import { providerSnapshot } from "../runtime-snapshots";
 import type { ProviderInstallationVerificationAuthority } from
   "./installation-lease";
+import { PROVIDER_METADATA_TIMEOUT_MS } from "./metadata";
+import { MAX_PROBE_DEADLINE_MS, slowMachineProbeDeadline } from "./probe-deadline";
 
 const DETECTION_TIMEOUT_MS = 4_000;
 const DETECTION_RETRY_DELAYS_MS = [1_000, 3_000, 9_000];
@@ -114,6 +116,7 @@ export function createProviderInfoRefresh(
     }
     const enrichedSnapshot = async (
       detection: ProviderDetection,
+      attempt: number,
     ): Promise<ProviderInfo> => {
       if (!detection.canRun) {
         return providerSnapshot(
@@ -128,9 +131,10 @@ export function createProviderInfoRefresh(
         {
           force: forceMetadata,
           signal: dependencies.lifetimeSignal,
-          ...(detection.probeLatencyMs === undefined
-            ? {}
-            : { probeLatencyMs: detection.probeLatencyMs }),
+          timeoutMs: Math.min(
+            MAX_PROBE_DEADLINE_MS,
+            slowMachineProbeDeadline(PROVIDER_METADATA_TIMEOUT_MS, detection.probeLatencyMs) * 2 ** attempt,
+          ),
           ...(verificationAuthority
             ? { installationVerificationAuthority: verificationAuthority }
             : {}),
@@ -182,10 +186,50 @@ export function createProviderInfoRefresh(
       if (dependencies.isClosed()) return;
       if (replaceOwned(owner, [snapshot])) broadcast();
     };
-    const settle = async (detection: ProviderDetection): Promise<void> => {
+    const later = (
+      id: ProviderInfo["id"],
+      attempt: number,
+      operation: () => Promise<void>,
+      onFailure: () => void,
+    ): void => {
+      const cancellation = new AbortController();
+      pendingRetries.set(id, cancellation);
+      void pause(
+        retryDelaysMs[attempt]!,
+        AbortSignal.any([cancellation.signal, dependencies.lifetimeSignal]),
+      ).then(async (elapsed) => {
+        if (pendingRetries.get(id) === cancellation) pendingRetries.delete(id);
+        if (!elapsed || owners.get(id) !== owner || dependencies.isClosed()) return;
+        const running = dependencies.track(async () => {
+          dependencies.onActivityChange(1);
+          try {
+            await operation();
+          } finally {
+            dependencies.onActivityChange(-1);
+          }
+        });
+        const settled = running.then(() => undefined, () => {
+          if (owners.get(id) === owner) onFailure();
+        });
+        retryAttempts.set(id, settled);
+        await settled;
+        if (retryAttempts.get(id) === settled) retryAttempts.delete(id);
+      });
+    };
+    const settle = async (detection: ProviderDetection, attempt = 0): Promise<void> => {
       if (!detection.canRun) return;
-      const enriched = await enrichedSnapshot(detection);
+      const id = detection.provider.id;
+      const enriched = await enrichedSnapshot(detection, attempt);
       if (replaceOwned(owner, [enriched]) && !dependencies.isClosed()) broadcast();
+      if (
+        !verificationAuthority
+        && attempt < retryDelaysMs.length
+        && owners.get(id) === owner
+        && !dependencies.isClosed()
+        && dependencies.providers.metadataReadFailed(id)
+      ) {
+        later(id, attempt, async () => await settle(detection, attempt + 1), () => undefined);
+      }
     };
     const retry = async (
       previous: ProviderDetection,
@@ -204,32 +248,12 @@ export function createProviderInfoRefresh(
       else await settle(detection);
     };
     const schedule = (previous: ProviderDetection, attempt: number): void => {
-      const id = previous.provider.id;
-      const cancellation = new AbortController();
-      pendingRetries.set(id, cancellation);
-      void pause(
-        retryDelaysMs[attempt]!,
-        AbortSignal.any([cancellation.signal, dependencies.lifetimeSignal]),
-      ).then(async (elapsed) => {
-        if (pendingRetries.get(id) === cancellation) pendingRetries.delete(id);
-        if (!elapsed || owners.get(id) !== owner || dependencies.isClosed()) return;
-        const running = dependencies.track(async () => {
-          dependencies.onActivityChange(1);
-          try {
-            await retry(previous, attempt + 1);
-          } finally {
-            dependencies.onActivityChange(-1);
-          }
-        });
-        const settled = running.then(() => undefined, () => {
-          if (owners.get(id) === owner) {
-            publish(detectedSnapshot(previous, retryDelaysMs.length));
-          }
-        });
-        retryAttempts.set(id, settled);
-        await settled;
-        if (retryAttempts.get(id) === settled) retryAttempts.delete(id);
-      });
+      later(
+        previous.provider.id,
+        attempt,
+        async () => await retry(previous, attempt + 1),
+        () => publish(detectedSnapshot(previous, retryDelaysMs.length)),
+      );
     };
     const settleOrSchedule = async (detection: ProviderDetection): Promise<void> => {
       if (!retrying(detection, 0)) await settle(detection);

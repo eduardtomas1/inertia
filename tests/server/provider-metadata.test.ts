@@ -315,17 +315,23 @@ describe("provider metadata cache", () => {
     });
   });
 
-  it("hands the measured version probe latency to the provider read", async () => {
-    const read = vi.fn(async () => ({}));
+  it("hands the requested deadline to the provider read and reports a failed read", async () => {
+    const read = vi.fn()
+      .mockRejectedValueOnce(new Error("Claude metadata discovery timed out."))
+      .mockResolvedValueOnce({ models: [model("model-a")] });
     const cache = new ProviderMetadataCache({ read });
 
-    await cache.metadata("claude", "/fixture/claude", {}, workspacePath, {
-      force: true, probeLatencyMs: 1_800,
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, {
+      force: true, timeoutMs: 18_000,
     });
 
     expect(read).toHaveBeenCalledOnce();
     expect(read.mock.calls[0]).toHaveLength(7);
-    expect(read.mock.calls[0]![6]).toBe(1_800);
+    expect(read.mock.calls[0]![6]).toBe(18_000);
+    expect(cache.lastReadFailed("claude")).toBe(true);
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
+    expect(read.mock.calls[1]![6]).toBeUndefined();
+    expect(cache.lastReadFailed("claude")).toBe(false);
   });
 
   it("bounds untrusted inventories, merges sparse rate updates, and never probes Cursor outside an ACP session", async () => {

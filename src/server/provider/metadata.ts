@@ -27,7 +27,6 @@ import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
-import { slowMachineProbeDeadline } from "./probe-deadline";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -59,6 +58,7 @@ export interface ProviderMetadataScope {
 }
 
 export const PROVIDER_METADATA_CATALOG_MODEL_ID = "provider-catalog";
+export const PROVIDER_METADATA_TIMEOUT_MS = 6_000;
 
 export interface ProviderMetadataReadResult {
   models?: ProviderModel[];
@@ -99,7 +99,7 @@ export interface ProviderMetadataRequestOptions {
   force?: boolean;
   /** Cancels the provider read and drains its owned process tree before settling. */
   signal?: AbortSignal;
-  probeLatencyMs?: number;
+  timeoutMs?: number;
 }
 
 interface CachedField<T> {
@@ -482,9 +482,8 @@ export async function readProviderMetadata(
   cwd: string,
   fields: readonly ProviderMetadataField[] = PROBE_FIELDS[providerId],
   signal?: AbortSignal,
-  probeLatencyMs?: number,
+  timeoutMs = PROVIDER_METADATA_TIMEOUT_MS,
 ): Promise<ProviderMetadataReadResult> {
-  const timeoutMs = slowMachineProbeDeadline(6_000, probeLatencyMs);
   if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, timeoutMs, fields, { signal });
   if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
@@ -500,6 +499,7 @@ export class ProviderMetadataCache {
   private readonly entries = new Map<string, CachedProviderMetadata>();
   private readonly nativeScopeKeys = new Map<ProviderId, string>();
   private readonly inFlight = new Map<string, InFlightRefresh>();
+  private readonly failedReads = new Set<string>();
   private readonly persistence?: ProviderMetadataPersistence;
   private readonly reader: typeof readProviderMetadata;
   private readonly now: () => number;
@@ -524,6 +524,10 @@ export class ProviderMetadataCache {
 
   current(providerId: ProviderId): ProviderMetadata {
     return this.currentScoped(this.nativeScope(providerId));
+  }
+
+  lastReadFailed(providerId: ProviderId): boolean {
+    return this.failedReads.has(currentProviderMetadataScopeKey(this.nativeScope(providerId)));
   }
 
   processCleanupConfirmed(providerId?: ProviderId): boolean {
@@ -756,7 +760,7 @@ export class ProviderMetadataCache {
       fields,
       revision,
       options.signal,
-      options.probeLatencyMs,
+      options.timeoutMs,
     )
       .finally(() => {
         if (this.inFlight.get(key)?.promise === promise) {
@@ -775,7 +779,7 @@ export class ProviderMetadataCache {
     fields: readonly ProviderMetadataField[],
     revision: number,
     signal?: AbortSignal,
-    probeLatencyMs?: number,
+    timeoutMs?: number,
   ): Promise<void> {
     const entry = this.entry(scope);
     const attemptedAt = this.now();
@@ -788,7 +792,7 @@ export class ProviderMetadataCache {
         cwd,
         fields,
         signal,
-        probeLatencyMs,
+        timeoutMs,
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {
@@ -796,6 +800,7 @@ export class ProviderMetadataCache {
       }
       if (signal?.aborted) return;
       if (entry.revision !== revision) return;
+      this.failedReads.add(currentProviderMetadataScopeKey(scope));
       for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
       for (const field of fields) if (entry[field].values.length > 0) entry[field].stale = true;
       this.persist(entry);
@@ -803,6 +808,7 @@ export class ProviderMetadataCache {
     }
     // The reader settled its owned process tree, so earlier doubt is lifted.
     this.cleanupUnconfirmedProviders.delete(scope.providerId);
+    this.failedReads.delete(currentProviderMetadataScopeKey(scope));
 
     if (entry.revision !== revision) return;
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;

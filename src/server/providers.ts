@@ -915,6 +915,10 @@ export class ProviderManager {
     return this.metadataCache.current(providerId);
   }
 
+  metadataReadFailed(providerId: ProviderId): boolean {
+    return this.metadataCache.lastReadFailed(providerId);
+  }
+
   cachedMetadataForSelection(selectionInput: ModelSelection): ProviderMetadata {
     const route = this.resolveModelRoute(selectionInput);
     const executable = this.resolvedCommands.get(route.providerId)

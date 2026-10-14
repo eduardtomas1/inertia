@@ -50,7 +50,6 @@ const frequentSurfaceLoads = [
   loadUsageLimitsDialog,
   loadTasksView,
   loadModelSourceRail,
-  loadWorkspaceTerminal,
 ] as const;
 
 export function prefetchFrequentSurfaces(): void {

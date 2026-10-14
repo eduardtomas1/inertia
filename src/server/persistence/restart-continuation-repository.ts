@@ -44,8 +44,19 @@ export function completeRestartContinuationPlan(database: Database.Database, pla
   if (accepted.changes !== 1) throw new Error("The continuation plan no longer owns this dispatch.");
 }
 
+const repositories = new WeakMap<Database.Database, RestartContinuationRepository>();
+
 export class RestartContinuationRepository {
-  constructor(private readonly database: Database.Database) {}
+  static for(database: Database.Database): RestartContinuationRepository {
+    let repository = repositories.get(database);
+    if (!repository) {
+      repository = new RestartContinuationRepository(database);
+      repositories.set(database, repository);
+    }
+    return repository;
+  }
+
+  private constructor(private readonly database: Database.Database) {}
 
   createForConversations(inputs: readonly RestartContinuationPlanInput[]): RestartContinuationPlan[] {
     return this.database.transaction(() => inputs.map((input) => {

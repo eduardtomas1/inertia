@@ -1,3 +1,6 @@
+import { EventEmitter } from "node:events";
+
+import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
@@ -50,6 +53,9 @@ async function runningChat() {
   return { runtime, firstTurnId: first.turn.id, continuation, close };
 }
 
+const preparation = { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null };
+const owner = (): WebSocket => Object.assign(new EventEmitter(), { readyState: 1 }) as unknown as WebSocket;
+
 function maintenance(duringUpdate: () => Promise<void>) {
   const done: ProviderMaintenanceOperation = {
     id: "00000000-0000-4000-8000-000000000001", providerId: "codex", status: "succeeded", startedAt: null, finishedAt: null,
@@ -67,13 +73,13 @@ describe("update everything with restart continuation", () => {
     const { runtime, firstTurnId, continuation, close } = await runningChat();
     try {
       const result = await runUpdateEverything({
-        store: runtime.store, turns: runtime.controller, restartContinuation: continuation,
+        store: runtime.store, turns: runtime.controller, restartContinuation: continuation, preparation,
         maintenance: maintenance(async () => {
           expect(runtime.store.agentTurn(firstTurnId)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
           await continuation.scheduler.tick();
           expect(runtime.provider.runCount).toBe(1);
         }),
-      } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true });
+      } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true }, owner());
 
       expect(result.interruptedConversationIds).toEqual([runtime.conversationId]);
       expect(isHeld()).toBe(false);
@@ -92,13 +98,13 @@ describe("update everything with restart continuation", () => {
     const { runtime, continuation, close } = await runningChat();
     try {
       await runUpdateEverything({
-        store: runtime.store, turns: runtime.controller, restartContinuation: continuation, maintenance: maintenance(async () => undefined),
-      } as unknown as UpdateEverythingDependencies, { providerIds: [], includeApp: true, continueChats: true });
+        store: runtime.store, turns: runtime.controller, restartContinuation: continuation, preparation, maintenance: maintenance(async () => undefined),
+      } as unknown as UpdateEverythingDependencies, { providerIds: [], includeApp: true, continueChats: true }, owner());
       await continuation.scheduler.tick();
       expect(runtime.provider.runCount).toBe(1);
       expect(runtime.store.restartContinuations.forConversation(runtime.conversationId)).toMatchObject({ state: "waiting" });
 
-      finishUpdateEverything(false);
+      finishUpdateEverything();
       await continuation.scheduler.tick();
       await flushTurnControllerTestPromises();
       expect(runtime.provider.runCount).toBe(2);
@@ -109,8 +115,8 @@ describe("update everything with restart continuation", () => {
     const { runtime, firstTurnId, continuation, close } = await runningChat();
     try {
       await runUpdateEverything({
-        store: runtime.store, turns: runtime.controller, restartContinuation: continuation, maintenance: maintenance(async () => undefined),
-      } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: false });
+        store: runtime.store, turns: runtime.controller, restartContinuation: continuation, preparation, maintenance: maintenance(async () => undefined),
+      } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: false }, owner());
       await continuation.scheduler.tick();
       expect(runtime.store.agentTurn(firstTurnId)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
       expect(runtime.store.restartContinuations.forConversation(runtime.conversationId)).toBeNull();

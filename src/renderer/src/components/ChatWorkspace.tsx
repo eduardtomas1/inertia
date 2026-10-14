@@ -5,6 +5,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  type ComponentType,
   useEffect,
   useId,
   useLayoutEffect,
@@ -56,6 +57,7 @@ import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { shouldFollowTimeline } from "../utils/responseTimeline";
 import {
@@ -96,14 +98,12 @@ import type {
   ResponseTimelineProps,
 } from "./response-timeline/types";
 import { IconButton, LoadingMark } from "./ui";
+import { loadResponseTimeline } from "./chatSurfaceLoaders";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
 
-const ResponseTimeline = lazy(async () => ({
-  default: (await import("./ResponseTimeline")).ResponseTimeline,
-}));
-
 function StreamingResponseTimeline({
+  ResponseTimeline,
   streaming,
   onStreamingContent,
   ...props
@@ -111,6 +111,7 @@ function StreamingResponseTimeline({
   ResponseTimelineProps,
   "streamingText" | "streamingReasoning" | "streamingChannel"
 > & {
+  ResponseTimeline: ComponentType<ResponseTimelineProps>;
   streaming: StreamingAgentSource;
   onStreamingContent: () => (() => void) | undefined;
 }): React.JSX.Element {
@@ -353,6 +354,7 @@ export function ChatWorkspace({
   useNativePreviewSuspension(
     approvals.length > 0 || inputRequests.length > 0,
   );
+  const ResponseTimeline = useLoadedSurface(loadResponseTimeline, Boolean(project && conversation));
   const Root = embedded ? "section" : "main";
   const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
     ?.trim().toLowerCase() ?? "";
@@ -974,7 +976,8 @@ export function ChatWorkspace({
             </div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
-            <StreamingResponseTimeline
+            {ResponseTimeline ? <StreamingResponseTimeline
+              ResponseTimeline={ResponseTimeline}
               turns={ownedTurns}
               messages={ownedMessages}
               contextPackets={contextPackets}
@@ -1026,7 +1029,7 @@ export function ChatWorkspace({
               onOpenTurnFile={onOpenTurnFile}
               onStop={stopTimeline}
               onOpenSurface={onOpenSurface}
-            />
+            /> : <LoadingMark label="Loading conversation" />}
           </Suspense>
         </div>
       </div>

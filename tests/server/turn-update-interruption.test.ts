@@ -30,13 +30,21 @@ describe("interrupting running turns for an app update", () => {
   it("settles the turn as interrupted for the update and keeps its native session", async () => {
     const { runtime, turnId } = await runningChat();
     try {
-      await expect(runtime.controller.interruptForUpdate([runtime.conversationId])).resolves.toBe(true);
+      await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Codex")).resolves.toBe(true);
       expect(runtime.store.agentTurn(turnId)).toMatchObject({
         status: "interrupted", terminalReason: "app-update", providerSessionAfter: "native-session",
       });
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("native-session");
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
       expect(runtime.provider.cancelCount).toBe(1);
+      expect(errorTitles(runtime)).toEqual(["Stopped to update Codex."]);
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
+
+  it("names Inertia when the app itself restarts", async () => {
+    const { runtime } = await runningChat();
+    try {
+      await runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia");
       expect(errorTitles(runtime)).toEqual(["Stopped to update Inertia."]);
     } finally { await runtime.controller.dispose(); runtime.store.close(); }
   });
@@ -48,8 +56,8 @@ describe("interrupting running turns for an app update", () => {
         conversationId: runtime.conversationId, interruptedTurnId: turnId,
         routeIdentity: queuedRouteIdentity(runtime.store.conversation(runtime.conversationId)),
       }]);
-      await runtime.controller.interruptForUpdate([runtime.conversationId]);
-      expect(errorTitles(runtime)).toEqual(["Stopped to update Inertia. The chat continues after the update."]);
+      await runtime.controller.interruptForUpdate([runtime.conversationId], "Codex and Claude");
+      expect(errorTitles(runtime)).toEqual(["Stopped to update Codex and Claude. The chat continues after the update."]);
     } finally { await runtime.controller.dispose(); runtime.store.close(); }
   });
 
@@ -58,7 +66,7 @@ describe("interrupting running turns for an app update", () => {
     try {
       runtime.provider.deferOwnedStop("settled");
       let resolved = false;
-      const interrupted = runtime.controller.interruptForUpdate([runtime.conversationId]).then((value) => {
+      const interrupted = runtime.controller.interruptForUpdate([runtime.conversationId], "Codex").then((value) => {
         resolved = true;
         return value;
       });
@@ -75,14 +83,14 @@ describe("interrupting running turns for an app update", () => {
     const { runtime, turnId } = await runningChat();
     try {
       const before = runtime.store.agentTurn(turnId).status;
-      await expect(runtime.controller.interruptForUpdate(["another-conversation"])).resolves.toBe(true);
+      await expect(runtime.controller.interruptForUpdate(["another-conversation"], "Codex")).resolves.toBe(true);
       expect(runtime.store.agentTurn(turnId).status).toBe(before);
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
       expect(runtime.provider.cancelCount).toBe(0);
       runtime.provider.resolve({ status: "completed", sessionId: "native-session" });
       await flushTurnControllerTestPromises();
       await runtime.controller.waitForProviderCleanup([runtime.conversationId]);
-      await expect(runtime.controller.interruptForUpdate([runtime.conversationId])).resolves.toBe(true);
+      await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Codex")).resolves.toBe(true);
       expect(runtime.store.agentTurn(turnId)).toMatchObject({ status: "completed", terminalReason: "provider-completed" });
     } finally { await runtime.controller.dispose(); runtime.store.close(); }
   });

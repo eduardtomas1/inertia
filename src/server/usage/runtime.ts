@@ -13,11 +13,13 @@ import { createRestartContinuationRuntime } from "../runtime/restart-continuatio
 import type { TurnInteractionCommandDependencies } from "../runtime/commands/turn-interaction-commands";
 import type { ProviderMaintenanceController } from "../provider/maintenance-controller";
 import { createUpdatesCommandHandler } from "../runtime/commands/updates-commands";
+import type { RuntimeUpdatePreparationGate } from "../runtime-update-preparation";
 
 interface ResumeRuntimeOptions {
   dependencies: TurnInteractionCommandDependencies;
   track<T>(operation: () => Promise<T>): Promise<T>;
   providerMaintenance: ProviderMaintenanceController;
+  updatePreparation: RuntimeUpdatePreparationGate;
 }
 
 export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManager, backends: BackendProfileController, providerInfo: () => ProviderInfo[], cwd: string, signal: AbortSignal, enabled: boolean, credentials: BackendCredentialBroker | undefined, send: (socket: WebSocket, event: ServerEvent) => void,
@@ -36,7 +38,8 @@ export function usageLimitsRuntime(store: RuntimeStore, providers: ProviderManag
   const restartContinuation = createRestartContinuationRuntime(resume.dependencies, { signal, track: resume.track });
   restartContinuation.start();
   const updates = createUpdatesCommandHandler({
-    store, turns: resume.dependencies.turns, maintenance: resume.providerMaintenance, restartContinuation, send,
+    store, turns: resume.dependencies.turns, maintenance: resume.providerMaintenance, restartContinuation,
+    preparation: resume.updatePreparation, send,
   });
-  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler, updates], restartContinuation };
+  return { service, handlers: [createUsageLimitCommandHandler(service, send), limitReset.handler, updates] };
 }

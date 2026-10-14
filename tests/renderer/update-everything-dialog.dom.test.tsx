@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UpdateEverythingDialog } from "../../src/renderer/src/components/sidebar/UpdateEverythingDialog";
-import { runningChatsSentence, updateEverythingLabel } from "../../src/renderer/src/components/sidebar/appUpdatePresentation";
+import { restartBlockersSentence, runningChatsSentence, updateEverythingLabel } from "../../src/renderer/src/components/sidebar/appUpdatePresentation";
 import type { UpdateEverythingPlan } from "../../src/renderer/src/components/sidebar/updateEverythingPlan";
 
 const STORAGE_KEY = "inertia:update-everything:continue";
@@ -16,6 +16,7 @@ function plan(overrides: Partial<UpdateEverythingPlan> = {}): UpdateEverythingPl
     ],
     runningChats: 3,
     continuingChats: 3,
+    workspaceRuns: 0,
     ...overrides,
   };
 }
@@ -52,6 +53,22 @@ describe("update everything labels", () => {
     expect(runningChatsSentence(3, 2, true)).toBe("3 running chats will be interrupted. 2 will continue after the update.");
     expect(runningChatsSentence(1, 1, true)).toBe("1 running chat will be interrupted and will continue after the update.");
     expect(runningChatsSentence(2, 0, true)).toBe("2 running chats will be interrupted.");
+  });
+});
+
+describe("update everything restart blockers", () => {
+  it("names the workspace runs that must finish before Inertia restarts", () => {
+    expect(restartBlockersSentence(0)).toBeNull();
+    expect(restartBlockersSentence(1)).toBe("1 workspace run must finish before Inertia restarts.");
+    expect(restartBlockersSentence(2)).toBe("2 workspace runs must finish before Inertia restarts.");
+  });
+
+  it("shows the sentence only while Inertia is part of the run", () => {
+    show(plan({ workspaceRuns: 2 }));
+    expect(body()).toHaveTextContent("2 workspace runs must finish before Inertia restarts.");
+    cleanup();
+    show(plan({ workspaceRuns: 0 }));
+    expect(body()).not.toHaveTextContent("must finish before Inertia restarts");
   });
 });
 

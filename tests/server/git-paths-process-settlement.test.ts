@@ -21,6 +21,16 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const legacyMarkerOutput = {
+  stdout: Buffer.from("--path-format=absolute\n.git\n.git\n"),
+  stderr: Buffer.alloc(0),
+  truncated: false,
+};
+
+function mergedMarkerProbe(args: readonly string[]): boolean {
+  return args.includes("--git-dir") && args.includes("--git-common-dir");
+}
+
 it.each([
   new GitError("timeout", "Git inspection was cancelled."),
   new GitError("operation-failed", "Git stopped responding, and its process tree could not be confirmed stopped."),
@@ -39,6 +49,7 @@ it("settles both metadata probes before rejecting one malformed marker", async (
     _cwd: string,
     args: readonly string[],
   ) => {
+    if (mergedMarkerProbe(args)) return Promise.resolve(legacyMarkerOutput);
     if (args.includes("--git-dir")) {
       return Promise.reject(new Error("git-dir marker is malformed"));
     }
@@ -95,7 +106,7 @@ it("preserves a failed metadata-probe cleanup after cancellation", async () => {
     await expect(repositoryMetadataMarkerIdentity(root, {
       signal: controller.signal,
     })).rejects.toBe(cleanupFailure);
-    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(2);
+    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(1);
     expect(gitRunner.runGitInspection.mock.calls.every(([, args]) => (
       (args as readonly string[]).includes("--path-format=absolute")
     ))).toBe(true);
@@ -115,7 +126,7 @@ it("does not retry a failed metadata-probe cleanup after a local timeout", async
   try {
     await expect(repositoryMetadataMarkerIdentity(root))
       .rejects.toBe(cleanupFailure);
-    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(2);
+    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(1);
     expect(gitRunner.runGitInspection.mock.calls.every(([, args]) => (
       (args as readonly string[]).includes("--path-format=absolute")
     ))).toBe(true);
@@ -137,19 +148,23 @@ it("prioritizes failed process-tree cleanup across metadata probes", async () =>
   gitRunner.runGitInspection.mockImplementation((
     _cwd: string,
     args: readonly string[],
-  ) => Promise.reject(args.includes("--git-dir")
-    ? cancellation
-    : cleanupFailure));
+  ) => mergedMarkerProbe(args)
+    ? Promise.resolve(legacyMarkerOutput)
+    : Promise.reject(args.includes("--git-dir")
+      ? cancellation
+      : cleanupFailure));
 
   try {
     await expect(repositoryMetadataMarkerIdentity(root))
       .rejects.toBe(cleanupFailure);
-    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(3);
+    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(4);
     expect(gitRunner.runGitInspection.mock.calls.filter(([, args]) => (
-      (args as readonly string[]).includes("--git-common-dir")
+      !mergedMarkerProbe(args as readonly string[])
+      && (args as readonly string[]).includes("--git-common-dir")
     ))).toHaveLength(1);
     expect(gitRunner.runGitInspection.mock.calls.filter(([, args]) => (
-      (args as readonly string[]).includes("--git-dir")
+      !mergedMarkerProbe(args as readonly string[])
+      && (args as readonly string[]).includes("--git-dir")
     ))).toHaveLength(2);
   } finally {
     await rm(root, { recursive: true, force: true });

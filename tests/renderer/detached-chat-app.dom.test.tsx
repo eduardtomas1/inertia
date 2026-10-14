@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -277,5 +278,41 @@ describe("detached chat window", () => {
     } finally {
       storage.mockRestore();
     }
+  });
+
+  it("shows the transcript in the first commit that shows the loaded chat", async () => {
+    const turn = taskTurn({
+      id: "preloaded-turn",
+      conversationId,
+      userMessageId: "preloaded-message",
+      status: "completed",
+      completedAt: "2030-01-01T00:02:00.000Z",
+    });
+    harnessDetail.current = {
+      ...detail,
+      agentTurns: [turn],
+      messages: [{
+        id: "preloaded-message",
+        conversationId,
+        turnId: turn.id,
+        role: "user",
+        content: "Preloaded transcript request.",
+        attachments: [],
+        createdAt: turn.requestedAt,
+      }],
+    };
+    vi.resetModules();
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    await act(async () => { await vi.dynamicImportSettled(); });
+    const transcriptInCommit: boolean[] = [];
+    render(<Profiler id="detached-transcript" onRender={() => {
+      const scroll = document.querySelector(".message-scroll");
+      if (!scroll || scroll.closest("[aria-busy='true']")) return;
+      transcriptInCommit.push(scroll.textContent?.includes("Preloaded transcript request.") ?? false);
+    }}><DetachedChatApp initialWindowContext={context} /></Profiler>);
+
+    expect(await screen.findByText("Preloaded transcript request.")).toBeInTheDocument();
+    expect(transcriptInCommit.length).toBeGreaterThan(0);
+    expect(transcriptInCommit).not.toContain(false);
   });
 });

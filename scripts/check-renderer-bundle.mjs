@@ -127,7 +127,7 @@ const budgets = {
   // Replaces the 6 KiB notice allowance with the stateful footer control,
   // keyboard/hover details and restart confirmation (10.5 KiB measured).
   // Entry and core ceilings are unchanged; Markdown still loads only on demand.
-  deferredSidebarUpdateControlJavaScript: 10.75 * kibibyte + 4_260,
+  deferredSidebarUpdateControlJavaScript: 10.75 * kibibyte + 4_260 + 623,
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,

@@ -558,6 +558,54 @@ describe("durable runtime message queue", () => {
     } finally { release(); await f.close(); }
   });
 
+  it("sends a queued follow-up as the continuation of a turn stopped for an update once the hold ends", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      hold();
+      try {
+        expect(await f.controller.interruptForUpdate([f.conversationId], "Inertia")).toBe(true);
+        await f.drain();
+        expect(f.store.agentTurn(initial.turn.id)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
+        expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+        expect(f.provider.runCount).toBe(1);
+      } finally {
+        release();
+      }
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"), { timeout: 5_000 });
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { release(); await f.close(); }
+  });
+
+  it.each([
+    ["app-update", "accepted", 1],
+    ["runtime-restart", "waiting", 0],
+    ["runtime-shutdown", "waiting", 0],
+    ["runtime-crash", "waiting", 0],
+  ] as const)("after a turn interrupted by %s the queued follow-up is %s", async (terminalReason, state, runs) => {
+    const f = await fixture();
+    try {
+      const conversation = f.store.conversation(f.conversationId);
+      const run = f.store.createWorkspaceRun({ kind: "agent", projectId: conversation.projectId, conversationId: f.conversationId,
+        label: "Task", detail: null, status: "running", port: null });
+      const { turn } = f.store.beginAgentTurn({ conversationId: f.conversationId, runId: run.id, content: "First task",
+        providerId: conversation.providerId, modelSelection: conversation.modelSelection, model: "gpt-test",
+        reasoningEffort: conversation.reasoningEffort, interactionMode: conversation.interactionMode, accessMode: conversation.accessMode,
+        configurationRevision: 0, association: "authoritative" });
+      const at = new Date().toISOString();
+      f.store.updateAgentTurnLifecycle(turn.id, { status: "running", startedAt: at });
+      f.store.updateAgentTurnLifecycle(turn.id, { status: "interrupted", terminalReason, completedAt: at });
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe(state);
+      expect(f.provider.runCount).toBe(runs);
+    } finally { await f.close(); }
+  });
+
   it("returns a claimed head to waiting when runtime shutdown interrupts its dispatch", async () => {
     const f = await fixture();
     try {

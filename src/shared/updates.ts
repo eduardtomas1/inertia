@@ -15,6 +15,7 @@ export const updatesRunResultSchema = z.strictObject({
   })),
   interruptedConversationIds: z.array(z.string().min(1)),
   readyForAppInstall: z.boolean(),
+  appInstallBlocker: z.string().min(1).nullable(),
 });
 
 export type UpdatesRunResult = z.infer<typeof updatesRunResultSchema>;

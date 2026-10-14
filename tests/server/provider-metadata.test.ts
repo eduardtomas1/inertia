@@ -315,6 +315,19 @@ describe("provider metadata cache", () => {
     });
   });
 
+  it("hands the measured version probe latency to the provider read", async () => {
+    const read = vi.fn(async () => ({}));
+    const cache = new ProviderMetadataCache({ read });
+
+    await cache.metadata("claude", "/fixture/claude", {}, workspacePath, {
+      force: true, probeLatencyMs: 1_800,
+    });
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(read.mock.calls[0]).toHaveLength(7);
+    expect(read.mock.calls[0]![6]).toBe(1_800);
+  });
+
   it("bounds untrusted inventories, merges sparse rate updates, and never probes Cursor outside an ACP session", async () => {
     const models = validateProviderModels(Array.from({ length: 150 }, (_, index) => ({
       ...model(`model-${index}`),

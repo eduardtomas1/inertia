@@ -220,6 +220,31 @@ describe("provider info refresh ownership", () => {
     });
   });
 
+  it("passes the measured version probe latency to the catalog read", async () => {
+    let providerInfo = initialProviderSnapshots();
+    const empty = { models: [], rateLimits: [], metadataState: providerInfo[0]!.metadataState };
+    const providers = {
+      detect: vi.fn(async () => ({ ...detection("claude", "1", "authenticated", true), probeLatencyMs: 2_400 })),
+      cachedMetadata: vi.fn(() => empty),
+      metadata: vi.fn(async () => empty),
+      providerCapabilityContract: vi.fn(() => undefined),
+    } as unknown as ProviderManager;
+    const refresh = createProviderInfoRefresh({
+      enabled: true, providers, defaultWorkspacePath: "/workspace",
+      lifetimeSignal: new AbortController().signal,
+      providerInfo: () => providerInfo,
+      replaceProviderInfo: (value) => { providerInfo = value; },
+      broadcastSnapshot: vi.fn(), isClosed: () => false,
+      track: async (operation) => await operation(), onActivityChange: vi.fn(),
+    });
+
+    await refresh("claude", true, true);
+
+    expect(providers.metadata).toHaveBeenCalledWith("claude", "/workspace", expect.objectContaining({
+      force: true, probeLatencyMs: 2_400,
+    }));
+  });
+
   describe("background detection retries", () => {
     const empty = {
       models: [],
@@ -310,10 +335,12 @@ describe("provider info refresh ownership", () => {
         expect(runtime.codex()).toMatchObject({ version: "2", authState: "authenticated", canRun: true });
       });
       expect(runtime.detect).toHaveBeenCalledTimes(3);
-      for (const [providerId, options] of runtime.detect.mock.calls.slice(1) as unknown as Array<[string, { timeoutMs: number; refreshEnvironment: boolean }]>) {
-        expect(providerId).toBe("codex");
-        expect(options).toMatchObject({ timeoutMs: 4_000, refreshEnvironment: false });
-      }
+      const retries = runtime.detect.mock.calls.slice(1) as unknown as Array<[string, { timeoutMs: number; refreshEnvironment: boolean }]>;
+      expect(retries.map(([providerId]) => providerId)).toEqual(["codex", "codex"]);
+      expect(retries.map(([, options]) => options)).toMatchObject([
+        { timeoutMs: 8_000, refreshEnvironment: false },
+        { timeoutMs: 16_000, refreshEnvironment: false },
+      ]);
     });
 
     it("ends bounded background retries with an honest connection issue", async () => {

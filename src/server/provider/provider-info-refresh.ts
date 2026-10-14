@@ -128,6 +128,9 @@ export function createProviderInfoRefresh(
         {
           force: forceMetadata,
           signal: dependencies.lifetimeSignal,
+          ...(detection.probeLatencyMs === undefined
+            ? {}
+            : { probeLatencyMs: detection.probeLatencyMs }),
           ...(verificationAuthority
             ? { installationVerificationAuthority: verificationAuthority }
             : {}),
@@ -188,7 +191,7 @@ export function createProviderInfoRefresh(
       const id = previous.provider.id;
       const detection = await dependencies.providers.detect(id, {
         cwd: dependencies.defaultWorkspacePath,
-        timeoutMs: DETECTION_TIMEOUT_MS,
+        timeoutMs: DETECTION_TIMEOUT_MS * 2 ** attempt,
         refreshEnvironment: false,
         signal: dependencies.lifetimeSignal,
       });

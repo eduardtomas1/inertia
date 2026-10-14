@@ -27,6 +27,7 @@ import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
+import { slowMachineProbeDeadline } from "./probe-deadline";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -98,6 +99,7 @@ export interface ProviderMetadataRequestOptions {
   force?: boolean;
   /** Cancels the provider read and drains its owned process tree before settling. */
   signal?: AbortSignal;
+  probeLatencyMs?: number;
 }
 
 interface CachedField<T> {
@@ -480,9 +482,11 @@ export async function readProviderMetadata(
   cwd: string,
   fields: readonly ProviderMetadataField[] = PROBE_FIELDS[providerId],
   signal?: AbortSignal,
+  probeLatencyMs?: number,
 ): Promise<ProviderMetadataReadResult> {
-  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, 6_000, fields, { signal });
-  if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, 6_000, undefined, fields, {}, signal);
+  const timeoutMs = slowMachineProbeDeadline(6_000, probeLatencyMs);
+  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, timeoutMs, fields, { signal });
+  if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
     return { models: await readOpenCodeSdkModels(executable, environment, cwd, { signal }) };
   }
@@ -752,6 +756,7 @@ export class ProviderMetadataCache {
       fields,
       revision,
       options.signal,
+      options.probeLatencyMs,
     )
       .finally(() => {
         if (this.inFlight.get(key)?.promise === promise) {
@@ -770,6 +775,7 @@ export class ProviderMetadataCache {
     fields: readonly ProviderMetadataField[],
     revision: number,
     signal?: AbortSignal,
+    probeLatencyMs?: number,
   ): Promise<void> {
     const entry = this.entry(scope);
     const attemptedAt = this.now();
@@ -782,6 +788,7 @@ export class ProviderMetadataCache {
         cwd,
         fields,
         signal,
+        probeLatencyMs,
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {

@@ -90,11 +90,13 @@ export function transcriptNavigationReducer(
       // Virtualizer measurement and delayed history hydration can scroll a
       // following view before its bottom exists. Only reader intent releases it.
       if (!action.intentional) return state;
+      if (state.mode === (action.followsLatest ? "follow-latest" : "reading-history")) return state;
       return action.followsLatest
         ? { mode: "follow-latest", conversationId: action.conversationId }
         : { mode: "reading-history", conversationId: action.conversationId };
     case "latest.requested":
       return action.conversationId === state.conversationId
+        && state.mode !== "follow-latest"
         ? { mode: "follow-latest", conversationId: action.conversationId }
         : state;
   }

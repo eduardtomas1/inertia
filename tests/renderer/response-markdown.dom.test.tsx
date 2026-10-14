@@ -1,11 +1,24 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
 import {
   MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS,
   MAX_MARKDOWN_IMAGES_PER_DOCUMENT,
 } from "../../src/renderer/src/components/markdown/MarkdownImageScheduler";
+
+const markdownRenders = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("react-markdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-markdown")>();
+  return {
+    ...actual,
+    default: (options: Parameters<typeof actual.default>[0]) => {
+      markdownRenders.count += 1;
+      return actual.default(options);
+    },
+  };
+});
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
@@ -699,5 +712,47 @@ describe("ResponseMarkdown project files", () => {
 
     expect(container.querySelector("code.language-ts")).not.toBeNull();
     expect(container.querySelector("code.hljs")).toBeNull();
+  });
+});
+
+function withoutReactIds(html: string): string {
+  return html.replace(/_r_[0-9a-z]+_/gu, "id");
+}
+
+function markdown(content: string, streaming = false) {
+  return (
+    <ResponseMarkdown
+      content={content}
+      projectRoot="/project"
+      projectId={PROJECT_ID}
+      defaultCodeWrap={false}
+      streaming={streaming}
+    />
+  );
+}
+
+describe("ResponseMarkdown parse reuse", () => {
+  beforeEach(() => {
+    markdownRenders.count = 0;
+  });
+
+  it("reuses the rendered Markdown of a settled message when its row mounts again", () => {
+    const content = "## Remounted answer\n\nA [link](./notes.md) and code:\n\n```ts\nconst remounted = 1;\n```\n";
+    const first = render(markdown(content));
+    const html = withoutReactIds(first.container.innerHTML);
+    first.unmount();
+
+    const second = render(markdown(content));
+
+    expect(withoutReactIds(second.container.innerHTML)).toBe(html);
+    expect(markdownRenders.count).toBe(1);
+  });
+
+  it("parses streaming content on every mount", () => {
+    const content = "Streaming answer that is still growing";
+    render(markdown(content, true)).unmount();
+    render(markdown(content, true)).unmount();
+
+    expect(markdownRenders.count).toBe(2);
   });
 });

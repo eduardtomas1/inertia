@@ -123,8 +123,47 @@ mascot follows several chats at once.
   the context tool, takes linear time; a 32 KB command took about 0.9 s.
   Claude chat titles are read from the chat's own project folder instead of
   every Claude project.
-
-<!-- PERF: migration 97 and the update-everything feature go here -->
+- **Update everything**: when updates are available, the update control in
+  the sidebar offers Inertia and every installed provider together, for
+  example **Update Inertia and 2 providers** or **Update Codex**. The dialog
+  lists each update with its versions and says how many running chats will
+  be stopped. Inertia downloads the app update first, stops the affected
+  chats, updates the providers one at a time and then installs the app. New
+  chats, terminals and resumed chats are refused with "Inertia is updating."
+  until it is done.
+- With **Continue chats after the update** checked (the choice is
+  remembered), each stopped chat continues once in its own session after the
+  update or the restart, with "Continue from where you stopped.", and its
+  timeline names what was updated. Chats waiting for an approval or an
+  answer and archived chats are not continued, and a chat with a queued
+  follow-up sends that follow-up instead. Builds that cannot install the app
+  in place, which includes the current unsigned macOS and Windows builds,
+  update the providers and link to the release page.
+- Startup: the runtime starts before the window, background work waits until
+  the window has connected, and unchanged state is not sent twice. On the
+  development Mac the first transcript row shows about 570 ms after launch
+  instead of about 680 ms, and with a 3,000-turn chat on a fresh profile
+  575 ms instead of 875 ms.
+- Usage, Limits, Daily work, Tasks, the terminal and the model chooser no
+  longer wait 300 ms on first open: they open in 14 to 55 ms instead of 314
+  to 355 ms. A detached chat window shows its transcript in about 190 ms
+  instead of 490 ms.
+- A Git refresh runs 7 Git processes instead of 10, and the Changes panel
+  opens in about 1.1 s instead of 1.4 s.
+- Each provider shows as soon as its own check finishes, checks allow more
+  time on a slow machine, a model list read that timed out is retried in the
+  background, and models stay visible when only the usage read is late. With
+  a test Claude ten times slower than normal, Claude now shows as connected
+  after about 7 s and gets its models, instead of ending on "Connection
+  issue" after about 38 s.
+- Scrolling a long chat redraws rows at once only when the view reaches rows
+  that are not drawn yet, reuses formatted Markdown and highlighted code when
+  rows come back, and estimates row heights from the real text size. Missed
+  screen refreshes while wheel scrolling fell from 3 to 4% to under 2%, and
+  while dragging the scrollbar down a 300-turn chat from 12% to 2%.
+- Scrolling up near the top of a chat loads older messages by itself and
+  fetches the page before it in advance; **Load earlier messages** stays for
+  keyboard use.
 
 ### Providers and dependencies
 
@@ -145,13 +184,19 @@ mascot follows several chats at once.
 - Migration 94 (`RecordAgentContextReads`) records the earlier turns agents
   read through the context tool, migration 95
   (`CompactConversationContextTransport`) rebuilds the context packets for
-  the smaller transport, and migration 96 (`PersistTodos`) stores tasks.
+  the smaller transport, migration 96 (`PersistTodos`) stores tasks, and
+  migration 97 (`PersistRestartContinuationPlans`) stores which chats an
+  update stopped and whether each has continued.
 - Database backup checks also verify the context packet triggers that
   migration 95 recreates.
 - Quitting no longer hangs when the macOS keychain does not answer: Private
   Connect checks secure storage only when it has been enabled or its settings
   are opened, so a profile that never used it no longer touches the keychain
   at launch.
+- Updating Inertia is no longer blocked after Antigravity was updated from
+  Inertia: the provider update record now accepts Antigravity.
+- The provider notice no longer stays on "Updating provider." after the
+  update has finished.
 - The README shows the current interface, with new Tasks and Plan views.
 - Release only: a release must be on main and must not change a migration
   released in an earlier version, Windows release builds warm Electron before

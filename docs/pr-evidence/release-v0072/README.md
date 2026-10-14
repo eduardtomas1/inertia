@@ -26,15 +26,14 @@ and dependencies, and Fixes. It covers every change since `v0.0.71`
 - #604 Reflect provider plan progress in the Plan tab.
 - #605 Name new chats automatically from the first prompt.
 - #606 Fit the mascot's failed label on every platform.
+- #608 Make Inertia faster where it was measured to be slow, and update
+  everything with one click.
 - This PR: the readiness fixes, dependencies, README views and release gates.
 
 Schemas 94 (`RecordAgentContextReads`) and 95
-(`CompactConversationContextTransport`), both from #597, and 96
-(`PersistTodos`, from #546) are the release's migrations. This PR adds no
-migration of its own.
-
-<!-- PERF: migration 97 and the performance/update-everything branch, if it
-merges before the tag, change the line above and the sections marked PERF. -->
+(`CompactConversationContextTransport`), both from #597, 96 (`PersistTodos`,
+from #546) and 97 (`PersistRestartContinuationPlans`, from #608) are the
+release's migrations. This PR adds no migration of its own.
 
 ## Dependencies
 
@@ -191,6 +190,10 @@ test that failed on the unfixed code.
 - Tests: the Windows lock ordering test allows 10 s, tests set
   `DISABLE_SYSTEM_FONTS_LOAD`, the provider settings hover retries until the
   row is hovered, and a forced Electron fixture close names its exit stages.
+- Quit (Electron): Private Connect read its secure storage at launch for
+  every profile and quit waited for that read, so a quit hung when the macOS
+  keychain did not answer. Storage is now read only when Private Connect has
+  been enabled or its settings are opened (`host-lazy-storage.test.ts`).
 
 Noted, not fixed: the SQL cut of command detail at 4,096 characters can leave
 a token's first characters before scrubbing; reconnect backoff resets after
@@ -201,7 +204,54 @@ each successful sync; the macOS forced-termination root cause stays open
 
 ## Performance and updates
 
-<!-- PERF -->
+`perf/faster-app-2026-10` (#608) adds two things.
+
+- Update everything: the sidebar update control and a dialog update the app
+  and every installed provider in one run (`updates.run`, `updates.finish`).
+  The runtime holds new chat, terminal and resume work during the run,
+  stops the affected chats, updates the providers one lock key at a time and
+  hands the app install to the existing install path. Migration 97 adds the
+  `restart_continuation_plans` table, one plan per stopped chat, and each
+  chat continues once after the restart, or at once when nothing restarts.
+  Also fixed: the provider maintenance journal rejected Antigravity records,
+  which blocked app updates after an Antigravity update, and the provider
+  notice stayed on "Updating provider." when a chat update reused an older
+  snapshot.
+- Performance, each change measured before and after: startup (runtime
+  worker before the window, post-ready work after the first client connects,
+  the Git artifact backfill in one transaction, no re-broadcast of unchanged
+  snapshots), screen opens (the loaded-surface hook for seven lazy screens
+  and the detached window), Git (one `rev-parse` for the metadata identity,
+  HEAD read from the status header), provider refresh (per-provider
+  publication, deadlines stretched by measured latency, background retries
+  after a timeout only), scrolling (synchronous rendering only when the
+  viewport leaves the rendered rows, Markdown and highlight caches, row
+  estimates from the answer typography, navigation state kept when the mode
+  is unchanged, one relative-time formatter) and older history (auto-load
+  near the top, idle prefetch of the next page).
+
+Evidence: `docs/screenshots/perf/README.md` has the before and after tables,
+with N and machine load, for every kept and dropped candidate;
+`docs/screenshots/update-everything/` has the sidebar control, dialog,
+updating state, continued chat and a GIF of the flow from
+`tests/e2e/update-everything.spec.ts` with the fake Codex provider.
+
+Not verified:
+
+- The real app install and restart path: under `NODE_ENV=test` delivery is
+  forced to manual, so download, install, restart and continuing after the
+  restart are covered by unit tests only. The provider half and the
+  continuation run end to end.
+- Windows and Linux runtime timing; all numbers are from macOS arm64.
+- The fallback to two `rev-parse` probes for Git older than 2.31 was not run
+  live.
+- The desktop benchmark's split-chat step reads about 390 ms against about
+  270 ms on main. A single run with a 1.5 s pause before the step read 388 ms
+  before and 292 ms after the branch, which points at step ordering rather
+  than a slower split; it is unresolved.
+- One worker's test run let real provider discovery (version and sign-in
+  probes) execute once on the development machine; it was corrected at once.
+  Everything else used fake providers and fixtures.
 
 ## Verification
 
@@ -277,15 +327,58 @@ tag is the first run of these steps.
   `src/server/persistence/context-packet-triggers-schema.ts`,
   `src/server/database.ts`: Windows close budget, secrets, backup checks.
 - `src/shared/mascot.ts`: mascot labels.
+- `src/main/private-connect/host.ts`, `docs/PRIVATE_CONNECT_INTERNALS.md`:
+  Private Connect storage read only when needed.
 - `.github/workflows/ci.yml`, `.github/workflows/release-platforms.yml`,
   `scripts/validate-release.mjs`: release gates and Xvfb.
 - `scripts/check-renderer-bundle.mjs`: the two caps.
 - `scripts/capture-readme-screenshots.mjs`, `README.md`, `docs/screenshots/`:
   README views.
+- `src/main/index.ts`, `src/main/deferred-window-creation.ts`,
+  `src/server/index.ts`, `src/server/runtime/post-ready-work.ts`,
+  `src/server/turn-git-artifacts.ts`: startup order.
+- `src/server/persistence/database-recovery-required-tables.ts`,
+  `git-artifact-repository.ts`, `migrations/catalog.ts`,
+  `migrations/recent-migrations.ts`,
+  `migrations/restart-continuation-plans.ts`,
+  `restart-continuation-repository.ts`, `turn-ledger-repository.ts`,
+  `types.ts`, `workspace-run-repository.ts`,
+  `database-migration-lineage.json`: migration 97 and the artifact backfill.
+- `src/server/runtime/update-everything.ts`, `update-hold.ts`,
+  `restart-continuation-runtime.ts`, `restart-continuation-scheduler.ts`,
+  `commands/turn-interaction-commands.ts`, `commands/updates-commands.ts`,
+  `turns/turn-update-interruption.ts` and the turn admission files,
+  `src/shared/updates.ts`, `src/shared/contracts/client-command/index.ts`,
+  `client-command/updates.ts`, `events.ts`, `server-event-schema.ts`:
+  update everything.
+- `src/renderer/src/components/sidebar/SidebarUpdateControl.tsx`,
+  `UpdateEverythingDialog.tsx`, `updateEverythingPlan.ts`,
+  `src/renderer/src/hooks/useUpdateEverything.ts`,
+  `useProviderMaintenance.ts`, `src/renderer/src/utils/updateEverythingRun.ts`:
+  the update control, dialog and provider notice.
+- `src/server/provider/maintenance-journal.ts`: Antigravity records.
+- `src/renderer/src/components/lazySurfaceLoaders.ts`,
+  `chatSurfaceLoaders.ts`, `usageLimitsLoaders.ts`, `AppLayout.tsx`,
+  `WorkspaceScene.tsx`, `UsageView.tsx`, `ModelChooser.tsx`,
+  `ChatWorkspace.tsx`, `src/renderer/src/DetachedChatApp.tsx`: screen opens.
+- `src/server/git/paths.ts`, `status.ts`: Git processes.
+- `src/server/provider/provider-info-refresh.ts`, `metadata.ts`,
+  `probe-deadline.ts`, `detect-all-providers.ts`,
+  `claude-agent-sdk-metadata.ts`, `discovery.ts`, `src/server/providers.ts`:
+  provider refresh.
+- `src/renderer/src/components/response-timeline/useViewportSyncedVirtualizer.ts`,
+  `src/renderer/src/utils/response-timeline/virtualization.ts`,
+  `ResponseMarkdown.tsx`, `sourceHighlighting.ts`, `boundedCache.ts`,
+  `transcriptNavigation.ts`, `src/renderer/src/lib/format.ts`,
+  `useConversationHistory.ts`, `useOlderHistoryNearTop.ts`: scrolling and
+  older history.
+- `tests/performance/`, `playwright.*-profile.config.ts`,
+  `playwright.screens.config.ts`, `playwright.content-benchmark.config.ts`,
+  `scripts/summarize-*.mjs`, `scripts/map-cpuprofile.mjs`: the measurement
+  harnesses; `scripts/check-renderer-bundle.mjs`: the first-load caps.
+- `docs/screenshots/perf/`, `docs/screenshots/update-everything/`: evidence.
 - `vitest.config.ts` and tests under `tests/`: the proofs above.
 - `CHANGELOG.md` and this report.
-
-<!-- FINAL: PERF branch files -->
 
 ## Publication boundary
 

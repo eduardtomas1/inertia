@@ -1,12 +1,16 @@
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
+import { loadModelSourceRail } from "./chatSurfaceLoaders";
+import { loadUsageLimitsDialog, loadUsageLimitsPanel } from "./usageLimitsLoaders";
 
 export const loadCommandPalette = createSurfaceLoader(async () => ({
   default: (await import("./CommandPalette")).CommandPalette,
 }));
 export const loadCommitDialog = createSurfaceLoader(() => import("./CommitDialog"));
 export const loadConversationSplitView = createSurfaceLoader(() => import("./ConversationSplitView"));
-export const loadDailyWorkDialog = createSurfaceLoader(() => import("./DailyWorkDialog"));
+export const loadDailyWorkDialog = createSurfaceLoader(async () => ({
+  default: (await import("./DailyWorkDialog")).DailyWorkDialog,
+}));
 export const loadAttachmentsSurface = createSurfaceLoader(() => import("./AttachmentsSurface"));
 export const loadBackgroundTasksSurface = createSurfaceLoader(() => import("./BackgroundTasksSurface"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
@@ -23,9 +27,15 @@ export const loadSettingsView = createSurfaceLoader(async () => ({
   default: (await import("./SettingsView")).SettingsView,
 }));
 export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface"));
-export const loadUsageView = createSurfaceLoader(() => import("./UsageView"));
-export const loadTasksView = createSurfaceLoader(() => import("./TasksView"));
-export const loadWorkspaceTerminal = createSurfaceLoader(() => import("./WorkspaceTerminal"));
+export const loadUsageView = createSurfaceLoader(async () => ({
+  default: (await import("./UsageView")).UsageView,
+}));
+export const loadTasksView = createSurfaceLoader(async () => ({
+  default: (await import("./TasksView")).TasksView,
+}));
+export const loadWorkspaceTerminal = createSurfaceLoader(async () => ({
+  default: (await import("./WorkspaceTerminal")).WorkspaceTerminal,
+}));
 export const loadTerminalPanel = createSurfaceLoader(() => import("./TerminalPanel"));
 export const loadWorkspaceChangesPanel = createSurfaceLoader(() => import("./WorkspaceChangesPanel"));
 export const loadWelcomeGuide = createSurfaceLoader(() => import("./welcome-guide/WelcomeGuide"));
@@ -35,6 +45,12 @@ const frequentSurfaceLoads = [
   loadConversationSplitView,
   loadDailyWorkDialog,
   loadSettingsView,
+  loadUsageView,
+  loadUsageLimitsPanel,
+  loadUsageLimitsDialog,
+  loadTasksView,
+  loadModelSourceRail,
+  loadWorkspaceTerminal,
 ] as const;
 
 export function prefetchFrequentSurfaces(): void {

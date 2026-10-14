@@ -108,3 +108,20 @@ it("renews an expired unattempted confirmation instead of offering an endless sa
   expect(screen.getByRole("button", { name: "Renew confirmation" })).toBeVisible();
   expect(screen.queryByText(/The result is uncertain/)).not.toBeInTheDocument();
 });
+it("opens the Limits dialog on the first commit once the idle prefetch has loaded it", async () => {
+  const request = async (): Promise<ServerEvent> => await new Promise<ServerEvent>(() => undefined);
+  vi.resetModules();
+  const { UsageLimitsProvider } = await import("../../src/renderer/src/components/usage-limits-context");
+  const { UsageIndicator } = await import("../../src/renderer/src/components/UsageIndicator");
+  const { prefetchFrequentSurfaces } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
+  await act(async () => {
+    prefetchFrequentSurfaces();
+    await vi.dynamicImportSettled();
+  });
+  render(<UsageLimitsProvider request={request} status="online"><UsageIndicator usage={null} rateLimits={[]} rateLimitState={{ freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false }} quotaSource="selected-route" mode="expanded" providerLabel="Codex" onModeChange={() => undefined} /></UsageLimitsProvider>);
+  fireEvent.click(screen.getByRole("button", { name: /Open usage and context/ }));
+
+  act(() => { fireEvent.click(screen.getByRole("button", { name: "All provider limits" })); });
+
+  expect(screen.getByRole("dialog", { name: "Provider usage limits" })).toBeInTheDocument();
+});

@@ -1,7 +1,5 @@
 import { CircleAlert, RefreshCw } from "lucide-react";
 import {
-  lazy,
-  Suspense,
   useEffect,
   useRef,
   useState,
@@ -15,6 +13,7 @@ import type {
 } from "@shared/contracts";
 
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { resultEvent } from "../lib/runtimeCommands";
 import { formatCompact, formatCount, formatDuration } from "../lib/usageFormat";
@@ -23,10 +22,9 @@ import {
   DailyProviderChart,
   dailyProviderMetric,
 } from "./UsageProviderChart";
+import { loadUsageLimitsPanel } from "./usageLimitsLoaders";
 import { IconButton, LoadingMark } from "./ui";
 import "./UsageView.css";
-
-const UsageLimitsPanel = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageLimitsPanel }));
 
 type UsageDashboardCommand = Extract<
   CommandWithoutId,
@@ -412,6 +410,7 @@ function UsageSkeleton(): React.JSX.Element {
 
 export function UsageView({ status, request }: UsageViewProps): React.JSX.Element {
   const [tab, setTab] = useState<"history" | "limits">("history");
+  const UsageLimitsPanel = useLoadedSurface(loadUsageLimitsPanel, tab === "limits");
   const [days, setDays] = useState<UsageRangeDays>(30);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [dashboard, setDashboard] = useState<UsageDashboard | null>(null);
@@ -454,7 +453,7 @@ export function UsageView({ status, request }: UsageViewProps): React.JSX.Elemen
           <button type="button" aria-pressed={tab === "history"} onClick={() => setTab("history")}>History</button>
           <button type="button" aria-pressed={tab === "limits"} onClick={() => setTab("limits")}>Limits</button>
         </div>
-        {tab === "limits" ? <Suspense fallback={<LoadingMark label="Loading limits" />}><UsageLimitsPanel request={request} status={status} /></Suspense> : <>
+        {tab === "limits" ? UsageLimitsPanel ? <UsageLimitsPanel request={request} status={status} /> : <LoadingMark label="Loading limits" /> : <>
         <header className="usage-toolbar">
           <span>{dashboard
             ? `${displayDate(dashboard.range.startDate)} to ${displayDate(dashboard.range.endDate)}`

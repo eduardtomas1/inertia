@@ -50,6 +50,7 @@ import {
   loadWorkspaceChangesPanel,
 } from "./lazySurfaceLoaders";
 import { createSurfaceLoader } from "../utils/surfaceLoader";
+import type { TerminalPanelProps } from "./TerminalPanelSupport";
 
 // Loaded here, not in lazySurfaceLoaders: the panel imports those loaders.
 const loadWorkspacePanel = createSurfaceLoader(() => import("./WorkspacePanel"));
@@ -91,10 +92,6 @@ const PreviewPanel = lazySurface(
   loadPreviewPanel,
   (module) => module.PreviewPanel,
 );
-const WorkspaceTerminal = lazySurface(
-  loadWorkspaceTerminal,
-  (module) => module.WorkspaceTerminal,
-);
 const WorkspaceChangesPanel = lazySurface(
   loadWorkspaceChangesPanel,
   (module) => module.WorkspaceChangesPanel,
@@ -120,7 +117,7 @@ export interface WorkspaceToolScene {
   changes: ComponentProps<typeof WorkspaceChangesPanel>;
   files: ComponentProps<typeof FilesPanel>;
   filesKey: string;
-  terminal: ComponentProps<typeof WorkspaceTerminal>["terminal"];
+  terminal: TerminalPanelProps;
   terminalKey: string;
   goal: ComponentProps<typeof GoalPanel>;
   plan: ComponentProps<typeof PlanPanel>;
@@ -237,17 +234,17 @@ function TerminalDock({
 }): JSX.Element | null {
   const activatedKeyRef = useRef<string | null>(null);
   if (tools?.terminal.visible) activatedKeyRef.current = tools.terminalKey;
-  if (!tools || activatedKeyRef.current !== tools.terminalKey) return null;
+  const activated = tools !== null && activatedKeyRef.current === tools.terminalKey;
+  const WorkspaceTerminal = useLoadedSurface(loadWorkspaceTerminal, activated);
+  if (!tools || !activated || !WorkspaceTerminal) return null;
   return (
-    <Suspense fallback={null}>
-      <WorkspaceTerminal
-        terminal={tools.terminal}
-        terminalKey={tools.terminalKey}
-        inSurface={tools.activeTool === "terminal" && tools.panel.visible !== false}
-        containerRef={containerRef}
-        surfaceTarget={surfaceTarget}
-      />
-    </Suspense>
+    <WorkspaceTerminal
+      terminal={tools.terminal}
+      terminalKey={tools.terminalKey}
+      inSurface={tools.activeTool === "terminal" && tools.panel.visible !== false}
+      containerRef={containerRef}
+      surfaceTarget={surfaceTarget}
+    />
   );
 }
 

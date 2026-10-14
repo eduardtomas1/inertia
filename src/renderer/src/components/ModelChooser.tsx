@@ -1,9 +1,7 @@
 import { Search } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  lazy,
   memo,
-  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -15,7 +13,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { loadModelSourceRail } from "./chatSurfaceLoaders";
 import {
   modelChooserRowFromRoute,
   ModelChooserRow,
@@ -53,8 +53,6 @@ import {
   isSidebarNavigationKey,
   nextSelectableNavigationIndex,
 } from "../utils/sidebarModel";
-
-const ModelSourceRail = lazy(() => import("./ModelSourceRail"));
 
 export type ModelChooserNavigationKey =
   | "ArrowDown"
@@ -243,6 +241,7 @@ export function ModelChooser({
   const activeRouteKeyRef = useRef<string | null>(null);
   const activeSelectionContextRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
+  const ModelSourceRail = useLoadedSurface(loadModelSourceRail, open);
   useNativePreviewSuspension(open);
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<ModelSourceFilter>({
@@ -625,11 +624,7 @@ export function ModelChooser({
             />
           </div>
           <div className="model-chooser-body">
-            <Suspense fallback={
-              <nav className="model-source-rail" aria-label="Model sources" aria-busy="true">
-                <span className="model-source-rail-item" aria-hidden="true" />
-              </nav>
-            }>
+            {ModelSourceRail ? (
               <ModelSourceRail
                 items={railItems}
                 selectedId={selectedSourceId}
@@ -639,7 +634,11 @@ export function ModelChooser({
                   window.requestAnimationFrame(() => searchRef.current?.focus());
                 }}
               />
-            </Suspense>
+            ) : (
+              <nav className="model-source-rail" aria-label="Model sources" aria-busy="true">
+                <span className="model-source-rail-item" aria-hidden="true" />
+              </nav>
+            )}
             <div className="model-chooser-results-wrap">
               <div
                 ref={resultsScrollRef}

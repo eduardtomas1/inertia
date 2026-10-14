@@ -334,6 +334,18 @@ describe("provider metadata cache", () => {
     expect(cache.lastReadFailed("claude")).toBe(false);
   });
 
+  it("stops reporting a failed read once a run supplies the catalog", async () => {
+    const cache = new ProviderMetadataCache({
+      read: vi.fn().mockRejectedValueOnce(new Error("Claude metadata discovery timed out.")),
+    });
+
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
+    expect(cache.lastReadFailed("claude")).toBe(true);
+    cache.learn("claude", claudeExecutable, { models: [model("model-a")] }, "provider");
+
+    expect(cache.lastReadFailed("claude")).toBe(false);
+  });
+
   it("gives later reads the deadline measured by the latest detection", async () => {
     const read = vi.fn(async () => ({}));
     const cache = new ProviderMetadataCache({ read });

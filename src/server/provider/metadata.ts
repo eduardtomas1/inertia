@@ -690,7 +690,10 @@ export class ProviderMetadataCache {
       entry.rateLimits.stale = false;
       learned = true;
     }
-    if (learned) entry.revision += 1;
+    if (learned) {
+      entry.revision += 1;
+      this.failedReads.delete(currentProviderMetadataScopeKey(scope));
+    }
     this.persist(entry);
     return this.currentScoped(scope);
   }

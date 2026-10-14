@@ -234,7 +234,8 @@ test("updates Codex, interrupts the running chat and continues it on the same th
     await expect.poll(async () => (await brewCalls(fake)).some((args) => args[0] === "upgrade")).toBe(true);
     expect((await brewCalls(fake)).filter((args) => args[0] === "upgrade")).toEqual([["upgrade", "codex"]]);
     if (evidenceDirectory) await page.waitForTimeout(1_000);
-    await capture(page, "updating");
+    await capture(page, "updating", updateControl(page));
+    await page.mouse.move(0, 0);
     await writeFile(fake.brewGatePath, "release\n", "utf8");
 
     await expect(page.getByText(`Updated to ${latestVersion}`, { exact: true })).toBeVisible();

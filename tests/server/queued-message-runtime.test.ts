@@ -596,8 +596,8 @@ describe("durable runtime message queue", () => {
         reasoningEffort: conversation.reasoningEffort, interactionMode: conversation.interactionMode, accessMode: conversation.accessMode,
         configurationRevision: 0, association: "authoritative" });
       const at = new Date().toISOString();
-      f.store.updateAgentTurnLifecycle(turn.id, { status: "running" });
-      f.store.updateAgentTurnLifecycle(turn.id, { status: "interrupted", terminalReason, startedAt: at, completedAt: at });
+      f.store.updateAgentTurnLifecycle(turn.id, { status: "running", startedAt: at });
+      f.store.updateAgentTurnLifecycle(turn.id, { status: "interrupted", terminalReason, completedAt: at });
       const id = randomUUID();
       await f.command("message.queue.enqueue", id);
       await f.drain();

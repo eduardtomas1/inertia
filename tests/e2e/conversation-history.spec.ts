@@ -49,7 +49,10 @@ test("loads older pages at the transcript start without moving the reading posit
     };
     requestAnimationFrame(sample);
   }, turns[45]);
-  await readFromTranscriptStart(page);
+  await transcript.evaluate((scroll) => {
+    scroll.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
+    scroll.scrollTop = 0;
+  });
   await expect(feed(80)).toBeAttached();
   await expect(page.getByRole("button", { name: "Load earlier messages", exact: true })).toBeAttached();
   let samples: { count: number; top: number | null }[] = [];

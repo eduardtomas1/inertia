@@ -15,6 +15,7 @@ import { TurnGitArtifactManager } from
   "../../src/server/turn-git-artifacts";
 import { DuoLaunchCoordinator } from
   "../../src/server/runtime/duo/duo-launch-coordinator";
+import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
 
 const directories: string[] = [];
 const runtimes: RunningRuntime[] = [];
@@ -99,6 +100,25 @@ describe("runtime post-ready work", () => {
     expect(reconcileArtifacts).toHaveBeenCalledOnce();
     expect(resumeComparisons).toHaveBeenCalledOnce();
     expect(providerRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not rebroadcast the shell snapshot when passive work changes nothing", async () => {
+    const paths = await runtimePaths();
+    vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll").mockResolvedValue();
+    vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const snapshotBroadcasts = vi.spyOn(RuntimeSyncHub.prototype, "broadcastSnapshot");
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+
+    await runtime.startPostReadyWork();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(snapshotBroadcasts).not.toHaveBeenCalled();
   });
 
   it("starts no passive work when shutdown wins before readiness", async () => {

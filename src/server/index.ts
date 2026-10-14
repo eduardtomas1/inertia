@@ -45,6 +45,7 @@ import { createTestShutdownTrace } from "./runtime/test-shutdown-trace";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
 import { ScratchWorkspace } from "./runtime/scratch-workspace";
+import { PostReadyWork, shellSnapshotDigest } from "./runtime/post-ready-work";
 import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
 import {
   ProjectIdentityRefresher,
@@ -175,8 +176,42 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let closed = false;
   let closing: Promise<void> | null = null;
   const runtimeLifetimeAbort = new AbortController();
-  let postReadyWorkStarted = false;
-  let postReadyWork: Promise<void> = Promise.resolve();
+  // These best-effort tasks can own Git or provider child processes. They
+  // begin only after the worker has published runtime.ready so a slow scan
+  // cannot consume the bounded startup/recovery window or taint a generation
+  // that never became usable.
+  const postReady = new PostReadyWork({
+    isClosed: () => closed, isBlocked: () => runtimeSafetyLock, track: (operation) => trackRuntimeOperation(operation),
+    startBackups: () => store.startBackups(),
+    refreshProjectIdentities: () => projectIdentities.refreshAll(projectIdentityCandidates),
+    afterProjectIdentityRefresh: () => testOnlyProjectIdentityRefresh,
+    reconcileWorkspaces: () => Promise.all([
+      new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined),
+      duoLaunchCoordinator.resumeComparisons(),
+    ]),
+    reconcileArtifacts: () => turnGitArtifacts.reconcile(),
+    snapshotDigest: () => shellSnapshotDigest(currentSnapshot()),
+    broadcastSnapshot: () => broadcastSnapshot(),
+    startProviderDiscovery: () => {
+      if (!enableProviders) return;
+      void refreshProviderInfo(undefined, true).then(async () => {
+        // Remote version advisories are best-effort UI data and own no
+        // shutdown resources.
+        if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
+      }).catch(() => {
+        if (closed) return;
+        providerInfo = providerInfo.map((provider) => ({
+          ...provider,
+          installState: "error",
+          authState: "error",
+          canRun: false,
+          statusMessage: "Agent discovery failed",
+        }));
+        broadcastSnapshot();
+      });
+      startIdleRateLimitRefresh(providerUsage);
+    },
+  });
   const recoveryImportAdmission = new DatabaseRecoveryImportAdmission();
   let activeRuntimeCommands = 0;
   const updatePreparation = new RuntimeUpdatePreparationGate({
@@ -189,12 +224,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     terminalActivity: () => terminals.hasUpdateBlockingActivity(),
     providerMaintenanceActive: () => providerMaintenance.hasBlockingAuthority(),
     providerRefreshActive: () => activeProviderRefreshes > 0,
-    artifactReconciliationActive: () => artifactReconciliationActive,
+    artifactReconciliationActive: () => postReady.artifactReconciliationActive,
     holdTerminalAdmission: () => terminals.holdForUpdatePreparation(),
     releaseTerminalAdmission: () => terminals.releaseUpdatePreparation(),
     drainAdditionalOperations: async () => {
       await projectIdentities.drain();
-      await artifactReconciliation;
+      await postReady.artifactReconciliation;
     },
   });
   const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
@@ -256,7 +291,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const projectIdentityCandidates = store.shellSnapshot().projects
     .filter(({ workspaceKind }) => workspaceKind !== "scratch")
     .map(({ id, path }) => ({ id, path }));
-  let projectIdentityRefresh: Promise<void> = Promise.resolve();
   const projectIdentityAuthority = {
     revalidate: async (projectId: string, projectPath: string) => {
       if (store.project(projectId).workspaceKind === "scratch") return true;
@@ -363,8 +397,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const token = randomBytes(32).toString("base64url");
   const websocketPath = `/runtime/${token}`;
   const runtimeCommandDrainWaiters = new Set<() => void>();
-  let artifactReconciliation: Promise<void> | null = null;
-  let artifactReconciliationActive = false;
   const server = createServer((_request, response) => {
     response.writeHead(404, {
       "Cache-Control": "no-store",
@@ -887,69 +919,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }
   const websocketUrl = `ws://127.0.0.1:${address.port}${websocketPath}`; detachedChatRuntimeSecurity.activate(websocketUrl);
 
-  const startPostReadyWork = (): Promise<void> => {
-    if (postReadyWorkStarted) return postReadyWork;
-    if (closed || runtimeSafetyLock) return Promise.resolve();
-    postReadyWorkStarted = true;
-
-    // These best-effort tasks can own Git or provider child processes. They
-    // begin only after the worker has published runtime.ready so a slow scan
-    // cannot consume the bounded startup/recovery window or taint a generation
-    // that never became usable.
-    try {
-      store.startBackups();
-    } catch {
-      // Backup scheduling is maintenance; startup remains authoritative.
-    }
-    projectIdentityRefresh = trackRuntimeOperation(() => projectIdentities
-      .refreshAll(projectIdentityCandidates)
-      .catch(() => undefined)
-      .then(() => {
-        if (!closed) broadcastSnapshot();
-      })
-      .then(() => testOnlyProjectIdentityRefresh))
-      .catch(() => undefined);
-    postReadyWork = trackRuntimeOperation(() =>
-      Promise.all([
-        new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined),
-        duoLaunchCoordinator.resumeComparisons(),
-      ])
-        .then(() => {
-          if (!closed) broadcastSnapshot();
-        }))
-      .catch(() => undefined);
-    artifactReconciliationActive = true;
-    artifactReconciliation = trackRuntimeOperation(() =>
-      turnGitArtifacts.reconcile()
-        .then((changed) => {
-          if (changed && !closed) broadcastSnapshot();
-        }))
-      .catch(() => undefined)
-      .finally(() => {
-        artifactReconciliationActive = false;
-      });
-
-    if (enableProviders) {
-      void refreshProviderInfo(undefined, true).then(async () => {
-        // Remote version advisories are best-effort UI data and own no
-        // shutdown resources.
-        if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
-      }).catch(() => {
-        if (closed) return;
-        providerInfo = providerInfo.map((provider) => ({
-          ...provider,
-          installState: "error",
-          authState: "error",
-          canRun: false,
-          statusMessage: "Agent discovery failed",
-        }));
-        broadcastSnapshot();
-      });
-      startIdleRateLimitRefresh(providerUsage);
-    }
-    return postReadyWork;
-  };
-
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
     ...privateConnectStoreReads(store),
@@ -1015,7 +984,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         initializedConversationAttachments,
         signal,
       ),
-    startPostReadyWork,
+    startPostReadyWork: () => postReady.start(),
     websocketUrl,
     focusMascotChat: (conversationId, request) => mascotStatus.focus(conversationId, request),
     databaseRecovery: store.databaseRecoveryReport(),
@@ -1147,8 +1116,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             });
           }
           await recoveryImportAdmission.drain();
-          await projectIdentityRefresh;
-          await artifactReconciliation;
+          await postReady.identityRefresh;
+          await postReady.artifactReconciliation;
           if (
             turns.activeConversationIds().length > 0
             || store.hasRecordedActiveWorkspaceRun()
@@ -1224,7 +1193,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             stopIsolatedRuns: () => shutdownTrace.observe("isolated-runs", () => isolatedRuns.dispose(cause)),
             disposeTurnsAndProviders: () => shutdownTrace.observe("turns-providers", () => turns.dispose(cause)),
             settleArtifacts: async () => {
-              await shutdownTrace.observe("artifact-reconciliation", () => artifactReconciliation);
+              await shutdownTrace.observe("artifact-reconciliation", () => postReady.artifactReconciliation);
               await shutdownTrace.observe("artifact-settlement", () => turnGitArtifacts.settleShutdown());
             },
             terminateClients: () => shutdownTrace.observe("clients", () => runtimeSync.terminateAll((client) => client.terminate())),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type {
   AgentActivity,
@@ -49,6 +49,7 @@ import {
   withTerminalTurnProjection,
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
+import { conversationDetailVersion, createConversationDetailCache } from "../utils/conversationDetailCache";
 import { createStreamingAgentStore } from "./useStreamingAgentState";
 import { useConversationHistory } from "./useConversationHistory";
 import type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
@@ -138,6 +139,8 @@ export function useConversationProjection({
   const [detailState, setDetailState] =
     useState<ConversationDetailViewState | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const [detailCache] = useState(() => createConversationDetailCache());
+  const detailVersionRef = useRef<{ conversationId: string; version: string | null } | null>(null);
   const missingRetryRef = useRef<{ conversationId: string; attempts: number } | null>(null);
   // Read through a ref so a caller passing a fresh array cannot retrigger loads.
   const missingRetryDelaysRef = useRef(missingDetailRetryDelaysMs);
@@ -277,6 +280,26 @@ export function useConversationProjection({
     }).catch(() => undefined);
   }, [conversationId, request, status, subscriptionOwner]);
 
+  useLayoutEffect(() => {
+    if (!conversationId || status !== "online") return;
+    const current = detailStateRef.current;
+    if (current?.conversationId === conversationId && current.state === "ready") return;
+    const version = conversationDetailVersion(snapshotRef.current?.conversations.find(
+      ({ id }) => id === conversationId,
+    ) ?? null);
+    const cached = detailCache.read(conversationId, version);
+    if (!cached) return;
+    detailVersionRef.current = { conversationId, version };
+    setDetailState({ kind: "conversation.detail", conversationId, state: "ready", detail: cached });
+  }, [conversationId, detailCache, status]);
+
+  useEffect(() => {
+    if (detailState?.state !== "ready") return;
+    const owner = detailVersionRef.current;
+    if (owner?.conversationId !== detailState.conversationId) return;
+    detailCache.remember(owner.conversationId, owner.version, detailState.detail);
+  }, [detailCache, detailState]);
+
   useEffect(() => {
     if (!conversationId) {
       requestGenerationRef.current += 1;
@@ -295,6 +318,9 @@ export function useConversationProjection({
 
     const generation = requestGenerationRef.current + 1;
     requestGenerationRef.current = generation;
+    const requestedVersion = conversationDetailVersion(snapshotRef.current?.conversations.find(
+      ({ id }) => id === conversationId,
+    ) ?? null);
     let retryTimer: number | null = null;
     void request({
       type: "conversation.detail.load",
@@ -313,6 +339,8 @@ export function useConversationProjection({
       const shell = snapshotRef.current?.conversations.find(
         ({ id }) => id === conversationId,
       ) ?? null;
+      if (result.state === "ready") detailVersionRef.current = { conversationId, version: requestedVersion };
+      else detailCache.forget(conversationId);
       setDetailState((current) =>
         resolveConversationDetail(
           current,
@@ -424,6 +452,7 @@ export function useConversationProjection({
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [
+    detailCache,
     detailRefresh,
     conversationId,
     request,
@@ -537,6 +566,8 @@ export function useConversationProjection({
     const activeConversation = conversationRef.current;
     const projectionEnabled = enabledRef.current;
     if (event.type === "server.welcome") {
+      detailCache.clear();
+      detailVersionRef.current = null;
       requestGenerationRef.current += 1;
       terminalRefreshPendingRef.current = false;
       liveTurnOwnerRef.current = null;
@@ -617,6 +648,8 @@ export function useConversationProjection({
       return;
     }
     if (event.type === "conversation.detail.invalidated") {
+      detailCache.forget(event.conversationId);
+      if (detailVersionRef.current?.conversationId === event.conversationId) detailVersionRef.current = null;
       if (
         projectionEnabled
         && event.conversationId === activeConversation?.id
@@ -941,6 +974,7 @@ export function useConversationProjection({
     }
   }), [
     closeTextStream,
+    detailCache,
     resetLiveProjection,
     setStreaming,
     subscribe,

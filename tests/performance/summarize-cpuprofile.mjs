@@ -14,7 +14,7 @@ async function consumerFor(url) {
   const file = url.replace(/^[a-z-]+:\/\/[^/]+\//u, "");
   if (consumers.has(file)) return consumers.get(file);
   const mapPath = join(resolve(rendererDirectory), `${file}.map`);
-  const consumer = existsSync(mapPath) ? await new SourceMapConsumer(JSON.parse(readFileSync(mapPath, "utf8"))) : null;
+  const consumer = existsSync(mapPath) ? await Promise.resolve(new SourceMapConsumer(JSON.parse(readFileSync(mapPath, "utf8")))) : null;
   consumers.set(file, consumer);
   return consumer;
 }

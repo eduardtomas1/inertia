@@ -12,7 +12,10 @@ interface PrefetchedOlderPage {
   before: ConversationHistoryCursor;
   response: Promise<ServerEvent>;
   detail: ConversationDetail | null;
+  at: number;
 }
+
+const PREFETCHED_PAGE_MAX_AGE_MS = 60_000;
 
 function historyPage(conversationId: string, event: ServerEvent): ConversationDetail {
   if (event.type !== "request.result" || event.result.kind !== "conversation.detail"
@@ -46,12 +49,14 @@ export function useConversationHistory({ conversationId, online, detailState, se
   const failedTarget = useRef<string | null>(null);
   const interruptedOlder = useRef<string | null>(null);
   const prefetched = useRef<PrefetchedOlderPage | null>(null);
+  const applied = useRef<ConversationHistoryCursor | null>(null);
   const cancelPrefetch = useRef<(() => void) | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     generation.current += 1;
     pending.current = false;
+    applied.current = null;
     failedTarget.current = null;
     if (interruptedOlder.current !== conversationId) interruptedOlder.current = null;
     setLoading(false);
@@ -63,6 +68,7 @@ export function useConversationHistory({ conversationId, online, detailState, se
       prefetched.current = null;
     };
   }, [conversationId, online]);
+  useEffect(() => { applied.current = null; }, [detailState]);
   const prefetchOlder = useCallback((before: ConversationHistoryCursor | null | undefined) => {
     cancelPrefetch.current?.();
     cancelPrefetch.current = null;
@@ -72,7 +78,7 @@ export function useConversationHistory({ conversationId, online, detailState, se
       cancelPrefetch.current = null;
       if (owner !== generation.current || pending.current) return;
       const response = request({ type: "conversation.detail.load", payload: { conversationId, history: { before } } });
-      const page: PrefetchedOlderPage = { conversationId, before, response, detail: null };
+      const page: PrefetchedOlderPage = { conversationId, before, response, detail: null, at: Date.now() };
       const discard = () => { if (prefetched.current === page) prefetched.current = null; };
       prefetched.current = page;
       response.then((event) => {
@@ -89,12 +95,17 @@ export function useConversationHistory({ conversationId, online, detailState, se
   }, [prefetchOlder, setDetailState]);
   const load = useCallback(async (history: ConversationHistoryRequest, mode: "older" | "target") => {
     if (!conversationId || !online || pending.current) return;
+    if (mode === "older" && history.before && applied.current && sameCursor(history.before, applied.current)) return;
     const owner = generation.current;
     const targetKey = history.messageId ?? history.turnId ?? null;
     const early = mode === "older" ? prefetched.current : null;
     if (mode === "older") prefetched.current = null;
-    const reusable = early?.conversationId === conversationId && sameCursor(early.before, history.before) ? early : null;
+    const reusable = early?.conversationId === conversationId && sameCursor(early.before, history.before)
+      && Date.now() - early.at <= PREFETCHED_PAGE_MAX_AGE_MS
+      ? early
+      : null;
     if (reusable?.detail) {
+      applied.current = history.before ?? null;
       applyOlder(conversationId, reusable.detail);
       return;
     }
@@ -109,6 +120,7 @@ export function useConversationHistory({ conversationId, online, detailState, se
       if (mode === "older") interruptedOlder.current = null;
       const detail = historyPage(conversationId, event);
       if (mode === "older") {
+        applied.current = history.before ?? null;
         applyOlder(conversationId, detail);
         return;
       }

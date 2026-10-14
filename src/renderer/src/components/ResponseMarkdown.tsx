@@ -952,8 +952,8 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
 
 const settledMarkdownTrees = createBoundedCache<ReactNode>(
   500,
-  1_500_000,
-  (content) => content.length,
+  4_000_000,
+  (content) => content.length * 16,
 );
 
 function responseUrlTransform(url: string, key: string): string {

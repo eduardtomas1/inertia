@@ -3,6 +3,7 @@ import { useEffect, useRef, type RefObject } from "react";
 export interface NearTopHistoryControls {
   hasOlder: boolean;
   loading: boolean;
+  error: string | null;
   online: boolean;
   loadOlder: () => void;
 }
@@ -23,7 +24,7 @@ export function useOlderHistoryNearTop(
       const upward = top < previousTop;
       previousTop = top;
       const controls = current.current;
-      if (!upward || top > scroll.clientHeight || !controls?.hasOlder || controls.loading || !controls.online) return;
+      if (!upward || top > scroll.clientHeight || !controls?.hasOlder || controls.loading || controls.error || !controls.online) return;
       controls.loadOlder();
     };
     scroll.addEventListener("scroll", onScroll, { passive: true });

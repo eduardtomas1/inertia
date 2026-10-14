@@ -358,6 +358,38 @@ describe("older history prefetch", () => {
     expect(chat.pending[0]?.before).toBe("cursor-3");
   });
 
+  it("refetches a prefetched page that is older than a minute", async () => {
+    const chat = pagedHistory();
+    act(() => chat.hook.result.current.history.loadOlder());
+    await chat.answer(1, pageCursor(2));
+    runIdle();
+    await chat.answer(2, pageCursor(3));
+    expect(chat.request).toHaveBeenCalledTimes(2);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 61_000);
+    act(() => chat.hook.result.current.history.loadOlder());
+    expect(chat.request).toHaveBeenCalledTimes(3);
+    expect(chat.pending[0]?.before).toBe("cursor-2");
+    clock.mockRestore();
+    chat.hook.unmount();
+  });
+
+  it("does not request the page it just applied before the timeline commits", async () => {
+    const chat = pagedHistory();
+    act(() => chat.hook.result.current.history.loadOlder());
+    await chat.answer(1, pageCursor(2));
+    runIdle();
+    await chat.answer(2, pageCursor(3));
+    expect(chat.request).toHaveBeenCalledTimes(2);
+    act(() => {
+      chat.hook.result.current.history.loadOlder();
+      chat.hook.result.current.history.loadOlder();
+    });
+    expect(chat.turnIds()).toEqual(["turn-2", "turn-1", "turn-0"]);
+    expect(chat.request).toHaveBeenCalledTimes(2);
+    chat.hook.unmount();
+  });
+
   it("keeps a single older request in flight and applies each page once", async () => {
     const chat = pagedHistory();
     act(() => chat.hook.result.current.history.loadOlder());
@@ -421,9 +453,9 @@ describe("older history near the top", () => {
     element.scrollTop = top;
     fireEvent.scroll(element);
   }
-  function scene(loading = false, hasOlder = true, online = true) {
+  function scene(loading = false, hasOlder = true, online = true, error: string | null = null) {
     const loadOlder = vi.fn();
-    const view = render(<NearTop history={{ hasOlder, loading, online, loadOlder }} />);
+    const view = render(<NearTop history={{ hasOlder, loading, error, online, loadOlder }} />);
     const element = view.getByTestId("scroll");
     Object.defineProperty(element, "clientHeight", { configurable: true, value: 600 });
     Object.defineProperty(element, "scrollHeight", { configurable: true, value: 6_000 });
@@ -441,9 +473,9 @@ describe("older history near the top", () => {
     expect(loadOlder).toHaveBeenCalledTimes(1);
   });
 
-  it("stays quiet while a page is loading, offline, or when nothing older exists", () => {
-    for (const [loading, hasOlder, online] of [[true, true, true], [false, false, true], [false, true, false]] as const) {
-      const { element, loadOlder, view } = scene(loading, hasOlder, online);
+  it("stays quiet while a page is loading, offline, failed, or when nothing older exists", () => {
+    for (const [loading, hasOlder, online, error] of [[true, true, true, null], [false, false, true, null], [false, true, false, null], [false, true, true, "Earlier messages could not be loaded."]] as const) {
+      const { element, loadOlder, view } = scene(loading, hasOlder, online, error);
       scrollTo(element, 900);
       scrollTo(element, 100);
       expect(loadOlder).not.toHaveBeenCalled();

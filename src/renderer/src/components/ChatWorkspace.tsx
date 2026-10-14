@@ -1,5 +1,6 @@
 import type { LimitResetCommandRunner } from "./composer/limitResetClient";
 import { readTranscriptPosition, forgetTranscriptPosition } from "../utils/transcriptPosition";
+import { recordsOwnedByConversation } from "../utils/conversationRecords";
 import {
   lazy,
   Suspense,
@@ -136,16 +137,6 @@ const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
 const EMPTY_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
 const EMPTY_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
-
-function recordsOwnedByConversation<T extends { conversationId: string }>(
-  records: T[],
-  conversationId: string | null,
-): T[] {
-  if (!conversationId) return [];
-  return records.every((record) => record.conversationId === conversationId)
-    ? records
-    : records.filter((record) => record.conversationId === conversationId);
-}
 
 type ChatWorkspaceProps = {
   embedded?: boolean;

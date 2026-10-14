@@ -570,8 +570,11 @@ function sameReferences<T>(left: T[], right: T[]): boolean {
 }
 
 function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
+  return left.index === right.index && sameResponseTurnContent(left, right);
+}
+
+function sameResponseTurnContent(left: ResponseTurn, right: ResponseTurn): boolean {
   return left.id === right.id
-    && left.index === right.index
     && left.agentTurn === right.agentTurn
     && left.userMessage === right.userMessage
     && left.terminalAssistantMessage === right.terminalAssistantMessage
@@ -631,6 +634,30 @@ function sameCompatibility(
     && sameReferences(left.checkpoints, right.checkpoints);
 }
 
+const renumberedTimelineItems = new WeakMap<ResponseTimelineItem, ResponseTimelineItem>();
+
+export function cachedTimelineItemValue<T>(
+  cache: WeakMap<ResponseTimelineItem, T>,
+  item: ResponseTimelineItem,
+): T | undefined {
+  const cached = cache.get(item);
+  if (cached !== undefined) return cached;
+  const predecessor = renumberedTimelineItems.get(item);
+  const inherited = predecessor ? cache.get(predecessor) : undefined;
+  if (inherited !== undefined) cache.set(item, inherited);
+  return inherited;
+}
+
+function renumberedTurnItem(
+  prior: ResponseTimelineItem | undefined,
+  item: Extract<ResponseTimelineItem, { kind: "turn" }>,
+): ResponseTimelineItem | null {
+  if (prior?.kind !== "turn" || !sameResponseTurnContent(prior.turn, item.turn)) return null;
+  const renumbered = { ...prior, turn: { ...prior.turn, index: item.turn.index } };
+  renumberedTimelineItems.set(renumbered, prior);
+  return renumbered;
+}
+
 /**
  * Retains unchanged historical row objects across snapshots. Streaming content
  * is deliberately not part of these persisted rows, so an active row can
@@ -647,7 +674,8 @@ export function stabilizeResponseTimeline(
     const prior = previousById.get(item.id);
     if (item.kind === "turn") {
       const turn = stabilizeTurn(prior?.kind === "turn" ? prior.turn : undefined, item.turn);
-      const stable = prior?.kind === "turn" && turn === prior.turn ? prior : { ...item, turn };
+      const stable = prior?.kind === "turn" && turn === prior.turn ? prior
+        : renumberedTurnItem(prior, item) ?? { ...item, turn };
       if (stable !== previous[index]) changed = true;
       return stable;
     }

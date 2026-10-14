@@ -24,6 +24,7 @@ import { applyTerminalTurnProjections } from "../../utils/terminalTurnProjection
 import {
   buildResponseTimeline,
   buildTimelineMinimapMarkers,
+  cachedTimelineItemValue,
   estimateTimelineItemRenderWeight,
   estimateTimelineRowSize,
   resolveTimelineKeyboardIntent,
@@ -429,7 +430,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     return result;
   }, [timeline]);
   const renderWeight = useMemo(() => timeline.reduce((total, item) => {
-    const cached = renderWeightCache.current.get(item);
+    const cached = cachedTimelineItemValue(renderWeightCache.current, item);
     if (cached !== undefined) return total + cached;
     const weight = estimateTimelineItemRenderWeight(item);
     renderWeightCache.current.set(item, weight);
@@ -456,7 +457,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const estimateSize = useCallback((index: number) => {
     const item = timeline[index];
     if (!item) return 280;
-    const cachedByLayout = rowEstimateCache.current.get(item);
+    const cachedByLayout = cachedTimelineItemValue(rowEstimateCache.current, item);
     const cached = cachedByLayout?.get(estimateKey);
     if (cached !== undefined) return cached;
     const artifact = item.kind === "turn" ? item.turn.gitArtifact : null;

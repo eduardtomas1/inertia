@@ -29,6 +29,7 @@ export {
 export {
   answerTailCommentary,
   buildResponseTimeline,
+  cachedTimelineItemValue,
   shouldConsolidateSettledWorkIntoRunDetails,
   stabilizeResponseTimeline,
   updateResponseTimelineForActivityDelta,

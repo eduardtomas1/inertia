@@ -43,3 +43,8 @@ export function runningChatsSentence(running: number, continuing: number, contin
   if (continuing >= running) return `${interrupted} and will continue after the update.`;
   return `${interrupted}. ${continuing} will continue after the update.`;
 }
+
+export function restartBlockersSentence(workspaceRuns: number): string | null {
+  if (workspaceRuns === 0) return null;
+  return `${workspaceRuns} workspace ${workspaceRuns === 1 ? "run" : "runs"} must finish before Inertia restarts.`;
+}

@@ -6,8 +6,8 @@ import type {
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
 import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "@shared/provider-maintenance";
-import { agentRunStateForTurn, isAgentRunTerminalState } from "@shared/run-state";
-import type { UpdateEverythingPhase } from "../../hooks/useUpdateEverything";
+import { agentRunStateForTurn, agentTurnStatusForRunState, isAgentRunTerminalState } from "@shared/run-state";
+import type { UpdateEverythingPhase } from "../../utils/updateEverythingRun";
 
 export interface UpdateEverythingProvider {
   providerId: ProviderMaintenanceProviderId;
@@ -22,6 +22,7 @@ export interface UpdateEverythingPlan {
   providers: readonly UpdateEverythingProvider[];
   runningChats: number;
   continuingChats: number;
+  workspaceRuns: number;
 }
 
 function activeOperation(operation: ProviderMaintenanceOperation | undefined): boolean {
@@ -63,16 +64,20 @@ export function updateEverythingPlan({ snapshot, statuses, operations, appStatus
   });
   if (!candidates.some(versionedUpdate)) return null;
   const app = inAppUpdate(appStatus);
+  const workspaceRuns = app ? (snapshot?.runs ?? []).filter((run) => run.kind !== "agent"
+    && (run.status === "running" || run.status === "waiting")).length : 0;
+  const restarts = app !== null && workspaceRuns === 0;
   const providerIds = new Set(candidates.map(({ providerId }) => providerId));
   let runningChats = 0;
   let continuingChats = 0;
   for (const conversation of snapshot?.conversations ?? []) {
     const turn = conversation.latestTurn;
-    if (!turn || (!app && !providerIds.has(turn.providerId))) continue;
+    if (!turn || (!restarts && !providerIds.has(turn.providerId))) continue;
     const state = agentRunStateForTurn(turn);
     if (isAgentRunTerminalState(state)) continue;
     runningChats += 1;
-    if ((state === "running" || state === "starting") && !conversation.pendingApproval && !conversation.pendingInput) {
+    const status = agentTurnStatusForRunState(state);
+    if ((status === "running" || status === "starting") && !conversation.pendingApproval && !conversation.pendingInput) {
       continuingChats += 1;
     }
   }
@@ -87,6 +92,7 @@ export function updateEverythingPlan({ snapshot, statuses, operations, appStatus
     })),
     runningChats,
     continuingChats,
+    workspaceRuns,
   };
 }
 
@@ -95,6 +101,7 @@ export function updateEverythingProgress(
   operations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>,
   snapshot: AppSnapshot | null,
 ): string {
+  if (phase.kind === "download") return "Downloading Inertia…";
   if (phase.kind === "app") return "Updating Inertia…";
   const current = phase.providerIds.find((providerId) => operations.get(providerId)?.status === "running")
     ?? phase.providerIds.find((providerId) => activeOperation(operations.get(providerId)))

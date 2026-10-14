@@ -40,9 +40,12 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
   const popupId = useId();
   const checking = controller.checking || status?.state === "checking" || pending === "check";
   const showChecking = checking || (latched && !reducedMotion);
-  const everythingPlan = useMemo(() => everything && !everything.phase ? updateEverythingPlan({
+  const offeredPlan = useMemo(() => everything ? updateEverythingPlan({
     snapshot, statuses: everything.statuses, operations: everything.operations, appStatus: status,
   }) : null, [everything, snapshot, status]);
+  const everythingPlan = everything?.phase ? null : offeredPlan;
+  const offeredItems = offeredPlan && JSON.stringify([offeredPlan.app, offeredPlan.providers]);
+  const dismissEverythingError = everything?.dismissError;
   const everythingProgress = everything?.phase ? updateEverythingProgress(everything.phase, everything.operations, snapshot) : null;
   const everythingLabel = everythingPlan
     ? updateEverythingLabel(everythingPlan.app !== null, everythingPlan.providers.map((provider) => provider.label)) : null;
@@ -64,6 +67,9 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
     else if (checking) setLatched(true);
   }, [checking, reducedMotion]);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+  useEffect(() => { dismissEverythingError?.(); }, [dismissEverythingError, offeredItems, status?.revision]);
+  const everythingPlanGone = everythingPlan === null;
+  useEffect(() => { if (everythingPlanGone) setEverythingOpen(false); }, [everythingPlanGone]);
   useEffect(() => {
     if (!open) return;
     const dismissOutside = (event: PointerEvent): void => {
@@ -201,7 +207,8 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
       <header><div><strong>{presentation.label}</strong>
         {currentVersion && <small>{status?.channel === "canary" ? "Inertia Canary" : "Inertia"} · Installed {currentVersion}</small>}</div>
         <IconButton label="Close update details" onClick={() => close(true)}><X size={16} /></IconButton></header>
-      {(everything?.error ?? controller.error ?? status?.message) && <p className="update-detail-message">{everything?.error ?? controller.error ?? status?.message}</p>}
+      {(controller.error ?? status?.message) && <p className="update-detail-message">{controller.error ?? status?.message}</p>}
+      {everything?.error && <p className="update-detail-message">{everything.error}</p>}
       {status?.freshness === "cached" && <p className="update-detail-muted">Showing the last successful check. Release information may be out of date.</p>}
       {status?.state === "downloading" && <div className="update-detail-progress" role="progressbar" aria-label="Update download progress"
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={percent === null ? "Waiting for download progress" : `${percent}%`}>

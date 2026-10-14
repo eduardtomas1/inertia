@@ -1,6 +1,8 @@
 import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
 import type { TurnAdmissionLease } from "./turn-controller-types";
 
+export const PROVIDER_CLEANUP_WAIT_MS = 30_000;
+
 interface TurnAdmissionCoordinatorOptions {
   isClosing(): boolean;
   isActive(conversationId: string): boolean;

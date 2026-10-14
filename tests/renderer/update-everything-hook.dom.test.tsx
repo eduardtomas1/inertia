@@ -7,6 +7,7 @@ import type {
   ProviderMaintenanceProviderId,
   ProviderMaintenanceStatus,
   ServerEvent,
+  WorkspaceRun,
 } from "../../src/shared/contracts";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
 import type { AgentRunState } from "../../src/shared/run-state";
@@ -47,9 +48,10 @@ function chat(id: string, providerId: ProviderMaintenanceProviderId, state: Agen
   } as unknown as ConversationShell;
 }
 
-function snapshot(conversations: ConversationShell[] = []): AppSnapshot {
+function snapshot(conversations: ConversationShell[] = [], runs: Partial<WorkspaceRun>[] = []): AppSnapshot {
   return {
     conversations,
+    runs,
     providers: [{ id: "codex", label: "Codex" }, { id: "claude", label: "Claude" }, { id: "cursor", label: "Cursor" }],
     settings: { providerIdentityLabels: { claude: "Claude Code" } },
   } as unknown as AppSnapshot;
@@ -57,10 +59,10 @@ function snapshot(conversations: ConversationShell[] = []): AppSnapshot {
 
 const NO_OPERATIONS = new Map<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>();
 
-function runResult(readyForAppInstall: boolean): ServerEvent {
+function runResult(readyForAppInstall: boolean, appInstallBlocker: string | null = null): ServerEvent {
   return {
     type: "request.result", requestId: "request",
-    result: { kind: "updates.run", providers: [], interruptedConversationIds: [], readyForAppInstall },
+    result: { kind: "updates.run", providers: [], interruptedConversationIds: [], readyForAppInstall, appInstallBlocker },
   };
 }
 
@@ -139,12 +141,30 @@ describe("update everything plan", () => {
       chat("d", "codex", "running", { pendingInput: true }),
       chat("e", "cursor", "completed"),
       chat("f", "kimi", null),
+      chat("g", "codex", "delegated"),
+      chat("h", "codex", "retrying"),
+      chat("i", "codex", "queued"),
     ];
     const statuses = statusMap(maintenance("codex"));
     expect(updateEverythingPlan({ snapshot: snapshot(conversations), statuses, operations: NO_OPERATIONS, appStatus: updateStatus() }))
-      .toMatchObject({ runningChats: 4, continuingChats: 2 });
+      .toMatchObject({ runningChats: 7, continuingChats: 4 });
     expect(updateEverythingPlan({ snapshot: snapshot(conversations), statuses, operations: NO_OPERATIONS, appStatus: null }))
-      .toMatchObject({ runningChats: 3, continuingChats: 1 });
+      .toMatchObject({ runningChats: 6, continuingChats: 3 });
+  });
+
+  it("counts workspace runs that would refuse the restart and then expects only updated providers' chats to stop", () => {
+    const conversations = [chat("a", "codex", "running"), chat("b", "claude", "running")];
+    const runs = [
+      { kind: "check", status: "running" }, { kind: "service", status: "waiting" },
+      { kind: "agent", status: "running" }, { kind: "check", status: "succeeded" },
+    ] as const;
+    const statuses = statusMap(maintenance("codex"));
+    expect(updateEverythingPlan({ snapshot: snapshot(conversations, [...runs]), statuses, operations: NO_OPERATIONS, appStatus: updateStatus() }))
+      .toMatchObject({ workspaceRuns: 2, runningChats: 1, continuingChats: 1 });
+    expect(updateEverythingPlan({ snapshot: snapshot(conversations, [runs[2], runs[3]]), statuses, operations: NO_OPERATIONS, appStatus: updateStatus() }))
+      .toMatchObject({ workspaceRuns: 0, runningChats: 2, continuingChats: 2 });
+    expect(updateEverythingPlan({ snapshot: snapshot(conversations, [...runs]), statuses, operations: NO_OPERATIONS, appStatus: null }))
+      .toMatchObject({ workspaceRuns: 0, runningChats: 1 });
   });
 
   it("names the provider being updated, then the app", () => {
@@ -192,20 +212,49 @@ describe("update everything run", () => {
     expect(request.mock.calls.map(([command]) => command.type)).toEqual(["updates.run"]);
   });
 
-  it("waits for a pending download to finish before installing", async () => {
-    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
-    download.mockResolvedValue(updateStatus({ state: "downloading" }));
-    install.mockResolvedValue(updateStatus({ state: "installing" }));
+  it("finishes the download before the run starts, so the hold never covers it", async () => {
+    const order: string[] = [];
+    const request = vi.fn(async (command: CommandWithoutId) => {
+      order.push(command.type);
+      return command.type === "updates.run" ? runResult(true) : ok;
+    });
+    download.mockImplementation(async () => { order.push("download"); return updateStatus({ state: "downloading" }); });
+    install.mockImplementation(async () => { order.push("install"); return updateStatus({ state: "installing" }); });
     const hook = harness(updateStatus(), request);
     let finished = false;
     let running!: Promise<void>;
     act(() => { running = hook.result.current.run(withApp).then(() => { finished = true; }); });
     await vi.waitFor(() => expect(statusListener).not.toBeNull());
+    expect(request).not.toHaveBeenCalled();
     expect(install).not.toHaveBeenCalled();
-    expect(hook.result.current.phase).toEqual({ kind: "app" });
+    expect(hook.result.current.phase).toEqual({ kind: "download" });
+    expect(updateEverythingProgress({ kind: "download" }, NO_OPERATIONS, snapshot())).toBe("Downloading Inertia…");
     await act(async () => { statusListener?.(updateStatus({ state: "downloaded" })); await running; });
     expect(finished).toBe(true);
-    expect(install).toHaveBeenCalledOnce();
+    expect(order).toEqual(["download", "updates.run", "install"]);
+  });
+
+  it.each([
+    ["fails", updateStatus({ state: "failed", message: "The update could not be downloaded. Try again when your connection is stable." })],
+    ["is cancelled", updateStatus({ state: "cancelled", message: "The update download was cancelled." })],
+  ])("starts no run when the download %s", async (_name, settled) => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+    download.mockResolvedValue(settled);
+    const hook = harness(updateStatus(), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(request).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+    expect(hook.result.current.phase).toBeNull();
+    expect(hook.result.current.error).toBeNull();
+  });
+
+  it("starts no run when the download cannot be started", async () => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+    download.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
+    const hook = harness(updateStatus(), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(request).not.toHaveBeenCalled();
+    expect(hook.result.current.error).toBe("The update download could not be started.");
   });
 
   it("installs an already downloaded update directly", async () => {
@@ -240,13 +289,14 @@ describe("update everything run", () => {
     expect(hook.result.current.error).toBe("The update restart could not be started safely.");
   });
 
-  it("does not install after a failed download and releases the hold", async () => {
-    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
-    download.mockResolvedValue(updateStatus({ state: "failed" }));
-    const hook = harness(updateStatus(), request);
+  it("reports why the runtime kept the app out of the run and releases the hold", async () => {
+    const message = "Close active terminals before restarting to update.";
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false, message) : ok);
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
     await act(async () => hook.result.current.run(withApp));
     expect(install).not.toHaveBeenCalled();
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
+    expect(hook.result.current.error).toBe(message);
   });
 
   it("skips the app when the runtime is not ready for it", async () => {

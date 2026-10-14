@@ -186,6 +186,22 @@ describe("workspace run controller", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("answers active workspace runs apart from the agent runs that turns own", async () => {
+    const { store, project } = await fixture();
+    try {
+      const agent = store.createWorkspaceRun({ kind: "agent", projectId: project.id, conversationId: null, label: "Codex",
+        detail: null, status: "running", port: null });
+      expect(store.hasRecordedActiveWorkspaceRun()).toBe(true);
+      expect(store.hasRecordedActiveWorkspaceRun(true)).toBe(false);
+      const check = store.createWorkspaceRun({ kind: "check", projectId: project.id, conversationId: null, label: "test",
+        detail: null, status: "running", port: null });
+      expect(store.hasRecordedActiveWorkspaceRun(true)).toBe(true);
+      store.updateWorkspaceRun(check.id, { status: "succeeded" });
+      store.updateWorkspaceRun(agent.id, { status: "succeeded" });
+      expect(store.hasRecordedActiveWorkspaceRun()).toBe(false);
+    } finally { store.close(); }
+  });
+
   it("answers workspace run presence and activity without a snapshot", async () => {
     const { store, project } = await fixture();
     try {

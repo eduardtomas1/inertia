@@ -121,3 +121,18 @@ Before: snapshot fix. After: plus this fix.
 | First transcript row, warm | 598.3 / 890.0 | 573.4 / 589.1 | 7 / 7 | 1.8-2.6 / 1.9-2.4 |
 | WebSocket accepted, cold | 502.5 / 922.2 | 472.8 / 724.2 | 7 / 7 | 1.8-2.6 / 1.9-2.5 |
 | First transcript row, cold | 596.6 / 1179.7 | 564.6 / 815.3 | 7 / 7 | 1.8-2.6 / 1.9-2.5 |
+
+### Startup: tried and dropped
+
+Both measured against the baseline above (300 turns, 7 launches, spawn mode), as ablations that remove the cost outright, so each figure is an upper bound on what a real fix could gain.
+
+| ablation | metric (median / p95 ms) | baseline | ablation | load (1 min) |
+|---|---|---:|---:|---|
+| Do not wait for `prepareGitExecutable` at all | runtime ready posted, warm | 545.7 / 573.6 | 521.2 / 527.3 | 1.9-3.9 / 2.2-2.9 |
+| | runtime ready posted, cold | 540.2 / 2183.0 | 520.1 / 714.1 | 1.9-6.0 / 2.2-2.9 |
+| Start `prepareGitExecutable` early and join it before listening | runtime ready posted, warm | 545.7 / 573.6 | 535.0 / 553.9 | 1.9-3.9 / 1.6-2.6 |
+| Answer the snapshot permission check without asking macOS | detail received to first transcript row, warm | 60.0 | 60.2 | 1.9-3.9 / 2.8-3.8 |
+
+Git location off the readiness path: the plan required at least 25 ms on the runtime-ready mark. Dropping the wait entirely gains 24.5 ms warm, because most of the step is synchronous journal work on the same thread, and doing so would turn a startup failure into a later one and let early Git commands spend their own deadlines waiting for discovery. The variant that keeps the startup guarantees gains 10.7 ms. Not shipped.
+
+Snapshot permission caching: removing both macOS permission calls changes nothing measurable on the path to the first transcript row, so caching them cannot either. Not shipped.

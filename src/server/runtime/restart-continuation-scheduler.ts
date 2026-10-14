@@ -2,12 +2,12 @@ import type { RuntimeStore } from "../database";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
 import type { RestartContinuationPlan, RestartContinuationPlanInput } from "../persistence/restart-continuation-repository";
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
+import { UPDATE_HOLD_MESSAGE } from "./update-hold";
 
 const POLL_MS = 5_000;
 const RETRY_BASE_MS = 5_000;
 const MAX_ATTEMPTS = 3;
-const CONTINUABLE_STATUSES: ReadonlySet<string> = new Set(["queued", "starting", "running"]);
-const UPDATING = "Inertia is updating.";
+const CONTINUABLE_STATUSES: ReadonlySet<string> = new Set(["starting", "running"]);
 const UNCONFIRMED = "The continuation could not be confirmed.";
 
 type Readiness = { kind: "ready" } | { kind: "wait" } | { kind: "stale"; reason: string };
@@ -69,7 +69,7 @@ export class RestartContinuationScheduler {
 
   assertDispatch(plan: RestartContinuationPlan): void {
     this.dependencies.signal.throwIfAborted();
-    if (this.dependencies.held()) throw new RuntimeRequestError(UPDATING);
+    if (this.dependencies.held()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     const saved = this.store.restartContinuations.forConversation(plan.conversationId);
     if (saved?.id !== plan.id || saved.state !== "dispatching" || this.readiness(plan).kind !== "ready") {
       throw new RuntimeRequestError("This continuation was cancelled or its chat changed.");

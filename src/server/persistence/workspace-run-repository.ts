@@ -119,13 +119,13 @@ export class WorkspaceRunRepository {
     `).all(conversationId) as WorkspaceRunRow[]).map(workspaceRunFromRow);
   }
 
-  hasActive(): boolean {
+  hasActive(excludeAgentRuns = false): boolean {
     return Boolean(this.context.database.prepare(`
       SELECT 1
       FROM workspace_runs
-      WHERE status IN ('running', 'waiting')
+      WHERE status IN ('running', 'waiting') AND (? = 0 OR kind <> 'agent')
       LIMIT 1
-    `).get());
+    `).get(excludeAgentRuns ? 1 : 0));
   }
 
   hasActiveForProject(projectId: string): boolean {

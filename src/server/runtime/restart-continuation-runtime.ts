@@ -4,9 +4,8 @@ import type WebSocket from "ws";
 import { RuntimeRequestError } from "../runtime-errors";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
 import { RestartContinuationScheduler } from "./restart-continuation-scheduler";
+import { PROVIDER_CLEANUP_WAIT_MS } from "./turns/turn-admission-coordinator";
 import { isHeld } from "./update-hold";
-
-const PROVIDER_CLEANUP_WAIT_MS = 30_000;
 
 export interface RestartContinuationRuntime {
   scheduler: RestartContinuationScheduler;

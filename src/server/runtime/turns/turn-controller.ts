@@ -77,6 +77,7 @@ import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
 import {
   TurnAdmissionCoordinator,
+  PROVIDER_CLEANUP_WAIT_MS,
   waitForProviderCleanupBarriers,
 } from "./turn-admission-coordinator";
 import { queuePairedTurns } from "./turn-paired-queue";
@@ -86,7 +87,7 @@ import {
   settleQueuedAdoptionFailure,
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
-import { UPDATE_INTERRUPTION_CLEANUP_MS, updateInterruptionMessage } from "./turn-update-interruption";
+import { updateInterruptionMessage } from "./turn-update-interruption";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
@@ -1017,7 +1018,7 @@ export class TurnController {
       requestProviderCancellation(this.providers, conversationId);
       this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id));
     }
-    return await this.waitForProviderCleanup(conversationIds, Date.now() + UPDATE_INTERRUPTION_CLEANUP_MS);
+    return await this.waitForProviderCleanup(conversationIds, Date.now() + PROVIDER_CLEANUP_WAIT_MS);
   }
 
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {

@@ -6,7 +6,7 @@ import {
 } from "../../provider-maintenance";
 import { requestBase } from "./common";
 
-export const updatesRunProviderIdsSchema = z.array(providerMaintenanceProviderIdSchema)
+const updatesRunProviderIdsSchema = z.array(providerMaintenanceProviderIdSchema)
   .max(PROVIDER_MAINTENANCE_PROVIDER_IDS.length)
   .refine((providerIds) => new Set(providerIds).size === providerIds.length, "Duplicate provider.");
 
@@ -23,6 +23,6 @@ export const updatesCommandSchemas = [
   z.object({
     ...requestBase,
     type: z.literal("updates.finish"),
-    payload: z.object({ installed: z.boolean() }).strict(),
+    payload: z.object({ installed: z.literal(false) }).strict(),
   }).strict(),
 ] as const;

@@ -101,10 +101,10 @@ it("moves multiple live terminals between the dock and surface without recreatin
     .toBe(JSON.stringify(ids));
 });
 
-it("mounts the terminal dock on the first commit once the idle prefetch has loaded it", async () => {
+it("mounts the terminal dock on the first commit once the terminal intent prefetch has loaded it", async () => {
   vi.resetModules();
   const { WorkspaceScene: FreshWorkspaceScene } = await import("../../src/renderer/src/components/WorkspaceScene");
-  const { prefetchFrequentSurfaces } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
+  const { prefetchWorkspaceTool } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
   const projectId = "11111111-1111-4111-8111-111111111111";
   const conversationId = "33333333-3333-4333-8333-333333333333";
   const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> => {
@@ -133,7 +133,7 @@ it("mounts the terminal dock on the first commit once the idle prefetch has load
       detailState={null} chat={{} as WorkspaceSceneProps["chat"]} resizeHandle={null} tools={tools} />;
   };
   await act(async () => {
-    prefetchFrequentSurfaces();
+    prefetchWorkspaceTool("terminal");
     await vi.dynamicImportSettled();
   });
   const view = render(scene(false));

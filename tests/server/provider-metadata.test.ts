@@ -328,10 +328,21 @@ describe("provider metadata cache", () => {
     expect(read).toHaveBeenCalledOnce();
     expect(read.mock.calls[0]).toHaveLength(7);
     expect(read.mock.calls[0]![6]).toBe(18_000);
-    expect(cache.lastReadFailed("claude")).toBe(true);
+    expect(cache.lastReadTimedOut("claude")).toBe(true);
     await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
     expect(read.mock.calls[1]![6]).toBe(6_000);
-    expect(cache.lastReadFailed("claude")).toBe(false);
+    expect(cache.lastReadTimedOut("claude")).toBe(false);
+  });
+
+  it("reports only a timed-out read as a failed read", async () => {
+    const cache = new ProviderMetadataCache({
+      read: vi.fn().mockRejectedValueOnce(new Error("Claude metadata returned malformed data.")),
+    });
+
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
+
+    expect(cache.lastReadTimedOut("claude")).toBe(false);
+    expect(cache.current("claude").metadataState.models.lastAttemptedAt).toEqual(expect.any(String));
   });
 
   it("stops reporting a failed read once a run supplies the catalog", async () => {
@@ -340,10 +351,10 @@ describe("provider metadata cache", () => {
     });
 
     await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
-    expect(cache.lastReadFailed("claude")).toBe(true);
+    expect(cache.lastReadTimedOut("claude")).toBe(true);
     cache.learn("claude", claudeExecutable, { models: [model("model-a")] }, "provider");
 
-    expect(cache.lastReadFailed("claude")).toBe(false);
+    expect(cache.lastReadTimedOut("claude")).toBe(false);
   });
 
   it("gives later reads the deadline measured by the latest detection", async () => {

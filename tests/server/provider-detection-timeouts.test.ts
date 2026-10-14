@@ -8,6 +8,7 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { composerRouteReadiness } from "../../src/renderer/src/utils/composerReadiness";
 import { detectProvider, ProviderManager } from "../../src/server/providers";
 import { createProviderInfoRefresh } from "../../src/server/provider/provider-info-refresh";
+import { slowMachineProbeDeadline } from "../../src/server/provider/probe-deadline";
 import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 import {
   portableFixtureRoot,
@@ -305,4 +306,19 @@ if ((hangs[stage] ?? 0) !== 0) {
     expect(runtime.published.map(({ statusMessage }) => statusMessage).join("\n")).not.toMatch(/update/iu);
     runtime.close();
   }, 30_000);
+});
+
+describe("slow machine probe deadlines", () => {
+  it("keeps the base deadline after a normal version answer", () => {
+    expect(slowMachineProbeDeadline(4_000, undefined)).toBe(4_000);
+    expect(slowMachineProbeDeadline(4_000, 120)).toBe(4_000);
+    expect(slowMachineProbeDeadline(4_000, 500)).toBe(4_000);
+  });
+
+  it("stretches in proportion to a slow version answer up to a bounded ceiling", () => {
+    expect(slowMachineProbeDeadline(4_000, 1_000)).toBe(8_000);
+    expect(slowMachineProbeDeadline(6_000, 1_250)).toBe(15_000);
+    expect(slowMachineProbeDeadline(6_000, 60_000)).toBe(30_000);
+    expect(slowMachineProbeDeadline(30_000, 2_000)).toBe(30_000);
+  });
 });

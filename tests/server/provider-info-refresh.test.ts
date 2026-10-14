@@ -72,7 +72,7 @@ describe("provider info refresh ownership", () => {
         return await otherRead.promise;
       }),
       providerCapabilityContract: vi.fn(() => undefined),
-      metadataReadFailed: () => false,
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const published: ProviderInfo[][] = [];
     const activity = vi.fn();
@@ -129,7 +129,7 @@ describe("provider info refresh ownership", () => {
         return await finishBroadEnrichment.promise;
       }),
       providerCapabilityContract: vi.fn(() => undefined),
-      metadataReadFailed: () => false,
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const broadcastSnapshot = vi.fn(() => structuredClone(providerInfo));
     const refresh = createProviderInfoRefresh({
@@ -197,7 +197,7 @@ describe("provider info refresh ownership", () => {
       cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
       metadata,
       providerCapabilityContract: () => undefined,
-      metadataReadFailed: () => false,
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -244,7 +244,7 @@ describe("provider info refresh ownership", () => {
       metadata: vi.fn(async (id: ProviderInfo["id"], cwd: string, options: object) => (
         await cache.metadata(id, detected.executable!, {}, cwd, options)
       )),
-      metadataReadFailed: (id: ProviderInfo["id"]) => cache.lastReadFailed(id),
+      metadataReadTimedOut: (id: ProviderInfo["id"]) => cache.lastReadTimedOut(id),
       providerCapabilityContract: () => undefined,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
@@ -267,6 +267,39 @@ describe("provider info refresh ownership", () => {
     expect(deadlines[1]).toBeGreaterThan(deadlines[0]!);
   });
 
+  it("reads a catalog that fails without timing out only once", async () => {
+    let providerInfo = initialProviderSnapshots();
+    const read = vi.fn(async () => { throw new Error("Claude metadata returned malformed data."); });
+    const cache = new ProviderMetadataCache({ read });
+    const detected = detection("claude", "1", "authenticated", true);
+    const providers = {
+      detect: vi.fn(async () => detected),
+      cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
+      metadata: vi.fn(async (id: ProviderInfo["id"], cwd: string, options: object) => (
+        await cache.metadata(id, detected.executable!, {}, cwd, options)
+      )),
+      metadataReadTimedOut: (id: ProviderInfo["id"]) => cache.lastReadTimedOut(id),
+      providerCapabilityContract: () => undefined,
+    } as unknown as ProviderManager;
+    const track = vi.fn(async (operation: () => Promise<void>) => await operation());
+    const refresh = createProviderInfoRefresh({
+      enabled: true, providers, defaultWorkspacePath: "/workspace",
+      lifetimeSignal: new AbortController().signal,
+      providerInfo: () => providerInfo,
+      replaceProviderInfo: (value) => { providerInfo = value; },
+      broadcastSnapshot: vi.fn(), isClosed: () => false,
+      track, onActivityChange: vi.fn(),
+      detectionRetryDelaysMs: [10, 10, 10],
+    });
+
+    await refresh("claude", true, true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(track).toHaveBeenCalledOnce();
+    expect(providerInfo.find(({ id }) => id === "claude")).toMatchObject({ canRun: true, models: [] });
+  });
+
   it("scales the catalog read deadline with the measured version probe latency", async () => {
     let providerInfo = initialProviderSnapshots();
     const empty = { models: [], rateLimits: [], metadataState: providerInfo[0]!.metadataState };
@@ -275,7 +308,7 @@ describe("provider info refresh ownership", () => {
       cachedMetadata: vi.fn(() => empty),
       metadata: vi.fn(async () => empty),
       providerCapabilityContract: vi.fn(() => undefined),
-      metadataReadFailed: () => false,
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -402,7 +435,7 @@ describe("provider info refresh ownership", () => {
         cachedMetadata: vi.fn(() => empty),
         metadata: vi.fn(async () => empty),
         providerCapabilityContract: vi.fn(() => undefined),
-        metadataReadFailed: () => false,
+        metadataReadTimedOut: () => false,
       } as unknown as ProviderManager;
       const refresh = createProviderInfoRefresh({
         enabled: true, providers, defaultWorkspacePath: "/workspace",

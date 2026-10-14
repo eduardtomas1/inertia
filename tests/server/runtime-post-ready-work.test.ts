@@ -173,6 +173,40 @@ describe("runtime post-ready work", () => {
     runtime.releaseUpdatePreparation(operationId);
   });
 
+  it("leaves provider discovery to the deferred start when an update preparation promotes passive work", async () => {
+    const paths = await runtimePaths();
+    let finishIdentities!: () => void;
+    const refreshIdentities = vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll")
+      .mockImplementation(() => new Promise<void>((resolve) => { finishIdentities = resolve; }));
+    const reconcileArtifacts = vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const providerRefresh = vi.fn(async () => {
+      throw new Error("stop provider discovery after proving admission");
+    });
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: true,
+      testOnlyProviderRefresh: providerRefresh,
+    });
+    runtimes.push(runtime);
+
+    runtime.startPostReadyWorkAfterFirstClient();
+    const operationId = randomUUID();
+    let prepared = false;
+    const preparation = runtime.prepareForUpdate(operationId).finally(() => { prepared = true; });
+    await vi.waitFor(() => expect(refreshIdentities).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(prepared).toBe(false);
+    finishIdentities();
+
+    await expect(preparation).resolves.toMatchObject({ ready: true });
+    expect(reconcileArtifacts).toHaveBeenCalledOnce();
+    expect(providerRefresh).not.toHaveBeenCalled();
+    runtime.releaseUpdatePreparation(operationId);
+    await vi.waitFor(() => expect(providerRefresh).toHaveBeenCalledOnce(), { timeout: 2_000 });
+  });
+
   it("starts no passive work when shutdown wins before readiness", async () => {
     const paths = await runtimePaths();
     const startBackups = vi.spyOn(RuntimeStore.prototype, "startBackups");
@@ -336,6 +370,19 @@ describe("post-ready work", () => {
     const deferred = work();
     deferred.postReady.startAfterFirstClient(1_000);
     deferred.postReady.beforeUpdatePreparation(() => "prepared");
+    expect(deferred.options.startBackups).toHaveBeenCalledOnce();
+    expect(deferred.options.startProviderDiscovery).not.toHaveBeenCalled();
+  });
+
+  it("starts provider discovery once the deferred start fires after a promoted preparation", async () => {
+    vi.useFakeTimers();
+    const deferred = work();
+    deferred.postReady.startAfterFirstClient(1_000);
+    deferred.postReady.beforeUpdatePreparation(() => "prepared");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(deferred.options.startBackups).toHaveBeenCalledOnce();
+    expect(deferred.options.startProviderDiscovery).toHaveBeenCalledOnce();
+    await deferred.postReady.start();
     expect(deferred.options.startProviderDiscovery).toHaveBeenCalledOnce();
   });
 });

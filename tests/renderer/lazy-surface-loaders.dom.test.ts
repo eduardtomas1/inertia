@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   loadCommandPalette,
+  loadTasksView,
+  loadWorkspaceTerminal,
+  prefetchFrequentSurfaces,
   scheduleFrequentSurfacePrefetch,
 } from "../../src/renderer/src/components/lazySurfaceLoaders";
 
@@ -46,5 +49,13 @@ describe("lazy surface prefetching", () => {
     cancel();
     expect(cancelIdleCallback).toHaveBeenCalledWith(17);
     expect(clearTimeoutSpy).toHaveBeenCalledWith(23);
+  });
+
+  it("leaves the workspace terminal to load on intent", async () => {
+    prefetchFrequentSurfaces();
+    await vi.dynamicImportSettled();
+
+    expect(loadTasksView.peek()).toHaveProperty("default");
+    expect(loadWorkspaceTerminal.peek()).toBeNull();
   });
 });

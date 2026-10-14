@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 
 import { RuntimeGenerationLeaseJournal } from
   "../../src/node/runtime-generation-leases";
@@ -119,6 +120,55 @@ describe("runtime post-ready work", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     expect(snapshotBroadcasts).not.toHaveBeenCalled();
+  });
+
+  it("defers passive work until the first client has received its welcome", async () => {
+    const paths = await runtimePaths();
+    const refreshIdentities = vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll").mockResolvedValue();
+    vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+
+    runtime.startPostReadyWorkAfterFirstClient();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(refreshIdentities).not.toHaveBeenCalled();
+
+    const socket = new WebSocket(runtime.websocketUrl, { origin: "http://localhost:5173" });
+    try {
+      const welcome = await new Promise<boolean>((resolve, reject) => {
+        socket.once("message", (data) => resolve(String(data).startsWith('{"type":"server.welcome"')));
+        socket.once("error", reject);
+      });
+      expect(welcome).toBe(true);
+      await vi.waitFor(() => expect(refreshIdentities).toHaveBeenCalledOnce());
+    } finally {
+      socket.close();
+    }
+  });
+
+  it("starts deferred passive work before an update preparation drains the runtime", async () => {
+    const paths = await runtimePaths();
+    const refreshIdentities = vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll").mockResolvedValue();
+    const reconcileArtifacts = vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+
+    runtime.startPostReadyWorkAfterFirstClient();
+    const operationId = randomUUID();
+    await expect(runtime.prepareForUpdate(operationId)).resolves.toMatchObject({ ready: true });
+    expect(refreshIdentities).toHaveBeenCalledOnce();
+    expect(reconcileArtifacts).toHaveBeenCalledOnce();
+    runtime.releaseUpdatePreparation(operationId);
   });
 
   it("starts no passive work when shutdown wins before readiness", async () => {

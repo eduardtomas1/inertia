@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PostReadyWork, type PostReadyWorkOptions } from "../../src/server/runtime/post-ready-work";
 
@@ -20,6 +20,10 @@ function work(overrides: Partial<PostReadyWorkOptions> = {}) {
   };
   return { postReady: new PostReadyWork(options), broadcastSnapshot, options };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("post-ready work", () => {
   it("broadcasts after each passive task that changed the shell snapshot", async () => {
@@ -63,5 +67,34 @@ describe("post-ready work", () => {
     await postReady.identityRefresh;
     expect(broadcastSnapshot).not.toHaveBeenCalled();
     expect(options.startProviderDiscovery).toHaveBeenCalledOnce();
+  });
+
+  it("starts after the first client, or after the wait when none connects", async () => {
+    vi.useFakeTimers();
+    const fallback = work();
+    fallback.postReady.startAfterFirstClient(1_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fallback.options.startProviderDiscovery).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fallback.options.startProviderDiscovery).toHaveBeenCalledOnce();
+
+    const connected = work();
+    connected.postReady.startAfterFirstClient(1_000);
+    connected.postReady.clientConnected();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connected.options.startProviderDiscovery).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(connected.options.startProviderDiscovery).toHaveBeenCalledOnce();
+  });
+
+  it("promotes only a deferred start when an update preparation begins", () => {
+    const idle = work();
+    expect(idle.postReady.beforeUpdatePreparation(() => "prepared")).toBe("prepared");
+    expect(idle.options.startProviderDiscovery).not.toHaveBeenCalled();
+
+    const deferred = work();
+    deferred.postReady.startAfterFirstClient(1_000);
+    deferred.postReady.beforeUpdatePreparation(() => "prepared");
+    expect(deferred.options.startProviderDiscovery).toHaveBeenCalledOnce();
   });
 });

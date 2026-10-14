@@ -905,6 +905,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     approvals: () => pendingApprovals.values(),
     inputs: () => pendingInputs.values(),
     plans: () => agentPlans.values(),
+    onConnect: () => postReady.clientConnected(),
     onDisconnect: (socket) => secureFileAuthorities.clearOwner(socket),
   });
 
@@ -985,11 +986,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         signal,
       ),
     startPostReadyWork: () => postReady.start(),
+    startPostReadyWorkAfterFirstClient: () => postReady.startAfterFirstClient(),
     websocketUrl,
     focusMascotChat: (conversationId, request) => mascotStatus.focus(conversationId, request),
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
-    prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),
+    prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) =>
       updatePreparation.release(operationId),
     readHtmlRender: (renderId) => store.htmlRenders.read(renderId),

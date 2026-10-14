@@ -25,6 +25,7 @@ function runtimeWithClose(
 ): RunningRuntime {
   return {
     startPostReadyWork: vi.fn(async () => undefined),
+    startPostReadyWorkAfterFirstClient: vi.fn(),
     focusMascotChat: vi.fn(),
     websocketUrl: "ws://127.0.0.1:1/runtime/test",
     databaseRecovery: {

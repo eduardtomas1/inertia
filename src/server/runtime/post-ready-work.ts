@@ -1,5 +1,7 @@
 import type { AppSnapshot } from "../../shared/contracts";
 
+export const FIRST_CLIENT_WAIT_MS = 1_000;
+
 export function shellSnapshotDigest(snapshot: AppSnapshot): string {
   const diagnostics = snapshot.lifecycleDiagnostics
     ? { ...snapshot.lifecycleDiagnostics, capturedAt: null, runtimeUptimeMs: null }
@@ -26,9 +28,34 @@ export class PostReadyWork {
   artifactReconciliation: Promise<void> | null = null;
   artifactReconciliationActive = false;
   private started = false;
+  private deferred = false;
   private work: Promise<void> = Promise.resolve();
+  private connected: () => void = () => undefined;
+  private readonly firstConnection = new Promise<void>((resolve) => {
+    this.connected = resolve;
+  });
 
   constructor(private readonly options: PostReadyWorkOptions) {}
+
+  clientConnected(): void {
+    setImmediate(this.connected);
+  }
+
+  startAfterFirstClient(waitMs = FIRST_CLIENT_WAIT_MS): void {
+    if (this.started || this.deferred) return;
+    this.deferred = true;
+    const timer = setTimeout(() => void this.start(), waitMs);
+    timer.unref();
+    void this.firstConnection.then(() => {
+      clearTimeout(timer);
+      void this.start();
+    });
+  }
+
+  beforeUpdatePreparation<T>(prepare: () => T): T {
+    if (this.deferred) void this.start();
+    return prepare();
+  }
 
   start(): Promise<void> {
     if (this.started) return this.work;

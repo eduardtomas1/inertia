@@ -287,7 +287,9 @@ export function createProviderInfoRefresh(
           broadcastPending = true;
           setImmediate(flush);
         }
-        settling.push(settleOrSchedule(detection));
+        const settled = settleOrSchedule(detection);
+        settled.catch(() => undefined);
+        settling.push(settled);
       };
       let failure: { error: unknown } | null = null;
       try {

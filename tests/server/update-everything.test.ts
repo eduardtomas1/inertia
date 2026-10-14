@@ -191,7 +191,15 @@ describe("update everything orchestration", () => {
 
     expect(result.interruptedConversationIds).toEqual([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
     expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CURSOR_CHAT, "deleted-chat"], "Inertia");
+  });
+
+  it("names every provider being updated when Inertia does not restart", async () => {
+    const subject = fixture();
+
+    await subject.run({ providerIds: ["codex", "claude", "cursor"] });
+
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT, CURSOR_CHAT], "Codex, Claude and Cursor");
   });
 
   it("leaves chats on other providers running and skips chats it cannot resolve", async () => {
@@ -201,7 +209,7 @@ describe("update everything orchestration", () => {
 
     expect(result.interruptedConversationIds).toEqual([CODEX_CHAT]);
     expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT]);
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT], "Codex");
   });
 
   it.each([
@@ -215,7 +223,7 @@ describe("update everything orchestration", () => {
     const result = await subject.run({ providerIds: ["codex"], includeApp: true });
 
     expect(subject.restartContinuation.createPlans).toHaveBeenCalledWith([CODEX_CHAT]);
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT], "Codex");
     expect(result).toMatchObject({ interruptedConversationIds: [CODEX_CHAT], readyForAppInstall: false, appInstallBlocker: message });
     expect(isHeld()).toBe(false);
     expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
@@ -227,7 +235,7 @@ describe("update everything orchestration", () => {
     release();
     subject.preparation.restartBlockerBesidesAgentTurns.mockReturnValue("terminal");
     await expect(subject.run()).resolves.toMatchObject({ readyForAppInstall: false, appInstallBlocker: null });
-    expect(subject.turns.interruptForUpdate).toHaveBeenLastCalledWith([CODEX_CHAT, CLAUDE_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenLastCalledWith([CODEX_CHAT, CLAUDE_CHAT], "Codex and Claude");
   });
 
   it("keeps the app out of the run when interrupted chats do not stop in time, and still updates providers", async () => {
@@ -248,7 +256,7 @@ describe("update everything orchestration", () => {
     await subject.run({ continueChats: false });
 
     expect(subject.restartContinuation.createPlans).not.toHaveBeenCalled();
-    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT]);
+    expect(subject.turns.interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT, CLAUDE_CHAT], "Codex and Claude");
   });
 
   it("keeps updating the rest when one provider fails, stays unchanged or is cancelled", async () => {
@@ -461,7 +469,7 @@ describe("update everything with the real maintenance controller", () => {
     expect(result.providers).toEqual([
       { providerId: "codex", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "2.0.0", error: null },
     ]);
-    expect(interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT]);
+    expect(interruptForUpdate).toHaveBeenCalledWith([CODEX_CHAT], "Codex");
     await expect(interruptForUpdate.mock.results[0]!.value).resolves.toBe(true);
     expect(blockers).not.toHaveBeenCalled();
     expect(controller.hasBlockingAuthority("codex")).toBe(false);

@@ -57,7 +57,7 @@ describe.each(providers)("%s durable turn restart", (providerId) => {
         await flushTurnControllerTestPromises();
       }
       if (mode === "app-update-close") {
-        await expect(runtime.controller.interruptForUpdate([runtime.conversationId])).resolves.toBe(true);
+        await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia")).resolves.toBe(true);
       }
       if (mode !== "unclean-active-close") await runtime.controller.dispose();
       generation = runtime.store.providerRunOwnership.all()[0]?.runtimeGenerationId;

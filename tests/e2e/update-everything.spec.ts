@@ -230,7 +230,7 @@ test("updates Codex, interrupts the running chat and continues it on the same th
     await expect(dialog).toHaveCount(0);
 
     await expect(updateControl(page)).toHaveAttribute("aria-label", "Updating Codex…");
-    await expect(interruption(page)).toContainText("Stopped to update Inertia. The chat continues after the update.");
+    await expect(interruption(page)).toContainText("Stopped to update Codex. The chat continues after the update.");
     await expect.poll(async () => (await brewCalls(fake)).some((args) => args[0] === "upgrade")).toBe(true);
     expect((await brewCalls(fake)).filter((args) => args[0] === "upgrade")).toEqual([["upgrade", "codex"]]);
     if (evidenceDirectory) await page.waitForTimeout(1_000);
@@ -279,7 +279,7 @@ test("interrupts the running chat without continuing it when continuation is tur
     await writeFile(fake.brewGatePath, "release\n", "utf8");
     await dialog.getByRole("button", { name: "Update", exact: true }).click();
 
-    await expect(interruption(page)).toContainText("Stopped to update Inertia.");
+    await expect(interruption(page)).toContainText("Stopped to update Codex.");
     await expect(interruption(page)).not.toContainText("continues after the update");
     await expect(page.getByText(`Updated to ${latestVersion}`, { exact: true })).toBeVisible();
     await expect(updateControl(page)).not.toHaveAttribute("aria-label", "Updating Codex…");

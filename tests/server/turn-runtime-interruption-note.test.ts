@@ -132,7 +132,7 @@ describe("runtime interruption note", () => {
         description: "Audit the tokenizer edge cases",
       });
       await flushTurnControllerTestPromises();
-      await expect(runtime.controller.interruptForUpdate([runtime.conversationId])).resolves.toBe(true);
+      await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia")).resolves.toBe(true);
       expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
 
       const second = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue from where you stopped." });

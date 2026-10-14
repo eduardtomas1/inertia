@@ -71,7 +71,7 @@ describe.each(["codex", "claude"] as const)("%s chat continued after an app upda
     });
     try {
       expect(continuation.createPlans([runtime.conversationId])).toEqual([runtime.conversationId]);
-      await expect(runtime.controller.interruptForUpdate([runtime.conversationId])).resolves.toBe(true);
+      await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia")).resolves.toBe(true);
       await continuation.scheduler.tick();
       await flushTurnControllerTestPromises();
       const latest = runtime.store.latestAgentTurnForConversation(runtime.conversationId)!;
@@ -118,7 +118,7 @@ describe("restart continuation dispatch admission", () => {
     }), { signal: abort.signal, track: async (operation) => await operation() });
     try {
       continuation.createPlans([runtime.conversationId]);
-      await runtime.controller.interruptForUpdate([runtime.conversationId]);
+      await runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia");
       await continuation.scheduler.tick();
       await flushTurnControllerTestPromises();
       expect(runtime.store.latestAgentTurnForConversation(runtime.conversationId)?.id).toBe(firstTurnId);

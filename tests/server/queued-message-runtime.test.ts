@@ -566,7 +566,7 @@ describe("durable runtime message queue", () => {
       await f.command("message.queue.enqueue", id);
       hold();
       try {
-        expect(await f.controller.interruptForUpdate([f.conversationId])).toBe(true);
+        expect(await f.controller.interruptForUpdate([f.conversationId], "Inertia")).toBe(true);
         await f.drain();
         expect(f.store.agentTurn(initial.turn.id)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
         expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });

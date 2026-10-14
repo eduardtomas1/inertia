@@ -1011,12 +1011,12 @@ export class TurnController {
     return this.settle(active, "failed", "unsupported-interaction", message);
   }
 
-  async interruptForUpdate(conversationIds: readonly string[]): Promise<boolean> {
+  async interruptForUpdate(conversationIds: readonly string[], subject: string): Promise<boolean> {
     for (const conversationId of conversationIds) {
       const active = this.activeByConversation.get(conversationId);
       if (!active || active.runState.isTerminal()) continue;
       requestProviderCancellation(this.providers, conversationId);
-      this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id));
+      this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id, subject));
     }
     return await this.waitForProviderCleanup(conversationIds, Date.now() + PROVIDER_CLEANUP_WAIT_MS);
   }

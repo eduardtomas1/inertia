@@ -128,10 +128,10 @@ Both measured against the baseline above (300 turns, 7 launches, spawn mode), as
 
 | ablation | metric (median / p95 ms) | baseline | ablation | load (1 min) |
 |---|---|---:|---:|---|
-| Do not wait for `prepareGitExecutable` at all | runtime ready posted, warm | 545.7 / 573.6 | 521.2 / 527.3 | 1.9-3.9 / 2.2-2.9 |
-| | runtime ready posted, cold | 540.2 / 2183.0 | 520.1 / 714.1 | 1.9-6.0 / 2.2-2.9 |
-| Start `prepareGitExecutable` early and join it before listening | runtime ready posted, warm | 545.7 / 573.6 | 535.0 / 553.9 | 1.9-3.9 / 1.6-2.6 |
-| Answer the snapshot permission check without asking macOS | detail received to first transcript row, warm | 60.0 | 60.2 | 1.9-3.9 / 2.8-3.8 |
+| Do not wait for `prepareGitExecutable` at all | runtime ready posted, warm | 545.7 / 573.6 | 521.2 / 527.3 | 1.9-3.9 / 2.2-3.5 |
+| | runtime ready posted, cold | 540.2 / 2183.0 | 520.1 / 714.1 | 1.9-6.0 / 2.2-3.5 |
+| Start `prepareGitExecutable` early and join it before listening | runtime ready posted, warm | 545.7 / 573.6 | 535.0 / 553.9 | 1.9-3.9 / 2.3-3.6 |
+| Answer the snapshot permission check without asking macOS | detail received to first transcript row, warm | 60.0 | 60.2 | 1.9-3.9 / 2.6-3.9 |
 
 Git location off the readiness path: the plan required at least 25 ms on the runtime-ready mark. Dropping the wait entirely gains 24.5 ms warm, because most of the step is synchronous journal work on the same thread, and doing so would turn a startup failure into a later one and let early Git commands spend their own deadlines waiting for discovery. The variant that keeps the startup guarantees gains 10.7 ms. Not shipped.
 

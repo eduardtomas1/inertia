@@ -53,6 +53,7 @@ export interface RuntimeWebSocketBoundaryOptions {
   approvals(): Iterable<AgentApprovalRequest>;
   inputs(): Iterable<AgentInputRequest>;
   plans(): Iterable<AgentPlan>;
+  onConnect?(): void;
   onDisconnect?(socket: WebSocket): void;
 }
 
@@ -194,6 +195,7 @@ export function attachRuntimeWebSocketBoundary(
         inputs: options.inputs(),
         plans: options.plans(),
       }, authority);
+      options.onConnect?.();
     } catch {
       socket.close(1011, "Runtime synchronization failed.");
     }

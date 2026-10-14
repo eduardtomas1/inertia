@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 
 import { RuntimeGenerationLeaseJournal } from
   "../../src/node/runtime-generation-leases";
@@ -15,6 +16,8 @@ import { TurnGitArtifactManager } from
   "../../src/server/turn-git-artifacts";
 import { DuoLaunchCoordinator } from
   "../../src/server/runtime/duo/duo-launch-coordinator";
+import { RuntimeSyncHub } from "../../src/server/runtime/runtime-sync-hub";
+import { PostReadyWork, type PostReadyWorkOptions } from "../../src/server/runtime/post-ready-work";
 
 const directories: string[] = [];
 const runtimes: RunningRuntime[] = [];
@@ -46,6 +49,7 @@ async function runtimePaths(): Promise<{
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.allSettled(runtimes.splice(0).map((runtime) => runtime.close()));
   vi.restoreAllMocks();
   await Promise.allSettled(directories.splice(0).map((directory) =>
@@ -99,6 +103,74 @@ describe("runtime post-ready work", () => {
     expect(reconcileArtifacts).toHaveBeenCalledOnce();
     expect(resumeComparisons).toHaveBeenCalledOnce();
     expect(providerRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not rebroadcast the shell snapshot when passive work changes nothing", async () => {
+    const paths = await runtimePaths();
+    vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll").mockResolvedValue();
+    vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const snapshotBroadcasts = vi.spyOn(RuntimeSyncHub.prototype, "broadcastSnapshot");
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+
+    await runtime.startPostReadyWork();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(snapshotBroadcasts).not.toHaveBeenCalled();
+  });
+
+  it("defers passive work until the first client has received its welcome", async () => {
+    const paths = await runtimePaths();
+    const refreshIdentities = vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll").mockResolvedValue();
+    vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+
+    runtime.startPostReadyWorkAfterFirstClient();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(refreshIdentities).not.toHaveBeenCalled();
+
+    const socket = new WebSocket(runtime.websocketUrl, { origin: "http://localhost:5173" });
+    try {
+      const welcome = await new Promise<boolean>((resolve, reject) => {
+        socket.once("message", (data) => resolve(String(data).startsWith('{"type":"server.welcome"')));
+        socket.once("error", reject);
+      });
+      expect(welcome).toBe(true);
+      await vi.waitFor(() => expect(refreshIdentities).toHaveBeenCalledOnce());
+    } finally {
+      socket.close();
+    }
+  });
+
+  it("starts deferred passive work before an update preparation drains the runtime", async () => {
+    const paths = await runtimePaths();
+    const refreshIdentities = vi.spyOn(ProjectIdentityRefresher.prototype, "refreshAll").mockResolvedValue();
+    const reconcileArtifacts = vi.spyOn(TurnGitArtifactManager.prototype, "reconcile").mockResolvedValue(false);
+    vi.spyOn(DuoLaunchCoordinator.prototype, "resumeComparisons").mockResolvedValue();
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: false,
+    });
+    runtimes.push(runtime);
+
+    runtime.startPostReadyWorkAfterFirstClient();
+    const operationId = randomUUID();
+    await expect(runtime.prepareForUpdate(operationId)).resolves.toMatchObject({ ready: true });
+    expect(refreshIdentities).toHaveBeenCalledOnce();
+    expect(reconcileArtifacts).toHaveBeenCalledOnce();
+    runtime.releaseUpdatePreparation(operationId);
   });
 
   it("starts no passive work when shutdown wins before readiness", async () => {
@@ -172,5 +244,98 @@ describe("runtime post-ready work", () => {
     expect(providerRefresh.mock.calls[0]?.[0].aborted).toBe(true);
     expect(refreshSettled).toBe(true);
     runtimes.splice(runtimes.indexOf(runtime), 1);
+  });
+});
+
+function work(overrides: Partial<PostReadyWorkOptions> = {}) {
+  const broadcastSnapshot = vi.fn();
+  const options: PostReadyWorkOptions = {
+    isClosed: () => false,
+    isBlocked: () => false,
+    track: (operation) => operation(),
+    startBackups: vi.fn(),
+    refreshProjectIdentities: async () => undefined,
+    afterProjectIdentityRefresh: () => undefined,
+    reconcileWorkspaces: async () => undefined,
+    reconcileArtifacts: async () => false,
+    startProviderDiscovery: vi.fn(),
+    snapshotDigest: () => "unchanged",
+    broadcastSnapshot,
+    ...overrides,
+  };
+  return { postReady: new PostReadyWork(options), broadcastSnapshot, options };
+}
+
+describe("post-ready work", () => {
+  it("broadcasts after each passive task that changed the shell snapshot", async () => {
+    let digest = "before";
+    let finishWorkspaces!: () => void;
+    const { postReady, broadcastSnapshot } = work({
+      snapshotDigest: () => digest,
+      refreshProjectIdentities: async () => {
+        digest = "identity";
+      },
+      reconcileWorkspaces: () => new Promise<void>((resolve) => {
+        finishWorkspaces = resolve;
+      }),
+      reconcileArtifacts: async () => true,
+    });
+
+    const started = postReady.start();
+    await postReady.identityRefresh;
+    await postReady.artifactReconciliation;
+    expect(broadcastSnapshot).toHaveBeenCalledTimes(2);
+    finishWorkspaces();
+    await started;
+    expect(broadcastSnapshot).toHaveBeenCalledTimes(3);
+    expect(postReady.artifactReconciliationActive).toBe(false);
+  });
+
+  it("skips the snapshot broadcast after shutdown and survives a failing backup start", async () => {
+    let closed = false;
+    const { postReady, broadcastSnapshot, options } = work({
+      isClosed: () => closed,
+      snapshotDigest: () => (closed ? "after" : "before"),
+      startBackups: () => {
+        throw new Error("backups unavailable");
+      },
+      refreshProjectIdentities: async () => {
+        closed = true;
+      },
+    });
+
+    await postReady.start();
+    await postReady.identityRefresh;
+    expect(broadcastSnapshot).not.toHaveBeenCalled();
+    expect(options.startProviderDiscovery).toHaveBeenCalledOnce();
+  });
+
+  it("starts after the first client, or after the wait when none connects", async () => {
+    vi.useFakeTimers();
+    const fallback = work();
+    fallback.postReady.startAfterFirstClient(1_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fallback.options.startProviderDiscovery).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fallback.options.startProviderDiscovery).toHaveBeenCalledOnce();
+
+    const connected = work();
+    connected.postReady.startAfterFirstClient(1_000);
+    connected.postReady.clientConnected();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connected.options.startProviderDiscovery).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(connected.options.startProviderDiscovery).toHaveBeenCalledOnce();
+  });
+
+  it("promotes only a deferred start when an update preparation begins", () => {
+    const idle = work();
+    expect(idle.postReady.beforeUpdatePreparation(() => "prepared")).toBe("prepared");
+    expect(idle.options.startProviderDiscovery).not.toHaveBeenCalled();
+
+    const deferred = work();
+    deferred.postReady.startAfterFirstClient(1_000);
+    deferred.postReady.beforeUpdatePreparation(() => "prepared");
+    expect(deferred.options.startProviderDiscovery).toHaveBeenCalledOnce();
   });
 });

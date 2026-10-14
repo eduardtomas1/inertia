@@ -28,6 +28,7 @@ export class PostReadyWork {
   artifactReconciliation: Promise<void> | null = null;
   artifactReconciliationActive = false;
   private started = false;
+  private discoveryStarted = false;
   private deferred = false;
   private work: Promise<void> = Promise.resolve();
   private connected: () => void = () => undefined;
@@ -53,11 +54,27 @@ export class PostReadyWork {
   }
 
   beforeUpdatePreparation<T>(prepare: () => T): T {
-    if (this.deferred) void this.start();
+    if (this.deferred) void this.startPassiveWork();
     return prepare();
   }
 
   start(): Promise<void> {
+    if (this.started) {
+      if (!this.options.isClosed() && !this.options.isBlocked()) this.startProviderDiscovery();
+      return this.work;
+    }
+    const work = this.startPassiveWork();
+    if (this.started) this.startProviderDiscovery();
+    return work;
+  }
+
+  private startProviderDiscovery(): void {
+    if (this.discoveryStarted) return;
+    this.discoveryStarted = true;
+    this.options.startProviderDiscovery();
+  }
+
+  private startPassiveWork(): Promise<void> {
     if (this.started) return this.work;
     if (this.options.isClosed() || this.options.isBlocked()) return Promise.resolve();
     this.started = true;
@@ -80,7 +97,6 @@ export class PostReadyWork {
       .finally(() => {
         this.artifactReconciliationActive = false;
       });
-    this.options.startProviderDiscovery();
     return this.work;
   }
 

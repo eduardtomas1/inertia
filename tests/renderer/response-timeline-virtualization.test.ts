@@ -393,6 +393,27 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(longEstimate).toBeLessThanOrEqual(12_400);
   });
 
+  it("prices Markdown blocks by the rendered answer typography", () => {
+    const lead = Array.from({ length: 8 }, (_, index) =>
+      `Paragraph ${index} keeps this answer above the minimum row height.`).join("\n\n");
+    const estimate = (body: string): number =>
+      estimateTimelineRowSize(buildItem({ id: "typography", answer: `${lead}\n\n${body}` }));
+    const list = (items: number): string =>
+      Array.from({ length: items }, (_, index) => `- Item ${index}`).join("\n");
+    const table = (rows: number): string => [
+      "| File | Status |",
+      "| --- | --- |",
+      ...Array.from({ length: rows }, (_, index) => `| src/file-${index}.ts | modified |`),
+    ].join("\n");
+    const wrapped = (lines: number): string => "word ".repeat(18 * lines).trim();
+
+    expect(estimate(wrapped(3)) - estimate(wrapped(1))).toBe(2 * 23);
+    expect(estimate(list(6)) - estimate(list(1))).toBe(5 * (23 + 6));
+    expect(estimate(table(5)) - estimate(table(1))).toBe(4 * 36);
+    expect(estimate("# Heading") - estimate("## Heading")).toBe(30 - 24);
+    expect(estimate("## Heading") - estimate("### Heading")).toBe(24 - 20);
+  });
+
   it("estimates a settled follow-up exchange that stays visible outside the work details", () => {
     const exchange = (earlierAnswer: string): ResponseTimelineItem => {
       const turn = agentTurn("exchange", "completed", "exchange-answer");

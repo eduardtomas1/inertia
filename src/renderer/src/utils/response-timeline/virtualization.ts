@@ -285,10 +285,12 @@ function estimateMarkdownHeight(content: string, columns: number): number {
   const paragraph: string[] = [];
   let codeLines = 0;
   let inFence = false;
+  let listHeight = 0;
+  let tableRows = 0;
   const flushParagraph = (): void => {
     if (paragraph.length === 0) return;
     const lines = estimatedWrappedLines(paragraph.join(" "), columns);
-    blocks.push(Math.max(25, lines * 25));
+    blocks.push(Math.max(23, lines * 23));
     paragraph.length = 0;
   };
   const flushCode = (): void => {
@@ -296,12 +298,27 @@ function estimateMarkdownHeight(content: string, columns: number): number {
     blocks.push(Math.min(4_800, 18 + codeLines * 20));
     codeLines = 0;
   };
+  const flushList = (): void => {
+    if (listHeight === 0) return;
+    blocks.push(listHeight);
+    listHeight = 0;
+  };
+  const flushTable = (): void => {
+    if (tableRows === 0) return;
+    blocks.push(24 + tableRows * 36);
+    tableRows = 0;
+  };
+  const flushBlocks = (): void => {
+    flushParagraph();
+    flushList();
+    flushTable();
+  };
 
   for (const rawLine of content.replace(/\r/gu, "").split("\n")) {
     const line = rawLine.trimEnd();
     const trimmed = line.trim();
     if (/^(?:```|~~~)/u.test(trimmed)) {
-      flushParagraph();
+      flushBlocks();
       codeLines += 1;
       inFence = !inFence;
       if (!inFence) flushCode();
@@ -313,31 +330,40 @@ function estimateMarkdownHeight(content: string, columns: number): number {
     }
     if (!trimmed) {
       flushParagraph();
+      flushTable();
       continue;
     }
-    if (/^#{1,6}\s/u.test(trimmed)) {
-      flushParagraph();
-      blocks.push(Math.max(30, estimatedWrappedLines(trimmed.replace(/^#{1,6}\s+/u, ""), columns) * 30));
+    const heading = /^(#{1,6})\s/u.exec(trimmed);
+    if (heading) {
+      flushBlocks();
+      const level = heading[1]!.length;
+      const lineHeight = level === 1 ? 30 : level === 2 ? 24 : level === 3 ? 20 : 18;
+      blocks.push(Math.max(lineHeight, estimatedWrappedLines(trimmed.replace(/^#{1,6}\s+/u, ""), columns) * lineHeight));
       continue;
     }
     if (/^(?:[-+*]|\d+[.)])\s/u.test(trimmed)) {
       flushParagraph();
-      blocks.push(Math.max(25, estimatedWrappedLines(trimmed.replace(/^(?:[-+*]|\d+[.)])\s+/u, ""), columns - 4) * 25));
+      flushTable();
+      listHeight += (listHeight > 0 ? 6 : 0)
+        + Math.max(23, estimatedWrappedLines(trimmed.replace(/^(?:[-+*]|\d+[.)])\s+/u, ""), columns - 4) * 23);
       continue;
     }
     if (trimmed.startsWith(">")) {
-      flushParagraph();
-      blocks.push(18 + estimatedWrappedLines(trimmed.replace(/^>\s?/u, ""), columns - 4) * 25);
+      flushBlocks();
+      blocks.push(18 + estimatedWrappedLines(trimmed.replace(/^>\s?/u, ""), columns - 4) * 23);
       continue;
     }
     if (/^\|.*\|$/u.test(trimmed)) {
       flushParagraph();
-      blocks.push(Math.max(28, estimatedWrappedLines(trimmed, columns) * 28));
+      flushList();
+      if (!/^\|(?:\s*:?-+:?\s*\|)+$/u.test(trimmed)) tableRows += 1;
       continue;
     }
+    flushList();
+    flushTable();
     paragraph.push(trimmed);
   }
-  flushParagraph();
+  flushBlocks();
   flushCode();
   const contentHeight = blocks.reduce((total, height) => total + height, 0);
   return Math.min(12_000, contentHeight + Math.max(0, blocks.length - 1) * 12);

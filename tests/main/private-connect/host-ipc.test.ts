@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -52,6 +52,7 @@ afterEach(async () => {
 async function readyHost(): Promise<void> {
   const userDataDirectory = await mkdtemp(join(tmpdir(), "inertia-private-connect-ipc-"));
   roots.push(userDataDirectory);
+  await writeFile(join(userDataDirectory, "private-connect.vault"), "c3RvcmU=");
   PrivateConnectHost.create({
     userDataDirectory,
     staticRoot: userDataDirectory,

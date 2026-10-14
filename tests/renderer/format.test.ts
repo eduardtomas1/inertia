@@ -8,7 +8,22 @@ import {
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 
 describe("renderer time labels", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("reuses one relative time formatter across labels", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+    const constructed = vi.spyOn(Intl, "RelativeTimeFormat");
+
+    expect(formatRelativeTime("2026-07-22T11:59:00.000Z")).toBe("1 minute ago");
+    expect(formatRelativeTime("2026-07-22T09:00:00.000Z")).toBe("3 hours ago");
+    expect(formatRelativeTime("2026-07-21T12:00:00.000Z")).toBe("yesterday");
+
+    expect(constructed).not.toHaveBeenCalled();
+  });
 
   it("keeps the English interface language independent of the operating-system locale", () => {
     vi.useFakeTimers();

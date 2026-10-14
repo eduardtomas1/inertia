@@ -14,6 +14,10 @@ import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
 
 const ADMISSION_RETRY_MS = 1_000;
 
+function releasesQueue(turn: Pick<AgentTurn, "status" | "terminalReason"> | null): boolean {
+  return turn?.status === "completed" || (turn?.status === "interrupted" && turn.terminalReason === "app-update");
+}
+
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
   || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
 
@@ -59,7 +63,7 @@ export function createQueuedMessageRuntime(
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
     const conversation = store.conversation(conversationId);
     if (conversation.archivedAt !== null) return;
-    if (!manual && store.latestAgentTurnForConversation(conversationId)?.status !== "completed") return;
+    if (!manual && !releasesQueue(store.latestAgentTurnForConversation(conversationId))) return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
       store.queuedMessages.block(conversationId, first.id, "This chat's model, access or workspace changed. Remove and queue the message again.");
       changed(conversationId);
@@ -260,7 +264,7 @@ export function createQueuedMessageRuntime(
   return {
     handler,
     turnInteractionHandler: createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps }),
-    onTurnSettled(turn: AgentTurn): void { if (turn.status === "completed") void schedule(turn.conversationId).catch(() => undefined); },
+    onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
     start(): void {
       store.queuedMessages.reconcile();
       for (const conversationId of store.queuedMessages.pendingConversationIds()) void schedule(conversationId).catch(() => undefined);

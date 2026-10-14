@@ -3,8 +3,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarUpdateControl } from "../../src/renderer/src/components/sidebar/SidebarUpdateControl";
 import { useAppUpdate } from "../../src/renderer/src/hooks/useAppUpdate";
-import type { UpdateEverythingController } from "../../src/renderer/src/hooks/useUpdateEverything";
-import type { AppSnapshot, ProviderMaintenanceProviderId, ProviderMaintenanceStatus } from "../../src/shared/contracts";
+import { useUpdateEverything, type UpdateEverythingController } from "../../src/renderer/src/hooks/useUpdateEverything";
+import type { AppSnapshot, ProviderMaintenanceProviderId, ProviderMaintenanceStatus, ServerEvent } from "../../src/shared/contracts";
 import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
 import { updateStatus } from "../support/app-update-fixture";
@@ -278,6 +278,15 @@ describe("update everything mode in the sidebar", () => {
     fireEvent.keyDown(trigger(), { key: "ArrowUp" });
     expect(details()).toHaveTextContent("Inertia is updating.");
   });
+  it("closes the dialog when its plan goes away so it never reopens on its own", () => {
+    const { rerender } = render(<EverythingHarness everything={everythingController()} />); publish();
+    fireEvent.click(trigger());
+    expect(screen.getByRole("heading", { name: "Update Inertia and Codex?" })).toBeInTheDocument();
+    rerender(<EverythingHarness everything={everythingController({}, [])} />);
+    expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
+    rerender(<EverythingHarness everything={everythingController()} />);
+    expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
+  });
   it("keeps today's app-only flow without provider updates", async () => {
     download.mockResolvedValue(updateStatus({ state: "downloading" }));
     render(<EverythingHarness everything={everythingController({}, [{ ...CODEX, versionStatus: "current", latestVersion: "0.112.0" }])} />); publish();
@@ -289,5 +298,34 @@ describe("update everything mode in the sidebar", () => {
     render(<EverythingHarness everything={everythingController()} />);
     publish({ state: "downloaded", installBlocker: "terminal", message: "Close active terminals before restarting to update." });
     expect(trigger()).toHaveAccessibleName("Update restart needs attention");
+  });
+  it("shows the live app status first and clears a run error once the plan or the app status changes", async () => {
+    const request = vi.fn(async (): Promise<ServerEvent> => { throw new Error("Inertia is updating."); });
+    function LiveHarness({ statuses }: { statuses: ProviderMaintenanceStatus[] }): React.JSX.Element {
+      const controller = useAppUpdate();
+      const everything = useUpdateEverything({
+        statuses: new Map(statuses.map((status) => [status.providerId, status])), operations: new Map(), appStatus: controller.status, request,
+      });
+      return <SidebarUpdateControl controller={controller} everything={everything} snapshot={labelSnapshot} />;
+    }
+    const messages = (): string[] => [...details().querySelectorAll(".update-detail-message")].map((node) => node.textContent ?? "");
+    const failRun = async (): Promise<void> => {
+      fireEvent.click(trigger());
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Update" })));
+      await vi.waitFor(() => expect(request).toHaveBeenCalled());
+      request.mockClear();
+      fireEvent.keyDown(trigger(), { key: "ArrowUp" });
+    };
+    const { rerender } = render(<LiveHarness statuses={[CODEX]} />);
+    publish({ state: "current", message: "Inertia is up to date." });
+    await failRun();
+    expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
+    rerender(<LiveHarness statuses={[{ ...CODEX, latestVersion: "0.114.0" }]} />);
+    expect(messages()).toEqual(["Inertia is up to date."]);
+    fireEvent.keyDown(details(), { key: "Escape" });
+    await failRun();
+    expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
+    publish({ state: "current", message: "Inertia is up to date.", freshness: "cached" });
+    expect(messages()).toEqual(["Inertia is up to date."]);
   });
 });

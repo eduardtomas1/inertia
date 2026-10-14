@@ -18,6 +18,7 @@ import {
 } from "./types";
 
 interface ParsedStatus {
+  oid: string | null;
   branch: string | null;
   detached: boolean;
   upstream: string | null;
@@ -69,6 +70,7 @@ function changedFile(
 function parsePorcelain(buffer: Buffer): ParsedStatus {
   const fields = buffer.toString("utf8").split("\0");
   const files: GitChangedFile[] = [];
+  let oid: string | null = null;
   let branch: string | null = null;
   let detached = false;
   let upstream: string | null = null;
@@ -78,7 +80,9 @@ function parsePorcelain(buffer: Buffer): ParsedStatus {
   for (let index = 0; index < fields.length; index += 1) {
     const record = fields[index];
     if (!record) continue;
-    if (record.startsWith("# branch.head ")) {
+    if (record.startsWith("# branch.oid ")) {
+      oid = record.slice(13);
+    } else if (record.startsWith("# branch.head ")) {
       const head = record.slice(14);
       detached = head === "(detached)";
       branch = detached || head === "(unknown)" ? null : head;
@@ -113,6 +117,7 @@ function parsePorcelain(buffer: Buffer): ParsedStatus {
     }
   }
   return {
+    oid,
     branch,
     detached,
     upstream,
@@ -243,7 +248,9 @@ export async function inspectRepositoryStatusAndHead(
     },
   );
   const parsed = parsePorcelain(statusResult.stdout);
-  const hasCurrentHead = await hasHead(root, options);
+  const hasCurrentHead = parsed.oid === null
+    ? await hasHead(root, options)
+    : parsed.oid !== "(initial)";
   const [statsInspection, routingInspection] = await Promise.allSettled([
     runGitInspection(
       root,

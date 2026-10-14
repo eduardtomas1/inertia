@@ -287,28 +287,27 @@ export async function repositoryMetadataMarkerIdentity(
     {
       deadlineAt: options.deadlineAt,
       signal: options.signal,
-      maxOutputBytes: MAX_PATH_LENGTH,
+      maxOutputBytes: MAX_PATH_LENGTH * 2,
       failureMessage: "Unable to inspect this Git repository identity.",
     },
   );
-  const directoryIdentity = async (
-    argument: "--git-dir" | "--git-common-dir",
-  ): Promise<string> => {
-    const result = await inspect([
-      "rev-parse",
-      "--path-format=absolute",
-      argument,
-    ]).catch(async (error: unknown) => {
-      if (
-        options.signal?.aborted
-        || isGitProcessTreeTerminationFailure(error)
-      ) {
-        throw error;
-      }
-      requirePathInspectionTime(options);
-      return await inspect(["rev-parse", argument]);
-    });
-    const reported = terminalPathOutput(result.stdout);
+  const reportedDirectories = async (
+    ...flags: readonly ("--git-dir" | "--git-common-dir")[]
+  ): Promise<Buffer> => (await inspect([
+    "rev-parse",
+    "--path-format=absolute",
+    ...flags,
+  ]).catch(async (error: unknown) => {
+    if (
+      options.signal?.aborted
+      || isGitProcessTreeTerminationFailure(error)
+    ) {
+      throw error;
+    }
+    requirePathInspectionTime(options);
+    return await inspect(["rev-parse", ...flags]);
+  })).stdout;
+  const directoryIdentity = async (reported: string): Promise<string> => {
     if (!reported || reported.includes("\0")) {
       throw new GitError(
         "conflict",
@@ -350,10 +349,24 @@ export async function repositoryMetadataMarkerIdentity(
       );
     }
   };
-  const [gitDirectoryResult, commonDirectoryResult] = await Promise.allSettled([
-    directoryIdentity("--git-dir"),
-    directoryIdentity("--git-common-dir"),
-  ]);
+  const probedDirectoryIdentity = async (
+    argument: "--git-dir" | "--git-common-dir",
+  ): Promise<string> => await directoryIdentity(
+    terminalPathOutput(await reportedDirectories(argument)),
+  );
+  const lines = (await reportedDirectories("--git-dir", "--git-common-dir"))
+    .toString("utf8").split("\n");
+  const reported = lines.length === 3 && lines[2] === ""
+    ? lines.slice(0, 2).map((line) => line.endsWith("\r") ? line.slice(0, -1) : line)
+    : null;
+  const [gitDirectoryResult, commonDirectoryResult] = await Promise.allSettled(
+    reported
+      ? reported.map(directoryIdentity)
+      : [
+          probedDirectoryIdentity("--git-dir"),
+          probedDirectoryIdentity("--git-common-dir"),
+        ],
+  );
   // Both inspections own Git children. Await both settlements even when one
   // marker probe fails so no sibling process retains a Windows cwd handle
   // after this identity inspection rejects.

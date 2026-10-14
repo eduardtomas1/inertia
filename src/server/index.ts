@@ -218,9 +218,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
     databaseRecoveryActive: () => recoveryImportAdmission.isActive(),
-    agentWorkActive: () => turns.activeConversationIds().length > 0
+    agentWorkActive: (ignoringTurns = false) => (!ignoringTurns && turns.activeConversationIds().length > 0)
       || isolatedRuns.activeCount() > 0
-      || store.hasRecordedActiveWorkspaceRun(),
+      || store.hasRecordedActiveWorkspaceRun(ignoringTurns),
     terminalActivity: () => terminals.hasUpdateBlockingActivity(),
     providerMaintenanceActive: () => providerMaintenance.hasBlockingAuthority(),
     providerRefreshActive: () => activeProviderRefreshes > 0,
@@ -716,7 +716,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   queuedMessages.start();
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
-    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance,
+    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
   });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [

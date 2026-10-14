@@ -26,11 +26,11 @@ function localPath(url) {
 }
 
 const consumers = new Map();
-async function consumerFor(path) {
+function consumerFor(path) {
   if (consumers.has(path)) return consumers.get(path);
   let consumer = null;
   const mapPath = `${path}.map`;
-  if (existsSync(mapPath)) consumer = await new SourceMapConsumer(JSON.parse(readFileSync(mapPath, "utf8")));
+  if (existsSync(mapPath)) consumer = new SourceMapConsumer(JSON.parse(readFileSync(mapPath, "utf8")));
   consumers.set(path, consumer);
   return consumer;
 }
@@ -57,7 +57,7 @@ for (const node of profile.nodes) {
   let name = functionName || "(anonymous)";
   const path = localPath(url);
   if (path) {
-    const consumer = await consumerFor(path);
+    const consumer = consumerFor(path);
     if (consumer && lineNumber >= 0) {
       const original = consumer.originalPositionFor({ line: lineNumber + 1, column: Math.max(0, columnNumber) });
       if (original.source) {

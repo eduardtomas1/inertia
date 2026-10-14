@@ -77,3 +77,65 @@ entries each, 1.5M and 4M characters); streaming Markdown is not cached.
 
 Wheel and thumb-drag frame timings were compared in interleaved runs
 (before and after alternating) and stayed within noise.
+
+## Row height estimates: price Markdown by the rendered answer typography
+
+Before: Markdown prose and list lines were priced at 25 px, every heading
+at 30 px, every list item and table line as its own block with a 12 px
+gap, and table delimiter rows as rendered rows. The rendered answer uses
+14.5 px text at 1.6 line height (23.2 px), 24 px and 20 px headings,
+6 px between list items and 36 px table rows below a 24 px toolbar.
+After: the estimate uses those values and prices a list or a table as
+one block.
+
+| Metric | Before | After | N | Load |
+| --- | --- | --- | --- | --- |
+| Estimated height before measuring, 300 turns (measured 358,282 px) | 388,139 px (+8.3%) | 363,351 px (+1.4%) | 5 | 2.2-4.3 |
+| Estimated height before measuring, 2,000 turns (measured about 2,390,000 px) | 2,597,385 px (+8.4%) | 2,424,697 px (+1.5%) | 5 | 2.2-4.3 |
+| Mean blank viewport, 2,000 turns, thumb drag up | 6.34% (8.31) | 1.41% (1.42) | 5 | 2.2-4.3 |
+| Mean blank viewport, 2,000 turns, thumb drag down | 1.18% (2.04) | 0.42% (0.57) | 5 | 2.2-4.3 |
+| Missed refreshes, 300 turns, thumb drag up | 8.03% (10.02) | 7.73% (11.84) | 5 | 2.2-4.3 |
+| Missed refreshes, 2,000 turns, thumb drag up | 55.97% (56.68) | 55.51% (56.24) | 5 | 2.2-4.3 |
+| Missed refreshes, 2,000 turns, wheel up | 2.52% (2.67) | 1.67% (3.26) | 5 | 2.2-4.3 |
+
+Before and after runs alternated. Jump to latest after loading 2,000
+turns was bimodal in both builds (45-59 ms after, 48-58 ms in earlier
+runs of the same before build), so its median is not a reliable
+comparison here; the desktop benchmark below covers it.
+
+## Sidebar: reuse one relative-time formatter
+
+Before: every sidebar row label built a new `Intl.RelativeTimeFormat`.
+After: one module-level formatter is reused.
+
+| Metric | Before | After | N | Load |
+| --- | --- | --- | --- | --- |
+| Main-thread busy, 500-chat sidebar, wheel down | 2,728 ms | 2,477 ms | 3 | 2.6-2.8 |
+| Main-thread busy, 500-chat sidebar, wheel up | 2,678 ms | 2,146 ms | 3 | 2.6-2.8 |
+| Main-thread busy, wheel down while streaming | 2,747 ms | 2,597 ms | 3 | 2.6-2.8 |
+
+Tried and dropped: updating the sidebar window only when its visible
+index range changes made no difference (678 commits per wheel pass
+before and after, N=5), because at wheel speed the range changes on
+almost every event. Keeping the window until the visible rows come
+within four rows of its edge cut commits from 678 to 190 and rendered
+components from 320,685 to 45,859 per pass, but each re-centre mounted
+several rows at once and produced one 16.7 ms frame in most passes
+(maximum frame 9.4 ms before; missed refreshes 0% to 0.28%, N=5), so it
+was not kept.
+
+## Desktop benchmark with all kept fixes
+
+`npm run benchmark:desktop:built`, before (feature branch) and after
+(this branch) alternating, N=3 runs, five follow-latest samples per run,
+load 2.1-5.3.
+
+| Metric | Before | After | N |
+| --- | --- | --- | --- |
+| Jump to latest | 41.8 ms (max 46.2) | 42.2 ms (max 44.6) | 15 |
+| Reader navigation | 151.2 ms (max 192.7) | 139.9 ms (max 173.0) | 15 |
+| Long conversation p95 frame | 8.8 ms | 8.4 ms | 3 |
+| Long conversation maximum frame | 16.7 ms | 9.4 ms | 3 |
+| Streaming first delta to paint | 18 ms | 19 ms | 3 |
+| Streaming completion to final paint | 285 ms | 270 ms | 3 |
+| Streaming p95 visible gap | 76.7 ms | 75.6 ms | 3 |

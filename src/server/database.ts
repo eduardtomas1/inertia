@@ -794,8 +794,8 @@ export class RuntimeStore {
     return this.turnLedgerRepository.unfinished();
   }
 
-  terminalAuthoritativeAgentTurnsMissingGitArtifacts(): AgentTurn[] {
-    return this.turnLedgerRepository.terminalAuthoritativeMissingGitArtifacts();
+  createMissingTurnGitArtifacts(input: (turn: AgentTurn) => CreateTurnGitArtifactInput): void {
+    this.gitArtifactRepository.createMany(this.turnLedgerRepository.terminalAuthoritativeMissingGitArtifacts(), input);
   }
 
   createTurnGitArtifact(input: CreateTurnGitArtifactInput): StoredTurnGitArtifact {

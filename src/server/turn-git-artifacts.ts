@@ -470,19 +470,17 @@ export class TurnGitArtifactManager {
       });
     }
 
-    for (const turn of this.#lifetime.signal.aborted
-      ? []
-      : this.store.terminalAuthoritativeAgentTurnsMissingGitArtifacts()) {
-      this.store.createTurnGitArtifact({
+    if (!this.#lifetime.signal.aborted) {
+      this.store.createMissingTurnGitArtifacts((turn) => ({
         turnId: turn.id,
         beforeCheckpointId: turn.checkpointId,
         status: "unavailable",
         completeness: "unavailable",
         failureReason: "No authoritative pre-turn Git capture was persisted.",
         createdAt: turn.completedAt ?? turn.updatedAt,
-      });
+      }));
+      await this.prune();
     }
-    if (!this.#lifetime.signal.aborted) await this.prune();
     return this.store.turnGitArtifactRevision() !== before;
   }
 

@@ -2,7 +2,11 @@ import type { ProviderMaintenanceProviderId, ServerEvent } from "@shared/contrac
 import type { UpdatesRunResult } from "@shared/updates";
 import type { AppUpdateStatus } from "@shared/desktop";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import type { UpdateEverythingPhase } from "../hooks/useUpdateEverything";
+
+export type UpdateEverythingPhase =
+  | { kind: "download" }
+  | { kind: "providers"; providerIds: readonly ProviderMaintenanceProviderId[] }
+  | { kind: "app" };
 
 export interface UpdateEverythingRequest {
   providerIds: ProviderMaintenanceProviderId[];

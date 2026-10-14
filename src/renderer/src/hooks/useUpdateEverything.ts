@@ -8,12 +8,7 @@ import type {
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import type { UpdateEverythingRequest } from "../utils/updateEverythingRun";
-
-export type UpdateEverythingPhase =
-  | { kind: "download" }
-  | { kind: "providers"; providerIds: readonly ProviderMaintenanceProviderId[] }
-  | { kind: "app" };
+import type { UpdateEverythingPhase, UpdateEverythingRequest } from "../utils/updateEverythingRun";
 
 export interface UpdateEverythingController {
   statuses: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceStatus>;

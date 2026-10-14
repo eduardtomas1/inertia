@@ -7,7 +7,7 @@ import type {
 import type { AppUpdateStatus } from "@shared/desktop";
 import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "@shared/provider-maintenance";
 import { agentRunStateForTurn, agentTurnStatusForRunState, isAgentRunTerminalState } from "@shared/run-state";
-import type { UpdateEverythingPhase } from "../../hooks/useUpdateEverything";
+import type { UpdateEverythingPhase } from "../../utils/updateEverythingRun";
 
 export interface UpdateEverythingProvider {
   providerId: ProviderMaintenanceProviderId;

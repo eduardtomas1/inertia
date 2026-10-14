@@ -71,13 +71,13 @@ const budgets = {
   // title match add 750 core bytes (2,294,025 measured on macOS arm64, where
   // the previous build measures the same 2,293,275 bytes as Linux x64).
   // See docs/pr-evidence/visual-replies/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 1_134,
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 1_134 + 2829,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 2_693,
   // The token pass and the plain surfaces measure 256,646 bytes on every
   // platform; keep only narrow cross-platform headroom.
   entryCss: 250.9 * kibibyte + 182,

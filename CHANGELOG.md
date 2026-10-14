@@ -148,6 +148,10 @@ mascot follows several chats at once.
   the smaller transport, and migration 96 (`PersistTodos`) stores tasks.
 - Database backup checks also verify the context packet triggers that
   migration 95 recreates.
+- Quitting no longer hangs when the macOS keychain does not answer: Private
+  Connect checks secure storage only when it has been enabled or its settings
+  are opened, so a profile that never used it no longer touches the keychain
+  at launch.
 - The README shows the current interface, with new Tasks and Plan views.
 - Release only: a release must be on main and must not change a migration
   released in an earlier version, Windows release builds warm Electron before

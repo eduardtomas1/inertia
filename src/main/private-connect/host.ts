@@ -50,7 +50,10 @@ interface PrivateConnectHostOptions {
 
 export class PrivateConnectHost {
   private service: PrivateConnectService | null = null;
+  private readonly migration: Promise<{ cleaned: boolean }>;
+  private restoration: Promise<void> = Promise.resolve();
   private initialization: Promise<void> | null = null;
+  private updatePreparing = false;
   private initializationError: string | null = DEFAULT_STATE.statusMessage;
   private shutdownPhase: "not-started" | "awaiting-initialization" | "stopping-service" | "stopped" = "not-started";
   private shuttingDownService: PrivateConnectService | null = null;
@@ -62,11 +65,12 @@ export class PrivateConnectHost {
       void this.service?.setPrivacyLocked(locked);
     });
     this.registerIpc(options.assertTrusted);
+    this.migration = cleanupLegacyAuthority(options.userDataDirectory);
   }
 
   static create(options: PrivateConnectHostOptions): PrivateConnectHost {
     const host = new PrivateConnectHost(options);
-    void host.initialize();
+    host.restoration = host.restorePreviousUse();
     return host;
   }
 
@@ -81,6 +85,7 @@ export class PrivateConnectHost {
     this.stopped = true;
     this.privacyMonitor.shutdown();
     this.shutdownPhase = "awaiting-initialization";
+    await this.restoration;
     await this.initialization;
     this.shutdownPhase = "stopping-service";
     this.shuttingDownService = this.service ?? this.shuttingDownService;
@@ -95,22 +100,42 @@ export class PrivateConnectHost {
   }
 
   async prepareForUpdate(): Promise<boolean> {
+    this.updatePreparing = true;
+    await this.restoration;
     await this.initialization;
-    return await this.service?.prepareForUpdate() ?? true;
+    const ready = await this.service?.prepareForUpdate() ?? true;
+    if (!ready) this.updatePreparing = false;
+    return ready;
   }
 
   async releaseUpdatePreparation(): Promise<void> {
+    this.updatePreparing = false;
+    await this.restoration;
     await this.initialization;
     await this.service?.releaseUpdatePreparation();
   }
 
+  private vaultPath(): string {
+    return join(this.options.userDataDirectory, "private-connect.vault");
+  }
+
+  private async restorePreviousUse(): Promise<void> {
+    await this.migration.catch(() => undefined);
+    const previouslyEnabled = await lstat(this.vaultPath()).then(
+      () => true,
+      (error: unknown) => !(error instanceof Error && "code" in error && error.code === "ENOENT"),
+    );
+    if (previouslyEnabled) await this.initialize();
+  }
+
   private async initialize(): Promise<void> {
     if (this.initialization) return this.initialization;
+    if (this.stopped) return;
     this.initialization = (async () => {
       try {
-        const migration = await cleanupLegacyAuthority(this.options.userDataDirectory);
+        const migration = await this.migration;
         const store = new PrivateConnectStore(
-          join(this.options.userDataDirectory, "private-connect.vault"),
+          this.vaultPath(),
           await createPrivateConnectStoreEncryption(safeStorage),
         );
         const service = await PrivateConnectService.create({
@@ -123,6 +148,7 @@ export class PrivateConnectHost {
         this.service = service;
         if (this.stopped) return;
         this.initializationError = null;
+        if (this.updatePreparing) await service.prepareForUpdate();
         await service.setPrivacyLocked(this.privacyMonitor.isLocked());
         if (migration.cleaned) {
           service.setNotice("Private Connect is ready. Previous browser pairings were removed; pair devices again in Settings → Devices & integrations.");
@@ -155,12 +181,14 @@ export class PrivateConnectHost {
   private registerIpc(assertTrusted: PrivateConnectHostOptions["assertTrusted"]): void {
     ipcMain.handle(PRIVATE_CONNECT_IPC.getState, (event, ...args) => {
       assertTrusted(event, args.length);
+      void this.initialize();
       return this.state();
     });
     ipcMain.handle(PRIVATE_CONNECT_IPC.setEnabled, async (event, ...args) => {
       assertTrusted(event, args.length, 1);
       const request = parsePrivateConnectEnableRequest(args[0]);
       if (!request) throw new Error("Invalid Private Connect settings.");
+      await this.initialize();
       return await this.requireService().setEnabled(request.enabled);
     });
     ipcMain.handle(PRIVATE_CONNECT_IPC.createInvitation, async (event, ...args) => {

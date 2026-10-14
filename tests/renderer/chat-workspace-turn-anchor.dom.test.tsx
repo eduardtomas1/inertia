@@ -538,6 +538,27 @@ describe("draft turn anchoring", () => {
     await waitFor(() => expect(screen.getByLabelText("Thread transcript")).toHaveFocus());
   });
 
+  it("loads earlier messages when the reader scrolls up near the top, not on programmatic scrolls", () => {
+    const loadOlder = vi.fn();
+    const props = workspaceProps(conversation("conversation-history-near-top"), async () => null);
+    render(<ChatWorkspace {...props} history={{ hasOlder: true, loading: false, error: null, loadOlder, online: true }} />);
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperty(transcript, "clientHeight", { configurable: true, value: 600 });
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 6_000 });
+    const scrollTo = (top: number) => {
+      transcript.scrollTop = top;
+      fireEvent.scroll(transcript);
+    };
+    scrollTo(2_000);
+    scrollTo(300);
+    expect(loadOlder).not.toHaveBeenCalled();
+    scrollTo(2_000);
+    fireEvent.wheel(transcript, { deltaY: -400 });
+    scrollTo(300);
+    expect(loadOlder).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Load earlier messages" })).toBeVisible();
+  });
+
   it("marks Load earlier messages unavailable while offline and restores it when online", () => {
     const loadOlder = vi.fn();
     const props = workspaceProps(conversation("conversation-history-offline"), async () => null);

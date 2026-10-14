@@ -1,5 +1,6 @@
 import type { LimitResetCommandRunner } from "./composer/limitResetClient";
 import { readTranscriptPosition, forgetTranscriptPosition } from "../utils/transcriptPosition";
+import { useOlderHistoryNearTop } from "../hooks/useOlderHistoryNearTop";
 import {
   lazy,
   Suspense,
@@ -784,6 +785,12 @@ export function ChatWorkspace({
     noteReaderIntent,
     onLatestContentVisibilityChange,
   ]);
+  const loadOlderNearTop = useCallback((): void => {
+    if (!readerIntentRef.current) return;
+    noteResponseTimelineNavigationIntent();
+    history?.loadOlder();
+  }, [history, noteResponseTimelineNavigationIntent]);
+  useOlderHistoryNearTop(scrollRef, history && { ...history, loadOlder: loadOlderNearTop });
 
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,

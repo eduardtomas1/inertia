@@ -31,51 +31,41 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await app?.close(); });
 
-test("loads older pages without moving the reading position or losing the oldest turn", async ({ browserName: _browserName }, info) => {
+test("loads older pages at the transcript start without moving the reading position or losing the oldest turn", async ({ browserName: _browserName }, info) => {
   const { page } = app;
   const transcript = page.getByLabel("Thread transcript", { exact: true });
+  const feed = (count: number) => page.getByRole("feed", { name: `${count} conversation turns`, exact: true });
   await expect(page.locator(`[data-turn-id="${turns.at(-1)}"]`).first()).toBeInViewport();
+  await expect(feed(40)).toBeAttached();
+  await transcript.evaluate((scroll, anchorId) => {
+    const samples: { count: number; top: number | null }[] = [];
+    Reflect.set(window, "__historySamples", samples);
+    const sample = () => {
+      const label = scroll.querySelector('[role="feed"]')?.getAttribute("aria-label") ?? "";
+      const row = scroll.querySelector<HTMLElement>(`[data-response-row-id="${anchorId}"]`);
+      samples.push({ count: Number(/^(\d+) /u.exec(label)?.[1] ?? 0),
+        top: row ? row.getBoundingClientRect().top - scroll.getBoundingClientRect().top : null });
+      if (samples.length < 3_000) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, turns[45]);
   await readFromTranscriptStart(page);
-  const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });
-  await earlier.scrollIntoViewIfNeeded();
-  const anchor = page.locator(`[data-turn-id="${turns[45]}"]`).first();
-  await expect(anchor).toBeInViewport();
-  let before = 0;
-  const positions: unknown[] = [];
-  const observe = async () => {
-    const position = await transcript.evaluate((scroll) => {
-      const bounds = scroll.getBoundingClientRect();
-      return { at: performance.now(), scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight,
-        viewport: { top: bounds.top, height: bounds.height },
-        rows: [...scroll.querySelectorAll<HTMLElement>("[data-response-row-id]")].map((row) => ({
-          id: row.dataset.responseRowId, top: row.getBoundingClientRect().top,
-          height: row.getBoundingClientRect().height,
-        })) };
-    });
-    positions.push(position);
-    return position;
-  };
-  await expect.poll(async () => {
-    const bounds = await anchor.boundingBox();
-    if (bounds) before = bounds.y;
-    return Boolean(bounds);
-  }).toBe(true);
-  await observe();
-  await earlier.click();
-  await expect(page.getByRole("button", { name: "Loading earlier messages…" })).toHaveCount(0);
+  await expect(feed(80)).toBeAttached();
+  await expect(page.getByRole("button", { name: "Load earlier messages", exact: true })).toBeAttached();
+  let samples: { count: number; top: number | null }[] = [];
   try {
     await expect.poll(async () => {
-      const position = await observe();
-      const row = position.rows.find(({ id }) => id === turns[45]);
-      return row ? Math.abs(row.top - before) : Number.POSITIVE_INFINITY;
+      samples = await page.evaluate(() => Reflect.get(window, "__historySamples") as { count: number; top: number | null }[]);
+      const before = samples.filter(({ count, top }) => count === 40 && top !== null).at(-1);
+      const after = samples.filter(({ count, top }) => count === 80 && top !== null).at(-1);
+      return before && after ? Math.abs(after.top! - before.top!) : Number.POSITIVE_INFINITY;
     }).toBeLessThan(4);
   } finally {
-    await info.attach("prepend-positions", { body: JSON.stringify({ anchor: turns[45], before, positions }, null, 2), contentType: "application/json" });
+    await info.attach("prepend-positions", { body: JSON.stringify({ anchor: turns[45], samples }, null, 2), contentType: "application/json" });
     await info.attach("prepend-viewport", { body: await page.screenshot(), contentType: "image/png" });
   }
-  await earlier.scrollIntoViewIfNeeded();
-  await earlier.click();
-  await expect(page.getByRole("feed", { name: `${turns.length} conversation turns`, exact: true })).toBeAttached();
+  await readFromTranscriptStart(page);
+  await expect(feed(turns.length)).toBeAttached();
   await expect(page.getByRole("button", { name: /earlier messages/u })).toHaveCount(0);
   const oldest = page.locator(`[data-turn-id="${turns[0]}"]`).first();
   await expect(async () => {

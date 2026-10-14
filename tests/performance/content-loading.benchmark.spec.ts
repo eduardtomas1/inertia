@@ -19,6 +19,7 @@ import {
   type FrameRecord,
   type OlderPageSample,
   type OpenChatSample,
+  type ScrolledOlderPageSample,
 } from "./content-loading-instrumentation";
 
 const LAUNCHES = Number(process.env.INERTIA_CONTENT_BENCHMARK_LAUNCHES ?? 5);
@@ -27,6 +28,8 @@ const OLDER_PAGES = Number(process.env.INERTIA_CONTENT_BENCHMARK_OLDER_PAGES ?? 
 const INSTRUMENTED = process.env.INERTIA_CONTENT_BENCHMARK_INSTRUMENTED !== "0";
 const TRACE_PAGES = (process.env.INERTIA_CONTENT_BENCHMARK_TRACE_PAGES ?? "").split(",").filter(Boolean).map(Number);
 const CPU_THROTTLE = Number(process.env.INERTIA_CONTENT_BENCHMARK_CPU_THROTTLE ?? 1);
+const OLDER_TRIGGER = process.env.INERTIA_CONTENT_BENCHMARK_OLDER_TRIGGER === "scroll" ? "scroll" : "click";
+const SCROLL_STEP_PX = Number(process.env.INERTIA_CONTENT_BENCHMARK_SCROLL_STEP ?? 120);
 const reportPath = resolve(process.env.INERTIA_CONTENT_BENCHMARK_REPORT
   ?? `performance-results/content-loading-desktop-${process.platform}-${process.arch}.json`);
 const profileDirectory = join(dirname(reportPath), "content-loading-profiles");
@@ -39,6 +42,7 @@ interface LaunchResult {
   initialFrames: { types: string[]; bytes: number }[];
   open: { size: ContentLoadingChatSize; cold: boolean; sample: OpenChatSample }[];
   older: OlderPageSample[];
+  scrolled: ScrolledOlderPageSample[];
   reopenAfterOlder: { turnsBeforeSwitch: number; turnsAfterReopen: number; reopenMs: number } | null;
 }
 
@@ -272,6 +276,113 @@ async function loadOlderPage(page: Page): Promise<OlderPageSample | null> {
   });
 }
 
+async function scrollOlderPage(page: Page): Promise<ScrolledOlderPageSample | null> {
+  return await page.evaluate(async (step) => {
+    const bench = Reflect.get(window, "__contentBench") as { log: FrameRecord[]; commits: CommitRecord[] };
+    const afterPaint = () => new Promise<number>((resolvePaint) => requestAnimationFrame((frameAt) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => resolvePaint(frameAt);
+      channel.port2.postMessage(null);
+    }));
+    const scroller = document.querySelector<HTMLElement>(".message-scroll");
+    if (!scroller) throw new Error("Transcript is missing.");
+    const turns = () => {
+      const feed = document.querySelector('[role="feed"][aria-label$=" conversation turns"]');
+      return feed
+        ? Number(/^(\d+) conversation turns$/u.exec(feed.getAttribute("aria-label") ?? "")?.[1] ?? 0)
+        : document.querySelectorAll(".response-static-item").length;
+    };
+    const hasOlder = () => [...scroller.querySelectorAll<HTMLButtonElement>("button")]
+      .some((candidate) => /^Load(ing)? earlier messages/u.test(candidate.textContent?.trim() ?? ""));
+    if (!hasOlder()) return null;
+    const rows = () => [...scroller.querySelectorAll<HTMLElement>(".response-virtual-item, .response-static-item")];
+    const viewportTop = () => scroller.getBoundingClientRect().top;
+    const track = () => {
+      const top = viewportTop();
+      const row = rows().find((candidate) => candidate.getBoundingClientRect().top >= top);
+      return row ? { key: row.textContent?.slice(0, 120) ?? "", top: row.getBoundingClientRect().top - top } : null;
+    };
+    const locate = (key: string) => {
+      const row = rows().find((candidate) => candidate.textContent?.slice(0, 120) === key);
+      return row ? row.getBoundingClientRect().top - viewportTop() : null;
+    };
+    const before = turns();
+    const logStart = bench.log.length;
+    const commitStart = bench.commits.length;
+    const startedAt = performance.now();
+    let thresholdAt: number | null = null;
+    let topAt: number | null = null;
+    let countAt: number | null = null;
+    let jumpPx = 0;
+    let jumpFrames = 0;
+    let framesAfterCount = 0;
+    let previousFrame = startedAt;
+    let maxFrameMs = 0;
+    let last: { key: string; top: number } | null = null;
+    while (performance.now() - startedAt < 30_000) {
+      scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -step }));
+      scroller.scrollTop = Math.max(0, scroller.scrollTop - step);
+      const steppedAt = performance.now();
+      if (thresholdAt === null && scroller.scrollTop <= scroller.clientHeight) thresholdAt = steppedAt;
+      if (topAt === null && scroller.scrollTop === 0 && countAt === null) topAt = steppedAt;
+      const tracked = track();
+      const frameAt = await afterPaint();
+      maxFrameMs = Math.max(maxFrameMs, frameAt - previousFrame);
+      previousFrame = frameAt;
+      const top = tracked ? locate(tracked.key) : null;
+      if (tracked && top !== null) {
+        const drift = Math.abs(top - tracked.top);
+        jumpPx = Math.max(jumpPx, drift);
+        if (drift >= 1) jumpFrames += 1;
+        last = { key: tracked.key, top };
+      }
+      if (countAt === null && turns() > before) countAt = performance.now();
+      if (countAt !== null && (framesAfterCount += 1) > 10) break;
+      if (countAt === null && topAt !== null && performance.now() - topAt > 3_000) break;
+    }
+    let settledDriftPx = Number.NaN;
+    if (last) {
+      const settleFrom = performance.now();
+      let stable = 0;
+      let previous: number | null = null;
+      while (performance.now() - settleFrom < 5_000) {
+        await afterPaint();
+        const top = locate(last.key);
+        stable = top !== null && previous !== null && Math.abs(top - previous) < 0.5 ? stable + 1 : 0;
+        previous = top;
+        if (stable >= 10 && performance.now() - (bench.commits.at(-1)?.t ?? 0) > 300) break;
+      }
+      settledDriftPx = previous === null ? Number.NaN : previous - last.top;
+    }
+    const open = new Set<string | null>();
+    let detailRequests = 0;
+    let maxDetailRequestsInFlight = 0;
+    for (const frame of bench.log.slice(logStart)) {
+      if (frame.direction === "out" && frame.types.includes("conversation.detail.load")) {
+        detailRequests += 1;
+        open.add(frame.requestId);
+        maxDetailRequestsInFlight = Math.max(maxDetailRequestsInFlight, open.size);
+      }
+      if (frame.direction === "in" && frame.kind === "conversation.detail") open.delete(frame.requestId);
+    }
+    return {
+      reachedTop: topAt !== null,
+      thresholdToCountMs: countAt !== null && thresholdAt !== null ? countAt - thresholdAt : null,
+      topWaitMs: countAt === null ? null : topAt === null ? 0 : countAt - topAt,
+      scrollToCountMs: countAt === null ? null : countAt - startedAt,
+      turnsBefore: before,
+      turnsAfter: turns(),
+      jumpPx,
+      jumpFrames,
+      settledDriftPx,
+      detailRequests,
+      maxDetailRequestsInFlight,
+      maxFrameMs,
+      commits: bench.commits.length - commitStart,
+    };
+  }, SCROLL_STEP_PX);
+}
+
 async function profile<T>(page: Page, name: string | null, operation: () => Promise<T>): Promise<T> {
   if (!name) return await operation();
   const session = await page.context().newCDPSession(page);
@@ -343,7 +454,15 @@ async function runLaunch(root: string, seed: string, workspace: string, fixture:
     await openChat(page, large.title, large.lastAnswerMarker, large.rowPrefix);
     await settleIdle(page);
     const older: OlderPageSample[] = [];
-    for (let pageIndex = 0; pageIndex < OLDER_PAGES; pageIndex += 1) {
+    const scrolled: ScrolledOlderPageSample[] = [];
+    for (let pageIndex = 0; OLDER_TRIGGER === "scroll" && pageIndex < OLDER_PAGES; pageIndex += 1) {
+      const sample = await scrollOlderPage(page);
+      if (!sample) break;
+      scrolled.push(sample);
+      if (sample.turnsAfter <= sample.turnsBefore) break;
+      await settleIdle(page);
+    }
+    for (let pageIndex = 0; OLDER_TRIGGER === "click" && pageIndex < OLDER_PAGES; pageIndex += 1) {
       const name = instrumented && [0, 1, 2, OLDER_PAGES - 2, OLDER_PAGES - 1].includes(pageIndex) ? `older-page-${pageIndex + 1}` : null;
       const traceName = instrumented && TRACE_PAGES.includes(pageIndex + 1) ? `older-page-${pageIndex + 1}` : null;
       const sample = await trace(page, traceName, () => profile(page, traceName ? null : name, () => loadOlderPage(page)));
@@ -352,15 +471,15 @@ async function runLaunch(root: string, seed: string, workspace: string, fixture:
       await settleIdle(page);
     }
     let reopenAfterOlder: LaunchResult["reopenAfterOlder"] = null;
-    if (older.length) {
-      const turnsBeforeSwitch = older.at(-1)!.turnsAfter;
+    if (older.length || scrolled.length) {
+      const turnsBeforeSwitch = older.at(-1)?.turnsAfter ?? scrolled.at(-1)!.turnsAfter;
       const small = fixture.chats[300];
       await openChat(page, small.title, small.lastAnswerMarker, small.rowPrefix);
       await settleIdle(page);
       const reopen = await openChat(page, large.title, large.lastAnswerMarker, large.rowPrefix);
       reopenAfterOlder = { turnsBeforeSwitch, turnsAfterReopen: reopen.loadedTurns, reopenMs: reopen.clickToVisibleMs };
     }
-    return { startupMs: launched.startupMs, loadBefore, loadAfter: loadavg(), initialFrames, open, older, reopenAfterOlder };
+    return { startupMs: launched.startupMs, loadBefore, loadAfter: loadavg(), initialFrames, open, older, scrolled, reopenAfterOlder };
   } finally {
     if (electronApp) await closeApp(electronApp);
   }
@@ -394,6 +513,25 @@ function summarizeOpen(launches: LaunchResult[]) {
     }
   }
   return result;
+}
+
+function summarizeScrolled(launches: LaunchResult[]) {
+  const all = launches.flatMap(({ scrolled }) => scrolled);
+  const keys: (keyof ScrolledOlderPageSample)[] = ["thresholdToCountMs", "topWaitMs", "scrollToCountMs", "jumpPx",
+    "jumpFrames", "settledDriftPx", "detailRequests", "maxDetailRequestsInFlight", "maxFrameMs", "commits"];
+  const metric = (samples: ScrolledOlderPageSample[], key: keyof ScrolledOlderPageSample) =>
+    distribution(samples.flatMap((sample) => typeof sample[key] === "number" && Number.isFinite(sample[key]) ? [sample[key] as number] : []));
+  return {
+    pagesLoaded: launches.map(({ scrolled }) => scrolled.filter((sample) => sample.turnsAfter > sample.turnsBefore).length),
+    turnsAdded: [...new Set(all.map((sample) => sample.turnsAfter - sample.turnsBefore))],
+    reachedTop: all.filter(({ reachedTop }) => reachedTop).length,
+    allPages: Object.fromEntries(keys.map((key) => [key, metric(all, key)])),
+    perPage: Array.from({ length: Math.max(0, ...launches.map(({ scrolled }) => scrolled.length)) }, (_, index) => {
+      const samples = launches.flatMap(({ scrolled }) => scrolled[index] ? [scrolled[index]!] : []);
+      return { page: index + 1, turnsBefore: samples[0]?.turnsBefore,
+        ...Object.fromEntries(keys.map((key) => [key, metric(samples, key)])) };
+    }),
+  };
 }
 
 function summarizeOlder(launches: LaunchResult[]) {
@@ -439,7 +577,9 @@ test("records chat open and older-history paging costs", async () => {
       load: launches.map(({ loadBefore, loadAfter }) => ({ before: loadBefore, after: loadAfter })),
       initialFrames: launches[0]?.initialFrames,
       open: summarizeOpen(launches),
+      olderTrigger: OLDER_TRIGGER,
       older: summarizeOlder(launches),
+      scrolled: summarizeScrolled(launches),
       reopenAfterOlder: launches.map(({ reopenAfterOlder }) => reopenAfterOlder),
       instrumented: instrumented && {
         open: instrumented.open.map(({ size, cold, sample }) => ({ size, cold, clickToVisibleMs: sample.clickToVisibleMs,

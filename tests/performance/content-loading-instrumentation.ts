@@ -124,6 +124,22 @@ export interface OpenChatSample {
   censusCommits: CommitRecord[];
 }
 
+export interface ScrolledOlderPageSample {
+  reachedTop: boolean;
+  thresholdToCountMs: number | null;
+  topWaitMs: number | null;
+  scrollToCountMs: number | null;
+  turnsBefore: number;
+  turnsAfter: number;
+  jumpPx: number;
+  jumpFrames: number;
+  settledDriftPx: number;
+  detailRequests: number;
+  maxDetailRequestsInFlight: number;
+  maxFrameMs: number;
+  commits: number;
+}
+
 export interface OlderPageSample {
   clickToResultMs: number | null;
   clickToCountMs: number;

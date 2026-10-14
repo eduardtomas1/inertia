@@ -57,6 +57,7 @@ describe.runIf(process.platform === "darwin" || process.platform === "linux")("C
     for (const scale of SCALES) {
       const launches: ClaudeRefreshMeasurement[] = [];
       const refreshes: ClaudeRefreshMeasurement[] = [];
+      const refreshesWithinTtl: ClaudeRefreshMeasurement[] = [];
       const sharedLaunches: ClaudeRefreshMeasurement[] = [];
       for (let run = 0; run < RUNS; run += 1) {
         for (const shared of [false, true]) {
@@ -78,6 +79,7 @@ describe.runIf(process.platform === "darwin" || process.platform === "linux")("C
             } else {
               launches.push(await scenario.measure("launch", plan));
               refreshes.push(await scenario.measure("refresh", plan));
+              refreshesWithinTtl.push(await scenario.measure("refresh-within-ttl", plan));
             }
           } finally {
             await scenario.close();
@@ -88,13 +90,14 @@ describe.runIf(process.platform === "darwin" || process.platform === "linux")("C
       const scaleReport = {
         launch: summary(launches),
         refresh: summary(refreshes),
+        refreshWithinTtl: summary(refreshesWithinTtl),
         launchWithCursor: summary(sharedLaunches),
         sampleLaunch: launches[0],
         sampleRefresh: refreshes[0],
         sampleLaunchWithCursor: sharedLaunches[0],
       };
       (report.scales as Record<string, unknown>)[`${scale}x`] = scaleReport;
-      for (const name of ["launch", "refresh", "launchWithCursor"] as const) {
+      for (const name of ["launch", "refresh", "refreshWithinTtl", "launchWithCursor"] as const) {
         process.stdout.write(`${scale}x ${name} ${JSON.stringify(scaleReport[name])}\n`);
       }
     }

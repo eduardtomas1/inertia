@@ -55,7 +55,7 @@ export interface ClaudeRefreshScenario {
   fixture: ClaudeRefreshFixture;
   claude(): ProviderInfo;
   measure(
-    mode: "refresh" | "launch",
+    mode: "refresh" | "refresh-within-ttl" | "launch",
     plan: ClaudeRefreshFixturePlan,
     settleTimeoutMs?: number,
   ): Promise<ClaudeRefreshMeasurement>;
@@ -93,17 +93,18 @@ export async function createClaudeRefreshScenario(
   const elapsed = (): number => performance.now() - origin;
   const steps: ClaudeRefreshStep[] = [];
   const metadataCache = new ProviderMetadataCache({
-    read: async (providerId, executable, environment, cwd, fields, signal) => {
+    read: async (...args: Parameters<typeof readProviderMetadata>) => {
+      const [providerId, , , , fields] = args;
       const step: ClaudeRefreshStep = {
         name: `metadata ${providerId} (${(fields ?? []).join("+")})`,
         startedMs: elapsed(),
         endedMs: null,
-        deadlineMs: providerId === "claude" ? 6_000 : null,
+        deadlineMs: (args as unknown[])[6] as number | undefined ?? 6_000,
         outcome: "pending",
       };
       steps.push(step);
       try {
-        const result = await readProviderMetadata(providerId, executable, environment, cwd, fields, signal);
+        const result = await readProviderMetadata(...args);
         step.outcome = `models=${result.models?.length ?? 0} rateLimits=${result.rateLimits?.length ?? 0}`;
         return result;
       } catch (error) {
@@ -180,9 +181,9 @@ export async function createClaudeRefreshScenario(
     origin = performance.now();
     const wallClockOrigin = Date.now();
     let resolved = false;
-    const running = (mode === "refresh"
-      ? refresh("claude", true, true)
-      : refresh(undefined, true)).finally(() => { resolved = true; });
+    const running = (mode === "launch"
+      ? refresh(undefined, true)
+      : refresh("claude", true, mode === "refresh")).finally(() => { resolved = true; });
     await running;
     const wallMs = elapsed();
     const deadline = Date.now() + settleTimeoutMs;

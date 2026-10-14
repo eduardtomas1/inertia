@@ -27,6 +27,7 @@ import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
+import { slowMachineProbeDeadline } from "./probe-deadline";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -500,6 +501,7 @@ export class ProviderMetadataCache {
   private readonly nativeScopeKeys = new Map<ProviderId, string>();
   private readonly inFlight = new Map<string, InFlightRefresh>();
   private readonly failedReads = new Set<string>();
+  private readonly probeLatencies = new Map<ProviderId, number>();
   private readonly persistence?: ProviderMetadataPersistence;
   private readonly reader: typeof readProviderMetadata;
   private readonly now: () => number;
@@ -619,8 +621,15 @@ export class ProviderMetadataCache {
 
   correlate(
     providerId: ProviderId,
-    correlation: { executable: string | null; version: string | null; authState: ProviderAuthState },
+    { probeLatencyMs, ...correlation }: {
+      executable: string | null;
+      version: string | null;
+      authState: ProviderAuthState;
+      probeLatencyMs?: number;
+    },
   ): void {
+    if (probeLatencyMs === undefined) this.probeLatencies.delete(providerId);
+    else this.probeLatencies.set(providerId, probeLatencyMs);
     this.switchNativeScope(providerNativeMetadataScope(providerId, correlation));
   }
 
@@ -760,7 +769,10 @@ export class ProviderMetadataCache {
       fields,
       revision,
       options.signal,
-      options.timeoutMs,
+      options.timeoutMs ?? slowMachineProbeDeadline(
+        PROVIDER_METADATA_TIMEOUT_MS,
+        this.probeLatencies.get(scope.providerId),
+      ),
     )
       .finally(() => {
         if (this.inFlight.get(key)?.promise === promise) {

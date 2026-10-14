@@ -330,8 +330,24 @@ describe("provider metadata cache", () => {
     expect(read.mock.calls[0]![6]).toBe(18_000);
     expect(cache.lastReadFailed("claude")).toBe(true);
     await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true });
-    expect(read.mock.calls[1]![6]).toBeUndefined();
+    expect(read.mock.calls[1]![6]).toBe(6_000);
     expect(cache.lastReadFailed("claude")).toBe(false);
+  });
+
+  it("gives later reads the deadline measured by the latest detection", async () => {
+    const read = vi.fn(async () => ({}));
+    const cache = new ProviderMetadataCache({ read });
+
+    cache.correlate("claude", {
+      executable: claudeExecutable, version: "2.1.200", authState: "authenticated", probeLatencyMs: 2_000,
+    });
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true, fields: ["rateLimits"] });
+    cache.correlate("claude", {
+      executable: claudeExecutable, version: "2.1.200", authState: "authenticated", probeLatencyMs: 90,
+    });
+    await cache.metadata("claude", claudeExecutable, {}, workspacePath, { force: true, fields: ["rateLimits"] });
+
+    expect(read.mock.calls.map((call) => (call as unknown[])[6])).toEqual([24_000, 6_000]);
   });
 
   it("bounds untrusted inventories, merges sparse rate updates, and never probes Cursor outside an ACP session", async () => {

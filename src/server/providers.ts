@@ -718,6 +718,7 @@ export class ProviderManager {
         ? detection.version ?? null
         : null,
       authState: detection.authState,
+      probeLatencyMs: detection.probeLatencyMs,
     });
     this.capabilityAuthority.rememberDetection(detection);
     return detection;

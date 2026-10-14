@@ -538,6 +538,27 @@ describe("draft turn anchoring", () => {
     await waitFor(() => expect(screen.getByLabelText("Thread transcript")).toHaveFocus());
   });
 
+  it("loads earlier messages when the reader scrolls up near the top, not on programmatic scrolls", () => {
+    const loadOlder = vi.fn();
+    const props = workspaceProps(conversation("conversation-history-near-top"), async () => null);
+    render(<ChatWorkspace {...props} history={{ hasOlder: true, loading: false, error: null, loadOlder, online: true }} />);
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperty(transcript, "clientHeight", { configurable: true, value: 600 });
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 6_000 });
+    const scrollTo = (top: number) => {
+      transcript.scrollTop = top;
+      fireEvent.scroll(transcript);
+    };
+    scrollTo(2_000);
+    scrollTo(300);
+    expect(loadOlder).not.toHaveBeenCalled();
+    scrollTo(2_000);
+    fireEvent.wheel(transcript, { deltaY: -400 });
+    scrollTo(300);
+    expect(loadOlder).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Load earlier messages" })).toBeVisible();
+  });
+
   it("marks Load earlier messages unavailable while offline and restores it when online", () => {
     const loadOlder = vi.fn();
     const props = workspaceProps(conversation("conversation-history-offline"), async () => null);
@@ -849,6 +870,75 @@ describe("draft turn anchoring", () => {
       await act(async () => vi.runOnlyPendingTimers());
       vi.useRealTimers();
     }
+  });
+
+  it("does not re-render the timeline for each scroll event while reading history", async () => {
+    const activeConversation = conversation("conversation-reading-scroll-renders");
+    HTMLElement.prototype.scrollTo = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => null)}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 5_000 },
+      scrollTop: { configurable: true, writable: true, value: 2_000 },
+    });
+    fireEvent.wheel(transcript);
+    fireEvent.scroll(transcript);
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+    const rendersInHistory = timelineRenderedProps.values.length;
+
+    for (let step = 1; step <= 5; step += 1) {
+      transcript.scrollTop = 2_000 - step * 40;
+      fireEvent.scroll(transcript);
+    }
+
+    expect(timelineRenderedProps.values.length).toBe(rendersInHistory);
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
+  });
+
+  it("keeps following new content after a final answer settles at the latest message", async () => {
+    const activeConversation = conversation("conversation-final-answer-already-following");
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    const props = workspaceProps(activeConversation, async () => null);
+    const view = render(<ChatWorkspace {...props} messages={[]} />);
+    await screen.findByTestId("turn-anchor-projection");
+    const callback = timelineCallbacks.get(activeConversation.id)!;
+
+    act(() => {
+      callback({
+        status: "started",
+        conversationId: activeConversation.id,
+        answerId: "answer-following",
+      });
+      callback({
+        status: "positioned",
+        conversationId: activeConversation.id,
+        answerId: "answer-following",
+        followsLatest: true,
+      });
+    });
+    expect(screen.queryByRole("button", { name: "Jump to latest" }))
+      .not.toBeInTheDocument();
+    scrollTo.mockClear();
+
+    const lateMessage: ChatMessage = {
+      id: "final-answer-following-late-message",
+      conversationId: activeConversation.id,
+      turnId: null,
+      role: "assistant",
+      content: "New content after the settled answer.",
+      attachments: [],
+      createdAt: "2026-08-02T10:00:03.000Z",
+    };
+    view.rerender(<ChatWorkspace {...props} messages={[lateMessage]} />);
+
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
   });
 
   it("yields an awaited turn to explicit response timeline navigation", async () => {

@@ -60,6 +60,7 @@ export interface ProviderDetection {
   cleanupConfirmed: boolean;
   cleanupDiagnostic?: PosixCleanupDiagnostic;
   probeTimedOut?: boolean;
+  probeLatencyMs?: number;
   statusMessage?: string;
 }
 

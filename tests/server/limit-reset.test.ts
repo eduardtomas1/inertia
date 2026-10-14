@@ -20,6 +20,7 @@ import { serverEventSchema } from "../../src/shared/contracts/server-event-schem
 import type { NativeUsageReader } from "../../src/server/usage/native";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
 import { groupWorkThreads, sortActivityThreads } from "../../src/renderer/src/utils/sidebarModel";
+import { hold, release } from "../../src/server/runtime/update-hold";
 
 const instant = Date.parse("2026-10-01T12:00:00.000Z");
 const reset = new Date(instant + 60_000).toISOString();
@@ -104,6 +105,24 @@ describe("quota reset actions", () => {
     expect(receipt).toMatchObject({ id, state: "completed", turnId: expect.any(String) });
     expect(store.latestAgentTurnForConversation(conversationId)?.id).toBe(receipt.turnId);
     await scheduler.tick();
+    expect(dependencies.dispatch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a due resume waiting while Inertia is updating and sends it after the hold ends", async () => {
+    await schedule();
+    vi.setSystemTime(instant + 61_000); account.windows[0]!.remainingPercent = 100;
+    const reads = vi.mocked(dependencies.readAccount).mock.calls.length;
+    hold();
+    try {
+      await scheduler.tick();
+      expect(store.limitResets.get(conversationId)).toMatchObject({ state: "waiting", attempts: 0, error: null });
+      expect(dependencies.readAccount).toHaveBeenCalledTimes(reads);
+      expect(dependencies.dispatch).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
+    await scheduler.tick();
+    expect(store.limitResets.get(conversationId)?.state).toBe("completed");
     expect(dependencies.dispatch).toHaveBeenCalledOnce();
   });
 

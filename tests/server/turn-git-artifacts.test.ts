@@ -7,6 +7,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCheckpoint } from "../../src/server/checkpoints";
@@ -295,6 +296,54 @@ describe("turn Git artifacts", () => {
       files: [],
     });
     store.close();
+  });
+
+  it("records every terminal turn missing an artifact with one prepared insert", async () => {
+    const runtime = workspace();
+    const checkpointed = beginTurn(runtime.store, runtime.conversationId, "turn-missing-checkpointed");
+    const checkpoint = await checkpointFor(
+      runtime.store,
+      runtime.repository,
+      runtime.data,
+      runtime.conversationId,
+      1,
+    );
+    runtime.store.associateCheckpointWithTurn(
+      checkpoint.id,
+      runtime.conversationId,
+      checkpointed.runId,
+      checkpointed.id,
+    );
+    runtime.store.settleAgentTurn(checkpointed.id, {
+      status: "completed",
+      checkpointId: checkpoint.id,
+    });
+    const turnIds = [checkpointed.id];
+    for (let index = 0; index < 120; index += 1) {
+      const turn = beginTurn(runtime.store, runtime.conversationId, `turn-missing-${index}`);
+      runtime.store.settleAgentTurn(turn.id, { status: index % 2 ? "failed" : "completed" });
+      turnIds.push(turn.id);
+    }
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const prepare = vi.spyOn(Database.prototype, "prepare");
+
+    await expect(manager.reconcile()).resolves.toBe(true);
+
+    expect(prepare.mock.calls.length).toBeLessThan(20);
+    for (const turnId of turnIds) {
+      const turn = runtime.store.agentTurn(turnId);
+      expect(runtime.store.turnGitArtifactStorage(turnId)).toMatchObject({
+        turnId,
+        status: "unavailable",
+        completeness: "unavailable",
+        beforeCheckpointId: turn.checkpointId,
+        failureReason: "No authoritative pre-turn Git capture was persisted.",
+        createdAt: turn.completedAt ?? turn.updatedAt,
+      });
+    }
+    expect(runtime.store.agentTurn(checkpointed.id).checkpointId).toBe(checkpoint.id);
+    prepare.mockRestore();
+    runtime.store.close();
   });
 
   it("bounds stalled finalization, deduplicates callers, and rejects late replacement", async () => {

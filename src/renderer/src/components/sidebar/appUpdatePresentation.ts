@@ -1,6 +1,6 @@
 import type { AppUpdateStatus } from "@shared/desktop";
 
-export type UpdateAction = "check" | "download" | "install" | "release" | "none";
+export type UpdateAction = "check" | "download" | "install" | "release" | "everything" | "none";
 export type UpdateIconState = "idle" | "checking" | "available" | "downloading" | "downloaded" | "installing" | "attention";
 
 export function updatePresentation(status: AppUpdateStatus | null, checking: boolean): {
@@ -29,4 +29,22 @@ export function updatePresentation(status: AppUpdateStatus | null, checking: boo
 
 export function updatePercent(percent: number | undefined): number | null {
   return percent === undefined || !Number.isFinite(percent) ? null : Math.round(Math.min(100, Math.max(0, percent)));
+}
+
+export function updateEverythingLabel(app: boolean, providerLabels: readonly string[]): string {
+  const providers = providerLabels.length === 1 ? providerLabels[0] : `${providerLabels.length} providers`;
+  return app ? `Update Inertia and ${providers}` : `Update ${providers}`;
+}
+
+export function runningChatsSentence(running: number, continuing: number, continueChats: boolean): string | null {
+  if (running === 0) return null;
+  const interrupted = `${running} running ${running === 1 ? "chat" : "chats"} will be interrupted`;
+  if (!continueChats || continuing === 0) return `${interrupted}.`;
+  if (continuing >= running) return `${interrupted} and will continue after the update.`;
+  return `${interrupted}. ${continuing} will continue after the update.`;
+}
+
+export function restartBlockersSentence(workspaceRuns: number): string | null {
+  if (workspaceRuns === 0) return null;
+  return `${workspaceRuns} workspace ${workspaceRuns === 1 ? "run" : "runs"} must finish before Inertia restarts.`;
 }

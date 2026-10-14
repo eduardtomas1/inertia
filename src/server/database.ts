@@ -1,4 +1,5 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
 import { HtmlRenderRepository } from "./persistence/html-render-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
@@ -67,6 +68,7 @@ import {
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
+import { applyRuntimeConnectionPragmas } from "./persistence/runtime-connection-pragmas";
 import { requireRow } from "./persistence/required-row";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
@@ -282,13 +284,7 @@ export class RuntimeStore {
       requireProject: (projectId) => this.requireProject(projectId),
     });
     try {
-      this.database.pragma("foreign_keys = ON");
-      this.database.pragma("busy_timeout = 5000");
-      this.database.pragma("journal_mode = WAL");
-      this.database.pragma("synchronous = NORMAL");
-      this.database.pragma("cache_size = -16000");
-      this.database.pragma("mmap_size = 268435456");
-      this.database.pragma("temp_store = MEMORY");
+      applyRuntimeConnectionPragmas(this.database);
       migrateRuntimeDatabase(this.database);
       this.agentThreadManagement.recoverInterrupted();
       this.contextPackets.recoverInterruptedAgentRequests();
@@ -365,6 +361,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  get restartContinuations() { return RestartContinuationRepository.for(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     return {
@@ -793,8 +790,8 @@ export class RuntimeStore {
     return this.turnLedgerRepository.unfinished();
   }
 
-  terminalAuthoritativeAgentTurnsMissingGitArtifacts(): AgentTurn[] {
-    return this.turnLedgerRepository.terminalAuthoritativeMissingGitArtifacts();
+  createMissingTurnGitArtifacts(input: (turn: AgentTurn) => CreateTurnGitArtifactInput): void {
+    this.gitArtifactRepository.createMany(this.turnLedgerRepository.terminalAuthoritativeMissingGitArtifacts(), input);
   }
 
   createTurnGitArtifact(input: CreateTurnGitArtifactInput): StoredTurnGitArtifact {
@@ -1142,7 +1139,7 @@ export class RuntimeStore {
   }
 
   findWorkspaceRun(id: string): WorkspaceRun | null { return this.workspaceRunRepository.find(id); }
-  hasRecordedActiveWorkspaceRun(): boolean { return this.workspaceRunRepository.hasActive(); }
+  hasRecordedActiveWorkspaceRun(excludeAgentRuns = false): boolean { return this.workspaceRunRepository.hasActive(excludeAgentRuns); }
   hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
   hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
   hasActiveWorkspaceRunForProject(projectId: string): boolean { return this.conversationWork.hasProject(projectId) || this.hasRecordedActiveWorkspaceRunForProject(projectId); }

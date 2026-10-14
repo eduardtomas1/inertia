@@ -41,6 +41,7 @@ import {
   selectionInside,
 } from "../utils/contextMenu";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
+import { createBoundedCache } from "../utils/boundedCache";
 import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
 import { encodedLocalFilePath, localFileUrl, parseLocalFileUrl } from "@shared/local-file-url";
@@ -949,6 +950,34 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   img: MarkdownImage,
 };
 
+const settledMarkdownTrees = createBoundedCache<ReactNode>(
+  500,
+  4_000_000,
+  (content) => content.length * 16,
+);
+
+function responseUrlTransform(url: string, key: string): string {
+  return key === "href" && parseLocalFileUrl(url) ? url : defaultUrlTransform(url);
+}
+
+function renderMarkdownTree(content: string): ReactNode {
+  return ReactMarkdown({
+    children: content,
+    urlTransform: responseUrlTransform,
+    remarkPlugins: REMARK_PLUGINS,
+    rehypePlugins: REHYPE_PLUGINS,
+    components: RESPONSE_MARKDOWN_COMPONENTS,
+  });
+}
+
+function settledMarkdownTree(content: string): ReactNode {
+  const cached = settledMarkdownTrees.get(content);
+  if (cached !== undefined) return cached;
+  const tree = renderMarkdownTree(content);
+  settledMarkdownTrees.set(content, tree);
+  return tree;
+}
+
 export function stabilizeStreamingMarkdown(content: string): string {
   const fences = content.match(/^ {0,3}(?:```|~~~)/gmu) ?? [];
   if (fences.length % 2 === 0) return content;
@@ -968,6 +997,10 @@ function ResponseMarkdownComponent({
   onOpenProjectFile,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
+  const markdownTree = useMemo(
+    () => streaming ? renderMarkdownTree(renderedContent) : settledMarkdownTree(renderedContent),
+    [renderedContent, streaming],
+  );
   const imageSchedulerIdentity = [
     projectRoot,
     projectId,
@@ -997,15 +1030,7 @@ function ResponseMarkdownComponent({
     <MarkdownRenderContext.Provider value={renderContext}>
       <MarkdownImageSchedulerProvider key={imageSchedulerIdentity}>
         <div className={`response-markdown${streaming ? " is-streaming" : ""}`}>
-          <ReactMarkdown
-            urlTransform={(url, key) => key === "href" && parseLocalFileUrl(url)
-              ? url : defaultUrlTransform(url)}
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_PLUGINS}
-            components={RESPONSE_MARKDOWN_COMPONENTS}
-          >
-            {renderedContent}
-          </ReactMarkdown>
+          {markdownTree}
         </div>
       </MarkdownImageSchedulerProvider>
     </MarkdownRenderContext.Provider>

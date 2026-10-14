@@ -37,6 +37,7 @@ import { createTerminalOutputBuffer } from "./terminal-output-buffer";
 import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { terminalCleanupFailureOptions } from "./terminal-cleanup-failure";
 import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "./runtime/update-hold";
 
 import { spawnWindowsManagedTerminal } from "./windows-managed-terminal";
 import type { WindowsTerminalAuthority } from "../node/windows-terminal-authority";
@@ -542,6 +543,7 @@ export class TerminalManager {
     if (this.disposingAll || this.updatePreparationHeld) {
       throw new TerminalError("The terminal service is stopping.");
     }
+    if (isHeld()) throw new TerminalError(UPDATE_HOLD_MESSAGE);
     const failedRetirement = [...this.sessions.values()].some((session) => (
       this.closingFailures.has(session.id)
       && (

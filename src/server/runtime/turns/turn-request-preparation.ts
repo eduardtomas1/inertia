@@ -421,6 +421,7 @@ export function resolveTurnRequest(
   const input: BeginAgentTurnInput = {
     queuedMessageId: request.queuedMessageId,
     limitResetPlanId: request.limitResetPlanId,
+    restartContinuationPlanId: request.restartContinuationPlanId,
     id: turnId,
     conversationId: conversation.id,
     runId,

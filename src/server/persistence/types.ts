@@ -140,6 +140,7 @@ export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
   queuedMessageId?: string;
   limitResetPlanId?: string;
+  restartContinuationPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
   attachments?: ChatAttachment[];

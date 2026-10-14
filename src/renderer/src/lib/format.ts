@@ -1,17 +1,18 @@
 import { INTERFACE_LOCALE } from "./locale";
 
+const relativeTimeFormatter = new Intl.RelativeTimeFormat(INTERFACE_LOCALE, { numeric: "auto" });
+
 export function formatRelativeTime(value: string): string {
   const timestamp = new Date(value).getTime();
   const seconds = Math.round((timestamp - Date.now()) / 1_000);
-  const formatter = new Intl.RelativeTimeFormat(INTERFACE_LOCALE, { numeric: "auto" });
 
-  if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
+  if (Math.abs(seconds) < 60) return relativeTimeFormatter.format(seconds, "second");
   const minutes = Math.round(seconds / 60);
-  if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
+  if (Math.abs(minutes) < 60) return relativeTimeFormatter.format(minutes, "minute");
   const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return formatter.format(hours, "hour");
+  if (Math.abs(hours) < 24) return relativeTimeFormatter.format(hours, "hour");
   const days = Math.round(hours / 24);
-  if (Math.abs(days) < 30) return formatter.format(days, "day");
+  if (Math.abs(days) < 30) return relativeTimeFormatter.format(days, "day");
   return new Intl.DateTimeFormat(INTERFACE_LOCALE, { month: "short", day: "numeric" }).format(timestamp);
 }
 

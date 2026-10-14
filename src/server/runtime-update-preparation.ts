@@ -7,7 +7,7 @@ interface RuntimeUpdatePreparationAuthority {
   isClosed: () => boolean;
   activeRuntimeCommands: () => number;
   databaseRecoveryActive: () => boolean;
-  agentWorkActive: () => boolean;
+  agentWorkActive: (ignoringTurns?: boolean) => boolean;
   terminalActivity: () => boolean;
   providerMaintenanceActive: () => boolean;
   providerRefreshActive: () => boolean;
@@ -106,11 +106,20 @@ export class RuntimeUpdatePreparationGate {
     return true;
   }
 
+  restartBlockerBesidesAgentTurns(): Extract<RuntimeUpdatePreparationBlocker, "database-recovery" | "agent-work" | "terminal"> | null {
+    if (this.databaseRecoveryActive()) return "database-recovery";
+    if (this.authority.agentWorkActive(true)) return "agent-work";
+    if (this.authority.terminalActivity()) return "terminal";
+    return null;
+  }
+
+  private databaseRecoveryActive(): boolean {
+    return this.activeDatabaseRecoveryOperations > 0
+      || this.authority.databaseRecoveryActive();
+  }
+
   private blocker(): RuntimeUpdatePreparationBlocker | null {
-    if (
-      this.activeDatabaseRecoveryOperations > 0
-      || this.authority.databaseRecoveryActive()
-    ) return "database-recovery";
+    if (this.databaseRecoveryActive()) return "database-recovery";
     if (this.authority.agentWorkActive()) return "agent-work";
     if (this.authority.terminalActivity()) return "terminal";
     if (this.authority.providerMaintenanceActive()) return "provider-maintenance";

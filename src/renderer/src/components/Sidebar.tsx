@@ -188,6 +188,7 @@ function SidebarView({
   onRemoveProject,
   onUpdateProjectAppearance,
   appUpdate,
+  updateEverything,
   projectScopeId,
   onProjectScopeChange,
 }: SidebarProps): React.JSX.Element {
@@ -1068,7 +1069,7 @@ function SidebarView({
           </IconButton>
           <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
-            <SidebarUpdateControl controller={appUpdate} />
+            <SidebarUpdateControl controller={appUpdate} everything={updateEverything} snapshot={snapshot} />
           </Suspense>}
         </div>
       </aside>

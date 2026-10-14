@@ -20,6 +20,7 @@ import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import type { ProjectAppearancePatch } from "@shared/project-preferences";
 
 import type { useAppUpdate } from "../app-update";
+import type { UpdateEverythingController } from "../hooks/useUpdateEverything";
 import type { useInertiaConnection } from "../hooks/useInertiaConnection";
 import { useProjectScope } from "../hooks/useProjectScope";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
@@ -27,6 +28,7 @@ import type {
   useWorkspaceLayout,
   WorkspacePanelActions,
 } from "../hooks/useWorkspaceLayout";
+import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useStableActions } from "../hooks/useStableController";
 import type { NewConversationLocation } from "../lib/newConversation";
@@ -70,9 +72,6 @@ import {
 const RootCommitDialog = lazy(async () => ({
   default: (await loadCommitDialog()).RootCommitDialog,
 }));
-const DailyWorkDialog = lazy(async () => ({
-  default: (await loadDailyWorkDialog()).DailyWorkDialog,
-}));
 const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
 }));
@@ -85,12 +84,6 @@ const CompletionSounds = lazy(async () => ({
 }));
 const Sidebar = lazy(async () => ({
   default: (await import("./Sidebar")).Sidebar,
-}));
-const UsageView = lazy(async () => ({
-  default: (await loadUsageView()).UsageView,
-}));
-const TasksView = lazy(async () => ({
-  default: (await loadTasksView()).TasksView,
 }));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -165,6 +158,7 @@ interface AppLayoutProps {
   settings: AppSettings;
   connection: Connection;
   appUpdate: AppUpdate;
+  updateEverything?: UpdateEverythingController;
   providerQuotaNotices: ProviderQuotaNoticeController;
   workspaceLayout: WorkspaceLayout;
   view: AppView;
@@ -278,6 +272,7 @@ export const AppLayout = memo(function AppLayout({
   settings,
   connection,
   appUpdate,
+  updateEverything,
   providerQuotaNotices,
   workspaceLayout,
   view,
@@ -314,6 +309,9 @@ export const AppLayout = memo(function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const UsageView = useLoadedSurface(loadUsageView, view === "usage");
+  const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
+  const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
   const [paletteView, setPaletteView] = useState<CommandPaletteView>("search");
@@ -636,6 +634,7 @@ export const AppLayout = memo(function AppLayout({
             projectScopeId={projectScopeId}
             onProjectScopeChange={setProjectScopeId}
             appUpdate={appUpdate}
+            updateEverything={updateEverything}
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
@@ -809,19 +808,13 @@ export const AppLayout = memo(function AppLayout({
             }${frameHasSheetPanel ? " has-tools-sheet" : ""}`}
           >
           {view === "usage" ? (
-              <Suspense fallback={(
+              UsageView ? <UsageView {...usage} /> : (
                 <div className="workspace-tool-loading usage-surface-loading">
                   <LoadingMark label="Loading usage" />
                 </div>
-              )}>
-                <UsageView {...usage} />
-              </Suspense>
+              )
             ) : view === "tasks" ? (
-              <Suspense fallback={(
-                <div className="workspace-tool-loading tasks-view-loading">
-                  <LoadingMark label="Loading tasks" />
-                </div>
-              )}>
+              TasksView ? (
                 <TasksView
                   snapshot={connection.snapshot}
                   settings={settings}
@@ -831,7 +824,11 @@ export const AppLayout = memo(function AppLayout({
                   onOpenConversation={tasksActions.openConversation}
                   onError={setActionError}
                 />
-              </Suspense>
+              ) : (
+                <div className="workspace-tool-loading tasks-view-loading">
+                  <LoadingMark label="Loading tasks" />
+                </div>
+              )
             ) : (
               <WorkspaceScene {...scene} />
             )}
@@ -886,7 +883,7 @@ export const AppLayout = memo(function AppLayout({
         </Suspense>
       )}
       <DialogPresence open={dailyWorkOpen}>
-        <Suspense fallback={null}>
+        {DailyWorkDialog && (
           <DailyWorkDialog
             open={dailyWorkOpen}
             status={usage.status}
@@ -903,7 +900,7 @@ export const AppLayout = memo(function AppLayout({
               setSidebarOpen(false);
             }}
           />
-        </Suspense>
+        )}
       </DialogPresence>
       {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>

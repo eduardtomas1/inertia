@@ -26,6 +26,7 @@ import {
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
 import type { TurnAdmissionLease } from "../../src/server/runtime/turns/turn-controller-types";
+import { hold as holdForUpdate, release as releaseUpdateHold } from "../../src/server/runtime/update-hold";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { CONVERSATION_ATTACHMENT_STORAGE_FULL_MESSAGE } from "../../src/node/conversation-attachment-store-capacity";
@@ -286,6 +287,23 @@ function dependencies(options: {
     send: vi.fn(),
   };
 }
+
+describe("update hold", () => {
+  it("refuses new messages and follow-ups before touching the chat while Inertia is updating", async () => {
+    const queue = vi.fn(() => queuedTurn());
+    const runtime = dependencies({ queue, relinquishAll: vi.fn(async () => undefined) });
+    holdForUpdate();
+    try {
+      await expect(createTurnInteractionCommandHandler(runtime)({} as never, messageCommand()))
+        .rejects.toThrow("Inertia is updating.");
+    } finally {
+      releaseUpdateHold();
+    }
+    expect(runtime.store.conversation).not.toHaveBeenCalled();
+    expect(runtime.turns.acquireFollowUpAdmission).not.toHaveBeenCalled();
+    expect(queue).not.toHaveBeenCalled();
+  });
+});
 
 describe("turn stop cleanup", () => {
   it("does not acknowledge Stop until provider cleanup is confirmed", async () => {

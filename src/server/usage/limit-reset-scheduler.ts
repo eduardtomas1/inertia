@@ -5,6 +5,7 @@ import type { RuntimeStore } from "../database";
 import { RuntimeRequestError, publicRuntimeError } from "../runtime-errors";
 import { publicLimitResetPlan, type StoredLimitResetPlan } from "../persistence/limit-reset-repository";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
+import { isHeld } from "../runtime/update-hold";
 import { MISSED_RESUME_AFTER_MS, matchesFailedNativeTurn, resetQuota, resumeAccountIdentity, sameReportedReset } from "./limit-reset-policy";
 
 const LIMIT_CHANGED = "The reported limit changed. Check the new reset time and try again.";
@@ -320,6 +321,7 @@ export class LimitResetScheduler {
       this.dependencies.changed(plan.conversationId);
       return;
     }
+    if (isHeld()) return;
     if (!this.store.limitResets.claim(plan)) return;
     try {
       await this.attempt(plan);

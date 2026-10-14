@@ -41,6 +41,7 @@ import {
   type ClaudeLaunchTargetOptions,
 } from "./claude-launch-target";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
+import { MAX_PROBE_DEADLINE_MS, slowMachineProbeDeadline } from "./probe-deadline";
 import { cursorAgentCommandArgs } from "./cursor-command";
 import {
   probeOpenCodePureIsolation,
@@ -478,7 +479,7 @@ async function detectProviderRecordingCleanup(
     ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
-  const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
+  const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, MAX_PROBE_DEADLINE_MS));
   const cwd = options.cwd ?? process.cwd();
   const discoveredEnvironment = await providerEnvironment(
     options.refreshEnvironment === true,
@@ -537,7 +538,10 @@ async function detectProviderRecordingCleanup(
   }
 
   const versionProbes = await settleAllOrThrow(candidates.map(async (executable) => {
+    const versionStartedAt = performance.now();
     const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
+    const latencyMs = Math.round(performance.now() - versionStartedAt);
+    const followUpTimeoutMs = slowMachineProbeDeadline(timeoutMs, latencyMs);
     const version = versionFromOutput(probe.output);
     const acpProbe = (providerId === "cursor" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
@@ -548,7 +552,7 @@ async function detectProviderRecordingCleanup(
             : ["acp", "--help"],
           probeEnvironment,
           cwd,
-          timeoutMs,
+          followUpTimeoutMs,
         )
       : undefined;
     const acpReady = !acpProbe || (
@@ -562,7 +566,7 @@ async function detectProviderRecordingCleanup(
           && !KIMI_LEGACY_CLI.test(`${probe.output}\n${acpProbe.output}`))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
-      ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, timeoutMs)
+      ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, followUpTimeoutMs)
       : undefined;
     const appServerReady = !appServerProbe || (
       appServerProbe.started
@@ -571,7 +575,7 @@ async function detectProviderRecordingCleanup(
       && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
     );
     const serveProbe = providerId === "opencode" && probe.started && !probe.timedOut && probe.exitCode === 0
-      ? await runProbe(executable, ["serve", "--help"], probeEnvironment, cwd, timeoutMs)
+      ? await runProbe(executable, ["serve", "--help"], probeEnvironment, cwd, followUpTimeoutMs)
       : undefined;
     const serveReady = !serveProbe || (
       serveProbe.started
@@ -584,6 +588,7 @@ async function detectProviderRecordingCleanup(
       executable,
       probe,
       version,
+      latencyMs,
       identified: versionResponded && Boolean(version) && (
         providerId === "cursor"
           ? cursorCandidateIsIdentified(executable, probe.output, acpProbe?.output ?? "")
@@ -840,7 +845,7 @@ async function detectProviderRecordingCleanup(
       pathEntries: discoveredEnvironment.pathEntries,
     },
     cwd,
-    timeoutMs,
+    slowMachineProbeDeadline(timeoutMs, selected.latencyMs),
   );
   requireActive(
     authProbe.cleanupConfirmed === true
@@ -885,6 +890,7 @@ async function detectProviderRecordingCleanup(
     canRun,
     protocolVerified: cleanupConfirmed,
     cleanupConfirmed,
+    probeLatencyMs: selected.latencyMs,
     ...(authTimedOut ? { probeTimedOut: true } : {}),
     statusMessage: claudeLaunch && !claudeLaunch.ok
       ? claudeLaunch.reason

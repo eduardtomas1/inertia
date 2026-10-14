@@ -176,4 +176,29 @@ describe("transcript new-turn navigation", () => {
       conversationId: "conversation-1",
     });
   });
+
+  it("keeps the same state when reader navigation does not change the mode", () => {
+    const reading = {
+      mode: "reading-history" as const,
+      conversationId: "conversation-1",
+    };
+    const following = initialTranscriptNavigation("conversation-1");
+
+    expect(transcriptNavigationReducer(reading, {
+      type: "reader.scrolled",
+      conversationId: "conversation-1",
+      followsLatest: false,
+      intentional: true,
+    })).toBe(reading);
+    expect(transcriptNavigationReducer(following, {
+      type: "reader.scrolled",
+      conversationId: "conversation-1",
+      followsLatest: true,
+      intentional: true,
+    })).toBe(following);
+    expect(transcriptNavigationReducer(following, {
+      type: "latest.requested",
+      conversationId: "conversation-1",
+    })).toBe(following);
+  });
 });

@@ -15,6 +15,7 @@ import {
   validRuntimeGenerationId,
   validSystemBootId,
 } from "../../node/runtime-identity-protocol";
+import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from "../../shared/provider-maintenance";
 import type {
   ProviderInstallationIdentity,
 } from "./installation-lease";
@@ -116,11 +117,7 @@ function validOperationId(value: unknown): value is string {
 function validProviderId(
   value: unknown,
 ): value is ProviderInstallationIdentity["providerId"] {
-  return value === "codex"
-    || value === "claude"
-    || value === "cursor"
-    || value === "kimi"
-    || value === "opencode";
+  return (PROVIDER_MAINTENANCE_PROVIDER_IDS as readonly unknown[]).includes(value);
 }
 
 function payloadDigest(payload: ProviderMaintenanceJournalPayload): string {

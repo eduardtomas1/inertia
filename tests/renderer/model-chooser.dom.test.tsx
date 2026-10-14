@@ -561,4 +561,21 @@ describe("model chooser active route", () => {
 
     expect(screen.getByTitle("Unready Model")).toBeInTheDocument();
   });
+
+  it("shows the source list on the first commit once the idle prefetch has loaded it", async () => {
+    vi.resetModules();
+    const { ModelChooser: FreshModelChooser } = await import("../../src/renderer/src/components/ModelChooser");
+    const { prefetchFrequentSurfaces } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
+    const current = currentRoute();
+    await act(async () => {
+      prefetchFrequentSurfaces();
+      await vi.dynamicImportSettled();
+    });
+    render(<FreshModelChooser routes={[current]} selectedRoute={current} onSelect={vi.fn()} />);
+
+    act(() => { fireEvent.click(screen.getByRole("button", { name: /Choose model/u })); });
+
+    expect(screen.getByRole("toolbar", { name: "Model sources filters" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Model sources" })).not.toHaveAttribute("aria-busy");
+  });
 });

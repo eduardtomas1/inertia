@@ -19,7 +19,7 @@ const sessionId = "retained-native-session";
 const restartWarning =
   "The previous run ended when Inertia closed. Send another message to continue.";
 const providers = ["codex", "claude"] as const;
-const closeModes = ["completed", "clean-active-close", "unclean-active-close"] as const;
+const closeModes = ["completed", "clean-active-close", "unclean-active-close", "app-update-close"] as const;
 
 afterEach(cleanupTurnControllerTestDirectories);
 
@@ -56,6 +56,9 @@ describe.each(providers)("%s durable turn restart", (providerId) => {
         });
         await flushTurnControllerTestPromises();
       }
+      if (mode === "app-update-close") {
+        await expect(runtime.controller.interruptForUpdate([runtime.conversationId], "Inertia")).resolves.toBe(true);
+      }
       if (mode !== "unclean-active-close") await runtime.controller.dispose();
       generation = runtime.store.providerRunOwnership.all()[0]?.runtimeGenerationId;
     } finally {
@@ -76,7 +79,8 @@ describe.each(providers)("%s durable turn restart", (providerId) => {
       expect(recovered.status).toBe(mode === "completed" ? "completed" : "interrupted");
       expect(recovered.terminalReason).toBe(
         mode === "completed" ? "provider-completed"
-          : mode === "clean-active-close" ? "runtime-shutdown" : "runtime-restart",
+          : mode === "clean-active-close" ? "runtime-shutdown"
+            : mode === "app-update-close" ? "app-update" : "runtime-restart",
       );
       expect(reopened.conversation(runtime.conversationId).providerSessionId).toBe(sessionId);
       const warnings = () => reopened.conversationDetail(runtime.conversationId)!

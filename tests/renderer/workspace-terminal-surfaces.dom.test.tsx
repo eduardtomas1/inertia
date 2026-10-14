@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -99,4 +99,48 @@ it("moves multiple live terminals between the dock and surface without recreatin
   )).toEqual([]);
   expect(window.sessionStorage.getItem(`inertia:terminal-sessions:v1:${projectId}:${conversationId}`))
     .toBe(JSON.stringify(ids));
+});
+
+it("mounts the terminal dock on the first commit once the terminal intent prefetch has loaded it", async () => {
+  vi.resetModules();
+  const { WorkspaceScene: FreshWorkspaceScene } = await import("../../src/renderer/src/components/WorkspaceScene");
+  const { prefetchWorkspaceTool } = await import("../../src/renderer/src/components/lazySurfaceLoaders");
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const conversationId = "33333333-3333-4333-8333-333333333333";
+  const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> => {
+    if (command.type === "terminal.create") return {
+      type: "terminal.created", requestId: command.requestId, terminalId: "44444444-4444-4444-8444-444444444443",
+    };
+    return { type: "request.ok", requestId: command.requestId };
+  });
+  const noop = (): void => undefined;
+  const scene = (visible: boolean): React.JSX.Element => {
+    const tools = {
+      activeTool: "files",
+      panel: {
+        surfaces: ["files"], activeSurface: "files", visible: true,
+        onActivateSurface: noop, onOpenSurface: noop, onCloseSurface: noop,
+      },
+      terminal: {
+        projectId, conversationId, projectName: "Project", status: "online" as const,
+        fontSize: 13, theme: "dark" as const, sendCommand,
+        subscribe: () => () => undefined, onClose: vi.fn(), visible,
+      },
+      terminalKey: `${projectId}:${conversationId}`,
+      files: {}, filesKey: "files",
+    } as unknown as WorkspaceToolScene;
+    return <FreshWorkspaceScene view="workspace" settings={{} as WorkspaceSceneProps["settings"]}
+      detailState={null} chat={{} as WorkspaceSceneProps["chat"]} resizeHandle={null} tools={tools} />;
+  };
+  await act(async () => {
+    prefetchWorkspaceTool("terminal");
+    await vi.dynamicImportSettled();
+  });
+  const view = render(scene(false));
+  expect(view.container.querySelector(".terminal-dock")).toBeNull();
+
+  act(() => { view.rerender(scene(true)); });
+
+  expect(view.container.querySelector(".terminal-dock")).not.toBeNull();
+  await waitFor(() => expect(view.container.querySelectorAll('[data-terminal-state="ready"]')).toHaveLength(1));
 });

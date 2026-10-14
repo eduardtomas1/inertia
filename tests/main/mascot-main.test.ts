@@ -5,6 +5,7 @@ import type { BrowserWindowConstructorOptions, IpcMainInvokeEvent, Rectangle } f
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
+import { MascotFeedMemory } from "../../src/main/mascot-feed-memory";
 import { MASCOT_PIN_TIMEOUT_MS } from "../../src/main/mascot-pin";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_IPC, type MascotCounts, type MascotSnapshot, type MascotStatus } from "../../src/shared/mascot";
 import type { MascotFeed } from "../../src/shared/mascot-feed";
@@ -179,6 +180,24 @@ describe("mascot chat selection", () => {
     app.mascot.runtimePhase("ready");
     app.mascot.reject();
     expect(app.feedRejected).toHaveBeenCalledTimes(3);
+  });
+
+  it("replays the latest runtime phase and feed to a mascot created later", async () => {
+    const working = chat("working", "running");
+    const stale = new MascotFeedMemory();
+    stale.runtimePhase("ready");
+    stale.status(feed(working, [working]));
+    stale.runtimePhase("restarting");
+    const restarting = await fixture();
+    stale.replay(restarting.mascot);
+    expect(restarting.mascot.snapshot()).toMatchObject({ status: { phase: "unavailable", conversationId: null }, chats: [], rows: [] });
+
+    const current = new MascotFeedMemory();
+    current.runtimePhase("ready");
+    current.status(feed(working, [working]));
+    const ready = await fixture();
+    current.replay(ready.mascot);
+    expect(ready.mascot.snapshot().status).toEqual(working);
   });
 
   it("pins a listed chat through validated IPC and opens exactly that chat", async () => {

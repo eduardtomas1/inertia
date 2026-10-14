@@ -15,8 +15,15 @@ import yaml from "highlight.js/lib/languages/yaml";
 
 import type { SourceLanguage } from "@shared/source-language";
 
+import { createBoundedCache } from "./boundedCache";
+
 const MAX_HIGHLIGHT_CHARS = 50_000;
 const MAX_HIGHLIGHT_LINES = 2_000;
+const highlightedHtmlCache = createBoundedCache<string | null>(
+  500,
+  4_000_000,
+  (key, html) => key.length + (html?.length ?? 0),
+);
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("css", css);
@@ -50,14 +57,20 @@ export function highlightedSourceHtml(
   enabled = true,
 ): string | null {
   if (!highlightable(code, language, enabled)) return null;
+  const key = `${language.highlightLanguage}\0${code}`;
+  const cached = highlightedHtmlCache.get(key);
+  if (cached !== undefined) return cached;
+  let html: string | null;
   try {
-    return hljs.highlight(code, {
+    html = hljs.highlight(code, {
       language: language.highlightLanguage,
       ignoreIllegals: true,
     }).value;
   } catch {
-    return null;
+    html = null;
   }
+  highlightedHtmlCache.set(key, html);
+  return html;
 }
 
 /**

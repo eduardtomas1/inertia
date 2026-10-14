@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import hljs from "highlight.js/lib/core";
+import { describe, expect, it, vi } from "vitest";
 
 import { sourceLanguageForFile } from "../../src/shared/source-language";
 import {
@@ -35,5 +36,25 @@ describe("source highlighting", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
     expect(highlightedSourceHtml("x".repeat(50_001), java)).toBeNull();
+  });
+
+  it("reuses highlighted HTML when the same source is shown again", () => {
+    const typescript = sourceLanguageForFile("example.ts");
+    const json = sourceLanguageForFile("example.json");
+    const code = "const reusedHighlight = { value: 1 };";
+    const highlight = vi.spyOn(hljs, "highlight");
+    try {
+      const first = highlightedSourceHtml(code, typescript);
+      const second = highlightedSourceHtml(code, typescript);
+      expect(second).toBe(first);
+      expect(highlight).toHaveBeenCalledTimes(1);
+
+      highlightedSourceHtml(code, json);
+      expect(highlight).toHaveBeenCalledTimes(2);
+      expect(highlightedSourceHtml(code, typescript, false)).toBeNull();
+      expect(highlight).toHaveBeenCalledTimes(2);
+    } finally {
+      highlight.mockRestore();
+    }
   });
 });

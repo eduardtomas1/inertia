@@ -48,8 +48,8 @@ describe("restart continuation plan migration", () => {
     store.close();
     const database = new Database(databasePath, { readonly: true });
     try {
-      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(97);
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 97 });
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get())
+        .toEqual({ version: CURRENT_DATABASE_SCHEMA_VERSION });
       expect(runtimeMigrationCatalog().find(({ version }) => version === 97)?.name).toBe("PersistRestartContinuationPlans");
       expect((database.prepare("PRAGMA table_info(restart_continuation_plans)").all() as Array<{ name: string }>)
         .map(({ name }) => name)).toEqual([
@@ -66,13 +66,14 @@ describe("restart continuation plan migration", () => {
     const chat = chatWithTurn();
     store.close();
     const older = new Database(databasePath);
-    older.exec("DROP TABLE restart_continuation_plans; DELETE FROM schema_migrations WHERE version >= 97;");
+    older.exec("DROP TABLE conversation_title_locks; DROP TABLE restart_continuation_plans; DELETE FROM schema_migrations WHERE version >= 97;");
     older.close();
     const upgraded = new Database(databasePath);
     try {
       upgraded.pragma("foreign_keys = ON");
       migrateRuntimeDatabase(upgraded);
-      expect(upgraded.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 97 });
+      expect(upgraded.prepare("SELECT MAX(version) AS version FROM schema_migrations").get())
+        .toEqual({ version: CURRENT_DATABASE_SCHEMA_VERSION });
       expect(upgraded.prepare("SELECT COUNT(*) AS count FROM restart_continuation_plans").get()).toEqual({ count: 0 });
       expect(upgraded.prepare("SELECT id FROM agent_turns").all()).toEqual([{ id: chat.turnId }]);
       expect(upgraded.pragma("foreign_key_check")).toEqual([]);

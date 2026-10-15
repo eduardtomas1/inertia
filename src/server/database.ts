@@ -146,7 +146,6 @@ export class RuntimeStore {
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
-  readonly conversationTitleLocks = new Set<string>();
   constructor(
     databasePath: string,
     _defaultWorkspacePath: string,
@@ -409,7 +408,7 @@ export class RuntimeStore {
 
   removeProject(projectId: string): void {
     this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
-    for (const conversationId of this.projectRepository.remove(projectId)) this.conversationTitleLocks.delete(conversationId);
+    this.projectRepository.remove(projectId);
   }
 
   selectProject(projectId: string): void {
@@ -418,6 +417,8 @@ export class RuntimeStore {
 
   markConversationUnread(conversationId: string): void { this.conversationRepository.markUnread(conversationId); }
   regenerateConversationTitle(conversationId: string): void { this.conversationRepository.regenerateTitle(conversationId); }
+  lockConversationTitle(conversationId: string): void { this.conversationRepository.lockTitle(conversationId); }
+  conversationTitleLocked(conversationId: string): boolean { return this.conversationRepository.titleLocked(conversationId); }
   firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null { return this.conversationRepository.firstUserMessage(conversationId, maxChars); }
 
   createConversation(projectId: string, title: string, options: NewConversationOptions = {}): Conversation { return this.conversationRepository.create(projectId, title, options); }
@@ -850,7 +851,6 @@ export class RuntimeStore {
 
   deleteConversation(conversationId: string): void {
     this.conversationRepository.delete(conversationId);
-    this.conversationTitleLocks.delete(conversationId);
   }
 
   createMessage(

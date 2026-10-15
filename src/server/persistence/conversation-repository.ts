@@ -171,6 +171,17 @@ export class ConversationRepository {
     this.update(conversationId, { title });
   }
 
+  lockTitle(conversationId: string): void {
+    this.context.requireConversation(conversationId);
+    this.context.database.prepare("INSERT OR IGNORE INTO conversation_title_locks (conversation_id) VALUES (?)")
+      .run(conversationId);
+  }
+
+  titleLocked(conversationId: string): boolean {
+    return this.context.database.prepare("SELECT 1 FROM conversation_title_locks WHERE conversation_id = ?")
+      .get(conversationId) !== undefined;
+  }
+
   firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null {
     this.context.requireConversation(conversationId);
     const message = this.context.database.prepare(`

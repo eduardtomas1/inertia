@@ -168,7 +168,7 @@ describe("todo command handler", () => {
     });
     expect(store.shellSnapshot().activeConversationId).toBe(activeBefore);
     expect(store.todos.get(id)).toMatchObject({ conversationId: conversation.id, completedAt: null });
-    expect(store.conversationTitleLocks.has(conversation.id)).toBe(true);
+    expect(store.conversationTitleLocked(conversation.id)).toBe(true);
     expect(dependencies.verifyProviderInstallation).toHaveBeenCalledWith("codex");
     expect(turns.queue).toHaveBeenCalledWith({
       conversationId: conversation.id,
@@ -341,7 +341,7 @@ describe("todo command handler", () => {
 
     expect(events).toEqual([expect.objectContaining({
       type: "request.error",
-      message: "The chat was created, but the task could not be linked to it.",
+      message: "The task could not be handed to an agent.",
     })]);
     expect(order).toEqual(["verify", "snapshot", "request.error"]);
     expect(context.store.shellSnapshot().conversations).toEqual([]);

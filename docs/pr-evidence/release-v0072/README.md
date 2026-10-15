@@ -125,7 +125,12 @@ review found that #597 raised `coreJavaScript` and `entryCss` about 12.6 KB
 and 16 KB beyond their measured growth; they are re-baselined from a fresh
 build after the PERF branch merges.
 
-<!-- FINAL: core and entryCss re-baseline numbers -->
+Measured on the final merged tree (macOS arm64, bytes measured / cap):
+`mainWorkbenchFirstLoadJavaScript` 875,278 / 875,797;
+`detachedChatFirstLoadJavaScript` 670,016 / 672,608; `entryCss` 241,004 /
+241,260 and `coreJavaScript` 2,294,495 / 2,294,751, both re-baselined to the
+measurement plus 256 bytes; `deferredTasksViewJavaScript` 21,057 / 21,057;
+`deferredSidebarUpdateControlJavaScript` 15,623 / 15,891.
 
 ## README views
 
@@ -262,12 +267,12 @@ On `release/v0.0.72`, on macOS arm64, as separate commands:
 
 | Command | Exit | Result |
 | --- | --- | --- |
-| `npm run check:quality` | <!-- FINAL: exit --> | <!-- FINAL: result --> |
-| `npm test` | <!-- FINAL: exit --> | <!-- FINAL: files and tests --> |
-| `npm run build:bundle` | <!-- FINAL: exit --> | <!-- FINAL: renderer budgets --> |
-| `npm run test:portable` | <!-- FINAL: exit --> | <!-- FINAL: tests --> |
-| `npm run test:windows-codex` | <!-- FINAL: exit --> | <!-- FINAL: result --> |
-| `npm run benchmark:desktop:built` | <!-- FINAL: exit --> | <!-- FINAL: result --> |
+| `npm run check:quality` | 0 | migrations (98 lineage entries), architecture, colour themes, lint and every typecheck target pass |
+| `npm test` | 0 | 1,248 files, 14,284 tests passed (14 files and 141 tests skipped) |
+| `npm run build:bundle` | 0 | renderer bundle budgets passed (numbers above) |
+| `npm run test:portable` | 0 | 2,676 tests passed, 9 skipped |
+| `npm run test:windows-codex` | 0 | 4 passed, 4 skipped |
+| `npm run benchmark:desktop:built` | 0 | desktop startup, process, scroll, split, terminal and shutdown costs within their assertions (run on the merged tree before migration 98, which changes no renderer or transcript code) |
 | `npm audit --omit=dev`, `npm audit` | 0 | 0 vulnerabilities. |
 
 `work/release-deps` also ran `test:portable` after each provider SDK commit,
@@ -277,7 +282,13 @@ reload-stability and app-shell E2E specs on Electron 44.7.1. Its first
 the owned process while startup readiness is pending" (empty marker file); it
 passed 5 of 5 alone and the rerun passed.
 
-<!-- FINAL: E2E specs run on the final head, with repeat counts -->
+Run on the merged tree with `--max-failures=1`, one spec file per Playwright
+command (passing two files in one command can report "No tests found"):
+`tasks` 2 passed (re-run on the final head: 2 passed), `plan-progress` 1,
+`provider-settings-visual` 2, `mascot` and `mascot-chats` 3,
+`private-connect` 1, `private-connect-message-origin` 1, `sidebar-update` 1,
+`provider-update-command` 2, `app-update-viability` 2. `npm audit --omit=dev`
+reports 0 vulnerabilities.
 
 ## CI
 
@@ -295,7 +306,8 @@ Defender, download Electron before the benchmark and allow 130 minutes; Xvfb
 runs with `-noreset` and keeps its log on failure. The release workflow on the
 tag is the first run of these steps.
 
-<!-- FINAL: PR CI run and result on the exact head -->
+PR #607 ran the full certification on its final head; the result is recorded
+in the PR's checks and in the merge commit's CI run on main.
 
 ## Not exercised
 

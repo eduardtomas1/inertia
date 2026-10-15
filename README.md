@@ -56,6 +56,14 @@ Keep an objective in view alongside the latest conversation plan. Goals distingu
 
 ![A tracked objective and conversation plan in the Goal panel](docs/screenshots/inertia-goals.png)
 
+The Plan tab shows the agent's plan as a formatted document and marks each step as the provider reports progress.
+
+![A plan document with live step progress in the Plan tab](docs/screenshots/inertia-plan.png)
+
+Keep a to-do list on the **Tasks** page with due dates and priorities. Open a task to hand it to an agent: choose a model and a project or folder, and **Start** opens a chat with the task as its first message.
+
+![The Tasks page with an urgent task open, ready to hand to an agent](docs/screenshots/inertia-tasks.png)
+
 Open image attachments without leaving the chat, zoom into details, and pan across larger images. Browse sent files in **Open a surface → Attachments**, with previews and a scrollable gallery.
 
 See [supported attachment formats and provider limits](docs/ATTACHMENTS.md) for text/log encodings, source/configuration files, documents, and spreadsheets.

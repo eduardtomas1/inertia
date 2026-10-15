@@ -4,8 +4,18 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentTurn } from "../../src/shared/contracts";
+import { RuntimeStore } from "../../src/server/database";
+import {
+  createConversationCommandHandler,
+  type ConversationCommandDependencies,
+} from "../../src/server/runtime/commands/conversation-commands";
+import {
+  createTodoCommandHandler,
+  type TodoCommandDependencies,
+} from "../../src/server/runtime/commands/todo-commands";
 import {
   conversationTitleSources,
+  createConversationTitleRuntime,
   createConversationTitleService,
   type ConversationTitleServiceDependencies,
 } from "../../src/server/runtime/conversation-title-service";
@@ -46,7 +56,7 @@ function fixture(overrides: Partial<ConversationTitleServiceDependencies> = {}) 
   const dependencies: ConversationTitleServiceDependencies = {
     conversation: vi.fn(() => ({ ...state })),
     firstUserMessage: vi.fn(() => ({ id: firstMessageId, content: firstPrompt })),
-    isTaskConversation: vi.fn(() => false),
+    keepsOwnTitle: vi.fn(() => false),
     updateTitle: vi.fn((_id: string, title: string) => {
       state.title = title;
     }),
@@ -107,11 +117,24 @@ describe("conversation title service", () => {
   });
 
   it("keeps the title of a chat started from a task", async () => {
-    const subject = fixture({ isTaskConversation: vi.fn(() => true) });
+    const subject = fixture({ keepsOwnTitle: vi.fn(() => true) });
     subject.service.onTurnSettled(turn(), { providerSessionTitle: "OpenCode title" });
     await settled();
     expect(subject.dependencies.sources.codex).not.toHaveBeenCalled();
     expect(subject.dependencies.updateTitle).not.toHaveBeenCalled();
+  });
+
+  it("keeps a task chat's title after its task is deleted", async () => {
+    const keepsOwnTitle = vi.fn(() => true);
+    const subject = fixture({ keepsOwnTitle });
+    vi.mocked(subject.dependencies.sources.claude).mockResolvedValue("Login redirect investigation");
+    subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
+    await settled();
+    keepsOwnTitle.mockReturnValue(false);
+    subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
+    await settled();
+    expect(subject.dependencies.updateTitle).not.toHaveBeenCalled();
+    expect(subject.state.title).toBe("Fix the login redirect loop");
   });
 
   it("lets a rename made during generation win", async () => {
@@ -197,7 +220,7 @@ describe("conversation title service", () => {
       userMessageId: "44444444-4444-4444-8444-444444444444",
     }), { providerSessionTitle: null });
     await settled();
-    expect(claude).toHaveBeenNthCalledWith(2, { sessionId });
+    expect(claude).toHaveBeenNthCalledWith(2, { conversationId, sessionId });
     expect(subject.state.title).toBe("Login redirect investigation");
     subject.state.title = "Fix the login redirect loop";
     subject.service.onTurnSettled(turn({ providerId: "claude", providerSessionAfter: sessionId }), { providerSessionTitle: null });
@@ -211,7 +234,7 @@ describe("conversation title service", () => {
     subject.state.providerSessionId = sessionId;
     subject.service.onTurnSettled(turn({ providerId: "claude" }), { providerSessionTitle: null });
     await settled();
-    expect(subject.dependencies.sources.claude).toHaveBeenCalledWith({ sessionId });
+    expect(subject.dependencies.sources.claude).toHaveBeenCalledWith({ conversationId, sessionId });
   });
 
   it("applies a provider session title from any settle while the guard holds", async () => {
@@ -268,6 +291,163 @@ describe("conversation title service", () => {
   });
 });
 
+describe("conversation title runtime", () => {
+  function runtime(store: { managed?: boolean; locked?: boolean; taskLinked?: boolean }) {
+    const updateConversation = vi.fn();
+    const operations: Array<Promise<void>> = [];
+    const service = createConversationTitleRuntime({
+      store: {
+        assertConversationProvider: vi.fn(),
+        conversation: vi.fn(() => ({ title: "Fix the login redirect loop", archivedAt: null, providerSessionId: null })),
+        firstUserMessage: vi.fn(() => ({ id: firstMessageId, content: firstPrompt })),
+        updateConversation,
+        conversationPath: vi.fn(() => "/workspace/chat"),
+        cliConversationImport: vi.fn(() => null),
+        todos: { list: vi.fn(() => store.taskLinked ? [{ conversationId }] : []) },
+        agentThreadManagement: { managed: vi.fn(() => store.managed ? { childConversationId: conversationId } : null) },
+        conversationTitleLocked: vi.fn(() => store.locked === true),
+      } as never,
+      providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() },
+      backendProfileController: { isExternalSelection: vi.fn(() => false) },
+      broadcastSnapshot: vi.fn(),
+      track: (operation) => {
+        const tracked = operation();
+        operations.push(tracked);
+        return tracked;
+      },
+      signal: new AbortController().signal,
+    });
+    service.onTurnSettled(turn({ providerId: "opencode" }), { providerSessionTitle: "Login redirect investigation" });
+    return { updateConversation, operations };
+  }
+
+  it("renames an ordinary chat whose title is still its quick title", async () => {
+    const subject = runtime({});
+    await settled();
+    await Promise.all(subject.operations);
+    expect(subject.updateConversation).toHaveBeenCalledWith(conversationId, { title: "Login redirect investigation" });
+  });
+
+  it.each([
+    ["an agent-created chat", { managed: true }],
+    ["a chat whose title was locked", { locked: true }],
+    ["a chat started from a task", { taskLinked: true }],
+  ])("never renames %s", async (_label, store) => {
+    const subject = runtime(store);
+    await settled();
+    await Promise.all(subject.operations);
+    expect(subject.updateConversation).not.toHaveBeenCalled();
+  });
+});
+
+describe("conversation title runtime with a stored chat", () => {
+  const roots: string[] = [];
+  const stores: RuntimeStore[] = [];
+  afterEach(() => {
+    for (const store of stores.splice(0)) store.close();
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  function openStore(root: string): RuntimeStore {
+    const store = new RuntimeStore(join(root, "inertia.sqlite"), root, { recoverInterruptedRuns: false });
+    stores.push(store);
+    return store;
+  }
+
+  function storedChat() {
+    const root = mkdtempSync(join(tmpdir(), "inertia-title-stored-"));
+    roots.push(root);
+    const store = openStore(root);
+    return { root, store, project: store.createProject("Titles", root) };
+  }
+
+  async function regenerate(store: RuntimeStore, id: string): Promise<void> {
+    await expect(createConversationCommandHandler({ store } as unknown as ConversationCommandDependencies)({} as never, {
+      type: "conversation.regenerate-title",
+      requestId: "66666666-6666-4666-8666-666666666666",
+      payload: { conversationId: id },
+    })).resolves.toBe("mutation");
+  }
+
+  async function settleNativeTitle(store: RuntimeStore, id: string): Promise<string> {
+    const operations: Array<Promise<void>> = [];
+    const service = createConversationTitleRuntime({
+      store,
+      providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() } as never,
+      backendProfileController: { isExternalSelection: vi.fn(() => false) },
+      broadcastSnapshot: vi.fn(),
+      track: (operation) => {
+        const tracked = operation();
+        operations.push(tracked);
+        return tracked;
+      },
+      signal: new AbortController().signal,
+    });
+    service.onTurnSettled(turn({
+      conversationId: id,
+      providerId: "claude",
+      userMessageId: store.firstUserMessage(id, 1024)!.id,
+      providerSessionAfter: sessionId,
+    }), { providerSessionTitle: "Login redirect investigation" });
+    await settled();
+    await Promise.all(operations);
+    return store.conversation(id).title;
+  }
+
+  it("renames an ordinary stored chat whose title is still its quick title", async () => {
+    const { store, project } = storedChat();
+    const conversation = store.createConversation(project.id, "Fix the login redirect loop");
+    store.createMessage(conversation.id, firstPrompt);
+
+    await expect(settleNativeTitle(store, conversation.id)).resolves.toBe("Login redirect investigation");
+  });
+
+  it("leaves a title regenerated by the user alone when a Claude turn later reports a native title", async () => {
+    const { store, project } = storedChat();
+    const conversation = store.createConversation(project.id, "New chat");
+    store.createMessage(conversation.id, firstPrompt, "user", [], null, "2030-01-01T00:00:00.000Z");
+    await regenerate(store, conversation.id);
+    expect(store.conversation(conversation.id).title).toBe("Fix the login redirect loop");
+
+    await expect(settleNativeTitle(store, conversation.id)).resolves.toBe("Fix the login redirect loop");
+  });
+
+  it("keeps a regenerated title after the app restarts", async () => {
+    const { root, store, project } = storedChat();
+    const conversation = store.createConversation(project.id, "New chat");
+    store.createMessage(conversation.id, firstPrompt);
+    await regenerate(store, conversation.id);
+    store.close();
+
+    await expect(settleNativeTitle(openStore(root), conversation.id)).resolves.toBe("Fix the login redirect loop");
+  });
+
+  it("keeps the title of a chat started from a task after the task is deleted and the app restarts", async () => {
+    const { root, store, project } = storedChat();
+    const id = "77777777-7777-4777-8777-777777777777";
+    store.todos.create({ id, title: "Fix the login redirect loop" });
+    const execute = createTodoCommandHandler({
+      store,
+      creation: {
+        create: async (payload: { projectId: string; title: string }) => store.createConversation(payload.projectId, payload.title),
+      },
+      enableProviders: false,
+      broadcastSnapshot: vi.fn(),
+      send: vi.fn(),
+    } as unknown as TodoCommandDependencies);
+    await execute({} as never, {
+      type: "todo.start",
+      requestId: "88888888-8888-4888-8888-888888888888",
+      payload: { id, conversation: { projectId: project.id } },
+    } as never);
+    const conversationId = store.todos.get(id)!.conversationId!;
+    store.todos.delete(id);
+    store.close();
+
+    await expect(settleNativeTitle(openStore(root), conversationId)).resolves.toBe("Fix the login redirect loop");
+  });
+});
+
 describe("conversation title sources", () => {
   const roots: string[] = [];
   const configDirectory = process.env.CLAUDE_CONFIG_DIR;
@@ -279,11 +459,11 @@ describe("conversation title sources", () => {
     generateCodexThreadTitle.mockReset();
   });
 
-  function claudeFixture(lines: readonly Record<string, unknown>[]) {
+  function claudeFixture(lines: readonly Record<string, unknown>[], sessionWorkspace = "workspace") {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "inertia-title-source-")));
     roots.push(root);
     const workspace = join(root, "workspace");
-    const projects = join(root, "config", "projects", workspace.replace(/[^a-zA-Z0-9]/gu, "-"));
+    const projects = join(root, "config", "projects", join(root, sessionWorkspace).replace(/[^a-zA-Z0-9]/gu, "-"));
     mkdirSync(workspace);
     mkdirSync(projects, { recursive: true });
     writeFileSync(
@@ -291,13 +471,15 @@ describe("conversation title sources", () => {
       lines.map((line) => JSON.stringify(line)).join("\n") + "\n",
     );
     process.env.CLAUDE_CONFIG_DIR = join(root, "config");
-    return conversationTitleSources({
+    const conversationPath = vi.fn(() => workspace);
+    return Object.assign(conversationTitleSources({
       store: {
         assertConversationProvider: vi.fn(),
-        conversationPath: vi.fn(() => workspace),
+        conversationPath,
+        cliConversationImport: vi.fn(() => null),
       },
       providers: { codexControlContext: vi.fn(), claudeSkills: vi.fn() },
-    });
+    }), { conversationPath });
   }
 
   const userLine = {
@@ -314,12 +496,21 @@ describe("conversation title sources", () => {
       userLine,
       { type: "ai-title", aiTitle: "Login redirect investigation", sessionId },
     ]);
-    await expect(sources.claude({ sessionId })).resolves.toBe("Login redirect investigation");
+    await expect(sources.claude({ conversationId, sessionId })).resolves.toBe("Login redirect investigation");
+    expect(sources.conversationPath).toHaveBeenCalledWith(conversationId);
+  });
+
+  it("reads the session only from the chat's own Claude project directory", async () => {
+    const sources = claudeFixture([
+      userLine,
+      { type: "ai-title", aiTitle: "Login redirect investigation", sessionId },
+    ], "other-workspace");
+    await expect(sources.claude({ conversationId, sessionId })).resolves.toBeUndefined();
   });
 
   it("returns nothing before Claude has written a title", async () => {
     const sources = claudeFixture([userLine]);
-    await expect(sources.claude({ sessionId })).resolves.toBeUndefined();
+    await expect(sources.claude({ conversationId, sessionId })).resolves.toBeUndefined();
   });
 
   it("generates a Codex title through the chat's control context", async () => {
@@ -338,6 +529,7 @@ describe("conversation title sources", () => {
       store: {
         assertConversationProvider,
         conversationPath: vi.fn(() => "/workspace/chat"),
+        cliConversationImport: vi.fn(() => null),
       },
       providers: { codexControlContext, claudeSkills: vi.fn() },
     });

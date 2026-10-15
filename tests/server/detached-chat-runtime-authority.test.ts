@@ -270,6 +270,17 @@ describe("detached chat runtime authority", () => {
     } as ClientCommand)).not.toBeNull();
   });
 
+  it("keeps update-everything commands to the main window", () => {
+    const commands: ClientCommand[] = [
+      { type: "updates.run", requestId: REQUEST, payload: { providerIds: ["codex"], includeApp: true, continueChats: true } },
+      { type: "updates.finish", requestId: REQUEST, payload: { installed: false } },
+    ];
+    for (const command of commands) {
+      expect(rejection(command)).toBe("That request is unavailable in a detached chat.");
+      expect(mainRejection(command)).toBeNull();
+    }
+  });
+
   it("keeps every conversation-context command outside detached authority", () => {
     const commands: ClientCommand[] = [
       {
@@ -426,6 +437,8 @@ describe("detached chat runtime authority", () => {
       { type: "todo.update", requestId: REQUEST, payload: { id: REQUEST, patch: { completed: true } } },
       { type: "todo.delete", requestId: REQUEST, payload: { id: REQUEST } },
       { type: "todo.start", requestId: REQUEST, payload: { id: REQUEST, conversation: { projectId: PROJECT } } },
+      { type: "updates.run", requestId: REQUEST, payload: { providerIds: ["codex"], includeApp: true, continueChats: true } },
+      { type: "updates.finish", requestId: REQUEST, payload: { installed: false } },
     ] satisfies ClientCommand[]) {
       expect(rejection(command)).not.toBeNull();
       expect(mainRejection(command)).toBeNull();

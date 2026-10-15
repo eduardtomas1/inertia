@@ -253,21 +253,21 @@ jobs:
       - name: Run compact Electron/core bridge smoke under Xvfb
         if: needs.classify.outputs.renderer != 'true'
         run: >-
-          xvfb-run --auto-servernum npm exec -- playwright test
+          xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test
           tests/e2e/core-bridge-smoke.spec.ts
           --project=isolated --workers=1
           --output=test-results/core-bridge-smoke
 
       - name: Run renderer display-sensitive interaction under Xvfb
         if: needs.classify.outputs.renderer == 'true'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       - name: Run renderer isolated interaction under Xvfb
         if: needs.classify.outputs.renderer == 'true'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Keep Linux sentinel failure diagnostics
         if: failure()
@@ -275,6 +275,15 @@ jobs:
         with:
           name: pr-linux-lifecycle-results
           path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Keep Xvfb server log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-linux-lifecycle-xvfb-log
+          path: ${{ runner.temp }}/xvfb.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -696,7 +705,7 @@ jobs:
 
       - name: Smoke native packaged app under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run test:package-smoke
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:package-smoke
 
       - name: Smoke final macOS and Linux release containers
         if: runner.os == 'macOS'
@@ -708,7 +717,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           INERTIA_RELEASE_CHANNEL: stable
-        run: xvfb-run --auto-servernum npm run test:release-container-smoke
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run test:release-container-smoke
 
       - name: Verify complete macOS bundle signature
         if: runner.os == 'macOS'
@@ -726,6 +735,15 @@ jobs:
           path: |
             test-results
             coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Keep Xvfb server log
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-xvfb-log-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/xvfb.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -812,7 +830,7 @@ jobs:
 
       - name: Measure desktop workloads under Xvfb
         if: (needs.classify.outputs.benchmarks == 'true') && matrix.artifact == 'linux-x64' && matrix.phase == 'isolated'
-        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run benchmark:desktop:built
 
       - name: Run display-sensitive Electron end-to-end tests
         if: runner.os != 'Linux' && matrix.phase == 'display-sensitive'
@@ -833,15 +851,15 @@ jobs:
 
       - name: Run display-sensitive Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux' && matrix.phase == 'display-sensitive'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       - name: Run isolated Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux' && matrix.phase == 'isolated'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially under Xvfb
         if: runner.os == 'Linux' && (matrix.phase == 'isolated' || matrix.phase == 'runtime-recovery')
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+        run: xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Keep provider settings visual evidence
         if: runner.os == 'Linux' && matrix.arch == 'x64' && matrix.phase == 'isolated'
@@ -867,6 +885,15 @@ jobs:
         with:
           name: ci-test-results-electron-${{ matrix.evidence_artifact }}
           path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Keep Xvfb server log
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-xvfb-log-electron-${{ matrix.evidence_artifact }}
+          path: ${{ runner.temp }}/xvfb.log
           if-no-files-found: ignore
           retention-days: 7
 

@@ -6,6 +6,7 @@ import type {
   TurnGitArtifact,
 } from "../../shared/contracts";
 import {
+  checkpointFromRow,
   optionalTurnString,
   requiredTurnString,
   requireTimestamp,
@@ -19,6 +20,7 @@ import {
   turnGitArtifactFromRow,
 } from "./git-artifact-codecs";
 import type {
+  CheckpointRow,
   MessageRow,
   TurnGitArtifactRow,
 } from "./rows";
@@ -35,11 +37,65 @@ interface GitArtifactPersistenceContext {
   database: Database.Database;
 }
 
+const INSERT_TURN_GIT_ARTIFACT = `
+  INSERT INTO turn_git_artifacts (
+    id, turn_id, conversation_id, run_id, repository_identity, worktree_identity,
+    branch, before_checkpoint_id, before_ref, after_ref, before_fingerprint,
+    after_fingerprint, files_json, insertions, deletions, status, completeness,
+    patch_state, patch_digest, captured_at, terminal_assistant_message_id,
+    failure_reason, absence_reason, created_at, updated_at
+  ) VALUES (
+    @id, @turnId, @conversationId, @runId, @repositoryIdentity, @worktreeIdentity,
+    @branch, @beforeCheckpointId, @beforeRef, NULL, @beforeFingerprint,
+    NULL, '[]', 0, 0, @status, @completeness,
+    'none', NULL, NULL, NULL, @failureReason, @absenceReason, @createdAt, @updatedAt
+  )
+`;
+
 export class GitArtifactRepository {
   constructor(private readonly context: GitArtifactPersistenceContext) {}
 
   create(input: CreateTurnGitArtifactInput): StoredTurnGitArtifact {
-    const turn = this.context.agentTurn(input.turnId);
+    const artifact = this.newArtifact(
+      this.context.agentTurn(input.turnId),
+      input,
+      (checkpointId) => this.context.checkpoint(checkpointId),
+    );
+    this.context.database.prepare(INSERT_TURN_GIT_ARTIFACT).run(artifact);
+    return artifact;
+  }
+
+  createMany(
+    turns: readonly AgentTurn[],
+    input: (turn: AgentTurn) => CreateTurnGitArtifactInput,
+  ): void {
+    const insert = this.context.database.prepare(INSERT_TURN_GIT_ARTIFACT);
+    const checkpoint = this.context.database.prepare(
+      "SELECT * FROM checkpoints WHERE id = ?",
+    );
+    const checkpointFor = (checkpointId: string): CheckpointSummary => {
+      const row = checkpoint.get(checkpointId) as CheckpointRow | undefined;
+      if (!row) throw new RecordNotFoundError("Checkpoint not found.");
+      return checkpointFromRow(row);
+    };
+    const failure = this.context.database.transaction((): { error: unknown } | null => {
+      for (const turn of turns) {
+        try {
+          insert.run(this.newArtifact(turn, input(turn), checkpointFor));
+        } catch (error) {
+          return { error };
+        }
+      }
+      return null;
+    })();
+    if (failure) throw failure.error;
+  }
+
+  private newArtifact(
+    turn: AgentTurn,
+    input: CreateTurnGitArtifactInput,
+    checkpointFor: (checkpointId: string) => CheckpointSummary,
+  ): StoredTurnGitArtifact {
     const createdAt = requireTimestamp(
       input.createdAt ?? new Date().toISOString(),
       "Artifact creation time",
@@ -50,7 +106,7 @@ export class GitArtifactRepository {
       200,
     );
     if (beforeCheckpointId) {
-      const checkpoint = this.context.checkpoint(beforeCheckpointId);
+      const checkpoint = checkpointFor(beforeCheckpointId);
       if (checkpoint.conversationId !== turn.conversationId) {
         throw new Error("The artifact checkpoint belongs to a different conversation.");
       }
@@ -91,20 +147,6 @@ export class GitArtifactRepository {
       createdAt,
       updatedAt: createdAt,
     };
-    this.context.database.prepare(`
-      INSERT INTO turn_git_artifacts (
-        id, turn_id, conversation_id, run_id, repository_identity, worktree_identity,
-        branch, before_checkpoint_id, before_ref, after_ref, before_fingerprint,
-        after_fingerprint, files_json, insertions, deletions, status, completeness,
-        patch_state, patch_digest, captured_at, terminal_assistant_message_id,
-        failure_reason, absence_reason, created_at, updated_at
-      ) VALUES (
-        @id, @turnId, @conversationId, @runId, @repositoryIdentity, @worktreeIdentity,
-        @branch, @beforeCheckpointId, @beforeRef, NULL, @beforeFingerprint,
-        NULL, '[]', 0, 0, @status, @completeness,
-        'none', NULL, NULL, NULL, @failureReason, @absenceReason, @createdAt, @updatedAt
-      )
-    `).run(artifact);
     return artifact;
   }
 

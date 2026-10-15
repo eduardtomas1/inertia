@@ -3,6 +3,7 @@ import type WebSocket from "ws";
 import type { ClientCommand, ProviderInfo, ServerEvent } from "../../../shared/contracts";
 import { todoPromptContent, type Todo } from "../../../shared/todos";
 import type { RuntimeStore } from "../../database";
+import { TodoRepositoryError } from "../../persistence/todo-repository";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type {
@@ -81,19 +82,39 @@ export function createTodoCommandHandler(
       let linked: Todo;
       try {
         linked = dependencies.store.todos.link(todo.id, conversation.id);
-      } catch {
-        throw new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+      } catch (error) {
+        const unlinked = new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
+        if (dependencies.store.conversationWorktrees.get(conversation.id)?.ownsWorktree) throw unlinked;
+        try {
+          dependencies.store.deleteConversation(conversation.id);
+        } catch {
+          throw unlinked;
+        }
+        throw error instanceof TodoRepositoryError
+          ? error
+          : new RuntimeRequestError("The task could not be handed to an agent.");
       }
+      dependencies.store.lockConversationTitle(conversation.id);
       const content = todoPromptContent(linked);
       if (dependencies.enableProviders) {
-        const queued = dependencies.turns.queue({
-          conversationId: conversation.id,
-          content,
-          activateConversation: false,
-          contextRequestId: command.requestId,
-          turnCheckpoint: true,
-          skills: [],
-        });
+        let queued: ReturnType<TodoCommandDependencies["turns"]["queue"]>;
+        try {
+          queued = dependencies.turns.queue({
+            conversationId: conversation.id,
+            content,
+            activateConversation: false,
+            contextRequestId: command.requestId,
+            turnCheckpoint: true,
+            skills: [],
+          });
+        } catch {
+          if (!dependencies.store.latestAgentTurnForConversation(conversation.id)) {
+            dependencies.store.createMessage(conversation.id, content, "user", [], null, undefined, {
+              activateConversation: false,
+            });
+          }
+          throw new RuntimeRequestError("The chat was created, but its first turn could not start.");
+        }
         if (!dependencies.turns.start(queued.turn.id)) {
           dependencies.turns.failBeforeStart(conversation.id, "The task's chat could not start.");
           throw new RuntimeRequestError("The chat was created, but its first turn could not start.");

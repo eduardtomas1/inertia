@@ -1,6 +1,7 @@
 import type { RuntimeStore } from "../database";
 import { isUntitledConversationTitle, quickConversationTitle } from "../runtime/conversation-title";
 import type { TurnController } from "../runtime/turns/turn-controller";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "../runtime/update-hold";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 
 interface PrivateConnectPromptAuthority {
@@ -30,6 +31,7 @@ export function queuePrivateConnectPrompt(
   deviceId: string,
 ): { turnId: string } {
   if (!isMessageOriginDeviceId(deviceId)) throw new Error("The remote prompt has no valid device origin.");
+  if (isHeld()) throw new Error(UPDATE_HOLD_MESSAGE);
   let queued: ReturnType<TurnController["queue"]> | null = null;
   let reserved = false;
   try {

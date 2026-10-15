@@ -218,7 +218,7 @@ it("measures desktop workloads on the prepared bundle before any Electron end-to
   expect(measure).toBeGreaterThan(index("Build the application bundle"));
   expect(measure).toBe(index("Prepare Electron end-to-end binary") + 1);
   expect(measure).toBeLessThan(steps.findIndex(({ run }) => run?.includes("playwright test --project=")));
-  expect(step.run).toBe("xvfb-run --auto-servernum npm run benchmark:desktop:built");
+  expect(step.run).toBe('xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" npm run benchmark:desktop:built');
   expect(step.if).toContain("needs.classify.outputs.benchmarks == 'true'");
   expect(step.if).not.toMatch(/always\(\)|failure\(\)|cancelled\(\)/u);
   expect(step["continue-on-error"]).not.toBe(true);
@@ -272,4 +272,64 @@ it("keeps provider canary failures visible without filing incidents for cancelle
   expect(workflow.jobs["merge-ready"].needs).not.toContain("provider-drift");
   expect(drift.jobs["report-failure"].if).toContain("github.ref == 'refs/heads/main'");
   expect(drift.jobs["report-failure"].if).toContain("needs.provider-drift.result != 'cancelled'");
+});
+
+it("release builds exclude Windows workspaces from Defender and download Electron before measuring", () => {
+  const job = parse(source(".github/workflows/release-platforms.yml")).jobs.build;
+  const steps = job.steps as Array<{ name: string; if?: string; run?: string; shell?: string; "continue-on-error"?: boolean }>;
+  const index = (name: string) => steps.findIndex((step) => step.name === name);
+  const defender = steps[index("Exclude the workspace from Microsoft Defender")]!;
+  expect(defender).toMatchObject({ if: "runner.os == 'Windows'", shell: "pwsh", "continue-on-error": true });
+  expect(defender.run).toContain('Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"');
+  expect(defender.run).toContain('Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"');
+  expect(index("Exclude the workspace from Microsoft Defender")).toBeLessThan(index("Set up Node.js"));
+  expect(steps.filter((step) => step.name === "Prepare Electron end-to-end binary")).toHaveLength(1);
+  expect(index("Prepare Electron end-to-end binary")).toBeLessThan(index("Measure release-candidate desktop workloads"));
+  const targets = job.strategy.matrix.include as Array<{ label: string; timeout_minutes: number }>;
+  expect(targets.find(({ label }) => label === "Windows x64")!.timeout_minutes).toBe(130);
+});
+
+it("keeps every Xvfb server alive across clients and its log as failure evidence", () => {
+  const prefix = 'xvfb-run --auto-servernum -s "-screen 0 1280x1024x24 -noreset" -e "$RUNNER_TEMP/xvfb.log" ';
+  let jobsWithXvfb = 0;
+  for (const file of [".github/workflows/ci.yml", ".github/workflows/release-platforms.yml"]) {
+    const jobs = parse(source(file)).jobs as Record<string, { steps?: Array<{ run?: string; uses?: string; if?: string; with?: Record<string, string> }> }>;
+    for (const [id, job] of Object.entries(jobs)) {
+      const steps = job.steps ?? [];
+      const xvfb = steps.map((step, index) => ({ step, index })).filter(({ step }) => step.run?.includes("xvfb-run"));
+      if (xvfb.length === 0) continue;
+      jobsWithXvfb += 1;
+      for (const { step } of xvfb) {
+        expect(step.run!.split("xvfb-run").length - 1, `${file} ${id}`).toBe(step.run!.split(prefix).length - 1);
+      }
+      const uploads = steps.map((step, index) => ({ step, index }))
+        .filter(({ step }) => step.with?.path === "${{ runner.temp }}/xvfb.log");
+      expect(uploads, `${file} ${id}`).toHaveLength(1);
+      const [{ step: upload, index }] = uploads as [{ step: { uses?: string; if?: string; with?: Record<string, string> }; index: number }];
+      expect(upload.uses).toBe("actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9");
+      expect(upload.if).toContain("failure()");
+      expect(upload.with?.["if-no-files-found"]).toBe("ignore");
+      expect(index).toBeGreaterThan(xvfb.at(-1)!.index);
+    }
+  }
+  expect(jobsWithXvfb).toBe(4);
+});
+
+it("hands the main ref to the release validator for stable ancestry and compares migrations with the previous stable release", () => {
+  const release = parse(source(".github/workflows/release-platforms.yml"));
+  const freeze = release.jobs.release_identity.steps.find((step: { id?: string }) => step.id === "freeze");
+  expect(freeze.run).toContain("git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main");
+  expect(freeze.run).toMatch(/RELEASE_MAIN_REF=refs\/remotes\/origin\/main \\\n\s+node scripts\/validate-release\.mjs/u);
+  expect(freeze.run.indexOf("git fetch --no-tags origin")).toBeLessThan(freeze.run.indexOf("node scripts/validate-release.mjs"));
+  const quality = release.jobs.quality.steps as Array<{ uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, string> }>;
+  expect(quality[0]!.uses).toMatch(/^actions\/checkout@/u);
+  expect(quality[0]!.with?.["fetch-depth"]).toBe(0);
+  const lineage = quality.find((step) => step.run?.includes("scripts/verify-database-lineage.mjs"))!;
+  expect(lineage.env).toMatchObject({
+    RELEASE_SHA: "${{ needs.release_identity.outputs.release_sha }}",
+    RELEASE_TAG: "${{ inputs.release_tag || github.ref_name }}",
+  });
+  expect(lineage.run).toContain("git tag --merged \"$RELEASE_SHA\" --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname");
+  expect(lineage.run).toContain('node scripts/verify-database-lineage.mjs --base-ref "refs/tags/$previous_tag"');
+  expect(lineage.run).toContain("exit 1");
 });

@@ -160,6 +160,7 @@ const ok = (): ServerEvent => ({ type: "request.ok", requestId: "request" });
 function harness(initial: AppSnapshot, overrides: Partial<TasksViewProps> = {}) {
   const request = vi.fn(async (_command: CommandWithoutId): Promise<ServerEvent> => ok());
   const onOpenConversation = vi.fn();
+  const onError = vi.fn();
   const props = (current: AppSnapshot): TasksViewProps => ({
     snapshot: current,
     settings,
@@ -167,6 +168,7 @@ function harness(initial: AppSnapshot, overrides: Partial<TasksViewProps> = {}) 
     projectScopeId: null,
     request,
     onOpenConversation,
+    onError,
     ...overrides,
   });
   const view = render(<TasksView {...props(initial)} />);
@@ -174,6 +176,7 @@ function harness(initial: AppSnapshot, overrides: Partial<TasksViewProps> = {}) 
     ...view,
     request,
     onOpenConversation,
+    onError,
     update(next: AppSnapshot) {
       view.rerender(<TasksView {...props(next)} />);
     },
@@ -607,6 +610,37 @@ describe("Tasks view", () => {
 
     await user.click(within(agent).getByRole("button", { name: "Folder…" }));
     await waitFor(() => expect(target).toHaveValue(secondProjectId));
+  });
+
+  it("reports an unexpected start response and lets Start be pressed again", async () => {
+    const user = userEvent.setup();
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => command.type === "todo.start"
+      ? { type: "request.result", requestId: "request", result: { kind: "project.created", projectId: createdProjectId } }
+      : ok());
+    const view = harness(snapshot([todo(id, "Clean the downloads folder")]), { request });
+    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    const start = within(screen.getByRole("group", { name: "Hand it to an agent" })).getByRole("button", { name: "Start" });
+    await user.click(start);
+
+    await waitFor(() => expect(view.onError)
+      .toHaveBeenCalledWith("The local service returned an unexpected task response."));
+    expect(start).toBeEnabled();
+    expect(view.onOpenConversation).not.toHaveBeenCalled();
+  });
+
+  it("reports a folder picker failure and keeps the chosen project", async () => {
+    const user = userEvent.setup();
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    vi.stubGlobal("inertia", { selectDirectory: vi.fn().mockRejectedValue(new Error("The folder picker is unavailable.")) });
+    const view = harness(snapshot([todo(id, "Clean the downloads folder")]));
+    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    const agent = screen.getByRole("group", { name: "Hand it to an agent" });
+    await user.click(within(agent).getByRole("button", { name: "Folder…" }));
+
+    await waitFor(() => expect(view.onError).toHaveBeenCalledWith("The folder picker is unavailable."));
+    expect(within(agent).getByRole("combobox", { name: "Project" })).toHaveValue(firstProjectId);
+    expect(within(agent).getByRole("button", { name: "Folder…" })).toBeEnabled();
   });
 
   it("shows a linked task's chat status and opens the chat", async () => {

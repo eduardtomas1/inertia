@@ -37,9 +37,8 @@ describe("RuntimeStore tasks", () => {
     stores.splice(0);
     const database = new Database(databasePath, { readonly: true });
     try {
-      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(96);
       expect((database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version)
-        .toBe(96);
+        .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect((database.prepare("PRAGMA table_info(todos)").all() as Array<{ name: string }>).map(({ name }) => name)).toEqual([
         "id", "title", "note", "priority", "due_date", "completed_at", "conversation_id", "created_at", "updated_at",
       ]);

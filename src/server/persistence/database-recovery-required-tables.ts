@@ -41,6 +41,19 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "created_at",
     "updated_at",
   ]],
+  [97, "restart_continuation_plans", [
+    "id",
+    "conversation_id",
+    "interrupted_turn_id",
+    "route_identity",
+    "state",
+    "attempts",
+    "turn_id",
+    "error",
+    "created_at",
+    "updated_at",
+  ]],
+  [98, "conversation_title_locks", ["conversation_id"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -83,6 +96,8 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [93, ["html_renders"]],
   [94, ["agent_context_reads"]],
   [96, ["todos"]],
+  [97, ["restart_continuation_plans"]],
+  [98, ["conversation_title_locks"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {

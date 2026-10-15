@@ -63,3 +63,8 @@ On startup, the main process removes only regular legacy
 `remote-access.vault` and transaction files inside the user-data directory,
 then records the migration marker. Existing browser pairings are intentionally
 not migrated and must be approved again.
+
+Secure platform storage is checked only when Private Connect is needed: at
+startup when the encrypted Private Connect store already exists, and otherwise
+when Settings first loads the Private Connect section or enables it. A launch
+that never uses Private Connect does not touch the macOS Keychain.

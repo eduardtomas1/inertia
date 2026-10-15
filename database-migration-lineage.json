@@ -737,6 +737,16 @@
       "version": 96,
       "name": "PersistTodos",
       "digest": "626c0edb91ad7dd9bf615c2d1f47eb38b14127965d98685ddb45b1856c4479ee"
+    },
+    {
+      "version": 97,
+      "name": "PersistRestartContinuationPlans",
+      "digest": "2d9023423a5713a0fe6e55a29e01c1db0e3194066ef33403c0b01ab3303a73cc"
+    },
+    {
+      "version": 98,
+      "name": "PersistConversationTitleLocks",
+      "digest": "039b5abb2b597512e2867f1e8a6e12ebba015af44969c26e7bf359d05502af5e"
     }
   ]
 }

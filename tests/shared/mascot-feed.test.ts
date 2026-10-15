@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, type MascotStatus } from "../../src/shared/mascot";
+import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_LABELS, MASCOT_ROW_LIMIT, type MascotStatus } from "../../src/shared/mascot";
 import { mascotFeedViolation, type MascotFeed, type MascotFeedInvariant } from "../../src/shared/mascot-feed";
 import { parseRuntimeWorkerEvent } from "../../src/node/runtime-process-protocol";
 
@@ -115,5 +115,16 @@ describe("mascot feed boundary", () => {
     ]) expect(parseRuntimeWorkerEvent(event({ ...valid, ...change }))).toBeNull();
     const { rows: _rows, ...withoutRows } = valid;
     expect(parseRuntimeWorkerEvent(event(withoutRows))).toBeNull();
+  });
+});
+
+const NARROWEST_LABEL_SPACE = 120;
+const DEJAVU_SANS_BOLD_12PX_CHARACTER = 7.5;
+
+describe("mascot labels", () => {
+  it("fit beside a pinned chat with the attention dot at 7.5 px per character, the DejaVu Sans Bold 12px fallback average", () => {
+    const tooWide = Object.values(MASCOT_LABELS)
+      .filter((label) => label.length * DEJAVU_SANS_BOLD_12PX_CHARACTER > NARROWEST_LABEL_SPACE);
+    expect(tooWide).toEqual([]);
   });
 });

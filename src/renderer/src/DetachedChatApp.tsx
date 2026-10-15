@@ -69,6 +69,7 @@ import { cachedAppSettings } from "./utils/cachedSettings";
 import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
+import { loadResponseTimeline } from "./components/chatSurfaceLoaders";
 
 type DetachedWindowContext = Extract<
   DesktopWindowContext,
@@ -96,6 +97,8 @@ const resolveProviderMaintenance = (): Promise<void> => Promise.resolve();
 const openProviderUpdateInstructions = (url: string): void => {
   void window.inertia.openExternal(url).catch(() => undefined);
 };
+
+void loadResponseTimeline();
 
 /** Keeps native close fail-closed around popup-only composer ownership. */
 export function preserveDetachedDraftBeforeUnload(

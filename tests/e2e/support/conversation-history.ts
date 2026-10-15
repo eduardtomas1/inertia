@@ -19,17 +19,20 @@ export async function loadSeededConversationTurns(page: Page, expectedCount: num
   });
   await expect.poll(loadedCount).toBeGreaterThan(0);
   const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });
-  let loadedPages = 0;
-  for (; loadedPages < 10 && await loadedCount() < expectedCount; loadedPages++) {
+  const pagesMissing = await loadedCount() < expectedCount;
+  if (pagesMissing) await readFromTranscriptStart(page);
+  for (let loadedPages = 0; loadedPages < 10; loadedPages++) {
     const before = await loadedCount();
-    if (loadedPages === 0) await readFromTranscriptStart(page);
-    await earlier.scrollIntoViewIfNeeded();
-    await earlier.click();
-    await expect.poll(loadedCount).toBeGreaterThan(before);
+    if (before >= expectedCount) break;
+    await expect.poll(async () => {
+      const count = await loadedCount();
+      if (count === before && await earlier.isVisible()) await earlier.click({ timeout: 1_000 }).catch(() => undefined);
+      return count;
+    }).toBeGreaterThan(before);
   }
   await expect.poll(loadedCount).toBe(expectedCount);
   await expect(earlier).toHaveCount(0);
-  if (loadedPages > 0) {
+  if (pagesMissing) {
     const latest = page.getByRole("button", { name: "Jump to latest", exact: true });
     await expect(latest).toBeVisible();
     await latest.click();

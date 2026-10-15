@@ -44,6 +44,7 @@ export default defineConfig({
       GIT_CONFIG_SYSTEM: resolve("tests/fixtures/git/empty.config"),
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_COUNT: "0",
+      DISABLE_SYSTEM_FONTS_LOAD: "1",
     },
     // #74 established that two hosted-Windows workers contend across native
     // Git, SQLite, and WebSocket fixtures. Sharding reduces wall time without

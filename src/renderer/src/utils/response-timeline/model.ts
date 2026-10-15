@@ -394,7 +394,8 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     reasonings: input.reasonings
       .filter(({ turnId }) => turnId === null || !claimedTurnIds.has(turnId))
       .sort(compareTimestamped),
-    plans: input.plans.filter(({ turnId }) => turnId === null || !claimedTurnIds.has(turnId)),
+    plans: input.plans.filter(({ turnId }) =>
+      turnId === null || malformedTurns.some(({ id }) => id === turnId)),
     checkpoints: input.checkpoints
       .filter(({ id, turnId }) =>
         !claimedCheckpointIds.has(id)

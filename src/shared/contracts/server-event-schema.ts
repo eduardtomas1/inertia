@@ -1091,6 +1091,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 }
 import { issueReportResult } from "../issue-report";
 import { messageQueueResultSchema } from "../queued-messages";
+import { updatesRunResultSchema } from "../updates";
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
@@ -1110,6 +1111,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
+  "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "todo.started": (value) => stringField(value, "conversationId"),

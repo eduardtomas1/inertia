@@ -53,6 +53,8 @@ const PIN_REFUSED_MESSAGE =
 const GATE_REFUSED_MESSAGE =
   "Inertia has not verified this installation, so it will not run the update.";
 
+export const PROVIDER_UPDATE_UNCHANGED_MESSAGE = "Update completed, but the installed version still appears unchanged.";
+
 export class ProviderMaintenanceError extends Error {
   constructor(message: string) {
     super(message);
@@ -243,6 +245,12 @@ export class ProviderMaintenanceController {
   }
 
   operation(operationId: string): ProviderMaintenanceOperation | null {
+    return this.operations.get(operationId) ?? null;
+  }
+
+  async settled(operationId: string): Promise<ProviderMaintenanceOperation | null> {
+    const active = [...this.active.values()].find(({ operation }) => operation.id === operationId);
+    await active?.completion?.catch(() => undefined);
     return this.operations.get(operationId) ?? null;
   }
 
@@ -765,7 +773,7 @@ export class ProviderMaintenanceController {
         afterVersion: refreshed.installedVersion,
         message: targetReached || (versionChanged !== null && versionChanged > 0)
           ? "Provider updated."
-          : "Update completed, but the installed version still appears unchanged.",
+          : PROVIDER_UPDATE_UNCHANGED_MESSAGE,
         output: result.output,
         outputTruncated: result.outputTruncated,
       },

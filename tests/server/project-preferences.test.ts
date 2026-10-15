@@ -102,18 +102,24 @@ describe("durable project and thread organization", () => {
     expect(reopened.conversation(conversation.id).markedUnreadAt).toBeNull();
   });
 
-  it("regenerates a bounded local title from the latest user text, never the assistant response", () => {
+  it("regenerates a quick local title from the latest user text, never the assistant response", () => {
     const { store, conversation } = fixture();
     expect(() => store.regenerateConversationTitle(conversation.id)).toThrow(/text message/u);
     store.createMessage(conversation.id, "Earlier", "user", [], null, "2026-09-09T09:00:00.000Z");
     store.createMessage(conversation.id, `  Latest\n  request ${"x".repeat(200)}`, "user", [], null, "2026-09-09T09:01:00.000Z");
     store.createMessage(conversation.id, "Assistant output must not become a title", "assistant", [], null, "2026-09-09T09:02:00.000Z");
     store.regenerateConversationTitle(conversation.id);
-    expect(store.conversation(conversation.id).title).toBe(`Latest request ${"x".repeat(200)}`.slice(0, 64));
+    expect(store.conversation(conversation.id).title).toBe("Latest");
     expect(store.conversation(conversation.id).status).toBe("idle");
     store.createMessage(conversation.id, `${"x".repeat(63)}😀 thanks`, "user", [], null, "2026-09-09T09:03:00.000Z");
     store.regenerateConversationTitle(conversation.id);
-    expect(store.conversation(conversation.id).title).toBe(`${"x".repeat(63)}😀`);
+    expect(store.conversation(conversation.id).title).toBe("x".repeat(60));
+    store.createMessage(conversation.id, "```ts\nconst broken = true;\n```\nFix the `parser` crash from https://example.com/log now", "user", [], null, "2026-09-09T09:04:00.000Z");
+    store.regenerateConversationTitle(conversation.id);
+    expect(store.conversation(conversation.id).title).toBe("Fix the parser crash from now");
+    store.createMessage(conversation.id, "```\nonly code\n```", "user", [], null, "2026-09-09T09:05:00.000Z");
+    store.regenerateConversationTitle(conversation.id);
+    expect(store.conversation(conversation.id).title).toBe("``` only code ```");
     store.updateConversation(conversation.id, { status: "running" });
     expect(() => store.regenerateConversationTitle(conversation.id)).toThrow(/active work/u);
   });

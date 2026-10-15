@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,6 +37,7 @@ describe("Private Connect host shutdown evidence", () => {
   it("reports the service step when shutdown races an unfinished initialization", async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), "inertia-private-connect-host-"));
     roots.push(userDataDirectory);
+    await writeFile(join(userDataDirectory, "private-connect.vault"), "c3RvcmU=");
     const host = PrivateConnectHost.create({
       userDataDirectory,
       staticRoot: userDataDirectory,
@@ -69,6 +70,7 @@ describe("Private Connect host shutdown evidence", () => {
   it("preserves cleanup failure when quitting during service creation", async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), "inertia-private-connect-host-"));
     roots.push(userDataDirectory);
+    await writeFile(join(userDataDirectory, "private-connect.vault"), "c3RvcmU=");
     const host = PrivateConnectHost.create({
       userDataDirectory,
       staticRoot: userDataDirectory,

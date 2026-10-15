@@ -2,6 +2,213 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.72 — 2026-10-13
+
+Keep a to-do list and hand any task to an agent, watch plan steps complete as
+the agent reports them, and get short chat names automatically. Turns start
+faster, a message sent as the agent finishes is never lost, and the desktop
+mascot follows several chats at once.
+
+### Tasks
+
+- **Tasks** is a plain to-do list on its own labelled row at the top of the
+  sidebar, under **New chat**, and in the command palette (**Open tasks**).
+  Each task has a note, a due date and a priority; urgent tasks come first,
+  and finished tasks fold behind **Done**.
+- Open a task and choose **Hand it to an agent**: pick the provider, model,
+  reasoning effort, speed and a project or any folder, then **Start**. Inertia
+  adds the folder as a project if needed, opens a chat there with the task's
+  title and note as the first message, and the task row shows whether that
+  chat is working, needs attention or is done. Deleting the chat unlinks the
+  task.
+- When **Start** or the folder picker fails, the task shows the error instead
+  of doing nothing. A task deleted while its chat is being created no longer
+  leaves an empty chat behind, and when the first turn cannot be queued the
+  task's message is still saved in its chat.
+
+### Chats and turns
+
+- A visual reply and the answer that follows it arrive together: the text
+  streams directly under the page, and the view lands on the page.
+- A message sent as the agent finishes is never lost or merged into the
+  answer. The answer ends where the provider ends it, the reply to your
+  follow-up is its own row after your message, and a follow-up that got no
+  reply because the turn stopped or failed is shown as unanswered. A
+  follow-up the provider did not confirm before the turn ended starts the
+  next turn, so nothing is dropped and nothing runs twice.
+- The composer is usable again as soon as a follow-up is acknowledged, and an
+  unsent draft keeps its files when a turn starts.
+- A provider handoff or a referenced chat now carries who wrote each message
+  (provider and model), turns that did not finish, the changed files and the
+  last commands of the final turn, in a smaller packet. Agents can read one
+  earlier turn at a time in full through the context tool, and references are
+  re-sent when a fresh session restores the history.
+- Copying an answer gives plain text without the quote bar: quotes become
+  paragraphs, lists keep their bullets and numbers, and tables are separated
+  by tabs.
+- The app looks quieter: one set of text sizes, corners, lines and colours, no
+  card behind the chat, your messages as one right-aligned bubble, turn
+  details in a footer that appears on hover, and a failed turn folded to one
+  row with its details behind it.
+- **Cmd/Ctrl+W** closes the focused panel's tab and **Shift+Cmd/Ctrl+W** now
+  closes the window.
+
+### Plans
+
+- The Plan tab marks steps as each provider reports progress: Claude's
+  checklist tools, Codex's plan updates, Cursor and Kimi Code plan entries and
+  OpenCode todos. Inertia shows exactly what the provider sends and does not
+  guess from tool activity.
+- The plan document stays while its steps complete in the following turns, a
+  Codex plan now has steps and an **Implement** button, and cancelled steps
+  show as cancelled instead of failing a Cursor or Kimi Code run.
+- **Implement** and **Refine plan** are disabled while the agent workflow
+  loads, so pressing **Implement** right after the plan turn no longer fails
+  with "Stop the active run or review before changing its agent
+  configuration."
+- A long chat no longer loses its connection, with an "unreadable response",
+  when its newest plan is older than the loaded history. The plan document
+  still shows in that case, and plans from older pages stay out of the
+  imported-history box.
+
+### Chat titles
+
+- A new chat is named right away from the first line of your prompt, without
+  skill tokens, code or URLs, cut to six words. The same applies to the first
+  Private Connect prompt in an untitled chat.
+- After the first turn, the chat takes the provider's own short title when
+  one exists: Claude and OpenCode already generate one, at no extra cost.
+  Codex has none, so Inertia makes one small, read-only request on the chat's
+  model at low effort, on your account, as Codex's own terminal app does.
+  Cursor, Kimi Code and Antigravity keep the name from the prompt.
+- A rename always wins, and chats started from a task or created by an agent
+  keep their names, even after the task is deleted. Opening a rename and
+  leaving it unchanged no longer puts the old name back over a title that
+  arrived meanwhile. **Regenerate title** uses the same rule as a new chat,
+  and automatic naming leaves its result alone.
+
+### Mascot
+
+- The mascot speaks in the agent's own words: its latest sentence, the plan
+  step, or a short summary of the tool at work, and for a question, an
+  approval or a failure, the question, the command or the real error.
+- With several chats it shows the one that needs you most and lists up to
+  five others as rows you can click. A chat with no updates for ten minutes
+  says so.
+- Hiding the mascot lasts for the session. **Unhide** in Settings, or **Show
+  mascot** in the Window menu on macOS and Linux and in the Dock menu on
+  macOS, brings it back. Escape no longer turns the feature off, and on macOS
+  the mascot stays when the main window closes.
+- Shorter labels fit beside the chat picker with every font: **Work failed**,
+  **Ready**, **Reconnecting** and **Input needed**.
+
+### Windows, macOS and Linux
+
+- On Windows the window has a transparent title bar with the native window
+  buttons; Linux keeps the native frame.
+- On Windows, reading Codex's details no longer times out on a slow machine:
+  a forced stop of the reading process gets the whole close time instead of
+  2 seconds.
+- On Linux, a fast command no longer waits about a second for a process
+  guardian that has already exited.
+
+### Performance and updates
+
+- A turn starts faster on every provider: the message is shown before any Git
+  work, the checkpoint is made as the turn starts, folders outside a
+  repository skip Git, and the process guardian wakes when the command exits
+  instead of polling. On a small repository the composer clears in 5 ms
+  instead of about 1.9 s.
+- Secret scrubbing of long commands, before they go to another provider or
+  the context tool, takes linear time; a 32 KB command took about 0.9 s.
+  Claude chat titles are read from the chat's own project folder instead of
+  every Claude project.
+- **Update everything**: when updates are available, the update control in
+  the sidebar offers Inertia and every installed provider together, for
+  example **Update Inertia and 2 providers** or **Update Codex**. The dialog
+  lists each update with its versions and says how many running chats will
+  be stopped. Inertia downloads the app update first, stops the affected
+  chats, updates the providers one at a time and then installs the app. New
+  chats, terminals and resumed chats are refused with "Inertia is updating."
+  until it is done.
+- With **Continue chats after the update** checked (the choice is
+  remembered), each stopped chat continues once in its own session after the
+  update or the restart, with "Continue from where you stopped.", and its
+  timeline names what was updated. Chats waiting for an approval or an
+  answer and archived chats are not continued, and a chat with a queued
+  follow-up sends that follow-up instead. Builds that cannot install the app
+  in place, which includes the current unsigned macOS and Windows builds,
+  update the providers and link to the release page.
+- Startup: the runtime starts before the window, background work waits until
+  the window has connected, and unchanged state is not sent twice. On the
+  development Mac the first transcript row shows about 570 ms after launch
+  instead of about 680 ms, and with a 3,000-turn chat on a fresh profile
+  575 ms instead of 875 ms.
+- Usage, Limits, Daily work, Tasks, the terminal and the model chooser no
+  longer wait 300 ms on first open: they open in 14 to 55 ms instead of 314
+  to 355 ms. A detached chat window shows its transcript in about 190 ms
+  instead of 490 ms.
+- A Git refresh runs 7 Git processes instead of 10, and the Changes panel
+  opens in about 1.1 s instead of 1.4 s.
+- Each provider shows as soon as its own check finishes, checks allow more
+  time on a slow machine, a model list read that timed out is retried in the
+  background, and models stay visible when only the usage read is late. With
+  a test Claude ten times slower than normal, Claude now shows as connected
+  after about 7 s and gets its models, instead of ending on "Connection
+  issue" after about 38 s.
+- Scrolling a long chat redraws rows at once only when the view reaches rows
+  that are not drawn yet, reuses formatted Markdown and highlighted code when
+  rows come back, and estimates row heights from the real text size. Missed
+  screen refreshes while wheel scrolling fell from 3 to 4% to under 2%, and
+  while dragging the scrollbar down a 300-turn chat from 12% to 2%.
+- Scrolling up near the top of a chat loads older messages by itself and
+  fetches the page before it in advance; **Load earlier messages** stays for
+  keyboard use.
+
+### Providers and dependencies
+
+- Claude Agent SDK 0.3.296 (Claude Code 2.1.296), the Agent Client Protocol
+  SDK 1.8.0 used for Cursor and Kimi Code, and OpenCode SDK 1.19.0 are
+  supported. OpenCode 2 is still unsupported.
+- Updated Electron to 44.7.1, which fixes Linux crashes without a display
+  server or when GTK fails to load and updates Chromium to 152.0.7977.149,
+  with lucide-react 1.56.0, zod 4.6.7, @napi-rs/canvas 1.0.11,
+  @napi-rs/keyring 2.1.1, smol-toml 1.9.1 and the Anthropic SDK used by the
+  provider drift checks at 0.133.0, and vitest 5.0.4, oxlint 1.88.0 and
+  happy-dom 20.14.6 for development.
+- The list virtualization library stays at its current version: its newest
+  releases rewrite the scroll correction long chats rely on.
+
+### Fixes
+
+- Migration 94 (`RecordAgentContextReads`) records the earlier turns agents
+  read through the context tool, migration 95
+  (`CompactConversationContextTransport`) rebuilds the context packets for
+  the smaller transport, migration 96 (`PersistTodos`) stores tasks,
+  migration 97 (`PersistRestartContinuationPlans`) stores which chats an
+  update stopped and whether each has continued, and migration 98
+  (`PersistConversationTitleLocks`) stores which chats keep their own title,
+  so a task chat or a regenerated title is not renamed after a restart.
+- Database backup checks also verify the context packet triggers that
+  migration 95 recreates.
+- Quitting no longer hangs when the macOS keychain does not answer: Private
+  Connect checks secure storage only when it has been enabled or its settings
+  are opened, so a profile that never used it no longer touches the keychain
+  at launch.
+- Updating Inertia is no longer blocked after Antigravity was updated from
+  Inertia: the provider update record now accepts Antigravity.
+- The provider notice no longer stays on "Updating provider." after the
+  update has finished.
+- The README shows the current interface, with new Tasks and Plan views.
+- Release only: a release must be on main and must not change a migration
+  released in an earlier version, Windows release builds warm Electron before
+  the desktop benchmark and skip Microsoft Defender scans of the workspace,
+  and Linux runs keep their virtual display alive between launches.
+- CI only: the Windows runtime lock ordering test allows 10 seconds for a
+  loaded runner, tests skip the system font scan when they load the image
+  decoder, the provider settings hover test waits until the row is hovered,
+  and a forced Electron fixture close names the exit stages the app reported.
+
 ## 0.0.71 — 2026-10-08
 
 Move a chat to another provider without losing its thread, let agents answer

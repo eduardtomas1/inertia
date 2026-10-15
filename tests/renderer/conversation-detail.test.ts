@@ -162,6 +162,13 @@ describe("paged history reconciliation", () => {
     expect(cleared.plans.map(({ runId }) => runId)).toEqual(["run-1"]);
   });
 
+  it.each(["older", "target"] as const)("keeps one copy of a latest-page plan whose turn arrives with %s history", (mode) => {
+    const recent = { ...plannedPage(3), plans: [...plannedPage(1).plans, ...plannedPage(3).plans] };
+    const loaded = mergeConversationHistory(recent, plannedPage(1), mode);
+    expect(loaded.plans.map(({ runId }) => runId)).toEqual(["run-1", "run-3"]);
+    expect(mergeProjectionPlans(loaded.plans, undefined).map(({ runId }) => runId)).toEqual(["run-1", "run-3"]);
+  });
+
   it("retains legacy plan order while refreshing their values and owned plans", () => {
     const legacy = { ...plannedPage(1).plans[0]!, turnId: null, runId: "legacy" };
     const current = { ...plannedPage(2), plans: [legacy, ...plannedPage(2).plans] };

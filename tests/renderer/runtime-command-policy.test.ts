@@ -24,6 +24,11 @@ describe("runtime command delivery policy", () => {
     expect(runtimeCommandPolicy("conversation.cli.preview").timeoutDelivery).toBe("rejected");
     expect(runtimeCommandPolicy("conversation.cli.import").timeoutDelivery).toBe("ambiguous");
   });
+  it("keeps an update run pending through six bounded provider updates and settles its finish quickly", () => {
+    expect(runtimeCommandPolicy("updates.run").timeoutMs).toBeGreaterThanOrEqual(30_000 + 6 * 5 * 60_000);
+    expect(runtimeCommandPolicy("updates.run").timeoutDelivery).toBe("ambiguous");
+    expect(runtimeCommandPolicy("updates.finish")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "ambiguous" });
+  });
   it("classifies representative reads and idempotent refreshes as retry-safe", () => {
     expect(runtimeCommandPolicy("app.refresh")).toEqual({
       timeoutMs: 15_000,

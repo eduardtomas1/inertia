@@ -99,6 +99,7 @@ export interface RunningRuntime extends RuntimeHtmlRenderReader {
   ) => Promise<void>;
   /** Starts passive maintenance only after the worker has published runtime.ready. */
   startPostReadyWork: () => Promise<void>;
+  startPostReadyWorkAfterFirstClient: () => void;
   websocketUrl: string;
   databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
   recordSystemSuspendInterval: (interval: RuntimeSystemSuspendInterval) => boolean;

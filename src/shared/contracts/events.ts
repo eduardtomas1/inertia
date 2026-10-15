@@ -1,4 +1,5 @@
 import type { LimitResetResult } from "../limit-reset";
+import type { UpdatesRunResult } from "../updates";
 import type { BackgroundTasksResult } from "../background-tasks";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
@@ -213,6 +214,7 @@ export type ServerEvent =
         | MessageSendAcceptance
         | MessageQueueResult
         | LimitResetResult
+        | UpdatesRunResult
         | BackgroundTasksResult
         | ConversationCompactionResult
         | DuoPreparedResult

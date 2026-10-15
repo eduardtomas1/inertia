@@ -508,6 +508,38 @@ describe("provider process-tree termination", () => {
     });
     const argsOf = (spawnProcess: ReturnType<typeof vi.fn>) => spawnProcess.mock.calls.map(([, args]) => args);
 
+    it("gives a forced-from-the-start taskkill the whole close budget", async () => {
+      vi.useFakeTimers();
+      try {
+        const startedAt = Date.now();
+        const child = fakeChild();
+        const taskkill = fakeTaskkill();
+        setTimeout(() => taskkill.emit("close", 0), 150);
+        setTimeout(() => {
+          child.exitCode = 1;
+          child.emit("close", 1);
+        }, 155);
+        let confirmed: boolean | undefined;
+        let resolvedAt: number | undefined;
+        void terminateProcessTreeAndWait(child as never, true, {
+          platform: "win32",
+          spawnProcess: vi.fn(() => taskkill) as never,
+          windowsSystemRoot: null,
+          waitMs: 100,
+        }).then((value) => {
+          confirmed = value;
+          resolvedAt = Date.now() - startedAt;
+        });
+        await vi.advanceTimersByTimeAsync(WINDOWS_SEQUENCE_MS);
+        expect(confirmed).toBe(true);
+        expect(taskkill.kill).not.toHaveBeenCalled();
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(resolvedAt).toBeLessThanOrEqual(WINDOWS_SEQUENCE_MS);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("never confirms a retry after taskkill failed against a root that had already exited", async () => {
       vi.useFakeTimers();
       try {

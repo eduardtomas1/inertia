@@ -6,9 +6,11 @@ const releaseRef = process.env.RELEASE_REF ?? "";
 const eventSha = (process.env.RELEASE_EVENT_SHA ?? "").toLowerCase();
 const expectedCommit = process.env.RELEASE_EXPECTED_COMMIT ?? "";
 const verifyRemote = process.env.RELEASE_VERIFY_REMOTE ?? "";
+const mainRef = process.env.RELEASE_MAIN_REF ?? "";
 const releaseTagPattern = /^(canary-)?v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const gitObjectPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
+const fullRefPattern = /^refs\/[A-Za-z0-9._/-]+$/u;
 const REMOTE_TAG_TIMEOUT_MS = 30_000;
 const MAX_REMOTE_TAG_RESPONSE_BYTES = 64 * 1_024;
 
@@ -63,6 +65,7 @@ if (releaseRef !== `refs/tags/${tag}`) fail("RELEASE_REF does not identify the v
 if (!gitObjectPattern.test(eventSha)) fail("the event SHA is not a Git object ID");
 if (!commitPattern.test(expectedCommit)) fail("the frozen release commit is not a canonical 40-hex SHA");
 if (verifyRemote !== "" && verifyRemote !== "1") fail("RELEASE_VERIFY_REMOTE must be empty or 1");
+if (mainRef !== "" && !fullRefPattern.test(mainRef)) fail("RELEASE_MAIN_REF must be empty or a full Git ref");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
@@ -81,6 +84,15 @@ if (headCommit !== expectedCommit) fail("checked-out HEAD does not equal the fro
 if (tagCommit !== expectedCommit) fail("the release tag no longer points to the frozen release commit");
 if (eventSha !== tagObject && eventSha !== tagCommit) fail("the event SHA identifies neither the tag object nor its peeled commit");
 if (git("status", "--porcelain") !== "") fail("the exact-tag checkout is not clean");
+
+if (mainRef !== "" && !tag.startsWith("canary-")) {
+  try {
+    git("merge-base", "--is-ancestor", expectedCommit, mainRef);
+  } catch (error) {
+    if (error?.status === 1) fail(`the frozen release commit is not contained in ${mainRef}`);
+    fail(`the frozen release commit could not be checked against ${mainRef}`);
+  }
+}
 
 if (verifyRemote === "1") {
   let remoteOutput;

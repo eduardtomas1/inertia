@@ -5,6 +5,7 @@ import type { UsageLimitsService } from "../usage/limits-service";
 import { LimitResetScheduler } from "../usage/limit-reset-scheduler";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
+import { PROVIDER_CLEANUP_WAIT_MS } from "./turns/turn-admission-coordinator";
 
 export function createLimitResetRuntime(dependencies: TurnInteractionCommandDependencies, limits: UsageLimitsService,
   options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T> }) {
@@ -22,7 +23,7 @@ export function createLimitResetRuntime(dependencies: TurnInteractionCommandDepe
       dependencies.broadcastSnapshot();
     },
     dispatch: async (plan, guard) => {
-      if (!await dependencies.turns.waitForProviderCleanup([plan.conversationId], Date.now() + 30_000)) throw new RuntimeRequestError("The previous turn is still closing. Resume this chat manually.");
+      if (!await dependencies.turns.waitForProviderCleanup([plan.conversationId], Date.now() + PROVIDER_CLEANUP_WAIT_MS)) throw new RuntimeRequestError("The previous turn is still closing. Resume this chat manually.");
       guard();
       const handler = createTurnInteractionCommandHandler({ ...dependencies,
         limitResetDispatch: { planId: plan.id, assertCurrent: guard }, send: () => undefined });

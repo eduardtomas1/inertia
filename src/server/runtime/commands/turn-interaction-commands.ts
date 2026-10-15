@@ -47,6 +47,7 @@ import {
 import { ConversationContextService } from "../conversation-context-service";
 import { isUntitledConversationTitle, quickConversationTitle } from "../conversation-title";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 
 type MessageSendStage =
   | "conversation-state"
@@ -118,6 +119,7 @@ export interface TurnInteractionCommandDependencies {
     adopt(input: UndeliveredFollowUp): MessageQueueResult;
   };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
+  restartContinuationDispatch?: { planId: string; assertCurrent(): void };
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
@@ -156,6 +158,8 @@ export function createTurnInteractionCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "message.send": {
+        if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+        const scheduledDispatch = dependencies.limitResetDispatch ?? dependencies.restartContinuationDispatch;
         let messageSendStage: MessageSendStage = "conversation-state";
         let conversation: ReturnType<RuntimeStore["conversation"]>;
         let contextPacketIds: readonly string[] = [];
@@ -164,7 +168,7 @@ export function createTurnInteractionCommandHandler(
           conversation = dependencies.store.conversation(
             command.payload.conversationId,
           );
-          dependencies.limitResetDispatch?.assertCurrent();
+          scheduledDispatch?.assertCurrent();
           if (dependencies.queuedMessage && (
             dependencies.queuedMessage.conversationId !== conversation.id
             || conversation.archivedAt !== null
@@ -205,7 +209,7 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
-          if (dependencies.limitResetDispatch) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
+          if (scheduledDispatch) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
           messageSendStage = "follow-up-preparation";
           if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(
@@ -746,7 +750,7 @@ export function createTurnInteractionCommandHandler(
         let durableTurnPersisted = false;
         let deriveInitialTitle = false;
         try {
-          dependencies.limitResetDispatch?.assertCurrent();
+          scheduledDispatch?.assertCurrent();
           if (dependencies.queuedMessage) {
             const current = dependencies.store.conversation(conversation.id);
             const item = dependencies.store.queuedMessages.get(conversation.id, dependencies.queuedMessage.id);
@@ -763,6 +767,7 @@ export function createTurnInteractionCommandHandler(
             ? dependencies.turns.queue({
                 queuedMessageId: dependencies.queuedMessage?.id,
                 limitResetPlanId: dependencies.limitResetDispatch?.planId,
+                restartContinuationPlanId: dependencies.restartContinuationDispatch?.planId,
                 conversationId: conversation.id,
                 content: command.payload.content,
                 attachments,

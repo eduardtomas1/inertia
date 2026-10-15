@@ -1,7 +1,7 @@
 import type { ContinuationIdentity } from "../../../shared/model-routing";
 import type { HiddenProviderInstruction } from "./request-context";
 
-export const RUNTIME_INTERRUPTION_REASONS: readonly string[] = ["runtime-restart", "runtime-shutdown", "runtime-crash"];
+export const RUNTIME_INTERRUPTION_REASONS: readonly string[] = ["runtime-restart", "runtime-shutdown", "runtime-crash", "app-update"];
 export const MAX_RUNTIME_INTERRUPTION_ENTRIES = 10;
 const MAX_LABEL_CHARACTERS = 160;
 const MAX_NOTE_BYTES = 4 * 1024;

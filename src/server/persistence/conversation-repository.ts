@@ -18,6 +18,7 @@ import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
 import { WorkspacePathAuthority } from "../workspace-path-authority";
+import { QUICK_TITLE_SCANNED_CHARS, quickConversationTitle } from "../runtime/conversation-title";
 
 type ConversationPersistenceContext = Pick<
   PersistenceContext,
@@ -159,13 +160,26 @@ export class ConversationRepository {
       throw new Error("Wait for active work to finish before regenerating the title.");
     }
     const message = this.context.database.prepare(`
-      SELECT substr(content, 1, 512) AS content FROM messages
+      SELECT substr(content, 1, ?) AS content FROM messages
       WHERE conversation_id = ? AND role = 'user'
       ORDER BY created_at DESC, id DESC LIMIT 1
-    `).get(conversationId) as { content: string } | undefined;
-    const title = Array.from(message?.content.replace(/\s+/gu, " ").trim() ?? "").slice(0, 64).join("");
+    `).get(QUICK_TITLE_SCANNED_CHARS, conversationId) as { content: string } | undefined;
+    const content = message?.content ?? "";
+    const title = quickConversationTitle(content)
+      || Array.from(content.slice(0, 512).replace(/\s+/gu, " ").trim()).slice(0, 64).join("");
     if (!title) throw new Error("Send a text message before regenerating this thread's title.");
     this.update(conversationId, { title });
+  }
+
+  lockTitle(conversationId: string): void {
+    this.context.requireConversation(conversationId);
+    this.context.database.prepare("INSERT OR IGNORE INTO conversation_title_locks (conversation_id) VALUES (?)")
+      .run(conversationId);
+  }
+
+  titleLocked(conversationId: string): boolean {
+    return this.context.database.prepare("SELECT 1 FROM conversation_title_locks WHERE conversation_id = ?")
+      .get(conversationId) !== undefined;
   }
 
   firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null {

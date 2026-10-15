@@ -6,8 +6,8 @@ import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   PROVIDER_IDS,
   PROVIDER_INFO,
+  ProviderManager,
   type ProviderDetection,
-  type ProviderManager,
 } from "../../src/server/providers";
 import { createProviderInfoRefresh } from
   "../../src/server/provider/provider-info-refresh";
@@ -72,6 +72,7 @@ describe("provider info refresh ownership", () => {
         return await otherRead.promise;
       }),
       providerCapabilityContract: vi.fn(() => undefined),
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const published: ProviderInfo[][] = [];
     const activity = vi.fn();
@@ -128,6 +129,7 @@ describe("provider info refresh ownership", () => {
         return await finishBroadEnrichment.promise;
       }),
       providerCapabilityContract: vi.fn(() => undefined),
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const broadcastSnapshot = vi.fn(() => structuredClone(providerInfo));
     const refresh = createProviderInfoRefresh({
@@ -195,6 +197,7 @@ describe("provider info refresh ownership", () => {
       cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
       metadata,
       providerCapabilityContract: () => undefined,
+      metadataReadTimedOut: () => false,
     } as unknown as ProviderManager;
     const refresh = createProviderInfoRefresh({
       enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -217,6 +220,175 @@ describe("provider info refresh ownership", () => {
     expect(read).toHaveBeenCalledTimes(2);
     expect(providerInfo.find(({ id }) => id === "codex")).toMatchObject({
       models: [recoveredModel], metadataState: { models: { freshness: "fresh", refreshing: false } },
+    });
+  });
+
+  it("retries a failed catalog read in the background with a longer deadline", async () => {
+    let providerInfo = initialProviderSnapshots();
+    const recoveredModel = {
+      id: "recovered", label: "Recovered", description: "Fixture model",
+      isDefault: true, inputModalities: ["text" as const],
+      reasoningOptions: [], defaultReasoningEffort: "",
+    };
+    const deadlines: number[] = [];
+    const read = vi.fn(async (...args: unknown[]) => {
+      deadlines.push(args[6] as number);
+      if (deadlines.length === 1) throw new Error("Claude metadata discovery timed out.");
+      return { models: [recoveredModel] };
+    });
+    const cache = new ProviderMetadataCache({ read });
+    const detected = detection("claude", "1", "authenticated", true);
+    const providers = {
+      detect: vi.fn(async () => detected),
+      cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
+      metadata: vi.fn(async (id: ProviderInfo["id"], cwd: string, options: object) => (
+        await cache.metadata(id, detected.executable!, {}, cwd, options)
+      )),
+      metadataReadTimedOut: (id: ProviderInfo["id"]) => cache.lastReadTimedOut(id),
+      providerCapabilityContract: () => undefined,
+    } as unknown as ProviderManager;
+    const refresh = createProviderInfoRefresh({
+      enabled: true, providers, defaultWorkspacePath: "/workspace",
+      lifetimeSignal: new AbortController().signal,
+      providerInfo: () => providerInfo,
+      replaceProviderInfo: (value) => { providerInfo = value; },
+      broadcastSnapshot: vi.fn(), isClosed: () => false,
+      track: async (operation) => await operation(), onActivityChange: vi.fn(),
+      detectionRetryDelaysMs: [10, 10, 10],
+    });
+
+    await refresh("claude", true, true);
+    expect(providerInfo.find(({ id }) => id === "claude")).toMatchObject({ canRun: true, models: [] });
+
+    await vi.waitFor(() => {
+      expect(providerInfo.find(({ id }) => id === "claude")?.models).toMatchObject([recoveredModel]);
+    }, { timeout: 1_000 });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(deadlines[1]).toBeGreaterThan(deadlines[0]!);
+  });
+
+  it("reads a catalog that fails without timing out only once", async () => {
+    let providerInfo = initialProviderSnapshots();
+    const read = vi.fn(async () => { throw new Error("Claude metadata returned malformed data."); });
+    const cache = new ProviderMetadataCache({ read });
+    const detected = detection("claude", "1", "authenticated", true);
+    const providers = {
+      detect: vi.fn(async () => detected),
+      cachedMetadata: (id: ProviderInfo["id"]) => cache.current(id),
+      metadata: vi.fn(async (id: ProviderInfo["id"], cwd: string, options: object) => (
+        await cache.metadata(id, detected.executable!, {}, cwd, options)
+      )),
+      metadataReadTimedOut: (id: ProviderInfo["id"]) => cache.lastReadTimedOut(id),
+      providerCapabilityContract: () => undefined,
+    } as unknown as ProviderManager;
+    const track = vi.fn(async (operation: () => Promise<void>) => await operation());
+    const refresh = createProviderInfoRefresh({
+      enabled: true, providers, defaultWorkspacePath: "/workspace",
+      lifetimeSignal: new AbortController().signal,
+      providerInfo: () => providerInfo,
+      replaceProviderInfo: (value) => { providerInfo = value; },
+      broadcastSnapshot: vi.fn(), isClosed: () => false,
+      track, onActivityChange: vi.fn(),
+      detectionRetryDelaysMs: [10, 10, 10],
+    });
+
+    await refresh("claude", true, true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(track).toHaveBeenCalledOnce();
+    expect(providerInfo.find(({ id }) => id === "claude")).toMatchObject({ canRun: true, models: [] });
+  });
+
+  it("scales the catalog read deadline with the measured version probe latency", async () => {
+    let providerInfo = initialProviderSnapshots();
+    const empty = { models: [], rateLimits: [], metadataState: providerInfo[0]!.metadataState };
+    const providers = {
+      detect: vi.fn(async () => ({ ...detection("claude", "1", "authenticated", true), probeLatencyMs: 2_400 })),
+      cachedMetadata: vi.fn(() => empty),
+      metadata: vi.fn(async () => empty),
+      providerCapabilityContract: vi.fn(() => undefined),
+      metadataReadTimedOut: () => false,
+    } as unknown as ProviderManager;
+    const refresh = createProviderInfoRefresh({
+      enabled: true, providers, defaultWorkspacePath: "/workspace",
+      lifetimeSignal: new AbortController().signal,
+      providerInfo: () => providerInfo,
+      replaceProviderInfo: (value) => { providerInfo = value; },
+      broadcastSnapshot: vi.fn(), isClosed: () => false,
+      track: async (operation) => await operation(), onActivityChange: vi.fn(),
+    });
+
+    await refresh("claude", true, true);
+
+    expect(providers.metadata).toHaveBeenCalledWith("claude", "/workspace", expect.objectContaining({
+      force: true, timeoutMs: 28_800,
+    }));
+  });
+
+  describe("broad refreshes", () => {
+    function broadRuntime(detect: (providerId: ProviderInfo["id"]) => Promise<ProviderDetection>) {
+      let providerInfo = initialProviderSnapshots();
+      const lifetime = new AbortController();
+      const manager = ProviderManager.createForTests({
+        lifetimeSignal: lifetime.signal,
+        metadataCache: new ProviderMetadataCache({ read: async () => ({}) }),
+        detectProvider: async (providerId) => await detect(providerId),
+      });
+      const refresh = createProviderInfoRefresh({
+        enabled: true, providers: manager, defaultWorkspacePath: "/workspace",
+        lifetimeSignal: lifetime.signal,
+        providerInfo: () => providerInfo,
+        replaceProviderInfo: (value) => { providerInfo = value; },
+        broadcastSnapshot: vi.fn(), isClosed: () => lifetime.signal.aborted,
+        track: async (operation) => await operation(), onActivityChange: vi.fn(),
+      });
+      return {
+        refresh,
+        provider: (id: ProviderInfo["id"]) => providerInfo.find((candidate) => candidate.id === id)!,
+        close: () => lifetime.abort(new Error("The runtime is shutting down.")),
+      };
+    }
+    const absent = (providerId: ProviderInfo["id"]): ProviderDetection => ({
+      provider: PROVIDER_INFO[providerId], available: false, installState: "not-installed",
+      authState: "unknown", canRun: false, cleanupConfirmed: true, statusMessage: "CLI not found",
+    });
+
+    it("publishes each provider as soon as its own detection completes", async () => {
+      const slow = deferred<ProviderDetection>();
+      const runtime = broadRuntime(async (providerId) => providerId === "cursor"
+        ? await slow.promise
+        : providerId === "claude"
+          ? detection("claude", "2.1.200", "authenticated", true)
+          : absent(providerId));
+
+      const refreshing = runtime.refresh(undefined, true);
+      await vi.waitFor(() => {
+        expect(runtime.provider("claude")).toMatchObject({ authState: "authenticated", canRun: true });
+      }, { timeout: 1_000 });
+      expect(runtime.provider("cursor")).toMatchObject({ installState: "checking", authState: "checking" });
+      slow.resolve(absent("cursor"));
+      await refreshing;
+      expect(runtime.provider("cursor")).toMatchObject({ installState: "not-installed" });
+      runtime.close();
+    });
+
+    it("keeps every other provider's result when one provider's detection fails", async () => {
+      const runtime = broadRuntime(async (providerId) => {
+        if (providerId === "kimi") throw new Error("Injected Kimi discovery failure");
+        return providerId === "claude"
+          ? detection("claude", "2.1.200", "authenticated", true)
+          : absent(providerId);
+      });
+
+      await runtime.refresh(undefined, true).catch(() => undefined);
+
+      expect(runtime.provider("claude")).toMatchObject({ authState: "authenticated", canRun: true });
+      expect(runtime.provider("codex")).toMatchObject({ installState: "not-installed" });
+      expect(runtime.provider("kimi")).toMatchObject({
+        installState: "error", authState: "error", canRun: false, statusMessage: "Agent discovery failed",
+      });
+      runtime.close();
     });
   });
 
@@ -263,6 +435,7 @@ describe("provider info refresh ownership", () => {
         cachedMetadata: vi.fn(() => empty),
         metadata: vi.fn(async () => empty),
         providerCapabilityContract: vi.fn(() => undefined),
+        metadataReadTimedOut: () => false,
       } as unknown as ProviderManager;
       const refresh = createProviderInfoRefresh({
         enabled: true, providers, defaultWorkspacePath: "/workspace",
@@ -310,10 +483,12 @@ describe("provider info refresh ownership", () => {
         expect(runtime.codex()).toMatchObject({ version: "2", authState: "authenticated", canRun: true });
       });
       expect(runtime.detect).toHaveBeenCalledTimes(3);
-      for (const [providerId, options] of runtime.detect.mock.calls.slice(1) as unknown as Array<[string, { timeoutMs: number; refreshEnvironment: boolean }]>) {
-        expect(providerId).toBe("codex");
-        expect(options).toMatchObject({ timeoutMs: 4_000, refreshEnvironment: false });
-      }
+      const retries = runtime.detect.mock.calls.slice(1) as unknown as Array<[string, { timeoutMs: number; refreshEnvironment: boolean }]>;
+      expect(retries.map(([providerId]) => providerId)).toEqual(["codex", "codex"]);
+      expect(retries.map(([, options]) => options)).toMatchObject([
+        { timeoutMs: 8_000, refreshEnvironment: false },
+        { timeoutMs: 16_000, refreshEnvironment: false },
+      ]);
     });
 
     it("ends bounded background retries with an honest connection issue", async () => {
@@ -326,6 +501,8 @@ describe("provider info refresh ownership", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(runtime.detect).toHaveBeenCalledTimes(4);
+      expect(runtime.detect.mock.calls.map((call) => (call as unknown as [string, { timeoutMs: number }])[1].timeoutMs))
+        .toEqual([4_000, 8_000, 16_000, 16_000]);
       expect(runtime.codex()).toMatchObject({
         installState: "installed",
         canRun: false,

@@ -1711,6 +1711,26 @@ describe("server event remaining discriminant and identity boundary", () => {
       request,
     })).toThrow("Malformed server event");
   });
+  it("accepts a plan whose turn is outside the loaded page", () => {
+    const published = event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready",
+      detail: { ...conversationDetail, plans: [...conversationDetail.plans,
+        { ...conversationDetail.plans[0], runId: "run-older", turnId: "turn-older" }] },
+    });
+    expect(parseServerEvent(published)).toEqual(published);
+  });
+  it("rejects an off-page plan whose run belongs to a loaded turn", () => {
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready",
+      detail: { ...conversationDetail, plans: [{ ...conversationDetail.plans[0], turnId: "turn-older" }] },
+    }))).toThrow("Malformed server event");
+  });
+  it.each(["activities", "subagents", "reasonings"] as const)("rejects detail %s whose turn is outside the loaded page", (collection) => {
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready",
+      detail: { ...conversationDetail, [collection]: [{ ...conversationDetail[collection][0], turnId: "turn-older" }] },
+    }))).toThrow("Malformed server event");
+  });
   it("accepts cancelled plan steps and rejects unknown plan step statuses", () => {
     const plan = { ...conversationDetail.plans[0], steps: [{ step: "Inspect", status: "completed" }, { step: "Skip", status: "cancelled" }] };
     expect(parseServerEvent({ type: "agent.plan.updated", plan })).toMatchObject({ plan });

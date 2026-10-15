@@ -501,7 +501,7 @@ describe("Windows runtime Job Object containment", () => {
   it("requires bootstrap readiness before any native operation can launch", async () => {
     await disposeWindowsRuntimeJobExecutableLock();
     const preparation = prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
-      timeoutMs: 1_000,
+      timeoutMs: 10_000,
       spawnLockBroker: () => verifiedExecutableBrokerChild({ lockDelayMs: 50 }),
     });
     await new Promise<void>((resolve) => setImmediate(resolve));

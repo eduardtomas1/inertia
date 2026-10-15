@@ -185,24 +185,44 @@ export async function readClaudeAgentSdkMetadata(
       },
     });
     const usageReader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-    const timeout = new Promise<never>((_resolve, reject) => {
+    const reads = [
+      fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
+      fields.includes("rateLimits") && typeof usageReader === "function"
+        ? usageReader.call(query)
+        : Promise.resolve(undefined),
+      includeAccount && typeof query.accountInfo === "function" ? query.accountInfo() : Promise.resolve(undefined),
+    ] as const;
+    const answered: PromiseSettledResult<unknown>[] = reads.map(() => ({
+      status: "rejected",
+      reason: new Error("Claude metadata discovery timed out."),
+    }));
+    reads.forEach((read, index) => {
+      void (read as Promise<unknown>).then(
+        (value) => { answered[index] = { status: "fulfilled", value }; },
+        (reason: unknown) => { answered[index] = { status: "rejected", reason }; },
+      );
+    });
+    const timeout = new Promise<"timed-out">((resolve) => {
       timer = setTimeout(() => {
         abortController.abort();
-        reject(new Error("Claude metadata discovery timed out."));
+        resolve("timed-out");
       }, timeoutMs);
       timer.unref();
     });
-    const [modelsResult, limitsResult, accountResult] = await Promise.race([
-      Promise.allSettled([
-        fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
-        fields.includes("rateLimits") && typeof usageReader === "function"
-          ? usageReader.call(query)
-          : Promise.resolve(undefined),
-        includeAccount && typeof query.accountInfo === "function" ? query.accountInfo() : Promise.resolve(undefined),
-      ]),
-      timeout,
-      cancelled,
-    ]);
+    const settled = await Promise.race([Promise.allSettled(reads), timeout, cancelled]);
+    if (
+      settled === "timed-out"
+      && !(fields.includes("models") && answered[0]!.status === "fulfilled")
+    ) {
+      throw new Error("Claude metadata discovery timed out.");
+    }
+    const [modelsResult, limitsResult, accountResult] = (settled === "timed-out"
+      ? answered
+      : settled) as [
+      PromiseSettledResult<Awaited<typeof reads[0]>>,
+      PromiseSettledResult<Awaited<typeof reads[1]>>,
+      PromiseSettledResult<Awaited<typeof reads[2]>>,
+    ];
     metadata = {
       ...(accountResult.status === "fulfilled" && accountResult.value ? { account: { email: accountResult.value.email, organization: accountResult.value.organization, subscriptionType: accountResult.value.subscriptionType, apiProvider: accountResult.value.apiProvider } } : {}),
       ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
@@ -210,7 +230,7 @@ export async function readClaudeAgentSdkMetadata(
     };
     // Ordinary SDK control errors may yield partial metadata. Every request
     // has settled here, so these also finish through EOF instead of a stop.
-    completed = true;
+    completed = settled !== "timed-out";
   } finally {
     if (timer) clearTimeout(timer);
     if (completed && !abortController.signal.aborted && !ownedProcess.transportError()) {

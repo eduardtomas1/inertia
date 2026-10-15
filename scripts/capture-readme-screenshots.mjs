@@ -20,12 +20,113 @@ if (process.platform !== "darwin") throw new Error("README screenshots must be c
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const screenshotDirectory = join(repositoryRoot, "docs", "screenshots");
 const captureRoot = await mkdtemp(join(tmpdir(), "inertia-readme-capture-"));
-const workspaceDirectory = "/tmp/inertia-demo-workspace";
-const companionWorkspaceDirectory = "/tmp/inertia-demo-companion";
+const workspaceDirectory = "/tmp/fernway";
+const companionWorkspaceDirectory = "/tmp/fernway-api";
+const featureBranch = "shorter-signup";
 const dataDirectory = join(captureRoot, "data");
 const profileDirectory = join(captureRoot, "profile");
 const databasePath = join(dataDirectory, "inertia.sqlite");
 const providerBinDirectory = join(captureRoot, "provider-bin");
+const planSteps = [
+  "Combine the email and password screens",
+  "Save a draft after each step",
+  "Review keyboard access and both themes",
+];
+const planDocument = [
+  "# Plan: Three-step sign-up",
+  "",
+  "## Context",
+  "",
+  "Sign-up takes five screens today, and closing the tab loses every answer. Combine the first screens and keep a local draft until the email address is confirmed.",
+  "",
+  "## Steps",
+  "",
+  ...planSteps.map((step, index) => `${index + 1}. ${step}`),
+  "",
+  "## Checks",
+  "",
+  "- A returning visitor lands on the step they left.",
+  "- The draft is removed after confirmation.",
+].join("\n");
+const signupStepsBefore = [
+  "export const signupSteps = [",
+  '  { id: "email", title: "Your email" },',
+  '  { id: "password", title: "Choose a password" },',
+  '  { id: "profile", title: "About you" },',
+  '  { id: "interests", title: "Where do you like to go?" },',
+  '  { id: "confirm", title: "Confirm your account" },',
+  "] as const;",
+  "",
+  'export type SignupStepId = (typeof signupSteps)[number]["id"];',
+  "",
+].join("\n");
+const signupStepsAfter = [
+  "export const signupSteps = [",
+  '  { id: "account", title: "Create your account" },',
+  '  { id: "interests", title: "Where do you like to go?" },',
+  '  { id: "confirm", title: "Confirm your email" },',
+  "] as const;",
+  "",
+  'export type SignupStepId = (typeof signupSteps)[number]["id"];',
+  "",
+].join("\n");
+const signupDraftBefore = [
+  'import type { SignupStepId } from "./steps";',
+  "",
+  "export function clearDraft(): void {",
+  '  sessionStorage.removeItem("signup");',
+  "}",
+  "",
+].join("\n");
+const signupDraftAfter = [
+  'import type { SignupStepId } from "./steps";',
+  "",
+  'const draftKey = "fernway.signup-draft";',
+  "",
+  "export type Draft = {",
+  "  step: SignupStepId;",
+  "  answers: Record<string, string>;",
+  "};",
+  "",
+  "export function saveDraft(draft: Draft): void {",
+  "  const value = JSON.stringify(draft);",
+  "  localStorage.setItem(draftKey, value);",
+  "}",
+  "",
+  "export function clearDraft(): void {",
+  "  localStorage.removeItem(draftKey);",
+  "}",
+  "",
+].join("\n");
+const rateLimitBefore = [
+  "export const limits = {",
+  "  login: 10,",
+  "  signup: 5,",
+  "};",
+  "",
+].join("\n");
+const rateLimitAfter = [
+  "export const limits = {",
+  "  login: 10,",
+  "  signup: 5,",
+  "  bookings: 20,",
+  "};",
+  "",
+  'export const exemptRoutes = ["/webhooks/payments"];',
+  "",
+].join("\n");
+const showcaseTasks = [
+  {
+    title: "Fix the date picker on Safari",
+    note: "The return date resets when the month changes. Two customers reported it this week.",
+    priority: "urgent",
+    dueInDays: 1,
+  },
+  { title: "Write release notes for 2.4", note: "", priority: "high", dueInDays: 3 },
+  { title: "Review the trip links pull request", note: "", priority: "medium", dueInDays: null },
+  { title: "Refresh the App Store screenshots", note: "", priority: null, dueInDays: null },
+  { title: "Book the design review", note: "", priority: null, dueInDays: null, done: true },
+];
 let ownsWorkspace = false;
 let ownsCompanionWorkspace = false;
 let app;
@@ -55,6 +156,13 @@ async function capture(page, filename) {
   console.log(`Captured ${filename}`);
 }
 
+async function waitForBranchMenus(page, count) {
+  await page.waitForFunction(
+    (expected) => document.querySelectorAll("button.checkout-branch-button").length >= expected,
+    count,
+  );
+}
+
 async function closeWorkspaceTools(page) {
   const toggle = page.locator("[data-panel-layout-controls] [data-right-panel-toggle]");
   if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
@@ -78,6 +186,64 @@ async function selectWorkspaceSurface(page, name) {
   }
 }
 
+function localDate(daysFromToday) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromToday);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+async function git(cwd, args) {
+  const { stdout } = await execFileAsync("git", args, { cwd });
+  return stdout;
+}
+
+async function commitAll(cwd, message) {
+  await git(cwd, ["add", "."]);
+  await git(cwd, [
+    "-c",
+    "user.name=Fernway Team",
+    "-c",
+    "user.email=team@fernway.example",
+    "commit",
+    "-qm",
+    message,
+  ]);
+}
+
+async function writeWorkspaceFile(root, path, contents) {
+  await mkdir(join(root, path, ".."), { recursive: true });
+  await writeFile(join(root, path), contents, "utf8");
+}
+
+async function workingTreePatch(cwd) {
+  const text = await git(cwd, ["diff", "--no-color", "--no-ext-diff"]);
+  const numstat = await git(cwd, ["diff", "--numstat"]);
+  const files = numstat.trim().split("\n").map((line) => {
+    const [insertions, deletions, path] = line.split("\t");
+    return {
+      path,
+      previousPath: null,
+      status: "modified",
+      insertions: Number(insertions),
+      deletions: Number(deletions),
+      binary: false,
+      untracked: false,
+      staged: false,
+      unstaged: true,
+      indexStatus: ".",
+      worktreeStatus: "M",
+    };
+  });
+  return {
+    text,
+    files,
+    insertions: files.reduce((total, file) => total + file.insertions, 0),
+    deletions: files.reduce((total, file) => total + file.deletions, 0),
+  };
+}
+
 async function workspacePathReceipt(path) {
   const canonicalPath = await realpath(path);
   const info = await lstat(canonicalPath, { bigint: true });
@@ -96,7 +262,7 @@ async function workspacePathReceipt(path) {
   });
 }
 
-async function seedShowcaseData() {
+async function seedShowcaseData(patch, companionPatch) {
   const database = new Database(databasePath);
   const projectPathReceipt = await workspacePathReceipt(workspaceDirectory);
   const companionPathReceipt = await workspacePathReceipt(
@@ -118,6 +284,7 @@ async function seedShowcaseData() {
   const requestedAt = new Date(Date.now() - 70_000).toISOString();
   const startedAt = new Date(Date.now() - 69_500).toISOString();
   const assistantAt = new Date(Date.now() - 64_000).toISOString();
+  const companionAssistantAt = new Date(Date.now() - 66_000).toISOString();
   const completedAt = new Date(Date.now() - 63_000).toISOString();
   const modelSelection = {
     harnessId: "codex-app-server",
@@ -141,9 +308,9 @@ async function seedShowcaseData() {
   const workThreads = [
     {
       id: randomUUID(),
-      title: "Harden sent attachment recovery",
+      title: "Fix flaky checkout test",
       providerId: "claude",
-      branch: "codex/attachment-recovery",
+      branch: "fix/checkout-test",
       updatedAt: new Date(Date.now() - 15 * 60_000).toISOString(),
       selection: {
         ...modelSelection,
@@ -156,9 +323,9 @@ async function seedShowcaseData() {
     },
     {
       id: randomUUID(),
-      title: "Verify Environment actions",
+      title: "Add shareable trip links",
       providerId: "cursor",
-      branch: "codex/environment-panel",
+      branch: "trip-links",
       updatedAt: new Date(Date.now() - 55 * 60_000).toISOString(),
       selection: {
         ...modelSelection,
@@ -171,9 +338,9 @@ async function seedShowcaseData() {
     },
     {
       id: randomUUID(),
-      title: "Audit usage aggregation",
+      title: "Speed up itinerary search",
       providerId: "opencode",
-      branch: "codex/usage-dashboard",
+      branch: "search-perf",
       updatedAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
       selection: {
         ...modelSelection,
@@ -185,23 +352,22 @@ async function seedShowcaseData() {
       },
     },
   ];
-  const historicalPatch = [
-    "diff --git a/welcome.ts b/welcome.ts",
-    "--- a/welcome.ts",
-    "+++ b/welcome.ts",
-    "@@ -1 +1 @@",
-    "-export const welcome = 'calm and focused';",
-    "+export const welcome = 'calm, focused, and ready';",
-    "",
-  ].join("\n");
   const patchDigest = createHash("sha256")
-    .update(historicalPatch)
+    .update(patch.text)
+    .digest("hex");
+  const companionPatchDigest = createHash("sha256")
+    .update(companionPatch.text)
     .digest("hex");
   const artifactDirectory = join(dataDirectory, "turn-git-artifacts");
   await mkdir(artifactDirectory, { recursive: true, mode: 0o700 });
   await writeFile(
     join(artifactDirectory, `${patchDigest}.gz`),
-    gzipSync(Buffer.from(historicalPatch, "utf8"), { level: 9 }),
+    gzipSync(Buffer.from(patch.text, "utf8"), { level: 9 }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(artifactDirectory, `${companionPatchDigest}.gz`),
+    gzipSync(Buffer.from(companionPatch.text, "utf8"), { level: 9 }),
     { mode: 0o600 },
   );
   const models = [{
@@ -230,11 +396,11 @@ async function seedShowcaseData() {
   database.transaction(() => {
     database.prepare(`
       INSERT INTO projects (id, name, path, color, status, created_at, updated_at)
-      VALUES (?, 'Interface', ?, '#6f76d9', 'ready', ?, ?)
-    `).run(projectId, workspaceDirectory, now, now);
+      VALUES (?, 'Fernway', ?, '#6f76d9', 'ready', ?, ?)
+    `).run(projectId, workspaceDirectory, requestedAt, requestedAt);
     database.prepare(`
       INSERT INTO projects (id, name, path, color, status, created_at, updated_at)
-      VALUES (?, 'Runtime', ?, '#4f9f8c', 'ready', ?, ?)
+      VALUES (?, 'Fernway API', ?, '#4f9f8c', 'ready', ?, ?)
     `).run(
       companionProjectId,
       companionWorkspaceDirectory,
@@ -259,7 +425,7 @@ async function seedShowcaseData() {
         interaction_mode, access_mode, status, completed_at, last_viewed_at,
         created_at, updated_at
       ) VALUES (
-        ?, ?, 'Welcome to Inertia', 'codex', ?, NULL,
+        ?, ?, 'Simplify sign-up', 'codex', ?, NULL,
         'gpt-5.6-sol', 'high', 'build', 'supervised', 'completed', ?, ?, ?, ?
       )
     `).run(
@@ -278,7 +444,7 @@ async function seedShowcaseData() {
         interaction_mode, access_mode, status, completed_at, last_viewed_at,
         created_at, updated_at
       ) VALUES (
-        ?, ?, 'Review runtime safeguards', 'codex', ?, NULL,
+        ?, ?, 'Limit booking requests', 'codex', ?, NULL,
         'gpt-5.6-sol', 'high', 'build', 'supervised', 'idle', NULL, ?, ?, ?
       )
     `).run(
@@ -290,9 +456,9 @@ async function seedShowcaseData() {
       now,
     );
     database.prepare(`
-      UPDATE conversations SET branch = 'main'
+      UPDATE conversations SET branch = ?
       WHERE id = ?
-    `).run(conversationId);
+    `).run(featureBranch, conversationId);
     database.prepare(`
       UPDATE conversations SET branch = 'main'
       WHERE id = ?
@@ -324,6 +490,9 @@ async function seedShowcaseData() {
     database.prepare(`
       UPDATE app_state
       SET theme = 'dark',
+          default_provider = 'codex',
+          default_model = 'gpt-5.6-sol',
+          default_reasoning_effort = 'high',
           show_timestamps = 0,
           show_thinking = 1,
           show_usage = 1,
@@ -376,7 +545,7 @@ async function seedShowcaseData() {
     `).run(
       userMessageId,
       conversationId,
-      "Plan a focused pass to make the onboarding flow clearer.",
+      "Make sign-up shorter, and keep people's answers if they leave halfway through.",
       requestedAt,
       turnId,
     );
@@ -387,7 +556,7 @@ async function seedShowcaseData() {
     `).run(
       assistantMessageId,
       conversationId,
-      "The onboarding flow now brings you straight into your work. Projects stay close, and every chat keeps its own context.\n\n- **One place for your work.** Search conversations across projects, or narrow the list to a single repository.\n- **A quieter composer.** Keep the message in focus, with model and run settings a glance away.\n- **Room to compare.** Open a second chat beside the first without losing your place.\n\nThe changes are ready for a final visual pass in both themes.",
+      "Sign-up now takes three steps instead of five, and nobody loses their answers if they close the tab.\n\n- **Fewer steps.** Email and password now share the first screen, and the profile questions wait until after the first trip.\n- **Saved progress.** Each step saves a local draft, so returning visitors pick up where they left off.\n- **Clean finish.** The draft is cleared once the email address is confirmed.\n\nThe changes are ready for a keyboard and theme review.",
       assistantAt,
       turnId,
     );
@@ -398,7 +567,7 @@ async function seedShowcaseData() {
     `).run(
       companionUserMessageId,
       companionConversationId,
-      "Keep the runtime review independent from the interface chat.",
+      "Add rate limiting to booking requests without touching the payment webhooks.",
       requestedAt,
       companionTurnId,
     );
@@ -409,8 +578,8 @@ async function seedShowcaseData() {
     `).run(
       companionAssistantMessageId,
       companionConversationId,
-      "Each chat keeps its own workspace and provider context.\n\n- File changes stay with the selected checkout.\n- Running commands remain attached to their chat.\n- Drafts survive switching between panes.\n\nYou can review the interface here while the runtime work continues independently.",
-      assistantAt,
+      "Booking requests are now limited per account, and the payment webhooks are untouched.\n\n- `POST /bookings` allows 20 requests a minute for each account.\n- Sign-up and login keep their existing limits.\n- Webhook routes skip the limiter entirely.\n\nNew tests cover the limit, the reset window and the webhook exemption.",
+      companionAssistantAt,
       companionTurnId,
     );
     database.prepare(`
@@ -427,7 +596,7 @@ async function seedShowcaseData() {
       randomUUID(),
       conversationId,
       runId,
-      "Kept the plan scoped to the onboarding experience and preserved the existing workspace flow.",
+      "Kept the change to the sign-up screens and the draft helper.",
       completedAt,
       turnId,
     );
@@ -451,7 +620,7 @@ async function seedShowcaseData() {
         1, ?, ?
       )
     `).run(companionConversationId, now, companionTurnId);
-    database.prepare(`
+    const insertTurnArtifact = database.prepare(`
       INSERT INTO turn_git_artifacts (
         id, turn_id, conversation_id, run_id, repository_identity,
         worktree_identity, branch, before_checkpoint_id, before_ref, after_ref,
@@ -460,60 +629,51 @@ async function seedShowcaseData() {
         captured_at, terminal_assistant_message_id, failure_reason,
         created_at, updated_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, 'main', NULL, ?, ?, ?, ?, ?, 1, 1,
+        ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?,
         'ready', 'complete', 'available', ?, ?, ?, NULL, ?, ?
       )
-    `).run(
+    `);
+    insertTurnArtifact.run(
       randomUUID(),
       turnId,
       conversationId,
       runId,
-      createHash("sha256").update("inertia-readme-demo-repository").digest("hex"),
-      createHash("sha256").update("inertia-readme-demo-worktree").digest("hex"),
-      createHash("sha256").update("inertia-readme-demo-before-ref").digest("hex"),
-      createHash("sha256").update("inertia-readme-demo-after-ref").digest("hex"),
-      createHash("sha256").update("export const welcome = 'calm and focused';\n").digest("hex"),
-      createHash("sha256").update("export const welcome = 'calm, focused, and ready';\n").digest("hex"),
-      JSON.stringify([{
-        path: "welcome.ts",
-        previousPath: null,
-        status: "modified",
-        insertions: 1,
-        deletions: 1,
-        binary: false,
-        untracked: false,
-        staged: false,
-        unstaged: true,
-        indexStatus: ".",
-        worktreeStatus: "M",
-      }]),
+      createHash("sha256").update("fernway-repository").digest("hex"),
+      createHash("sha256").update("fernway-worktree").digest("hex"),
+      featureBranch,
+      createHash("sha256").update("fernway-before-ref").digest("hex"),
+      createHash("sha256").update("fernway-after-ref").digest("hex"),
+      createHash("sha256").update("fernway-before").digest("hex"),
+      createHash("sha256").update(patch.text).digest("hex"),
+      JSON.stringify(patch.files),
+      patch.insertions,
+      patch.deletions,
       patchDigest,
       completedAt,
       assistantMessageId,
       requestedAt,
       completedAt,
     );
-    database.prepare(`
-      INSERT INTO turn_git_artifacts (
-        id, turn_id, conversation_id, run_id, repository_identity,
-        worktree_identity, branch, before_checkpoint_id, before_ref, after_ref,
-        before_fingerprint, after_fingerprint, files_json, insertions,
-        deletions, status, completeness, patch_state, patch_digest,
-        captured_at, terminal_assistant_message_id, failure_reason,
-        created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, 'main', NULL, ?, ?, ?, ?, '[]', 0, 0,
-        'ready', 'complete', 'none', NULL, ?, ?, NULL, ?, ?
-      )
-    `).run(
-      randomUUID(), companionTurnId, companionConversationId, companionRunId,
-      createHash("sha256").update("demo-runtime-repo").digest("hex"),
-      createHash("sha256").update("demo-runtime-worktree").digest("hex"),
-      createHash("sha256").update("demo-before").digest("hex"),
-      createHash("sha256").update("demo-before").digest("hex"),
-      createHash("sha256").update("demo-clean").digest("hex"),
-      createHash("sha256").update("demo-clean").digest("hex"),
-      completedAt, companionAssistantMessageId, requestedAt, completedAt,
+    insertTurnArtifact.run(
+      randomUUID(),
+      companionTurnId,
+      companionConversationId,
+      companionRunId,
+      createHash("sha256").update("fernway-api-repository").digest("hex"),
+      createHash("sha256").update("fernway-api-worktree").digest("hex"),
+      "main",
+      createHash("sha256").update("fernway-api-before-ref").digest("hex"),
+      createHash("sha256").update("fernway-api-after-ref").digest("hex"),
+      createHash("sha256").update("fernway-api-before").digest("hex"),
+      createHash("sha256").update(companionPatch.text).digest("hex"),
+      JSON.stringify(companionPatch.files),
+      companionPatch.insertions,
+      companionPatch.deletions,
+      companionPatchDigest,
+      completedAt,
+      companionAssistantMessageId,
+      requestedAt,
+      completedAt,
     );
     database.prepare(`
       INSERT INTO agent_goals (
@@ -526,7 +686,7 @@ async function seedShowcaseData() {
       )
     `).run(
       conversationId,
-      "Keep delegated work truthful, focused, and ready for review",
+      "Ship a three-step sign-up that never loses progress",
       requestedAt,
       completedAt,
     );
@@ -538,12 +698,11 @@ async function seedShowcaseData() {
       conversationId,
       runId,
       turnId,
-      "A focused onboarding pass, with the final visual review still to do.",
-      JSON.stringify([
-        { step: "Simplify project navigation", status: "completed" },
-        { step: "Keep chat context independent in split view", status: "completed" },
-        { step: "Review keyboard access and both themes", status: "inProgress" },
-      ]),
+      planDocument,
+      JSON.stringify(planSteps.map((step, index) => ({
+        step,
+        status: index < 2 ? "completed" : "inProgress",
+      }))),
       completedAt,
     );
     const metadataScope = {
@@ -576,6 +735,25 @@ async function seedShowcaseData() {
       now,
       now,
     );
+    const insertTask = database.prepare(`
+      INSERT INTO todos (
+        id, title, note, priority, due_date, completed_at, conversation_id,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+    `);
+    showcaseTasks.forEach((task, index) => {
+      const createdAt = new Date(Date.now() - (60 - index) * 60_000).toISOString();
+      insertTask.run(
+        randomUUID(),
+        task.title,
+        task.note,
+        task.priority,
+        task.dueInDays === null ? null : localDate(task.dueInDays),
+        task.done ? completedAt : null,
+        createdAt,
+        task.done ? completedAt : createdAt,
+      );
+    });
   })();
   database.close();
   return {
@@ -596,41 +774,25 @@ try {
   ownsCompanionWorkspace = true;
   await mkdir(screenshotDirectory, { recursive: true });
   await mkdir(providerBinDirectory);
-  await writeFile(join(workspaceDirectory, "welcome.ts"), "export const welcome = 'calm and focused';\n", "utf8");
-  await writeFile(join(workspaceDirectory, "README.md"), "# Getting Started\n", "utf8");
-  await writeFile(
-    join(companionWorkspaceDirectory, "runtime.ts"),
-    "export const runtime = 'supervised';\n",
-    "utf8",
+  await writeWorkspaceFile(workspaceDirectory, "README.md", "# Fernway\n\nPlan trips with friends.\n");
+  await writeWorkspaceFile(workspaceDirectory, "src/signup/steps.ts", signupStepsBefore);
+  await writeWorkspaceFile(workspaceDirectory, "src/signup/draft.ts", signupDraftBefore);
+  await git(workspaceDirectory, ["init", "-q", "-b", "main"]);
+  await commitAll(workspaceDirectory, "Add the sign-up steps");
+  await git(workspaceDirectory, ["checkout", "-q", "-b", featureBranch]);
+  await writeWorkspaceFile(workspaceDirectory, "src/signup/steps.ts", signupStepsAfter);
+  await writeWorkspaceFile(workspaceDirectory, "src/signup/draft.ts", signupDraftAfter);
+  const patch = await workingTreePatch(workspaceDirectory);
+  await writeWorkspaceFile(companionWorkspaceDirectory, "README.md", "# Fernway API\n");
+  await writeWorkspaceFile(
+    companionWorkspaceDirectory,
+    "src/bookings/rateLimit.ts",
+    rateLimitBefore,
   );
-  await writeFile(
-    join(companionWorkspaceDirectory, "README.md"),
-    "# Runtime safeguards\n",
-    "utf8",
-  );
-  await execFileAsync("git", ["init", "-q", "-b", "main"], { cwd: workspaceDirectory });
-  await execFileAsync("git", ["add", "."], { cwd: workspaceDirectory });
-  await execFileAsync("git", ["-c", "user.name=Inertia Demo", "-c", "user.email=demo@inertia.local", "commit", "-qm", "Getting started"], { cwd: workspaceDirectory });
-  await writeFile(join(workspaceDirectory, "welcome.ts"), "export const welcome = 'calm, focused, and ready';\n", "utf8");
-  await execFileAsync("git", ["init", "-q", "-b", "main"], {
-    cwd: companionWorkspaceDirectory,
-  });
-  await execFileAsync("git", ["add", "."], {
-    cwd: companionWorkspaceDirectory,
-  });
-  await execFileAsync(
-    "git",
-    [
-      "-c",
-      "user.name=Inertia Demo",
-      "-c",
-      "user.email=demo@inertia.local",
-      "commit",
-      "-qm",
-      "Runtime safeguards",
-    ],
-    { cwd: companionWorkspaceDirectory },
-  );
+  await git(companionWorkspaceDirectory, ["init", "-q", "-b", "main"]);
+  await commitAll(companionWorkspaceDirectory, "Add request limits");
+  await writeWorkspaceFile(companionWorkspaceDirectory, "src/bookings/rateLimit.ts", rateLimitAfter);
+  const companionPatch = await workingTreePatch(companionWorkspaceDirectory);
 
   app = await launch();
   let page = await app.firstWindow();
@@ -638,16 +800,17 @@ try {
   await app.close();
   app = undefined;
 
-  await seedShowcaseData();
+  await seedShowcaseData(patch, companionPatch);
 
   app = await launch();
   page = await app.firstWindow();
-  await page.getByRole("heading", { name: "Welcome to Inertia", level: 1 }).waitFor();
+  await page.getByRole("heading", { name: "Simplify sign-up", level: 1 }).waitFor();
   await page.locator(".app-shell[data-runtime-generation]").waitFor();
   await sizeWindow();
   await page.locator('.app-shell[data-connection-status="online"]').waitFor();
   await closeWorkspaceTools(page);
   await page.getByRole("button", { name: "More Git actions", exact: true }).waitFor();
+  await waitForBranchMenus(page, 1);
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
   await page.getByRole("textbox", { name: "Message", exact: true }).fill("");
   await page.mouse.move(1100, 350);
@@ -655,7 +818,7 @@ try {
   await page.keyboard.press("Meta+K");
   await page.getByRole("combobox", {
     name: "Search commands, projects, chats, and messages",
-  }).fill("context");
+  }).fill("sign-up");
   await page.locator(".palette-message-snippet mark").first().waitFor();
   await capture(page, "inertia-message-search.png");
   await page.keyboard.press("Escape");
@@ -664,9 +827,7 @@ try {
   await tools.waitFor({ state: "visible" });
   const changesTab = tools.locator('[data-workspace-tab="changes"]');
   await selectWorkspaceSurface(page, "Changes");
-  await page.locator(".diff-line.is-addition").filter({
-    hasText: "export const welcome = 'calm, focused, and ready';",
-  }).first().waitFor();
+  await page.locator(".diff-line.is-addition").first().waitFor();
   const toolsResize = page.getByRole("separator", { name: "Resize workspace tools" });
   for (let step = 0; step < 6; step += 1) await toolsResize.press("Shift+ArrowLeft");
   await changesTab.click();
@@ -674,32 +835,54 @@ try {
   await capture(page, "inertia-git-workflow.png");
   await toolsResize.press("Enter");
   await selectWorkspaceSurface(page, "Goal");
-  await tools.getByText("Keep delegated work truthful, focused, and ready for review", { exact: true }).waitFor();
+  await tools.getByText("Ship a three-step sign-up that never loses progress", { exact: true }).waitFor();
   await tools.getByText("2 of 3 plan steps complete", { exact: true }).waitFor();
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-goals.png");
+  await selectWorkspaceSurface(page, "Plan");
+  const plan = tools.getByRole("region", { name: "Implementation plan" });
+  await plan.getByRole("heading", { level: 2, name: "Three-step sign-up" }).waitFor();
+  await plan.getByText("2 of 3 complete", { exact: true }).waitFor();
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-plan.png");
   await closeWorkspaceTools(page);
   await sidebar.getByRole("button", { name: "Filter work by project" }).click();
-  await page.getByRole("combobox", { name: "Search projects" }).fill("Interface");
+  await page.getByRole("combobox", { name: "Search projects" }).fill("Fernway");
   await capture(page, "inertia-project-picker.png");
   await page.keyboard.press("Escape");
   await page.getByRole("dialog", { name: "Choose project filter" }).waitFor({ state: "hidden" });
+  await sidebar.locator(".activity-thread-select").filter({
+    hasText: "Limit booking requests",
+  }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Add this chat to split view", exact: true }).click();
+  await page.getByRole("main", { name: "Split conversation workspace" }).waitFor();
+  await page.getByText("Webhook routes skip the limiter entirely.", { exact: true }).waitFor();
+  await waitForBranchMenus(page, 2);
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-split-workspace.png");
+  await page.getByRole("button", { name: "Close split chat Limit booking requests", exact: true }).click();
+  await sidebar.getByRole("button", { name: "Tasks", exact: true }).click();
+  const tasks = page.getByRole("main", { name: "Tasks" });
+  await tasks.getByRole("button", { name: /^Fix the date picker on Safari/u }).click();
+  const taskDetail = tasks.getByRole("complementary", { name: "Task details" });
+  await taskDetail.getByRole("group", { name: "Hand it to an agent" }).waitFor();
+  await taskDetail.getByText("GPT-5.6-Sol", { exact: true }).waitFor();
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.mouse.move(1100, 700);
+  await capture(page, "inertia-tasks.png");
+  await sidebar.locator(".activity-thread-select").filter({ hasText: "Simplify sign-up" }).click();
+  await page.getByRole("heading", { name: "Simplify sign-up", level: 1 }).waitFor();
   await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
   await page.getByRole("dialog", { name: "Add project" }).waitFor();
   await capture(page, "inertia-add-project.png");
   await page.getByRole("button", { name: "Close add project" }).click();
   await page.getByRole("dialog", { name: "Add project" }).waitFor({ state: "hidden" });
-  await sidebar.locator(".activity-thread-select").filter({
-    hasText: "Review runtime safeguards",
-  }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Add this chat to split view", exact: true }).click();
-  await page.getByRole("main", { name: "Split conversation workspace" }).waitFor();
-  await page.mouse.move(1100, 350);
-  await capture(page, "inertia-split-workspace.png");
-  await page.getByRole("button", { name: "Close split chat Review runtime safeguards", exact: true }).click();
   await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("radio", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: "More Git actions", exact: true }).waitFor();
+  await waitForBranchMenus(page, 1);
   await page.mouse.move(1100, 350);
   await capture(page, "inertia-light.png");
 

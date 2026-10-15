@@ -27,6 +27,7 @@ import { readOpenCodeSdkModels } from "./opencode-sdk-harness";
 import { readAntigravityModels } from "./antigravity-models";
 import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { RATE_LIMIT_TTL_MS } from "../runtime/provider-usage-refresh";
+import { slowMachineProbeDeadline } from "./probe-deadline";
 
 export type ProviderMetadataField = "models" | "rateLimits";
 
@@ -58,6 +59,7 @@ export interface ProviderMetadataScope {
 }
 
 export const PROVIDER_METADATA_CATALOG_MODEL_ID = "provider-catalog";
+export const PROVIDER_METADATA_TIMEOUT_MS = 6_000;
 
 export interface ProviderMetadataReadResult {
   models?: ProviderModel[];
@@ -98,6 +100,7 @@ export interface ProviderMetadataRequestOptions {
   force?: boolean;
   /** Cancels the provider read and drains its owned process tree before settling. */
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 interface CachedField<T> {
@@ -410,6 +413,15 @@ export function validateProviderRateLimits(value: unknown): ProviderRateLimit[] 
   }).slice(0, MAX_RATE_LIMITS);
 }
 
+function timedOut(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
+    if (/timed out/iu.test(current.message)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
 function timestamp(value: string | null): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -480,9 +492,10 @@ export async function readProviderMetadata(
   cwd: string,
   fields: readonly ProviderMetadataField[] = PROBE_FIELDS[providerId],
   signal?: AbortSignal,
+  timeoutMs = PROVIDER_METADATA_TIMEOUT_MS,
 ): Promise<ProviderMetadataReadResult> {
-  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, 6_000, fields, { signal });
-  if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, 6_000, undefined, fields, {}, signal);
+  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, timeoutMs, fields, { signal });
+  if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, timeoutMs, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
     return { models: await readOpenCodeSdkModels(executable, environment, cwd, { signal }) };
   }
@@ -496,6 +509,8 @@ export class ProviderMetadataCache {
   private readonly entries = new Map<string, CachedProviderMetadata>();
   private readonly nativeScopeKeys = new Map<ProviderId, string>();
   private readonly inFlight = new Map<string, InFlightRefresh>();
+  private readonly timedOutReads = new Set<string>();
+  private readonly probeLatencies = new Map<ProviderId, number>();
   private readonly persistence?: ProviderMetadataPersistence;
   private readonly reader: typeof readProviderMetadata;
   private readonly now: () => number;
@@ -520,6 +535,10 @@ export class ProviderMetadataCache {
 
   current(providerId: ProviderId): ProviderMetadata {
     return this.currentScoped(this.nativeScope(providerId));
+  }
+
+  lastReadTimedOut(providerId: ProviderId): boolean {
+    return this.timedOutReads.has(currentProviderMetadataScopeKey(this.nativeScope(providerId)));
   }
 
   processCleanupConfirmed(providerId?: ProviderId): boolean {
@@ -611,8 +630,15 @@ export class ProviderMetadataCache {
 
   correlate(
     providerId: ProviderId,
-    correlation: { executable: string | null; version: string | null; authState: ProviderAuthState },
+    { probeLatencyMs, ...correlation }: {
+      executable: string | null;
+      version: string | null;
+      authState: ProviderAuthState;
+      probeLatencyMs?: number;
+    },
   ): void {
+    if (probeLatencyMs === undefined) this.probeLatencies.delete(providerId);
+    else this.probeLatencies.set(providerId, probeLatencyMs);
     this.switchNativeScope(providerNativeMetadataScope(providerId, correlation));
   }
 
@@ -673,7 +699,10 @@ export class ProviderMetadataCache {
       entry.rateLimits.stale = false;
       learned = true;
     }
-    if (learned) entry.revision += 1;
+    if (learned) {
+      entry.revision += 1;
+      this.timedOutReads.delete(currentProviderMetadataScopeKey(scope));
+    }
     this.persist(entry);
     return this.currentScoped(scope);
   }
@@ -752,6 +781,10 @@ export class ProviderMetadataCache {
       fields,
       revision,
       options.signal,
+      options.timeoutMs ?? slowMachineProbeDeadline(
+        PROVIDER_METADATA_TIMEOUT_MS,
+        this.probeLatencies.get(scope.providerId),
+      ),
     )
       .finally(() => {
         if (this.inFlight.get(key)?.promise === promise) {
@@ -770,6 +803,7 @@ export class ProviderMetadataCache {
     fields: readonly ProviderMetadataField[],
     revision: number,
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<void> {
     const entry = this.entry(scope);
     const attemptedAt = this.now();
@@ -782,6 +816,7 @@ export class ProviderMetadataCache {
         cwd,
         fields,
         signal,
+        timeoutMs,
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {
@@ -789,6 +824,8 @@ export class ProviderMetadataCache {
       }
       if (signal?.aborted) return;
       if (entry.revision !== revision) return;
+      if (timedOut(error)) this.timedOutReads.add(currentProviderMetadataScopeKey(scope));
+      else this.timedOutReads.delete(currentProviderMetadataScopeKey(scope));
       for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
       for (const field of fields) if (entry[field].values.length > 0) entry[field].stale = true;
       this.persist(entry);
@@ -796,6 +833,7 @@ export class ProviderMetadataCache {
     }
     // The reader settled its owned process tree, so earlier doubt is lifted.
     this.cleanupUnconfirmedProviders.delete(scope.providerId);
+    this.timedOutReads.delete(currentProviderMetadataScopeKey(scope));
 
     if (entry.revision !== revision) return;
     for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;

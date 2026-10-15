@@ -188,6 +188,7 @@ function SidebarView({
   onRemoveProject,
   onUpdateProjectAppearance,
   appUpdate,
+  updateEverything,
   projectScopeId,
   onProjectScopeChange,
 }: SidebarProps): React.JSX.Element {
@@ -206,6 +207,7 @@ function SidebarView({
   const [initialSubmenu, setInitialSubmenu] = useState<"snooze" | undefined>();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const renameOriginalRef = useRef("");
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [doneVisible, setDoneVisible] = useState(INITIAL_DONE_VISIBLE);
@@ -677,6 +679,7 @@ function SidebarView({
         onSettleConversation={onSettleConversation}
         onSnoozeConversation={onSnoozeConversation}
         onStartRename={() => {
+          renameOriginalRef.current = conversation.title;
           setRenameDraft(conversation.title);
           setRenaming(conversation.id);
         }}
@@ -689,7 +692,8 @@ function SidebarView({
       className="conversation-rename"
       onSubmit={(event) => {
         event.preventDefault();
-        if (renameDraft.trim()) onRenameConversation(conversation, renameDraft.trim());
+        const title = renameDraft.trim();
+        if (title && title !== renameOriginalRef.current) onRenameConversation(conversation, title);
         setRenaming(null);
       }}
     >
@@ -1065,7 +1069,7 @@ function SidebarView({
           </IconButton>
           <SidebarHelpButton />
           {appUpdate && <Suspense fallback={<IconButton label="Loading application updates" className="sidebar-update-button" disabled><RefreshCw size={16} /></IconButton>}>
-            <SidebarUpdateControl controller={appUpdate} />
+            <SidebarUpdateControl controller={appUpdate} everything={updateEverything} snapshot={snapshot} />
           </Suspense>}
         </div>
       </aside>

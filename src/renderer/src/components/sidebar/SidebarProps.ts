@@ -10,6 +10,7 @@ import type { AppView } from "../../appView";
 import type { ProjectAppearanceUpdate } from "../ProjectCustomizePanel";
 import type { ConnectionStatus } from "../../hooks/useInertiaConnection";
 import type { AppUpdateController } from "../../hooks/useAppUpdate";
+import type { UpdateEverythingController } from "../../hooks/useUpdateEverything";
 
 export interface SidebarProps {
   snapshot: AppSnapshot | null;
@@ -18,6 +19,7 @@ export interface SidebarProps {
   open: boolean;
   busy: boolean;
   appUpdate?: AppUpdateController;
+  updateEverything?: UpdateEverythingController;
   layoutWidth: number;
   onClose: () => void;
   onViewChange: (view: AppView) => void;

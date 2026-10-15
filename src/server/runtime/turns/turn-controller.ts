@@ -77,14 +77,17 @@ import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
 import {
   TurnAdmissionCoordinator,
+  PROVIDER_CLEANUP_WAIT_MS,
   waitForProviderCleanupBarriers,
 } from "./turn-admission-coordinator";
 import { queuePairedTurns } from "./turn-paired-queue";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 import {
   adoptLiveTurn,
   settleQueuedAdoptionFailure,
 } from "./turn-live-adoption";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
+import { updateInterruptionMessage } from "./turn-update-interruption";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
@@ -543,6 +546,7 @@ export class TurnController {
     if (this.closing) {
       throw new RuntimeRequestError("The local runtime is shutting down.");
     }
+    if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     this.admissions.assertQueueAuthority(request.conversationId, admission);
     if (
       !request.goalStart
@@ -583,6 +587,7 @@ export class TurnController {
     launchId: string,
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
   ): [QueuedTurn, QueuedTurn] {
+    if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     return queuePairedTurns({
       store: this.store,
       providers: this.providers,
@@ -1004,6 +1009,16 @@ export class TurnController {
     if (!active || active.runState.isTerminal()) return false;
     requestProviderCancellation(this.providers, conversationId);
     return this.settle(active, "failed", "unsupported-interaction", message);
+  }
+
+  async interruptForUpdate(conversationIds: readonly string[], subject: string): Promise<boolean> {
+    for (const conversationId of conversationIds) {
+      const active = this.activeByConversation.get(conversationId);
+      if (!active || active.runState.isTerminal()) continue;
+      requestProviderCancellation(this.providers, conversationId);
+      this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id, subject));
+    }
+    return await this.waitForProviderCleanup(conversationIds, Date.now() + PROVIDER_CLEANUP_WAIT_MS);
   }
 
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {

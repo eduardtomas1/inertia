@@ -46,9 +46,9 @@ export interface ProviderMaintenanceProjection {
 }
 
 function statusMap(
-  snapshot: Pick<AppSnapshot, "providers"> | null,
+  providers: AppSnapshot["providers"] | undefined,
 ): Map<ProviderMaintenanceProviderId, ProviderMaintenanceStatus> {
-  return new Map((snapshot?.providers ?? []).flatMap(({ maintenance }) =>
+  return new Map((providers ?? []).flatMap(({ maintenance }) =>
     maintenance ? [[maintenance.providerId, maintenance] as const] : []));
 }
 
@@ -57,28 +57,28 @@ export function useProviderMaintenance(
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>,
   subscribe: (listener: (event: ServerEvent) => void) => () => void,
 ): ProviderMaintenanceProjection {
-  const [statuses, setStatuses] = useState(() => statusMap(snapshot));
+  const snapshotProviders = snapshot?.providers;
+  const snapshotOperations = snapshot?.maintenanceOperations;
+  const [statuses, setStatuses] = useState(() => statusMap(snapshotProviders));
   const [operations, setOperations] = useState(
-    () => providerMaintenanceOperationMap(snapshot?.maintenanceOperations),
+    () => providerMaintenanceOperationMap(snapshotOperations),
   );
 
   useEffect(() => {
-    const fromSnapshot = statusMap(snapshot);
+    const fromSnapshot = statusMap(snapshotProviders);
     if (fromSnapshot.size === 0) return;
     setStatuses((current) => new Map([...current, ...fromSnapshot]));
-  }, [snapshot]);
+  }, [snapshotProviders]);
 
   useEffect(() => {
-    const fromSnapshot = providerMaintenanceOperationMap(
-      snapshot?.maintenanceOperations,
-    );
+    const fromSnapshot = providerMaintenanceOperationMap(snapshotOperations);
     if (fromSnapshot.size === 0) return;
     setOperations((current) => new Map([...current, ...fromSnapshot]));
-  }, [snapshot]);
+  }, [snapshotOperations]);
 
   useEffect(() => subscribe((event) => {
     if (event.type === "server.welcome") {
-      setStatuses(statusMap(event.snapshot));
+      setStatuses(statusMap(event.snapshot.providers));
       setOperations(providerMaintenanceOperationMap(
         event.snapshot.maintenanceOperations,
       ));

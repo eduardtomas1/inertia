@@ -184,9 +184,11 @@ mascot follows several chats at once.
 - Migration 94 (`RecordAgentContextReads`) records the earlier turns agents
   read through the context tool, migration 95
   (`CompactConversationContextTransport`) rebuilds the context packets for
-  the smaller transport, migration 96 (`PersistTodos`) stores tasks, and
+  the smaller transport, migration 96 (`PersistTodos`) stores tasks,
   migration 97 (`PersistRestartContinuationPlans`) stores which chats an
-  update stopped and whether each has continued.
+  update stopped and whether each has continued, and migration 98
+  (`PersistConversationTitleLocks`) stores which chats keep their own title,
+  so a task chat or a regenerated title is not renamed after a restart.
 - Database backup checks also verify the context packet triggers that
   migration 95 recreates.
 - Quitting no longer hangs when the macOS keychain does not answer: Private

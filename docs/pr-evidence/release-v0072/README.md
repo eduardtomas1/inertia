@@ -32,8 +32,8 @@ and dependencies, and Fixes. It covers every change since `v0.0.71`
 
 Schemas 94 (`RecordAgentContextReads`) and 95
 (`CompactConversationContextTransport`), both from #597, 96 (`PersistTodos`,
-from #546) and 97 (`PersistRestartContinuationPlans`, from #608) are the
-release's migrations. This PR adds no migration of its own.
+from #546), 97 (`PersistRestartContinuationPlans`, from #608) and 98
+(`PersistConversationTitleLocks`, from this PR) are the release's migrations.
 
 ## Dependencies
 
@@ -162,12 +162,15 @@ test that failed on the unfixed code.
   `sidebar-work.dom.test.tsx`).
 - Tasks: start and folder picker failures reach the action error path
   (`tasks-view.dom.test.tsx`); a task deleted during start removes the empty
-  chat, and a queue failure keeps the prompt in the chat
+  chat, a link failure that removes the empty chat says the task could not be
+  handed to an agent, and a queue failure keeps the prompt in the chat
   (`todo-commands.test.ts`).
 - Titles: task and agent-created chats are locked against automatic naming,
   also after the task is deleted; **Regenerate title** uses the quick title
-  and is locked; Claude titles are read with the chat's own `dir`
-  (`conversation-title-service.test.ts`).
+  and is locked; the locks are persisted in migration 98, so they survive a
+  restart and go with the chat or project; Claude titles are read with the
+  chat's own `dir` (`conversation-title-service.test.ts`,
+  `conversation-title-locks.test.ts`).
 - Windows: a forced `taskkill` with no graceful phase gets the whole close
   budget instead of 2 s, so a slow Codex metadata read is kept
   (`process-lifecycle.test.ts`).
@@ -341,9 +344,11 @@ tag is the first run of these steps.
   `git-artifact-repository.ts`, `migrations/catalog.ts`,
   `migrations/recent-migrations.ts`,
   `migrations/restart-continuation-plans.ts`,
+  `migrations/conversation-title-locks.ts`,
   `restart-continuation-repository.ts`, `turn-ledger-repository.ts`,
   `types.ts`, `workspace-run-repository.ts`,
-  `database-migration-lineage.json`: migration 97 and the artifact backfill.
+  `database-migration-lineage.json`: migrations 97 and 98 and the artifact
+  backfill.
 - `src/server/runtime/update-everything.ts`, `update-hold.ts`,
   `restart-continuation-runtime.ts`, `restart-continuation-scheduler.ts`,
   `commands/turn-interaction-commands.ts`, `commands/updates-commands.ts`,

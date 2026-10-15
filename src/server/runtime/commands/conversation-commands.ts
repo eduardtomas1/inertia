@@ -166,7 +166,7 @@ export function createConversationCommandHandler(
           throw new RuntimeRequestError("Wait for active work to finish before regenerating the title.");
         }
         dependencies.store.regenerateConversationTitle(command.payload.conversationId);
-        dependencies.store.conversationTitleLocks.add(command.payload.conversationId);
+        dependencies.store.lockConversationTitle(command.payload.conversationId);
         return "mutation";
       case "conversation.create": {
         const conversation = await creation.create(

@@ -140,7 +140,7 @@ export function createConversationTitleRuntime(dependencies: {
     RuntimeStore,
     | "assertConversationProvider" | "conversation" | "firstUserMessage" | "updateConversation"
     | "conversationPath" | "cliConversationImport" | "todos" | "agentThreadManagement"
-    | "conversationTitleLocks"
+    | "conversationTitleLocked"
   >;
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
   backendProfileController: Pick<BackendProfileController, "isExternalSelection">;
@@ -152,7 +152,7 @@ export function createConversationTitleRuntime(dependencies: {
   return createConversationTitleService({
     conversation: (conversationId) => store.conversation(conversationId),
     firstUserMessage: (conversationId, maxChars) => store.firstUserMessage(conversationId, maxChars),
-    keepsOwnTitle: (conversationId) => store.conversationTitleLocks.has(conversationId)
+    keepsOwnTitle: (conversationId) => store.conversationTitleLocked(conversationId)
       || store.agentThreadManagement.managed(conversationId) !== null
       || store.todos.list().some((todo) => todo.conversationId === conversationId),
     updateTitle: (conversationId, title) => {

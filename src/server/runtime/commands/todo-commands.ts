@@ -92,7 +92,7 @@ export function createTodoCommandHandler(
         }
         throw error instanceof TodoRepositoryError ? error : unlinked;
       }
-      dependencies.store.conversationTitleLocks.add(conversation.id);
+      dependencies.store.lockConversationTitle(conversation.id);
       const content = todoPromptContent(linked);
       if (dependencies.enableProviders) {
         let queued: ReturnType<TodoCommandDependencies["turns"]["queue"]>;

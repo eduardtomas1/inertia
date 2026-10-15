@@ -90,7 +90,9 @@ export function createTodoCommandHandler(
         } catch {
           throw unlinked;
         }
-        throw error instanceof TodoRepositoryError ? error : unlinked;
+        throw error instanceof TodoRepositoryError
+          ? error
+          : new RuntimeRequestError("The task could not be handed to an agent.");
       }
       dependencies.store.lockConversationTitle(conversation.id);
       const content = todoPromptContent(linked);

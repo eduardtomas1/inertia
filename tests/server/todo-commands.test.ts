@@ -341,7 +341,7 @@ describe("todo command handler", () => {
 
     expect(events).toEqual([expect.objectContaining({
       type: "request.error",
-      message: "The chat was created, but the task could not be linked to it.",
+      message: "The task could not be handed to an agent.",
     })]);
     expect(order).toEqual(["verify", "snapshot", "request.error"]);
     expect(context.store.shellSnapshot().conversations).toEqual([]);

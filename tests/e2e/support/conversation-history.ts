@@ -21,8 +21,9 @@ export async function loadSeededConversationTurns(page: Page, expectedCount: num
   const earlier = page.getByRole("button", { name: "Load earlier messages", exact: true });
   const pagesMissing = await loadedCount() < expectedCount;
   if (pagesMissing) await readFromTranscriptStart(page);
-  for (let loadedPages = 0; loadedPages < 10 && await loadedCount() < expectedCount; loadedPages++) {
+  for (let loadedPages = 0; loadedPages < 10; loadedPages++) {
     const before = await loadedCount();
+    if (before >= expectedCount) break;
     await expect.poll(async () => {
       const count = await loadedCount();
       if (count === before && await earlier.isVisible()) await earlier.click({ timeout: 1_000 }).catch(() => undefined);

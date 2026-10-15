@@ -329,7 +329,7 @@ test("imports an archived rollout larger than the old 16 MiB limit with its open
   const earlier = app.page.getByRole("button", { name: "Load earlier messages", exact: true });
   await expect.poll(async () => {
     if (await note.count() === 1) return await note.innerText();
-    if (await earlier.isVisible()) await earlier.click();
+    if (await earlier.isVisible()) await earlier.click({ timeout: 1_000 }).catch(() => undefined);
     else await transcript.evaluate((element) => { element.scrollTop = element.scrollTop === 0 ? 1 : 0; });
     return null;
   }).toContain("Earlier messages were not imported: 762 of 962");

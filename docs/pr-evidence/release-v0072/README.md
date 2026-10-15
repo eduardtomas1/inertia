@@ -122,8 +122,8 @@ arm64 against a build of main:
 Every other cap is unchanged. `detachedChatFirstLoadJavaScript` and
 `coreJavaScript` grow by the same 596 bytes within their existing caps. The
 review found that #597 raised `coreJavaScript` and `entryCss` about 12.6 KB
-and 16 KB beyond their measured growth; they are re-baselined from a fresh
-build after the PERF branch merges.
+and 16 KB beyond their measured growth; they were re-baselined from a fresh
+build after the performance branch merged.
 
 Measured on the final merged tree (macOS arm64, bytes measured / cap):
 `mainWorkbenchFirstLoadJavaScript` 875,278 / 875,797;

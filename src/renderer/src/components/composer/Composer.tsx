@@ -458,6 +458,10 @@ export const Composer = memo(function Composer({
       setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
       return;
     }
+    if (running && contextPacketIds.length > 0) {
+      setAttachmentError("Follow-ups while the agent is working cannot include a referenced chat. Send this after the turn ends, or remove the reference.");
+      return;
+    }
     const request = running
       ? {
           visibleContent: message.trim(),

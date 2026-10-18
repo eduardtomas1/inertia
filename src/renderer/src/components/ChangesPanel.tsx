@@ -145,6 +145,14 @@ function noteControlLabel(action: "Edit" | "Delete", kind: string, note: DiffRev
   return `${action} ${kind}: ${body.length > 60 ? `${body.slice(0, 59)}…` : body}`;
 }
 
+function textlessChange(file: DiffFile): string {
+  if (file.binary) return "Binary file. No text diff to show.";
+  if (file.oldPath === "/dev/null") return "Empty file added.";
+  if (file.newPath === "/dev/null") return "Empty file deleted.";
+  if (file.oldPath !== file.newPath) return `Renamed from ${file.oldPath}. No text changes.`;
+  return "No text changes to show.";
+}
+
 const classificationLabels: Record<DiffReviewClassificationHint["classification"], string> = {
   "behavior-change": "Behavior change",
   "regression-risk": "Regression risk",
@@ -647,6 +655,7 @@ export function ChangesPanel({
                 ))}
                 {reviewLockReason && <p className="panel-notice diff-review-paused" role="status">{reviewLockMessages[reviewLockReason]}</p>}
                 {!selection && comment && <p className="panel-notice diff-review-held" role="status">The diff changed while it refreshed. Select lines again to continue your draft.</p>}
+                {selectedFile.hunks.length === 0 && <p className="panel-notice">{textlessChange(selectedFile)}</p>}
                 {selectedFile.hunks.map((hunk) => {
                   const shown = hunkMatchesFilter(selectedFile, hunk);
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);

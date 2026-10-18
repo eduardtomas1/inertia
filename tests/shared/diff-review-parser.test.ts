@@ -89,7 +89,7 @@ describe("unified diff parsing", () => {
       "gone.txt",
       "untracked.txt",
     ]);
-    expect(sha256(JSON.stringify(parseUnifiedDiff(representative)))).toBe("e671b5b9bf95b51c7268fc5f7647418cfaec78d95f5c291bd76996b1db60413b");
+    expect(sha256(JSON.stringify(parseUnifiedDiff(representative)))).toBe("6b322f3fdcec4691913afa9195c30f0c14f770f3d5ff6b94d00900c68fb5bbbf");
   });
 
   it("keeps a deleted line that starts with two dashes inside its hunk", () => {
@@ -185,5 +185,40 @@ describe("unified diff parsing", () => {
       oldPath: "café \"x\"\u0007.txt",
       newPath: "café \"x\"\u0007.txt",
     });
+  });
+
+  it("names binary, renamed, mode-only and empty files whose paths contain spaces", () => {
+    const patch = [
+      "diff --git a/mode file.sh b/mode file.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "diff --git a/my img.bin b/my img.bin",
+      "index 20b5be9..88f3700 100644",
+      "Binary files a/my img.bin and b/my img.bin differ",
+      "diff --git a/old name.txt b/new name.txt",
+      "similarity index 100%",
+      "rename from old name.txt",
+      "rename to new name.txt",
+      "diff --git \"a/caf\\303\\251 old.txt\" \"b/caf\\303\\251 new.txt\"",
+      "similarity index 100%",
+      "rename from \"caf\\303\\251 old.txt\"",
+      "rename to \"caf\\303\\251 new.txt\"",
+      "diff --git a/new image.bin b/new image.bin",
+      "new file mode 100644",
+      "Binary files /dev/null and b/new image.bin differ",
+      "diff --git a/empty file.txt b/empty file.txt",
+      "deleted file mode 100644",
+      "index e69de29..0000000",
+      "",
+    ].join("\n");
+
+    expect(parseUnifiedDiff(patch).files.map(({ path, oldPath, newPath, binary = false, hunks }) => [path, oldPath, newPath, binary, hunks.length])).toEqual([
+      ["mode file.sh", "mode file.sh", "mode file.sh", false, 0],
+      ["my img.bin", "my img.bin", "my img.bin", true, 0],
+      ["new name.txt", "old name.txt", "new name.txt", false, 0],
+      ["café new.txt", "café old.txt", "café new.txt", false, 0],
+      ["new image.bin", "/dev/null", "new image.bin", true, 0],
+      ["empty file.txt", "empty file.txt", "/dev/null", false, 0],
+    ]);
   });
 });

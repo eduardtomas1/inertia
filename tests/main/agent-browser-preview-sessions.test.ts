@@ -721,6 +721,19 @@ describe("conversation-owned Browser sessions", () => {
     expect(Reflect.get(children[0]!, "visible")).toBe(true);
   });
 
+  it("places the native page in window units when the app is zoomed", () => {
+    const { broker, children, window } = harness();
+    const owner = { ownerId: "primary", contextId: conversationId, connectionId };
+    window.webContents.getZoomFactor.mockReturnValue(1.2);
+    broker.connect(owner);
+
+    broker.setBounds({ ...owner, bounds: { x: 10, y: 20, width: 500, height: 300 } });
+    expect(Reflect.get(children[0]!, "bounds")).toEqual({ x: 12, y: 24, width: 600, height: 360 });
+
+    broker.setBounds({ ...owner, bounds: { x: 100, y: 50, width: 950, height: 640 } });
+    expect(Reflect.get(children[0]!, "bounds")).toEqual({ x: 120, y: 60, width: 1_080, height: 740 });
+  });
+
   it("names the exact reason page content is withheld", async () => {
     const { broker } = harness();
     await broker.navigate({

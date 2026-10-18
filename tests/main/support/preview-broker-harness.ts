@@ -368,7 +368,7 @@ export function createPreviewBrokerHarness(
         if (index >= 0) children.splice(index, 1);
       },
     },
-    webContents: { isDestroyed: () => false, send: vi.fn() },
+    webContents: { isDestroyed: () => false, send: vi.fn(), getZoomFactor: vi.fn(() => 1) },
     getContentBounds: () => ({ x: 0, y: 0, width: 1_200, height: 800 }),
   };
   const recordOperationFailure = vi.fn();

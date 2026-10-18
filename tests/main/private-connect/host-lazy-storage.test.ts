@@ -109,6 +109,25 @@ describe("Private Connect secure storage check", () => {
     await host.shutdown();
   });
 
+  it("checks secure storage again after a failed check instead of keeping the failure", async () => {
+    electron.isAsyncEncryptionAvailable.mockResolvedValueOnce(false);
+    const { host } = await launch(false);
+    const getState = electron.handlers.get(PRIVATE_CONNECT_IPC.getState)!;
+    const setEnabled = electron.handlers.get(PRIVATE_CONNECT_IPC.setEnabled)!;
+
+    await getState({});
+    await vi.waitFor(() => expect(host.state()).toMatchObject({
+      available: false,
+      statusMessage: "Secure platform storage is unavailable; Private Connect remains disabled.",
+    }));
+    expect(serviceFactory.create).not.toHaveBeenCalled();
+
+    await expect(Promise.resolve(setEnabled({}, { enabled: true }))).resolves.toMatchObject({ enabled: true });
+    expect(electron.isAsyncEncryptionAvailable).toHaveBeenCalledTimes(2);
+    expect(serviceFactory.create).toHaveBeenCalledOnce();
+    await host.shutdown();
+  });
+
   it("keeps a later first use closed while an update is being prepared", async () => {
     const { host } = await launch(false);
 

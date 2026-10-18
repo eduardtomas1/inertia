@@ -131,13 +131,14 @@ export class PrivateConnectHost {
   private async initialize(): Promise<void> {
     if (this.initialization) return this.initialization;
     if (this.stopped) return;
-    this.initialization = (async () => {
+    const initialization = (async () => {
       try {
         const migration = await this.migration;
-        const store = new PrivateConnectStore(
-          this.vaultPath(),
-          await createPrivateConnectStoreEncryption(safeStorage),
-        );
+        const encryption = await createPrivateConnectStoreEncryption(safeStorage);
+        if (!encryption.available()) {
+          throw new Error("Secure platform storage is unavailable; Private Connect remains disabled.");
+        }
+        const store = new PrivateConnectStore(this.vaultPath(), encryption);
         const service = await PrivateConnectService.create({
           store,
           runtime: this.options.runtime,
@@ -164,7 +165,9 @@ export class PrivateConnectHost {
         this.emitState(this.state());
       }
     })();
-    await this.initialization;
+    this.initialization = initialization;
+    await initialization;
+    if (!this.service && this.initialization === initialization) this.initialization = null;
   }
 
   private requireService(): PrivateConnectService {

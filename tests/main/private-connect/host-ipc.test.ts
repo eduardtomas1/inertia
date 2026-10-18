@@ -29,7 +29,7 @@ vi.mock("electron", () => ({
 }));
 
 vi.mock("../../../src/main/private-connect/store", () => ({
-  createPrivateConnectStoreEncryption: vi.fn(async () => ({})),
+  createPrivateConnectStoreEncryption: vi.fn(async () => ({ available: () => true })),
   PrivateConnectStore: class {},
 }));
 

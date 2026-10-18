@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useReducer, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useState, useSyncExternalStore } from "react";
 import {
   CircleCheck,
   CircleX,
@@ -37,6 +37,36 @@ const SETTLED_CUE_ICONS: Record<SettledCueStatus, LucideIcon> = {
 
 /** The label shows whole minutes, so a coarse refresh keeps it current. */
 const ELAPSED_REFRESH_MS = 15_000;
+
+const IDLE_REFRESH_MS = 60_000;
+const idleClockListeners = new Set<() => void>();
+let idleClockTimer = 0;
+
+function subscribeIdleClock(onChange: () => void): () => void {
+  idleClockListeners.add(onChange);
+  if (idleClockListeners.size === 1) {
+    idleClockTimer = window.setInterval(() => {
+      for (const listener of idleClockListeners) listener();
+    }, IDLE_REFRESH_MS);
+  }
+  return () => {
+    idleClockListeners.delete(onChange);
+    if (idleClockListeners.size === 0) window.clearInterval(idleClockTimer);
+  };
+}
+
+function idleClockMinute(): number {
+  return Math.floor(Date.now() / IDLE_REFRESH_MS);
+}
+
+function subscribeNothing(): () => void {
+  return () => undefined;
+}
+
+function useIdleClock(active: boolean): void {
+  const documentVisible = useDocumentVisibility();
+  useSyncExternalStore(active && documentVisible ? subscribeIdleClock : subscribeNothing, idleClockMinute);
+}
 
 /**
  * The status each thread was last shown with. Module scope keeps it across
@@ -102,6 +132,7 @@ export function WorkStatusCue({
   );
   const arrived = useStatusArrival(conversationId, status);
   useCoarseClock(status === "working" && workingSince !== null);
+  useIdleClock(status === "idle");
 
   if (status === "idle") {
     return (

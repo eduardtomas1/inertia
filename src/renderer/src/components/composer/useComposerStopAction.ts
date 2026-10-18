@@ -26,8 +26,8 @@ export function useComposerStopAction({
     };
   }, [conversationId, running]);
 
-  const stop = async (): Promise<void> => {
-    if (stopClaimRef.current || cancelling || !running) return;
+  const stop = async (): Promise<boolean> => {
+    if (stopClaimRef.current || cancelling || !running) return false;
     const claim = Symbol();
     stopClaimRef.current = claim;
     setPending(true);
@@ -42,8 +42,10 @@ export function useComposerStopAction({
       if (stopClaimRef.current === claim) {
         releaseTimerRef.current = window.setTimeout(release, COMPOSER_ACTION_STALE_FALLBACK_MS);
       }
+      return true;
     } catch {
       release();
+      return false;
     }
   };
   return { stopping: pending || cancelling, stopClaimRef, stop };

@@ -68,6 +68,7 @@ import {
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
 import { MainWindowCreation } from "./main-window-creation.js";
+import { createRendererCrashRecovery } from "./renderer-crash-recovery.js";
 import { registerEditContextMenu } from "./edit-context-menu.js";
 import { installApplicationMenu } from "./application-menu.js";
 import { validateDesktopAppUpdateCandidate } from "./app-update-candidate-viability.js";
@@ -810,9 +811,14 @@ async function createMainWindow(): Promise<void> {
   window.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) previewBroker.releaseSurfaces();
   });
+  const recoverRenderer = createRendererCrashRecovery({
+    canReload: () => !window.isDestroyed() && mainWindowCreation.allowsCreation(),
+    reload: () => window.webContents.reload(),
+  });
   window.webContents.on("render-process-gone", (_event, details) => {
     previewBroker.releaseSurfaces();
     runtimeDiagnostics?.record("renderer.crash", { reason: details.reason, exitCode: details.exitCode });
+    recoverRenderer(details);
   });
   hardenDesktopSession(window.webContents.session);
 
@@ -983,6 +989,7 @@ async function bootstrap(): Promise<void> {
   );
 
   registerRendererProtocol(releaseChannel.sessionPartition ? session.fromPartition(releaseChannel.sessionPartition).protocol : undefined);
+  mainWindowCreation.admit();
   const windowCreation = new DeferredWindowCreation(createWindow);
   const [, , attachmentStorage, conversationAttachmentStore] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),

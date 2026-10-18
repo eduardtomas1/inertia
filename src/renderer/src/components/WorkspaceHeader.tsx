@@ -39,6 +39,7 @@ import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { TooltipButton } from "./TooltipButton";
 import { IconButton } from "./ui";
+import { useFocusOutDismiss } from "./workspace-header/useFocusOutDismiss";
 
 const WorkspaceBranchMenu = lazy(() => import("./WorkspaceBranchMenu"));
 const WorkspaceHeaderActions = lazy(async () => ({
@@ -172,6 +173,11 @@ export function WorkspaceHeader({
   const [titleAnchor, setTitleAnchor] = useState<{ x: number; y: number } | null>(null);
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"overflow" | "title" | "branches">();
+  const overflowAnchorRef = useRef<HTMLDivElement>(null);
+  const branchAnchorRef = useRef<HTMLDivElement | null>(null);
+  const dismissOnFocusOut = useCallback(() => dismissMenu("context-change"), [dismissMenu]);
+  useFocusOutDismiss(overflowAnchorRef, menu === "overflow", dismissOnFocusOut);
+  useFocusOutDismiss(branchAnchorRef, menu === "branches", dismissOnFocusOut);
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const renameCommittedRef = useRef(false);
   const [actionsContainer] = useState(() => {
@@ -228,6 +234,10 @@ export function WorkspaceHeader({
   };
   const openBranches = (): void => {
     if (requestCheckoutBranchMenu()) return;
+    const quickAction = document.activeElement?.closest<HTMLButtonElement>('[data-header-menu="git"] .header-split-primary');
+    setMenuTrigger("branches", quickAction ?? headerRef.current?.querySelector<HTMLButtonElement>(collapsed
+      ? ".header-overflow-button"
+      : '[data-header-menu="git"] .header-split-chevron') ?? null);
     onRefreshBranches();
     if (menu !== "branches") toggleMenu("branches");
   };
@@ -405,7 +415,7 @@ export function WorkspaceHeader({
         {workspaceActions && (
           <>
             <div className="header-actions" ref={mountInlineActions} />
-            <div className="header-overflow-anchor" hidden={!collapsed}>
+            <div ref={overflowAnchorRef} className="header-overflow-anchor" hidden={!collapsed}>
               <IconButton
                 ref={(node) => setMenuTrigger("overflow", node)}
                 label="More header actions"
@@ -436,7 +446,10 @@ export function WorkspaceHeader({
         )}
         {showGit && menu === "branches" && project && (
           <div
-            ref={(node) => setMenuPopover("branches", node)}
+            ref={(node) => {
+              branchAnchorRef.current = node;
+              setMenuPopover("branches", node);
+            }}
             className="header-branch-anchor"
             data-header-menu="branch"
           >

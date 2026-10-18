@@ -208,6 +208,7 @@ function SidebarView({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const renameOriginalRef = useRef("");
+  const renameFocusRef = useRef<string | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [doneVisible, setDoneVisible] = useState(INITIAL_DONE_VISIBLE);
@@ -381,6 +382,7 @@ function SidebarView({
     updateWorkViewport,
     virtualizedWorkIndex,
     visibleWorkConversationIds,
+    retainFocusedWorkItem,
   ] = useSidebarWorkIndex({
     activeConversationId: snapshot?.activeConversationId ?? null,
     compact,
@@ -422,6 +424,12 @@ function SidebarView({
     renderedWorkConversationIds,
     virtualizedWorkIndex,
   ]);
+  useLayoutEffect(() => {
+    const conversationId = renameFocusRef.current;
+    if (renaming || !conversationId) return;
+    renameFocusRef.current = null;
+    focusWorkIdentity(`thread:${conversationId}`);
+  }, [focusWorkIdentity, renaming]);
   useLayoutEffect(() => {
     const identity = workFocusIdentityRef.current;
     if (!identity) return;
@@ -544,6 +552,11 @@ function SidebarView({
     workFocusIdentityRef.current = nextIdentity;
     workFocusIndexRef.current = nextIndex;
 
+  };
+
+  const endProjectRename = (): void => {
+    setRenamingProject(null);
+    sidebarRef.current?.querySelector<HTMLElement>(".project-scope-trigger")?.focus({ preventScroll: true });
   };
 
   const startProjectRename = (project: Project) => {
@@ -687,14 +700,19 @@ function SidebarView({
     );
   };
 
+  const endRename = (conversation: Conversation, save: boolean, refocus: boolean): void => {
+    const title = renameDraft.trim();
+    if (save && title && title !== renameOriginalRef.current) onRenameConversation(conversation, title);
+    if (refocus) renameFocusRef.current = conversation.id;
+    setRenaming(null);
+  };
+
   const renameForm = (conversation: Conversation) => (
     <form
       className="conversation-rename"
       onSubmit={(event) => {
         event.preventDefault();
-        const title = renameDraft.trim();
-        if (title && title !== renameOriginalRef.current) onRenameConversation(conversation, title);
-        setRenaming(null);
+        endRename(conversation, true, true);
       }}
     >
       <input
@@ -704,11 +722,14 @@ function SidebarView({
         data-work-focus-id={`thread:${conversation.id}`}
         aria-label={`Rename ${conversation.title}`}
         onChange={(event) => setRenameDraft(event.target.value)}
-        onBlur={() => setRenaming(null)}
+        onBlur={(event) => {
+          if (!document.hasFocus() || document.activeElement === event.currentTarget) return;
+          endRename(conversation, true, false);
+        }}
         onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.preventDefault(); event.stopPropagation();
-          setRenaming(null);
+          endRename(conversation, false, true);
         }}
       />
     </form>
@@ -828,7 +849,7 @@ function SidebarView({
             </span>
           </button>
         )}
-        {canOrganize && <div className="thread-inline-actions">
+        {canOrganize && <div className="thread-inline-actions" data-work-focus-owner={`thread-actions:${conversation.id}`}>
             <IconButton label="Snooze thread" aria-label={`Snooze ${conversation.title}`}
               onClick={(event) => {
                 preview.close(); setInitialSubmenu("snooze");
@@ -998,7 +1019,7 @@ function SidebarView({
             onSubmit={(event) => {
               event.preventDefault();
               if (projectRenameDraft.trim()) onRenameProject(activeRenameProject, projectRenameDraft.trim());
-              setRenamingProject(null);
+              endProjectRename();
             }}
           >
             <label htmlFor="sidebar-project-rename" className="visually-hidden">Rename project</label>
@@ -1006,7 +1027,7 @@ function SidebarView({
               <input id="sidebar-project-rename" value={projectRenameDraft} autoFocus maxLength={80} onChange={(event) => setProjectRenameDraft(event.target.value)} onKeyDown={(event) => {
                 if (event.key !== "Escape") return;
                 event.preventDefault(); event.stopPropagation();
-                setRenamingProject(null);
+                endProjectRename();
               }} />
               <button type="submit">Save</button>
             </span>
@@ -1047,6 +1068,7 @@ function SidebarView({
                     className="work-index-virtual-item"
                     key={rendered.item.id}
                     style={{ transform: `translateY(${start}px)` }}
+                    onFocusCapture={() => retainFocusedWorkItem(rendered.item.id)}
                   >
                     {renderWorkIndexItem(rendered.item)}
                   </div>

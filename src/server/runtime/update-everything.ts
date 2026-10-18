@@ -30,15 +30,19 @@ export interface UpdateEverythingDependencies {
   turns: UpdateInterruptionController;
   maintenance: Pick<ProviderMaintenanceController, "current" | "startUpdate" | "settled">;
   restartContinuation: RestartContinuationPlanner;
-  preparation: Pick<RuntimeUpdatePreparationGate, "isAdmissionClosed" | "restartBlockerBesidesAgentTurns">;
+  preparation: Pick<RuntimeUpdatePreparationGate, "isAdmissionClosed" | "restartBlockerBesidesAgentTurns" | "providerActivityBlocker">;
 }
 
-type RestartBlocker = NonNullable<ReturnType<RuntimeUpdatePreparationGate["restartBlockerBesidesAgentTurns"]>>;
+type RestartBlocker =
+  | NonNullable<ReturnType<RuntimeUpdatePreparationGate["restartBlockerBesidesAgentTurns"]>>
+  | NonNullable<ReturnType<RuntimeUpdatePreparationGate["providerActivityBlocker"]>>;
 
 const RESTART_BLOCKERS: Record<RestartBlocker, string> = {
   "database-recovery": "Wait for database recovery to finish before restarting.",
   "agent-work": "Wait for workspace runs to finish before restarting to update.",
   terminal: "Close active terminals before restarting to update.",
+  "provider-maintenance": "Wait for provider maintenance to finish before restarting.",
+  "provider-refresh": "Wait for provider checks to finish before restarting.",
 };
 
 const AGENT_WORK_DID_NOT_STOP = "Active agent work did not stop in time.";
@@ -135,13 +139,16 @@ export async function runUpdateEverything(
     for (const providerId of request.providerIds) {
       providers.push(await updateProvider(dependencies.maintenance, providerId));
     }
-    readyForAppInstall = request.includeApp && !blocker && stopped;
+    const restartBlocker = request.includeApp
+      ? blocker ?? dependencies.preparation.providerActivityBlocker()
+      : null;
+    readyForAppInstall = request.includeApp && !restartBlocker && stopped;
     return {
       kind: "updates.run",
       providers,
       interruptedConversationIds: conversationIds,
       readyForAppInstall,
-      appInstallBlocker: request.includeApp ? appInstallBlocker(blocker, stopped) : null,
+      appInstallBlocker: request.includeApp ? appInstallBlocker(restartBlocker, stopped) : null,
     };
   } finally {
     returned = true;

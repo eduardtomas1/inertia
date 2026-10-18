@@ -51,7 +51,7 @@ async function untrackedPreview(
     const content = file.content;
     if (content.includes(0)) {
       return {
-        text: `Binary file ${path} is untracked.\n`,
+        text: `diff --git a/${path} b/${path}\nnew file mode 100644\nBinary files /dev/null and b/${path} differ\n`,
         truncated: false,
       };
     }

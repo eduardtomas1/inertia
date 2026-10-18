@@ -65,5 +65,6 @@ export function formatFullDateTime(value: string): string {
 
 export function projectNameFromPath(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
-  return normalized.split(/[\\/]/).pop() || "Untitled project";
+  const name = (normalized.split(/[\\/]/).pop() ?? "").trim().slice(0, 80);
+  return name.replace(/[\uD800-\uDBFF]$/u, "").trimEnd() || "Untitled project";
 }

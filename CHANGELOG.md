@@ -2,7 +2,7 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.72 — 2026-10-13
+## 0.0.72 — 2026-10-18
 
 Keep a to-do list and hand any task to an agent, watch plan steps complete as
 the agent reports them, and get short chat names automatically. Turns start
@@ -200,6 +200,11 @@ mascot follows several chats at once.
 - The provider notice no longer stays on "Updating provider." after the
   update has finished.
 - The README shows the current interface, with new Tasks and Plan views.
+- A final review before release fixed follow-ups, **Update everything**, the
+  Browser, window startup and crash recovery, dialogs and shortcuts, keyboard
+  focus, provider launches and secret scrubbing, checkpoints and Git
+  operations, links, the terminal, sleep and clock changes, and long pastes
+  and attachments while a turn runs.
 - Release only: a release must be on main and must not change a migration
   released in an earlier version, Windows release builds warm Electron before
   the desktop benchmark and skip Microsoft Defender scans of the workspace,

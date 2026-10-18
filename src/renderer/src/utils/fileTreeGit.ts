@@ -1,4 +1,5 @@
 import type { ChangedFile, WorkspaceGitSnapshot } from "@shared/contracts";
+import { workspaceGitOpenFilePath } from "./workspaceGit";
 import { isSafeWorkspaceEntryPath, workspaceParentPath } from "./workspaceTree";
 
 // UI projection bounds are independent of the runtime's process/output bounds.
@@ -61,8 +62,8 @@ export function buildFileTreeGitIndex(state?: FileTreeGitState): FileTreeGitInde
     for (const file of repository.files) {
       if (++inspected > FILE_GIT_LIMITS.files) { limited = true; break; }
       if (!isSafeWorkspaceEntryPath(file.path)) { limited = true; continue; }
-      const path = root ? `${root}/${file.path}` : file.path;
-      if (path.length > 4_096 || owner(path) !== root) continue;
+      const path = workspaceGitOpenFilePath(repository, file.path);
+      if (path === null || path.length > 4_096 || owner(path) !== root) continue;
       const status = decoration(file);
       if (!status) { limited = true; continue; }
       files.set(path, status);

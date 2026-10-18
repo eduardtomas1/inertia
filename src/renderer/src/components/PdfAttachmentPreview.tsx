@@ -130,7 +130,7 @@ export function PdfAttachmentPreview({
         <button
           type="button"
           aria-label="Previous PDF page"
-          disabled={pageNumber <= 1}
+          aria-disabled={pageNumber <= 1 || undefined}
           onClick={() => setPageNumber((current) => Math.max(1, current - 1))}
         >
           <ChevronLeft size={14} aria-hidden="true" />
@@ -141,9 +141,10 @@ export function PdfAttachmentPreview({
         <button
           type="button"
           aria-label="Next PDF page"
-          disabled={pageCount === 0 || pageNumber >= pageCount}
-          onClick={() =>
-            setPageNumber((current) => Math.min(pageCount, current + 1))}
+          aria-disabled={pageCount === 0 || pageNumber >= pageCount || undefined}
+          onClick={() => {
+            if (pageCount > 0) setPageNumber((current) => Math.min(pageCount, current + 1));
+          }}
         >
           <ChevronRight size={14} aria-hidden="true" />
         </button>

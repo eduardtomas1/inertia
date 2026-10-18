@@ -11,6 +11,7 @@ import { Ellipsis, GitPullRequest, ShieldCheck } from "lucide-react";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { FocusFirstMenuItem } from "./workspace-header/FocusFirstMenuItem";
+import { useFocusOutDismiss } from "./workspace-header/useFocusOutDismiss";
 import { IconButton } from "./ui";
 import { HintButton } from "./HintButton";
 
@@ -110,6 +111,9 @@ export function RepositoryScopeActions({
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"more">();
   const moreTrigger = useRef<HTMLButtonElement | null>(null);
+  const moreAnchor = useRef<HTMLSpanElement>(null);
+  const dismissOnFocusOut = useCallback(() => dismissMenu("context-change"), [dismissMenu]);
+  useFocusOutDismiss(moreAnchor, menu === "more", dismissOnFocusOut);
   const items: RepositoryScopeAction[] = [
     ...(commitFolded ? [commit] : []),
     ...actions,
@@ -147,7 +151,7 @@ export function RepositoryScopeActions({
         </HintButton>
       )}
       {compact ? (
-        <span className="workspace-repository-more-anchor">
+        <span ref={moreAnchor} className="workspace-repository-more-anchor">
           <IconButton
             ref={(node) => {
               moreTrigger.current = node;

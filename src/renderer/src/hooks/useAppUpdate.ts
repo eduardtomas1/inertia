@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppUpdateStatus } from "@shared/desktop";
 
 const INITIAL_CHECK_DELAY_MS = 2_500;
+const AUTOMATIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+const AUTOMATIC_CHECK_POLL_MS = 60_000;
 
 export interface AppUpdateController {
   status: AppUpdateStatus | null;
@@ -53,11 +55,20 @@ export function useAppUpdate(): AppUpdateController {
     const unsubscribe = typeof subscribe === "function"
       ? subscribe(acceptStatus)
       : () => undefined;
-    const timer = window.setTimeout(() => {
-      void check(false).catch(() => undefined);
-    }, INITIAL_CHECK_DELAY_MS);
+    let lastCheckedAt: number | null = null;
+    const automaticCheck = (): void => {
+      void check(false).catch(() => undefined).finally(() => { lastCheckedAt = Date.now(); });
+    };
+    const checkWhenDue = (): void => {
+      if (lastCheckedAt === null) return;
+      const elapsed = Date.now() - lastCheckedAt;
+      if (elapsed < 0 || elapsed >= AUTOMATIC_CHECK_INTERVAL_MS) automaticCheck();
+    };
+    const timer = window.setTimeout(automaticCheck, INITIAL_CHECK_DELAY_MS);
+    const poll = window.setInterval(checkWhenDue, AUTOMATIC_CHECK_POLL_MS);
     return () => {
       window.clearTimeout(timer);
+      window.clearInterval(poll);
       unsubscribe();
     };
   }, [acceptStatus, check]);

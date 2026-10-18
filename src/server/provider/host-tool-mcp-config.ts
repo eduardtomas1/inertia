@@ -6,6 +6,11 @@ import {
   PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE,
   type ProviderHostToolMcpConnection,
 } from "./host-tool-mcp-http";
+import {
+  nodeRuntimeFileSystem,
+  nodeRuntimeOnPath,
+  type NodeRuntimeFileSystem,
+} from "./node-runtime";
 
 export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
@@ -74,6 +79,12 @@ process.stdin.on("data",chunk=>{
 process.stdin.on("end",()=>{if(pending.length>0||dropped)process.exitCode=1;});
 `;
 
+export interface HostMcpProxyRuntimeOptions {
+  platform?: NodeJS.Platform;
+  fileSystem?: NodeRuntimeFileSystem;
+  electronExecutable?: string;
+}
+
 function authorization(connection: ProviderHostToolMcpConnection): string {
   return `Bearer ${connection.bearerToken}`;
 }
@@ -81,6 +92,8 @@ function authorization(connection: ProviderHostToolMcpConnection): string {
 export function acpHostMcpServers(
   connection: ProviderHostToolMcpConnection,
   supportsHttp: boolean,
+  environment: NodeJS.ProcessEnv,
+  options: HostMcpProxyRuntimeOptions = {},
 ): McpServer[] {
   if (supportsHttp) {
     return [{
@@ -90,16 +103,31 @@ export function acpHostMcpServers(
       headers: [{ name: "Authorization", value: authorization(connection) }],
     }];
   }
+  const command = stdioProxyRuntime(environment, options);
+  if (!command) return [];
   return [{
     name: INERTIA_HOST_MCP_NAME,
-    command: process.execPath,
+    command,
     args: ["--no-warnings", "-e", STDIO_PROXY_SOURCE],
     env: [
       { name: INERTIA_HOST_MCP_URL_ENV, value: connection.url },
       { name: INERTIA_HOST_MCP_TOKEN_ENV, value: connection.bearerToken },
-      { name: "ELECTRON_RUN_AS_NODE", value: "1" },
     ],
   }];
+}
+
+function stdioProxyRuntime(
+  environment: NodeJS.ProcessEnv,
+  options: HostMcpProxyRuntimeOptions,
+): string | null {
+  const electronExecutable = options.electronExecutable
+    ?? (process.versions.electron ? process.execPath : undefined);
+  if (!electronExecutable) return process.execPath;
+  return nodeRuntimeOnPath(environment, {
+    platform: options.platform ?? process.platform,
+    fileSystem: options.fileSystem ?? nodeRuntimeFileSystem,
+    electronExecutable,
+  });
 }
 
 export function openCodeHostMcpConfig(

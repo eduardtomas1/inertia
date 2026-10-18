@@ -374,5 +374,58 @@ describe("Claude checklist projection", () => {
         { step: "Verify", status: "pending" },
       ]);
     });
+
+    it("keeps a resumed session's earlier plan until a TaskList result lists the whole checklist", async () => {
+      const root = portableFixtureRoot("Claude checklist after restart");
+      roots.push(root);
+      const harness = createClaudeAgentSdkHarness({
+        createQuery: () => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("init");
+          yield* [
+            toolUse("TaskUpdate", "update-1", { taskId: "1", status: "completed" }),
+            toolResult("update-1", { success: true, taskId: "1", updatedFields: ["status"] }),
+            toolUse("TaskCreate", "create-3", { subject: "Ship", description: "Ship" }),
+            toolResult("create-3", { task: { id: "3", subject: "Ship" } }),
+            toolUse("TaskList", "list-1", {}),
+            toolResult("list-1", { tasks: [
+              { id: "1", subject: "Inspect", status: "completed", blockedBy: [] },
+              { id: "2", subject: "Verify", status: "in_progress", blockedBy: [] },
+              { id: "3", subject: "Ship", status: "pending", blockedBy: [] },
+            ] }),
+            toolUse("TaskCreate", "create-4", { subject: "Announce", description: "Announce" }),
+            toolResult("create-4", { task: { id: "4", subject: "Announce" } }),
+          ] as unknown as SDKMessage[];
+          yield claudeSuccessResult("Done", "completed");
+        })()),
+      });
+      const manager = ProviderManager.createForTests(
+        { commands: { claude: process.execPath } },
+        new AgentHarnessRegistry([harness]),
+      );
+      const plans: AgentPlanStep[][] = [];
+      await expect(manager.run(nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-checklist-after-restart",
+        cwd: root,
+        prompt: "Continue",
+        interactionMode: "build",
+        access: "supervised",
+        sessionId: CLAUDE_PROTOCOL_SESSION_ID,
+      }), { onPlan: ({ steps }) => plans.push(steps) })).resolves.toMatchObject({ status: "completed" });
+
+      expect(plans).toEqual([
+        [
+          { step: "Inspect", status: "completed" },
+          { step: "Verify", status: "inProgress" },
+          { step: "Ship", status: "pending" },
+        ],
+        [
+          { step: "Inspect", status: "completed" },
+          { step: "Verify", status: "inProgress" },
+          { step: "Ship", status: "pending" },
+          { step: "Announce", status: "pending" },
+        ],
+      ]);
+    });
   });
 });

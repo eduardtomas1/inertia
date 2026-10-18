@@ -100,6 +100,7 @@ import type {
 import { IconButton, LoadingMark } from "./ui";
 import { loadResponseTimeline } from "./chatSurfaceLoaders";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
+import { composerFocusRestorer } from "../utils/composerFocusRestore";
 import "./ChatWorkspace.css";
 
 function StreamingResponseTimeline({
@@ -518,7 +519,8 @@ export function ChatWorkspace({
     }
   }, [conversation?.id, onStop, ownedMessages, stopOwner, stopTurn]);
   const stopTimeline = useCallback(() => {
-    void stopWithPromptRestore().catch(() => undefined);
+    const restoreFocus = composerFocusRestorer(document.activeElement);
+    void stopWithPromptRestore().then(restoreFocus, () => undefined);
   }, [stopWithPromptRestore]);
   const ownedActivities = recordsOwnedByConversation(activities, conversationId);
   const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);

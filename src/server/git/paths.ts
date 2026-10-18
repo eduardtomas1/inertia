@@ -442,6 +442,23 @@ export async function validatedPaths(
   paths: readonly string[],
   options: GitPathInspectionOptions = {},
 ): Promise<string[]> {
+  return await validatedRepositoryPaths(root, paths, options, true);
+}
+
+export async function validatedEntryPaths(
+  root: string,
+  paths: readonly string[],
+  options: GitPathInspectionOptions = {},
+): Promise<string[]> {
+  return await validatedRepositoryPaths(root, paths, options, false);
+}
+
+async function validatedRepositoryPaths(
+  root: string,
+  paths: readonly string[],
+  options: GitPathInspectionOptions,
+  followEntry: boolean,
+): Promise<string[]> {
   requirePathInspectionTime(options);
   if (paths.length === 0 || paths.length > MAX_DIFF_FILES) {
     throw new GitError(
@@ -471,9 +488,10 @@ export async function validatedPaths(
         "A selected file is outside the repository.",
       );
     }
+    const inspected = followEntry ? absolute : dirname(absolute);
     try {
       const canonical = await awaitPathInspection(
-        async () => await realpath(absolute),
+        async () => await realpath(inspected),
         options,
       );
       requirePathInspectionTime(options);
@@ -485,7 +503,7 @@ export async function validatedPaths(
       }
     } catch (error) {
       if (error instanceof GitError) throw error;
-      let ancestor = absolute;
+      let ancestor = inspected;
       while (ancestor !== root) {
         requirePathInspectionTime(options);
         try {

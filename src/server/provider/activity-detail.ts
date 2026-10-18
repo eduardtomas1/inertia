@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 
+import { scrubCommandSecrets } from "./command-secrets";
 import { boundedSubagentText, scrubSubagentSecrets } from "./subagent-trace";
 
 /** Maximum persisted technical detail for one provider activity. */
@@ -313,7 +314,7 @@ export function providerActivityDetailSections(options: {
   const output = officialToolResultText(options.output);
   const error = officialToolResultText(options.error);
   const sections = [
-    command ? `Command:\n${command}` : null,
+    command ? `Command:\n${scrubCommandSecrets(command)}` : null,
     output ? `Output:\n${output}` : null,
     error ? `Error:\n${error}` : null,
   ].filter((entry): entry is string => Boolean(entry));

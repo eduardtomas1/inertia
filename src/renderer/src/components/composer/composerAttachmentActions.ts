@@ -149,6 +149,12 @@ export function composerAttachmentActions({
   const selectionOwnsVisibleComposer = (): boolean =>
     mountedRef.current
     && attachmentAuthorityRef.current.conversationId === conversationId;
+  const reportTurnChanged = (attachments: readonly ChatAttachment[]): void => {
+    if (selectionOwnsVisibleComposer()
+      && attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) === "image")) {
+      setAttachmentError("The turn changed while the image was being added. Attach it again.");
+    }
+  };
   const actionBlocked = (): boolean =>
     submittingRef.current
     || attachmentImportingRef.current
@@ -174,6 +180,7 @@ export function composerAttachmentActions({
     authority: string,
   ): Promise<ComposerAttachmentAdoptionResult> => {
     if (!selectionRemainsAuthorized(authority)) {
+      reportTurnChanged(lease.attachments);
       await cancelPrivilegedLease(lease);
       return "cancelled";
     }
@@ -193,6 +200,7 @@ export function composerAttachmentActions({
         if (selectionOwnsVisibleComposer()) {
           setAttachments(() => next);
         }
+        reportTurnChanged(lease.attachments.filter(({ id }) => adopted.has(id)));
         for (const id of adoptedIds) void releaseAttachmentRef.current(id);
         return "cancelled";
       }

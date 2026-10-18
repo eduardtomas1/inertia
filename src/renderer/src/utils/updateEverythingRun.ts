@@ -45,36 +45,53 @@ async function downloadApp(): Promise<AppUpdateStatus> {
   return await settledDownload(started);
 }
 
-async function installApp(): Promise<boolean> {
+async function installApp(): Promise<string | null> {
   const result = await invoke(() => window.inertia.installAppUpdate(), "The update restart could not be started safely.");
-  return result.state === "installing" && result.installBlocker === null;
+  return result.state === "installing" && result.installBlocker === null ? null : result.message;
 }
 
-export async function runUpdateEverything({ payload, request, appStatus, onPhase }: {
+function providerFailures(
+  result: UpdatesRunResult,
+  providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>,
+): string[] {
+  return result.providers.flatMap(({ providerId, outcome, error }) => outcome !== "failed" ? []
+    : [`${providerLabels.get(providerId) ?? providerId} update failed${error ? `: ${error}` : "."}`]);
+}
+
+export async function runUpdateEverything({ payload, request, appStatus, providerLabels, onPhase }: {
   payload: UpdateEverythingRequest;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   appStatus: () => AppUpdateStatus | null;
+  providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>;
   onPhase: (phase: UpdateEverythingPhase) => void;
 }): Promise<string | null> {
   let app = payload.includeApp ? appStatus() : null;
+  let run = payload;
+  let download: string | null = null;
   if (app?.state === "available") {
     onPhase({ kind: "download" });
     app = await downloadApp();
-    if (app.state !== "downloaded") return null;
+    if (app.state !== "downloaded") {
+      download = app.message;
+      run = { ...payload, includeApp: false };
+    }
   }
-  onPhase({ kind: "providers", providerIds: payload.providerIds });
-  const result = updatesRunResult(await request({ type: "updates.run", payload }));
+  onPhase({ kind: "providers", providerIds: run.providerIds });
+  const result = updatesRunResult(await request({ type: "updates.run", payload: run }));
   let installed = false;
+  let refusal: string | null = null;
   let failure: unknown = null;
-  if (payload.includeApp && result.readyForAppInstall && app?.state === "downloaded") {
+  if (run.includeApp && result.readyForAppInstall && app?.state === "downloaded") {
     onPhase({ kind: "app" });
     try {
-      installed = await installApp();
+      refusal = await installApp();
+      installed = refusal === null;
     } catch (cause) {
       failure = cause;
     }
   }
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
-  return result.appInstallBlocker;
+  const appMessage = download ?? refusal ?? result.appInstallBlocker;
+  return [...providerFailures(result, providerLabels), ...(appMessage ? [appMessage] : [])].join(" ") || null;
 }

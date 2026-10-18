@@ -1,5 +1,6 @@
 import {
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
   rm,
@@ -58,6 +59,7 @@ function selectTaggedCheckpointPaths(
 }
 
 const isSkippedWorktreeTag = (tag: number): boolean => tag === 0x53;
+const isAnyTag = (): boolean => true;
 const isAssumedUnchangedTag = (tag: number): boolean =>
   tag >= 0x61 && tag <= 0x7a;
 
@@ -365,6 +367,67 @@ async function repositoryIndexPath(
     : null;
 }
 
+const CONTENT_CONVERSION_ATTRIBUTES = new Set([
+  "crlf",
+  "eol",
+  "filter",
+  "ident",
+  "text",
+  "working-tree-encoding",
+]);
+const DISABLED_AUTOCRLF_VALUES = new Set(["false", "no", "off", "0"]);
+
+async function repositoryConvertsContent(
+  repositoryPath: string,
+  paths: Buffer,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const autocrlf = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "config",
+        "--default",
+        "false",
+        "--get",
+        "core.autocrlf",
+      ]),
+      {},
+      undefined,
+      1024,
+      deadlineAt,
+      signal,
+    )
+  ).stdout.toString("utf8").trim().toLowerCase();
+  if (!DISABLED_AUTOCRLF_VALUES.has(autocrlf)) return true;
+  if (paths.length === 0) return false;
+  const attributes = await runBoundedGit(
+    repositoryPath,
+    checkpointGitArguments(["check-attr", "--all", "-z", "--stdin"]),
+    {
+      deadlineAt,
+      signal,
+      input: paths,
+      maxOutputBytes: 1024 * 1024,
+      truncateOutput: true,
+      timeoutMs: 20_000,
+      failureMessage: CHECKPOINT_FAILURE,
+    },
+  );
+  if (attributes.truncated) return true;
+  const fields = attributes.stdout.toString("utf8").split("\0");
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const value = fields[index + 2];
+    if (
+      CONTENT_CONVERSION_ATTRIBUTES.has(fields[index + 1]!)
+      && value !== "unset"
+      && value !== "unspecified"
+    ) return true;
+  }
+  return false;
+}
+
 async function reuseRepositoryIndex(
   repositoryPath: string,
   sourcePath: string,
@@ -389,6 +452,12 @@ async function reuseRepositoryIndex(
         signal,
       )
     ).stdout;
+    if (await repositoryConvertsContent(
+      repositoryPath,
+      selectTaggedCheckpointPaths(taggedPaths, isAnyTag),
+      deadlineAt,
+      signal,
+    )) return false;
     const assumedUnchanged = selectTaggedCheckpointPaths(
       taggedPaths,
       isAssumedUnchangedTag,
@@ -419,6 +488,88 @@ async function reuseRepositoryIndex(
     ) throw error;
     return false;
   }
+}
+
+async function nestedRepositoryHasCommit(
+  repositoryPath: string,
+  path: string,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const directory = resolve(repositoryPath, path);
+  try {
+    await runBoundedGit(
+      directory,
+      checkpointGitArguments([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "HEAD^{commit}",
+      ]),
+      {
+        deadlineAt,
+        signal,
+        environment: { GIT_DIR: join(directory, ".git") },
+        maxOutputBytes: 1024,
+        timeoutMs: 20_000,
+        failureMessage: CHECKPOINT_FAILURE,
+      },
+    );
+    return true;
+  } catch (error) {
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
+    if (error instanceof GitError && error.code === "timeout") {
+      throw new CheckpointError("Checkpoint operation timed out.");
+    }
+    return false;
+  }
+}
+
+export async function withoutUnbornNestedRepositoryDirectories(
+  repositoryPath: string,
+  paths: readonly string[],
+  options: CheckpointOperationOptions = {},
+): Promise<string[]> {
+  const kept: string[] = [];
+  for (const path of paths) {
+    const directory = await lstat(resolve(repositoryPath, path))
+      .then((entry) => entry.isDirectory(), () => false);
+    if (
+      !directory
+      || await nestedRepositoryHasCommit(
+        repositoryPath,
+        path,
+        options.deadlineAt,
+        options.signal,
+      )
+    ) kept.push(path);
+  }
+  return kept;
+}
+
+async function withoutUnbornNestedRepositories(
+  repositoryPath: string,
+  paths: Buffer,
+  options: CheckpointOperationOptions = {},
+): Promise<Buffer> {
+  const kept: Buffer[] = [];
+  let offset = 0;
+  while (offset < paths.length) {
+    const terminator = paths.indexOf(0, offset);
+    const end = terminator < 0 ? paths.length : terminator;
+    const path = paths.subarray(offset, end);
+    if (
+      path.at(-1) !== 0x2f
+      || await nestedRepositoryHasCommit(
+        repositoryPath,
+        path.toString("utf8"),
+        options.deadlineAt,
+        options.signal,
+      )
+    ) kept.push(path, NUL_BYTE);
+    offset = end + 1;
+  }
+  return Buffer.concat(kept);
 }
 
 /**
@@ -562,7 +713,7 @@ export async function createCheckpoint(
       options.deadlineAt,
       options.signal,
     );
-    const untrackedPaths = (
+    const untrackedListing = (
       await runGit(
         repositoryPath,
         checkpointGitArguments([
@@ -578,6 +729,11 @@ export async function createCheckpoint(
         options.signal,
       )
     ).stdout;
+    const untrackedPaths = await withoutUnbornNestedRepositories(
+      repositoryPath,
+      untrackedListing,
+      options,
+    );
     isolated = await checkpointEnvironment(
       repositoryPath,
       storageDirectory,
@@ -694,6 +850,33 @@ export async function createCheckpoint(
       await rm(isolated.globalConfigPath, { force: true })
         .catch(() => undefined);
     }
+  }
+}
+
+export async function assertCheckpointExists(
+  repositoryPath: string,
+  ref: string,
+  options: CheckpointOperationOptions = {},
+): Promise<void> {
+  const objectType = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "for-each-ref",
+        "--format=%(objecttype)",
+        ref,
+      ]),
+      {},
+      undefined,
+      1024,
+      options.deadlineAt,
+      options.signal,
+    )
+  ).stdout.toString("utf8").trim();
+  if (objectType !== "commit") {
+    throw new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    );
   }
 }
 
@@ -820,17 +1003,16 @@ export async function deleteCheckpoints(repositoryPath: string, conversationId: 
     join(tmpdir(), "inertia-checkpoint-hooks-"),
   );
   try {
-    await Promise.all(
-      refs.map((ref) => runGit(
-        repositoryPath,
-        checkpointGitArguments([
-          "-c",
-          `core.hooksPath=${hooksDirectory}`,
-          "update-ref",
-          "-d",
-          ref,
-        ]),
-      )),
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "-c",
+        `core.hooksPath=${hooksDirectory}`,
+        "update-ref",
+        "--stdin",
+      ]),
+      {},
+      Buffer.from(refs.map((ref) => `delete ${ref}\n`).join(""), "utf8"),
     );
   } finally {
     await rm(hooksDirectory, {

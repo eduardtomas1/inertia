@@ -226,8 +226,8 @@ export function ZoomableAttachmentImage({
         <button
           type="button"
           aria-label="Zoom out"
-          disabled={!zoomed}
-          onClick={() => zoomTo(steppedZoomScale(zoom.scale, -1))}
+          aria-disabled={!zoomed || undefined}
+          onClick={() => { if (zoomed) zoomTo(steppedZoomScale(zoom.scale, -1)); }}
         >
           <ZoomOut size={14} aria-hidden="true" />
         </button>
@@ -235,16 +235,16 @@ export function ZoomableAttachmentImage({
         <button
           type="button"
           aria-label="Zoom in"
-          disabled={zoom.scale >= IMAGE_ZOOM_MAX_SCALE}
-          onClick={() => zoomTo(steppedZoomScale(zoom.scale, 1))}
+          aria-disabled={zoom.scale >= IMAGE_ZOOM_MAX_SCALE || undefined}
+          onClick={() => { if (zoom.scale < IMAGE_ZOOM_MAX_SCALE) zoomTo(steppedZoomScale(zoom.scale, 1)); }}
         >
           <ZoomIn size={14} aria-hidden="true" />
         </button>
         <button
           type="button"
           aria-label="Reset zoom"
-          disabled={!zoomed}
-          onClick={reset}
+          aria-disabled={!zoomed || undefined}
+          onClick={() => { if (zoomed) reset(); }}
         >
           <RotateCcw size={14} aria-hidden="true" />
         </button>

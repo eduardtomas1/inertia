@@ -49,6 +49,16 @@ describe("bounded Git decorations in the Files editor", () => {
     expect(index.notice).toContain("partial");
   });
 
+  it("places a subfolder project's badges on its own tree paths and drops files outside it", () => {
+    const index = buildFileTreeGitIndex(state(snapshot([
+      repo(".", [file("app/src/edit.ts"), file("app/new.ts", "added"), file("docs/outside.md"), file("app-two/sibling.ts")], { workspacePrefix: "app" }),
+    ])));
+    expect([...index.files.keys()]).toEqual(["src/edit.ts", "new.ts"]);
+    expect(index.files.get("src/edit.ts")?.mark).toBe("M");
+    expect([...index.directories]).toEqual(["src"]);
+    expect(index.notice).toBe("");
+  });
+
   it("bounds oversized status projection and never treats missing badges as clean", () => {
     const files = Array.from({ length: FILE_GIT_LIMITS.files + 10 }, (_, i) => file(`file-${i}.ts`));
     const index = buildFileTreeGitIndex(state(snapshot([repo(".", files)])));

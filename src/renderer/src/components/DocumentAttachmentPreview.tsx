@@ -411,7 +411,7 @@ export function AttachmentPreviewDialog({
         <button
           type="button"
           className="secondary-button"
-          disabled={opening}
+          aria-disabled={opening || undefined}
           onClick={() => {
             if (opening) return;
             setOpenFailed(false);

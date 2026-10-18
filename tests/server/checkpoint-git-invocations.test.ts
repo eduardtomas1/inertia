@@ -38,7 +38,7 @@ vi.mock("../../src/server/git/runner", async (importOriginal) => {
   };
 });
 
-import { createCheckpoint } from "../../src/server/checkpoints";
+import { createCheckpoint, deleteCheckpoints } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { assertCheckpointPreservesIgnoredFiles } from "../../src/server/git/checkpoint-ignored-paths";
 import { GitError } from "../../src/server/git/types";
@@ -100,6 +100,44 @@ describe("checkpoint Git invocations", () => {
       ]));
     }
     expect(git(root, "show", `${checkpoint.ref}:untracked.txt`)).toBe("new");
+  });
+
+  it("reuses the repository index only while no path converts its content", async () => {
+    const { root, indexes } = repository();
+    git(root, "config", "core.autocrlf", "false");
+    writeFileSync(join(root, ".gitattributes"), "*.png binary\n*.ts diff=typescript\n");
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    const rebuilt = (): boolean => gitCalls.some((args) => args.includes("read-tree") && args.includes("--empty"));
+
+    await createCheckpoint(root, indexes, randomUUID());
+    expect(rebuilt()).toBe(false);
+
+    for (const configure of [
+      () => git(root, "config", "core.autocrlf", "input"),
+      () => writeFileSync(join(root, ".git", "info", "attributes"), "tracked.txt text\n"),
+      () => writeFileSync(join(root, ".gitattributes"), "*.txt filter=lfs\n"),
+    ]) {
+      git(root, "config", "core.autocrlf", "false");
+      writeFileSync(join(root, ".git", "info", "attributes"), "");
+      git(root, "checkout", "--", ".gitattributes");
+      configure();
+      gitCalls.splice(0);
+      await createCheckpoint(root, indexes, randomUUID());
+      expect(rebuilt()).toBe(true);
+    }
+  });
+
+  it("deletes a thread's checkpoints in one reference transaction", async () => {
+    const { root, indexes } = repository();
+    const conversationId = randomUUID();
+    for (let index = 0; index < 5; index += 1) await createCheckpoint(root, indexes, conversationId);
+    gitCalls.splice(0);
+
+    await deleteCheckpoints(root, conversationId);
+
+    expect(gitCalls.filter((args) => subcommand(args) === "update-ref")).toHaveLength(1);
+    expect(git(root, "for-each-ref", "--format=%(refname)", `refs/inertia/checkpoints/${conversationId}/`)).toBe("");
   });
 
   it("lists a wholly ignored directory once when checking a restore", async () => {

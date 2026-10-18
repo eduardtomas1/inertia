@@ -17,15 +17,29 @@ export function shiftPair(platform: NodeJS.Platform = process.platform): () => b
   throw new Error("unsupported");
 }
 
+export function parentLiveness(now: () => number = () => performance.now()): { beat(): void; lost(): boolean } {
+  let lastBeat = now();
+  let lastCheck = lastBeat;
+  return {
+    beat: () => { lastBeat = now(); },
+    lost: () => {
+      const at = now();
+      if (at - lastCheck > 1000) lastBeat = at;
+      lastCheck = at;
+      return at - lastBeat > 5000;
+    },
+  };
+}
+
 const parent = process.parentPort;
 if (parent) {
   try {
     const read = shiftPair();
     let active = false;
-    let lastBeat = Date.now();
-    parent.on("message", (event) => { if (event.data === "alive") lastBeat = Date.now(); });
+    const liveness = parentLiveness();
+    parent.on("message", (event) => { if (event.data === "alive") liveness.beat(); });
     setInterval(() => {
-      if (Date.now() - lastBeat > 5000) process.exit(0);
+      if (liveness.lost()) process.exit(0);
       const pressed = read();
       if (pressed && !active) parent.postMessage("trigger");
       active = pressed;

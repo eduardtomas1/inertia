@@ -136,6 +136,37 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "staged.txt"), "utf8")).toBe("later unstaged bytes of staged file\n");
   });
 
+  it.each([false, true])("says a deleted checkpoint is gone without recording a recovery (ignored files: %s)", async (ignoredFiles) => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "update-ref", "-d", captured.ref);
+    if (ignoredFiles) {
+      writeFileSync(join(root, ".gitignore"), "local.env\n");
+      writeFileSync(join(root, "local.env"), "SECRET=1\n");
+    }
+    writeFileSync(join(root, "tracked.txt"), "valuable edits\n");
+    const checkpoint: CheckpointSummary = {
+      ...captured, conversationId, label: "Before turn 1", turnId: null,
+      turnIndex: 1, filesChanged: 0, insertions: 0, deletions: 0,
+      createdAt: new Date().toISOString(),
+    };
+    const saved: unknown[] = [];
+
+    await expect(restoreConversationCheckpoint({
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: (input) => {
+        saved.push(input);
+        return { ...input, id: randomUUID(), turnId: null, createdAt: new Date().toISOString() };
+      },
+    }, checkpoint, () => undefined)).rejects.toEqual(new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    ));
+    expect(saved).toEqual([]);
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("valuable edits\n");
+  });
+
   it("refuses to overwrite ignored files that cannot be recovered", async () => {
     const root = repository();
     const conversationId = randomUUID();
@@ -469,6 +500,78 @@ describe("Git checkpoints", () => {
     expect(existsSync(smudgeMarker)).toBe(false);
   });
 
+  function settleIndex(root: string, path: string): void {
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(join(root, path), past, past);
+    git(root, "update-index", "--refresh");
+    expect(git(root, "status", "--porcelain")).toBe("");
+  }
+
+  it("checkpoints and restores the raw bytes of an untouched file under core.autocrlf", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    git(root, "config", "core.autocrlf", "true");
+    const crlf = Buffer.from("first line\r\nsecond line\r\n");
+    writeFileSync(join(root, "windows.txt"), crlf);
+    git(root, "add", "windows.txt");
+    git(root, "commit", "-m", "crlf");
+    settleIndex(root, "windows.txt");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(root, indexes, conversationId);
+
+    expect(execFileSync("git", ["cat-file", "blob", `${checkpoint.ref}:windows.txt`], { cwd: root }))
+      .toEqual(crlf);
+    writeFileSync(join(root, "windows.txt"), "agent edit\r\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(join(root, "windows.txt"))).toEqual(crlf);
+  });
+
+  it("checkpoints and restores the raw bytes of an untouched file behind a clean and smudge filter", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const store = join(indexes, "large-object");
+    const cleanFilter = join(indexes, "pointer-clean.cjs");
+    const smudgeFilter = join(indexes, "pointer-smudge.cjs");
+    writeFileSync(cleanFilter, [
+      'const { writeFileSync } = require("node:fs");',
+      "const chunks = [];",
+      'process.stdin.on("data", (chunk) => chunks.push(chunk));',
+      'process.stdin.on("end", () => {',
+      `  writeFileSync(${JSON.stringify(store)}, Buffer.concat(chunks));`,
+      '  process.stdout.write("pointer\\n");',
+      "});",
+      "",
+    ].join("\n"));
+    writeFileSync(smudgeFilter, [
+      'const { readFileSync } = require("node:fs");',
+      'process.stdin.on("data", () => undefined);',
+      `process.stdin.on("end", () => process.stdout.write(readFileSync(${JSON.stringify(store)})));`,
+      "",
+    ].join("\n"));
+    git(root, "config", "filter.fake.clean", nodeFilterCommand(cleanFilter));
+    git(root, "config", "filter.fake.smudge", nodeFilterCommand(smudgeFilter));
+    git(root, "config", "filter.fake.required", "true");
+    writeFileSync(join(root, ".gitattributes"), "*.bin filter=fake\n");
+    const asset = Buffer.from([0, 1, 2, 3, 0xff]);
+    writeFileSync(join(root, "asset.bin"), asset);
+    git(root, "add", ".gitattributes", "asset.bin");
+    git(root, "commit", "-m", "asset");
+    expect(git(root, "cat-file", "blob", "HEAD:asset.bin")).toBe("pointer");
+    settleIndex(root, "asset.bin");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(root, indexes, conversationId);
+
+    expect(execFileSync("git", ["cat-file", "blob", `${checkpoint.ref}:asset.bin`], { cwd: root }))
+      .toEqual(asset);
+    writeFileSync(join(root, "asset.bin"), "agent edit\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(join(root, "asset.bin"))).toEqual(asset);
+  });
+
   it("does not run repository reference hooks for checkpoint refs", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
@@ -492,6 +595,24 @@ describe("Git checkpoints", () => {
 
     await deleteCheckpoints(root, conversationId);
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it("deletes every packed checkpoint of a long thread and keeps other threads", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const otherConversationId = randomUUID();
+    const head = git(root, "rev-parse", "HEAD");
+    const refs = Array.from({ length: 150 }, () => `refs/inertia/checkpoints/${conversationId}/${randomUUID()}`);
+    const kept = `refs/inertia/checkpoints/${otherConversationId}/${randomUUID()}`;
+    execFileSync("git", ["update-ref", "--stdin"], {
+      cwd: root,
+      input: [...refs, kept].map((ref) => `create ${ref} ${head}\n`).join(""),
+    });
+    git(root, "pack-refs", "--all");
+
+    await deleteCheckpoints(root, conversationId);
+
+    expect(git(root, "for-each-ref", "--format=%(refname)", "refs/inertia/checkpoints/")).toBe(kept);
   });
 
   it("preserves repository and configured excludes without enabling filters", async () => {
@@ -581,6 +702,30 @@ describe("Git checkpoints", () => {
 
     expect(git(root, "show", `${checkpoint.ref}:tracked.txt`)).toBe("hidden edit");
     expect(git(root, "ls-files", "-v", "tracked.txt")).toBe("h tracked.txt");
+  });
+
+  it("checkpoints around an untracked nested repository that has no commit", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    git(root, "init", "-q", "tools/empty");
+    writeFileSync(join(root, "tools", "empty", "draft.txt"), "draft\n");
+    git(root, "init", "-q", "tools/born");
+    git(join(root, "tools", "born"), "-c", "user.name=Inertia Test", "-c", "user.email=test@inertia.local",
+      "commit", "-q", "--allow-empty", "-m", "born");
+    writeFileSync(join(root, "tracked.txt"), "edit\n");
+    writeFileSync(join(root, "new.txt"), "new\n");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(root, indexes, conversationId);
+
+    expect(git(root, "ls-tree", "-r", "--name-only", checkpoint.ref).split("\n").sort())
+      .toEqual(["new.txt", "tools/born", "tracked.txt"]);
+    expect(git(root, "show", `${checkpoint.ref}:tracked.txt`)).toBe("edit");
+    writeFileSync(join(root, "tracked.txt"), "later\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("edit\n");
+    expect(readFileSync(join(root, "tools", "empty", "draft.txt"), "utf8")).toBe("draft\n");
   });
 
   it("captures a repository that uses a split index", async () => {

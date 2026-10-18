@@ -250,7 +250,7 @@ describe("update everything mode in the sidebar", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("Inertia 1.2.2 → 1.2.3");
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Update" })));
-    expect(everything.run).toHaveBeenCalledExactlyOnceWith({ providerIds: ["codex"], includeApp: true, continueChats: true });
+    expect(everything.run).toHaveBeenCalledExactlyOnceWith({ providerIds: ["codex"], includeApp: true, continueChats: true }, new Map([["codex", "Codex"]]));
     expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
   });
   it("closes the dialog with Escape and keeps the hover details closed while it is open", () => {
@@ -299,7 +299,7 @@ describe("update everything mode in the sidebar", () => {
     publish({ state: "downloaded", installBlocker: "terminal", message: "Close active terminals before restarting to update." });
     expect(trigger()).toHaveAccessibleName("Update restart needs attention");
   });
-  it("shows the live app status first and clears a run error once the plan or the app status changes", async () => {
+  it("shows the live app status first and clears a run error only once the plan changes", async () => {
     const request = vi.fn(async (): Promise<ServerEvent> => { throw new Error("Inertia is updating."); });
     function LiveHarness({ statuses }: { statuses: ProviderMaintenanceStatus[] }): React.JSX.Element {
       const controller = useAppUpdate();
@@ -326,6 +326,15 @@ describe("update everything mode in the sidebar", () => {
     await failRun();
     expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
     publish({ state: "current", message: "Inertia is up to date.", freshness: "cached" });
+    expect(messages()).toEqual(["Inertia is up to date.", "Inertia is updating."]);
+    rerender(<LiveHarness statuses={[{ ...CODEX, latestVersion: "0.115.0" }]} />);
     expect(messages()).toEqual(["Inertia is up to date."]);
+  });
+  it("shows a refused restart's message once when the run reports the updater's own words", () => {
+    const message = "Wait for provider maintenance to finish before restarting.";
+    render(<EverythingHarness everything={everythingController({ error: message })} />);
+    publish({ state: "downloaded", installBlocker: "maintenance", message });
+    fireEvent.keyDown(trigger(), { key: "ArrowUp" });
+    expect([...details().querySelectorAll(".update-detail-message")].map((node) => node.textContent)).toEqual([message]);
   });
 });

@@ -3044,12 +3044,12 @@ button.header-breadcrumb-project:hover {
   cursor: pointer;
 }
 
-.image-attachment-zoom-controls button:hover:not(:disabled) {
+.image-attachment-zoom-controls button:hover:not(:disabled, [aria-disabled="true"]) {
   color: var(--text);
   background: var(--fill);
 }
 
-.image-attachment-zoom-controls button:disabled {
+.image-attachment-zoom-controls button:is(:disabled, [aria-disabled="true"]) {
   opacity: var(--disabled-opacity);
   cursor: default;
 }
@@ -3106,7 +3106,7 @@ button.header-breadcrumb-project:hover {
   background: transparent;
 }
 
-.pdf-attachment-preview-toolbar button:not(:disabled):hover {
+.pdf-attachment-preview-toolbar button:not(:disabled, [aria-disabled="true"]):hover {
   color: var(--text);
   background: var(--fill);
 }

@@ -1155,9 +1155,11 @@ export function FilesPanel({
       {editingFile && onSaveFile && (
         <FileEditorDialog
           file={editingFile}
+          current={preview}
           canSave={canSaveFile ?? (() => false)}
           onClose={() => setEditingFile(null)}
           onSave={onSaveFile}
+          onReload={() => onSelectFile(editingFile.path, undefined, true)}
         />
       )}
     </section>

@@ -30,11 +30,17 @@ export function AddProjectDialog({
   const titleId = useId();
   const formId = useId();
   const submitting = useRef(false);
+  const refocusAfterFailure = useRef<HTMLElement | null>(null);
   useNativePreviewSuspension(true);
   useLayoutEffect(() => captureModalFocus(), []);
   useLayoutEffect(() => {
     root.current?.querySelector<HTMLInputElement>("input")?.focus();
   }, [source]);
+  useLayoutEffect(() => {
+    if (busy || !refocusAfterFailure.current) return;
+    refocusAfterFailure.current.focus();
+    refocusAfterFailure.current = null;
+  }, [busy]);
   const sources = [
     {
       id: "local" as const,
@@ -75,6 +81,10 @@ export function AddProjectDialog({
       );
       return;
     }
+    const focused = document.activeElement instanceof HTMLElement
+      && root.current?.contains(document.activeElement)
+      ? document.activeElement
+      : null;
     submitting.current = true;
     setError(null);
     setBusy(true);
@@ -87,6 +97,7 @@ export function AddProjectDialog({
       });
       onClose();
     } catch (cause) {
+      refocusAfterFailure.current = focused ?? root.current?.querySelector<HTMLInputElement>("input") ?? null;
       setError(
         cause instanceof Error
           ? cause.message

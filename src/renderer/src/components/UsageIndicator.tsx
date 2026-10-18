@@ -483,7 +483,10 @@ export function UsageIndicator({
             <button
               type="button"
               className="usage-hide-button"
-              onClick={() => onModeChange("hidden")}
+              onClick={() => {
+                triggerRef.current?.closest(".composer")?.querySelector<HTMLTextAreaElement>('[data-composer-zone="input"] textarea')?.focus();
+                onModeChange("hidden");
+              }}
             >
               <EyeOff size={14} aria-hidden="true" />
               Hide usage

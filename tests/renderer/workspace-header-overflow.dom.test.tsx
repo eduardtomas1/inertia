@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -156,6 +156,30 @@ describe("workspace header overflow", () => {
 
     fireEvent.keyDown(item("Run Dev server"), { key: "ArrowUp" });
     expect(item("Git actions")).toHaveFocus();
+  });
+
+  it("returns focus to the overflow trigger when a branch menu opened from it closes", async () => {
+    render(<WorkspaceHeader {...headerProps({ compact: true })} />);
+    const trigger = screen.getByRole("button", { name: "More header actions" });
+    fireEvent.click(trigger);
+    const menu = await screen.findByRole("menu", { name: "Header actions" });
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Git actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Switch branch|^Create branch/u }));
+    await screen.findByRole("menu", { name: "Branches" });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("closes the folded header menu when keyboard focus leaves it", async () => {
+    render(<WorkspaceHeader {...headerProps({ compact: true })} />);
+    const trigger = screen.getByRole("button", { name: "More header actions" });
+    fireEvent.click(trigger);
+    await within(await screen.findByRole("menu", { name: "Header actions" })).findByRole("menuitem", { name: "Commit" });
+    act(() => screen.getByRole("button", { name: "Toggle project navigation" }).focus());
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("leaves arrow keys alone on inline header actions", async () => {

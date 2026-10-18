@@ -277,4 +277,18 @@ describe("provider activity detail boundary", () => {
     expect(summary).toBe("Failed at <workspace>/src/app.ts");
     expect(summary).not.toContain("ghp_");
   });
+
+  it.each([
+    ["deploy --api-key 9f8e7d6c5b4a39281706f5e4 --region eu", "deploy --api-key [redacted] --region eu"],
+    ["oauth login --client-secret abc", "oauth login --client-secret [redacted]"],
+    ["sync --access-token abc --force", "sync --access-token [redacted] --force"],
+    ["export github_token=abc && gh pr list", "export github_token=[redacted] && gh pr list"],
+    ["gh secret set DEPLOY_KEY --body abc", "gh secret set DEPLOY_KEY --body [redacted]"],
+  ])("persists the command %j with its secret scrubbed", (command, scrubbed) => {
+    const detail = sanitizeProviderActivityDetail(providerActivityDetailSections({
+      command,
+      output: "done",
+    }));
+    expect(detail).toBe(`Command:\n${scrubbed}\n\nOutput:\ndone`);
+  });
 });

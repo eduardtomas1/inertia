@@ -7,7 +7,6 @@ describe("desktop file URLs", () => {
     ["/home/example/Desktop/My workflow.json", "file:///home/example/Desktop/My%20workflow.json", false],
     ["/Users/example/文档/name#part?100%.md", "file:///Users/example/%E6%96%87%E6%A1%A3/name%23part%3F100%25.md", false],
     ["C:\\Other Folder\\notes.json", "file:///C:/Other%20Folder/notes.json", true],
-    ["\\\\server\\share\\My notes.md", "file://server/share/My%20notes.md", true],
   ] as const)("round-trips %s through the native URL parser", (path, href, windows) => {
     expect(localFileUrl(path)).toBe(href);
     const url = parseLocalFileUrl(href);
@@ -21,6 +20,7 @@ describe("desktop file URLs", () => {
     "file:///tmp/a%00.json", "file:///tmp/a%0A.json", "file:///tmp/a\r.json",
     "file:///tmp/a%2Fetc", "file:///tmp/a%5Cetc", "file:///tmp/%ZZ",
     "file://user:password@host/share", "file://host:42/share", "file:///tmp/a?command=run",
+    "file://files.attacker.example/share/x", "file://server/share/My%20notes.md", "file://localhost./tmp/a",
     "file:///" + "a".repeat(16_384), null, {},
   ])("rejects invalid file URL %s", (href) => {
     expect(parseLocalFileUrl(href)).toBeNull();
@@ -29,10 +29,14 @@ describe("desktop file URLs", () => {
   it.each([
     "relative/file.json", "/tmp/a\0.json", "/tmp/a\r.json", "/tmp/a\n.json",
     "//ho\0st/share", "//ho\rst/share", "//ho\nst/share",
-    "/tmp/\ud800", "//user@host/share",
+    "/tmp/\ud800", "//user@host/share", "\\\\server\\share\\My notes.md", "//files.attacker.example/share/x",
   ]) (
     "does not construct a file URL for %s", (path) => expect(localFileUrl(path)).toBeNull(),
   );
+
+  it("accepts the local host spelled out", () => {
+    expect(parseLocalFileUrl("file://localhost/tmp/notes.md")?.href).toBe("file:///tmp/notes.md");
+  });
 
   it("preserves escaped filename delimiters and source fragments", () => {
     const url = parseLocalFileUrl("file:///tmp/name%23part%3A42.md#L12")!;

@@ -149,7 +149,7 @@ export class TurnController {
     } = {},
   ) {
     this.scheduler = options.scheduler ?? defaultTurnScheduler();
-    this.clock = monotonicTurnClock(options.clock);
+    this.clock = monotonicTurnClock(options.clock, store.turnLedgerRepository.latestRequestedAt());
     this.id = options.id ?? randomUUID;
     const turnTimeoutMs = Math.max(1, options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
     const turnMaxLifetimeMs = Math.max(

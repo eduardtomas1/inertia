@@ -313,6 +313,7 @@ export interface DiffFile {
   path: string;
   oldPath: string;
   newPath: string;
+  binary?: true;
   hunks: DiffHunk[];
 }
 

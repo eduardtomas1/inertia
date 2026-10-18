@@ -6,6 +6,7 @@ import {
   readFile,
   rm,
   stat,
+  utimes,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -669,6 +670,8 @@ export class TurnGitArtifactManager {
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : null;
       if (code !== "EEXIST") throw error;
+      const reusedAt = new Date();
+      await utimes(target, reusedAt, reusedAt);
     }
     return digest;
   }

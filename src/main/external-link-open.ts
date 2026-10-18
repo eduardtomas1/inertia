@@ -1,7 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { localFileLocationSuffix, parseLocalFileUrl } from "../shared/local-file-url.js";
-import { safeHttpUrl } from "../shared/preview-url.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 
 interface DesktopLinkShell {
@@ -38,5 +37,14 @@ export async function openDesktopLink(
     } catch { throw new Error("The local file could not be opened."); }
     return;
   }
-  await shell.openExternal(safeHttpUrl(value).toString());
+  await shell.openExternal(systemBrowserUrl(value).toString());
+}
+
+function systemBrowserUrl(value: unknown): URL {
+  if (typeof value !== "string" || !value || value.length > 4_096) throw new Error("Invalid URL");
+  const url = new URL(value);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+    throw new Error("Only HTTP and HTTPS links without credentials can be opened");
+  }
+  return url;
 }

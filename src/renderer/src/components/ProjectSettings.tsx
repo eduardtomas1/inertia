@@ -195,7 +195,7 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         {actionForm.open && <form className="project-action-form" aria-label="New action" onSubmit={(event) => {
           event.preventDefault();
           if (blocked || !actionName.trim() || !executable.trim()) return;
-          void change("project-actions", update({ preferences: { ...preferences, actions: [...preferences.actions, { id: crypto.randomUUID(), name: actionName.trim(), executable: executable.trim(), args: args ? args.split("\n") : [] }] } })).then((saved) => { if (saved) { actionForm.close(); setActionName(""); setExecutable(""); setArgs(""); } });
+          void change("project-actions", update({ preferences: { ...preferences, actions: [...preferences.actions, { id: crypto.randomUUID(), name: actionName.trim(), executable: executable.trim(), args: args.split("\n").filter(Boolean) }] } })).then((saved) => { if (saved) { actionForm.close(); setActionName(""); setExecutable(""); setArgs(""); } });
         }}>
           <label>Name<input className="setting-input" required maxLength={80} value={actionName} onChange={(event) => setActionName(event.target.value)} disabled={unavailable} readOnly={saving} /></label>
           <label>Executable<input className="setting-input" required maxLength={4096} value={executable} onChange={(event) => setExecutable(event.target.value)} disabled={unavailable} readOnly={saving} placeholder="npm" /></label>

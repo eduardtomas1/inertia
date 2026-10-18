@@ -8,6 +8,7 @@ afterEach(() => {
 
 it("coalesces pending setup and checks admission again after its asynchronous boundary", async () => {
   const windows = new MainWindowCreation();
+  windows.admit();
   let ready!: () => void;
   const setup = new Promise<void>((resolve) => { ready = resolve; });
   const construct = vi.fn();
@@ -30,6 +31,7 @@ it("coalesces pending setup and checks admission again after its asynchronous bo
 
 it("permits a later open before shutdown, including recovery from failed setup", async () => {
   const windows = new MainWindowCreation();
+  windows.admit();
   const create = vi.fn(async () => undefined);
   await windows.run(create);
   await windows.run(create);
@@ -41,6 +43,7 @@ it("permits a later open before shutdown, including recovery from failed setup",
 
 it("does not reopen admission when an old failed setup settles after shutdown", async () => {
   const windows = new MainWindowCreation();
+  windows.admit();
   let reject!: (error: Error) => void;
   const pending = windows.run(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
   const failure = expect(pending).rejects.toThrow("setup failed");
@@ -48,6 +51,31 @@ it("does not reopen admission when an old failed setup settles after shutdown", 
   reject(new Error("setup failed"));
   await failure;
   const create = vi.fn(async () => undefined);
+  await windows.run(create);
+  expect(create).not.toHaveBeenCalled();
+  expect(windows.allowsCreation()).toBe(false);
+});
+
+it("opens no window for an early activation before startup admits window creation", async () => {
+  const windows = new MainWindowCreation();
+  const create = vi.fn(async () => undefined);
+
+  await windows.run(create);
+  expect(create).not.toHaveBeenCalled();
+  expect(windows.allowsCreation()).toBe(false);
+
+  windows.admit();
+  expect(windows.allowsCreation()).toBe(true);
+  await windows.run(create);
+  expect(create).toHaveBeenCalledOnce();
+});
+
+it("keeps window creation closed when shutdown began before startup admitted it", async () => {
+  const windows = new MainWindowCreation();
+  const create = vi.fn(async () => undefined);
+  windows.beginShutdown();
+  windows.admit();
+
   await windows.run(create);
   expect(create).not.toHaveBeenCalled();
   expect(windows.allowsCreation()).toBe(false);

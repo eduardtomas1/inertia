@@ -79,7 +79,7 @@ describe("Codex App Server plans", { concurrent: false }, () => {
     await manager.disposeAll();
   });
 
-  it("skips malformed plan items and bounds oversized ones", async () => {
+  it("skips malformed plan items, bounds oversized ones and makes no steps from prose", async () => {
     const fake = createFakeAppServer(roots);
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "plan-malformed";
@@ -101,8 +101,7 @@ describe("Codex App Server plans", { concurrent: false }, () => {
     expect(plans).toHaveLength(2);
     const [oversized, many] = plans;
     expect(oversized!.explanation).toHaveLength(128_000);
-    expect(oversized!.steps).toHaveLength(1);
-    expect(oversized!.steps[0]!.step).toHaveLength(1_000);
+    expect(oversized!.steps).toEqual([]);
     expect(many!.steps).toHaveLength(MAX_AGENT_PLAN_STEPS);
     expect(many!.steps[0]!.step).toHaveLength(1_000);
     expect(many!.steps.at(-1)).toEqual({ step: `Step ${MAX_AGENT_PLAN_STEPS}`, status: "pending" });

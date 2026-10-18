@@ -28,4 +28,17 @@ describe("sidebar snooze clock", () => {
     });
     expect(result.current).toBe(start + 1_001);
   });
+
+  it("re-renders within a minute when a snooze or the day ended while the computer slept", () => {
+    vi.useFakeTimers();
+    const start = new Date(2026, 7, 9, 18, 0, 0).getTime();
+    vi.setSystemTime(start);
+    const conversations = [{ snoozedUntil: new Date(start + 2 * 60 * 60 * 1_000).toISOString() }] as Conversation[];
+    const { result } = renderHook(() => useSnoozeClock(conversations));
+    vi.setSystemTime(start + 14 * 60 * 60 * 1_000);
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(result.current).toBeGreaterThanOrEqual(start + 14 * 60 * 60 * 1_000);
+  });
 });

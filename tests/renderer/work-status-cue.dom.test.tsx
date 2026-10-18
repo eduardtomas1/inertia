@@ -71,4 +71,25 @@ describe("bounded Work status cues", () => {
     view.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("ages idle rows every minute with one shared timer while visible", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = render(<>{["idle-a", "idle-b", "idle-c"].map((id) => (
+      <WorkStatusCue key={id} {...base} conversationId={id} status="idle" />
+    ))}</>);
+    expect([...view.container.querySelectorAll("time")].map((time) => time.textContent)).toEqual(["3m", "3m", "3m"]);
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect([...view.container.querySelectorAll("time")].map((time) => time.textContent)).toEqual(["4m", "4m", "4m"]);
+
+    visibility.mockReturnValue("hidden");
+    fireEvent(document, new Event("visibilitychange"));
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+    visibility.mockReturnValue("visible");
+    fireEvent(document, new Event("visibilitychange"));
+    expect([...view.container.querySelectorAll("time")].map((time) => time.textContent)).toEqual(["9m", "9m", "9m"]);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

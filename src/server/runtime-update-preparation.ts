@@ -113,6 +113,12 @@ export class RuntimeUpdatePreparationGate {
     return null;
   }
 
+  providerActivityBlocker(): Extract<RuntimeUpdatePreparationBlocker, "provider-maintenance" | "provider-refresh"> | null {
+    if (this.authority.providerMaintenanceActive()) return "provider-maintenance";
+    if (this.authority.providerRefreshActive()) return "provider-refresh";
+    return null;
+  }
+
   private databaseRecoveryActive(): boolean {
     return this.activeDatabaseRecoveryOperations > 0
       || this.authority.databaseRecoveryActive();
@@ -122,9 +128,7 @@ export class RuntimeUpdatePreparationGate {
     if (this.databaseRecoveryActive()) return "database-recovery";
     if (this.authority.agentWorkActive()) return "agent-work";
     if (this.authority.terminalActivity()) return "terminal";
-    if (this.authority.providerMaintenanceActive()) return "provider-maintenance";
-    if (this.authority.providerRefreshActive()) return "provider-refresh";
-    return null;
+    return this.providerActivityBlocker();
   }
 
   private releaseBlocked(

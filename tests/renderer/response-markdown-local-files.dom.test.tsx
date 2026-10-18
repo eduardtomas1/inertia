@@ -18,7 +18,6 @@ it.each([
   ["[Workflow](../Workflow.json)", "file:///workspace/Workflow.json"],
   ["[Workflow](file:///Users/example/Documents/Workflow%20with%20spaces.json)", "file:///Users/example/Documents/Workflow%20with%20spaces.json"],
   ["[Workflow](file:///C:/Other%20Folder/Workflow.json)", "file:///C:/Other%20Folder/Workflow.json"],
-  ["[Workflow](file://server/share/Workflow.json)", "file://server/share/Workflow.json"],
   ["[Workflow](/elsewhere/name%23part%3A42%3F.json#L12)", "file:///elsewhere/name%23part%3A42%3F.json"],
   ["[Workflow](/elsewhere/source.ts:42:7)", "file:///elsewhere/source.ts:42:7"],
   ["[Workflow](file:///elsewhere/source.ts:42)", "file:///elsewhere/source.ts:42"],
@@ -31,6 +30,16 @@ it.each([
   fireEvent.click(link);
   expect(openExternal).toHaveBeenCalledWith(url);
   expect(onOpenProjectFile).not.toHaveBeenCalled();
+});
+
+it.each([
+  "[Workflow](file://server/share/Workflow.json)",
+  "[Workflow](//files.attacker.example/share/Workflow.json)",
+])("blocks a file link on another host: %s", (content) => {
+  const { openExternal } = fixture(content);
+  expect(screen.queryByRole("link", { name: "Workflow" })).toBeNull();
+  expect(screen.getByText("Workflow")).toHaveClass("response-unsafe-link");
+  expect(openExternal).not.toHaveBeenCalled();
 });
 
 it("makes outside-project code-block file headers clickable", () => {

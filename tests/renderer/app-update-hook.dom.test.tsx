@@ -84,4 +84,26 @@ describe("application update controller", () => {
     act(() => hook.result.current.dismissError());
     expect(hook.result.current.error).toBeNull();
   });
+
+  it("checks again every six hours and after the clock moves back", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2030-01-02T00:00:00.000Z"));
+    const check = vi.fn(async () => update(1, "current"));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { checkAppUpdate: check, onAppUpdateStatus: () => () => undefined } as unknown as DesktopBridge,
+    });
+    const hook = renderHook(() => useAppUpdate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
+    expect(check).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 60 * 1_000); });
+    expect(check).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60 * 60 * 1_000 + 60_000); });
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(check).toHaveBeenLastCalledWith(false);
+    vi.setSystemTime(Date.now() - 24 * 60 * 60 * 1_000);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(check).toHaveBeenCalledTimes(3);
+    hook.unmount();
+  });
 });

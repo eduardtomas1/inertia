@@ -31,18 +31,25 @@ function unquotedPath(quoted: string): string {
   return new TextDecoder().decode(Uint8Array.from(bytes));
 }
 
+function decodedPath(value: string): string {
+  return value.startsWith('"') && value.endsWith('"') ? unquotedPath(value) : value;
+}
+
 function cleanPath(value: string): string {
   const trimmed = value.trim();
   if (trimmed === "/dev/null") return trimmed;
-  const decoded = trimmed.startsWith('"') && trimmed.endsWith('"')
-    ? unquotedPath(trimmed)
-    : trimmed;
-  return decoded.replace(/^[ab]\//u, "");
+  return decodedPath(trimmed).replace(/^[ab]\//u, "");
 }
 
 function diffHeaderPaths(line: string): [string, string] | null {
   if (!line.startsWith("diff --git ")) return null;
-  const tokens = line.slice("diff --git ".length).match(/"(?:\\.|[^"\\])*"|\S+/gu);
+  const names = line.slice("diff --git ".length);
+  const middle = (names.length - 1) / 2;
+  if (Number.isInteger(middle) && names.charAt(middle) === " " && !names.startsWith('"')) {
+    const oldPath = cleanPath(names.slice(0, middle));
+    if (oldPath === cleanPath(names.slice(middle + 1))) return [oldPath, oldPath];
+  }
+  const tokens = names.match(/"(?:\\.|[^"\\])*"|\S+/gu);
   if (!tokens || tokens.length < 2) return null;
   return [cleanPath(tokens[0]), cleanPath(tokens[1])];
 }
@@ -92,6 +99,14 @@ export function parseUnifiedDiff(patch: string): StructuredDiff {
       file.newPath = cleanPath(rawLine.slice(4));
       file.path = file.newPath === "/dev/null" ? file.oldPath : file.newPath;
       continue;
+    }
+    if (!hunk) {
+      const moved = /^(?:rename|copy) (from|to) (.+)$/u.exec(rawLine);
+      if (moved?.[1] === "from") file.oldPath = decodedPath(moved[2]!);
+      if (moved?.[1] === "to") file.newPath = file.path = decodedPath(moved[2]!);
+      if (rawLine.startsWith("new file mode ")) file.oldPath = "/dev/null";
+      if (rawLine.startsWith("deleted file mode ")) file.newPath = "/dev/null";
+      if (rawLine.startsWith("Binary files ") || rawLine === "GIT binary patch") file.binary = true;
     }
 
     const hunkMatch = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/u.exec(rawLine);

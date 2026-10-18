@@ -1,6 +1,9 @@
-export function monotonicTurnClock(wallClock: () => Date = () => new Date()): () => Date {
-  let last = Number.NEGATIVE_INFINITY;
-  let clamped = false;
+export function monotonicTurnClock(
+  wallClock: () => Date = () => new Date(),
+  floor = Number.NEGATIVE_INFINITY,
+): () => Date {
+  let last = floor;
+  let clamped = true;
   return () => {
     const wall = wallClock().getTime();
     clamped = wall < last || (clamped && wall === last);

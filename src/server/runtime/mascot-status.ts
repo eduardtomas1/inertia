@@ -184,9 +184,10 @@ export class MascotStatusPublisher {
       case "agent.plan.updated": {
         if (!live) return;
         const completed = event.plan.steps.filter(({ status: stepStatus }) => stepStatus === "completed").length;
-        const total = Math.min(event.plan.steps.length, 1_000);
+        const counted = event.plan.steps.filter(({ status: stepStatus }) => stepStatus !== "cancelled").length;
+        const total = Math.min(counted, 1_000);
         status.steps = total ? { completed: Math.min(completed, total), total } : null;
-        status.progress = total ? `${completed} of ${event.plan.steps.length} steps complete` : null;
+        status.progress = total ? `${completed} of ${counted} steps complete` : null;
         entry.step = mascotPreview(event.plan.steps.find(({ status: stepStatus }) => stepStatus === "inProgress")?.step);
         break;
       }

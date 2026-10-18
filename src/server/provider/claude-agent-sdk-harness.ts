@@ -222,7 +222,7 @@ function startClaudeRun(
   const pendingFollowUpIds = new Set<string>();
   let sessionId = options.input.sessionId;
   let authoritativeSessionId = options.input.sessionId;
-  let checklistTasks = checklistSessions.tasks(sessionId);
+  let checklistTasks = checklistSessions.tasks(sessionId, true);
   let pendingSessionReset: { outgoingId: string; candidateId?: string } | undefined;
   let contextUsageGeneration = 0;
   let latestContextUsage: unknown;

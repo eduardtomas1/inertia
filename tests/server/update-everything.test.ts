@@ -138,6 +138,10 @@ function fixture(options: {
   const preparation = {
     isAdmissionClosed: vi.fn(() => false),
     restartBlockerBesidesAgentTurns: vi.fn((): "database-recovery" | "agent-work" | "terminal" | null => null),
+    providerActivityBlocker: vi.fn((): "provider-maintenance" | "provider-refresh" | null => {
+      order.push("provider-activity");
+      return null;
+    }),
   };
   const dependencies = {
     store,
@@ -227,6 +231,24 @@ describe("update everything orchestration", () => {
     expect(result).toMatchObject({ interruptedConversationIds: [CODEX_CHAT], readyForAppInstall: false, appInstallBlocker: message });
     expect(isHeld()).toBe(false);
     expect(subject.restartContinuation.arm).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["provider-maintenance", "Wait for provider maintenance to finish before restarting."],
+    ["provider-refresh", "Wait for provider checks to finish before restarting."],
+  ] as const)("keeps the app out of the run when %s is still active after the provider updates", async (blocker, message) => {
+    const subject = fixture();
+    subject.preparation.providerActivityBlocker.mockImplementation(() => {
+      subject.order.push("provider-activity");
+      return blocker;
+    });
+
+    const result = await subject.run({ providerIds: ["codex"], includeApp: true });
+
+    expect(subject.order.slice(-3)).toEqual(["settled:codex", "provider-activity", "arm:held=false"]);
+    expect(result).toMatchObject({ readyForAppInstall: false, appInstallBlocker: message });
+    expect(result.providers.map(({ outcome }) => outcome)).toEqual(["updated"]);
+    expect(isHeld()).toBe(false);
   });
 
   it("reports no app blocker when the restart can proceed or the app is not part of the run", async () => {
@@ -463,7 +485,7 @@ describe("update everything with the real maintenance controller", () => {
       turns: { activeConversationIds: () => [CODEX_CHAT], interruptForUpdate },
       maintenance: controller,
       restartContinuation: { createPlans: (ids: readonly string[]) => [...ids], arm: () => undefined },
-      preparation: { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null },
+      preparation: { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null, providerActivityBlocker: () => null },
     } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true }, socket());
 
     expect(result.providers).toEqual([
@@ -483,7 +505,7 @@ describe("update everything with the real maintenance controller", () => {
       turns: { activeConversationIds: () => [CLAUDE_CHAT], interruptForUpdate: async () => true },
       maintenance: controller,
       restartContinuation: { createPlans: (ids: readonly string[]) => [...ids], arm: () => undefined },
-      preparation: { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null },
+      preparation: { isAdmissionClosed: () => false, restartBlockerBesidesAgentTurns: () => null, providerActivityBlocker: () => null },
     } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true }, socket());
 
     expect(result.interruptedConversationIds).toEqual([]);

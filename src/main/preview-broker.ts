@@ -406,15 +406,18 @@ export class PreviewBroker {
     ].every((entry) => Number.isInteger(entry))) {
       throw new Error("Invalid preview bounds");
     }
-    const content = this.#window()?.getContentBounds();
-    if (!content) return true;
-    const x = Math.max(0, Math.min(candidate.x as number, content.width));
-    const y = Math.max(0, Math.min(candidate.y as number, content.height));
+    const window = this.#window();
+    if (!window) return true;
+    const content = window.getContentBounds();
+    const zoom = window.webContents.getZoomFactor();
+    const scaled = (value: number): number => Math.round(value * zoom);
+    const x = Math.max(0, Math.min(scaled(candidate.x as number), content.width));
+    const y = Math.max(0, Math.min(scaled(candidate.y as number), content.height));
     const bounds = {
       x,
       y,
-      width: Math.max(0, Math.min(candidate.width as number, content.width - x)),
-      height: Math.max(0, Math.min(candidate.height as number, content.height - y)),
+      width: Math.max(0, Math.min(scaled(candidate.width as number), content.width - x)),
+      height: Math.max(0, Math.min(scaled(candidate.height as number), content.height - y)),
     };
     this.#pendingBounds.set(ownerId, { contextId, bounds });
     this.#applyBounds(this.#ensureAttached(ownerId, contextId), bounds);

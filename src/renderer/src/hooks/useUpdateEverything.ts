@@ -15,7 +15,7 @@ export interface UpdateEverythingController {
   operations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>;
   phase: UpdateEverythingPhase | null;
   error: string | null;
-  run: (request: UpdateEverythingRequest) => Promise<void>;
+  run: (request: UpdateEverythingRequest, providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>) => Promise<void>;
   dismissError: () => void;
 }
 
@@ -31,7 +31,10 @@ export function useUpdateEverything({ statuses, operations, appStatus, request }
   const appStatusRef = useRef(appStatus);
   useEffect(() => { appStatusRef.current = appStatus; }, [appStatus]);
 
-  const run = useCallback(async (payload: UpdateEverythingRequest): Promise<void> => {
+  const run = useCallback(async (
+    payload: UpdateEverythingRequest,
+    providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>,
+  ): Promise<void> => {
     if (inFlight.current) return;
     inFlight.current = true;
     setError(null);
@@ -43,6 +46,7 @@ export function useUpdateEverything({ statuses, operations, appStatus, request }
         payload,
         request,
         appStatus: () => appStatusRef.current,
+        providerLabels,
         onPhase: setPhase,
       }));
     } catch (cause) {

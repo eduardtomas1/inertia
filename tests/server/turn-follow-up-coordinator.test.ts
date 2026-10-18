@@ -576,6 +576,58 @@ describe("assistant rows around an accepted follow-up", () => {
   });
 
   it.each([
+    [undefined, "Earlier answer.", "Renamed it."],
+    ["claude", "Earlier answer.", "Renamed it."],
+    [undefined, "The earlier answer.", "The rename is done."],
+    ["claude", "The earlier answer.", "The rename is done."],
+    ["claude", "The earlier answer.", "The"],
+  ] as const)("keeps the reply whole when the provider's last text covers only the reply right after the follow-up (%s: %s)", async (providerId, earlier, reply) => {
+    const { runtime, turnId } = await running(providerId);
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: earlier });
+      answerEnded(runtime);
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: reply });
+      runtime.provider.resolve({ text: reply });
+      await flushTurnControllerTestPromises();
+      flushStreams(runtime);
+      expect(rows(runtime, turnId)).toEqual([
+        `assistant:${earlier}`,
+        "user:Also rename the file.",
+        `assistant:${reply}`,
+      ]);
+      expect(terminalAnswer(runtime, turnId)).toBe(reply);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("keeps a corrected reply whole when Claude's snapshot covers only the reply right after the follow-up", async () => {
+    const { runtime, turnId } = await running("claude");
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: "The earlier answer." });
+      answerEnded(runtime);
+      await followUp(runtime, "Also rename the file.");
+      runtime.provider.emit({ ...identity, type: "text", text: "The rename is done." });
+      flushStreams(runtime);
+      runtime.provider.emit({ ...identity, type: "text-snapshot", itemId: "corrected", text: "The rename is finished." });
+      runtime.provider.resolve({ text: "The rename is finished." });
+      await flushTurnControllerTestPromises();
+      flushStreams(runtime);
+      expect(rows(runtime, turnId)).toEqual([
+        "assistant:The earlier answer.",
+        "user:Also rename the file.",
+        "assistant:The rename is finished.",
+      ]);
+      expect(terminalAnswer(runtime, turnId)).toBe("The rename is finished.");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it.each([
     [undefined, "Renamed it.", "Renamed it."],
     ["claude", "Renamed it.", "Renamed it."],
     [undefined, "Draft.", "Final."],

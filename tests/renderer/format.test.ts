@@ -4,8 +4,10 @@ import {
   formatFullDateTime,
   formatMessageTime,
   formatRelativeTime,
+  projectNameFromPath,
 } from "../../src/renderer/src/lib/format";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
+import { clientCommandSchema } from "../../src/shared/contracts";
 
 describe("renderer time labels", () => {
   afterEach(() => {
@@ -69,5 +71,25 @@ describe("renderer time labels", () => {
     expect(formatMessageTime("2026-07-21T16:14:00.000Z", now)).toMatch(/^Jul 21, 4:14\sPM$/u);
     expect(formatMessageTime("2025-12-31T16:14:00.000Z", now)).toMatch(/^Dec 31, 2025, 4:14\sPM$/u);
     expect(formatFullDateTime("2026-07-21T16:14:00.000Z")).toMatch(/^Tuesday, July 21, 2026 at 4:14\sPM$/u);
+  });
+});
+
+describe("project names from folders", () => {
+  const accepted = (path: string): boolean => clientCommandSchema.safeParse({
+    type: "project.create",
+    requestId: "61616161-6161-4161-8161-616161616161",
+    payload: { name: projectNameFromPath(path), path },
+  }).success;
+
+  it("names every folder with a name the project schema accepts", () => {
+    const long = "a".repeat(120);
+    expect(projectNameFromPath(`/work/${long}`)).toBe("a".repeat(80));
+    expect(projectNameFromPath("/work/   ")).toBe("Untitled project");
+    expect(projectNameFromPath("/work/ studio ")).toBe("studio");
+    expect(projectNameFromPath(`/work/${"b".repeat(79)}😀tail`)).toBe("b".repeat(79));
+    expect(projectNameFromPath("C:\\work\\studio\\")).toBe("studio");
+    for (const path of [`/work/${long}`, "/work/   ", `/work/${"b".repeat(79)}😀tail`, "/work/studio"]) {
+      expect(accepted(path)).toBe(true);
+    }
   });
 });

@@ -3,11 +3,14 @@ import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { captureRawWorktreeTree } from "../checkpoints";
+import {
+  captureRawWorktreeTree,
+  withoutUnbornNestedRepositoryDirectories,
+} from "../checkpoints";
 import { MAX_DIFF_BYTES, MAX_DIFF_FILES } from "./constants";
 import {
   repositoryRoot,
-  validatedPaths,
+  validatedEntryPaths,
   type GitPathInspectionOptions,
 } from "./paths";
 import { resolvedRepositoryStatus } from "./status";
@@ -97,7 +100,7 @@ async function changedPaths(
       "The complete repository state is too large to verify for commit.",
     );
   }
-  const paths = await validatedPaths(
+  const paths = await validatedEntryPaths(
     root,
     status.files.map((file) => file.path),
     options,
@@ -106,7 +109,7 @@ async function changedPaths(
     file.previousPath ? [file.previousPath] : []
   );
   const previous = previousInputs.length > 0
-    ? await validatedPaths(root, previousInputs, options)
+    ? await validatedEntryPaths(root, previousInputs, options)
     : [];
   return [...new Set([...paths, ...previous])].sort((left, right) =>
     Buffer.compare(Buffer.from(left), Buffer.from(right))
@@ -158,7 +161,11 @@ async function captureRawReview(
   const removalSet = new Set(removalPaths);
   const raw = await captureRawWorktreeTree(
     root,
-    nulPaths(paths.filter((path) => !removalSet.has(path))),
+    nulPaths(await withoutUnbornNestedRepositoryDirectories(
+      root,
+      paths.filter((path) => !removalSet.has(path)),
+      options,
+    )),
     {
       deadlineAt: options.deadlineAt,
       removedPaths: nulPaths(removalPaths),
@@ -325,7 +332,11 @@ export async function prepareGitCommitSelection(
       });
     }
     const removalSet = new Set(removalPaths);
-    const additions = paths.filter((path) => !removalSet.has(path));
+    const additions = await withoutUnbornNestedRepositoryDirectories(
+      root,
+      paths.filter((path) => !removalSet.has(path)),
+      options,
+    );
     if (additions.length > 0) {
       await runGit(root, tempIndexArguments([
         "--literal-pathspecs",

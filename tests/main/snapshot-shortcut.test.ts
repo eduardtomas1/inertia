@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const native = vi.hoisted(() => ({ open: vi.fn(), load: vi.fn() }));
 vi.mock("ffi-rs", () => ({ default: { ...native, DataType: { I32: 1, I16: 17, Boolean: 6 } } }));
-import { shiftPair } from "../../src/main/snapshot-shortcut-worker";
+import { parentLiveness, shiftPair } from "../../src/main/snapshot-shortcut-worker";
 beforeEach(() => vi.resetAllMocks());
 
 it.each([
@@ -32,4 +32,25 @@ it.each([
 it("leaves Linux key handling to the registered accelerator", () => {
   expect(() => shiftPair("linux")).toThrow("unsupported");
   expect(native.open).not.toHaveBeenCalled();
+});
+
+it("stops polling when the app stops sending heartbeats", () => {
+  let now = 0;
+  const liveness = parentLiveness(() => now);
+  for (; now <= 5_000; now += 50) expect(liveness.lost()).toBe(false);
+  liveness.beat();
+  for (; now <= 10_000; now += 50) expect(liveness.lost()).toBe(false);
+  now += 100;
+  expect(liveness.lost()).toBe(true);
+});
+
+it("keeps polling after the computer wakes from sleep", () => {
+  let now = 0;
+  const liveness = parentLiveness(() => now);
+  for (; now <= 1_000; now += 50) expect(liveness.lost()).toBe(false);
+  now += 3_600_000;
+  expect(liveness.lost()).toBe(false);
+  now += 50;
+  liveness.beat();
+  for (const end = now + 5_000; now <= end; now += 50) expect(liveness.lost()).toBe(false);
 });

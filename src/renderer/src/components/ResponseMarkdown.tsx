@@ -272,7 +272,9 @@ export function resolveResponseLink(
     if (/^https?:$/iu.test(scheme)) {
       try {
         const url = new URL(href);
-        return { kind: "external", url: url.toString() };
+        return url.username || url.password
+          ? { kind: "unsafe" }
+          : { kind: "external", url: url.toString() };
       } catch {
         return { kind: "unsafe" };
       }
@@ -689,6 +691,29 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
   </>;
 }
 
+function WebLink({ url, children, ...props }: ComponentProps<"a"> & {
+  url: string;
+}): React.JSX.Element {
+  const [error, setError] = useState(false);
+  return <>
+    <a
+      {...props}
+      className={[props.className, "response-web-link"].filter(Boolean).join(" ")}
+      href={url}
+      rel="noreferrer noopener"
+      target="_blank"
+      onClick={(event) => {
+        event.preventDefault();
+        setError(false);
+        void window.inertia.openExternal(url).catch(() => setError(true));
+      }}
+    >
+      {children}
+    </a>
+    {error && <span className="response-copy-error" role="alert">The link could not be opened.</span>}
+  </>;
+}
+
 const BLOCKED_LINK_REASON = "This link was blocked because its address is invalid or uses an unsafe protocol.";
 
 function MarkdownLink({
@@ -714,24 +739,7 @@ function MarkdownLink({
     return <LocalFileLink {...props} path={target.path} url={target.url}>{children}</LocalFileLink>;
   }
   if (target.kind === "external") {
-    const externalLinkClass = [props.className, "response-web-link"]
-      .filter(Boolean)
-      .join(" ");
-    return (
-      <a
-        {...props}
-        className={externalLinkClass}
-        href={target.url}
-        rel="noreferrer noopener"
-        target="_blank"
-        onClick={(event) => {
-          event.preventDefault();
-          void window.inertia.openExternal(target.url);
-        }}
-      >
-        {children}
-      </a>
-    );
+    return <WebLink {...props} url={target.url}>{children}</WebLink>;
   }
   if (target.kind === "project") {
     const language = sourceLanguageForFile(

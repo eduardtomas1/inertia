@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -120,7 +123,7 @@ const BODY_LIMIT = 6 * 256 * 1024 + 64 * 1024;
 const WORST_CASE_PAGE = "\u0001".repeat(256 * 1024);
 
 function stdioProxy(connection: Awaited<ReturnType<typeof started>>["connection"]) {
-  const fallback = acpHostMcpServers(connection, false)[0]!;
+  const fallback = acpHostMcpServers(connection, false, process.env)[0]!;
   if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
   const child = spawn(fallback.command, fallback.args, {
     env: {
@@ -206,13 +209,13 @@ describe("provider host-tool MCP transport", () => {
       url: "http://127.0.0.1:41234/mcp",
       bearerToken: "run-secret-token",
     };
-    expect(acpHostMcpServers(connection, true)).toEqual([{
+    expect(acpHostMcpServers(connection, true, process.env)).toEqual([{
       type: "http",
       name: "inertia-chat-manager",
       url: connection.url,
       headers: [{ name: "Authorization", value: `Bearer ${connection.bearerToken}` }],
     }]);
-    const fallback = acpHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false, process.env)[0]!;
     expect(fallback).toMatchObject({
       name: "inertia-chat-manager",
       command: process.execPath,
@@ -470,7 +473,7 @@ describe("provider host-tool MCP transport", () => {
         return { success: true, text: "rendered" };
       },
     });
-    const fallback = acpHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false, process.env)[0]!;
     if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
     const child = spawn(fallback.command, fallback.args, {
       env: {
@@ -500,7 +503,7 @@ describe("provider host-tool MCP transport", () => {
 
   it("lets Cursor's stdio proxy drain a valid in-flight request after stdin EOF", async () => {
     const { connection } = await started();
-    const fallback = acpHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false, process.env)[0]!;
     if (!("command" in fallback)) throw new Error("Expected Cursor's stdio fallback.");
     const child = spawn(fallback.command, fallback.args, {
       env: {
@@ -533,7 +536,7 @@ describe("provider host-tool MCP transport", () => {
         images: [{ mimeType: "image/png", data: image }],
       }),
     });
-    const fallback = acpHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false, process.env)[0]!;
     if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
     const child = spawn(fallback.command, fallback.args, {
       env: {
@@ -573,7 +576,7 @@ describe("provider host-tool MCP transport", () => {
       }],
     }));
     const { connection } = await started({ invoke });
-    const fallback = acpHostMcpServers(connection, false)[0]!;
+    const fallback = acpHostMcpServers(connection, false, process.env)[0]!;
     if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
     const child = spawn(fallback.command, fallback.args, {
       env: {
@@ -636,5 +639,133 @@ describe("provider host-tool MCP transport", () => {
     expect(terminalClose).toBe(cancelClose);
     await expect(cancelClose).rejects.toThrow("could not be confirmed closed");
     await expect(terminalClose).rejects.toThrow("could not be confirmed closed");
+  });
+});
+
+describe("ACP stdio host-tool proxy runtime", () => {
+  const connection = {
+    url: "http://127.0.0.1:41234/mcp",
+    bearerToken: "run-secret-token",
+  };
+  const PACKAGED = "/Applications/Inertia.app/Contents/MacOS/Inertia";
+
+  function fileSystem(
+    files: string[],
+    links: Record<string, string> = {},
+    nonExecutable: string[] = [],
+  ) {
+    return {
+      realpath: (path: string) => {
+        if (links[path]) return links[path];
+        if (files.includes(path)) return path;
+        throw new Error("ENOENT");
+      },
+      fileSize: (path: string) => files.includes(path) || links[path] ? 1 : null,
+      executable: (path: string) => !nonExecutable.includes(path),
+    };
+  }
+
+  it("launches the proxy with Node.js from PATH when the runtime is the packaged desktop executable", () => {
+    const [server, ...rest] = acpHostMcpServers(
+      connection,
+      false,
+      { PATH: "relative/bin:/usr/bin:/opt/homebrew/bin" },
+      {
+        platform: "darwin",
+        electronExecutable: PACKAGED,
+        fileSystem: fileSystem([PACKAGED, "/opt/homebrew/Cellar/node/22.1.0/bin/node"], {
+          "/opt/homebrew/bin/node": "/opt/homebrew/Cellar/node/22.1.0/bin/node",
+        }),
+      },
+    );
+    expect(rest).toEqual([]);
+    expect(server).toMatchObject({
+      name: "inertia-chat-manager",
+      command: "/opt/homebrew/bin/node",
+    });
+    expect("env" in server! ? server.env.map(({ name }) => name) : []).toEqual([
+      "INERTIA_HOST_MCP_URL",
+      "INERTIA_HOST_MCP_TOKEN",
+    ]);
+  });
+
+  it("uses the Windows node.exe and never the packaged executable", () => {
+    const electron = "C:\\Program Files\\Inertia\\Inertia.exe";
+    expect(acpHostMcpServers(
+      connection,
+      false,
+      { Path: "C:\\Tools;C:\\Program Files\\nodejs" },
+      {
+        platform: "win32",
+        electronExecutable: electron,
+        fileSystem: fileSystem([electron, "C:\\Program Files\\nodejs\\node.exe"], {
+          "C:\\Tools\\node.exe": electron,
+        }),
+      },
+    )).toMatchObject([{ command: "C:\\Program Files\\nodejs\\node.exe" }]);
+  });
+
+  it("offers no stdio proxy when the packaged runtime finds no separate Node.js", () => {
+    expect(acpHostMcpServers(
+      connection,
+      false,
+      { PATH: "/usr/local/bin:/usr/bin" },
+      {
+        platform: "linux",
+        electronExecutable: "/opt/Inertia/inertia",
+        fileSystem: fileSystem(["/opt/Inertia/inertia"], {
+          "/usr/local/bin/node": "/opt/Inertia/inertia",
+        }),
+      },
+    )).toEqual([]);
+    expect(acpHostMcpServers(connection, true, {}, {
+      platform: "linux",
+      electronExecutable: "/opt/Inertia/inertia",
+      fileSystem: fileSystem([]),
+    })).toMatchObject([{ type: "http", url: connection.url }]);
+  });
+
+  it("skips a POSIX node file without execute permission and keeps searching PATH", () => {
+    expect(acpHostMcpServers(
+      connection,
+      false,
+      { PATH: "/usr/local/bin:/opt/homebrew/bin" },
+      {
+        platform: "darwin",
+        electronExecutable: PACKAGED,
+        fileSystem: fileSystem(
+          [PACKAGED, "/usr/local/bin/node", "/opt/homebrew/bin/node"],
+          {},
+          ["/usr/local/bin/node"],
+        ),
+      },
+    )).toMatchObject([{ command: "/opt/homebrew/bin/node" }]);
+  });
+
+  it.skipIf(process.platform === "win32")("checks execute permission on the real file system", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-node-runtime-"));
+    try {
+      const blocked = join(root, "blocked");
+      const usable = join(root, "usable");
+      for (const [directory, mode] of [[blocked, 0o644], [usable, 0o755]] as const) {
+        mkdirSync(directory);
+        writeFileSync(join(directory, "node"), "");
+        chmodSync(join(directory, "node"), mode);
+      }
+      expect(acpHostMcpServers(
+        connection,
+        false,
+        { PATH: `${blocked}:${usable}` },
+        { platform: process.platform, electronExecutable: join(root, "Inertia") },
+      )).toMatchObject([{ command: join(usable, "node") }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the current Node.js executable when the runtime is not Electron", () => {
+    expect(acpHostMcpServers(connection, false, { PATH: "" })).toMatchObject([{
+      command: process.execPath,
+    }]);
   });
 });

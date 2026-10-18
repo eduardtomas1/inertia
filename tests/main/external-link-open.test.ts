@@ -82,6 +82,15 @@ it.each(["javascript:alert(1)", "data:text/html,x", "inertia://runtime/command",
   },
 );
 
+it.each(["file://files.attacker.example/share/x", "file://server/share/notes.md", "file://localhost./share/x"])(
+  "refuses %s before touching the file system on Windows", async (href) => {
+    const { shell } = fixture();
+    await expect(openDesktopLink(href, shell, "win32")).rejects.toThrow(/^Invalid local file link\.$/u);
+    expect(shell.openPath).not.toHaveBeenCalled();
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
+  },
+);
+
 it("keeps the existing HTTP policy for web links", async () => {
   const { shell } = fixture();
   await openDesktopLink("https://example.test/docs", shell);

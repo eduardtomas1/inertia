@@ -255,7 +255,9 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("C:\\Work Space\\Project", "C%3A%5CWork%20Space%5CProject%5Csrc%5Cindex.ts%3A42")).toEqual({ kind: "project", relativePath: "src/index.ts:42", action: "reveal", literalPath: true });
     expect(resolveResponseLink("C:\\Work Space\\Project", "..\\Elsewhere\\secret.ts")).toEqual({ kind: "local", path: "C:/Work Space/Elsewhere/secret.ts", url: "file:///C:/Work%20Space/Elsewhere/secret.ts" });
     expect(resolveResponseLink("\\\\Server\\Share\\Project", "\\\\server\\share\\project\\src/App.java#L4")).toEqual({ kind: "project", relativePath: "src/App.java", action: "reveal", location: { startLine: 4, endLine: 4 } });
-    expect(resolveResponseLink("\\\\Server\\Share\\Project", "//server/other/project/src/App.java#L4")).toEqual({ kind: "local", path: "//server/other/project/src/App.java", url: "file://server/other/project/src/App.java" });
+    expect(resolveResponseLink("\\\\Server\\Share\\Project", "//server/other/project/src/App.java#L4")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("C:\\Work Space\\Project", "file://files.attacker.example/share/x")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("C:\\Work Space\\Project", "\\\\files.attacker.example\\share\\x")).toEqual({ kind: "unsafe" });
   });
 
   it("treats code-file metadata as a project path instead of a URL", () => {

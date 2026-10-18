@@ -168,7 +168,7 @@ describe("terminal.provider.resume command", () => {
       await expect(createProjectWorkspaceCommandHandler(fixture.value)({ readyState: 1 } as never, resumeCommand())).resolves.toBe("handled");
       expect(fixture.terminalResumeLaunch).toHaveBeenCalledWith(conversationId, "claude", sessionId, real);
       expect(fixture.replaceProcess.mock.calls[0]![2]).toBe(linked);
-      expect(fixture.replaceProcess.mock.calls[0]![10]).toMatchObject({ cwd: real });
+      expect((fixture.replaceProcess.mock.calls[0] as unknown[])[10]).toMatchObject({ cwd: real });
       expect(fixture.value.turns.hasActiveCheckout).toHaveBeenCalledWith(linked);
     } finally { await rm(root, { recursive: true, force: true }); }
   });

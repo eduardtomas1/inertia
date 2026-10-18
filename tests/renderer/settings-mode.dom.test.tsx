@@ -90,6 +90,13 @@ describe("Settings as a mode", () => {
     expect(screen.getByLabelText("Current view")).toHaveTextContent("usage");
   });
 
+  it("returns to the workspace instead of the ended new chat view", () => {
+    render(<Harness initialView="home" />);
+    openFrom("Open settings");
+    pressEscape();
+    expect(screen.getByLabelText("Current view")).toHaveTextContent("workspace");
+  });
+
   it("focuses the composer when the opener is gone and a chat is shown again", async () => {
     render(<Harness />);
     openFrom("Palette item");

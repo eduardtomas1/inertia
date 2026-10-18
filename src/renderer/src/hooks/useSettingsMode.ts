@@ -100,7 +100,8 @@ export function useSettingsMode({
 
   const closeSettings = useCallback(() => {
     releaseSettingsFocus();
-    navigateToView(returnView.current === "settings" ? "workspace" : returnView.current);
+    const target = returnView.current;
+    navigateToView(target === "settings" || target === "home" ? "workspace" : target);
   }, [navigateToView]);
 
   const toggleSettings = useCallback(() => {

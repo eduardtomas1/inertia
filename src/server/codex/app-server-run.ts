@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { recordWindowsCleanupFailure } from "../windows-cleanup-diagnostics";
 import {
+  activeRuntimeOwnedProcessPlatform,
   runtimeOwnedProcessInvocation,
+  runtimeOwnedProcessStopConfirmation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
 
@@ -303,12 +305,17 @@ export function startCodexAppServerRun(
         // graceful-wait window after the provider has already settled.
         await terminateOwnedProcessTree(true);
         if (exitedBeforeOwnedTermination) {
-          if (process.platform === "win32") recordWindowsCleanupFailure({
-            phase: "provider-exited-before-stop", scope: "child", force: true,
-            elapsedMs: 0, exitCode: child.exitCode,
-          });
           finalStatus = "failed";
-          cleanupConfirmed = false;
+          if (
+            activeRuntimeOwnedProcessPlatform() === "win32"
+            || runtimeOwnedProcessStopConfirmation(child) !== true
+          ) {
+            if (process.platform === "win32") recordWindowsCleanupFailure({
+              phase: "provider-exited-before-stop", scope: "child", force: true,
+              elapsedMs: 0, exitCode: child.exitCode,
+            });
+            cleanupConfirmed = false;
+          }
         }
       } catch (error) {
         finalStatus = "failed";

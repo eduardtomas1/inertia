@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { posix, win32 } from "node:path";
 
 import { environmentValue } from "../environment";
@@ -6,6 +6,7 @@ import { environmentValue } from "../environment";
 export interface NodeRuntimeFileSystem {
   realpath(path: string): string;
   fileSize(path: string): number | null;
+  executable?(path: string): boolean;
 }
 
 export interface NodeRuntimeSearch {
@@ -23,6 +24,14 @@ export const nodeRuntimeFileSystem: NodeRuntimeFileSystem = {
       return details.isFile() ? details.size : null;
     } catch {
       return null;
+    }
+  },
+  executable: (path) => {
+    try {
+      accessSync(path, constants.X_OK);
+      return true;
+    } catch {
+      return false;
     }
   },
 };
@@ -49,6 +58,7 @@ export function nodeRuntimeOnPath(
   for (const directory of directories) {
     const candidate = paths.join(directory, executable);
     if (search.fileSystem.fileSize(candidate) === null) continue;
+    if (!windows && search.fileSystem.executable?.(candidate) !== true) continue;
     const real = safeRealpath(candidate, search.fileSystem);
     if (!real || comparable(real) === electron) continue;
     if (!windows) return candidate;

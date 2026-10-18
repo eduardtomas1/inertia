@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -646,7 +649,11 @@ describe("ACP stdio host-tool proxy runtime", () => {
   };
   const PACKAGED = "/Applications/Inertia.app/Contents/MacOS/Inertia";
 
-  function fileSystem(files: string[], links: Record<string, string> = {}) {
+  function fileSystem(
+    files: string[],
+    links: Record<string, string> = {},
+    nonExecutable: string[] = [],
+  ) {
     return {
       realpath: (path: string) => {
         if (links[path]) return links[path];
@@ -654,6 +661,7 @@ describe("ACP stdio host-tool proxy runtime", () => {
         throw new Error("ENOENT");
       },
       fileSize: (path: string) => files.includes(path) || links[path] ? 1 : null,
+      executable: (path: string) => !nonExecutable.includes(path),
     };
   }
 
@@ -715,6 +723,44 @@ describe("ACP stdio host-tool proxy runtime", () => {
       electronExecutable: "/opt/Inertia/inertia",
       fileSystem: fileSystem([]),
     })).toMatchObject([{ type: "http", url: connection.url }]);
+  });
+
+  it("skips a POSIX node file without execute permission and keeps searching PATH", () => {
+    expect(acpHostMcpServers(
+      connection,
+      false,
+      { PATH: "/usr/local/bin:/opt/homebrew/bin" },
+      {
+        platform: "darwin",
+        electronExecutable: PACKAGED,
+        fileSystem: fileSystem(
+          [PACKAGED, "/usr/local/bin/node", "/opt/homebrew/bin/node"],
+          {},
+          ["/usr/local/bin/node"],
+        ),
+      },
+    )).toMatchObject([{ command: "/opt/homebrew/bin/node" }]);
+  });
+
+  it.skipIf(process.platform === "win32")("checks execute permission on the real file system", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-node-runtime-"));
+    try {
+      const blocked = join(root, "blocked");
+      const usable = join(root, "usable");
+      for (const [directory, mode] of [[blocked, 0o644], [usable, 0o755]] as const) {
+        mkdirSync(directory);
+        writeFileSync(join(directory, "node"), "");
+        chmodSync(join(directory, "node"), mode);
+      }
+      expect(acpHostMcpServers(
+        connection,
+        false,
+        { PATH: `${blocked}:${usable}` },
+        { platform: process.platform, electronExecutable: join(root, "Inertia") },
+      )).toMatchObject([{ command: join(usable, "node") }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps the current Node.js executable when the runtime is not Electron", () => {

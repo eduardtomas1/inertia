@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadThreadActions } from "../../src/renderer/src/components/sidebar/threadActionLoader";
 
@@ -182,6 +182,7 @@ function renderSidebar(
   return {
     onCreateConversation: sidebarProps.onCreateConversation,
     onRenameConversation: sidebarProps.onRenameConversation,
+    onRenameProject: sidebarProps.onRenameProject,
     onChooseNewChatProject: sidebarProps.onChooseNewChatProject,
     onSelectConversation,
     onSnoozeConversation,
@@ -1160,6 +1161,66 @@ describe("compact Work sidebar", () => {
     );
   });
 
+  it("returns focus to the row after a rename is saved or cancelled", async () => {
+    const view = renderSidebar([conversation("refocus", "Rename and return", new Date())]);
+    const row = () => screen.getByRole("button", { name: /^(Rename and return|Renamed work),/u });
+    const startRename = (): HTMLInputElement => {
+      fireEvent.contextMenu(row());
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename thread" }));
+      return screen.getByRole("textbox", { name: /^Rename / });
+    };
+
+    const cancelled = startRename();
+    fireEvent.change(cancelled, { target: { value: "Discard this" } });
+    fireEvent.keyDown(cancelled, { key: "Escape" });
+    await waitFor(() => expect(row()).toHaveFocus());
+    expect(view.onRenameConversation).not.toHaveBeenCalled();
+
+    const saved = startRename();
+    fireEvent.change(saved, { target: { value: "Renamed work" } });
+    fireEvent.submit(saved.closest("form")!);
+    await waitFor(() => expect(row()).toHaveFocus());
+    expect(view.onRenameConversation).toHaveBeenCalledWith(expect.objectContaining({ id: "refocus" }), "Renamed work");
+  });
+
+  it("keeps a typed row name when focus leaves the rename field or the window", () => {
+    const view = renderSidebar([conversation("blurred", "Blur rename", new Date())]);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Blur rename,/u }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename thread" }));
+    const input = screen.getByRole("textbox", { name: "Rename Blur rename" });
+    fireEvent.change(input, { target: { value: "Typed before switching apps" } });
+
+    const windowFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.blur(input);
+    windowFocus.mockRestore();
+    expect(screen.getByRole("textbox", { name: "Rename Blur rename" })).toHaveValue("Typed before switching apps");
+    expect(view.onRenameConversation).not.toHaveBeenCalled();
+
+    screen.getByRole("searchbox", { name: "Search projects and conversations" }).focus();
+    fireEvent.blur(input);
+    expect(screen.queryByRole("textbox", { name: "Rename Blur rename" })).not.toBeInTheDocument();
+    expect(view.onRenameConversation).toHaveBeenCalledWith(expect.objectContaining({ id: "blurred" }), "Typed before switching apps");
+  });
+
+  it("returns focus to the project filter after a project rename is saved or cancelled", () => {
+    const view = renderSidebar([], vi.fn());
+    const filter = screen.getByRole("button", { name: "Filter work by project" });
+    const startRename = (): HTMLInputElement => {
+      fireEvent.click(filter);
+      fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+      return screen.getByRole("textbox", { name: "Rename project" });
+    };
+
+    fireEvent.keyDown(startRename(), { key: "Escape" });
+    expect(filter).toHaveFocus();
+    const saved = startRename();
+    fireEvent.change(saved, { target: { value: "Studio renamed" } });
+    fireEvent.submit(saved.closest("form")!);
+    expect(filter).toHaveFocus();
+    expect(view.onRenameProject).toHaveBeenCalledWith(expect.objectContaining({ id: "project-studio" }), "Studio renamed");
+  });
+
   it("keeps snoozed work reachable so it can be unsnoozed", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
@@ -1198,6 +1259,21 @@ describe("compact Work sidebar", () => {
     expect(choices[0]).toHaveFocus();
     fireEvent.click(document.activeElement!);
     expect(view.onSnoozeConversation).toHaveBeenCalledWith(idle, expect.any(String));
+  });
+
+  it("moves focus to Done after a row's inline Settle action regroups the thread", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const settling = conversation("inline-settle", "Settle from the row", new Date(2026, 7, 11, 9));
+    const other = conversation("inline-other", "Other work", new Date(2026, 7, 11, 10));
+    const view = renderSidebar([other, settling]);
+
+    const settle = screen.getByRole("button", { name: "Settle Settle from the row" });
+    settle.focus();
+    fireEvent.click(settle);
+    view.rerenderSnapshot(snapshot([other, { ...settling, settledAt: new Date(2026, 7, 11, 12).toISOString() }]));
+
+    expect(screen.getByRole("button", { name: "Done 1" })).toHaveFocus();
   });
 
   it("refreshes local-day groups at midnight without a snapshot update", () => {

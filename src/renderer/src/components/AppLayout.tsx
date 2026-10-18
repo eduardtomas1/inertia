@@ -3,7 +3,7 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, memo, Suspense, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   AppSettings,
   AppSnapshot,
@@ -318,6 +318,10 @@ export const AppLayout = memo(function AppLayout({
   useEffect(() => { if (!paletteOpen) setPaletteView("search"); }, [paletteOpen]);
   const rootRepository = rootGitMutationScope(gitStatus);
   const commitReviewOwner = `${project?.id ?? ""}:${conversation?.id ?? ""}`;
+  const currentOwnerRef = useRef(commitReviewOwner);
+  useLayoutEffect(() => {
+    currentOwnerRef.current = commitReviewOwner;
+  }, [commitReviewOwner]);
   const {
     sidebarOpen,
     setSidebarOpen,
@@ -767,8 +771,9 @@ export const AppLayout = memo(function AppLayout({
               })}
             onOpenPullRequest={openPullRequest}
             onPushAndCreatePullRequest={() => {
+              const owner = commitReviewOwner;
               void actions.mutateRemote("git.push")
-                .then(openPullRequest)
+                .then(() => { if (currentOwnerRef.current === owner) openPullRequest(); })
                 .catch(() => undefined);
             }}
             onFetch={() => { void actions.mutateRemote("git.fetch").catch(() => undefined); }}

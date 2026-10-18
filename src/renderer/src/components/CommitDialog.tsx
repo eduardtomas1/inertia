@@ -296,7 +296,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
       {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
       {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
       {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
-      <label className="dialog-field"><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submit(false); }} /></label>
+      <label className="dialog-field"><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) void submit(false); }} /></label>
     </DialogShell>
   );
 }

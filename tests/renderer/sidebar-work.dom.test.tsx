@@ -1187,6 +1187,19 @@ describe("compact Work sidebar", () => {
     expect(view.onSnoozeConversation).toHaveBeenCalledWith(snoozed, null);
   });
 
+  it("focuses the first snooze choice when the inline Snooze action opens the menu", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const idle = conversation("inline-snooze", "Snooze from the row", new Date(2026, 7, 11, 9));
+    const view = renderSidebar([idle]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Snooze Snooze from the row" }));
+    const choices = within(screen.getByRole("menu", { name: "Snooze" })).getAllByRole("menuitem");
+    expect(choices[0]).toHaveFocus();
+    fireEvent.click(document.activeElement!);
+    expect(view.onSnoozeConversation).toHaveBeenCalledWith(idle, expect.any(String));
+  });
+
   it("refreshes local-day groups at midnight without a snapshot update", () => {
     vi.useFakeTimers();
     const start = new Date(2026, 7, 11, 23, 59, 59, 900);

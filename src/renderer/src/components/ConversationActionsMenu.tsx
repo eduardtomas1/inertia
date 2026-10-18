@@ -162,11 +162,14 @@ export function ConversationActionsMenu({
     };
     position();
     window.addEventListener("resize", position);
-    menuRef.current
-      ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')
+    const firstItem = '[role="menuitem"]:not([disabled])';
+    const submenuItem = initialSubmenu
+      ? menuRef.current?.querySelector<HTMLButtonElement>(`.thread-submenu ${firstItem}`)
+      : null;
+    (submenuItem ?? menuRef.current?.querySelector<HTMLButtonElement>(firstItem))
       ?.focus({ preventScroll: true });
     return () => window.removeEventListener("resize", position);
-  }, [anchor, conversation.id]);
+  }, [anchor, conversation.id, initialSubmenu]);
 
   useEffect(() => {
     const dismissAfterFocusLeaves = (event: FocusEvent): void => {

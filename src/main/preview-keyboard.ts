@@ -21,6 +21,19 @@ export function previewAppShortcutKey(
     : null;
 }
 
+export function previewReloadShortcut(
+  input: Pick<Input, "alt" | "control" | "key" | "meta" | "shift" | "type">,
+  platform: NodeJS.Platform | string,
+): boolean {
+  const primary = platform === "darwin"
+    ? input.meta && !input.control
+    : input.control && !input.meta;
+  return input.type === "keyDown"
+    && primary
+    && !input.alt
+    && input.key.toLowerCase() === "r";
+}
+
 export function forwardedKeyboardInput(input: Input): KeyboardInputEvent {
   const modifiers: NonNullable<KeyboardInputEvent["modifiers"]> = [];
   if (input.control) modifiers.push("control");

@@ -41,6 +41,7 @@ export function createPreviewBrokerElectronState() {
       loading: boolean;
       crashed: boolean;
       stop: ReturnType<typeof vi.fn>;
+      reload(): void;
       close(): void;
       insertedText: string[];
       sentInputs: Array<Record<string, unknown>>;

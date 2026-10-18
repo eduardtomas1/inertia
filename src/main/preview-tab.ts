@@ -6,6 +6,7 @@ import { WebContentsView, type BaseWindow, type WebContents } from "electron";
 import {
   forwardedKeyboardInput,
   previewAppShortcutKey,
+  previewReloadShortcut,
 } from "./preview-keyboard.js";
 import { agentPageInputIsUser } from "./preview-agent-control.js";
 import { hardenDesktopSession } from "./preview-session.js";
@@ -69,6 +70,11 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
   contents.on("before-input-event", (event, input) => {
     if (options.captureLocked.has(contents)) {
       event.preventDefault();
+      return;
+    }
+    if (previewReloadShortcut(input, process.platform)) {
+      event.preventDefault();
+      if (!options.agentBusy()) options.navigate("reload");
       return;
     }
     const shortcutKey = previewAppShortcutKey(input, process.platform);

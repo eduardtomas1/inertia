@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -684,6 +686,45 @@ describe("turn Git artifacts", () => {
       absenceReason: "not-repository",
     });
     store.close();
+  });
+
+  it("keeps a reused patch as recent as the turn that reused it", async () => {
+    const runtime = workspace();
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const capture = async (id: string, turnIndex: number) => {
+      const turn = beginTurn(runtime.store, runtime.conversationId, id);
+      const checkpoint = await checkpointFor(
+        runtime.store,
+        runtime.repository,
+        runtime.data,
+        runtime.conversationId,
+        turnIndex,
+      );
+      await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+      writeFileSync(join(runtime.repository, "tracked.txt"), "before\nafter\n");
+      await manager.captureAfter({ turn, checkpointId: checkpoint.id });
+      writeFileSync(join(runtime.repository, "tracked.txt"), "before\n");
+      return turn;
+    };
+    const first = await capture("turn-original", 1);
+    const digest = runtime.store.turnGitArtifact(first.id)?.patchDigest;
+    expect(digest).toMatch(/^[0-9a-f]{64}$/u);
+    const patches = join(runtime.data, "turn-git-artifacts");
+    const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1_000);
+    utimesSync(join(patches, `${digest}.gz`), longAgo, longAgo);
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1_000);
+    for (let index = 0; index < 200; index += 1) {
+      const path = join(patches, `${index.toString(16).padStart(64, "0")}.gz`);
+      writeFileSync(path, "older patch");
+      utimesSync(path, hourAgo, hourAgo);
+    }
+
+    const second = await capture("turn-repeat", 2);
+
+    expect(runtime.store.turnGitArtifact(second.id)).toMatchObject({ patchDigest: digest, patchState: "available" });
+    expect(existsSync(join(patches, `${digest}.gz`))).toBe(true);
+    expect((await manager.turnDiff(second.id)).patch).toContain("+after");
+    runtime.store.close();
   });
 
   it("bounds oversized patches and rejects tampered or out-of-artifact reads", async () => {

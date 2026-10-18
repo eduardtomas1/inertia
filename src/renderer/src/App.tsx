@@ -939,7 +939,7 @@ export default function App(): React.JSX.Element {
         onOpenRunPreview: openWorkspaceRunPreview,
       },
     } : null,
-    detachedChat: conversation && primaryConversationSuppressed ? {
+    detachedChat: conversation && primaryConversationSuppressed && !draftConversation.conversation ? {
       title: conversation.title,
       windowOpen: detachedChats.conversationIds.has(conversation.id),
       onActivate: () => selectConversation(conversation),
@@ -948,6 +948,7 @@ export default function App(): React.JSX.Element {
   }), [
     conversation,
     detachedChats.conversationIds,
+    draftConversation.conversation,
     openWorkspaceRunPreview,
     primaryConversationSuppressed,
     selectConversation,

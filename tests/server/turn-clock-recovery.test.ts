@@ -2,9 +2,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
-  flushTurnControllerTestPromises, turnControllerTestIdentity,
+  flushTurnControllerTestPromises, turnControllerTestIdentity, turnControllerTestProviderInfo,
 } from "../support/turn-controller-runtime";
 import { monotonicTurnClock } from "../../src/server/runtime/turns/turn-clock";
+import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 
 afterEach(cleanupTurnControllerTestDirectories);
 
@@ -48,6 +49,35 @@ describe("turn clock correction and durable settlement repair", () => {
       const assistant = runtime.store.conversationDetail(runtime.conversationId)!.messages
         .find((message) => message.role === "assistant")!;
       expect(Date.parse(second.message.createdAt)).toBeGreaterThan(Date.parse(assistant.createdAt));
+    } finally { runtime.store.close(); }
+  });
+
+  it("orders a new turn after earlier ones when the runtime restarts with the clock moved back", async () => {
+    let wallTime = Date.parse("2030-01-01T01:00:00.000Z");
+    const runtime = await createTurnControllerTestRuntime({}, { clock: () => new Date(wallTime) });
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Before the clock moved." });
+      runtime.controller.start(first.turn.id);
+      runtime.provider.resolve({ status: "completed", text: "Done." });
+      await flushTurnControllerTestPromises();
+      await flushTurnControllerTestPromises();
+      wallTime -= 60 * 60 * 1_000;
+      let sequence = 0;
+      const restarted = new TurnController(runtime.store, runtime.provider, new Map(), new Map(), new Map(), {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [turnControllerTestProviderInfo()],
+        captureStructuredContext: ({ content }) => ({ visibleRequest: content }),
+      }, { scheduler: runtime.scheduler, clock: () => new Date(wallTime), id: () => `restarted-id-${++sequence}`, turnTimeoutMs: 1_000 });
+      const second = restarted.queue({ conversationId: runtime.conversationId, content: "After the restart." });
+      expect(Date.parse(second.turn.requestedAt)).toBeGreaterThan(Date.parse(first.turn.requestedAt));
+      restarted.start(second.turn.id);
+      runtime.provider.resolve({ status: "completed", text: "Done again." });
+      await flushTurnControllerTestPromises();
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(second.turn.id).status).toBe("completed");
+      expect(runtime.store.latestAgentTurnForConversation(runtime.conversationId)?.id).toBe(second.turn.id);
+      expect(runtime.store.conversation(runtime.conversationId).status).toBe("completed");
     } finally { runtime.store.close(); }
   });
 

@@ -23,6 +23,18 @@ export interface TurnStreamProjectionOptions {
   onPersistenceFailure(active: ActiveTurn, error: unknown): void;
 }
 
+function sharedPrefixLength(left: string, right: string): number {
+  let common = 0;
+  while (
+    common < left.length
+    && common < right.length
+    && left.charCodeAt(common) === right.charCodeAt(common)
+  ) common += 1;
+  const last = right.charCodeAt(common - 1);
+  if (common > 0 && last >= 0xd800 && last <= 0xdbff) common -= 1;
+  return common;
+}
+
 function normalizedPrefix(value: string, maximumCodeUnits: number): string {
   if (value.length <= maximumCodeUnits) return value;
   let end = maximumCodeUnits;
@@ -138,14 +150,10 @@ export class TurnStreamProjection {
   private rebasedOnFollowUp(active: ActiveTurn, text: string): string {
     const preserved = active.followUpBoundary?.text;
     if (!preserved || text.startsWith(preserved)) return text;
-    let common = 0;
-    while (
-      common < preserved.length
-      && common < text.length
-      && preserved.charCodeAt(common) === text.charCodeAt(common)
-    ) common += 1;
-    const last = text.charCodeAt(common - 1);
-    if (common > 0 && last >= 0xd800 && last <= 0xdbff) common -= 1;
+    const common = sharedPrefixLength(preserved, text);
+    if (sharedPrefixLength(active.assistantSegmentText, text) >= common) {
+      return `${preserved}${text}`;
+    }
     return `${preserved}${text.slice(common)}`;
   }
 

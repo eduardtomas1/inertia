@@ -2,6 +2,7 @@ import { Save } from "lucide-react";
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -86,6 +87,10 @@ export function FileEditorDialog({
   useEffect(() => {
     return focusModalOnAnimationFrame(() => editorRef.current?.focus());
   }, []);
+
+  useLayoutEffect(() => {
+    if (error && !saving) editorRef.current?.focus();
+  }, [error, saving]);
 
   const closeSafely = (): void => {
     if (saving) return;

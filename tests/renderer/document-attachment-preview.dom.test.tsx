@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
 import type { ChatAttachment } from "../../src/shared/contracts";
+import { emulateDisabledFocusFixup } from "./support/focus-fixup";
 
 function attachment(
   update: Partial<ChatAttachment> = {},
@@ -83,6 +84,32 @@ describe("document attachment previews", () => {
     await waitFor(() => expect(screen.getByLabelText(`Text preview of ${name}`)).toHaveTextContent(text));
     expect(screen.getByLabelText(`Text preview of ${name}`).textContent).not.toContain("\x1b");
   });
+  it("keeps focus on Open in PDF app while the validated copy opens", async () => {
+    const stop = emulateDisabledFocusFixup();
+    try {
+      let failOpen!: (error: Error) => void;
+      const openAttachmentExternally = vi.fn(() => new Promise<void>((_resolve, reject) => { failOpen = reject; }));
+      vi.stubGlobal("inertia", { openAttachmentExternally });
+      vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>(() => {})));
+      const user = userEvent.setup();
+      render(<ComposerAttachmentList attachments={[attachment({ name: "report.pdf", mimeType: "application/pdf" })]} onRemove={vi.fn()} />);
+      await user.click(screen.getByRole("button", { name: "Preview attachment report.pdf" }));
+      const open = await screen.findByRole("button", { name: "Open in PDF app" });
+      await user.click(open);
+      const opening = screen.getByRole("button", { name: "Opening…" });
+      expect(opening).toHaveAttribute("aria-disabled", "true");
+      await act(async () => { await Promise.resolve(); });
+      expect(opening).toHaveFocus();
+      await user.click(opening);
+      expect(openAttachmentExternally).toHaveBeenCalledOnce();
+      await act(async () => { failOpen(new Error("synthetic")); });
+      expect(await screen.findByRole("alert")).toHaveTextContent("The validated copy could not be opened.");
+      expect(screen.getByRole("button", { name: "Open in PDF app" })).toHaveFocus();
+    } finally {
+      stop();
+    }
+  });
+
   it("projects document visibility onto the body-level preview portal", async () => {
     let visibility: DocumentVisibilityState = "visible";
     vi.spyOn(document, "visibilityState", "get")

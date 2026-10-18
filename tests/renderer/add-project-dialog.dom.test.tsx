@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AddProjectDialog } from "../../src/renderer/src/components/AddProjectDialog";
 import { readSourceText } from "../helpers/source-text";
+import { emulateDisabledFocusFixup } from "./support/focus-fixup";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -34,6 +35,22 @@ describe("add project dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open project" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(onImport).toHaveBeenCalledExactlyOnceWith({ path: "/work/website" });
+  });
+
+  it("returns focus to the folder path after a failed add disabled the form", async () => {
+    const stop = emulateDisabledFocusFixup();
+    try {
+      const onImport = vi.fn().mockRejectedValue(new Error("The folder is not readable."));
+      render(<AddProjectDialog onImport={onImport} onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /Local folder/u }));
+      const path = screen.getByRole("textbox", { name: "Folder path" });
+      fireEvent.change(path, { target: { value: "/work/locked" } });
+      fireEvent.submit(path.closest("form")!);
+      expect(await screen.findByRole("alert")).toHaveTextContent("The folder is not readable.");
+      await waitFor(() => expect(path).toHaveFocus());
+    } finally {
+      stop();
+    }
   });
 
   it("keeps a clone request owned while pending and allows a failed request to retry", async () => {

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ComposerAttachmentList } from "../../src/renderer/src/components/ComposerAttachmentList";
+import { emulateDisabledFocusFixup } from "./support/focus-fixup";
 import type { ChatAttachment } from "../../src/shared/contracts";
 
 const image: ChatAttachment = {
@@ -38,14 +39,14 @@ describe("attachment image zoom", () => {
     expect(level).toHaveTextContent("100%");
     expect(stage).toHaveAttribute("data-zoomed", "false");
     // Nothing to undo at the fitted scale.
-    expect(zoomOut).toBeDisabled();
-    expect(reset).toBeDisabled();
+    expect(zoomOut).toHaveAttribute("aria-disabled", "true");
+    expect(reset).toHaveAttribute("aria-disabled", "true");
 
     await user.click(zoomIn);
 
     expect(level).toHaveTextContent("150%");
     expect(stage).toHaveAttribute("data-zoomed", "true");
-    expect(zoomOut).toBeEnabled();
+    expect(zoomOut).not.toHaveAttribute("aria-disabled");
     expect(within(stage).getByRole("img", { name: "diagram.png" }))
       .toHaveStyle({ transform: "translate3d(0px, 0px, 0) scale(1.5)" });
 
@@ -56,7 +57,27 @@ describe("attachment image zoom", () => {
 
     expect(level).toHaveTextContent("100%");
     expect(stage).toHaveAttribute("data-zoomed", "false");
-    expect(zoomOut).toBeDisabled();
+    expect(zoomOut).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("keeps focus on a zoom control that reaches its limit", async () => {
+    const stop = emulateDisabledFocusFixup();
+    try {
+      const user = userEvent.setup();
+      const stage = await openZoomStage();
+      const level = within(stage).getByLabelText("Zoom level");
+      await user.click(within(stage).getByRole("button", { name: "Zoom in" }));
+      const reset = within(stage).getByRole("button", { name: "Reset zoom" });
+      await user.click(reset);
+      await waitFor(() => expect(level).toHaveTextContent("100%"));
+      await Promise.resolve();
+      expect(reset).toHaveFocus();
+      expect(reset).toHaveAttribute("aria-disabled", "true");
+      await user.click(within(stage).getByRole("button", { name: "Zoom out" }));
+      expect(level).toHaveTextContent("100%");
+    } finally {
+      stop();
+    }
   });
 
   it("zooms from the keyboard without swallowing the dialog's Escape", async () => {

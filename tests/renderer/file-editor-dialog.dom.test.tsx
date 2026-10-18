@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FileEditorDialog } from "../../src/renderer/src/components/FileEditorDialog";
 import { FilesPanel } from "../../src/renderer/src/components/FilesPanel";
 import { readSourceText } from "../helpers/source-text";
+import { emulateDisabledFocusFixup } from "./support/focus-fixup";
 
 const file = {
   path: "src/example.ts",
@@ -164,6 +165,23 @@ describe("FileEditorDialog", () => {
     view.rerender(<FilesPanel {...props} preview={fresh} />);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSaveFile).toHaveBeenLastCalledWith(file.path, "typed\n", "b".repeat(64)));
+  });
+
+  it("returns focus to the editor after a failed save disabled it", async () => {
+    const stop = emulateDisabledFocusFixup();
+    try {
+      const onSave = vi.fn(async () => { throw new Error("Reload this file before saving it."); });
+      render(<FileEditorDialog file={file} canSave={() => true} onClose={vi.fn()} onSave={onSave} />);
+      const editor = screen.getByRole("textbox", { name: "Edit contents of src/example.ts" });
+      await act(async () => { await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); }); });
+      expect(editor).toHaveFocus();
+      fireEvent.change(editor, { target: { value: "edited\n" } });
+      fireEvent.keyDown(editor, { key: "s", metaKey: true });
+      expect(await screen.findByRole("alert")).toHaveTextContent("Reload this file");
+      await waitFor(() => expect(editor).toHaveFocus());
+    } finally {
+      stop();
+    }
   });
 
   it("preserves a CRLF file's newline convention after browser editing", async () => {

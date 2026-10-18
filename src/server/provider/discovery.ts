@@ -138,6 +138,7 @@ interface ProviderDiscoveryDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
   scheduleProbeDeadline?: ProviderProbeDeadlineScheduler;
   claudeLaunchTarget?: ClaudeLaunchTargetOptions;
+  now?: () => number;
 }
 
 async function probeProcess(
@@ -432,6 +433,7 @@ async function detectProviderRecordingCleanup(
   };
   requireActive();
   const resolveCandidates = dependencies.executableCandidates ?? executableCandidates;
+  const now = dependencies.now ?? (() => performance.now());
   const terminateProcessTree = dependencies.terminateProcessTree
     ?? terminateProcessTreeAndWait;
   const scheduleProbeDeadline = dependencies.scheduleProbeDeadline
@@ -538,9 +540,9 @@ async function detectProviderRecordingCleanup(
   }
 
   const versionProbes = await settleAllOrThrow(candidates.map(async (executable) => {
-    const versionStartedAt = performance.now();
+    const versionStartedAt = now();
     const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
-    const latencyMs = Math.round(performance.now() - versionStartedAt);
+    const latencyMs = Math.round(now() - versionStartedAt);
     const followUpTimeoutMs = slowMachineProbeDeadline(timeoutMs, latencyMs);
     const version = versionFromOutput(probe.output);
     const acpProbe = (providerId === "cursor" || providerId === "kimi")

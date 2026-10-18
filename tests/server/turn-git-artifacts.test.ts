@@ -649,7 +649,7 @@ describe("turn Git artifacts", () => {
 
   it("reports a turn checkpoint failure inside a broken repository", async () => {
     const runtime = workspace();
-    git(runtime.repository, ["init", "--quiet", "nested"]);
+    git(runtime.repository, ["update-ref", `refs/inertia/checkpoints/${runtime.conversationId}`, "HEAD"]);
     const turn = beginTurn(runtime.store, runtime.conversationId, "turn-checkpoint-failure");
     const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
 

@@ -405,8 +405,8 @@ describe("provider info refresh ownership", () => {
     });
 
     function setup(options: {
-      retryDelaysMs: readonly number[];
-      detect: (call: number) => Promise<ProviderDetection>;
+      retryDelaysMs?: readonly number[];
+      detect: (call: number, timeoutMs?: number) => Promise<ProviderDetection>;
       gate?: RuntimeUpdatePreparationGate;
       activity?: { count: number };
     }) {
@@ -416,12 +416,12 @@ describe("provider info refresh ownership", () => {
       let calls = 0;
       let inFlight = 0;
       let maxInFlight = 0;
-      const detect = vi.fn(async () => {
+      const detect = vi.fn(async (_providerId?: ProviderInfo["id"], detectOptions?: { timeoutMs?: number }) => {
         calls += 1;
         inFlight += 1;
         maxInFlight = Math.max(maxInFlight, inFlight);
         try {
-          return await options.detect(calls);
+          return await options.detect(calls, detectOptions?.timeoutMs);
         } finally {
           inFlight -= 1;
         }
@@ -487,7 +487,7 @@ describe("provider info refresh ownership", () => {
       expect(retries.map(([providerId]) => providerId)).toEqual(["codex", "codex"]);
       expect(retries.map(([, options]) => options)).toMatchObject([
         { timeoutMs: 8_000, refreshEnvironment: false },
-        { timeoutMs: 16_000, refreshEnvironment: false },
+        { timeoutMs: 12_000, refreshEnvironment: false },
       ]);
     });
 
@@ -500,14 +500,37 @@ describe("provider info refresh ownership", () => {
         expect(runtime.codex().authState).toBe("error");
       });
       await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(runtime.detect).toHaveBeenCalledTimes(4);
+      expect(runtime.detect).toHaveBeenCalledTimes(3);
       expect(runtime.detect.mock.calls.map((call) => (call as unknown as [string, { timeoutMs: number }])[1].timeoutMs))
-        .toEqual([4_000, 8_000, 16_000, 16_000]);
+        .toEqual([4_000, 8_000, 12_000]);
       expect(runtime.codex()).toMatchObject({
         installState: "installed",
         canRun: false,
         statusMessage: "Codex did not answer the sign-in check in time; refresh to try again",
       });
+    });
+
+    it("ends every detection retry for a CLI that never answers within 30 seconds", async () => {
+      vi.useFakeTimers();
+      try {
+        const runtime = setup({
+          detect: async (_call, timeoutMs) => {
+            await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+            return timedOut();
+          },
+        });
+        const startedAt = Date.now();
+        void runtime.refresh("codex");
+        while (runtime.codex().authState !== "error" && Date.now() - startedAt < 120_000) {
+          await vi.advanceTimersByTimeAsync(100);
+        }
+
+        expect(runtime.codex().authState).toBe("error");
+        expect(Date.now() - startedAt).toBeLessThanOrEqual(30_000);
+        runtime.close();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("cancels a pending background retry when the runtime shuts down", async () => {

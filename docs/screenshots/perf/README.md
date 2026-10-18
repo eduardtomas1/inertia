@@ -216,7 +216,7 @@ The pipeline for one Claude refresh, before and after: three processes, strictly
 | `--version` | 4 s | 4 s |
 | `auth status`, `acp`/`app-server`/`serve --help` | 4 s | 4 s, stretched by the version answer's latency over 500 ms (1.25 s answer: 10 s), at most 30 s |
 | SDK catalog and usage session | 6 s, all answers dropped on timeout | 6 s, stretched the same way, at most 30 s; an answered catalog is kept when usage misses the deadline |
-| Timed-out detection retries (1, 3, 9 s apart) | 4 s each | 8, 16, 16 s |
+| Timed-out detection retries | three, 1, 3 and 9 s apart, 4 s each | two, 1 and 3 s apart, 8 and 12 s (28 s in all after the first 4 s try) |
 | Failed catalog read | kept stale until the next refresh or turn | retried in the background 1, 3, 9 s later with 2x, 4x, 8x the deadline |
 | Post-turn and idle catalog reads | 6 s | stretched by the latest detection's version latency |
 

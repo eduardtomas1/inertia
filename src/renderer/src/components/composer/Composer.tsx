@@ -1003,7 +1003,7 @@ export const Composer = memo(function Composer({
           onNavigatePromptHistory={promptHistoryController.navigate}
           onImportAttachments={importAttachments}
           onSubmit={submit}
-          canQueue={canQueue || documentBlocksFollowUp}
+          canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
           running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
           stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}

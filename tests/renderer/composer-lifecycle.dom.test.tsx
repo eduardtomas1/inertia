@@ -845,44 +845,77 @@ describe("composer asynchronous ownership", () => {
     expect(input.value).toBe("Read this spec next.");
   });
 
-  for (const key of ["Enter", "Tab"]) {
-    it(`explains why ${key} does not send a document draft once the next turn starts`, async () => {
-      const current = conversation("74747474-7474-4474-8474-747474747474");
-      const document: ChatAttachment = {
-        ...attachment(`next-turn-${key}`),
-        name: "spec.pdf",
-        mimeType: "application/pdf",
-      };
-      const onSend = vi.fn(async () => undefined);
-      const latestTurn = {
-        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
-        id: "finished-turn",
-        status: "completed" as const,
-        harnessId: "codex-app-server" as const,
-      };
-      const props = composerProps(current, {
-        running: false,
-        latestTurn,
-        onSend,
-        onImportAttachments: async () => attachmentLease([document]),
-      });
-      const view = render(<Composer {...props} />);
-      const input = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-      fireEvent.change(input, { target: { value: "Read this spec next." } });
-      fireEvent.paste(input, { clipboardData: { files: [new File(["%PDF"], "spec.pdf", { type: "application/pdf" })] } });
-      await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
-      view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
-
-      expect(fireEvent.keyDown(input, { key })).toBe(false);
-
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "Follow-ups while the agent is working support images only.",
-      );
-      expect(onSend).not.toHaveBeenCalled();
-      expect(input.value).toBe("Read this spec next.");
-      expect(screen.getByRole("button", { name: "Remove attachment spec.pdf" })).toBeVisible();
+  it("explains why Enter does not send a document draft once the next turn starts", async () => {
+    const current = conversation("74747474-7474-4474-8474-747474747474");
+    const document: ChatAttachment = {
+      ...attachment("next-turn-Enter"),
+      name: "spec.pdf",
+      mimeType: "application/pdf",
+    };
+    const onSend = vi.fn(async () => undefined);
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "finished-turn",
+      status: "completed" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const props = composerProps(current, {
+      running: false,
+      latestTurn,
+      onSend,
+      onImportAttachments: async () => attachmentLease([document]),
     });
-  }
+    const view = render(<Composer {...props} />);
+    const input = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Read this spec next." } });
+    fireEvent.paste(input, { clipboardData: { files: [new File(["%PDF"], "spec.pdf", { type: "application/pdf" })] } });
+    await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
+    view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
+
+    expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Follow-ups while the agent is working support images only.",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input.value).toBe("Read this spec next.");
+    expect(screen.getByRole("button", { name: "Remove attachment spec.pdf" })).toBeVisible();
+  });
+
+  it("lets Tab leave a document draft once the next turn starts", async () => {
+    const current = conversation("75757575-7575-4575-8575-757575757575");
+    const document: ChatAttachment = {
+      ...attachment("next-turn-tab-leaves"),
+      name: "spec.pdf",
+      mimeType: "application/pdf",
+    };
+    const onSend = vi.fn(async () => undefined);
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "finished-turn",
+      status: "completed" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const props = composerProps(current, {
+      running: false,
+      latestTurn,
+      onSend,
+      onImportAttachments: async () => attachmentLease([document]),
+    });
+    const view = render(<Composer {...props} />);
+    const input = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Read this spec next." } });
+    fireEvent.paste(input, { clipboardData: { files: [new File(["%PDF"], "spec.pdf", { type: "application/pdf" })] } });
+    await screen.findByRole("button", { name: "Remove attachment spec.pdf" });
+    view.rerender(<Composer {...props} running latestTurn={{ ...latestTurn, id: "queued-turn", status: "running" }} />);
+
+    expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input.value).toBe("Read this spec next.");
+    expect(screen.getByRole("button", { name: "Remove attachment spec.pdf" })).toBeVisible();
+  });
 
   it("keeps non-image media unavailable during an active follow-up", async () => {
     const current = conversation("16161616-1616-4616-8616-161616161616");

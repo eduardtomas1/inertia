@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Conversation } from "@shared/contracts";
 
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
+export const CLOCK_CHECK_INTERVAL_MS = 60_000;
 
 export function nextSnoozeExpiry(
   conversations: readonly Conversation[],
@@ -43,13 +43,18 @@ export function useSnoozeClock(
   );
 
   useEffect(() => {
-    const delay = Math.min(
-      MAX_TIMER_DELAY_MS,
-      Math.max(0, nextRefresh - Date.now()) + 1,
-    );
-    const timer = window.setTimeout(() => setNow(Date.now()), delay);
+    let timer = 0;
+    const check = (): void => {
+      const current = Date.now();
+      if (current >= nextRefresh || nextLocalDayBoundary(current) !== nextLocalDayBoundary(now)) {
+        setNow(current);
+        return;
+      }
+      timer = window.setTimeout(check, Math.min(CLOCK_CHECK_INTERVAL_MS, nextRefresh - current + 1));
+    };
+    check();
     return () => window.clearTimeout(timer);
-  }, [nextRefresh]);
+  }, [now, nextRefresh]);
 
   return now;
 }

@@ -12,6 +12,7 @@ import { compareTodos, type Todo, type TodoPatch, type TodoPriority } from "@sha
 
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
+import { CLOCK_CHECK_INTERVAL_MS, nextLocalDayBoundary } from "../hooks/useSnoozeClock";
 import { projectNameFromPath } from "../lib/format";
 import {
   buildNewConversationPayload,
@@ -112,9 +113,17 @@ export function TasksView({
   const detailTodo = selected ?? (detailPresent && detailId ? todoById.get(detailId) ?? null : null);
 
   useEffect(() => {
-    const current = new Date();
-    const midnight = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1);
-    const timer = window.setTimeout(() => setDay(day + 1), midnight.getTime() - current.getTime());
+    const boundary = nextLocalDayBoundary(Date.now());
+    let timer = 0;
+    const check = (): void => {
+      const current = Date.now();
+      if (nextLocalDayBoundary(current) !== boundary) {
+        setDay(day + 1);
+        return;
+      }
+      timer = window.setTimeout(check, Math.min(CLOCK_CHECK_INTERVAL_MS, boundary - current));
+    };
+    check();
     return () => window.clearTimeout(timer);
   }, [day]);
 

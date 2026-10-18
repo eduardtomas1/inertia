@@ -235,7 +235,8 @@ export class AppUpdateService {
       return Promise.resolve(this.current());
     }
     const now = this.now();
-    if (!force && this.cached && now - Date.parse(this.cached.checkedAt) < this.cacheMs) {
+    const cacheAge = this.cached ? now - Date.parse(this.cached.checkedAt) : -1;
+    if (!force && cacheAge >= 0 && cacheAge < this.cacheMs) {
       return Promise.resolve(this.publish({
         ...this.cached,
         freshness: "cached",

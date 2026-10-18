@@ -360,6 +360,16 @@ describe("app update checks", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("treats a cached result from the future as expired after the clock moves back", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => release("v0.0.10"));
+    let now = Date.parse("2030-01-02T03:04:05.000Z");
+    const service = new AppUpdateService({ currentVersion: "0.0.10", fetch, now: () => now });
+    await service.check();
+    now -= 24 * 60 * 60 * 1_000;
+    await expect(service.check()).resolves.toMatchObject({ state: "current", freshness: "fresh" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the last valid result on a transient failure and reports an honest empty state", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(release("v0.0.11"))

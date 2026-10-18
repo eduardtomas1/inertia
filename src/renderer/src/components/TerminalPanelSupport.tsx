@@ -79,6 +79,11 @@ export const terminalDetachCommand = (terminalId: string): ClientCommand => comm
   payload: { terminalId },
 });
 
+export const terminalSize = (cols: number, rows: number): { cols: number; rows: number } => ({
+  cols: Math.min(400, Math.max(20, cols)),
+  rows: Math.min(200, Math.max(4, rows)),
+});
+
 export const terminalResizeCommand = (
   terminalId: string,
   size: { cols: number; rows: number },

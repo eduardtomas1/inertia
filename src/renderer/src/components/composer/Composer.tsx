@@ -679,8 +679,9 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
-    && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
+  const queueBlocked = !attachmentsAreImages || Boolean(promptContext) || previewContextSelected
+    || fileReferences.length > 0 || contextPacketIds.length > 0;
+  const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending;
   const documentBlocksFollowUp = running && !attachmentsAreImages;
   const queuedMessageCount = useRuntimeQueueLength(conversation.id);
   const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
@@ -1004,6 +1005,7 @@ export const Composer = memo(function Composer({
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
+          queueBlocked={queueBlocked}
           onQueue={() => void queueCurrentMessage()}
           running={running} hasHistory={hasVisibleHistory || latestKnownTurn !== null}
           stopsBeforeSending={running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)}

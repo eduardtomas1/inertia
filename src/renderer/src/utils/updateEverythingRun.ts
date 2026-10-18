@@ -50,10 +50,19 @@ async function installApp(): Promise<string | null> {
   return result.state === "installing" && result.installBlocker === null ? null : result.message;
 }
 
-export async function runUpdateEverything({ payload, request, appStatus, onPhase }: {
+function providerFailures(
+  result: UpdatesRunResult,
+  providerLabel: (providerId: ProviderMaintenanceProviderId) => string,
+): string[] {
+  return result.providers.flatMap(({ providerId, outcome, error }) => outcome !== "failed" ? []
+    : [error ? `${providerLabel(providerId)} update failed: ${error}` : `${providerLabel(providerId)} update failed.`]);
+}
+
+export async function runUpdateEverything({ payload, request, appStatus, providerLabel, onPhase }: {
   payload: UpdateEverythingRequest;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   appStatus: () => AppUpdateStatus | null;
+  providerLabel: (providerId: ProviderMaintenanceProviderId) => string;
   onPhase: (phase: UpdateEverythingPhase) => void;
 }): Promise<string | null> {
   let app = payload.includeApp ? appStatus() : null;
@@ -83,5 +92,6 @@ export async function runUpdateEverything({ payload, request, appStatus, onPhase
   }
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
-  return download ?? refusal ?? result.appInstallBlocker;
+  const appMessage = download ?? refusal ?? result.appInstallBlocker;
+  return [...providerFailures(result, providerLabel), ...(appMessage ? [appMessage] : [])].join(" ") || null;
 }

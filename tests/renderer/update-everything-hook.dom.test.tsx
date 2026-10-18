@@ -10,6 +10,7 @@ import type {
   WorkspaceRun,
 } from "../../src/shared/contracts";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
+import type { UpdatesRunResult } from "../../src/shared/updates";
 import type { AgentRunState } from "../../src/shared/run-state";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { useUpdateEverything } from "../../src/renderer/src/hooks/useUpdateEverything";
@@ -59,10 +60,14 @@ function snapshot(conversations: ConversationShell[] = [], runs: Partial<Workspa
 
 const NO_OPERATIONS = new Map<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>();
 
-function runResult(readyForAppInstall: boolean, appInstallBlocker: string | null = null): ServerEvent {
+function runResult(
+  readyForAppInstall: boolean,
+  appInstallBlocker: string | null = null,
+  providers: UpdatesRunResult["providers"] = [],
+): ServerEvent {
   return {
     type: "request.result", requestId: "request",
-    result: { kind: "updates.run", providers: [], interruptedConversationIds: [], readyForAppInstall, appInstallBlocker },
+    result: { kind: "updates.run", providers, interruptedConversationIds: [], readyForAppInstall, appInstallBlocker },
   };
 }
 
@@ -181,6 +186,7 @@ describe("update everything plan", () => {
 function harness(appStatus: AppUpdateStatus | null, request: (command: CommandWithoutId) => Promise<ServerEvent>) {
   return renderHook(({ status }) => useUpdateEverything({
     statuses: statusMap(maintenance("codex"), maintenance("claude")), operations: NO_OPERATIONS, appStatus: status, request,
+    snapshot: snapshot(),
   }), { initialProps: { status: appStatus } });
 }
 
@@ -294,6 +300,32 @@ describe("update everything run", () => {
     await act(async () => hook.result.current.run(withApp));
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
     expect(hook.result.current.error).toBe(refused.message);
+  });
+
+  it("reports each provider that failed to update by its display name and still installs the app", async () => {
+    const providers = [
+      { providerId: "codex", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: "npm exited with code 1." },
+      { providerId: "claude", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: null },
+      { providerId: "cursor", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "1.1.0", error: null },
+      { providerId: "kimi", outcome: "skipped", beforeVersion: "1.0.0", afterVersion: null, error: "The update was cancelled." },
+    ] as const;
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run"
+      ? runResult(true, null, [...providers]) : ok);
+    install.mockResolvedValue(updateStatus({ state: "installing" }));
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(install).toHaveBeenCalledOnce();
+    expect(hook.result.current.error).toBe("Codex update failed: npm exited with code 1. Claude Code update failed.");
+  });
+
+  it("reports provider failures before why the app was kept out of the run", async () => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run"
+      ? runResult(false, "Close active terminals before restarting to update.", [
+        { providerId: "codex", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: "npm exited with code 1." },
+      ]) : ok);
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(hook.result.current.error).toBe("Codex update failed: npm exited with code 1. Close active terminals before restarting to update.");
   });
 
   it("reports a rejected install with the app updater's own wording", async () => {

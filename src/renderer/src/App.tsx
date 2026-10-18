@@ -210,6 +210,7 @@ export default function App(): React.JSX.Element {
     operations: providerMaintenance.operations,
     appStatus: appUpdate.status,
     request,
+    snapshot: connection.snapshot,
   }));
   const project = useMemo(
     () => activeWorkspaceProject(connection.snapshot),

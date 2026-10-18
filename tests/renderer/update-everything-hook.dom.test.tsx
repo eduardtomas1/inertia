@@ -281,6 +281,18 @@ describe("update everything run", () => {
     expect(hook.result.current.error ?? "").not.toContain("/private/path");
   });
 
+  it.each([
+    ["refuses the restart", updateStatus({ state: "downloaded", installBlocker: "maintenance", message: "Wait for provider maintenance to finish before restarting." })],
+    ["cannot confirm a safe shutdown", updateStatus({ state: "failed", installBlocker: "shutdown", message: "Inertia could not confirm a safe shutdown. Reopen the app before retrying." })],
+  ])("reports the app updater's message when it %s", async (_name, refused) => {
+    install.mockResolvedValue(refused);
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp));
+    expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
+    expect(hook.result.current.error).toBe(refused.message);
+  });
+
   it("reports a rejected install with the app updater's own wording", async () => {
     install.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);

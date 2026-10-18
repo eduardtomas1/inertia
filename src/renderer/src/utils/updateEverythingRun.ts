@@ -45,9 +45,9 @@ async function downloadApp(): Promise<AppUpdateStatus> {
   return await settledDownload(started);
 }
 
-async function installApp(): Promise<boolean> {
+async function installApp(): Promise<string | null> {
   const result = await invoke(() => window.inertia.installAppUpdate(), "The update restart could not be started safely.");
-  return result.state === "installing" && result.installBlocker === null;
+  return result.state === "installing" && result.installBlocker === null ? null : result.message;
 }
 
 export async function runUpdateEverything({ payload, request, appStatus, onPhase }: {
@@ -65,16 +65,18 @@ export async function runUpdateEverything({ payload, request, appStatus, onPhase
   onPhase({ kind: "providers", providerIds: payload.providerIds });
   const result = updatesRunResult(await request({ type: "updates.run", payload }));
   let installed = false;
+  let refusal: string | null = null;
   let failure: unknown = null;
   if (payload.includeApp && result.readyForAppInstall && app?.state === "downloaded") {
     onPhase({ kind: "app" });
     try {
-      installed = await installApp();
+      refusal = await installApp();
+      installed = refusal === null;
     } catch (cause) {
       failure = cause;
     }
   }
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
-  return result.appInstallBlocker;
+  return refusal ?? result.appInstallBlocker;
 }

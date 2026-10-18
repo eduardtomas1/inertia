@@ -119,7 +119,7 @@ export function installGlobalShortcuts(
     const modalOpen = Boolean(ownerDocument?.querySelector(
       '[role="dialog"][aria-modal="true"]',
     ));
-    if (shortcut && (actions.current.suspended || modalOpen)) {
+    if (shortcut && (event.repeat || actions.current.suspended || modalOpen)) {
       event.preventDefault();
       event.stopPropagation();
       ownedKeyUps.add(key);

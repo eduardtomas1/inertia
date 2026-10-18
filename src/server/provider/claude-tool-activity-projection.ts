@@ -28,7 +28,7 @@ export class ClaudeToolActivityProjection {
     private readonly emitter: AgentHarnessEmitter,
     checklistTasks?: () => ClaudeChecklistTasks,
   ) {
-    const tasks: ClaudeChecklistTasks = new Map();
+    const tasks: ClaudeChecklistTasks = { steps: new Map(), listed: true };
     this.checklist = new ClaudeChecklistProjection(emitter, checklistTasks ?? (() => tasks));
   }
 

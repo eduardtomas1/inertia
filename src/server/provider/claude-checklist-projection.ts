@@ -12,7 +12,10 @@ const MAX_CLAUDE_CHECKLIST_SESSIONS = 64;
 const CLAUDE_CHECKLIST_TOOLS: ReadonlySet<string> = new Set(["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList"]);
 
 type ClaudeChecklistStatus = Exclude<AgentPlanStep["status"], "cancelled">;
-export type ClaudeChecklistTasks = Map<string, AgentPlanStep>;
+export interface ClaudeChecklistTasks {
+  readonly steps: Map<string, AgentPlanStep>;
+  listed: boolean;
+}
 
 interface ClaudeChecklistCall {
   name: string;
@@ -48,9 +51,9 @@ function checklistTodo(value: unknown): AgentPlanStep | null {
 export class ClaudeChecklistSessions {
   private readonly sessions = new Map<string, ClaudeChecklistTasks>();
 
-  tasks(sessionId: string | undefined): ClaudeChecklistTasks {
-    if (!sessionId) return new Map();
-    const tasks = this.sessions.get(sessionId) ?? new Map<string, AgentPlanStep>();
+  tasks(sessionId: string | undefined, resumed = false): ClaudeChecklistTasks {
+    if (!sessionId) return { steps: new Map(), listed: true };
+    const tasks = this.sessions.get(sessionId) ?? { steps: new Map(), listed: !resumed };
     this.sessions.delete(sessionId);
     this.sessions.set(sessionId, tasks);
     if (this.sessions.size > MAX_CLAUDE_CHECKLIST_SESSIONS) {
@@ -93,24 +96,26 @@ export class ClaudeChecklistProjection {
       return;
     }
     const tasks = this.tasks();
+    if (call.name !== "TaskList" && !tasks.listed) return;
+    const steps = tasks.steps;
     if (call.name === "TaskCreate") {
       const task = objectValue(record.task);
       const id = boundedIdentifier(task?.id);
       const step = checklistText(task?.subject) ?? checklistText(call.input.subject);
       if (!id || !step) return;
-      if (!tasks.has(id) && tasks.size >= MAX_AGENT_PLAN_STEPS) return;
-      tasks.set(id, { step, status: "pending" });
+      if (!steps.has(id) && steps.size >= MAX_AGENT_PLAN_STEPS) return;
+      steps.set(id, { step, status: "pending" });
     } else if (call.name === "TaskUpdate") {
       const id = boundedIdentifier(call.input.taskId);
-      const task = id ? tasks.get(id) : undefined;
+      const task = id ? steps.get(id) : undefined;
       if (record.success !== true || !id || !task) return;
       if (call.input.status === "deleted") {
-        tasks.delete(id);
+        steps.delete(id);
       } else {
         const status = checklistStatus(call.input.status);
         const step = checklistText(call.input.subject);
         if (!status && !step) return;
-        tasks.set(id, { step: step ?? task.step, status: status ?? task.status });
+        steps.set(id, { step: step ?? task.step, status: status ?? task.status });
       }
     } else {
       if (!Array.isArray(record.tasks)) return;
@@ -119,10 +124,11 @@ export class ClaudeChecklistProjection {
         return task ? [task] : [];
       });
       if (record.tasks.length > 0 && listed.length === 0) return;
-      tasks.clear();
-      for (const { id, step } of listed) tasks.set(id, step);
+      steps.clear();
+      for (const { id, step } of listed) steps.set(id, step);
+      tasks.listed = true;
     }
-    this.emitter.rich({ type: "plan", explanation: null, steps: [...tasks.values()] });
+    this.emitter.rich({ type: "plan", explanation: null, steps: [...steps.values()] });
   }
 
   private todoWrite(todos: unknown): void {

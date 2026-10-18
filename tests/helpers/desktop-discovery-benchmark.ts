@@ -136,7 +136,7 @@ export async function measureDesktopDiscovery<Run extends DiscoveryRun>(
     outcome: "measured" as const,
     scope: "Credential-free synthetic Codex; global provider-root absence checked before launch; no authenticated upstream requests.",
     discoveryClock: "Main-host elapsed time until settled provider status is visible in Settings, including opening Settings; not internal probe-only latency.",
-    slowFixture: "Version probe deliberately never exits. Discovery shows Checking through its bounded retries (four 4 s probes with 1, 3 and 9 s waits) before Not responding; owned-process cleanup is unchanged.",
+    slowFixture: "Version probe deliberately never exits. Discovery shows Checking through its bounded retries (a 4 s probe, then 8 s and 12 s probes after 1 s and 3 s waits) before Not responding; owned-process cleanup is unchanged.",
     samples,
   };
 }

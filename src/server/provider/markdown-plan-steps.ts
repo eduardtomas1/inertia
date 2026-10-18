@@ -4,14 +4,19 @@ export function markdownPlanSteps(
   markdown: string,
   maxStepChars: number,
 ): Array<{ step: string; status: "pending" }> {
-  let fenced = false;
+  let fence: string | null = null;
   const steps: string[] = [];
   for (const line of markdown.split("\n")) {
-    if (/^\s*(?:```|~~~)/u.test(line)) {
-      fenced = !fenced;
+    const marker = line.match(/^\s*(`{3,}|~{3,})/u)?.[1];
+    if (!fence && marker) {
+      fence = marker;
       continue;
     }
-    const step = fenced ? undefined : line.match(/^(?:[-*+]|\d+[.)])\s+(.+)/u)?.[1]?.trim();
+    if (fence) {
+      if (marker?.[0] === fence[0] && marker.length >= fence.length && !line.trim().slice(marker.length)) fence = null;
+      continue;
+    }
+    const step = line.match(/^(?:[-*+]|\d+[.)])\s+(.+)/u)?.[1]?.trim();
     if (step) steps.push(step);
   }
   return steps

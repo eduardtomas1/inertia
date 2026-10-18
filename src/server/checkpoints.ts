@@ -1003,17 +1003,16 @@ export async function deleteCheckpoints(repositoryPath: string, conversationId: 
     join(tmpdir(), "inertia-checkpoint-hooks-"),
   );
   try {
-    await Promise.all(
-      refs.map((ref) => runGit(
-        repositoryPath,
-        checkpointGitArguments([
-          "-c",
-          `core.hooksPath=${hooksDirectory}`,
-          "update-ref",
-          "-d",
-          ref,
-        ]),
-      )),
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "-c",
+        `core.hooksPath=${hooksDirectory}`,
+        "update-ref",
+        "--stdin",
+      ]),
+      {},
+      Buffer.from(refs.map((ref) => `delete ${ref}\n`).join(""), "utf8"),
     );
   } finally {
     await rm(hooksDirectory, {

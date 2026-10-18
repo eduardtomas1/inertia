@@ -597,6 +597,24 @@ describe("Git checkpoints", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
+  it("deletes every packed checkpoint of a long thread and keeps other threads", async () => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const otherConversationId = randomUUID();
+    const head = git(root, "rev-parse", "HEAD");
+    const refs = Array.from({ length: 150 }, () => `refs/inertia/checkpoints/${conversationId}/${randomUUID()}`);
+    const kept = `refs/inertia/checkpoints/${otherConversationId}/${randomUUID()}`;
+    execFileSync("git", ["update-ref", "--stdin"], {
+      cwd: root,
+      input: [...refs, kept].map((ref) => `create ${ref} ${head}\n`).join(""),
+    });
+    git(root, "pack-refs", "--all");
+
+    await deleteCheckpoints(root, conversationId);
+
+    expect(git(root, "for-each-ref", "--format=%(refname)", "refs/inertia/checkpoints/")).toBe(kept);
+  });
+
   it("preserves repository and configured excludes without enabling filters", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));

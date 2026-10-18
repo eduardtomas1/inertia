@@ -38,7 +38,7 @@ vi.mock("../../src/server/git/runner", async (importOriginal) => {
   };
 });
 
-import { createCheckpoint } from "../../src/server/checkpoints";
+import { createCheckpoint, deleteCheckpoints } from "../../src/server/checkpoints";
 import { RuntimeStore } from "../../src/server/database";
 import { assertCheckpointPreservesIgnoredFiles } from "../../src/server/git/checkpoint-ignored-paths";
 import { GitError } from "../../src/server/git/types";
@@ -126,6 +126,18 @@ describe("checkpoint Git invocations", () => {
       await createCheckpoint(root, indexes, randomUUID());
       expect(rebuilt()).toBe(true);
     }
+  });
+
+  it("deletes a thread's checkpoints in one reference transaction", async () => {
+    const { root, indexes } = repository();
+    const conversationId = randomUUID();
+    for (let index = 0; index < 5; index += 1) await createCheckpoint(root, indexes, conversationId);
+    gitCalls.splice(0);
+
+    await deleteCheckpoints(root, conversationId);
+
+    expect(gitCalls.filter((args) => subcommand(args) === "update-ref")).toHaveLength(1);
+    expect(git(root, "for-each-ref", "--format=%(refname)", `refs/inertia/checkpoints/${conversationId}/`)).toBe("");
   });
 
   it("lists a wholly ignored directory once when checking a restore", async () => {

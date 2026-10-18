@@ -983,6 +983,7 @@ async function bootstrap(): Promise<void> {
   );
 
   registerRendererProtocol(releaseChannel.sessionPartition ? session.fromPartition(releaseChannel.sessionPartition).protocol : undefined);
+  mainWindowCreation.admit();
   const windowCreation = new DeferredWindowCreation(createWindow);
   const [, , attachmentStorage, conversationAttachmentStore] = await Promise.all([
     mkdir(dataDirectory, { recursive: true, mode: 0o700 }),

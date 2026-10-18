@@ -159,7 +159,7 @@ export function useBackgroundTaskFeed(
   const scheduleHead = useCallback((): void => {
     const state = head.current;
     if (state.timer) return;
-    const wait = Math.max(0, state.at + REFRESH_INTERVAL_MS - Date.now());
+    const wait = Math.min(REFRESH_INTERVAL_MS, Math.max(0, state.at + REFRESH_INTERVAL_MS - Date.now()));
     state.timer = window.setTimeout(() => {
       state.timer = 0;
       if (head.current === state) fetchHead();

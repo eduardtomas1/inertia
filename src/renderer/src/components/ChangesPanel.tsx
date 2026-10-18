@@ -145,6 +145,14 @@ function noteControlLabel(action: "Edit" | "Delete", kind: string, note: DiffRev
   return `${action} ${kind}: ${body.length > 60 ? `${body.slice(0, 59)}…` : body}`;
 }
 
+function textlessChange(file: DiffFile): string {
+  if (file.binary) return "Binary file. No text diff to show.";
+  if (file.oldPath === "/dev/null") return "Empty file added.";
+  if (file.newPath === "/dev/null") return "Empty file deleted.";
+  if (file.oldPath !== file.newPath) return `Renamed from ${file.oldPath}. No text changes.`;
+  return "No text changes to show.";
+}
+
 const classificationLabels: Record<DiffReviewClassificationHint["classification"], string> = {
   "behavior-change": "Behavior change",
   "regression-risk": "Regression risk",
@@ -220,6 +228,7 @@ export function ChangesPanel({
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLElement>(null);
   const restoreQuestionFocusRef = useRef(false);
   const draftRef = useRef({ selection, reviewAction, comment });
@@ -525,11 +534,11 @@ export function ChangesPanel({
     const next = all[(base + direction + all.length) % all.length]!;
     setActiveHunkId(next.hunk.id);
     onSelectFile(next.file.path);
-    window.setTimeout(() => document.getElementById(`review-${next.hunk.id}`)?.scrollIntoView({ block: "center" }), 0);
+    window.setTimeout(() => panelRef.current?.querySelector(`#${CSS.escape(`review-${next.hunk.id}`)}`)?.scrollIntoView({ block: "center" }), 0);
   };
 
   return (
-    <section className="changes-panel" aria-label="Workspace changes" aria-busy={diffBusy}>
+    <section className="changes-panel" ref={panelRef} aria-label="Workspace changes" aria-busy={diffBusy}>
       {noteDraft && ReviewNoteDialog && <ReviewNoteDialog draft={noteDraft} onClose={() => setNoteDraft(null)} />}
       <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">
@@ -646,6 +655,7 @@ export function ChangesPanel({
                 ))}
                 {reviewLockReason && <p className="panel-notice diff-review-paused" role="status">{reviewLockMessages[reviewLockReason]}</p>}
                 {!selection && comment && <p className="panel-notice diff-review-held" role="status">The diff changed while it refreshed. Select lines again to continue your draft.</p>}
+                {selectedFile.hunks.length === 0 && <p className="panel-notice">{textlessChange(selectedFile)}</p>}
                 {selectedFile.hunks.map((hunk) => {
                   const shown = hunkMatchesFilter(selectedFile, hunk);
                   const statusFile = files.find((candidate) => candidate.path === selectedFile.path);

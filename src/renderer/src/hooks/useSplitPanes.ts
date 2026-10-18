@@ -137,6 +137,12 @@ export function useSplitPanes({
     setPaneConversation("secondary", conversationId);
     if (!keepPaneOrder) setSecondaryPaneFirst(false);
   }, [setPaneConversation, setSecondaryPaneFirst]);
+  const clearPinnedPanes = useCallback(() => {
+    setIds((current) => PINNED_SPLIT_OWNERS.every((owner) => current[owner] === null)
+      ? current
+      : { secondary: null, tertiary: null, quaternary: null });
+    commitLayout(PRIMARY_SPLIT_LAYOUT);
+  }, [commitLayout]);
   const closePane = useCallback((owner: SplitPaneOwner) => {
     if (owner === "primary") return;
     setPaneConversation(owner, null);
@@ -190,6 +196,7 @@ export function useSplitPanes({
     setPaneConversation,
     setSecondaryPaneFirst,
     updateSplitConversationId,
+    clearPinnedPanes,
     closePane,
   };
 }

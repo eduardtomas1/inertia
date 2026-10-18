@@ -98,6 +98,23 @@ describe("opt-in automatic pull", () => {
     expect(existsSync(join(f.local, ".git", "automatic-pull-hook-ran"))).toBe(false);
   });
 
+  it("refuses to overwrite an ignored local file that the upstream now tracks", async () => {
+    const f = fixture();
+    writeFileSync(join(f.local, ".git", "info", "exclude"), ".env\n");
+    writeFileSync(join(f.local, ".env"), "LOCAL_SECRET=1\n");
+    writeFileSync(join(f.remote, ".env"), "TEAM_DEFAULT=1\n");
+    git(f.remote, "add", "--force", ".env");
+    git(f.remote, "commit", "-m", "track env");
+    expect(await automaticPullCandidate(f.local)).toBe(f.tracking);
+
+    await expect(automaticPull(f.local, f.tracking, {}, async () => true))
+      .rejects.toThrow("Git could not complete the operation because the repository has conflicting changes.");
+
+    expect(git(f.local, "rev-parse", "HEAD")).toBe(f.before);
+    expect(readFileSync(join(f.local, ".env"), "utf8")).toBe("LOCAL_SECRET=1\n");
+    expect(readFileSync(join(f.local, "tracked.txt"), "utf8")).toBe("first\n");
+  });
+
   it("rechecks untracked files after fetching and respects cancellation", async () => {
     const f = fixture(); let calls = 0;
     expect(await automaticPull(f.local, f.tracking, {}, async () => {

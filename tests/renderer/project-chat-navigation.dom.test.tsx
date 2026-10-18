@@ -2,9 +2,10 @@ import { act, renderHook } from "@testing-library/react";
 import type { Dispatch, SetStateAction } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Project, ServerEvent } from "../../src/shared/contracts";
+import type { AppSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
 import type { AppView } from "../../src/renderer/src/appView";
 import { useProjectChatNavigation } from "../../src/renderer/src/hooks/useProjectChatNavigation";
+import { useSplitPanes } from "../../src/renderer/src/hooks/useSplitPanes";
 
 const now = "2026-09-01T10:00:00.000Z";
 
@@ -58,7 +59,7 @@ function setup() {
     },
     selectionCommandQueue,
     conversationSelectionGenerationRef: generation,
-    updateSplitConversationId: vi.fn(),
+    clearSplitPanes: vi.fn(),
     setSidebarOpen,
     setView,
   }));
@@ -200,5 +201,46 @@ describe("project chat navigation", () => {
     expect(start).toHaveBeenLastCalledWith(first.id, true);
     expect(setView).toHaveBeenLastCalledWith("home");
     expect(hook.result.current.globalChatActive).toBe(true);
+  });
+
+  it.each(["selectProject", "openGlobalChat", "openNoProjectChat"] as const)("closes every split pane on %s", async (action) => {
+    const first = project("first", "First");
+    const second = project("second", "Second");
+    const snapshot = {
+      activeConversationId: "a",
+      conversations: ["a", "b", "c", "d"].map((id) => ({ id, archivedAt: null })),
+    } as unknown as AppSnapshot;
+    const created = { type: "request.result", result: { kind: "project.created", projectId: second.id } } as ServerEvent;
+    const draftConversation = {
+      changeProject: vi.fn(), discard: vi.fn(), clear: vi.fn(), importProject: async () => false,
+      sendFromComposer: vi.fn(async () => null), start: vi.fn(),
+    };
+    const hook = renderHook(() => {
+      const split = useSplitPanes({ snapshot, detachedConversationIds: new Set(), detachedReady: true });
+      const navigation = useProjectChatNavigation({
+        project: first, projects: [first, second], busyAction: null, draftConversation,
+        selectionCommandQueue: async () => created, conversationSelectionGenerationRef: { current: 0 },
+        clearSplitPanes: split.clearPinnedPanes, setSidebarOpen: vi.fn(), setView: vi.fn(),
+      });
+      return { split, navigation };
+    });
+    try {
+      act(() => {
+        hook.result.current.split.setPaneConversation("secondary", "b");
+        hook.result.current.split.setPaneConversation("tertiary", "c");
+        hook.result.current.split.setPaneConversation("quaternary", "d");
+      });
+      expect(hook.result.current.split.visibleOwners).toEqual(["secondary", "tertiary", "quaternary"]);
+      await act(async () => {
+        if (action === "selectProject") hook.result.current.navigation.selectProject(second);
+        else hook.result.current.navigation[action]();
+        await Promise.resolve();
+      });
+      expect(hook.result.current.split.visibleOwners).toEqual([]);
+      expect(hook.result.current.split.pinned).toEqual({ secondary: null, tertiary: null, quaternary: null });
+    } finally {
+      hook.unmount();
+      localStorage.clear();
+    }
   });
 });

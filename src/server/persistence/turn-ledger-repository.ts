@@ -640,6 +640,12 @@ export class TurnLedgerRepository {
     return row ? agentTurnFromRow(row) : null;
   }
 
+  latestRequestedAt(): number {
+    const row = this.context.database.prepare("SELECT MAX(requested_at) AS requested_at FROM agent_turns")
+      .get() as { requested_at: string | null };
+    return row.requested_at === null ? Number.NEGATIVE_INFINITY : Date.parse(row.requested_at);
+  }
+
   latestForConversation(conversationId: string): AgentTurn | null {
     this.context.requireConversation(conversationId);
     const row = this.context.database.prepare(`

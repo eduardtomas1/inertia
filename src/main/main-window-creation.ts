@@ -1,9 +1,12 @@
 /** Coalesces window setup and permanently closes admission during shutdown. */
 export class MainWindowCreation {
+  private admitted = false;
   private allowed = true;
   private pending: Promise<void> | null = null;
 
-  allowsCreation(): boolean { return this.allowed; }
+  admit(): void { this.admitted = true; }
+
+  allowsCreation(): boolean { return this.admitted && this.allowed; }
 
   current(): Promise<void> | null { return this.pending; }
 
@@ -11,7 +14,7 @@ export class MainWindowCreation {
 
   run(create: () => Promise<void>): Promise<void> {
     if (this.pending) return this.pending;
-    if (!this.allowed) return Promise.resolve();
+    if (!this.allowsCreation()) return Promise.resolve();
     const creation = create();
     this.pending = creation;
     const clear = (): void => {

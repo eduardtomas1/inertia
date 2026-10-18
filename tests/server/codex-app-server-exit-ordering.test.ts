@@ -9,6 +9,16 @@ vi.mock("node:child_process", async (original) => ({
   spawn: spawning.spawn,
 }));
 
+const ownership = vi.hoisted(() => ({
+  platform: null as "darwin" | "linux" | "win32" | null,
+  receipt: null as boolean | null,
+}));
+vi.mock("../../src/node/runtime-owned-processes", async (original) => ({
+  ...await original<typeof import("../../src/node/runtime-owned-processes")>(),
+  activeRuntimeOwnedProcessPlatform: () => ownership.platform,
+  runtimeOwnedProcessStopConfirmation: () => ownership.receipt,
+}));
+
 import { startCodexAppServerRun } from "../../src/server/codex/app-server-run";
 
 function fixture(respond = true) {
@@ -71,7 +81,11 @@ async function closeTransport(app: Fixture, source: "EOF" | "write failure") {
   expect(app.terminateProcessTree).toHaveBeenCalledExactlyOnceWith(app.child, true);
 }
 
-beforeEach(() => { vi.useFakeTimers(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+  ownership.platform = null;
+  ownership.receipt = null;
+});
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("Codex App Server exit ordering", () => {
@@ -96,6 +110,30 @@ describe("Codex App Server exit ordering", () => {
       });
       expect(result.failure?.technicalDetail).toContain("Reason: process-exit");
       expect(result.failure?.technicalDetail).not.toContain("super-secret-value");
+      expect(app.terminateProcessTree).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    ["darwin", true, true],
+    ["linux", true, true],
+    ["darwin", false, false],
+    ["win32", true, false],
+  ] as const)(
+    "on %s with a guardian receipt of %s reports cleanup confirmed %s after an unexpected exit",
+    async (platform, receipt, confirmed) => {
+      ownership.platform = platform;
+      ownership.receipt = receipt;
+      const app = fixture();
+      await vi.advanceTimersByTimeAsync(0);
+      app.observeExit(7);
+      await closeTransport(app, "EOF");
+      app.finishCleanup();
+
+      await expect(app.run.result).resolves.toMatchObject({
+        status: "failed", exitCode: 7, cleanupConfirmed: confirmed,
+        failure: { reason: "process-exit", phase: "running" },
+      });
       expect(app.terminateProcessTree).toHaveBeenCalledOnce();
     },
   );

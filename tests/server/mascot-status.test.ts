@@ -315,6 +315,22 @@ describe("mascot chat list and rows", () => {
     expect(feed().chats).toContainEqual(expect.objectContaining({ conversationId: "d", projectName: "Fresh project" }));
   });
 
+  it("leaves cancelled plan steps out of the step count like the Plan panel", () => {
+    const shell = conversation("chat", "running");
+    const { publisher, feed } = mascotPublisher({ lookup: () => shell });
+    publisher.replace([shell]);
+    publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null, steps: [
+      { step: "Sketch", status: "completed" }, { step: "Drop the old path", status: "cancelled" },
+      { step: "Build", status: "completed" }, { step: "Ship", status: "completed" },
+    ] } });
+    expect(feed().status).toMatchObject({ steps: { completed: 3, total: 3 }, progress: "3 of 3 steps complete" });
+    expect(feed().chats[0]!.steps).toEqual({ completed: 3, total: 3 });
+    publisher.observe({ type: "agent.plan.updated", plan: { ...owner, explanation: null, steps: [
+      { step: "Drop the old path", status: "cancelled" },
+    ] } });
+    expect(feed().status).toMatchObject({ steps: null, progress: null });
+  });
+
   it("keeps plan steps with their turn and clears them when the turn ends", () => {
     let shell = conversation("chat", "running");
     const { publisher, feed } = mascotPublisher({ lookup: () => shell });

@@ -283,7 +283,7 @@ describe("useDraftConversation", () => {
         project: current.projects.find(({ id }) => id === current.activeProjectId)!, projects: current.projects,
         busyAction: null, draftConversation: draft, conversationSelectionGenerationRef: { current: 0 },
         selectionCommandQueue: vi.fn(),
-        updateSplitConversationId: vi.fn(), setSidebarOpen: vi.fn(), setView: vi.fn(),
+        clearSplitPanes: vi.fn(), setSidebarOpen: vi.fn(), setView: vi.fn(),
       });
       return { draft, navigation };
     });

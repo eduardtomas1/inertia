@@ -52,7 +52,7 @@ export async function automaticPull(root: string, expectedUpstream: string, opti
   // External Git clients can still race after this read; this is no OS lock.
   if (status.branch !== captured.branch || status.upstream !== captured.upstream
     || !status.clean || status.truncated || status.ahead || !status.behind) return false;
-  await runGit(root, ["-c", `core.hooksPath=${devNull}`, "merge", "--ff-only", "--no-edit", "--no-autostash", "--", expectedUpstream], {
+  await runGit(root, ["-c", `core.hooksPath=${devNull}`, "merge", "--ff-only", "--no-edit", "--no-autostash", "--no-overwrite-ignore", "--", expectedUpstream], {
     ...options, maxOutputBytes: 64 * 1024, failureMessage: "Automatic pull could not fast-forward this checkout. Review its Git status before retrying.",
   });
   return true;

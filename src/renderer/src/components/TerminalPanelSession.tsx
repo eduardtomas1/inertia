@@ -25,6 +25,7 @@ import {
   terminalCloseCommand,
   terminalDetachCommand,
   terminalResizeCommand,
+  terminalSize,
   TERMINAL_CREATE_RETRY_DELAYS_MS,
   TERMINAL_CLOSE_FAILURE_MESSAGE,
   TERMINAL_SETTLING_RETRY_DELAYS_MS,
@@ -210,7 +211,7 @@ export function TerminalSession({
       frame = window.requestAnimationFrame(() => {
         try {
           fitAddon.fit();
-          const next = { cols: Math.max(20, terminal.cols), rows: Math.max(4, terminal.rows) };
+          const next = terminalSize(terminal.cols, terminal.rows);
           const previous = lastSizeRef.current;
           if (next.cols === previous.cols && next.rows === previous.rows) return;
           lastSizeRef.current = next;
@@ -284,7 +285,7 @@ export function TerminalSession({
             || !terminalReadyRef.current
             || statusRef.current !== "online"
           ) return;
-          const next = { cols: Math.max(20, terminal.cols), rows: Math.max(4, terminal.rows) };
+          const next = terminalSize(terminal.cols, terminal.rows);
           lastSizeRef.current = next;
           ignoreCommandFailure(sendCommand(terminalResizeCommand(terminalId, next)));
         } catch {
@@ -419,10 +420,7 @@ export function TerminalSession({
     } catch {
       // Safe defaults below will be corrected by ResizeObserver.
     }
-    const size = {
-      cols: Math.max(20, terminal?.cols ?? 80),
-      rows: Math.max(4, terminal?.rows ?? 24),
-    };
+    const size = terminalSize(terminal?.cols ?? 80, terminal?.rows ?? 24);
     lastSizeRef.current = size;
 
     const finishTerminal = (
@@ -677,10 +675,10 @@ export function TerminalSession({
       && ownerRef.current === owner
       && actionInFlightRef.current === actionIdentity
     );
-    const size = {
-      cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
-      rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
-    };
+    const size = terminalSize(
+      terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80,
+      terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24,
+    );
     terminalReadyRef.current = false;
     operationInFlightRef.current = true;
     setSessionState("starting");
@@ -799,10 +797,10 @@ export function TerminalSession({
       || !terminalIdRef.current
     ) return false;
     const resume = selectedResumeOption.availability.resume;
-    const size = {
-      cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
-      rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
-    };
+    const size = terminalSize(
+      terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80,
+      terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24,
+    );
     const previousId = terminalIdRef.current;
     const attempt = resumeAttemptRef.current + 1;
     resumeAttemptRef.current = attempt;

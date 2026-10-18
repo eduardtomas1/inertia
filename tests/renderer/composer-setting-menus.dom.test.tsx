@@ -138,6 +138,36 @@ describe("composer setting menus", () => {
     expect((await within(tray).findAllByRole("button")).length).toBeGreaterThan(0);
   });
 
+  it("keeps a preset being written when a turn starts on its own", async () => {
+    window.localStorage.clear();
+    const props = composerProps(conversation("preset-while-turn-starts"));
+    const view = render(<Composer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "More tools" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Prompt presets/u }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create a preset" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Release checklist" } });
+
+    view.rerender(<Composer {...props} running />);
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Release checklist");
+    expect(screen.getByRole("button", { name: /^Prompt presets/u })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the scratch prompts menu open when a turn starts on its own", async () => {
+    window.localStorage.clear();
+    const props = composerProps(conversation("stash-while-turn-starts"));
+    const view = render(<Composer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "More tools" }));
+    const trigger = await screen.findByRole("button", { name: /^Scratch prompts/u });
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    view.rerender(<Composer {...props} running />);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: /^Scratch prompts/u })).toBeVisible();
+  });
+
   it("leaves out the More tools button when chat tools support is the only thing it would show", () => {
     const current = conversation("chat-tools-only");
     render(<Composer {...composerProps(current, {

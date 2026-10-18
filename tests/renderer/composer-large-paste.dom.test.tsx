@@ -41,6 +41,38 @@ describe("large pasted text", () => {
   });
 
 
+  it("refuses a paste over the message limit while the agent is working instead of cutting it", () => {
+    const onImportAttachments = vi.fn(async () => null);
+    const view = render(<Composer {...composerProps(conversation("running-paste"), { onImportAttachments, running: true })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Keep this" } });
+    const pasted = fireEvent.paste(input, { clipboardData: { files: [], getData: () => "x".repeat(20_000) } });
+    expect(pasted).toBe(false);
+    expect(onImportAttachments).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Keep this");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This paste would exceed the 20,000 character limit, so it was not added. Paste it once the agent finishes to attach it as a file.",
+    );
+    fireEvent.change(input, { target: { value: "Keep this, shorter" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.paste(input, { clipboardData: { files: [], getData: () => "x".repeat(20_000) } });
+    expect(screen.getByRole("alert")).toBeVisible();
+    view.rerender(<Composer {...composerProps(conversation("another-chat"), { onImportAttachments, running: true })} />);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("refuses a shift-paste over the message limit and names the attachment route", () => {
+    render(<Composer {...composerProps(conversation("shift-paste-limit"))} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.keyDown(input, { key: "V", shiftKey: true, ctrlKey: true });
+    expect(fireEvent.paste(input, { clipboardData: { files: [], getData: () => "x".repeat(20_001) } })).toBe(false);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This paste would exceed the 20,000 character limit, so it was not added. Paste without Shift to attach it as a file.",
+    );
+    fireEvent.keyUp(input, { key: "V" });
+    expect(fireEvent.paste(input, { clipboardData: { files: [], getData: () => "x".repeat(20_000) } })).toBe(true);
+  });
+
   it.each([false, true])("uses the UTF-8 byte boundary exactly: at threshold %s", (atThreshold) => {
     const onImportAttachments = vi.fn(async () => null);
     render(<Composer {...composerProps(conversation("paste-boundary"), { onImportAttachments })} />);

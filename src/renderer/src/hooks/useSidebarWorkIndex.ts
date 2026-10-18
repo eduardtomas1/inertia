@@ -85,7 +85,7 @@ export function useSidebarWorkIndex({
   searchActive,
   sections,
 }: SidebarWorkIndexOptions) {
-  const [keyboardTargetIndex, setKeyboardTargetIndex] = useState<number | null>(null);
+  const [retainedIdentity, setRetainedIdentity] = useState<string | null>(null);
   const [viewport, setViewport] = useState({
     height: WORK_INDEX_INITIAL_HEIGHT,
     start: 0,
@@ -229,7 +229,7 @@ export function useSidebarWorkIndex({
   const activeIndex = items.findIndex((item) => (
     item.kind === "thread" && item.conversation.id === activeConversationId
   ));
-  const retainedTargetIndex = keyboardTargetIndex ?? activeIndex;
+  const retainedTargetIndex = (retainedIdentity === null ? undefined : indexByIdentity.get(retainedIdentity)) ?? activeIndex;
   if (
     virtualized
     && retainedTargetIndex >= 0
@@ -259,7 +259,7 @@ export function useSidebarWorkIndex({
     const itemIndex = indexByIdentity.get(identity);
     if (itemIndex === undefined) return false;
     if (virtualized) {
-      setKeyboardTargetIndex(itemIndex);
+      setRetainedIdentity(identity);
       const navigation = navigationRef.current;
       const stream = streamRef.current;
       if (navigation && stream) {
@@ -293,6 +293,9 @@ export function useSidebarWorkIndex({
     focus();
     return true;
   }, [estimateSize, indexByIdentity, navigationRef, offsets, virtualized]);
+  const retainFocusedItem = useCallback((identity: string): void => {
+    setRetainedIdentity(identity);
+  }, []);
 
   return [
     focusIdentity,
@@ -306,5 +309,6 @@ export function useSidebarWorkIndex({
     updateViewport,
     virtualized,
     visibleConversationIds,
+    retainFocusedItem,
   ] as const;
 }

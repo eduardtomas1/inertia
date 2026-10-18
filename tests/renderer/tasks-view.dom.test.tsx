@@ -407,6 +407,16 @@ describe("Tasks view", () => {
     expect(row("Write release notes")).toHaveTextContent("Today");
   });
 
+  it("moves due labels on within a minute when the computer wakes after midnight", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(2026, 9, 12, 18, 0, 0));
+    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes", { dueDate: "2026-10-13" })]));
+    expect(row("Write release notes")).toHaveTextContent("Tomorrow");
+    vi.setSystemTime(new Date(2026, 9, 13, 8, 0, 0));
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(row("Write release notes")).toHaveTextContent("Today");
+  });
+
   it("renames from the menu by focusing and selecting the detail title", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));

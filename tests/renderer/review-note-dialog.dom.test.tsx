@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReviewNoteDialog } from "../../src/renderer/src/components/ReviewNoteDialog";
+import { emulateDisabledFocusFixup } from "./support/focus-fixup";
 
 describe("review note editing", () => {
   it("focuses the note and saves trimmed text", async () => {
@@ -28,6 +29,23 @@ describe("review note editing", () => {
     expect(close).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  });
+
+  it("returns focus to the note after a failed save disabled its controls", async () => {
+    const stop = emulateDisabledFocusFixup();
+    try {
+      const save = vi.fn().mockRejectedValueOnce(new Error("synthetic failure"));
+      render(<ReviewNoteDialog draft={{ title: "Edit review note", body: "Original", save }} onClose={vi.fn()} />);
+      const input = screen.getByRole("textbox", { name: "Review note" });
+      fireEvent.change(input, { target: { value: "Revised" } });
+      const submit = screen.getByRole("button", { name: "Save note" });
+      submit.focus();
+      fireEvent.click(submit);
+      expect(await screen.findByRole("alert")).toHaveTextContent("Your text is still here");
+      await waitFor(() => expect(input).toHaveFocus());
+    } finally {
+      stop();
+    }
   });
 
   it("cancels with Escape and restores the opener's focus", () => {

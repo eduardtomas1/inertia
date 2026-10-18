@@ -10,6 +10,7 @@ import type {
   WorkspaceRun,
 } from "../../src/shared/contracts";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
+import type { UpdatesRunResult } from "../../src/shared/updates";
 import type { AgentRunState } from "../../src/shared/run-state";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { useUpdateEverything } from "../../src/renderer/src/hooks/useUpdateEverything";
@@ -59,10 +60,14 @@ function snapshot(conversations: ConversationShell[] = [], runs: Partial<Workspa
 
 const NO_OPERATIONS = new Map<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>();
 
-function runResult(readyForAppInstall: boolean, appInstallBlocker: string | null = null): ServerEvent {
+function runResult(
+  readyForAppInstall: boolean,
+  appInstallBlocker: string | null = null,
+  providers: UpdatesRunResult["providers"] = [],
+): ServerEvent {
   return {
     type: "request.result", requestId: "request",
-    result: { kind: "updates.run", providers: [], interruptedConversationIds: [], readyForAppInstall, appInstallBlocker },
+    result: { kind: "updates.run", providers, interruptedConversationIds: [], readyForAppInstall, appInstallBlocker },
   };
 }
 
@@ -185,13 +190,14 @@ function harness(appStatus: AppUpdateStatus | null, request: (command: CommandWi
 }
 
 const providersOnly = { providerIds: ["codex", "claude"] as ProviderMaintenanceProviderId[], includeApp: false, continueChats: true };
+const labels = new Map<ProviderMaintenanceProviderId, string>([["codex", "Codex"], ["claude", "Claude Code"]]);
 const withApp = { ...providersOnly, includeApp: true };
 
 describe("update everything run", () => {
   it("updates providers, then releases the runtime hold when there is no app step", async () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     const hook = harness(null, request);
-    await act(async () => hook.result.current.run(providersOnly));
+    await act(async () => hook.result.current.run(providersOnly, labels));
     expect(request.mock.calls.map(([command]) => command)).toEqual([
       { type: "updates.run", payload: providersOnly },
       { type: "updates.finish", payload: { installed: false } },
@@ -206,7 +212,7 @@ describe("update everything run", () => {
     download.mockResolvedValue(updateStatus({ state: "downloaded" }));
     install.mockResolvedValue(updateStatus({ state: "installing" }));
     const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(download).toHaveBeenCalledOnce();
     expect(install).toHaveBeenCalledOnce();
     expect(request.mock.calls.map(([command]) => command.type)).toEqual(["updates.run"]);
@@ -223,7 +229,7 @@ describe("update everything run", () => {
     const hook = harness(updateStatus(), request);
     let finished = false;
     let running!: Promise<void>;
-    act(() => { running = hook.result.current.run(withApp).then(() => { finished = true; }); });
+    act(() => { running = hook.result.current.run(withApp, labels).then(() => { finished = true; }); });
     await vi.waitFor(() => expect(statusListener).not.toBeNull());
     expect(request).not.toHaveBeenCalled();
     expect(install).not.toHaveBeenCalled();
@@ -237,22 +243,25 @@ describe("update everything run", () => {
   it.each([
     ["fails", updateStatus({ state: "failed", message: "The update could not be downloaded. Try again when your connection is stable." })],
     ["is cancelled", updateStatus({ state: "cancelled", message: "The update download was cancelled." })],
-  ])("starts no run when the download %s", async (_name, settled) => {
-    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+  ])("still updates the providers and reports the app's message when the download %s", async (_name, settled) => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     download.mockResolvedValue(settled);
     const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
-    expect(request).not.toHaveBeenCalled();
+    await act(async () => hook.result.current.run(withApp, labels));
+    expect(request.mock.calls.map(([command]) => command)).toEqual([
+      { type: "updates.run", payload: providersOnly },
+      { type: "updates.finish", payload: { installed: false } },
+    ]);
     expect(install).not.toHaveBeenCalled();
     expect(hook.result.current.phase).toBeNull();
-    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.error).toBe(settled.message);
   });
 
   it("starts no run when the download cannot be started", async () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     download.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
     const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(request).not.toHaveBeenCalled();
     expect(hook.result.current.error).toBe("The update download could not be started.");
   });
@@ -261,7 +270,7 @@ describe("update everything run", () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     install.mockResolvedValue(updateStatus({ state: "installing" }));
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(download).not.toHaveBeenCalled();
     expect(install).toHaveBeenCalledOnce();
     expect(request).toHaveBeenCalledOnce();
@@ -275,17 +284,55 @@ describe("update everything run", () => {
     arrange();
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
     expect(hook.result.current.phase).toBeNull();
     expect(hook.result.current.error ?? "").not.toContain("/private/path");
+  });
+
+  it.each([
+    ["refuses the restart", updateStatus({ state: "downloaded", installBlocker: "maintenance", message: "Wait for provider maintenance to finish before restarting." })],
+    ["cannot confirm a safe shutdown", updateStatus({ state: "failed", installBlocker: "shutdown", message: "Inertia could not confirm a safe shutdown. Reopen the app before retrying." })],
+  ])("reports the app updater's message when it %s", async (_name, refused) => {
+    install.mockResolvedValue(refused);
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp, labels));
+    expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
+    expect(hook.result.current.error).toBe(refused.message);
+  });
+
+  it("reports each provider that failed to update by its display name and still installs the app", async () => {
+    const providers = [
+      { providerId: "codex", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: "npm exited with code 1." },
+      { providerId: "claude", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: null },
+      { providerId: "cursor", outcome: "updated", beforeVersion: "1.0.0", afterVersion: "1.1.0", error: null },
+      { providerId: "kimi", outcome: "skipped", beforeVersion: "1.0.0", afterVersion: null, error: "The update was cancelled." },
+    ] as const;
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run"
+      ? runResult(true, null, [...providers]) : ok);
+    install.mockResolvedValue(updateStatus({ state: "installing" }));
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp, labels));
+    expect(install).toHaveBeenCalledOnce();
+    expect(hook.result.current.error).toBe("Codex update failed: npm exited with code 1. Claude Code update failed.");
+  });
+
+  it("reports provider failures before why the app was kept out of the run", async () => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run"
+      ? runResult(false, "Close active terminals before restarting to update.", [
+        { providerId: "codex", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: "npm exited with code 1." },
+      ]) : ok);
+    const hook = harness(updateStatus({ state: "downloaded" }), request);
+    await act(async () => hook.result.current.run(withApp, labels));
+    expect(hook.result.current.error).toBe("Codex update failed: npm exited with code 1. Close active terminals before restarting to update.");
   });
 
   it("reports a rejected install with the app updater's own wording", async () => {
     install.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(hook.result.current.error).toBe("The update restart could not be started safely.");
   });
 
@@ -293,7 +340,7 @@ describe("update everything run", () => {
     const message = "Close active terminals before restarting to update.";
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false, message) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(install).not.toHaveBeenCalled();
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
     expect(hook.result.current.error).toBe(message);
@@ -302,7 +349,7 @@ describe("update everything run", () => {
   it("skips the app when the runtime is not ready for it", async () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(install).not.toHaveBeenCalled();
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
   });
@@ -310,7 +357,7 @@ describe("update everything run", () => {
   it("surfaces a refused run without releasing another run's hold", async () => {
     const request = vi.fn(async () => { throw new Error("Inertia is updating."); });
     const hook = harness(null, request);
-    await act(async () => hook.result.current.run(providersOnly));
+    await act(async () => hook.result.current.run(providersOnly, labels));
     expect(request).toHaveBeenCalledOnce();
     expect(hook.result.current.error).toBe("Inertia is updating.");
     act(() => hook.result.current.dismissError());
@@ -322,8 +369,8 @@ describe("update everything run", () => {
     const request = vi.fn((command: CommandWithoutId) => command.type === "updates.run" ? response.promise : Promise.resolve(ok));
     const hook = harness(null, request);
     let first!: Promise<void>;
-    act(() => { first = hook.result.current.run(providersOnly); });
-    await act(async () => hook.result.current.run(providersOnly));
+    act(() => { first = hook.result.current.run(providersOnly, labels); });
+    await act(async () => hook.result.current.run(providersOnly, labels));
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
     expect(hook.result.current.phase).toEqual({ kind: "providers", providerIds: ["codex", "claude"] });
     await act(async () => { response.resolve(runResult(false)); await first; });

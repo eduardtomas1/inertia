@@ -60,6 +60,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     () => new Set(),
   );
   const [actionRoutingError, setActionRoutingError] = useState<string | null>(null);
+  const [resumeLimitReached, setResumeLimitReached] = useState(false);
   const [closeError, setCloseError] = useState<readonly [string, string] | null>(null);
   const mountedRef = useRef(true);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -106,6 +107,12 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const actionTargetId = !props.actionId || !resumedTabIds.has(activeId)
     ? activeId
     : (tabs.find(({ id }) => !resumedTabIds.has(id))?.id ?? null);
+  const everyTerminalResumed = tabs.length >= MAX_PERSISTED_TERMINAL_TABS
+    && tabs.every(({ id }) => resumedTabIds.has(id));
+
+  useEffect(() => {
+    if (!everyTerminalResumed) setResumeLimitReached(false);
+  }, [everyTerminalResumed]);
 
   useEffect(() => {
     const actionId = actionRequestId;
@@ -182,7 +189,12 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       setActiveId(idleTab.id);
       return;
     }
-    if (tabs.length >= MAX_PERSISTED_TERMINAL_TABS) return;
+    if (tabs.length >= MAX_PERSISTED_TERMINAL_TABS) {
+      handledPanelResumeRequestRef.current = requestedConversationId;
+      setResumeLimitReached(true);
+      onResumeRequestHandled?.();
+      return;
+    }
 
     // A resumed provider owns its terminal until that process exits. Preserve
     // it and give the explicit composer request a fresh terminal to start in.
@@ -390,7 +402,10 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   // instead of repeating "Terminal" in a header of its own.
   const [sessionActionsHost, setSessionActionsHost] = useState<HTMLDivElement | null>(null);
   const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
-  const panelError = actionRoutingError ?? closeError?.[1];
+  const panelError = actionRoutingError
+    ?? (resumeLimitReached && everyTerminalResumed
+      ? "End a resumed provider terminal before resuming another chat."
+      : closeError?.[1]);
   const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeId });
 
   return (

@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { win32 } from "node:path";
 
-import { environmentValue } from "../environment";
+import { nodeRuntimeOnPath } from "./node-runtime";
 
 const CLAUDE_CODE_PACKAGE = "@anthropic-ai/claude-code";
 const MAX_PACKAGE_MANIFEST_BYTES = 256 * 1024;
@@ -73,13 +73,13 @@ export function resolveClaudeLaunchTarget(
     if (!SCRIPT_EXTENSIONS.has(extension)) {
       return { ok: false, reason: UNRESOLVED_SHIM_REASON };
     }
-    const node = nodeRuntime(
-      executable,
-      environment,
+    const node = nodeRuntimeOnPath(environment, {
+      platform: "win32",
       fileSystem,
-      options.electronExecutable
+      electronExecutable: options.electronExecutable
         ?? (process.versions.electron ? process.execPath : undefined),
-    );
+      firstDirectory: win32.dirname(executable),
+    });
     if (!node) return { ok: false, reason: MISSING_NODE_REASON };
     return { ok: true, target: { command: node, scriptPrefix: [entry] } };
   } catch {
@@ -121,41 +121,6 @@ function packageEntry(
   if (!contains(realPackage, realEntry)) return null;
   if (fileSystem.fileSize(realEntry) === null) return null;
   return realEntry;
-}
-
-function nodeRuntime(
-  shim: string,
-  environment: NodeJS.ProcessEnv,
-  fileSystem: ClaudeLaunchFileSystem,
-  electronExecutable: string | undefined,
-): string | null {
-  const pathEntries = (environmentValue(environment, "PATH", "win32") ?? "")
-    .split(";")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry && win32.isAbsolute(entry) && !entry.includes("\0"));
-  const electron = electronExecutable
-    ? safeRealpath(electronExecutable, fileSystem)?.toLowerCase()
-    : undefined;
-  for (const directory of [win32.dirname(shim), ...pathEntries]) {
-    const candidate = win32.join(directory, "node.exe");
-    if (fileSystem.fileSize(candidate) === null) continue;
-    const real = safeRealpath(candidate, fileSystem);
-    if (!real || real.toLowerCase() === electron) continue;
-    if (win32.basename(real).toLowerCase() !== "node.exe") continue;
-    return real;
-  }
-  return null;
-}
-
-function safeRealpath(
-  path: string,
-  fileSystem: ClaudeLaunchFileSystem,
-): string | null {
-  try {
-    return fileSystem.realpath(path);
-  } catch {
-    return null;
-  }
 }
 
 function contains(root: string, candidate: string): boolean {

@@ -242,6 +242,28 @@ describe("safe selected diff reversal", () => {
     expect(diff.text).toContain("Unable to preview untracked file large.txt.");
   });
 
+  it("names untracked and tracked binaries and pure renames on paths with spaces", async () => {
+    const root = repository();
+    writeFileSync(join(root, "tracked image.bin"), Buffer.from([0, 1, 2]));
+    writeFileSync(join(root, "old name.txt"), "same\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-m", "more");
+    writeFileSync(join(root, "tracked image.bin"), Buffer.from([0, 1, 3]));
+    git(root, "mv", "old name.txt", "new name.txt");
+    writeFileSync(join(root, "new image.bin"), Buffer.from([0, 9]));
+
+    const diff = await getUnifiedDiff(root, {}, undefined, secureFiles);
+
+    expect(diff.truncated).toBe(false);
+    expect(parseUnifiedDiff(diff.text).files
+      .map(({ path, oldPath, binary = false, hunks }) => ({ path, oldPath, binary, hunks: hunks.length }))
+      .sort((left, right) => left.path.localeCompare(right.path))).toEqual([
+      { path: "new image.bin", oldPath: "/dev/null", binary: true, hunks: 0 },
+      { path: "new name.txt", oldPath: "old name.txt", binary: false, hunks: 0 },
+      { path: "tracked image.bin", oldPath: "tracked image.bin", binary: true, hunks: 0 },
+    ]);
+  });
+
   it("pins the repository root while previewing untracked content", async () => {
     const root = repository();
     const movedRoot = `${root}-moved`;

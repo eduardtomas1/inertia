@@ -54,6 +54,17 @@ describe("project settings", () => {
       preferences: { actions: [{ name: "Check", executable: "node", args: ["--version", "literal & data"] }] } } });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save action" })).not.toBeInTheDocument());
   });
+  it("drops blank argument lines instead of passing empty arguments", async () => {
+    const { request } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    fireEvent.change(within(screen.getByRole("form", { name: "New action" })).getByLabelText("Name", { exact: true }), { target: { value: "Build" } });
+    fireEvent.change(screen.getByLabelText("Executable", { exact: true }), { target: { value: "npm" } });
+    fireEvent.change(screen.getByLabelText("Arguments (one per line)"), { target: { value: "run\n\nbuild\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save action" }));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request.mock.calls[0]?.[0]).toMatchObject({ type: "project.update", payload: {
+      preferences: { actions: [{ name: "Build", executable: "npm", args: ["run", "build"] }] } } });
+  });
   it("saves the name on Enter with row-level feedback, never while typing, and keeps an empty name as a local error", async () => {
     const { container, request } = setup();
     const field = screen.getByRole("textbox", { name: "Name" });

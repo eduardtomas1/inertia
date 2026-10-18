@@ -12,6 +12,7 @@ class ShortcutEvent extends Event {
   readonly ctrlKey: boolean;
   readonly altKey: boolean;
   readonly shiftKey: boolean;
+  readonly repeat: boolean;
 
   constructor(
     type: "keydown" | "keyup",
@@ -21,6 +22,7 @@ class ShortcutEvent extends Event {
       ctrlKey?: boolean;
       altKey?: boolean;
       shiftKey?: boolean;
+      repeat?: boolean;
     } = {},
   ) {
     super(type, { cancelable: true });
@@ -29,6 +31,7 @@ class ShortcutEvent extends Event {
     this.ctrlKey = modifiers.ctrlKey ?? false;
     this.altKey = modifiers.altKey ?? false;
     this.shiftKey = modifiers.shiftKey ?? false;
+    this.repeat = modifiers.repeat ?? false;
   }
 }
 
@@ -95,6 +98,33 @@ describe("global shortcuts", () => {
     expect(keyUp.cancelBubble).toBe(true);
     expect(current.current.setPaletteOpen).toHaveBeenCalledWith(true);
     expect(current.current.setPaletteOpen).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("acts once while a shortcut is held and still owns the repeated presses", () => {
+    const target = new EventTarget();
+    const createConversation = vi.fn();
+    const current = { current: actions(createConversation) };
+    const dispose = installGlobalShortcuts(
+      target as unknown as Parameters<typeof installGlobalShortcuts>[0],
+      current,
+      "darwin",
+    );
+    const repeats = ["n", "b", "j", ","].flatMap((key) => [
+      new ShortcutEvent("keydown", key, { metaKey: true }),
+      new ShortcutEvent("keydown", key, { metaKey: true, repeat: true }),
+      new ShortcutEvent("keydown", key, { metaKey: true, repeat: true }),
+    ]);
+    for (const event of repeats) target.dispatchEvent(event);
+    const keyUp = new ShortcutEvent("keyup", "n");
+    target.dispatchEvent(keyUp);
+
+    expect(createConversation).toHaveBeenCalledOnce();
+    expect(current.current.setSidebarCollapsed).toHaveBeenCalledOnce();
+    expect(current.current.toggleTerminal).toHaveBeenCalledOnce();
+    expect(current.current.toggleSettings).toHaveBeenCalledOnce();
+    expect(repeats.every((event) => event.defaultPrevented && event.cancelBubble)).toBe(true);
+    expect(keyUp.defaultPrevented).toBe(true);
     dispose();
   });
 

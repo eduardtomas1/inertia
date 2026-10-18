@@ -27,6 +27,9 @@ export function ReviewNoteDialog({ draft, onClose }: {
     textarea.current?.focus();
     return restore;
   }, []);
+  useLayoutEffect(() => {
+    if (error && !busy) textarea.current?.focus();
+  }, [busy, error]);
   const save = async (): Promise<void> => {
     if (saving.current || !body.trim()) return;
     saving.current = true;

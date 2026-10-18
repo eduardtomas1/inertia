@@ -127,5 +127,54 @@ describe("composer active-turn authority", () => {
     await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
     expect(commit).not.toHaveBeenCalled();
     expect(screen.queryByText(pasted.name)).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The turn changed while the image was being added. Attach it again.",
+    );
+  });
+
+  it("explains an image removed because the turn changed while it was being committed", async () => {
+    const current = conversation("66666666-6666-4666-8666-666666666666");
+    const pasted = image("committed-for-previous-turn");
+    const committing = deferred<void>();
+    const releaseAttachment = vi.fn(async () => undefined);
+    const props = composerProps(current, {
+      running: true,
+      latestTurn: loadedTurn("turn-a"),
+      latestTurnSummary: summary("turn-a"),
+      onImportAttachments: async () => ({ attachments: [pasted], commit: () => committing.promise, cancel: async () => undefined }),
+      onReleaseAttachment: releaseAttachment,
+    });
+    const view = render(<Composer {...props} />);
+
+    pasteImage(screen.getByRole("textbox", { name: "Message" }));
+    await screen.findByText(pasted.name);
+    view.rerender(<Composer {...props} latestTurnSummary={summary("turn-b")} />);
+    await act(async () => committing.resolve());
+
+    await waitFor(() => expect(releaseAttachment).toHaveBeenCalledWith(pasted.id));
+    expect(screen.queryByText(pasted.name)).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The turn changed while the image was being added. Attach it again.",
+    );
+  });
+
+  it("says nothing about a turn change when the paste settles after leaving the chat", async () => {
+    const current = conversation("64646464-6464-4464-8464-646464646464");
+    const imported = deferred<ComposerAttachmentImportLease>();
+    const cancel = vi.fn(async () => undefined);
+    const props = composerProps(current, {
+      running: true,
+      latestTurn: loadedTurn("turn-a"),
+      latestTurnSummary: summary("turn-a"),
+      onImportAttachments: () => imported.promise,
+    });
+    const view = render(<Composer {...props} />);
+
+    pasteImage(screen.getByRole("textbox", { name: "Message" }));
+    view.rerender(<Composer {...props} conversation={conversation("65656565-6565-4565-8565-656565656565")} />);
+    await act(async () => imported.resolve({ attachments: [image("pasted-for-other-chat")], commit: vi.fn(async () => undefined), cancel }));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

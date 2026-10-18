@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { revParseValues, validatedPaths } from "../../src/server/git/paths";
+import { revParseValues, validatedEntryPaths, validatedPaths } from "../../src/server/git/paths";
 
 const roots: string[] = [];
 
@@ -45,6 +45,27 @@ describe("validated repository paths", () => {
 
     await expect(validatedPaths(root, ["alias/nested/missing.txt"]))
       .resolves.toEqual(["alias/nested/missing.txt"]);
+  });
+
+  it.skipIf(process.platform === "win32")("checks a link entry's own location but not its target", async () => {
+    const root = directory("inertia-validated-root-");
+    const outside = directory("inertia-validated-outside-");
+    writeFileSync(join(outside, "secret.txt"), "outside\n");
+    mkdirSync(join(root, "nested"));
+    symlinkSync(join(outside, "secret.txt"), join(root, "nested", "outside-link"));
+    symlinkSync("missing-target", join(root, "dangling-link"));
+    symlinkSync(outside, join(root, "linked"), "dir");
+
+    await expect(validatedEntryPaths(root, ["nested/outside-link", "dangling-link"]))
+      .resolves.toEqual(["nested/outside-link", "dangling-link"]);
+    await expect(validatedPaths(root, ["nested/outside-link"]))
+      .rejects.toThrow(/outside the repository/iu);
+    await expect(validatedPaths(root, ["dangling-link"]))
+      .rejects.toThrow(/symbolic link/iu);
+    for (const path of ["linked/secret.txt", "linked/missing.txt"]) {
+      await expect(validatedEntryPaths(root, [path]))
+        .rejects.toThrow(/outside the repository|symbolic link/iu);
+    }
   });
 });
 

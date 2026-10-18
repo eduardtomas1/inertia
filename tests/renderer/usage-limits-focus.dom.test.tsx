@@ -1,7 +1,7 @@
 import { UsageLimitsPanel } from "../../src/renderer/src/components/UsageLimitsPanel";
 import { USAGE_RESET_CONFIRMATION_EXPIRED } from "../../src/shared/provider-usage-limits";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { Profiler } from "react";
+import { Profiler, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { UsageIndicator } from "../../src/renderer/src/components/UsageIndicator";
 import { UsageLimitsProvider } from "../../src/renderer/src/components/usage-limits-context";
@@ -124,4 +124,18 @@ it("opens the Limits dialog on the first commit once the idle prefetch has loade
   act(() => { fireEvent.click(screen.getByRole("button", { name: "All provider limits" })); });
 
   expect(screen.getByRole("dialog", { name: "Provider usage limits" })).toBeInTheDocument();
+});
+
+function HideableUsage() {
+  const [mode, setMode] = useState<"expanded" | "hidden">("expanded");
+  return <div className="composer"><div data-composer-zone="input"><textarea aria-label="Message" /></div><UsageIndicator usage={null} rateLimits={[]} rateLimitState={{ freshness: "unavailable", provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false }} quotaSource="selected-route" mode={mode} providerLabel="Codex" onModeChange={(next) => setMode(next as "expanded" | "hidden")} /></div>;
+}
+it("moves focus to the message box when Hide usage removes the usage control", () => {
+  render(<HideableUsage />);
+  const trigger = screen.getByRole("button", { name: /Open usage and context/ });
+  trigger.focus(); fireEvent.click(trigger);
+  const hide = screen.getByRole("button", { name: "Hide usage" });
+  hide.focus(); fireEvent.click(hide);
+  expect(screen.queryByRole("button", { name: /usage and context/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
 });

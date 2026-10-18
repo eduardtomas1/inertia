@@ -415,6 +415,10 @@ export function MultiSpawnDialog({
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
+        const nested = event.target instanceof Element
+          ? event.target.closest('[role="dialog"]')
+          : null;
+        if (nested && nested !== dialogRef.current && dialogRef.current?.contains(nested)) return;
         // Own Escape before an underlying mobile sidebar can dismiss itself
         // and unmount the trigger that should receive restored focus.
         event.stopImmediatePropagation();

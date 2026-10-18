@@ -290,6 +290,35 @@ describe("composer chat references", () => {
     });
   });
 
+  it("keeps a referenced chat out of a follow-up sent while the agent is working and says why", async () => {
+    const current = conversation("running-reference");
+    const onSend = vi.fn(async () => undefined);
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "running-turn",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    render(<Composer {...composerProps(current, {
+      running: true,
+      latestTurn,
+      contextSources: [sourceOption],
+      contextPackets: [packetSummary({ targetConversationId: current.id })],
+      onConversationContextCommand: vi.fn(async () => packetResult(current.id)),
+      onSend,
+    })} />);
+    const editor = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(editor, { target: { value: "Use that chat" } });
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Follow-ups while the agent is working cannot include a referenced chat. Send this after the turn ends, or remove the reference.",
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editor).toHaveValue("Use that chat");
+  });
+
   it("preserves an edit made as the reference request completes", async () => {
     const user = userEvent.setup();
     const pending = deferred<ServerEvent>();

@@ -16,7 +16,7 @@ import {
   createProjectWorkspaceCommandHandler,
   type ProjectWorkspaceCommandDependencies,
 } from "../../src/server/runtime/commands/project-workspace-commands";
-import type { TerminalManager } from "../../src/server/terminal";
+import { TerminalManager } from "../../src/server/terminal";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const otherProjectId = "22222222-2222-4222-8222-222222222222";
@@ -82,6 +82,7 @@ function dependencies(input: {
   workspaceRunChecks?: boolean[];
   providerTerminalResumes?: ProviderTerminalResumeRegistry;
   imported?: { providerId: "codex" | "claude"; cwd: string; sessionId: string };
+  terminals?: TerminalManager;
 } = {}) {
   const current = input.current ?? conversation();
   const onExitCallbacks: Array<(exitCode: number) => void> = [];
@@ -133,7 +134,7 @@ function dependencies(input: {
       terminalResumeLaunch,
     } as unknown as ProviderManager,
     providerTerminalResumes,
-    terminals: { replaceProcess } as unknown as TerminalManager,
+    terminals: input.terminals ?? { replaceProcess } as unknown as TerminalManager,
     secureFiles: {} as never,
     secureFileAuthorities: {} as never,
     workspacePath,
@@ -166,8 +167,35 @@ describe("terminal.provider.resume command", () => {
       const fixture = dependencies({ current: claude, imported: { providerId: "claude", cwd: real, sessionId } });
       await expect(createProjectWorkspaceCommandHandler(fixture.value)({ readyState: 1 } as never, resumeCommand())).resolves.toBe("handled");
       expect(fixture.terminalResumeLaunch).toHaveBeenCalledWith(conversationId, "claude", sessionId, real);
-      expect(fixture.replaceProcess.mock.calls[0]![2]).toBe(real);
+      expect(fixture.replaceProcess.mock.calls[0]![2]).toBe(linked);
+      expect(fixture.replaceProcess.mock.calls[0]![10]).toMatchObject({ cwd: real });
       expect(fixture.value.turns.hasActiveCheckout).toHaveBeenCalledWith(linked);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it.skipIf(process.platform === "win32")("replaces the chat's terminal when the imported folder is spelled differently", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-resume-cwd-"));
+    try {
+      const real = join(root, "real"); const linked = join(root, "linked");
+      await mkdir(real); await symlink(real, linked, "dir");
+      const pty = () => ({ pid: 4242, onData: () => ({ dispose: () => undefined }), onExit: () => ({ dispose: () => undefined }), kill: vi.fn(), write: vi.fn(), resize: vi.fn() });
+      const spawnTerminal = vi.fn(pty);
+      const manager = new TerminalManager({
+        platform: "linux",
+        spawnTerminal: spawnTerminal as never,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({ process: spawnProcess(), confirmStopped: () => true, releaseIfGroupExited: vi.fn(), requestGuardianStop: () => false, waitForGuardianStop: async () => true }),
+        terminateProcessTree: vi.fn(async () => true),
+      });
+      const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as never;
+      const scope = { projectId, conversationId };
+      const shellId = manager.create(owner, linked, 80, 24, undefined, undefined, scope);
+      const modelSelection = providerNativeModelSelection({ providerId: "claude" });
+      const claude = { ...conversation(), providerId: "claude" as const, modelSelection, continuationIdentity: continuationIdentityForSelection(modelSelection, null, false), worktreePath: linked };
+      const fixture = dependencies({ current: claude, imported: { providerId: "claude", cwd: real, sessionId }, terminals: manager });
+      const command = resumeCommand();
+      await expect(createProjectWorkspaceCommandHandler(fixture.value)(owner, { ...command, payload: { ...command.payload, terminalId: shellId } })).resolves.toBe("handled");
+      expect(spawnTerminal.mock.calls.map((call) => (call as unknown[])[2])).toMatchObject([{ cwd: linked }, { cwd: real }]);
+      const created = fixture.send.mock.calls.map(([, event]) => event).find((event) => event.type === "terminal.created");
+      expect(manager.attach(owner, (created as { terminalId: string }).terminalId, linked, scope, 80, 24)).toMatchObject({ providerResumeConversationId: conversationId });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("derives the exact launch and owning worktree entirely on the server", async () => {

@@ -665,7 +665,7 @@ export function createProjectWorkspaceCommandHandler(
           const terminalId = await dependencies.terminals.replaceProcess(
             socket,
             command.payload.terminalId,
-            resumeCwd,
+            cwd,
             launch.executable,
             launch.args,
             launch.env,
@@ -676,6 +676,7 @@ export function createProjectWorkspaceCommandHandler(
             {
               descriptor: providerResume,
               conversationId: conversation.id,
+              ...(resumeCwd === cwd ? {} : { cwd: resumeCwd }),
             },
             false,
             command.requestId,

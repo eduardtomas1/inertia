@@ -133,6 +133,7 @@ export type TerminalAttachment = {
 export interface TerminalProviderResumeAttachment {
   descriptor: ProviderTerminalResumeDescriptor;
   conversationId: string;
+  cwd?: string;
 }
 
 function ownershipRetirementFailure(session: TerminalSession): TerminalError {
@@ -661,7 +662,7 @@ export class TerminalManager {
       }
       const spawnTerminal = (command: string, terminalArgs: string[] | string) => this.spawnTerminal(
         command, terminalArgs, {
-          name: "xterm-256color", cols, rows, cwd,
+          name: "xterm-256color", cols, rows, cwd: providerResume?.cwd ?? cwd,
           env: { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" },
         },
       );

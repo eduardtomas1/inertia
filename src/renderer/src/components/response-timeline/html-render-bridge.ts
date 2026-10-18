@@ -60,13 +60,16 @@ export function useHtmlRenderFrameBridge(
 }
 
 /**
- * The content height a frame's page last reported, or null before its first
- * report. A page can report many times while it lays out, so reports are
- * applied at most once per animation frame using only the latest one, and a
- * change of less than a pixel is ignored. Returns the height and the reporter.
+ * The content height a frame's page last reported, or the given starting
+ * height before its first report. A page can report many times while it lays
+ * out, so reports are applied at most once per animation frame using only the
+ * latest one, and a change of less than a pixel is ignored. Returns the height
+ * and the reporter.
  */
-export function useReportedFrameHeight(): readonly [number | null, (height: number) => void] {
-  const [height, setHeight] = useState<number | null>(null);
+export function useReportedFrameHeight(
+  initialHeight: number | null = null,
+): readonly [number | null, (height: number) => void] {
+  const [height, setHeight] = useState<number | null>(initialHeight);
   const latestRef = useRef<number | null>(null);
   const scheduledRef = useRef<number | null>(null);
 

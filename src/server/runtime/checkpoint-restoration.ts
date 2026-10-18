@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CheckpointSummary } from "../../shared/contracts";
-import { createCheckpoint, restoreCheckpoint } from "../checkpoints";
+import { assertCheckpointExists, createCheckpoint, restoreCheckpoint } from "../checkpoints";
 import type { RuntimeStore } from "../database";
 import { assertCheckpointPreservesIgnoredFiles } from "../git/checkpoint-ignored-paths";
 import { getRepositoryStatus } from "../git/status";
@@ -17,6 +17,7 @@ export async function restoreConversationCheckpoint(
   const deadlineAt = Date.now() + 60_000;
   const storage = await mkdtemp(join(tmpdir(), "inertia-checkpoint-recovery-"));
   try {
+    await assertCheckpointExists(repositoryPath, checkpoint.ref, { deadlineAt });
     await assertCheckpointPreservesIgnoredFiles(repositoryPath, checkpoint.ref, deadlineAt);
     const status = await getRepositoryStatus(repositoryPath, { deadlineAt });
     const recovery = await createCheckpoint(

@@ -136,6 +136,37 @@ describe("Git checkpoints", () => {
     expect(readFileSync(join(root, "staged.txt"), "utf8")).toBe("later unstaged bytes of staged file\n");
   });
 
+  it.each([false, true])("says a deleted checkpoint is gone without recording a recovery (ignored files: %s)", async (ignoredFiles) => {
+    const root = repository();
+    const conversationId = randomUUID();
+    const captured = await createCheckpoint(root, join(root, ".git", "indexes"), conversationId);
+    git(root, "update-ref", "-d", captured.ref);
+    if (ignoredFiles) {
+      writeFileSync(join(root, ".gitignore"), "local.env\n");
+      writeFileSync(join(root, "local.env"), "SECRET=1\n");
+    }
+    writeFileSync(join(root, "tracked.txt"), "valuable edits\n");
+    const checkpoint: CheckpointSummary = {
+      ...captured, conversationId, label: "Before turn 1", turnId: null,
+      turnIndex: 1, filesChanged: 0, insertions: 0, deletions: 0,
+      createdAt: new Date().toISOString(),
+    };
+    const saved: unknown[] = [];
+
+    await expect(restoreConversationCheckpoint({
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: (input) => {
+        saved.push(input);
+        return { ...input, id: randomUUID(), turnId: null, createdAt: new Date().toISOString() };
+      },
+    }, checkpoint, () => undefined)).rejects.toEqual(new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    ));
+    expect(saved).toEqual([]);
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("valuable edits\n");
+  });
+
   it("refuses to overwrite ignored files that cannot be recovered", async () => {
     const root = repository();
     const conversationId = randomUUID();

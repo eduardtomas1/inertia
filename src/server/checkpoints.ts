@@ -765,6 +765,33 @@ export async function createCheckpoint(
   }
 }
 
+export async function assertCheckpointExists(
+  repositoryPath: string,
+  ref: string,
+  options: CheckpointOperationOptions = {},
+): Promise<void> {
+  const objectType = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "for-each-ref",
+        "--format=%(objecttype)",
+        ref,
+      ]),
+      {},
+      undefined,
+      1024,
+      options.deadlineAt,
+      options.signal,
+    )
+  ).stdout.toString("utf8").trim();
+  if (objectType !== "commit") {
+    throw new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    );
+  }
+}
+
 export async function restoreCheckpoint(
   repositoryPath: string,
   ref: string,

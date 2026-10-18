@@ -223,7 +223,7 @@ const BOOTSTRAP_SCRIPT = /* @__PURE__ */ [
   "if(u.href.split('#')[0]===location.href.split('#')[0])return;e.preventDefault();",
   "if(/^https?:$/.test(u.protocol))post({type:P+'open-link',url:u.href,token:k});},true);",
   "document.addEventListener('keydown',function(e){if(e.key==='Escape')post({type:P+'escape'});},true);",
-  "var h=0;function size(){var r=document.documentElement;var v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h||v<=0)return;h=v;post({type:P+'size',height:v});}",
+  "var h=0;function size(){var r=document.documentElement,c=r.getBoundingClientRect().height;var v=Math.ceil(r.scrollHeight>r.clientHeight?Math.max(r.scrollHeight,c):c);if(v===h||v<=0)return;h=v;post({type:P+'size',height:v});}",
   "if(window.ResizeObserver){var o=new ResizeObserver(size);o.observe(document.documentElement);document.addEventListener('DOMContentLoaded',function(){if(document.body)o.observe(document.body);size();});}",
   "window.addEventListener('load',size);document.addEventListener('DOMContentLoaded',size);",
   "})();",

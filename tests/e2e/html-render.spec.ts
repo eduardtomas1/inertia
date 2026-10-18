@@ -112,6 +112,15 @@ test("shows a sandboxed, themed visual reply above the answer and keeps it acros
     expect(contentHeight).toBeGreaterThanOrEqual(80);
     expect(contentHeight).toBeLessThanOrEqual(2_000);
     expect(contentHeight).not.toBe(320);
+    const grownHeight = await frame.evaluate(() => {
+      const before = document.documentElement.getBoundingClientRect().height;
+      document.body.style.paddingBottom = `${4 + Math.floor(before) + 40.25 - before}px`;
+      return document.documentElement.getBoundingClientRect().height;
+    });
+    expect(grownHeight % 1).toBe(0.25);
+    await expect.poll(async () => Math.round((await frameElement.boundingBox())!.height)).toBe(Math.ceil(grownHeight));
+    await frame.evaluate(() => { document.body.style.paddingBottom = ""; });
+    await expect.poll(async () => Math.round((await frameElement.boundingBox())!.height)).toBe(contentHeight);
 
     const darkCanvas = await expectThemedLike(page, "dark");
     await page.mouse.move(0, 0);

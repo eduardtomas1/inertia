@@ -228,6 +228,10 @@ export function WorkspaceHeader({
   };
   const openBranches = (): void => {
     if (requestCheckoutBranchMenu()) return;
+    const quickAction = document.activeElement?.closest<HTMLButtonElement>('[data-header-menu="git"] .header-split-primary');
+    setMenuTrigger("branches", quickAction ?? headerRef.current?.querySelector<HTMLButtonElement>(collapsed
+      ? ".header-overflow-button"
+      : '[data-header-menu="git"] .header-split-chevron') ?? null);
     onRefreshBranches();
     if (menu !== "branches") toggleMenu("branches");
   };

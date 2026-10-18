@@ -158,6 +158,20 @@ describe("workspace header overflow", () => {
     expect(item("Git actions")).toHaveFocus();
   });
 
+  it("returns focus to the overflow trigger when a branch menu opened from it closes", async () => {
+    render(<WorkspaceHeader {...headerProps({ compact: true })} />);
+    const trigger = screen.getByRole("button", { name: "More header actions" });
+    fireEvent.click(trigger);
+    const menu = await screen.findByRole("menu", { name: "Header actions" });
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Git actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Switch branch|^Create branch/u }));
+    await screen.findByRole("menu", { name: "Branches" });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
   it("leaves arrow keys alone on inline header actions", async () => {
     render(<WorkspaceHeader {...headerProps()} />);
     const run = await screen.findByRole("button", { name: "Run Dev server" });

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
-  AppSnapshot,
   ProviderMaintenanceOperation,
   ProviderMaintenanceProviderId,
   ProviderMaintenanceStatus,
@@ -9,7 +8,6 @@ import type {
 } from "@shared/contracts";
 import type { AppUpdateStatus } from "@shared/desktop";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
-import { providerLabel } from "../components/sidebar/updateEverythingPlan";
 import type { UpdateEverythingPhase, UpdateEverythingRequest } from "../utils/updateEverythingRun";
 
 export interface UpdateEverythingController {
@@ -17,26 +15,26 @@ export interface UpdateEverythingController {
   operations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>;
   phase: UpdateEverythingPhase | null;
   error: string | null;
-  run: (request: UpdateEverythingRequest) => Promise<void>;
+  run: (request: UpdateEverythingRequest, providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>) => Promise<void>;
   dismissError: () => void;
 }
 
-export function useUpdateEverything({ statuses, operations, appStatus, request, snapshot }: {
+export function useUpdateEverything({ statuses, operations, appStatus, request }: {
   statuses: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceStatus>;
   operations: ReadonlyMap<ProviderMaintenanceProviderId, ProviderMaintenanceOperation>;
   appStatus: AppUpdateStatus | null;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
-  snapshot: AppSnapshot | null;
 }): UpdateEverythingController {
   const [phase, setPhase] = useState<UpdateEverythingPhase | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const appStatusRef = useRef(appStatus);
-  const snapshotRef = useRef(snapshot);
   useEffect(() => { appStatusRef.current = appStatus; }, [appStatus]);
-  useEffect(() => { snapshotRef.current = snapshot; }, [snapshot]);
 
-  const run = useCallback(async (payload: UpdateEverythingRequest): Promise<void> => {
+  const run = useCallback(async (
+    payload: UpdateEverythingRequest,
+    providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>,
+  ): Promise<void> => {
     if (inFlight.current) return;
     inFlight.current = true;
     setError(null);
@@ -48,7 +46,7 @@ export function useUpdateEverything({ statuses, operations, appStatus, request, 
         payload,
         request,
         appStatus: () => appStatusRef.current,
-        providerLabel: (providerId) => providerLabel(snapshotRef.current, providerId),
+        providerLabels,
         onPhase: setPhase,
       }));
     } catch (cause) {

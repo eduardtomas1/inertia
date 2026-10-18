@@ -52,17 +52,17 @@ async function installApp(): Promise<string | null> {
 
 function providerFailures(
   result: UpdatesRunResult,
-  providerLabel: (providerId: ProviderMaintenanceProviderId) => string,
+  providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>,
 ): string[] {
   return result.providers.flatMap(({ providerId, outcome, error }) => outcome !== "failed" ? []
-    : [error ? `${providerLabel(providerId)} update failed: ${error}` : `${providerLabel(providerId)} update failed.`]);
+    : [`${providerLabels.get(providerId) ?? providerId} update failed${error ? `: ${error}` : "."}`]);
 }
 
-export async function runUpdateEverything({ payload, request, appStatus, providerLabel, onPhase }: {
+export async function runUpdateEverything({ payload, request, appStatus, providerLabels, onPhase }: {
   payload: UpdateEverythingRequest;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   appStatus: () => AppUpdateStatus | null;
-  providerLabel: (providerId: ProviderMaintenanceProviderId) => string;
+  providerLabels: ReadonlyMap<ProviderMaintenanceProviderId, string>;
   onPhase: (phase: UpdateEverythingPhase) => void;
 }): Promise<string | null> {
   let app = payload.includeApp ? appStatus() : null;
@@ -93,5 +93,5 @@ export async function runUpdateEverything({ payload, request, appStatus, provide
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
   const appMessage = download ?? refusal ?? result.appInstallBlocker;
-  return [...providerFailures(result, providerLabel), ...(appMessage ? [appMessage] : [])].join(" ") || null;
+  return [...providerFailures(result, providerLabels), ...(appMessage ? [appMessage] : [])].join(" ") || null;
 }

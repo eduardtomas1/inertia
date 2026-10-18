@@ -37,7 +37,7 @@ function providerManagedUpdate(status: ProviderMaintenanceStatus): boolean {
   return status.installMethod === "provider-managed" && status.versionStatus === "unknown" && status.latestVersion === null;
 }
 
-export function providerLabel(snapshot: AppSnapshot | null, providerId: ProviderMaintenanceProviderId): string {
+function providerLabel(snapshot: AppSnapshot | null, providerId: ProviderMaintenanceProviderId): string {
   return snapshot?.settings.providerIdentityLabels?.[providerId]
     ?? snapshot?.providers.find(({ id }) => id === providerId)?.label
     ?? providerId;

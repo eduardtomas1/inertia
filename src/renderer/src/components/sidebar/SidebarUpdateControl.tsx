@@ -243,7 +243,7 @@ export function SidebarUpdateControl({ controller, everything, snapshot = null }
     {everythingOpen && everythingPlan && everything && <UpdateEverythingDialog plan={everythingPlan}
       restoreFocus={focusTrigger} onClose={() => setEverythingOpen(false)} onUpdate={(request) => {
         setEverythingOpen(false);
-        void everything.run(request);
+        void everything.run(request, new Map(everythingPlan.providers.map(({ providerId, label }) => [providerId, label])));
       }} />}
   </div>;
 }

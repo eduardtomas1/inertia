@@ -250,7 +250,7 @@ describe("update everything mode in the sidebar", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("Inertia 1.2.2 → 1.2.3");
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Update" })));
-    expect(everything.run).toHaveBeenCalledExactlyOnceWith({ providerIds: ["codex"], includeApp: true, continueChats: true });
+    expect(everything.run).toHaveBeenCalledExactlyOnceWith({ providerIds: ["codex"], includeApp: true, continueChats: true }, new Map([["codex", "Codex"]]));
     expect(screen.queryByRole("heading", { name: "Update Inertia and Codex?" })).toBeNull();
   });
   it("closes the dialog with Escape and keeps the hover details closed while it is open", () => {
@@ -305,7 +305,6 @@ describe("update everything mode in the sidebar", () => {
       const controller = useAppUpdate();
       const everything = useUpdateEverything({
         statuses: new Map(statuses.map((status) => [status.providerId, status])), operations: new Map(), appStatus: controller.status, request,
-        snapshot: labelSnapshot,
       });
       return <SidebarUpdateControl controller={controller} everything={everything} snapshot={labelSnapshot} />;
     }

@@ -186,18 +186,18 @@ describe("update everything plan", () => {
 function harness(appStatus: AppUpdateStatus | null, request: (command: CommandWithoutId) => Promise<ServerEvent>) {
   return renderHook(({ status }) => useUpdateEverything({
     statuses: statusMap(maintenance("codex"), maintenance("claude")), operations: NO_OPERATIONS, appStatus: status, request,
-    snapshot: snapshot(),
   }), { initialProps: { status: appStatus } });
 }
 
 const providersOnly = { providerIds: ["codex", "claude"] as ProviderMaintenanceProviderId[], includeApp: false, continueChats: true };
+const labels = new Map<ProviderMaintenanceProviderId, string>([["codex", "Codex"], ["claude", "Claude Code"]]);
 const withApp = { ...providersOnly, includeApp: true };
 
 describe("update everything run", () => {
   it("updates providers, then releases the runtime hold when there is no app step", async () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     const hook = harness(null, request);
-    await act(async () => hook.result.current.run(providersOnly));
+    await act(async () => hook.result.current.run(providersOnly, labels));
     expect(request.mock.calls.map(([command]) => command)).toEqual([
       { type: "updates.run", payload: providersOnly },
       { type: "updates.finish", payload: { installed: false } },
@@ -212,7 +212,7 @@ describe("update everything run", () => {
     download.mockResolvedValue(updateStatus({ state: "downloaded" }));
     install.mockResolvedValue(updateStatus({ state: "installing" }));
     const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(download).toHaveBeenCalledOnce();
     expect(install).toHaveBeenCalledOnce();
     expect(request.mock.calls.map(([command]) => command.type)).toEqual(["updates.run"]);
@@ -229,7 +229,7 @@ describe("update everything run", () => {
     const hook = harness(updateStatus(), request);
     let finished = false;
     let running!: Promise<void>;
-    act(() => { running = hook.result.current.run(withApp).then(() => { finished = true; }); });
+    act(() => { running = hook.result.current.run(withApp, labels).then(() => { finished = true; }); });
     await vi.waitFor(() => expect(statusListener).not.toBeNull());
     expect(request).not.toHaveBeenCalled();
     expect(install).not.toHaveBeenCalled();
@@ -247,7 +247,7 @@ describe("update everything run", () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     download.mockResolvedValue(settled);
     const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(request.mock.calls.map(([command]) => command)).toEqual([
       { type: "updates.run", payload: providersOnly },
       { type: "updates.finish", payload: { installed: false } },
@@ -261,7 +261,7 @@ describe("update everything run", () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     download.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
     const hook = harness(updateStatus(), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(request).not.toHaveBeenCalled();
     expect(hook.result.current.error).toBe("The update download could not be started.");
   });
@@ -270,7 +270,7 @@ describe("update everything run", () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     install.mockResolvedValue(updateStatus({ state: "installing" }));
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(download).not.toHaveBeenCalled();
     expect(install).toHaveBeenCalledOnce();
     expect(request).toHaveBeenCalledOnce();
@@ -284,7 +284,7 @@ describe("update everything run", () => {
     arrange();
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
     expect(hook.result.current.phase).toBeNull();
     expect(hook.result.current.error ?? "").not.toContain("/private/path");
@@ -297,7 +297,7 @@ describe("update everything run", () => {
     install.mockResolvedValue(refused);
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
     expect(hook.result.current.error).toBe(refused.message);
   });
@@ -313,7 +313,7 @@ describe("update everything run", () => {
       ? runResult(true, null, [...providers]) : ok);
     install.mockResolvedValue(updateStatus({ state: "installing" }));
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(install).toHaveBeenCalledOnce();
     expect(hook.result.current.error).toBe("Codex update failed: npm exited with code 1. Claude Code update failed.");
   });
@@ -324,7 +324,7 @@ describe("update everything run", () => {
         { providerId: "codex", outcome: "failed", beforeVersion: "1.0.0", afterVersion: null, error: "npm exited with code 1." },
       ]) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(hook.result.current.error).toBe("Codex update failed: npm exited with code 1. Close active terminals before restarting to update.");
   });
 
@@ -332,7 +332,7 @@ describe("update everything run", () => {
     install.mockRejectedValue(new Error("Error invoking remote method: /private/path"));
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(hook.result.current.error).toBe("The update restart could not be started safely.");
   });
 
@@ -340,7 +340,7 @@ describe("update everything run", () => {
     const message = "Close active terminals before restarting to update.";
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false, message) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(install).not.toHaveBeenCalled();
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
     expect(hook.result.current.error).toBe(message);
@@ -349,7 +349,7 @@ describe("update everything run", () => {
   it("skips the app when the runtime is not ready for it", async () => {
     const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     const hook = harness(updateStatus({ state: "downloaded" }), request);
-    await act(async () => hook.result.current.run(withApp));
+    await act(async () => hook.result.current.run(withApp, labels));
     expect(install).not.toHaveBeenCalled();
     expect(request.mock.calls.at(-1)?.[0]).toEqual({ type: "updates.finish", payload: { installed: false } });
   });
@@ -357,7 +357,7 @@ describe("update everything run", () => {
   it("surfaces a refused run without releasing another run's hold", async () => {
     const request = vi.fn(async () => { throw new Error("Inertia is updating."); });
     const hook = harness(null, request);
-    await act(async () => hook.result.current.run(providersOnly));
+    await act(async () => hook.result.current.run(providersOnly, labels));
     expect(request).toHaveBeenCalledOnce();
     expect(hook.result.current.error).toBe("Inertia is updating.");
     act(() => hook.result.current.dismissError());
@@ -369,8 +369,8 @@ describe("update everything run", () => {
     const request = vi.fn((command: CommandWithoutId) => command.type === "updates.run" ? response.promise : Promise.resolve(ok));
     const hook = harness(null, request);
     let first!: Promise<void>;
-    act(() => { first = hook.result.current.run(providersOnly); });
-    await act(async () => hook.result.current.run(providersOnly));
+    act(() => { first = hook.result.current.run(providersOnly, labels); });
+    await act(async () => hook.result.current.run(providersOnly, labels));
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
     expect(hook.result.current.phase).toEqual({ kind: "providers", providerIds: ["codex", "claude"] });
     await act(async () => { response.resolve(runResult(false)); await first; });

@@ -267,6 +267,7 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
       closeDisabled={locked}
       onClose={onClose}
       onDismiss={() => { if (!locked) onClose(); }}
+      onKeyDown={(event) => { if (event.key === "Escape") event.preventDefault(); }}
       footer={<>
         <button type="button" className="secondary-button" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(false)}>{locked ? <LoadingMark label="Committing" /> : <GitCommitHorizontal size={14} />}<span>Commit</span></button>
         <button type="button" className="primary-button dialog-primary" disabled={!message.trim() || locked || reviewUnavailable || selectedPaths.length === 0} onClick={() => void submit(true)}>{locked ? <LoadingMark label="Committing and pushing" /> : <CloudUpload size={14} />}<span>Commit & push</span></button>

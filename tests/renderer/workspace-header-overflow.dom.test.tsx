@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -170,6 +170,16 @@ describe("workspace header overflow", () => {
 
     expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("closes the folded header menu when keyboard focus leaves it", async () => {
+    render(<WorkspaceHeader {...headerProps({ compact: true })} />);
+    const trigger = screen.getByRole("button", { name: "More header actions" });
+    fireEvent.click(trigger);
+    await within(await screen.findByRole("menu", { name: "Header actions" })).findByRole("menuitem", { name: "Commit" });
+    act(() => screen.getByRole("button", { name: "Toggle project navigation" }).focus());
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("leaves arrow keys alone on inline header actions", async () => {

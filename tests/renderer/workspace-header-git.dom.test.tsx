@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect, type ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -262,6 +262,17 @@ describe("WorkspaceHeader Git split button", () => {
 
     expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("closes the branch menu when keyboard focus leaves it", async () => {
+    await renderHeader(status(true, { upstream: "origin/feature/pr" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "More Git actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Switch branch/u }));
+    await screen.findByRole("menu", { name: "Branches" });
+    act(() => screen.getByRole("button", { name: "Toggle project navigation" }).focus());
+
+    expect(screen.queryByRole("menu", { name: "Branches" })).not.toBeInTheDocument();
   });
 
   it("closes the Git menu before a sibling header action runs", async () => {

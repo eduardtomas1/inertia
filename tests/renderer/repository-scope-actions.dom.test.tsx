@@ -110,6 +110,15 @@ describe("Changes repository actions", () => {
     expect(screen.getByTestId("launcher")).toHaveTextContent("buttons");
   });
 
+  it("closes More when keyboard focus leaves its menu", () => {
+    sizes.rowScroll = 760;
+    render(<>{actionsRow()}<button type="button">After the row</button></>);
+    fireEvent.click(screen.getByRole("button", { name: "More actions for inertia" }));
+    expect(screen.getByRole("menu", { name: "More actions for inertia" })).toBeInTheDocument();
+    act(() => screen.getByRole("button", { name: "After the row" }).focus());
+    expect(screen.queryByRole("menu", { name: "More actions for inertia" })).toBeNull();
+  });
+
   it("folds Commit into More while the compact row still overflows, then restores it as the row widens", () => {
     sizes.rowScroll = 760;
     sizes.compactScroll = 560;

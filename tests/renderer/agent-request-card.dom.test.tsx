@@ -116,6 +116,64 @@ const approval: AgentApprovalRequest = {
   availableDecisions: ["cancel", "deny", "approve"],
 };
 
+function Workspace({ card, composer = true }: { card: React.ReactNode; composer?: boolean }): React.JSX.Element {
+  return (
+    <main className="chat-workspace">
+      <section className="response-turn" aria-label="Turn 1" tabIndex={-1}>{card}</section>
+      {composer && <section aria-label="Message composer"><textarea aria-label="Message" /></section>}
+    </main>
+  );
+}
+
+describe("request card focus after an answer", () => {
+  it("moves focus to the composer once an approval is answered and the card leaves", async () => {
+    const user = userEvent.setup();
+    const view = render(<Workspace card={<ApprovalCard request={approval} onRespond={vi.fn(async () => undefined)} />} />);
+
+    await user.click(screen.getByRole("button", { name: "Approve once" }));
+    view.rerender(<Workspace card={null} />);
+
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
+  it("moves focus to the composer once a question is answered", async () => {
+    const user = userEvent.setup();
+    render(<Workspace card={<InputRequestCard request={{ ...request, questions: [request.questions[0]!] }} onRespond={vi.fn(async () => undefined)} />} />);
+
+    await user.click(screen.getByRole("radio", { name: /Broad/u }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
+  it("falls back to the turn when the chat has no composer", async () => {
+    const user = userEvent.setup();
+    render(<Workspace composer={false} card={<ApprovalCard request={approval} onRespond={vi.fn(async () => undefined)} />} />);
+
+    await user.click(screen.getByRole("button", { name: "Deny" }));
+
+    expect(screen.getByRole("region", { name: "Turn 1" })).toHaveFocus();
+  });
+
+  it("leaves focus alone when the user moved on before the answer was accepted", async () => {
+    const user = userEvent.setup();
+    let accept!: () => void;
+    const onRespond = vi.fn(() => new Promise<void>((resolve) => { accept = resolve; }));
+    render(
+      <>
+        <Workspace card={<ApprovalCard request={approval} onRespond={onRespond} />} />
+        <button type="button">Open settings</button>
+      </>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve once" }));
+    screen.getByRole("button", { name: "Open settings" }).focus();
+    await act(async () => accept());
+
+    expect(screen.getByRole("button", { name: "Open settings" })).toHaveFocus();
+  });
+});
+
 describe("request card answer failures", () => {
   it("keeps focus on the card and handles the failure when an answer is refused", async () => {
     const user = userEvent.setup();

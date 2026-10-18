@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronLeft, MessageCircleQuestion, ShieldAlert } from "lucide-react";
 import type { AgentApprovalDecision, AgentApprovalRequest, AgentInputRequest } from "@shared/contracts";
 import { buildAgentInputAnswers, inputRequestTitle } from "../utils/agentInput";
+import { composerFocusRestorer } from "../utils/composerFocusRestore";
 
 type ApprovalCardProps = {
   request: AgentApprovalRequest;
@@ -14,7 +15,12 @@ const APPROVAL_BUTTONS = [
   ["approve", "Approve once"],
 ] as const;
 
-async function runResponse(setBusy: (busy: boolean) => void, respond: () => Promise<void>): Promise<void> {
+async function runResponse(
+  card: HTMLElement | null,
+  setBusy: (busy: boolean) => void,
+  respond: () => Promise<void>,
+): Promise<void> {
+  const restoreFocus = composerFocusRestorer(card);
   setBusy(true);
   try {
     await respond();
@@ -23,10 +29,12 @@ async function runResponse(setBusy: (busy: boolean) => void, respond: () => Prom
   } finally {
     setBusy(false);
   }
+  restoreFocus();
 }
 
 export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.JSX.Element {
   const [busy, setBusy] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
   const descriptionId = `approval-${request.id}-description`;
   const detailRows = ([
     ["Reason", request.reason],
@@ -36,11 +44,12 @@ export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.J
   ] as [string, string | null | false | undefined][]).filter(([, value]) => value);
   const respond = (decision: AgentApprovalDecision) => {
     if (busy) return;
-    return runResponse(setBusy, () => onRespond(request, decision));
+    return runResponse(cardRef.current, setBusy, () => onRespond(request, decision));
   };
 
   return (
     <section
+      ref={cardRef}
       className="agent-request-card is-approval"
       role="region"
       aria-busy={busy}
@@ -82,6 +91,7 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
 
   const hasAnswer = (id: string) => (answers[id] ?? []).some((value) => Boolean(value.trim()));
   const complete = request.questions.every(({ id }) => hasAnswer(id));
@@ -90,11 +100,12 @@ export function InputRequestCard({ request, onRespond }: InputRequestCardProps):
 
   const submit = () => {
     if (!complete || busy) return;
-    return runResponse(setBusy, () => onRespond(request, buildAgentInputAnswers(request, answers)));
+    return runResponse(cardRef.current, setBusy, () => onRespond(request, buildAgentInputAnswers(request, answers)));
   };
 
   return (
     <section
+      ref={cardRef}
       id={`agent-input-request-${request.id}`}
       className="agent-request-card agent-input-card is-question"
       role="region"

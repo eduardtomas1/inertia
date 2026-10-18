@@ -46,6 +46,7 @@ import { useComposerSnapshots } from "./useComposerSnapshots";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions, DOCUMENT_FOLLOW_UP_UNSUPPORTED } from "./composerAttachmentActions";
 import { useComposerStopAction } from "./useComposerStopAction";
+import { focusWasLost } from "../../utils/composerFocusRestore";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextPreview, ComposerConversationContextRequestCard, ComposerConversationContextStrip, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
@@ -692,6 +693,10 @@ export const Composer = memo(function Composer({
   const queuedMessageCount = useRuntimeQueueLength(conversation.id);
   const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
+  const stopAndKeepFocus = async (): Promise<void> => {
+    const origin = document.activeElement;
+    if (await stop() && focusWasLost(origin)) textareaRef.current?.focus();
+  };
   const queueCurrentMessage = async (stopTurnId?: string): Promise<void> => {
     if (documentBlocksFollowUp) {
       setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
@@ -1131,7 +1136,7 @@ export const Composer = memo(function Composer({
           onQueueCommand={onQueueCommand}
           onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
-          onStop={stop}
+          onStop={stopAndKeepFocus}
         />
       </section>
     </div>

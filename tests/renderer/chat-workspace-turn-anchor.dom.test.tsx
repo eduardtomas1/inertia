@@ -22,6 +22,7 @@ import {
   COMPOSER_STOP_RESTORE_EVENT,
   type ComposerStopRestoreDetail,
 } from "../../src/renderer/src/utils/composerStopRestore";
+import { deferred } from "./composer-fixtures";
 
 function streamingSource(text: string) {
   const store = createStreamingAgentStore();
@@ -89,6 +90,9 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           <button type="button" onClick={() => void onStop()}>
             Stop from composer mock
           </button>
+          <section aria-label="Message composer">
+            <textarea aria-label="Message" />
+          </section>
           {onCompact && (
             <button
               type="button"
@@ -486,6 +490,41 @@ describe("draft turn anchoring", () => {
     await waitFor(() => expect(onStop).toHaveBeenCalledOnce());
     expect(restoreEvents).toEqual([]);
     window.removeEventListener(COMPOSER_STOP_RESTORE_EVENT, captureRestore);
+  });
+
+  it("returns focus to the composer after Stop in the turn header is accepted", async () => {
+    const activeConversation = conversation("conversation-stop-focus");
+    const stopped = deferred<void>();
+    render(<ChatWorkspace
+      {...workspaceProps(activeConversation, async () => null)}
+      turns={[agentTurn(activeConversation, "running")]}
+      onStop={() => stopped.promise}
+    />);
+    const stop = await screen.findByRole("button", { name: "Stop from timeline mock" });
+    stop.focus();
+    fireEvent.click(stop);
+    expect(stop).toHaveFocus();
+
+    await act(async () => stopped.resolve());
+
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
+  it("leaves focus where it is when Stop in the turn header fails", async () => {
+    const activeConversation = conversation("conversation-stop-focus-failure");
+    const stopped = deferred<void>();
+    render(<ChatWorkspace
+      {...workspaceProps(activeConversation, async () => null)}
+      turns={[agentTurn(activeConversation, "running")]}
+      onStop={() => stopped.promise}
+    />);
+    const stop = await screen.findByRole("button", { name: "Stop from timeline mock" });
+    stop.focus();
+    fireEvent.click(stop);
+
+    await act(async () => stopped.reject(new Error("Stop failed.")));
+
+    expect(stop).toHaveFocus();
   });
 
   it("uses a restrained project-aware prompt for an empty chat", () => {

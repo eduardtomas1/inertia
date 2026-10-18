@@ -19,10 +19,10 @@ describe("composer cancellation ownership", () => {
     const { result, rerender } = renderHook(useComposerStopAction, {
       initialProps: { running: true, cancelling: false, conversationId: "first-chat", onStop: () => first.promise },
     });
-    let firstStop!: Promise<void>;
+    let firstStop!: Promise<boolean>;
     act(() => { firstStop = result.current.stop(); });
     rerender({ running: true, cancelling: false, conversationId: "second-chat", onStop: () => second.promise });
-    let secondStop!: Promise<void>;
+    let secondStop!: Promise<boolean>;
     act(() => { secondStop = result.current.stop(); });
     const secondClaim = result.current.stopClaimRef.current;
 
@@ -39,6 +39,30 @@ describe("composer cancellation ownership", () => {
     });
     expect(result.current.stopClaimRef.current).toBeNull();
     expect(result.current.stopping).toBe(false);
+  });
+
+  it("returns focus to the message box once Stop is accepted", async () => {
+    const stopped = deferred<void>();
+    render(<Composer {...composerProps(conversation("stop-focus"), { running: true, onStop: () => stopped.promise })} />);
+    const stop = await screen.findByRole("button", { name: "Stop agent" });
+    stop.focus();
+    fireEvent.click(stop);
+
+    await act(async () => stopped.resolve());
+
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
+  it("keeps focus on Stop when the stop request fails", async () => {
+    const stopped = deferred<void>();
+    render(<Composer {...composerProps(conversation("stop-focus-failure"), { running: true, onStop: () => stopped.promise })} />);
+    const stop = await screen.findByRole("button", { name: "Stop agent" });
+    stop.focus();
+    fireEvent.click(stop);
+
+    await act(async () => stopped.reject(new Error("Stop failed.")));
+
+    expect(screen.getByRole("button", { name: "Stop agent" })).toHaveFocus();
   });
 
   it.each(["detail", "summary"] as const)(

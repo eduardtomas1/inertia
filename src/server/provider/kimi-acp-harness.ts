@@ -449,6 +449,7 @@ function startKimiRun(
         ? acpHostMcpServers(
             hostMcpConnection,
             initialized.agentCapabilities?.mcpCapabilities?.http === true,
+            options.environment,
           )
         : [];
 

@@ -528,6 +528,7 @@ function startCursorRun(
       ? acpHostMcpServers(
           hostMcpConnection,
           initialized.agentCapabilities?.mcpCapabilities?.http === true,
+          options.environment,
         )
       : [];
     const cursorLogin = selectAcpAgentAuthMethod("Cursor", initialized.authMethods, "cursor_login");

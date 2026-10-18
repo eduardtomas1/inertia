@@ -58,6 +58,7 @@ function selectTaggedCheckpointPaths(
 }
 
 const isSkippedWorktreeTag = (tag: number): boolean => tag === 0x53;
+const isAnyTag = (): boolean => true;
 const isAssumedUnchangedTag = (tag: number): boolean =>
   tag >= 0x61 && tag <= 0x7a;
 
@@ -365,6 +366,67 @@ async function repositoryIndexPath(
     : null;
 }
 
+const CONTENT_CONVERSION_ATTRIBUTES = new Set([
+  "crlf",
+  "eol",
+  "filter",
+  "ident",
+  "text",
+  "working-tree-encoding",
+]);
+const DISABLED_AUTOCRLF_VALUES = new Set(["false", "no", "off", "0"]);
+
+async function repositoryConvertsContent(
+  repositoryPath: string,
+  paths: Buffer,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const autocrlf = (
+    await runGit(
+      repositoryPath,
+      checkpointGitArguments([
+        "config",
+        "--default",
+        "false",
+        "--get",
+        "core.autocrlf",
+      ]),
+      {},
+      undefined,
+      1024,
+      deadlineAt,
+      signal,
+    )
+  ).stdout.toString("utf8").trim().toLowerCase();
+  if (!DISABLED_AUTOCRLF_VALUES.has(autocrlf)) return true;
+  if (paths.length === 0) return false;
+  const attributes = await runBoundedGit(
+    repositoryPath,
+    checkpointGitArguments(["check-attr", "--all", "-z", "--stdin"]),
+    {
+      deadlineAt,
+      signal,
+      input: paths,
+      maxOutputBytes: 1024 * 1024,
+      truncateOutput: true,
+      timeoutMs: 20_000,
+      failureMessage: CHECKPOINT_FAILURE,
+    },
+  );
+  if (attributes.truncated) return true;
+  const fields = attributes.stdout.toString("utf8").split("\0");
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const value = fields[index + 2];
+    if (
+      CONTENT_CONVERSION_ATTRIBUTES.has(fields[index + 1]!)
+      && value !== "unset"
+      && value !== "unspecified"
+    ) return true;
+  }
+  return false;
+}
+
 async function reuseRepositoryIndex(
   repositoryPath: string,
   sourcePath: string,
@@ -389,6 +451,12 @@ async function reuseRepositoryIndex(
         signal,
       )
     ).stdout;
+    if (await repositoryConvertsContent(
+      repositoryPath,
+      selectTaggedCheckpointPaths(taggedPaths, isAnyTag),
+      deadlineAt,
+      signal,
+    )) return false;
     const assumedUnchanged = selectTaggedCheckpointPaths(
       taggedPaths,
       isAssumedUnchangedTag,

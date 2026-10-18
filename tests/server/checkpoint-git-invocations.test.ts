@@ -102,6 +102,32 @@ describe("checkpoint Git invocations", () => {
     expect(git(root, "show", `${checkpoint.ref}:untracked.txt`)).toBe("new");
   });
 
+  it("reuses the repository index only while no path converts its content", async () => {
+    const { root, indexes } = repository();
+    git(root, "config", "core.autocrlf", "false");
+    writeFileSync(join(root, ".gitattributes"), "*.png binary\n*.ts diff=typescript\n");
+    git(root, "add", ".gitattributes");
+    git(root, "commit", "-m", "attributes");
+    const rebuilt = (): boolean => gitCalls.some((args) => args.includes("read-tree") && args.includes("--empty"));
+
+    await createCheckpoint(root, indexes, randomUUID());
+    expect(rebuilt()).toBe(false);
+
+    for (const configure of [
+      () => git(root, "config", "core.autocrlf", "input"),
+      () => writeFileSync(join(root, ".git", "info", "attributes"), "tracked.txt text\n"),
+      () => writeFileSync(join(root, ".gitattributes"), "*.txt filter=lfs\n"),
+    ]) {
+      git(root, "config", "core.autocrlf", "false");
+      writeFileSync(join(root, ".git", "info", "attributes"), "");
+      git(root, "checkout", "--", ".gitattributes");
+      configure();
+      gitCalls.splice(0);
+      await createCheckpoint(root, indexes, randomUUID());
+      expect(rebuilt()).toBe(true);
+    }
+  });
+
   it("lists a wholly ignored directory once when checking a restore", async () => {
     const { root, indexes } = repository();
     const checkpoint = await createCheckpoint(root, indexes, randomUUID());

@@ -469,6 +469,78 @@ describe("Git checkpoints", () => {
     expect(existsSync(smudgeMarker)).toBe(false);
   });
 
+  function settleIndex(root: string, path: string): void {
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(join(root, path), past, past);
+    git(root, "update-index", "--refresh");
+    expect(git(root, "status", "--porcelain")).toBe("");
+  }
+
+  it("checkpoints and restores the raw bytes of an untouched file under core.autocrlf", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    git(root, "config", "core.autocrlf", "true");
+    const crlf = Buffer.from("first line\r\nsecond line\r\n");
+    writeFileSync(join(root, "windows.txt"), crlf);
+    git(root, "add", "windows.txt");
+    git(root, "commit", "-m", "crlf");
+    settleIndex(root, "windows.txt");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(root, indexes, conversationId);
+
+    expect(execFileSync("git", ["cat-file", "blob", `${checkpoint.ref}:windows.txt`], { cwd: root }))
+      .toEqual(crlf);
+    writeFileSync(join(root, "windows.txt"), "agent edit\r\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(join(root, "windows.txt"))).toEqual(crlf);
+  });
+
+  it("checkpoints and restores the raw bytes of an untouched file behind a clean and smudge filter", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    const store = join(indexes, "large-object");
+    const cleanFilter = join(indexes, "pointer-clean.cjs");
+    const smudgeFilter = join(indexes, "pointer-smudge.cjs");
+    writeFileSync(cleanFilter, [
+      'const { writeFileSync } = require("node:fs");',
+      "const chunks = [];",
+      'process.stdin.on("data", (chunk) => chunks.push(chunk));',
+      'process.stdin.on("end", () => {',
+      `  writeFileSync(${JSON.stringify(store)}, Buffer.concat(chunks));`,
+      '  process.stdout.write("pointer\\n");',
+      "});",
+      "",
+    ].join("\n"));
+    writeFileSync(smudgeFilter, [
+      'const { readFileSync } = require("node:fs");',
+      'process.stdin.on("data", () => undefined);',
+      `process.stdin.on("end", () => process.stdout.write(readFileSync(${JSON.stringify(store)})));`,
+      "",
+    ].join("\n"));
+    git(root, "config", "filter.fake.clean", nodeFilterCommand(cleanFilter));
+    git(root, "config", "filter.fake.smudge", nodeFilterCommand(smudgeFilter));
+    git(root, "config", "filter.fake.required", "true");
+    writeFileSync(join(root, ".gitattributes"), "*.bin filter=fake\n");
+    const asset = Buffer.from([0, 1, 2, 3, 0xff]);
+    writeFileSync(join(root, "asset.bin"), asset);
+    git(root, "add", ".gitattributes", "asset.bin");
+    git(root, "commit", "-m", "asset");
+    expect(git(root, "cat-file", "blob", "HEAD:asset.bin")).toBe("pointer");
+    settleIndex(root, "asset.bin");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(root, indexes, conversationId);
+
+    expect(execFileSync("git", ["cat-file", "blob", `${checkpoint.ref}:asset.bin`], { cwd: root }))
+      .toEqual(asset);
+    writeFileSync(join(root, "asset.bin"), "agent edit\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(join(root, "asset.bin"))).toEqual(asset);
+  });
+
   it("does not run repository reference hooks for checkpoint refs", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));

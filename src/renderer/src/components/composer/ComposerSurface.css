@@ -113,6 +113,9 @@
   color: var(--text);
   background: var(--fill-strong);
 }
+.composer-shell .composer-primary-rail:not(:has(> .composer-tools-toggle)) > .composer-actions {
+  margin-left: auto;
+}
 .composer-input-actions {
   --composer-send-size: max(32px, var(--composer-control-height));
   position: static;

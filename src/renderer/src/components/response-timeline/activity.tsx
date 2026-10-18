@@ -75,7 +75,7 @@ import { messageContextMenu } from "./messageContextMenu";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
-import { HtmlRenderStreamItem } from "./html-render";
+import { HtmlRenderFrame } from "./html-render";
 import {
   advanceThinkingLine,
   IDLE_THINKING_LINE,
@@ -667,7 +667,7 @@ function ExecutionStream({
         if (entry.kind === "html-render") {
           return entry.message.htmlRender && (
             <div role="listitem" key={entry.id}>
-              <HtmlRenderStreamItem
+              <HtmlRenderFrame
                 key={entry.message.htmlRender.renderId}
                 reference={entry.message.htmlRender}
               />

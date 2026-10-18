@@ -24,6 +24,7 @@ import { usePanelTabRow } from "../hooks/usePanelTabRow";
 import type { SurfaceAction } from "./WorkspacePanelLauncher";
 import { FocusFirstMenuItem } from "./workspace-header/FocusFirstMenuItem";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import {
   nextSidebarNavigationIndex,
@@ -118,6 +119,7 @@ export function WorkspacePanel({
   });
   const { menu, toggleMenu, dismissMenu, setMenuTrigger, setMenuPopover } =
     useDismissibleMenu<"add" | "tabs">();
+  useNativePreviewSuspension(menu !== null);
   const wasVisibleRef = useRef(visible);
   useLayoutEffect(() => {
     const opened = visible && !wasVisibleRef.current;
@@ -309,7 +311,7 @@ export function WorkspacePanel({
                     label={`Close ${meta.label}`}
                     data-tab-close=""
                     tabIndex={rovingTab ? 0 : -1}
-                    onClick={() => closeSurface(surface, false)}
+                    onClick={(event) => closeSurface(surface, event.detail === 0)}
                   >
                     <X size={14} aria-hidden="true" />
                   </IconButton>

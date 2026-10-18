@@ -556,6 +556,33 @@ setInterval(() => {}, 1000);
   });
 
   it.skipIf(process.platform === "win32")(
+    "reviews and commits symbolic links that point outside the repository or nowhere",
+    async () => {
+      const root = repository();
+      const outside = mkdtempSync(join(tmpdir(), "inertia-commit-review-outside-"));
+      roots.push(outside);
+      writeFileSync(join(outside, "secret.txt"), "outside bytes\n");
+      symlinkSync(join(outside, "secret.txt"), join(root, "outside-link"));
+      symlinkSync("missing-target", join(root, "dangling-link"));
+      writeFileSync(join(root, "selected.txt"), "selected after\n");
+      const review = await captureGitCommitReview(root);
+
+      expect(review.mutationPaths).toEqual(["dangling-link", "outside-link", "selected.txt"]);
+      await commitReviewedChanges(
+        root,
+        "Commit links",
+        ["outside-link", "dangling-link", "selected.txt"],
+        review.fingerprint,
+      );
+
+      expect(git(root, "ls-tree", "HEAD", "outside-link")).toMatch(/^120000 blob /u);
+      expect(git(root, "show", "HEAD:outside-link")).toBe(join(outside, "secret.txt"));
+      expect(git(root, "show", "HEAD:dangling-link")).toBe("missing-target");
+      expect(git(root, "show", "HEAD:selected.txt")).toBe("selected after");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "commits reviewed executable modes and symbolic-link targets",
     async () => {
       const root = repository();

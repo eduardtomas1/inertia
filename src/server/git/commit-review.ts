@@ -10,7 +10,7 @@ import {
 import { MAX_DIFF_BYTES, MAX_DIFF_FILES } from "./constants";
 import {
   repositoryRoot,
-  validatedPaths,
+  validatedEntryPaths,
   type GitPathInspectionOptions,
 } from "./paths";
 import { resolvedRepositoryStatus } from "./status";
@@ -100,7 +100,7 @@ async function changedPaths(
       "The complete repository state is too large to verify for commit.",
     );
   }
-  const paths = await validatedPaths(
+  const paths = await validatedEntryPaths(
     root,
     status.files.map((file) => file.path),
     options,
@@ -109,7 +109,7 @@ async function changedPaths(
     file.previousPath ? [file.previousPath] : []
   );
   const previous = previousInputs.length > 0
-    ? await validatedPaths(root, previousInputs, options)
+    ? await validatedEntryPaths(root, previousInputs, options)
     : [];
   return [...new Set([...paths, ...previous])].sort((left, right) =>
     Buffer.compare(Buffer.from(left), Buffer.from(right))

@@ -21,7 +21,7 @@ import { NETWORK_TIMEOUT_MS } from "./constants";
 import {
   repositoryRoot,
   revParseValues,
-  validatedPaths,
+  validatedEntryPaths,
 } from "./paths";
 import {
   runGit,
@@ -492,7 +492,7 @@ export async function commitReviewedChanges(
     deadlineAt: options.deadlineAt,
     gitVersionForTests: options.testHooks?.gitVersionForTests,
   });
-  const selected = await validatedPaths(root, paths, options);
+  const selected = await validatedEntryPaths(root, paths, options);
   const expected = requireGitCommitReviewFingerprint(
     expectedReviewFingerprint,
   );

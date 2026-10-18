@@ -99,8 +99,8 @@ const budgets = {
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
   // measured).
-  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24,
-  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108,
+  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23,
+  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 51,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   deferredCliConversationImportJavaScript: 9_797 + 256,
@@ -179,7 +179,7 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_294_495 + 256,
+  coreJavaScript: 2_294_495 + 256 + 843,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

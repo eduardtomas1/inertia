@@ -5,6 +5,7 @@ import {
   renderHook,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import {
   afterEach,
@@ -460,6 +461,42 @@ describe("multi-spawn", () => {
       .toBe("gpt-5.6-sol");
     expect(onSubmit.mock.calls[0]![0].sides[1].selection.modelId)
       .toBe("gpt-5.5");
+  });
+
+  it("closes only the model chooser on Escape and keeps the duo brief", async () => {
+    const onClose = vi.fn();
+    render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error={null}
+        onClose={onClose}
+        onSubmit={vi.fn(async () => undefined)}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+      target: { value: "Compare model behavior." },
+    });
+    const trigger = screen.getAllByRole("button", {
+      name: /Choose model\..*GPT-5\.6-Sol/u,
+    })[1]!;
+    fireEvent.click(trigger);
+    const chooser = screen.getByRole("dialog", { name: "Choose model" });
+    const search = within(chooser).getByRole("combobox", { name: "Search models" });
+
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Shared prompt")).toHaveValue("Compare model behavior.");
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("keeps an out-of-box provider default unpinned and ready", () => {

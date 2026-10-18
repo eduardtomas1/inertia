@@ -225,26 +225,26 @@ if ((hangs[stage] ?? 0) !== 0) {
     roots.push(root);
     const executable = join(root, "claude");
     const authDeadlines: number[] = [];
+    let clockMs = 0;
     const detection = await detectProvider("claude", { command: executable, cwd: root, timeoutMs: 400 }, {
       executableCandidates: async () => [executable],
+      now: () => clockMs,
       probeProcess: async (_candidate, args, _environment, _cwd, timeoutMs) => {
         if (args[0] === "--version") {
-          await new Promise((resolve) => setTimeout(resolve, 1_250));
+          clockMs += 1_250;
           return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0, output: "2.1.200 (Claude Code)" };
         }
         authDeadlines.push(timeoutMs);
         const answersAfterMs = 600;
-        await new Promise((resolve) => setTimeout(resolve, Math.min(answersAfterMs, timeoutMs)));
         return answersAfterMs > timeoutMs
           ? { started: true, timedOut: true, cleanupConfirmed: true, exitCode: null, output: "" }
           : { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0, output: '{"loggedIn":true}' };
       },
     });
 
-    expect(authDeadlines).toHaveLength(1);
-    expect(authDeadlines[0]).toBeGreaterThanOrEqual(1_000);
+    expect(authDeadlines).toEqual([1_000]);
     expect(detection).toMatchObject({ installState: "installed", authState: "authenticated", canRun: true });
-    expect(detection.probeLatencyMs).toBeGreaterThanOrEqual(1_250);
+    expect(detection.probeLatencyMs).toBe(1_250);
   });
 
   it("keeps the normal sign-in deadline after a fast version probe", async () => {
@@ -254,6 +254,7 @@ if ((hangs[stage] ?? 0) !== 0) {
     const authDeadlines: number[] = [];
     await detectProvider("claude", { command: executable, cwd: root, timeoutMs: 400 }, {
       executableCandidates: async () => [executable],
+      now: () => 0,
       probeProcess: async (_candidate, args, _environment, _cwd, timeoutMs) => {
         if (args[0] !== "--version") authDeadlines.push(timeoutMs);
         return { started: true, timedOut: false, cleanupConfirmed: true, exitCode: 0,

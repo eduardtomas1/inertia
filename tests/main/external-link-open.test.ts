@@ -91,11 +91,22 @@ it.each(["file://files.attacker.example/share/x", "file://server/share/notes.md"
   },
 );
 
-it("keeps the existing HTTP policy for web links", async () => {
+it("hands HTTP and HTTPS links to the system browser", async () => {
   const { shell } = fixture();
   await openDesktopLink("https://example.test/docs", shell);
   await openDesktopLink("http://localhost:3000", shell);
-  await expect(openDesktopLink("http://example.test", shell)).rejects.toThrow();
-  expect(shell.openExternal.mock.calls).toEqual([["https://example.test/docs"], ["http://localhost:3000/"]]);
+  await openDesktopLink("http://example.test/plain", shell);
+  expect(shell.openExternal.mock.calls).toEqual([
+    ["https://example.test/docs"], ["http://localhost:3000/"], ["http://example.test/plain"],
+  ]);
   expect(shell.openPath).not.toHaveBeenCalled();
+});
+
+it.each([
+  "https://user:secret@example.test/", "http://user@example.test/", "ftp://example.test/file",
+  `https://example.test/${"a".repeat(4_096)}`, "", "not a url",
+])("refuses web link %s", async (href) => {
+  const { shell } = fixture();
+  await expect(openDesktopLink(href, shell)).rejects.toThrow();
+  expect(shell.openExternal).not.toHaveBeenCalled();
 });

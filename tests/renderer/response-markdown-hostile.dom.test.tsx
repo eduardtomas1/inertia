@@ -199,4 +199,17 @@ describe("safe provider markdown still works", () => {
       "https://example.test/docs",
     );
   });
+
+  it("says so when the system browser refuses a link", async () => {
+    const bridge = inertiaBridge();
+    bridge.openExternal.mockRejectedValueOnce(new Error("Native error"));
+    renderMarkdown("[docs](http://example.test/docs)");
+    const link = screen.getByRole("link", { name: "docs" });
+    fireEvent.click(link);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The link could not be opened.");
+    expect(screen.queryByText(/Native error/u)).toBeNull();
+    fireEvent.click(link);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(bridge.openExternal).toHaveBeenCalledTimes(2);
+  });
 });

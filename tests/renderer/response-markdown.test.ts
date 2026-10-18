@@ -70,6 +70,9 @@ describe("response Markdown", () => {
     expect(resolveResponseLink("/work/project", "file:///etc/passwd:42")).toEqual({ kind: "local", path: "/etc/passwd:42", url: "file:///etc/passwd:42" });
     expect(resolveResponseLink("/work/project", "javascript:alert(1)")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink("/work/project", "https://example.com/docs")).toMatchObject({ kind: "external" });
+    expect(resolveResponseLink("/work/project", "http://example.com/docs")).toEqual({ kind: "external", url: "http://example.com/docs" });
+    expect(resolveResponseLink("/work/project", "https://user:secret@example.com/docs")).toEqual({ kind: "unsafe" });
+    expect(resolveResponseLink("/work/project", "http://user@example.com/docs")).toEqual({ kind: "unsafe" });
     expect(resolveResponseLink(
       "/work/project",
       "../guide.md#L4",

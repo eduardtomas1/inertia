@@ -220,6 +220,7 @@ export function ChangesPanel({
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [activeHunkId, setActiveHunkId] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLElement>(null);
   const restoreQuestionFocusRef = useRef(false);
   const draftRef = useRef({ selection, reviewAction, comment });
@@ -525,11 +526,11 @@ export function ChangesPanel({
     const next = all[(base + direction + all.length) % all.length]!;
     setActiveHunkId(next.hunk.id);
     onSelectFile(next.file.path);
-    window.setTimeout(() => document.getElementById(`review-${next.hunk.id}`)?.scrollIntoView({ block: "center" }), 0);
+    window.setTimeout(() => panelRef.current?.querySelector(`#${CSS.escape(`review-${next.hunk.id}`)}`)?.scrollIntoView({ block: "center" }), 0);
   };
 
   return (
-    <section className="changes-panel" aria-label="Workspace changes" aria-busy={diffBusy}>
+    <section className="changes-panel" ref={panelRef} aria-label="Workspace changes" aria-busy={diffBusy}>
       {noteDraft && ReviewNoteDialog && <ReviewNoteDialog draft={noteDraft} onClose={() => setNoteDraft(null)} />}
       <header className="panel-toolbar" ref={toolbarRef} tabIndex={-1}>
         <div className="panel-heading">

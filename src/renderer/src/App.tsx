@@ -351,7 +351,7 @@ export default function App(): React.JSX.Element {
     draftConversation,
     selectionCommandQueue,
     conversationSelectionGenerationRef,
-    updateSplitConversationId,
+    clearSplitPanes: split.clearPinnedPanes,
     setSidebarOpen,
     setView,
     setActionError,

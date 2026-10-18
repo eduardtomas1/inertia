@@ -33,7 +33,7 @@ function setup({ palette = false, detached = false, online = true, available = t
         importProject: async () => false, sendFromComposer: async () => null,
       },
       selectionCommandQueue: select, conversationSelectionGenerationRef: generation,
-      updateSplitConversationId: vi.fn(),
+      clearSplitPanes: vi.fn(),
       setSidebarOpen, setView,
     });
     const snapshot = { projects: [], conversations: available ? [primary, affected] : [primary] } as unknown as AppSnapshot;

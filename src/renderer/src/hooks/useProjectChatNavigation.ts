@@ -45,7 +45,7 @@ export function useProjectChatNavigation({
   draftConversation,
   selectionCommandQueue,
   conversationSelectionGenerationRef,
-  updateSplitConversationId,
+  clearSplitPanes,
   setSidebarOpen,
   setView,
   setActionError,
@@ -56,7 +56,7 @@ export function useProjectChatNavigation({
   draftConversation: DraftConversationNavigation;
   selectionCommandQueue: SelectionCommandQueue;
   conversationSelectionGenerationRef: MutableRefObject<number>;
-  updateSplitConversationId: (conversationId: string | null) => void;
+  clearSplitPanes: () => void;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
   setView: Dispatch<SetStateAction<AppView>>;
   setActionError?: (message: string) => void;
@@ -87,11 +87,11 @@ export function useProjectChatNavigation({
     if (pendingScratch.change) draftConversation.changeProject(pendingScratch.projectId);
     else draftConversation.start(pendingScratch.projectId, true);
     setPendingScratch(null);
-    updateSplitConversationId(null);
+    clearSplitPanes();
     setView("home");
     setSidebarOpen(false);
     setGlobalChatActive(true);
-  }, [pendingScratch, projects, draftConversation, setView, setSidebarOpen, updateSplitConversationId]);
+  }, [pendingScratch, projects, draftConversation, setView, setSidebarOpen, clearSplitPanes]);
 
   const openNoProjectChat = useCallback(() => requestScratch(false), [requestScratch]);
 
@@ -147,7 +147,7 @@ export function useProjectChatNavigation({
     globalChatGenerationRef.current += 1;
     conversationSelectionGenerationRef.current += 1;
     const targetProject = project ?? projects[0] ?? null;
-    updateSplitConversationId(null);
+    clearSplitPanes();
     setView("home");
     setSidebarOpen(false);
     if (!targetProject) {
@@ -166,7 +166,7 @@ export function useProjectChatNavigation({
     requestScratch,
     setSidebarOpen,
     setView,
-    updateSplitConversationId,
+    clearSplitPanes,
   ]);
 
   const selectGlobalChatProject = useCallback((nextProject: Project | null): void => {
@@ -207,7 +207,7 @@ export function useProjectChatNavigation({
     void selectionCommandQueue("project.select", {
       type: "project.select",
       payload: { projectId: nextProject.id },
-    }).then(() => updateSplitConversationId(null)).catch(() => undefined);
+    }).then(() => clearSplitPanes()).catch(() => undefined);
   }, [
     conversationSelectionGenerationRef,
     exitGlobalChat,
@@ -215,7 +215,7 @@ export function useProjectChatNavigation({
     project?.id,
     selectionCommandQueue,
     setView,
-    updateSplitConversationId,
+    clearSplitPanes,
   ]);
 
   return {

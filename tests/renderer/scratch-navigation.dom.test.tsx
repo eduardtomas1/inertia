@@ -22,7 +22,7 @@ function setup(projects: Project[] = []) {
   const hook = renderHook(({ choices }) => useProjectChatNavigation({
     project: choices[0] ?? null, projects: choices, busyAction: null, draftConversation: draft,
     selectionCommandQueue: queue, conversationSelectionGenerationRef: generation,
-    updateSplitConversationId: vi.fn(), setSidebarOpen: vi.fn(), setView, setActionError,
+    clearSplitPanes: vi.fn(), setSidebarOpen: vi.fn(), setView, setActionError,
   }), { initialProps: { choices: projects } });
   const finish = async () => { await act(async () => resolve({ type: "request.result", requestId: "request", result: { kind: "project.created", projectId: managed.id } })); };
   return { hook, draft, queue, finish, setView, setActionError };

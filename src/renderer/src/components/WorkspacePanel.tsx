@@ -309,7 +309,7 @@ export function WorkspacePanel({
                     label={`Close ${meta.label}`}
                     data-tab-close=""
                     tabIndex={rovingTab ? 0 : -1}
-                    onClick={() => closeSurface(surface, false)}
+                    onClick={(event) => closeSurface(surface, event.detail === 0)}
                   >
                     <X size={14} aria-hidden="true" />
                   </IconButton>

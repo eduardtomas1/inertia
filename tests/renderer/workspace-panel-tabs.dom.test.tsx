@@ -333,6 +333,27 @@ describe("workspace panel tab row", () => {
     expect(tabNames()).toEqual(["changes"]);
   });
 
+  it("moves focus to the neighbouring tab when the close control is used from the keyboard", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    render(<Host initial={state("preview", "changes", "preview", "terminal")} />);
+    const close = screen.getByRole("button", { name: "Close Browser" });
+    close.focus();
+
+    fireEvent.click(close, { detail: 0 });
+
+    expect(tabNames()).toEqual(["changes", "terminal"]);
+    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveFocus();
+
+    const outside = screen.getByRole("button", { name: "Outside" });
+    outside.focus();
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal" }), { detail: 1 });
+    expect(tabNames()).toEqual(["changes"]);
+    expect(outside).toHaveFocus();
+  });
+
   it("closes a tab with the middle button", () => {
     render(<Host initial={state("preview", "changes", "preview")} />);
     const tab = screen.getByRole("tab", { name: "Changes" }).closest<HTMLElement>(".panel-tab")!;

@@ -45,6 +45,9 @@ const conversation = {
     { id: conversationId, now },
   ),
   title: "Popped out chat",
+  latestTurn: null,
+  pendingApproval: false,
+  pendingInput: false,
 };
 const snapshot: AppSnapshot = {
   projects: [project],

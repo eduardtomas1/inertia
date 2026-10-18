@@ -41,7 +41,8 @@ describe("commit dialog keyboard", () => {
     const onClose = vi.fn();
     const onClosePanel = vi.fn();
     render(
-      <WorkspacePanel surfaces={["changes"]} activeSurface="changes" presentation="sheet" onClosePanel={onClosePanel}>
+      <WorkspacePanel surfaces={["changes"]} activeSurface="changes" presentation="sheet" onClosePanel={onClosePanel}
+        onActivateSurface={vi.fn()} onOpenSurface={vi.fn()} onCloseSurface={vi.fn()}>
         <CommitDialog open repositoryPath="." status={status} diff={{ fingerprint: "empty", files: [] }}
           diffParsing={false} diffError={null} reviewStates={[]} busy={false} onClose={onClose} onCommit={vi.fn()} />
       </WorkspacePanel>,

@@ -3,7 +3,7 @@
  */
 import { readFileSync } from "node:fs";
 
-import { render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
@@ -327,6 +327,50 @@ describe("a visual reply around a follow-up", () => {
 
     expect(element("[data-testid='html-render-frame']")).toBe(frame);
     expect(order()).toEqual(["page", "earlier", "follow-up", "answer"]);
+  });
+
+  function measure(frame: HTMLIFrameElement, height: number): void {
+    const frameWindow = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { configurable: true, value: frameWindow });
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "inertia-html-render:size", height },
+        origin: "null",
+        source: frameWindow as unknown as MessageEventSource,
+      }));
+    });
+  }
+
+  it("shows a page at its measured height at once when a follow-up moves it into the work log", async () => {
+    const view = render(<ResponseTimeline {...props("running", [page])} />);
+    const frame = element("[data-turn-layer='html-renders'] [data-testid='html-render-frame']") as HTMLIFrameElement;
+    measure(frame, 520);
+    await waitFor(() => expect(frame.style.height).toBe("520px"));
+
+    view.rerender(<ResponseTimeline {...props("running", [page, followUp])} />);
+
+    expect(document.querySelector("[data-turn-layer='html-renders']")).toBeNull();
+    const moved = element("[data-active-work-region] [data-testid='html-render']");
+    expect(moved).toHaveAttribute("data-html-render-state", "ready");
+    expect((moved.querySelector("[data-testid='html-render-frame']") as HTMLIFrameElement).style.height).toBe("520px");
+  });
+
+  it("keeps the full-size view open when a follow-up moves its page and returns focus to the moved page", async () => {
+    const view = render(<ResponseTimeline {...props("running", [page])} />);
+    const trigger = screen.getByRole("button", { name: "Open Revenue full size" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await screen.findByRole("dialog", { name: "Revenue" }, { timeout: 10_000 });
+
+    view.rerender(<ResponseTimeline {...props("running", [page, followUp])} />);
+
+    expect(trigger.isConnected).toBe(false);
+    expect(screen.getByRole("dialog", { name: "Revenue" })).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const moved = element("[data-active-work-region] [data-testid='html-render']");
+    expect(screen.getByRole("button", { name: "Open Revenue full size" })).toBe(moved.querySelector("[data-testid='html-render-open']"));
+    expect(moved.querySelector("[data-testid='html-render-open']")).toHaveFocus();
   });
 
   it("keeps a page made after the follow-up in the layer the anchor lands on", () => {

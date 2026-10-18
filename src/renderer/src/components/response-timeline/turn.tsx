@@ -25,7 +25,7 @@ import {
   SupportingLedgerLayer,
   UserRequestLayer,
 } from "./layers";
-import { TurnHtmlRenders } from "./html-render";
+import { HtmlRenderTurnScopeProvider, TurnHtmlRenders } from "./html-render";
 import { turnCompletionAnnouncement } from "./metadata";
 import type { ResponseTimelineProps } from "./types";
 
@@ -221,7 +221,7 @@ function TurnTimelineComponent({
           This turn is too large to display. Your history is saved.
         </p>
       ) : (
-        <>
+        <HtmlRenderTurnScopeProvider>
           <AgentExecutionLayer
             turn={railTurn}
             props={props}
@@ -252,7 +252,7 @@ function TurnTimelineComponent({
             onBeforeToggle={handleBeforeToggle}
             onAfterToggle={handleAfterToggle}
           />
-        </>
+        </HtmlRenderTurnScopeProvider>
       )}
     </section>
   );

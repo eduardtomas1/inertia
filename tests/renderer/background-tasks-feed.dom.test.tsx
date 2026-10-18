@@ -149,6 +149,17 @@ describe("Background tasks for the whole chat", () => {
     expect(items[0]).toHaveTextContent("Live helper");
   });
 
+  it("refreshes within a second after the clock moves back", async () => {
+    const loadTasks = vi.fn(async (before: BackgroundTaskCursor | null) => page(before));
+    const view = render(surface({ loadTasks }));
+    await flush();
+    expect(loadTasks).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(Date.now() - 60 * 60 * 1_000);
+    view.rerender(surface({ loadTasks, subagents: [{ ...live, status: "completed", isLive: false, sequence: 2 }] }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(loadTasks).toHaveBeenCalledTimes(2);
+  });
+
   it("takes a dismissed command out of the list and the totals at once", async () => {
     const lint = workspaceRun({ id: "lint", label: "npm run lint", status: "failed", canStop: false, startedAt: "2030-01-01T00:59:00.000Z", finishedAt: "2030-01-01T00:59:30.000Z" });
     const loadTasks = vi.fn(async (before: BackgroundTaskCursor | null) => ({ ...page(before), runs: [lint], finishedCount: 46, failedCount: 1 }));

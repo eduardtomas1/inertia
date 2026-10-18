@@ -3,7 +3,10 @@ import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { captureRawWorktreeTree } from "../checkpoints";
+import {
+  captureRawWorktreeTree,
+  withoutUnbornNestedRepositoryDirectories,
+} from "../checkpoints";
 import { MAX_DIFF_BYTES, MAX_DIFF_FILES } from "./constants";
 import {
   repositoryRoot,
@@ -158,7 +161,11 @@ async function captureRawReview(
   const removalSet = new Set(removalPaths);
   const raw = await captureRawWorktreeTree(
     root,
-    nulPaths(paths.filter((path) => !removalSet.has(path))),
+    nulPaths(await withoutUnbornNestedRepositoryDirectories(
+      root,
+      paths.filter((path) => !removalSet.has(path)),
+      options,
+    )),
     {
       deadlineAt: options.deadlineAt,
       removedPaths: nulPaths(removalPaths),
@@ -325,7 +332,11 @@ export async function prepareGitCommitSelection(
       });
     }
     const removalSet = new Set(removalPaths);
-    const additions = paths.filter((path) => !removalSet.has(path));
+    const additions = await withoutUnbornNestedRepositoryDirectories(
+      root,
+      paths.filter((path) => !removalSet.has(path)),
+      options,
+    );
     if (additions.length > 0) {
       await runGit(root, tempIndexArguments([
         "--literal-pathspecs",

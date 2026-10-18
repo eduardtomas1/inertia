@@ -686,6 +686,30 @@ describe("Git checkpoints", () => {
     expect(git(root, "ls-files", "-v", "tracked.txt")).toBe("h tracked.txt");
   });
 
+  it("checkpoints around an untracked nested repository that has no commit", async () => {
+    const root = repository();
+    const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));
+    roots.push(indexes);
+    git(root, "init", "-q", "tools/empty");
+    writeFileSync(join(root, "tools", "empty", "draft.txt"), "draft\n");
+    git(root, "init", "-q", "tools/born");
+    git(join(root, "tools", "born"), "-c", "user.name=Inertia Test", "-c", "user.email=test@inertia.local",
+      "commit", "-q", "--allow-empty", "-m", "born");
+    writeFileSync(join(root, "tracked.txt"), "edit\n");
+    writeFileSync(join(root, "new.txt"), "new\n");
+    const conversationId = randomUUID();
+
+    const checkpoint = await createCheckpoint(root, indexes, conversationId);
+
+    expect(git(root, "ls-tree", "-r", "--name-only", checkpoint.ref).split("\n").sort())
+      .toEqual(["new.txt", "tools/born", "tracked.txt"]);
+    expect(git(root, "show", `${checkpoint.ref}:tracked.txt`)).toBe("edit");
+    writeFileSync(join(root, "tracked.txt"), "later\n");
+    await restoreCheckpoint(root, checkpoint.ref, conversationId);
+    expect(readFileSync(join(root, "tracked.txt"), "utf8")).toBe("edit\n");
+    expect(readFileSync(join(root, "tools", "empty", "draft.txt"), "utf8")).toBe("draft\n");
+  });
+
   it("captures a repository that uses a split index", async () => {
     const root = repository();
     const indexes = mkdtempSync(join(tmpdir(), "inertia-indexes-"));

@@ -1,5 +1,6 @@
 import {
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
   rm,
@@ -489,6 +490,88 @@ async function reuseRepositoryIndex(
   }
 }
 
+async function nestedRepositoryHasCommit(
+  repositoryPath: string,
+  path: string,
+  deadlineAt?: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const directory = resolve(repositoryPath, path);
+  try {
+    await runBoundedGit(
+      directory,
+      checkpointGitArguments([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "HEAD^{commit}",
+      ]),
+      {
+        deadlineAt,
+        signal,
+        environment: { GIT_DIR: join(directory, ".git") },
+        maxOutputBytes: 1024,
+        timeoutMs: 20_000,
+        failureMessage: CHECKPOINT_FAILURE,
+      },
+    );
+    return true;
+  } catch (error) {
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
+    if (error instanceof GitError && error.code === "timeout") {
+      throw new CheckpointError("Checkpoint operation timed out.");
+    }
+    return false;
+  }
+}
+
+export async function withoutUnbornNestedRepositoryDirectories(
+  repositoryPath: string,
+  paths: readonly string[],
+  options: CheckpointOperationOptions = {},
+): Promise<string[]> {
+  const kept: string[] = [];
+  for (const path of paths) {
+    const directory = await lstat(resolve(repositoryPath, path))
+      .then((entry) => entry.isDirectory(), () => false);
+    if (
+      !directory
+      || await nestedRepositoryHasCommit(
+        repositoryPath,
+        path,
+        options.deadlineAt,
+        options.signal,
+      )
+    ) kept.push(path);
+  }
+  return kept;
+}
+
+async function withoutUnbornNestedRepositories(
+  repositoryPath: string,
+  paths: Buffer,
+  options: CheckpointOperationOptions = {},
+): Promise<Buffer> {
+  const kept: Buffer[] = [];
+  let offset = 0;
+  while (offset < paths.length) {
+    const terminator = paths.indexOf(0, offset);
+    const end = terminator < 0 ? paths.length : terminator;
+    const path = paths.subarray(offset, end);
+    if (
+      path.at(-1) !== 0x2f
+      || await nestedRepositoryHasCommit(
+        repositoryPath,
+        path.toString("utf8"),
+        options.deadlineAt,
+        options.signal,
+      )
+    ) kept.push(path, NUL_BYTE);
+    offset = end + 1;
+  }
+  return Buffer.concat(kept);
+}
+
 /**
  * Produces a raw worktree tree without evaluating repository-provided clean
  * filters or attributes. The temporary Git metadata carries Inertia's
@@ -630,7 +713,7 @@ export async function createCheckpoint(
       options.deadlineAt,
       options.signal,
     );
-    const untrackedPaths = (
+    const untrackedListing = (
       await runGit(
         repositoryPath,
         checkpointGitArguments([
@@ -646,6 +729,11 @@ export async function createCheckpoint(
         options.signal,
       )
     ).stdout;
+    const untrackedPaths = await withoutUnbornNestedRepositories(
+      repositoryPath,
+      untrackedListing,
+      options,
+    );
     isolated = await checkpointEnvironment(
       repositoryPath,
       storageDirectory,

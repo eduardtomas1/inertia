@@ -181,6 +181,24 @@ describe("Git commit review receipts", { timeout: 30_000 }, () => {
       .not.toBe(first.fingerprint);
   });
 
+  it("reviews changes beside an untracked nested repository that has no commit", async () => {
+    const root = repository();
+    git(root, "init", "-q", "tools/empty");
+    writeFileSync(join(root, "tools", "empty", "draft.txt"), "draft\n");
+    writeFileSync(join(root, "selected.txt"), "selected after\n");
+
+    const capture = await captureGitCommitReview(root);
+
+    expect(capture.mutationPaths).toEqual(["selected.txt", "tools/empty"]);
+
+    await commitReviewedChanges(root, "Commit beside the empty repository", ["selected.txt"], capture.fingerprint);
+
+    expect(git(root, "show", "HEAD:selected.txt")).toBe("selected after");
+    expect(git(root, "ls-tree", "-r", "--name-only", "HEAD").split("\n").sort())
+      .toEqual(["other.txt", "selected.txt"]);
+    expect(readFileSync(join(root, "tools", "empty", "draft.txt"), "utf8")).toBe("draft\n");
+  });
+
   it("rejects stale reviewed content before changing HEAD or the real index", async () => {
     const root = repository();
     writeFileSync(join(root, "selected.txt"), "reviewed\n");

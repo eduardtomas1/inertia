@@ -57,17 +57,22 @@ export async function runUpdateEverything({ payload, request, appStatus, onPhase
   onPhase: (phase: UpdateEverythingPhase) => void;
 }): Promise<string | null> {
   let app = payload.includeApp ? appStatus() : null;
+  let run = payload;
+  let download: string | null = null;
   if (app?.state === "available") {
     onPhase({ kind: "download" });
     app = await downloadApp();
-    if (app.state !== "downloaded") return null;
+    if (app.state !== "downloaded") {
+      download = app.message;
+      run = { ...payload, includeApp: false };
+    }
   }
-  onPhase({ kind: "providers", providerIds: payload.providerIds });
-  const result = updatesRunResult(await request({ type: "updates.run", payload }));
+  onPhase({ kind: "providers", providerIds: run.providerIds });
+  const result = updatesRunResult(await request({ type: "updates.run", payload: run }));
   let installed = false;
   let refusal: string | null = null;
   let failure: unknown = null;
-  if (payload.includeApp && result.readyForAppInstall && app?.state === "downloaded") {
+  if (run.includeApp && result.readyForAppInstall && app?.state === "downloaded") {
     onPhase({ kind: "app" });
     try {
       refusal = await installApp();
@@ -78,5 +83,5 @@ export async function runUpdateEverything({ payload, request, appStatus, onPhase
   }
   if (!installed) await request({ type: "updates.finish", payload: { installed: false } });
   if (failure) throw failure;
-  return refusal ?? result.appInstallBlocker;
+  return download ?? refusal ?? result.appInstallBlocker;
 }

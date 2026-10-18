@@ -237,15 +237,18 @@ describe("update everything run", () => {
   it.each([
     ["fails", updateStatus({ state: "failed", message: "The update could not be downloaded. Try again when your connection is stable." })],
     ["is cancelled", updateStatus({ state: "cancelled", message: "The update download was cancelled." })],
-  ])("starts no run when the download %s", async (_name, settled) => {
-    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(true) : ok);
+  ])("still updates the providers and reports the app's message when the download %s", async (_name, settled) => {
+    const request = vi.fn(async (command: CommandWithoutId) => command.type === "updates.run" ? runResult(false) : ok);
     download.mockResolvedValue(settled);
     const hook = harness(updateStatus(), request);
     await act(async () => hook.result.current.run(withApp));
-    expect(request).not.toHaveBeenCalled();
+    expect(request.mock.calls.map(([command]) => command)).toEqual([
+      { type: "updates.run", payload: providersOnly },
+      { type: "updates.finish", payload: { installed: false } },
+    ]);
     expect(install).not.toHaveBeenCalled();
     expect(hook.result.current.phase).toBeNull();
-    expect(hook.result.current.error).toBeNull();
+    expect(hook.result.current.error).toBe(settled.message);
   });
 
   it("starts no run when the download cannot be started", async () => {

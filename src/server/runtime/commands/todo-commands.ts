@@ -11,6 +11,7 @@ import type {
   ConversationCreationService,
 } from "../conversation-creation-service";
 import type { TurnController } from "../turns/turn-controller";
+import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -66,6 +67,7 @@ export function createTodoCommandHandler(
   const starting = new Set<string>();
 
   const start = async (socket: WebSocket, command: TodoStartCommand): Promise<void> => {
+    if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     const todo = dependencies.store.todos.get(command.payload.id);
     if (!todo) throw new RuntimeRequestError("That task no longer exists.");
     if (todo.conversationId !== null) {

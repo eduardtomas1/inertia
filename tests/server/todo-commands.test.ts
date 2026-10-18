@@ -19,6 +19,7 @@ import type { ClientCommand, ProviderInfo, ServerEvent } from "../../src/shared/
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { providerIdForHarness, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { todoPromptContent } from "../../src/shared/todos";
+import { hold, isHeld, release, UPDATE_HOLD_MESSAGE } from "../../src/server/runtime/update-hold";
 
 const roots: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -186,6 +187,30 @@ describe("todo command handler", () => {
       requestId: command.requestId,
       result: { kind: "todo.started", conversationId: conversation.id },
     }]);
+  });
+
+  it("refuses to start a task while Inertia is updating and starts it once the update ends", async () => {
+    const { store, creation, turns, run, startPayload } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Check the Linux lane" });
+    turns.queue.mockImplementation(() => {
+      if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+      return { turn: { id: "turn-1" } };
+    });
+    const owner = hold();
+    try {
+      const held = await run("todo.start", startPayload(id));
+      expect(held.events).toEqual([expect.objectContaining({ type: "request.error", message: UPDATE_HOLD_MESSAGE })]);
+      expect(creation.create).not.toHaveBeenCalled();
+      expect(turns.queue).not.toHaveBeenCalled();
+      expect(store.todos.get(id)?.conversationId).toBeNull();
+      expect(store.snapshot().conversations).toEqual([]);
+    } finally {
+      release(owner);
+    }
+    const started = await run("todo.start", startPayload(id));
+    expect(started.events).toEqual([expect.objectContaining({ type: "request.result", result: expect.objectContaining({ kind: "todo.started" }) })]);
+    expect(store.todos.get(id)?.conversationId).toBeTruthy();
   });
 
   it("records the task as the chat's first message without starting a provider when providers are off", async () => {

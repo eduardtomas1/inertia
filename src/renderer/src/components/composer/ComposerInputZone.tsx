@@ -175,6 +175,8 @@ export function ComposerInputZone({
   onUpdateConversation,
 }: ComposerInputZoneProps): React.JSX.Element {
   const pasteAsText = useRef(false);
+  const [pasteError, setPasteError] = useState<{ conversationId: string; message: string } | null>(null);
+  if (pasteError && pasteError.conversationId !== conversationId) setPasteError(null);
   const currentDraft = useRef({ conversationId, message });
   currentDraft.current = { conversationId, message };
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
@@ -512,6 +514,7 @@ export function ComposerInputZone({
           }}
           onSelect={(event) => onSkillSelectionChange?.(event.currentTarget)}
           onChange={(event) => {
+            setPasteError(null);
             onMessageChange(event.target.value);
             onSkillSelectionChange?.(event.currentTarget);
           }}
@@ -522,8 +525,10 @@ export function ComposerInputZone({
               return;
             }
             const text = event.clipboardData.getData("text/plain");
+            const exceedsLimit = message.length - (event.currentTarget.selectionEnd - event.currentTarget.selectionStart) + text.length > MAX_CHAT_MESSAGE_CHARS;
+            setPasteError(null);
             if (!running && !disabled && !attachmentsDisabled && !pasteAsText.current && text && (new TextEncoder().encode(text).byteLength >= PASTED_TEXT_ATTACHMENT_BYTES
-              || message.length - (event.currentTarget.selectionEnd - event.currentTarget.selectionStart) + text.length > MAX_CHAT_MESSAGE_CHARS)) {
+              || exceedsLimit)) {
               event.preventDefault();
               const start = event.currentTarget.selectionStart;
               const end = event.currentTarget.selectionEnd;
@@ -536,6 +541,14 @@ export function ComposerInputZone({
               };
               void onImportAttachments([new File([text], `pasted-text-${Date.now()}.txt`, { type: "text/plain" })])
                 .then((adopted) => { if (!adopted) restorePaste(); }, restorePaste);
+            } else if (exceedsLimit) {
+              event.preventDefault();
+              setPasteError({
+                conversationId,
+                message: `This paste would exceed the ${MAX_CHAT_MESSAGE_CHARS.toLocaleString(INTERFACE_LOCALE)} character limit, so it was not added. ${pasteAsText.current
+                  ? "Paste without Shift to attach it as a file."
+                  : running ? "Paste it once the agent finishes to attach it as a file." : "Paste it again once the current attachment is added."}`,
+              });
             }
           }}
           onKeyUp={() => { pasteAsText.current = false; }}
@@ -637,6 +650,9 @@ export function ComposerInputZone({
           <p className="composer-limit-warning" role="alert">
             This message exceeds the {MAX_CHAT_MESSAGE_CHARS.toLocaleString(INTERFACE_LOCALE)} character limit.
           </p>
+        )}
+        {pasteError && (
+          <p className="composer-limit-warning" role="alert">{pasteError.message}</p>
         )}
       </div>
       {mentionMenuVisible && (

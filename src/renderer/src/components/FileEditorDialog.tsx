@@ -36,11 +36,14 @@ export function serializeEditorText(
 
 export function FileEditorDialog({
   file,
+  current,
   canSave,
   onClose,
   onSave,
+  onReload,
 }: {
   file: WorkspaceFilePreview;
+  current?: WorkspaceFilePreview | null;
   canSave: (
     path: string,
     content: string,
@@ -52,20 +55,28 @@ export function FileEditorDialog({
     content: string,
     expectedDigest: string,
   ) => Promise<WorkspaceFilePreview>;
+  onReload?: () => void;
 }): React.JSX.Element {
   const titleId = useId();
   const descriptionId = useId();
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const originalEditorText = normalizedEditorText(file.content);
+  const [base, setBase] = useState(file);
+  const originalEditorText = normalizedEditorText(base.content);
   const [content, setContent] = useState(originalEditorText);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadFrom, setReloadFrom] = useState<WorkspaceFilePreview | null | undefined>(undefined);
+  if (reloadFrom !== undefined && current && current !== reloadFrom && current.path === base.path && !current.truncated) {
+    setBase(current);
+    setReloadFrom(undefined);
+    setError(null);
+  }
   const changed = content !== originalEditorText;
-  const serializedContent = serializeEditorText(file.content, content);
+  const serializedContent = serializeEditorText(base.content, content);
   const withinTransportLimit = canSave(
-    file.path,
+    base.path,
     serializedContent,
-    file.contentDigest,
+    base.contentDigest,
   );
   const sizeError = changed && !withinTransportLimit
     ? "This edit is too large to send safely. Shorten the file before saving."
@@ -91,9 +102,9 @@ export function FileEditorDialog({
     setError(null);
     try {
       await onSave(
-        file.path,
+        base.path,
         serializedContent,
-        file.contentDigest,
+        base.contentDigest,
       );
       onClose();
     } catch (saveError) {
@@ -143,6 +154,18 @@ export function FileEditorDialog({
         ? <span className="dialog-error" role="alert">{error ?? sizeError}</span>
         : "Changes are checked against the version you opened."}
       footer={<>
+        {error && onReload && (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              setReloadFrom(current ?? null);
+              onReload();
+            }}
+          >
+            Reload
+          </button>
+        )}
         <button
           type="button"
           className="secondary-button"

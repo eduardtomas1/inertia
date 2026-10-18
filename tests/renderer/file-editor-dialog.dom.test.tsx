@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FileEditorDialog } from "../../src/renderer/src/components/FileEditorDialog";
+import { FilesPanel } from "../../src/renderer/src/components/FilesPanel";
 import { readSourceText } from "../helpers/source-text";
 
 const file = {
@@ -113,6 +115,55 @@ describe("FileEditorDialog", () => {
     expect(screen.queryByText("Changes are checked against the version you opened.")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("reloads the file's version after a failed save and keeps the typed text", async () => {
+    const onClose = vi.fn();
+    const fresh = { ...file, content: "export const value = 3;\n", contentDigest: "b".repeat(64) };
+    const onSave = vi.fn(async (path: string, content: string, expectedDigest: string) => {
+      if (expectedDigest === file.contentDigest) throw new Error("This file changed after it was opened. Reload it before saving.");
+      return { ...fresh, path, content };
+    });
+    function Harness(): React.JSX.Element {
+      const [current, setCurrent] = useState<typeof file | null>(file);
+      return <FileEditorDialog file={file} current={current} canSave={() => true} onClose={onClose} onSave={onSave}
+        onReload={() => { setCurrent(null); queueMicrotask(() => setCurrent(fresh)); }} />;
+    }
+    render(<Harness />);
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "my edit\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This file changed after it was opened");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByRole("textbox")).toHaveValue("my edit\n");
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenLastCalledWith("src/example.ts", "my edit\n", "b".repeat(64)));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("rereads the open file literally from the Files panel when the editor reloads", async () => {
+    const fresh = { ...file, contentDigest: "b".repeat(64) };
+    const onSelectFile = vi.fn();
+    const onSaveFile = vi.fn(async (_path: string, _content: string, expectedDigest: string) => {
+      if (expectedDigest === file.contentDigest) throw new Error("Reload this file before saving it.");
+      return fresh;
+    });
+    const props = { projectRoot: "/work/project", projectId: "11111111-1111-4111-8111-111111111111", entries: [{ path: file.path, kind: "file" as const }],
+      selectedPath: file.path, onSelectFile, onLoadEntries: vi.fn(), onSaveFile, canSaveFile: () => true };
+    const view = render(<FilesPanel {...props} preview={file} />);
+    fireEvent.click(screen.getByRole("button", { name: `Edit ${file.path}` }));
+    fireEvent.change(screen.getByRole("textbox", { name: `Edit contents of ${file.path}` }), { target: { value: "typed\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(onSelectFile).toHaveBeenCalledWith(file.path, undefined, true);
+    view.rerender(<FilesPanel {...props} preview={null} />);
+    view.rerender(<FilesPanel {...props} preview={fresh} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSaveFile).toHaveBeenLastCalledWith(file.path, "typed\n", "b".repeat(64)));
   });
 
   it("preserves a CRLF file's newline convention after browser editing", async () => {

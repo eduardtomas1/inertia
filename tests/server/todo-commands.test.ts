@@ -213,6 +213,26 @@ describe("todo command handler", () => {
     expect(store.todos.get(id)?.conversationId).toBeTruthy();
   });
 
+  it("leaves the task unstarted and removes its chat when an update begins while the chat is being created", async () => {
+    let owner = 0;
+    const { store, turns, run, startPayload } = fixture({ ...providersOn, beforeCreate: () => { owner = hold(); } });
+    const id = randomUUID();
+    store.todos.create({ id, title: "Check the Linux lane" });
+    turns.queue.mockImplementation(() => {
+      if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+      return { turn: { id: "turn-1" } };
+    });
+    try {
+      const held = await run("todo.start", startPayload(id));
+      expect(held.events).toEqual([expect.objectContaining({ type: "request.error", message: UPDATE_HOLD_MESSAGE })]);
+      expect(turns.queue).not.toHaveBeenCalled();
+      expect(store.todos.get(id)?.conversationId).toBeNull();
+      expect(store.snapshot().conversations).toEqual([]);
+    } finally {
+      release(owner);
+    }
+  });
+
   it("records the task as the chat's first message without starting a provider when providers are off", async () => {
     const { store, turns, dependencies, run, startPayload } = fixture();
     const id = randomUUID();

@@ -83,6 +83,7 @@ export function createTodoCommandHandler(
     try {
       let linked: Todo;
       try {
+        if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
         linked = dependencies.store.todos.link(todo.id, conversation.id);
       } catch (error) {
         const unlinked = new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
@@ -92,7 +93,7 @@ export function createTodoCommandHandler(
         } catch {
           throw unlinked;
         }
-        throw error instanceof TodoRepositoryError
+        throw error instanceof TodoRepositoryError || error instanceof RuntimeRequestError
           ? error
           : new RuntimeRequestError("The task could not be handed to an agent.");
       }

@@ -1,4 +1,14 @@
-import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Maximize2 } from "lucide-react";
 import {
   clampHtmlRenderHeight,
@@ -35,14 +45,44 @@ function DeferredHtmlRenderDialog(props: {
   );
 }
 
+interface HtmlRenderTurnScope {
+  heights: Map<string, number>;
+  openFullSize: (reference: HtmlRenderReference) => void;
+}
+
+const HtmlRenderTurnScopeContext = createContext<HtmlRenderTurnScope | null>(null);
+
+export function HtmlRenderTurnScopeProvider({ children }: { children: ReactNode }): React.JSX.Element {
+  const [fullSize, setFullSize] = useState<HtmlRenderReference | null>(null);
+  const [scope] = useState<HtmlRenderTurnScope>(() => ({ heights: new Map(), openFullSize: setFullSize }));
+  const closeFullSize = useCallback(() => setFullSize(null), []);
+  const shownRenderId = useRef<string | null>(null);
+  useEffect(() => {
+    if (fullSize) {
+      shownRenderId.current = fullSize.renderId;
+      return;
+    }
+    const renderId = shownRenderId.current;
+    shownRenderId.current = null;
+    if (!renderId || (document.activeElement && document.activeElement !== document.body)) return;
+    document.querySelector<HTMLElement>(`[data-render-id="${renderId}"] > .html-render-open`)?.focus({ preventScroll: true });
+  }, [fullSize]);
+  return (
+    <HtmlRenderTurnScopeContext.Provider value={scope}>
+      {children}
+      {fullSize && (
+        <DeferredHtmlRenderDialog reference={fullSize} onClose={closeFullSize} />
+      )}
+    </HtmlRenderTurnScopeContext.Provider>
+  );
+}
+
 /** The turn's visual replies, in message order, above its final answer. */
 export function TurnHtmlRenders({
   turn,
 }: {
   turn: Pick<ResponseTurn, "htmlRenders">;
 }): React.JSX.Element | null {
-  const [fullSize, setFullSize] = useState<HtmlRenderReference | null>(null);
-  const closeFullSize = useCallback(() => setFullSize(null), []);
   if (turn.htmlRenders.length === 0) return null;
   return (
     <div className="turn-html-renders" data-turn-layer="html-renders">
@@ -50,36 +90,14 @@ export function TurnHtmlRenders({
         <HtmlRenderFrame
           key={`${message.id}:${message.htmlRender.renderId}`}
           reference={message.htmlRender}
-          onOpenFullSize={setFullSize}
         />
       ))}
-      {fullSize && (
-        <DeferredHtmlRenderDialog reference={fullSize} onClose={closeFullSize} />
-      )}
     </div>
-  );
-}
-
-export function HtmlRenderStreamItem({
-  reference,
-}: {
-  reference: HtmlRenderReference;
-}): React.JSX.Element {
-  const [fullSize, setFullSize] = useState<HtmlRenderReference | null>(null);
-  const closeFullSize = useCallback(() => setFullSize(null), []);
-  return (
-    <>
-      <HtmlRenderFrame reference={reference} onOpenFullSize={setFullSize} />
-      {fullSize && (
-        <DeferredHtmlRenderDialog reference={fullSize} onClose={closeFullSize} />
-      )}
-    </>
   );
 }
 
 interface HtmlRenderFrameProps {
   reference: HtmlRenderReference;
-  onOpenFullSize: (reference: HtmlRenderReference) => void;
 }
 
 export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element {
@@ -109,16 +127,16 @@ export function HtmlRenderFrame(props: HtmlRenderFrameProps): React.JSX.Element 
 
 function HtmlRenderDocumentFrame({
   reference,
-  onOpenFullSize,
   onUnavailable,
   onReload,
 }: HtmlRenderFrameProps & { onUnavailable: () => void; onReload: () => void }): React.JSX.Element {
+  const scope = useContext(HtmlRenderTurnScopeContext);
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   // The fragment themes first paint; later changes arrive as messages so the
   // page is never reloaded.
   const [src] = useState(() => htmlRenderUrl(reference.renderId) + htmlRenderThemeFragment(theme));
-  const [reportedHeight, reportHeight] = useReportedFrameHeight();
+  const [reportedHeight, reportHeight] = useReportedFrameHeight(scope?.heights.get(reference.renderId) ?? null);
   const [fallbackElapsed, setFallbackElapsed] = useState(false);
   // The page is shown with its first measured height, or after the fallback.
   const revealed = reportedHeight !== null || fallbackElapsed;
@@ -139,6 +157,10 @@ function HtmlRenderDocumentFrame({
   }, [bridgeLoad, onReload]);
 
   useEffect(() => {
+    if (reportedHeight !== null) scope?.heights.set(reference.renderId, reportedHeight);
+  }, [reference.renderId, reportedHeight, scope]);
+
+  useEffect(() => {
     if (revealed) return;
     const timer = window.setTimeout(() => setFallbackElapsed(true), HTML_RENDER_REVEAL_FALLBACK_MS);
     return () => window.clearTimeout(timer);
@@ -156,7 +178,7 @@ function HtmlRenderDocumentFrame({
         label={`Open ${reference.title} full size`}
         className="html-render-open"
         data-testid="html-render-open"
-        onClick={() => onOpenFullSize(reference)}
+        onClick={() => scope?.openFullSize(reference)}
       >
         <Maximize2 size={14} aria-hidden="true" />
       </IconButton>

@@ -5,6 +5,7 @@ import { Composer } from "../../src/renderer/src/components/Composer";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
 import { composerCheckoutStrip } from "../../src/renderer/src/components/composer/ComposerToolbar";
 import type { GitStatusSnapshot, Project } from "../../src/shared/contracts";
+import { readSourceText } from "../helpers/source-text";
 import { composerProps, conversation } from "./composer-fixtures";
 
 const project: Project = {
@@ -139,6 +140,24 @@ describe("composer shell", () => {
     render(<Composer {...composerProps(conversation("no-tools-chat"), { promptPresetsEnabled: false, promptStashEnabled: false })} />);
     expect(screen.queryByRole("button", { name: "More tools" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send message" })).toBeVisible();
+  });
+
+  it("keeps the usage ring at the right end of the rail with or without More tools", () => {
+    const style = document.createElement("style");
+    style.textContent = readSourceText("src/renderer/src/components/composer/ComposerSurface.css");
+    document.head.append(style);
+    const view = render(<Composer {...composerProps(conversation("ring-with-tools"))} />);
+    const marginLeft = (name: string) => getComputedStyle(
+      name === "Usage" ? screen.getByRole("group", { name }) : screen.getByRole("button", { name }),
+    ).marginLeft;
+    expect(marginLeft("More tools")).toBe("auto");
+    expect(marginLeft("Usage")).not.toBe("auto");
+    view.unmount();
+
+    render(<Composer {...composerProps(conversation("ring-without-tools"), { promptPresetsEnabled: false, promptStashEnabled: false })} />);
+    expect(screen.queryByRole("button", { name: "More tools" })).toBeNull();
+    expect(marginLeft("Usage")).toBe("auto");
+    style.remove();
   });
 
   it("attaches a queued message to the composer as its own row with a visible Send now action", async () => {

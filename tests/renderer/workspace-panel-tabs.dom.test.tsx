@@ -15,6 +15,7 @@ import {
   openRightPanelSurface,
   type RightPanelState,
 } from "../../src/renderer/src/utils/rightPanelSurfaces";
+import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import { readSourceText } from "../helpers/source-text";
 
 function Host({
@@ -155,6 +156,26 @@ describe("workspace panel tab row", () => {
     fireEvent.keyDown(screen.getByRole("menu", { name: "Panel tabs" }), { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("suspends the native Browser view while the all-tabs or add menu is open", () => {
+    render(<Host initial={state("preview", "changes", "preview")} />);
+    expect(nativePreviewSuspended()).toBe(false);
+
+    const allTabs = screen.getByRole("button", { name: "All tabs" });
+    fireEvent.click(allTabs);
+    expect(screen.getByRole("menu", { name: "Panel tabs" })).toBeInTheDocument();
+    expect(nativePreviewSuspended()).toBe(true);
+    fireEvent.click(allTabs);
+    expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
+    expect(nativePreviewSuspended()).toBe(false);
+
+    const add = screen.getByRole("button", { name: "Add panel surface" });
+    fireEvent.click(add);
+    expect(screen.getByRole("menu", { name: "Add panel surface" })).toBeInTheDocument();
+    expect(nativePreviewSuspended()).toBe(true);
+    fireEvent.click(add);
+    expect(nativePreviewSuspended()).toBe(false);
   });
 
   it("shows the all-tabs control only while the tab row overflows", () => {
@@ -331,6 +352,27 @@ describe("workspace panel tab row", () => {
 
     fireEvent.click(close);
     expect(tabNames()).toEqual(["changes"]);
+  });
+
+  it("moves focus to the neighbouring tab when the close control is used from the keyboard", () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    render(<Host initial={state("preview", "changes", "preview", "terminal")} />);
+    const close = screen.getByRole("button", { name: "Close Browser" });
+    close.focus();
+
+    fireEvent.click(close, { detail: 0 });
+
+    expect(tabNames()).toEqual(["changes", "terminal"]);
+    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveFocus();
+
+    const outside = screen.getByRole("button", { name: "Outside" });
+    outside.focus();
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal" }), { detail: 1 });
+    expect(tabNames()).toEqual(["changes"]);
+    expect(outside).toHaveFocus();
   });
 
   it("closes a tab with the middle button", () => {

@@ -1,6 +1,6 @@
 import { isMaximumReasoning } from "../../utils/maxReasoning";
 import "./ComposerSurface.css";
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
@@ -352,9 +352,12 @@ export const Composer = memo(function Composer({
     onReleaseAttachment,
   ]);
 
+  const dismissMenuForRun = useEffectEvent(() => {
+    if (menu !== "presets" && menu !== "stash") dismissMenu("context-change");
+  });
   useEffect(() => {
     if (running) {
-      dismissMenu("context-change");
+      dismissMenuForRun();
       if (submissionReleaseTimerRef.current !== null) {
         window.clearTimeout(submissionReleaseTimerRef.current);
         submissionReleaseTimerRef.current = null;
@@ -363,7 +366,7 @@ export const Composer = memo(function Composer({
       setSubmitting(false);
       return;
     }
-  }, [dismissMenu, running]);
+  }, [running]);
 
   useEffect(() => () => {
     if (submissionReleaseTimerRef.current !== null) window.clearTimeout(submissionReleaseTimerRef.current);

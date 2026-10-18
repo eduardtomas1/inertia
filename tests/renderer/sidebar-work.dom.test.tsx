@@ -795,6 +795,43 @@ describe("compact Work sidebar", () => {
       .toHaveFocus();
   });
 
+  it.each(["pointer", "keyboard"] as const)("keeps a %s-focused row mounted while the Work index scrolls and updates", (method) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const entries = Array.from({ length: 80 }, (_, index) => conversation(
+      `retained-${index}`,
+      `Retained work ${index}`,
+      new Date(2026, 7, 11, 11, 50 - index),
+    ));
+    const view = renderSidebar(entries);
+    const navigation = view.container.querySelector<HTMLElement>(".project-list")!;
+    if (method === "pointer") {
+      screen.getByRole("button", { name: /^Retained work 5,/u }).focus();
+    } else {
+      const first = screen.getByRole("button", { name: /^Retained work 0,/u });
+      first.focus();
+      for (let step = 0; step < 5; step += 1) {
+        fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+        act(() => { vi.advanceTimersByTime(20); });
+      }
+    }
+    const focused = screen.getByRole("button", { name: /^Retained work 5,/u });
+    expect(focused).toHaveFocus();
+
+    navigation.scrollTop = 3_000;
+    fireEvent.scroll(navigation);
+    expect(screen.queryByRole("button", { name: /^Retained work 70,/u })).not.toBeNull();
+    expect(focused).toHaveFocus();
+    view.rerenderSnapshot({
+      ...snapshot([conversation("retained-new", "Retained new work", new Date(2026, 7, 11, 11, 55)), ...entries]),
+      activeConversationId: entries[0]!.id,
+    });
+    act(() => { vi.advanceTimersByTime(100); });
+
+    expect(screen.getByRole("button", { name: /^Retained work 5,/u })).toHaveFocus();
+    expect(navigation.scrollTop).toBe(3_000);
+  });
+
   it("explains why Remove project is unavailable while the project has running work", () => {
     const startedAt = new Date(2026, 7, 11, 11, 57);
     const running = conversation("remove-running", "Running task", startedAt, { status: "running" });

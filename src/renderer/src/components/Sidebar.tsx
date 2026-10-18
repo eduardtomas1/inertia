@@ -381,6 +381,7 @@ function SidebarView({
     updateWorkViewport,
     virtualizedWorkIndex,
     visibleWorkConversationIds,
+    retainFocusedWorkItem,
   ] = useSidebarWorkIndex({
     activeConversationId: snapshot?.activeConversationId ?? null,
     compact,
@@ -1047,6 +1048,7 @@ function SidebarView({
                     className="work-index-virtual-item"
                     key={rendered.item.id}
                     style={{ transform: `translateY(${start}px)` }}
+                    onFocusCapture={() => retainFocusedWorkItem(rendered.item.id)}
                   >
                     {renderWorkIndexItem(rendered.item)}
                   </div>

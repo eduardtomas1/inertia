@@ -15,6 +15,7 @@ import {
   openRightPanelSurface,
   type RightPanelState,
 } from "../../src/renderer/src/utils/rightPanelSurfaces";
+import { nativePreviewSuspended } from "../../src/renderer/src/utils/nativePreviewOverlay";
 import { readSourceText } from "../helpers/source-text";
 
 function Host({
@@ -155,6 +156,26 @@ describe("workspace panel tab row", () => {
     fireEvent.keyDown(screen.getByRole("menu", { name: "Panel tabs" }), { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("suspends the native Browser view while the all-tabs or add menu is open", () => {
+    render(<Host initial={state("preview", "changes", "preview")} />);
+    expect(nativePreviewSuspended()).toBe(false);
+
+    const allTabs = screen.getByRole("button", { name: "All tabs" });
+    fireEvent.click(allTabs);
+    expect(screen.getByRole("menu", { name: "Panel tabs" })).toBeInTheDocument();
+    expect(nativePreviewSuspended()).toBe(true);
+    fireEvent.click(allTabs);
+    expect(screen.queryByRole("menu", { name: "Panel tabs" })).toBeNull();
+    expect(nativePreviewSuspended()).toBe(false);
+
+    const add = screen.getByRole("button", { name: "Add panel surface" });
+    fireEvent.click(add);
+    expect(screen.getByRole("menu", { name: "Add panel surface" })).toBeInTheDocument();
+    expect(nativePreviewSuspended()).toBe(true);
+    fireEvent.click(add);
+    expect(nativePreviewSuspended()).toBe(false);
   });
 
   it("shows the all-tabs control only while the tab row overflows", () => {

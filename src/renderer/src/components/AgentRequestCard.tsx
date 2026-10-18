@@ -16,7 +16,13 @@ const APPROVAL_BUTTONS = [
 
 async function runResponse(setBusy: (busy: boolean) => void, respond: () => Promise<void>): Promise<void> {
   setBusy(true);
-  try { await respond(); } finally { setBusy(false); }
+  try {
+    await respond();
+  } catch {
+    return;
+  } finally {
+    setBusy(false);
+  }
 }
 
 export function ApprovalCard({ request, onRespond }: ApprovalCardProps): React.JSX.Element {

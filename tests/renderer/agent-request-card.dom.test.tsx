@@ -1,9 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { InputRequestCard } from "../../src/renderer/src/components/AgentRequestCard";
-import type { AgentInputRequest } from "../../src/shared/contracts";
+import { ApprovalCard, InputRequestCard } from "../../src/renderer/src/components/AgentRequestCard";
+import type { AgentApprovalRequest, AgentInputRequest } from "../../src/shared/contracts";
 
 const request: AgentInputRequest = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -96,5 +96,38 @@ describe("InputRequestCard question pager", () => {
     const { container } = render(<InputRequestCard request={blank} onRespond={vi.fn(async () => undefined)} />);
 
     expect(container.querySelector(".agent-input-question-header")).toBeNull();
+  });
+});
+
+const approval: AgentApprovalRequest = {
+  id: "55555555-5555-4555-8555-555555555555",
+  providerId: "codex",
+  conversationId: request.conversationId,
+  runId: request.runId,
+  turnId: request.turnId,
+  kind: "command",
+  title: "Approve command",
+  detail: null,
+  command: "npm test",
+  cwd: null,
+  reason: null,
+  networkScope: null,
+  permissionRoots: [],
+  availableDecisions: ["cancel", "deny", "approve"],
+};
+
+describe("request card answer failures", () => {
+  it("keeps focus on the card and handles the failure when an answer is refused", async () => {
+    const user = userEvent.setup();
+    const onRespond = vi.fn(async () => { throw new Error("The request already ended."); });
+    render(<ApprovalCard request={approval} onRespond={onRespond} />);
+    const approve = screen.getByRole("button", { name: "Approve once" });
+
+    await user.click(approve);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onRespond).toHaveBeenCalledOnce();
+    expect(approve).toBeEnabled();
+    expect(approve).toHaveFocus();
   });
 });

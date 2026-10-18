@@ -110,7 +110,7 @@ describe("follow-up delivery uncertainty", () => {
 
     expect(undelivered.adopt).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: runtime.conversationId, content: "Inspect this image.", attachments: [retained],
-    }));
+    }), null);
     expect(undelivered.enqueue).not.toHaveBeenCalled();
     expect(persistedFollowUps()).toEqual([]);
     expect(conversationAttachments.acceptRetention).toHaveBeenCalledTimes(1);

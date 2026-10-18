@@ -735,7 +735,9 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       acknowledge(true);
       await expect(sending).resolves.toBe("handled");
       await f.drain();
-      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, state: "waiting" } } });
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: {
+        id: requestId, state: "blocked", error: "The follow-up was accepted as its turn ended. Check this chat before retrying.",
+      } } });
       expect(f.store.agentTurn(initial.turn.id).status).toBe(status);
       expect(f.store.conversationDetail(f.conversationId)!.messages
         .some((message) => message.content === "Also rename the file.")).toBe(false);
@@ -743,16 +745,22 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
     } finally { await f.close(); }
   });
 
-  it("queues a follow-up whose delivery became unknown because its turn ended", async () => {
+  it("holds a follow-up whose delivery became unknown because its turn ended until the user sends it", async () => {
     const f = await fixture();
     try {
       startRunning(f);
       vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError(true));
       const requestId = await f.followUp();
-      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: { id: requestId, state: "waiting" } } });
+      const unconfirmed = { id: requestId, state: "blocked", error: "The provider did not confirm whether it received this follow-up. Check this chat before retrying." };
+      expect(queueResult(f, requestId)).toMatchObject({ result: { kind: "message.queue", receipt: unconfirmed } });
       f.provider.resolve({ status: "completed" });
-      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("accepted"));
       await f.drain();
+      expect(f.store.agentTurn(f.store.latestAgentTurnForConversation(f.conversationId)!.id).status).toBe("completed");
+      expect(f.store.queuedMessages.get(f.conversationId, requestId)).toMatchObject(unconfirmed);
+      expect(f.provider.runCount).toBe(1);
+      await f.command("message.queue.send", requestId);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, requestId)?.state).toBe("accepted");
       expect(f.provider.runCount).toBe(2);
     } finally { await f.close(); }
   });

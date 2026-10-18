@@ -116,7 +116,7 @@ export interface TurnInteractionCommandDependencies {
   queuedMessage?: QueuedMessage;
   undeliveredFollowUps?: {
     enqueue(input: UndeliveredFollowUp, handoffId: string): Promise<MessageQueueResult>;
-    adopt(input: UndeliveredFollowUp): MessageQueueResult;
+    adopt(input: UndeliveredFollowUp, unconfirmed: string | null): MessageQueueResult;
   };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
@@ -331,7 +331,10 @@ export function createTurnInteractionCommandHandler(
             if ((steered.kind === "turn-ended" || steered.kind === "refused" || steered.kind === "unconfirmed") && dependencies.undeliveredFollowUps) {
               let queued: MessageQueueResult;
               try {
-                queued = dependencies.undeliveredFollowUps.adopt({ ...undelivered, attachments });
+                queued = dependencies.undeliveredFollowUps.adopt(
+                  { ...undelivered, attachments },
+                  steered.kind === "unconfirmed" ? steered.message : null,
+                );
               } catch (error) {
                 if (steered.kind !== "unconfirmed") throw error;
                 throw new RuntimeRequestError(steered.message, undefined, "ambiguous");

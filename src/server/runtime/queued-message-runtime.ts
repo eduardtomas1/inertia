@@ -197,7 +197,7 @@ export function createQueuedMessageRuntime(
       void schedule(input.conversationId).catch(() => undefined);
       return result(input.conversationId, input.id);
     },
-    adopt(input) {
+    adopt(input, unconfirmed) {
       const conversation = requireConversation(input.conversationId);
       assertRoomForUndelivered(conversation.id);
       try {
@@ -205,6 +205,7 @@ export function createQueuedMessageRuntime(
       } catch (error) {
         throw error instanceof QueuedMessageLimitError ? undeliveredQueueFull() : error;
       }
+      if (unconfirmed) store.queuedMessages.block(conversation.id, input.id, unconfirmed);
       changed(conversation.id);
       void schedule(conversation.id).catch(() => undefined);
       return result(conversation.id, input.id);

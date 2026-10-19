@@ -74,9 +74,10 @@ function sameRoute(
 
 /**
  * Turns a plan into the validated conversation update. The chat is re-read
- * first, so a mode or model change made while the picker ran always wins. A
- * refused update keeps the current route and records why; it never fails the
- * message.
+ * before every outcome, so a mode or model change made while the picker ran
+ * always wins (outcome `kept`) and the returned conversation is never the
+ * stale snapshot. A refused update keeps the current route and records why;
+ * it never fails the message.
  */
 export function applyRoutingPlan(input: {
   updates: Pick<ConversationUpdateService, "update">;
@@ -106,14 +107,26 @@ export function applyRoutingPlan(input: {
   const settledOutcome: RoutingDecisionSummary["outcome"] = plan.fallback
     ? "fallback"
     : plan.lowConfidence ? "low-confidence" : "kept";
+  const refused = (error: unknown): RoutingApplyResult => ({
+    conversation,
+    summary: summary("kept", `Kept the current model: ${publicRuntimeError(error)} (${plan.reason})`),
+    restore: null,
+  });
+  // Every outcome is checked against a fresh read, so the caller never
+  // continues with the snapshot the (possibly slow) picker started from.
+  let latest: Conversation;
+  try {
+    latest = input.reread();
+  } catch (error) {
+    return refused(error);
+  }
+  if (latest.routingMode !== "auto" || !sameRoute(latest, conversation)) {
+    return { conversation: latest, summary: summary("kept", CHAT_CHANGED_WHILE_ROUTING), restore: null };
+  }
   if (!plan.changesRoute || !input.selection || !plan.candidate) {
-    return { conversation, summary: summary(settledOutcome, plan.reason), restore: null };
+    return { conversation: latest, summary: summary(settledOutcome, plan.reason), restore: null };
   }
   try {
-    const latest = input.reread();
-    if (latest.routingMode !== "auto" || !sameRoute(latest, conversation)) {
-      return { conversation: latest, summary: summary("kept", CHAT_CHANGED_WHILE_ROUTING), restore: null };
-    }
     const applied = modelSelectionSchema.parse(input.selection);
     const updated = input.updates.update({
       conversationId: conversation.id,
@@ -134,11 +147,7 @@ export function applyRoutingPlan(input: {
       },
     };
   } catch (error) {
-    return {
-      conversation,
-      summary: summary("kept", `Kept the current model: ${publicRuntimeError(error)} (${plan.reason})`),
-      restore: null,
-    };
+    return { ...refused(error), conversation: latest };
   }
 }
 

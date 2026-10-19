@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,7 +17,7 @@ import { ConversationCreationService } from "../../src/server/runtime/conversati
 import { BackendProfileController } from "../../src/server/runtime/backends/backend-profile-controller";
 import { ConversationUpdateService } from "../../src/server/runtime/conversation-update-service";
 import { RouteAdvisor, type RouteAdvisorDependencies } from "../../src/server/runtime/routing/route-advisor";
-import type { ClientCommand, ModelSelection, ProviderInfo } from "../../src/shared/contracts";
+import type { ChatAttachment, ClientCommand, ModelSelection, ProviderInfo } from "../../src/shared/contracts";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { RoutingPreset, RoutingSettingsUpdate } from "../../src/shared/routing/routing-policy";
@@ -68,6 +68,25 @@ interface SenderOptions {
   providers?: ProviderInfo[];
   controller?: Partial<typeof backendProfileController> | BackendProfileController;
   prepareDocumentAttachments?: TurnInteractionCommandDependencies["prepareDocumentAttachments"];
+  /** Trusted image attachments the resolver hands back for the message. */
+  attachments?: ChatAttachment[];
+  relinquishAll?: (ids: string[]) => Promise<void>;
+}
+
+/** Sparse image files of the declared size, so the turn request's own path checks pass. */
+function imageAttachments(directory: string, count: number, size: number): ChatAttachment[] {
+  return Array.from({ length: count }, (_, index) => {
+    const path = join(directory, `image-${index}.png`);
+    writeFileSync(path, "");
+    truncateSync(path, size);
+    return {
+      id: `77777777-7777-4777-8777-${String(index).padStart(12, "0")}`,
+      name: `image-${index}.png`,
+      path,
+      mimeType: "image/png",
+      size,
+    };
+  });
 }
 
 function messageSender(
@@ -76,6 +95,7 @@ function messageSender(
   options: SenderOptions = {},
 ) {
   const providers = options.providers ?? [turnControllerTestProviderInfo()];
+  const attachments = options.attachments ?? [];
   const controller = options.controller instanceof BackendProfileController
     ? options.controller
     : { ...backendProfileController, ...options.controller };
@@ -90,13 +110,22 @@ function messageSender(
     } as unknown as TurnInteractionCommandDependencies["conversationAttachments"],
     backendProfileController: controller as unknown as TurnInteractionCommandDependencies["backendProfileController"],
     ...(options.prepareDocumentAttachments ? { prepareDocumentAttachments: options.prepareDocumentAttachments } : {}),
+    ...(attachments.length > 0 && !options.prepareDocumentAttachments
+      ? { prepareDocumentAttachments: async () => ({ contexts: [], imagePaths: attachments.map(({ path }) => path), generatedImagePaths: [] }) }
+      : {}),
     isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
     workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
     pendingApprovals: new Map(),
     pendingInputs: new Map(),
     dataDirectory: runtime.directory,
     enableProviders: true,
-    attachmentResolver: null,
+    attachmentResolver: attachments.length > 0
+      ? {
+          resolvePayloads: async () => attachments.map((attachment) => ({ attachment, bytes: new Uint8Array() })),
+          relinquishAll: options.relinquishAll ?? (async () => undefined),
+          releaseAll: async () => undefined,
+        } as unknown as TurnInteractionCommandDependencies["attachmentResolver"]
+      : null,
     generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
     workflows: {
       resolveTurnSkills: async () => ({ inputs: [], routeKey: null }),
@@ -116,7 +145,7 @@ function messageSender(
     await createTurnInteractionCommandHandler(dependencies)(null as unknown as WebSocket, {
       type: "message.send",
       requestId: randomUUID(),
-      payload: { conversationId: runtime.conversationId, content, attachments: [] },
+      payload: { conversationId: runtime.conversationId, content, attachments },
     } as ClientCommand);
     await vi.waitFor(() => expect(runtime.provider.input?.prompt).toContain(content));
     return runtime.store.latestAgentTurnForConversation(runtime.conversationId)!;
@@ -404,6 +433,90 @@ describe("Auto routing safeguards on message.send", () => {
       const changed = await route({ rules: slowPicker({ conversationId: runtime.conversationId, modelSelection: fast, routingMode: "auto" }) });
       expect(changed?.summary?.outcome).toBe("kept");
       expect(runtime.store.conversation(runtime.conversationId).modelSelection).toEqual(fast);
+    });
+  });
+
+  it("proceeds with the chat as changed during the picker when the plan keeps the route", async () => {
+    await withAutoChat(ROUTING, async (runtime) => {
+      const updates = new ConversationUpdateService({ store: runtime.store, providers: runtime.provider, backendProfileController });
+      const update = vi.spyOn(updates, "update");
+      const next = nativeSelection({ providerId: "codex", modelId: "gpt-next", reasoningEffort: "high" });
+      // The Light tier holds the current gpt-test route, so the plan keeps it.
+      const slowPicker = async () => {
+        updates.update({ conversationId: runtime.conversationId, routingMode: "manual", modelSelection: next });
+        return { tier: "light" as const, taskKind: "question" as const, confidence: 0.9, trace: [] };
+      };
+      const readiness = vi.fn(async (_selection: ModelSelection) => null);
+      const turn = await messageSender(runtime, advisor(runtime, { pickers: { rules: slowPicker }, updates }), {
+        controller: { readiness },
+      })(QUESTION);
+      expect(turn.modelSelection.modelId).toBe("gpt-next");
+      expect(turn.routing).toMatchObject({ outcome: "kept", reason: "Kept the current model: the chat changed while routing." });
+      expect(readiness.mock.calls.map(([selection]) => selection.modelId)).toEqual(["gpt-next"]);
+      expect(update).toHaveBeenCalledOnce();
+      expect(update.mock.calls.some(([, origin]) => origin === "auto-routing")).toBe(false);
+      expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({
+        routingMode: "manual",
+        modelSelection: expect.objectContaining({ modelId: "gpt-next" }),
+      });
+      await finish(runtime, "thread-1");
+    });
+  });
+
+  describe("provider image byte limits", () => {
+    const claudePreset: RoutingPreset = { ...gptTest, providerId: "claude", backendProfileId: "builtin:anthropic", modelId: "claude-test" };
+    const providers = [turnControllerTestProviderInfo(), claudeProvider()];
+    const claudeOnly = { presets: [claudePreset] };
+    const onClaude = (runtime: TurnControllerTestRuntime) => runtime.store.updateConversation(runtime.conversationId, {
+      providerId: "claude",
+      modelSelection: nativeSelection({ providerId: "claude", modelId: "claude-test", reasoningEffort: "high" }),
+    });
+    const LIMIT = "Claude accepts at most 20 MiB of images per message. Remove some images and send again.";
+
+    it("routes an Auto chat on Claude to a provider without the byte limit and sends the images", async () => {
+      const routing = { ...ROUTING, tiers: { ...ROUTING.tiers, light: { presets: [claudePreset, gptTest] } } };
+      await withAutoChat(routing, async (runtime) => {
+        onClaude(runtime);
+        const attachments = imageAttachments(runtime.directory, 3, 8 * 1024 * 1024);
+        const turn = await messageSender(runtime, advisor(runtime, { providerInfo: () => providers }), { providers, attachments })(QUESTION);
+        expect(turn).toMatchObject({ providerId: "codex", modelSelection: expect.objectContaining({ modelId: "gpt-test" }) });
+        expect(turn.routing).toMatchObject({ outcome: "applied", previousRoute: { providerId: "claude", modelId: "claude-test" } });
+        expect(runtime.provider.input?.imagePaths).toEqual(attachments.map(({ path }) => path));
+        expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({ providerId: "codex", routingMode: "auto" });
+        await finish(runtime, "thread-1");
+      });
+    });
+
+    it("raises the normal image limit and keeps the route when no candidate takes the images", async () => {
+      const routing = { ...ROUTING, tiers: { light: claudeOnly, standard: claudeOnly, heavy: claudeOnly, max: claudeOnly } };
+      await withAutoChat(routing, async (runtime) => {
+        onClaude(runtime);
+        const before = runtime.store.conversation(runtime.conversationId);
+        const relinquishAll = vi.fn(async () => undefined);
+        const attachments = imageAttachments(runtime.directory, 3, 8 * 1024 * 1024);
+        const send = messageSender(runtime, advisor(runtime, { providerInfo: () => providers }), { providers, attachments, relinquishAll });
+        await expect(send(QUESTION)).rejects.toThrow(LIMIT);
+        expect(relinquishAll).toHaveBeenCalledWith(attachments.map(({ id }) => id));
+        expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({
+          providerId: "claude",
+          routingMode: "auto",
+          modelSelection: before.modelSelection,
+        });
+        expect(runtime.store.agentTurnsForConversation(runtime.conversationId)).toHaveLength(0);
+      });
+    });
+
+    it("still refuses a manual Claude chat before document preparation", async () => {
+      await withAutoChat(ROUTING, async (runtime) => {
+        onClaude(runtime);
+        runtime.store.updateConversation(runtime.conversationId, { routingMode: "manual" });
+        const prepareDocumentAttachments = vi.fn(async () => ({ contexts: [], imagePaths: [], generatedImagePaths: [] }));
+        const send = messageSender(runtime, advisor(runtime, { providerInfo: () => providers }), {
+          providers, attachments: imageAttachments(runtime.directory, 3, 8 * 1024 * 1024), prepareDocumentAttachments,
+        });
+        await expect(send(QUESTION)).rejects.toThrow(LIMIT);
+        expect(prepareDocumentAttachments).not.toHaveBeenCalled();
+      });
     });
   });
 

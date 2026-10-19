@@ -1,4 +1,5 @@
 import type {
+  Conversation,
   ModelBackendProfileView,
   ProviderInfo,
   TurnRequestContext,
@@ -62,6 +63,14 @@ export interface RoutingTurnDecision {
   restore: RoutingRestorePoint | null;
 }
 
+/** Whether the next fresh turn of this chat goes through Auto routing. */
+export function autoRoutingApplies(
+  settings: { routing: { enabled: boolean } },
+  conversation: Pick<Conversation, "routingMode">,
+): boolean {
+  return settings.routing.enabled && conversation.routingMode === "auto";
+}
+
 function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
@@ -83,6 +92,10 @@ function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
 export class RouteAdvisor {
   constructor(private readonly dependencies: RouteAdvisorDependencies) {}
 
+  /**
+   * The chat may change while the picker runs, so a caller that gets a
+   * decision re-reads the conversation before continuing with the turn.
+   */
   async routeBeforeTurn(input: RouteBeforeTurnInput): Promise<RoutingTurnDecision | null> {
     try {
       return await this.route(input);
@@ -113,7 +126,7 @@ export class RouteAdvisor {
     const settings = dependencies.store.settings.current();
     if (!settings.routing.enabled) return null;
     const conversation = dependencies.store.conversation(input.conversationId);
-    if (conversation.routingMode !== "auto") return null;
+    if (!autoRoutingApplies(settings, conversation)) return null;
     const history = dependencies.store.turnLedgerRepository.routingHistory(conversation.id);
     const routingInput: RoutingInput = {
       content: input.content,

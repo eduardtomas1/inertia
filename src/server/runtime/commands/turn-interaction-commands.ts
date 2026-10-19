@@ -34,7 +34,7 @@ import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
-import { providerImageRequestLimitError } from "../../provider/provider-image-read";
+import { providerImageCountLimitError, providerImageRequestLimitError } from "../../provider/provider-image-read";
 import { pendingInteractionForConversation } from "../pending-interaction-registry";
 import {
   defineRuntimeCommandHandler,
@@ -49,7 +49,7 @@ import { ConversationContextService } from "../conversation-context-service";
 import { isUntitledConversationTitle, quickConversationTitle } from "../conversation-title";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
-import type { RouteAdvisor } from "../routing/route-advisor";
+import { autoRoutingApplies, type RouteAdvisor } from "../routing/route-advisor";
 
 type MessageSendStage =
   | "conversation-state"
@@ -472,6 +472,12 @@ export function createTurnInteractionCommandHandler(
         }
         try {
         messageSendStage = "attachments";
+        const routesBeforeTurn = dependencies.enableProviders && !dependencies.queuedMessage && !scheduledDispatch
+          && dependencies.routeAdvisor !== undefined;
+        // Auto routing may move the chat to a provider without the inline-image
+        // byte limit, so that provider-specific check waits for the routed route.
+        const deferProviderImageLimit = routesBeforeTurn
+          && autoRoutingApplies(dependencies.store.settings.current(), conversation);
         let resolvedAttachments: Awaited<
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
         > = [];
@@ -508,9 +514,11 @@ export function createTurnInteractionCommandHandler(
         const sourceAttachments = resolvedAttachments.map(
           ({ attachment }) => attachment,
         );
-        const imageLimit = dependencies.enableProviders
-          ? providerImageRequestLimitError(conversation.providerId, sourceAttachments)
-          : null;
+        const imageLimit = !dependencies.enableProviders
+          ? null
+          : deferProviderImageLimit
+            ? providerImageCountLimitError(conversation.providerId, sourceAttachments)
+            : providerImageRequestLimitError(conversation.providerId, sourceAttachments);
         if (imageLimit) {
           await dependencies.attachmentResolver?.relinquishAll(sourceAttachments.map(({ id }) => id));
           throw new RuntimeRequestError(imageLimit);
@@ -580,7 +588,7 @@ export function createTurnInteractionCommandHandler(
         // Auto routing sees the prepared inputs (scanned PDF pages need image
         // input too) and runs before readiness, which then checks the routed
         // route. Turn admission is held, so no other turn starts meanwhile.
-        let routing = dependencies.enableProviders && !dependencies.queuedMessage && !scheduledDispatch
+        let routing = routesBeforeTurn
           ? await dependencies.routeAdvisor?.routeBeforeTurn({
               conversationId: conversation.id,
               content: command.payload.content,
@@ -590,9 +598,15 @@ export function createTurnInteractionCommandHandler(
               context: resolvedTurnContext,
             }) ?? null
           : null;
-        if (routing?.restore) conversation = dependencies.store.conversation(conversation.id);
+        // The chat may have changed while the picker ran (a routed update, or
+        // the user's own model or mode change), so continue from a fresh read.
+        if (routing) conversation = dependencies.store.conversation(conversation.id);
         messageSendStage = "backend-readiness";
         const assertConversationReady = async (target: Conversation): Promise<void> => {
+          const routedImageLimit = deferProviderImageLimit
+            ? providerImageRequestLimitError(target.providerId, sourceAttachments)
+            : null;
+          if (routedImageLimit) throw new RuntimeRequestError(routedImageLimit);
           try {
             await awaitMessageSendPreparation(
               dependencies.verifyProviderInstallation?.(target.providerId)

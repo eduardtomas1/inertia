@@ -31,6 +31,16 @@ function validWorktreePlan(path: string, branch: string, token: string): boolean
 
 export class ConversationWorktreeRemovalError extends Error {}
 
+export interface ProjectWorktreeRecord {
+  conversationId: string;
+  title: string;
+  status: ConversationRow["status"];
+  archived: boolean;
+  worktreePath: string | null;
+  duo: boolean;
+  ownership: StoredConversationWorktreeOwnership | null;
+}
+
 export class ConversationWorktreeRepository {
   private readonly pathAuthority: WorkspacePathAuthority;
 
@@ -175,6 +185,83 @@ export class ConversationWorktreeRepository {
         this.requireConversation(conversationId),
       );
     })();
+  }
+
+  /** Chats in one project that have a checkout path or a worktree receipt. */
+  projectWorktreeRecords(projectId: string): ProjectWorktreeRecord[] {
+    const rows = this.database.prepare(`
+      SELECT conversations.id AS conversation_id,
+        conversations.title AS title,
+        conversations.status AS status,
+        conversations.archived_at AS archived_at,
+        conversations.worktree_path AS worktree_path,
+        EXISTS (
+          SELECT 1 FROM paired_launch_sides AS side
+          WHERE side.conversation_id = conversations.id
+        ) OR EXISTS (
+          SELECT 1 FROM paired_launches AS launch
+          WHERE launch.comparison_conversation_id = conversations.id
+        ) AS duo
+      FROM conversations
+      LEFT JOIN conversation_worktree_ownership AS ownership
+        ON ownership.conversation_id = conversations.id
+      WHERE conversations.project_id = ?
+        AND (
+          conversations.worktree_path IS NOT NULL
+          OR ownership.conversation_id IS NOT NULL
+        )
+      ORDER BY conversations.id
+    `).all(projectId) as Array<{
+      conversation_id: string;
+      title: string;
+      status: ConversationRow["status"];
+      archived_at: string | null;
+      worktree_path: string | null;
+      duo: number;
+    }>;
+    return rows.map((row) => ({
+      conversationId: row.conversation_id,
+      title: row.title,
+      status: row.status,
+      archived: row.archived_at !== null,
+      worktreePath: row.worktree_path,
+      duo: row.duo !== 0,
+      ownership: this.get(row.conversation_id),
+    }));
+  }
+
+  /** Every chat checkout path across projects, for shared-checkout checks. */
+  checkoutPaths(): Array<{ conversationId: string; worktreePath: string }> {
+    return (this.database.prepare(`
+      SELECT id, worktree_path FROM conversations
+      WHERE worktree_path IS NOT NULL
+    `).all() as Array<{ id: string; worktree_path: string }>).map((row) => ({
+      conversationId: row.id,
+      worktreePath: row.worktree_path,
+    }));
+  }
+
+  /**
+   * Records that Git removed this chat's owned worktree. The chat keeps its
+   * historical checkout path so it can never fall back to the project root;
+   * the receipt becomes external so later chat or project removal does not
+   * look for a worktree to clean up.
+   */
+  releaseRemovedWorktree(conversationId: string, ownershipToken: string): void {
+    const result = this.database.prepare(`
+      UPDATE conversation_worktree_ownership
+      SET owns_worktree = 0, creation_state = 'external',
+        ownership_token = NULL, worktree_id = NULL,
+        repository_identity = NULL, filesystem_identity_json = NULL,
+        branch_head = NULL
+      WHERE conversation_id = ?
+        AND owns_worktree = 1
+        AND creation_state = 'created'
+        AND ownership_token = ?
+    `).run(conversationId, ownershipToken);
+    if (result.changes !== 1) {
+      throw new Error("The removed worktree no longer matches its ownership receipt.");
+    }
   }
 
   transfer(

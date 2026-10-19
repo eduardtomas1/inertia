@@ -24,34 +24,68 @@ export interface WorkspaceTextScope {
   /** Absolute workspace and repository roots, shown as `<workspace>`. */
   roots: readonly string[];
   homeDirectory?: string;
+  /** Path rules to apply; defaults to the running platform. */
+  platform?: NodeJS.Platform;
 }
 
-const PATH_END = String.raw`(?=$|[\\/\s"'\x60,;:()<>\[\]{}])`;
 const USER_PATH_POSIX = /(?<![\w.:/~<>-])\/(?:Users|home|root|private\/tmp|private\/var|tmp|var\/folders)(?:\/[^\s"'`,;:()<>[\]{}]+)+/gu;
 const USER_PATH_WINDOWS = /(?<![\w.])[A-Za-z]:\\(?:Users|Temp|Windows\\Temp)(?:\\[^\\\s"'`,;()<>[\]{}]+)+/giu;
 const ANY_PATH_POSIX = /(?<![\w.:/~<>-])\/(?:[^\s"'\\/]+\/)+([^\s"'\\/]+)/gu;
 const ANY_PATH_WINDOWS = /(?<![\w.])[A-Za-z]:\\(?:[^\\\s"']+\\)+([^\\\s"']+)/gu;
 const LINE_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/gu;
+/** Characters that end a path in prose, commands, and diffs. */
+const PATH_DELIMITERS = String.raw`\s"'\x60,;()<>\[\]{}`;
 
 function escaped(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-function replacePathPrefix(text: string, path: string | undefined, replacement: string): string {
-  const normalized = path?.replace(/[\\/]+$/u, "");
+/**
+ * Matches `root` in any spelling the platform can produce. On Windows that is
+ * either separator, runs of them (JSON-escaped text doubles backslashes), any
+ * letter case including the drive letter, and a trailing separator. A root
+ * must end at a separator or a delimiter, so `C:\a\workspace` never matches
+ * inside `C:\a\workspace2`, and must not continue another path.
+ */
+function rootPattern(root: string, platform: NodeJS.Platform): RegExp | null {
+  const windows = platform === "win32";
+  const separator = windows ? String.raw`[\\/]` : "/";
+  const parts = root.split(windows ? /[\\/]+/u : /\/+/u).filter(Boolean);
   // A root of one segment ("/", "C:") would rewrite every absolute path.
-  if (!normalized || normalized.replace(/^[A-Za-z]:/u, "").split(/[\\/]/u).filter(Boolean).length < 1) {
-    return text;
-  }
-  const flags = process.platform === "win32" ? "giu" : "gu";
-  return text.replace(new RegExp(`${escaped(normalized)}${PATH_END}`, flags), replacement);
+  if (parts.length < (windows && /^[A-Za-z]:$/u.test(parts[0] ?? "") ? 2 : 1)) return null;
+  const leadingSeparators = /^[\\/]*/u.exec(root)![0].length;
+  const leading = leadingSeparators === 0
+    ? ""
+    : windows && leadingSeparators >= 2 ? `${separator}{2}` : separator;
+  // Text before the root must not be part of a longer path or name.
+  const before = String.raw`(?<![\w.~\\/-])`;
+  const body = parts.map(escaped).join(`${separator}+`);
+  // The rest of the path, up to a delimiter or a ":line" suffix.
+  const rest = String.raw`[^${PATH_DELIMITERS}:]*`;
+  return new RegExp(
+    `${before}${leading}${body}(?:(${separator}+)(${rest}))?(?=$|[${PATH_DELIMITERS}:])`,
+    windows ? "giu" : "gu",
+  );
+}
+
+function replaceRoot(text: string, root: string, replacement: string, platform: NodeJS.Platform): string {
+  const pattern = rootPattern(root, platform);
+  if (!pattern) return text;
+  const separators = platform === "win32" ? /[\\/]+/gu : /\/+/gu;
+  return text.replace(pattern, (_match, run: string | undefined, rest: string | undefined) =>
+    run === undefined
+      ? replacement
+      // The separator run after the root becomes one "/"; on Windows, so do
+      // the backslashes in the rest of the path.
+      : `${replacement}/${(rest ?? "").replace(separators, "/")}`);
 }
 
 function scrubPaths(text: string, scope: WorkspaceTextScope, anyPath: boolean): string {
   let result = text;
+  const platform = scope.platform ?? process.platform;
   const roots = [...new Set(scope.roots.filter(Boolean))].sort((left, right) => right.length - left.length);
-  for (const root of roots) result = replacePathPrefix(result, root, "<workspace>");
-  result = replacePathPrefix(result, scope.homeDirectory ?? homedir(), "<home>");
+  for (const root of roots) result = replaceRoot(result, root, "<workspace>", platform);
+  result = replaceRoot(result, scope.homeDirectory ?? homedir(), "<home>", platform);
   result = result.replace(USER_PATH_POSIX, "<path>").replace(USER_PATH_WINDOWS, "<path>");
   if (anyPath) {
     result = result.replace(ANY_PATH_POSIX, "<path>/$1").replace(ANY_PATH_WINDOWS, "<path>\\$1");

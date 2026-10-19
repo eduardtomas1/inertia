@@ -80,6 +80,7 @@ const MultiSpawnDialog = lazy(async () => ({
   default: (await loadMultiSpawnDialog()).MultiSpawnDialog,
 }));
 const PullRequestDialog = lazy(() => import("./PullRequestDialog"));
+const GitHistoryPanel = lazy(() => import("./GitHistoryPanel"));
 const ThreadNotifications = lazy(async () => ({
   default: (await import("../hooks/useThreadNotifications")).ThreadNotifications,
 }));
@@ -313,6 +314,8 @@ export const AppLayout = memo(function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  // History belongs to the chat it was opened from; switching chats hides it.
+  const [gitHistoryOwner, setGitHistoryOwner] = useState<string | null>(null);
   const taskCreation = useTaskCreationController({
     snapshot: connection.snapshot,
     request: (command, options) => actions.run(command.type, command, options),
@@ -820,6 +823,7 @@ export const AppLayout = memo(function AppLayout({
             onPull={() => { void actions.mutateRemote("git.pull").catch(() => undefined); }}
             onPush={() => { void actions.mutateRemote("git.push").catch(() => undefined); }}
             {...(actions.refreshGitStatus ? { onRefreshGitStatus: actions.refreshGitStatus } : {})}
+            onOpenGitHistory={() => setGitHistoryOwner(commitReviewOwner)}
           />
           {cornerControlsVisible && (
             <PanelLayoutControls
@@ -929,6 +933,7 @@ export const AppLayout = memo(function AppLayout({
             status={gitStatus}
             reviewStates={reviewStates}
             busy={busyAction === "git.commit" || busyAction === "git.push"}
+            reviewSummary={headerTools?.changes.summary?.overall ?? null}
             loadReview={actions.loadCommitReview}
             discardReview={actions.discardCommitReview}
             onClose={() => setCommitDialogOpen(false)}
@@ -957,6 +962,19 @@ export const AppLayout = memo(function AppLayout({
           />
         )}
       </DialogPresence>
+      {gitHistoryOwner === commitReviewOwner && project && (
+        <Suspense fallback={null}>
+          <GitHistoryPanel
+            open
+            projectId={project.id}
+            conversationId={conversation?.id}
+            {...(rootRepository ? { repositoryPath: rootRepository.repositoryPath, authorityRef: rootRepository.authorityRef } : {})}
+            branch={gitStatus?.branch ?? null}
+            run={actions.run}
+            onClose={() => setGitHistoryOwner(null)}
+          />
+        </Suspense>
+      )}
       {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>
           <PullRequestDialog

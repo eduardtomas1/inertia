@@ -5,6 +5,7 @@ import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
 import { usageResultValidators } from "./usage-results-schema";
+import { worktreeResultValidators } from "./worktree-results-schema";
 import { backgroundTasksResult } from "./background-tasks-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
@@ -20,6 +21,7 @@ import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from ".
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
+import { gitHistoryResultValidators } from "./git-history";
 import { COLOR_THEME_IDS } from "./app";
 import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
@@ -1114,6 +1116,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && uniqueRecordField(value.providers as unknown[], "providerId"),
   "provider.maintenance.operation": (value) => providerMaintenanceOperation(value.operation),
   ...usageResultValidators,
+  ...worktreeResultValidators,
   "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
@@ -1128,6 +1131,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "external.url": (value) => recordWithStrings(value, "url", "label"),
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
   "git.pr.confidence": (value) => validatePreMergeConfidence(value.confidence),
+  ...gitHistoryResultValidators,
   "workspace.entries": (value) => workspaceEntriesPage(value),
   "workspace.search.content": (value) => workspaceContentSearchPage(value),
   "workspace.file": (value) => workspaceFile(value.file) && booleanField(value, "usedFallback"),

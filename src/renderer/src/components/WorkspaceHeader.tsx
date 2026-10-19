@@ -119,6 +119,7 @@ type WorkspaceHeaderProps = {
   onPull: () => void;
   onPush: () => void;
   onRefreshGitStatus?: () => void;
+  onOpenGitHistory?: () => void;
   onRunAction: (action: ProjectAction) => void;
 };
 
@@ -163,6 +164,7 @@ export function WorkspaceHeader({
   onPull,
   onPush,
   onRefreshGitStatus,
+  onOpenGitHistory,
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const headerRef = useRef<HTMLElement>(null);
@@ -327,6 +329,7 @@ export function WorkspaceHeader({
         onPushAndCreatePullRequest={onPushAndCreatePullRequest ?? onPush}
         onOpenBranches={openBranches}
         {...(onRefreshGitStatus ? { onRefreshGitStatus } : {})}
+        {...(onOpenGitHistory ? { onOpenGitHistory } : {})}
         onRequestMenuClose={closeOverflow}
       />
     </Suspense>

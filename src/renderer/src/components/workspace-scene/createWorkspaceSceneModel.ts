@@ -71,6 +71,7 @@ import {
 } from "../../utils/goalExecution";
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
+import { requestGitBlame } from "../../utils/gitHistoryCommands";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -864,6 +865,7 @@ export function createWorkspaceSceneModel({
         summaryLoading: busyAction === "review.summary.generate",
         questionRunning: workspaceTools.selectionQuestionRunning,
         wrapLines: settings.wrapDiffs,
+        diffLayoutScope: `${project.id}:${persistedConversation?.id ?? "draft"}`,
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {
           void workspaceTools.loadGit({ authoritative: true }).catch((error) => setActionError(
@@ -934,6 +936,7 @@ export function createWorkspaceSceneModel({
           relativePath: path,
           action: "open-externally",
         }),
+        onLoadBlame: (blameRequest) => requestGitBlame(actions.run, { projectId: project.id, ...runtimeConversation }, blameRequest),
         canSaveFile: workspaceTools.canSaveWorkspaceFile,
         onSaveFile: async (...args) => {
           const saved = await workspaceTools.saveWorkspaceFile(...args);

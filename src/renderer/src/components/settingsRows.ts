@@ -124,6 +124,9 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["project-actions", "Actions", ["commands", "scripts", "project actions"]],
       ["project-repository-limit", "Repository display limit", ["repositories", "nested", "sidebar", "limit", "advanced"]],
     ],
+    Worktrees: [
+      ["project-worktrees", "Worktrees", ["worktree", "isolated", "checkout", "prune", "remove worktree", "cleanup", "git"]],
+    ],
     "Danger zone": [
       ["project-remove", "Remove project", ["delete project"]],
     ],

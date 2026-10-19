@@ -59,6 +59,7 @@ import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
 import { BackToResultsButton, contentMatchCountLabel, FilesContentResultsView, FilesSearchModeToggle, useFilesContentSearch, type FileSearchMode } from "./FilesPanelContentResults";
 import { FilesPanelLineSelection, PreviewLineNumber, useFilePreviewLineSelection } from "./FilesPanelLineSelection";
+import { FilePreviewBlameGutter, FilePreviewBlameToggle, useFilePreviewBlame, type FilePreviewBlameLoader } from "./FilesPanelBlame";
 import type { FileSelectionPromptMode } from "../utils/filePreviewSelection";
 import { projectPathContextMenu } from "../utils/contextMenu";
 import { rememberedExpandedFolders, rememberExpandedFolders } from "../utils/filesPanelExpandedFolders";
@@ -192,6 +193,8 @@ export type FilesPanelProps = {
     content: string,
     expectedDigest: string,
   ) => boolean;
+  /** Read-only Git blame for the source preview; omit to hide the Blame toggle. */
+  onLoadBlame?: FilePreviewBlameLoader;
 };
 
 interface SearchState {
@@ -246,6 +249,7 @@ export function FilesPanel({
   onOpenFile,
   onSaveFile,
   canSaveFile,
+  onLoadBlame,
 }: FilesPanelProps): React.JSX.Element {
   const { snapshot: gitSnapshot = null, loading: gitLoading = false, unavailable: gitUnavailable = false } = git ?? {};
   const gitIndex = useMemo(() => buildFileTreeGitIndex({ snapshot: gitSnapshot, loading: gitLoading, unavailable: gitUnavailable }), [gitSnapshot, gitLoading, gitUnavailable]);
@@ -380,6 +384,7 @@ export function FilesPanel({
     [preview, previewLanguage, renderedMarkdownPreview],
   );
   const previewPath = preview?.path ?? null;
+  const blame = useFilePreviewBlame({ preview, load: onLoadBlame, markdownPreview: renderedMarkdownPreview, untracked: preview ? gitIndex.files.get(preview.path)?.label === "Untracked" : false, renderedLines: renderedPreviewLines });
   const lineSelection = useFilePreviewLineSelection({
     preview,
     previewLines,
@@ -1072,6 +1077,7 @@ export function FilesPanel({
                   </button>
                 </div>
               )}
+              {preview && onLoadBlame && !showContentResults && <FilePreviewBlameToggle blame={blame} />}
               {preview && onSaveFile && !showContentResults && (
                 <IconButton
                   label={previewEditable
@@ -1149,7 +1155,7 @@ export function FilesPanel({
                   />
                 </div>
               ) : (
-                <pre ref={previewCodeRef} className={`${FILE_PREVIEW_CLASS}-code`} tabIndex={0} aria-label={`Contents of ${preview.path}`} onKeyDown={lineSelection.onCodeKeyDown}>
+                <pre ref={previewCodeRef} className={clsx(`${FILE_PREVIEW_CLASS}-code`, blame.enabled && "has-blame")} tabIndex={0} aria-label={`Contents of ${preview.path}`} onKeyDown={lineSelection.onCodeKeyDown}>
                   <code
                     className={clsx(
                       highlightedPreviewLines && "hljs",
@@ -1187,6 +1193,7 @@ export function FilesPanel({
                               } as CSSProperties
                             : undefined}
                         >
+                          {blame.enabled && <FilePreviewBlameGutter blame={blame} line={lineNumber} />}
                           <PreviewLineNumber line={lineNumber} className={`${FILE_PREVIEW_CLASS}-line-number`} selected={lineSelected} controller={lineSelection} />
                           {highlightedLine !== undefined
                             ? (

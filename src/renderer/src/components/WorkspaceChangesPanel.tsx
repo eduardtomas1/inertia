@@ -9,11 +9,14 @@ import {
   GitBranch,
   GitCommitHorizontal,
   Info,
+  Minus,
+  Plus,
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
 
 import type {
+  ChangedFile,
   DiffReviewNote,
   DiffReviewState,
   WorkspaceGitDiffSnapshot,
@@ -105,6 +108,18 @@ export interface WorkspaceChangesPanelProps extends ForwardedChangesProps {
   onActionError?: (message: string) => void;
   changesRequest?: WorkspaceChangesRequest | null;
   onChangesRequestHandled?: (revision: number) => void;
+}
+
+/** Matches the runtime's per-request path bound for `git.stage` / `git.unstage`. */
+const STAGING_BATCH_SIZE = 200;
+
+/** Unmerged paths are resolved in the terminal, never staged from this list. */
+function stageableFile(file: ChangedFile): boolean {
+  return file.unstaged && file.status !== "unmerged";
+}
+
+function unstageableFile(file: ChangedFile): boolean {
+  return file.staged && file.status !== "unmerged";
 }
 
 function repositoryStatus(repository: WorkspaceGitRepositorySnapshot): string {
@@ -612,6 +627,62 @@ export function WorkspaceChangesPanel({
     snapshot,
   ]);
 
+  const stagingRequestRef = useRef(false);
+  const [stagingPending, setStagingPending] = useState(false);
+  const stagingAvailable = Boolean(
+    activeRepository?.state === "ready"
+    && activeRepositoryAuthorityRef
+    && projectId
+    && run,
+  );
+  const stagingDisabled = stagingPending || Boolean(busyAction);
+  const changeIndex = useCallback((
+    type: "git.stage" | "git.unstage",
+    paths: readonly string[],
+  ): void => {
+    if (
+      !activeRepository
+      || !activeRepositoryAuthorityRef
+      || !projectId
+      || !run
+      || paths.length === 0
+      || stagingRequestRef.current
+    ) return;
+    stagingRequestRef.current = true;
+    setStagingPending(true);
+    const repositoryPath = activeRepository.repositoryPath;
+    const authorityRef = activeRepositoryAuthorityRef;
+    void (async () => {
+      try {
+        for (let index = 0; index < paths.length; index += STAGING_BATCH_SIZE) {
+          await run(type, {
+            type,
+            payload: {
+              projectId,
+              conversationId,
+              repositoryPath,
+              authorityRef,
+              paths: paths.slice(index, index + STAGING_BATCH_SIZE),
+            },
+          });
+        }
+      } catch {
+        // The runtime command surface presents the Git error.
+      } finally {
+        stagingRequestRef.current = false;
+        setStagingPending(false);
+        onRefresh();
+      }
+    })();
+  }, [
+    activeRepository,
+    activeRepositoryAuthorityRef,
+    conversationId,
+    onRefresh,
+    projectId,
+    run,
+  ]);
+
   const [mergeDialogRequest, setMergeDialogRequest] = useState<MergeDialogRequest | null>(null);
   const scopeNavigator = useMemo(() => {
     if (!snapshot || !activeRepository) return undefined;
@@ -817,18 +888,41 @@ export function WorkspaceChangesPanel({
     const workingFiles = activeRepository.files.filter(
       (file) => !file.staged || file.unstaged,
     );
-    const groups = stagedFiles.length > 0
+    const groups = stagedFiles.length > 0 || stagingAvailable
       ? [
-          { label: "Staged", files: stagedFiles },
-          { label: "Changes", files: workingFiles },
+          { label: "Staged", files: stagedFiles, index: "staged" as const },
+          { label: "Changes", files: workingFiles, index: "working" as const },
         ]
-      : [{ label: null, files: workingFiles }];
+      : [{ label: null, files: workingFiles, index: "working" as const }];
+    const allStageable = activeRepository.files.filter(stageableFile).map(({ path }) => path);
+    const allUnstageable = activeRepository.files.filter(unstageableFile).map(({ path }) => path);
     return (
       <nav className="changes-file-list workspace-repository-list" aria-label="Git repositories and changed files">
         <ul className="workspace-repository-files workspace-repository-flat-files" role="list">
           {groups.flatMap((group) => [
             ...(group.label && group.files.length > 0
-              ? [<li className="workspace-change-section-heading" key={`heading:${group.label}`}>{group.label}<span>{group.files.length}</span></li>]
+              ? [<li className="workspace-change-section-heading" key={`heading:${group.label}`}>
+                  <span className="workspace-change-section-title">{group.label}<span>{group.files.length}</span></span>
+                  {stagingAvailable && (group.index === "staged"
+                    ? allUnstageable.length > 0 && (
+                        <button
+                          type="button"
+                          className="text-button workspace-change-section-action"
+                          aria-label={`Unstage all ${allUnstageable.length} staged ${allUnstageable.length === 1 ? "file" : "files"} in ${label}`}
+                          disabled={stagingDisabled}
+                          onClick={() => changeIndex("git.unstage", allUnstageable)}
+                        >Unstage all</button>
+                      )
+                    : allStageable.length > 0 && (
+                        <button
+                          type="button"
+                          className="text-button workspace-change-section-action"
+                          aria-label={`Stage all ${allStageable.length} changed ${allStageable.length === 1 ? "file" : "files"} in ${label}`}
+                          disabled={stagingDisabled}
+                          onClick={() => changeIndex("git.stage", allStageable)}
+                        >Stage all</button>
+                      ))}
+                </li>]
               : []),
             ...group.files.map((file) => {
               const language = sourceLanguageForFile(file.path);
@@ -841,6 +935,13 @@ export function WorkspaceChangesPanel({
                 ? workspaceGitIdentity(effectiveSelection) === workspaceGitIdentity(identity)
                 : false;
               const { name, parent } = changedFilePathParts(file.path);
+              const canStageFile = stagingAvailable && !stagingDisabled && stageableFile(file);
+              const canUnstageFile = stagingAvailable && !stagingDisabled && unstageableFile(file);
+              const rowIndexAction = !stagingAvailable
+                ? null
+                : group.index === "staged"
+                  ? unstageableFile(file) ? "git.unstage" as const : null
+                  : stageableFile(file) ? "git.stage" as const : null;
               const menu = openPath !== null && projectId && projectRoot
                 ? projectPathContextMenu<HTMLButtonElement>("diff-file", {
                     projectId,
@@ -848,6 +949,8 @@ export function WorkspaceChangesPanel({
                     projectRoot,
                     relativePath: openPath,
                     open: () => onOpenWorkspaceFile(openPath),
+                    ...(canStageFile ? { stage: () => changeIndex("git.stage", [file.path]) } : {}),
+                    ...(canUnstageFile ? { unstage: () => changeIndex("git.unstage", [file.path]) } : {}),
                   })
                 : undefined;
               return (
@@ -865,6 +968,18 @@ export function WorkspaceChangesPanel({
                     <span className="workspace-repository-file-copy"><strong title={file.path}>{name}</strong>{parent && <small>{parent}</small>}</span>
                     <span className="workspace-repository-file-stats"><span><b>+{file.insertions}</b><i>−{file.deletions}</i></span></span>
                   </button>
+                  <span className="workspace-repository-row-actions">
+                  {rowIndexAction && (
+                    <TooltipButton
+                      className="icon-button workspace-repository-index-action"
+                      aria-label={`${rowIndexAction === "git.stage" ? "Stage" : "Unstage"} ${file.path} in ${label}`}
+                      tooltip={rowIndexAction === "git.stage" ? `Stage ${file.path}` : `Unstage ${file.path}`}
+                      disabled={stagingDisabled}
+                      onClick={() => changeIndex(rowIndexAction, [file.path])}
+                    >
+                      {rowIndexAction === "git.stage" ? <Plus size={14} /> : <Minus size={14} />}
+                    </TooltipButton>
+                  )}
                   <TooltipButton
                     className="icon-button"
                     aria-label={`Open ${file.path} from ${label}`}
@@ -874,6 +989,7 @@ export function WorkspaceChangesPanel({
                   >
                     <ExternalLink size={14} />
                   </TooltipButton>
+                  </span>
                 </li>
               );
             }),
@@ -882,7 +998,7 @@ export function WorkspaceChangesPanel({
         {activeRepository.truncated && <p className="workspace-repository-warning">Status is truncated; some changed files are not shown.</p>}
       </nav>
     );
-  }, [activeRepository, conversationId, effectiveSelection, onOpenWorkspaceFile, projectId, projectName, projectRoot, snapshot]);
+  }, [activeRepository, changeIndex, conversationId, effectiveSelection, onOpenWorkspaceFile, projectId, projectName, projectRoot, snapshot, stagingAvailable, stagingDisabled]);
 
   const compactNavigator = useMemo(() => {
     if (!snapshot || snapshot.files === 0 || !effectiveSelection) return undefined;
@@ -1027,6 +1143,7 @@ export function WorkspaceChangesPanel({
           diffParsing={commitDiffLoading || parsedCommitDiff.parsing}
           diffError={commitDiffError ?? parsedCommitDiff.error}
           busy={busyAction === "git.commit" || busyAction === "git.push"}
+          reviewSummary={nestedRepository ? null : summary?.overall ?? null}
           onClose={() => {
             commitDiffRequestRef.current += 1;
             setCommitDialogOpen(false);

@@ -509,3 +509,17 @@ describe("global message search authority", () => {
     }
   });
 });
+
+describe("detached chat Git history", () => {
+  it("keeps history, commit details and blame main-window only", () => {
+    const payload = { projectId: PROJECT, conversationId: CONVERSATION };
+    for (const command of [
+      { type: "git.log", requestId: REQUEST, payload },
+      { type: "git.commit.show", requestId: REQUEST, payload: { ...payload, sha: "abc1234" } },
+      { type: "git.blame", requestId: REQUEST, payload: { ...payload, path: "a.txt" } },
+    ] satisfies ClientCommand[]) {
+      expect(rejection(command)).toBe("That request is unavailable in a detached chat.");
+      expect(mainRejection(command)).toBeNull();
+    }
+  });
+});

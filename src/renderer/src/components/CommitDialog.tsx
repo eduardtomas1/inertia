@@ -1,5 +1,5 @@
-import { CloudUpload, GitCommitHorizontal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { CloudUpload, GitCommitHorizontal, Pencil } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   DiffReviewState,
   GitDiffSnapshot,
@@ -14,6 +14,12 @@ import {
   type CommandWithoutId,
 } from "../lib/runtimeCommands";
 import { unreviewedCommitHunks } from "../lib/commitReview";
+import {
+  COMMIT_MESSAGE_MAX_LENGTH,
+  COMMIT_SUBJECT_SOFT_LIMIT,
+  commitSubject,
+  draftCommitMessage,
+} from "../lib/commitMessageDraft";
 import { captureModalFocus } from "../utils/modalFocus";
 import { DialogShell } from "./DialogShell";
 import { LoadingMark } from "./ui";
@@ -27,9 +33,15 @@ export type CommitDialogProps = {
   diffError: string | null;
   reviewStates: DiffReviewState[];
   busy: boolean;
+  /** Overall text of the chat's review summary; used only to draft locally. */
+  reviewSummary?: string | null;
   onClose: () => void;
   onCommit: (message: string, push: boolean, paths: string[]) => Promise<void>;
 };
+
+const submitShortcutLabel = typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+  ? "⌘Enter"
+  : "Ctrl+Enter";
 
 export type RootCommitDialogProps = {
   owner: string;
@@ -37,6 +49,7 @@ export type RootCommitDialogProps = {
   status: GitStatusSnapshot | null;
   reviewStates: DiffReviewState[];
   busy: boolean;
+  reviewSummary?: string | null;
   loadReview: () => Promise<GitDiffSnapshot | null>;
   discardReview: () => void;
   onClose: () => void;
@@ -92,6 +105,7 @@ export function RootCommitDialog({
   status,
   reviewStates,
   busy,
+  reviewSummary = null,
   loadReview,
   discardReview,
   onClose,
@@ -185,6 +199,7 @@ export function RootCommitDialog({
         ? "Diff truncated. Refresh before committing."
         : parsed.error}
       busy={busy}
+      reviewSummary={reviewSummary}
       onClose={close}
       onCommit={async (...args) => {
         setReview(null);
@@ -201,12 +216,14 @@ export function RootCommitDialog({
   );
 }
 
-export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, diffError, reviewStates, busy, onClose, onCommit }: CommitDialogProps): React.JSX.Element | null {
+export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, diffError, reviewStates, busy, reviewSummary = null, onClose, onCommit }: CommitDialogProps): React.JSX.Element | null {
   const [message, setMessage] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messageId = useId();
+  const messageHintId = useId();
   useNativePreviewSuspension(open);
   useEffect(() => {
     if (!open) return;
@@ -241,6 +258,13 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
     [diff, repositoryPath, reviewStates, selectedPaths],
   );
   if (!open) return null;
+  const draft = draftCommitMessage({
+    summary: reviewSummary,
+    files: status?.files ?? [],
+    selectedPaths,
+  });
+  const subjectLength = commitSubject(message).length;
+  const subjectTooLong = subjectLength > COMMIT_SUBJECT_SOFT_LIMIT;
   const reviewUnavailable = diffParsing || diffError !== null;
   const locked = busy || submitting;
   const submit = async (push: boolean) => {
@@ -297,7 +321,51 @@ export function CommitDialog({ open, repositoryPath, status, diff, diffParsing, 
       {diffParsing && <p className="commit-stage-note" role="status">Preparing the complete diff before commit…</p>}
       {diffError && <p className="commit-review-warning" role="alert">The complete diff could not be prepared: {diffError}</p>}
       {unreviewedHunks.length > 0 && <p className="commit-review-warning">{unreviewedHunks.length} selected {unreviewedHunks.length === 1 ? "hunk is" : "hunks are"} unreviewed.</p>}
-      <label className="dialog-field"><span>Commit message</span><input ref={inputRef} value={message} maxLength={10_000} placeholder="Describe this change" onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) void submit(false); }} /></label>
+      <div className="dialog-field commit-message-field">
+        <div className="commit-message-heading">
+          <label htmlFor={messageId}>Commit message</label>
+          <button
+            type="button"
+            className="text-button"
+            disabled={locked || !draft}
+            title={message.trim()
+              ? "Replace the current message with a draft from the review summary or selected files"
+              : "Draft a message from the review summary or selected files"}
+            onClick={() => {
+              setMessage(draft);
+              inputRef.current?.focus();
+            }}
+          >
+            <Pencil size={14} aria-hidden="true" />{message.trim() ? "Replace with draft" : "Draft message"}
+          </button>
+        </div>
+        <textarea
+          id={messageId}
+          ref={inputRef}
+          value={message}
+          rows={5}
+          maxLength={COMMIT_MESSAGE_MAX_LENGTH}
+          placeholder={"Summary line\n\nOptional details"}
+          aria-describedby={messageHintId}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (
+              event.key !== "Enter"
+              || !(event.metaKey || event.ctrlKey)
+              || event.nativeEvent.isComposing
+            ) return;
+            event.preventDefault();
+            void submit(false);
+          }}
+        />
+        <p id={messageHintId} className="commit-message-hint">
+          <span className={subjectTooLong ? "commit-subject-length is-over" : "commit-subject-length"}>
+            Subject {subjectLength}/{COMMIT_SUBJECT_SOFT_LIMIT}
+            {subjectTooLong && <span className="visually-hidden"> characters, longer than recommended</span>}
+          </span>
+          <span>First line is the subject; leave a blank line before details. {submitShortcutLabel} commits.</span>
+        </p>
+      </div>
     </DialogShell>
   );
 }

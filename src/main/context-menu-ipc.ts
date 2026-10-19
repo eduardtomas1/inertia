@@ -82,8 +82,19 @@ export function contextMenuEntries(
         { label: "Copy code", action: "copy-code" },
       ];
     case "project-link":
-    case "diff-file":
       return pathEntries(platform, true);
+    case "diff-file":
+      return [
+        ...pathEntries(platform, true),
+        // Index changes are main-window Git mutations; detached chats cannot run them.
+        ...(context.role === "main" && (request.stageable || request.unstageable)
+          ? [
+              SEPARATOR,
+              ...(request.stageable ? [{ label: "Stage", action: "git-stage" } as const] : []),
+              ...(request.unstageable ? [{ label: "Unstage", action: "git-unstage" } as const] : []),
+            ]
+          : []),
+      ];
     case "file":
       return pathEntries(platform, !request.directory);
     case "terminal":

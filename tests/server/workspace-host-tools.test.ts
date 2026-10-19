@@ -21,6 +21,7 @@ import {
   WORKSPACE_TOOL_DEFINITIONS,
   type WorkspaceHostToolDependencies,
 } from "../../src/server/runtime/workspace-host-tools";
+import { workspaceCommand, workspaceText } from "../../src/server/runtime/workspace-host-tool-text";
 import { TurnGitArtifactManager } from "../../src/server/turn-git-artifacts";
 import type { AgentTurn } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -201,6 +202,41 @@ describe("inertia.workspace definitions", () => {
       digests.add(registry.manifest().definitionDigest);
     }
     expect(digests.size).toBe(2);
+  });
+});
+
+describe("workspace path redaction", () => {
+  const windows = { roots: ["C:\\a\\_temp\\ws"], homeDirectory: "C:\\Users\\me", platform: "win32" as const };
+  const posix = { roots: ["/srv/u/ws"], homeDirectory: "/srv/home/me", platform: "linux" as const };
+  const text = (value: string, scope: Parameters<typeof workspaceText>[2]) => workspaceText(value, 4_096, scope).text;
+
+  it.each([
+    ["a backslash root", "see C:\\a\\_temp\\ws\\src\\x.ts:12", "see <workspace>/src/x.ts:12"],
+    ["mixed separators", "C:/a\\_temp/ws\\dist/out.js", "<workspace>/dist/out.js"],
+    ["another drive-letter and name case", "c:\\A\\_TEMP\\WS\\file.txt", "<workspace>/file.txt"],
+    ["doubled (JSON-escaped) backslashes", "\"C:\\\\a\\\\_temp\\\\ws\\\\x.ts\"", "\"<workspace>/x.ts\""],
+    ["a separator run after the root", "C:\\a\\_temp\\ws\\\\/nested", "<workspace>/nested"],
+    ["the bare root", "cd C:\\a\\_temp\\ws", "cd <workspace>"],
+    ["the home directory", "C:\\USERS\\ME\\.npmrc", "<home>/.npmrc"],
+  ])("recognises the Windows workspace root in %s", (_name, input, expected) => {
+    expect(text(input, windows)).toBe(expected);
+  });
+
+  it("matches a configured root with a trailing separator, and in commands", () => {
+    expect(text("C:\\a\\_temp\\ws\\b", { ...windows, roots: ["C:\\a\\_temp\\ws\\"] })).toBe("<workspace>/b");
+    expect(workspaceCommand("deploy C:\\a\\_temp\\ws/dist", 1_024, windows).text).toBe("deploy <workspace>/dist");
+  });
+
+  it("does not match a root that is only a prefix of another folder name", () => {
+    expect(text("C:\\a\\_temp\\ws2\\file", windows)).toBe("C:\\a\\_temp\\ws2\\file");
+    expect(text("D:\\C:\\a\\_temp\\ws", windows)).not.toContain("<workspace>");
+    expect(text("/srv/u/ws2/file and /srv/u/ws-old", posix)).toBe("/srv/u/ws2/file and /srv/u/ws-old");
+  });
+
+  it("keeps POSIX matching case-sensitive and backslashes literal", () => {
+    expect(text("/srv/u/ws/src/a.ts:3 and /srv/u/ws//b", posix)).toBe("<workspace>/src/a.ts:3 and <workspace>/b");
+    expect(text("/SRV/u/ws/a", posix)).toBe("/SRV/u/ws/a");
+    expect(text("C:\\a\\_temp\\ws\\x", { ...windows, platform: "linux" })).toBe("C:\\a\\_temp\\ws\\x");
   });
 });
 

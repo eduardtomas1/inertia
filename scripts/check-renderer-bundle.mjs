@@ -84,7 +84,17 @@ const budgets = {
   // including the 139 terminal bytes above).
   // Tools-offer wave 2 polish: content results in the Files main area and
   // the Attachments gallery tile fix add 3 bytes (903,528 measured on Linux x64).
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 7_975 + 139 + 5_485 + 3,
+  // Tools-offer wave 4: diff readability (the Changes view-mode prop and its
+  // per-chat scope) adds 94 bytes to this route, measured on Linux x64 with
+  // and without the change on the same tree.
+  // Tools-offer wave 4: commit authoring and staging, history and blame, and
+  // the worktree list add 1,902 bytes to this route (905,524 measured on Linux
+  // x64 against 903,528 at 4e73ea07, including the 94 diff readability bytes
+  // above).
+  // Tools-offer wave 4 polish: the split-view file strip and per-column
+  // scrollers, the row actions cluster, the narrower blame gutter and the
+  // Main checkout label add 57 bytes (905,581 measured on Linux x64).
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 7_975 + 139 + 5_485 + 3 + 94 + 1_902 + 57,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -98,7 +108,11 @@ const budgets = {
   // from messages and plan steps, and attachment re-attach add 2,299 bytes to
   // this route (684,935 measured on Linux x64 against 682,589 at be447f83,
   // including the 47 terminal bytes above).
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 596 + 47 + 2_299,
+  // Tools-offer wave 4: diff readability adds 20 bytes to this route.
+  // Tools-offer wave 4: commit authoring and staging, history and blame, and
+  // the worktree list add 186 bytes to this route (685,141 measured on Linux
+  // x64 against 684,935 at 4e73ea07, including the 20 bytes above).
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 596 + 47 + 2_299 + 20 + 186,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The terminal find bar's floating rules add 781 bytes.
@@ -109,7 +123,15 @@ const budgets = {
   // the 158 bytes of earlier headroom).
   // Tools-offer wave 2 polish: content results in the Files main area and
   // the Attachments gallery tile fix add 1,443 bytes (246,196 measured on Linux x64).
-  entryCss: 241_004 + 256 + 781 + 2_712 + 1_443,
+  // Tools-offer wave 4: diff readability (intraline marks, the Unified | Split
+  // toggle and the split grid) adds 2,263 bytes, measured on Linux x64.
+  // Tools-offer wave 4: commit authoring and staging, history and blame, and
+  // the worktree list add 915 bytes (249,374 measured on Linux x64 against
+  // 246,196 at 4e73ea07, including the 2,263 diff readability bytes above).
+  // Tools-offer wave 4 polish: the split-view file strip and per-column
+  // scrollers, the row actions cluster, the narrower blame gutter and the
+  // Main checkout label add 2,896 bytes (252,270 measured on Linux x64).
+  entryCss: 241_004 + 256 + 781 + 2_712 + 1_443 + 2_263 + 915 + 2_896,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -139,7 +161,14 @@ const budgets = {
   // chunk add 2 bytes (21,128 measured against 21,126 on main).
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 2,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
-  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
+  // Tools-offer wave 4: commit authoring and staging, history and blame, and
+  // the worktree list add 6,436 bytes to this chunk, the Project settings
+  // worktree section (23,569 measured on Linux x64 against 17,133 at
+  // 4e73ea07); raise the cap by the 5,911-byte overflow.
+  // Tools-offer wave 4 polish: the split-view file strip and per-column
+  // scrollers, the row actions cluster, the narrower blame gutter and the
+  // Main checkout label add 289 bytes (23,858 measured on Linux x64).
+  deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 5_911 + 289,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   deferredThreadActionsJavaScript: 8 * kibibyte + 75,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
@@ -152,7 +181,14 @@ const budgets = {
   // raise the cap by the 672-byte overflow.
   // Tools-offer wave 2 polish: content results in the Files main area and
   // the Attachments gallery tile fix add 1,597 bytes (120,029 measured on Linux x64).
-  filesFirstLoadJavaScript: 115 * kibibyte + 672 + 1_597,
+  // Tools-offer wave 4: diff readability adds 55 bytes to this closure.
+  // Tools-offer wave 4: commit authoring and staging, history and blame, and
+  // the worktree list add 6,709 bytes to this closure (126,793 measured on
+  // Linux x64 against 120,029 at 4e73ea07, including the 55 bytes above).
+  // Tools-offer wave 4 polish: the split-view file strip and per-column
+  // scrollers, the row actions cluster, the narrower blame gutter and the
+  // Main checkout label add 394 bytes (127,187 measured on Linux x64).
+  filesFirstLoadJavaScript: 115 * kibibyte + 672 + 1_597 + 55 + 6_709 + 394,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
@@ -240,7 +276,17 @@ const budgets = {
   // the Attachments gallery tile fix add 1,424 bytes (2,348,074 measured on Linux x64).
   // Tools-offer wave 3: the managed context-read access value in the shared
   // contracts adds 10 core bytes (2,348,084 measured on Linux x64).
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 9_887 + 1_199 + 19_710 + 1_424 + 10,
+  // Tools-offer wave 4: diff readability (diff syntax highlighting, the bounded
+  // intraline word diff and the split view) adds 8,714 core bytes, measured on
+  // Linux x64 with and without the change on the same tree.
+  // Tools-offer wave 4: commit authoring and staging, history and blame, and
+  // the worktree list add 22,367 core bytes (2,379,165 measured on Linux x64
+  // against 2,348,084 at 4e73ea07, including the 8,714 diff readability
+  // bytes above).
+  // Tools-offer wave 4 polish: the split-view file strip and per-column
+  // scrollers, the row actions cluster, the narrower blame gutter and the
+  // Main checkout label add 3,470 bytes (2,382,635 measured on Linux x64).
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 9_887 + 1_199 + 19_710 + 1_424 + 10 + 8_714 + 22_367 + 3_470,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

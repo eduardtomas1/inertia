@@ -11685,3 +11685,132 @@ html[data-chat-drag] * {
 .file-back-to-results { display: inline-flex; min-height: var(--control-height-small); align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font-size: var(--text-sm); white-space: nowrap; }
 .file-back-to-results:hover { color: var(--text); background: var(--fill); }
 .file-back-to-results:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* Tools-offer wave 4: diff readability (syntax, intraline emphasis, split view). */
+:root {
+  --diff-addition-emphasis: color-mix(in srgb, var(--status-completed) 30%, transparent);
+  --diff-deletion-emphasis: color-mix(in srgb, var(--status-failed) 28%, transparent);
+}
+.diff-view-toggle { display: inline-flex; align-items: center; padding: 1px; border: 1px solid var(--line-soft); border-radius: var(--radius-xs); font-family: var(--font-sans); }
+.diff-view-toggle > button { min-height: calc(var(--control-height-small) - 4px); padding: 0 7px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font: 500 var(--text-xs)/var(--leading-chrome) var(--font-sans); white-space: nowrap; }
+.diff-view-toggle > button:hover:not(:disabled) { color: var(--text); background: var(--fill); }
+.diff-view-toggle > button[aria-pressed="true"] { color: var(--text); background: var(--fill-strong); }
+.diff-view-toggle > button:disabled { cursor: default; opacity: var(--disabled-opacity); }
+.diff-view-toggle > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.diff-code mark.diff-intraline { padding: 0; border-radius: 2px; color: inherit; background: transparent; }
+.diff-code .diff-line.is-addition mark.diff-intraline { background: var(--diff-addition-emphasis); }
+.diff-code .diff-line.is-deletion mark.diff-intraline { background: var(--diff-deletion-emphasis); }
+.diff-code.is-split .diff-hunk,
+.diff-code.is-split .diff-line { min-width: 0; }
+.diff-split-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.diff-code .diff-line.diff-split-cell { min-width: 0; grid-template-columns: 34px 18px minmax(0, 1fr); }
+.diff-code .diff-line.diff-split-context { min-width: 0; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.diff-split-half { display: grid; min-width: 0; grid-template-columns: 34px 18px minmax(0, 1fr); }
+.diff-split-row > [data-side="old"],
+.diff-split-half[data-side="old"] { border-right: 1px solid var(--line-soft); }
+.diff-split-placeholder { min-height: 100%; background: var(--fill); }
+.diff-code.is-split .diff-line-content { white-space: pre; }
+.diff-split-clip { min-width: 0; overflow: hidden; }
+.diff-split-clip > .diff-line-content { display: block; width: max-content; min-width: 100%; }
+.diff-split-body [data-side="old"] .diff-split-clip > .diff-line-content { transform: translateX(calc(var(--diff-scroll-old, 0px) * -1)); }
+.diff-split-body [data-side="new"] .diff-split-clip > .diff-line-content { transform: translateX(calc(var(--diff-scroll-new, 0px) * -1)); }
+.diff-split-scrollbars { position: sticky; z-index: 2; bottom: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--surface-raised); }
+.diff-split-scroll-gutter { display: grid; min-width: 0; grid-template-columns: 52px minmax(0, 1fr); }
+.diff-split-scroller { grid-column: 2; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.diff-split-scroller > div { height: 1px; }
+.diff-split-scroller:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.changes-layout.is-split-view { display: flex; flex-direction: column; }
+.changes-split-files { display: flex; min-width: 0; min-height: 36px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 2px 10px 2px 8px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.changes-split-files-toggle { display: inline-flex; min-height: var(--control-height-small); flex: 0 0 auto; align-items: center; gap: 5px; padding: 0 8px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font: 500 var(--text-sm)/var(--leading-chrome) var(--font-sans); white-space: nowrap; }
+.changes-split-files-toggle:hover, .changes-split-files-toggle[aria-expanded="true"] { color: var(--text); background: var(--fill); }
+.changes-split-files-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.changes-split-files-current { display: flex; min-width: 0; align-items: baseline; gap: 6px; overflow: hidden; color: var(--text-muted); font-size: var(--text-sm); white-space: nowrap; }
+.changes-split-files-current strong { overflow: hidden; color: var(--text); font-weight: 500; text-overflow: ellipsis; }
+.changes-split-files-current small { overflow: hidden; font-size: var(--text-xs); text-overflow: ellipsis; }
+.changes-split-body { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; }
+.changes-split-body > .changes-diff { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+.changes-split-files-overlay { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; display: flex; width: min(340px, 85%); flex-direction: column; background: var(--surface); box-shadow: var(--shadow-float); }
+.changes-split-files-overlay > * { min-height: 0; flex: 1; }
+@media (forced-colors: active) {
+  .diff-code mark.diff-intraline { text-decoration: underline; }
+}
+
+/* Commit message authoring and per-file staging (Changes panel). */
+.commit-message-field textarea {
+  min-height: calc(var(--control-height) * 3);
+  line-height: var(--leading-chrome);
+  white-space: pre-wrap;
+}
+
+.commit-message-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.commit-message-heading .text-button {
+  display: inline-flex;
+  min-height: var(--control-height-small);
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.commit-message-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
+.commit-subject-length {
+  font-variant-numeric: tabular-nums;
+}
+
+.commit-subject-length.is-over {
+  color: var(--warning);
+}
+
+.workspace-change-section-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.workspace-repository-files > .workspace-change-section-heading .workspace-change-section-action {
+  min-height: var(--control-height-small);
+  padding: 0 6px;
+  font-size: var(--text-xs);
+}
+
+/* Row actions sit side by side in one right-aligned cluster; only the cluster
+   is positioned, so Stage/Unstage never stacks under Open. */
+.workspace-repository-files .workspace-repository-row-actions {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transform: translateY(-50%);
+}
+
+.workspace-repository-files .workspace-repository-row-actions .icon-button {
+  position: static;
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+/* The ring itself comes from the shared :focus-visible rule; inset it and
+   lift the focused button so its adjacent sibling cannot paint over it. */
+.workspace-repository-files .workspace-repository-row-actions .icon-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  outline-offset: -2px;
+}

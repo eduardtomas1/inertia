@@ -55,6 +55,7 @@ import type {
   WorkspaceGitDiffSnapshot,
   WorkspaceGitSnapshot,
 } from "./git";
+import type { GitBlamePage, GitCommitDetail, GitLogPage } from "./git-history";
 import type {
   GitBranchInfo,
   ProjectAction,
@@ -198,6 +199,9 @@ export type ServerEvent =
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "git.pr.confidence"; confidence: GitPreMergeConfidence }
+        | { kind: "git.log"; page: GitLogPage }
+        | { kind: "git.commit.show"; commit: GitCommitDetail }
+        | { kind: "git.blame"; blame: GitBlamePage }
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
         | ({ kind: "workspace.search.content" } & WorkspaceContentSearchPage)
         | {
@@ -233,6 +237,8 @@ export type ServerEvent =
         | { kind: "usage.reset.outcome"; outcome: UsageResetOutcome }
         | { kind: "usage.dashboard"; dashboard: UsageDashboard }
         | { kind: "daily.work"; dashboard: DailyWorkDashboard }
+        | { kind: "worktree.list"; list: import("../worktrees").WorktreeList }
+        | { kind: "worktree.action"; outcome: import("../worktrees").WorktreeActionOutcome }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }
         | {
             kind: "agent.skills";

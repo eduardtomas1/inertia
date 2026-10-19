@@ -192,7 +192,9 @@ function plainCommand(action: { id: string; command: string }): string {
   const quoted = action.command.match(/"(?:[^"\\]|\\.)*"/gu) ?? [];
   try {
     return quoted.map((part) => JSON.parse(part) as string)
-      .map((argument) => /^[^\s"'\\]+$/u.test(argument) ? argument : JSON.stringify(argument))
+      // Quote only arguments a shell would split, and never escape backslashes:
+      // a doubled Windows separator would hide the path from the redactor.
+      .map((argument) => /^[^\s"']+$/u.test(argument) ? argument : `"${argument.replaceAll("\"", "\\\"")}"`)
       .join(" ");
   } catch {
     return action.command;

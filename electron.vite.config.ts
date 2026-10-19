@@ -187,7 +187,7 @@ export default defineConfig({
               "MascotSettings", "IssueReportSettings", "DiagnosticsSettings", "ProjectSettings", "CliConversationImportDialog", "ConversationActionsMenu", "PreMergeConfidenceLauncher", "TerminalPanel", "PreviewPanel",
               "ProviderAuthDialog", "ProviderMaintenanceNotice", "ComposerQueuedActions", "ComposerSendActions",
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
-              "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
+              "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "iconRegion", "pdf", "xlsx",
               "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
               "WelcomeGuide", "SnapshotSettings", "SnapshotControl", "AttachmentStorageSettings", "WorkspaceHeaderActions", "OrbCanvas", "ProjectCustomizePanel", "project-color-contrast",
             ]);
@@ -196,6 +196,7 @@ export default defineConfig({
           },
           manualChunks(id) {
             const normalizedId = id.replaceAll("\\", "/");
+            if (normalizedId.endsWith("/node_modules/morphicons/dist/region.js")) return "iconRegion";
             if (normalizedId.includes("/node_modules/morphicons/")) {
               return "morphicons";
             }

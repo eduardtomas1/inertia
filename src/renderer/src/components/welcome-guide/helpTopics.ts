@@ -71,7 +71,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Access modes",
-        detail: "Supervised keeps provider approvals, Auto-accept edits allows supported file edits, and Full access lets the agent act without asking. Choose Full access only for a workspace and task you trust.",
+        detail: "Supervised keeps provider approvals, Auto-accept edits allows supported file edits, and Full access lets the agent act without asking. Choose Full access only for a workspace and task you trust. Antigravity can't pause for approval, so Supervised runs there as Auto-accept edits, which edits files and refuses commands.",
       },
       {
         name: "Welcome guide",

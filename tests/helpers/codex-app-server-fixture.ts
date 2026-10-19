@@ -642,7 +642,7 @@ if (message.method === "turn/start") {
     : approvalMethod === "applyPatchApproval"
       ? { conversationId: approvalThreadId, callId: "change-1", fileChanges: { "src/example.ts": { type: "add", content: "export {};" } }, grantRoot: process.cwd(), reason: "Write the requested file" }
     : approvalMethod === "item/fileChange/requestApproval"
-    ? { threadId: approvalThreadId, turnId, itemId: "change-1", startedAtMs: Date.now(), reason: "Write the requested file", grantRoot: process.cwd() }
+    ? { threadId: approvalThreadId, turnId, itemId: "change-1", startedAtMs: Date.now(), reason: "Write the requested file", grantRoot: process.env.INERTIA_APP_SERVER_SCENARIO === "in-workspace-file-change" ? null : process.cwd() }
     : approvalMethod === "item/permissions/requestApproval"
       ? {
           threadId: approvalThreadId,

@@ -15,6 +15,7 @@ import type {
   ProviderId,
 } from "@shared/contracts";
 import { providerIdForHarness } from "../../../shared/model-routing";
+import { accessModeUnavailableReason } from "../../../shared/access-modes";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   composerRouteReadiness,
@@ -246,7 +247,11 @@ function MultiSpawnSideEditor({
             })}
           >
             {accessOptions.map((option) => (
-              <option value={option.value} key={option.value}>
+              <option
+                value={option.value}
+                key={option.value}
+                disabled={accessModeUnavailableReason(providerIdForHarness(side.selection.harnessId) ?? "", option.value) !== null}
+              >
                 {option.label}
               </option>
             ))}

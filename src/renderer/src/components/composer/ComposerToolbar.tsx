@@ -1,4 +1,4 @@
-import { lazy, Suspense, useContext, useId, useState } from "react";
+import { lazy, Suspense, useContext, useId } from "react";
 import {
   ChevronDown,
   Ellipsis,
@@ -37,7 +37,7 @@ import {
   usageQuotaSourceForSelection,
 } from "../../utils/usageDisplay";
 import { CheckoutBranchControlContext, CheckoutBranchSlot } from "../CheckoutBranchControl";
-import { layoutStorage } from "../../utils/layoutStorage";
+import { setComposerToolsOpen, useComposerToolsOpen } from "../../hooks/useComposerToolsOpen";
 import { ModelChooser } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
@@ -73,7 +73,6 @@ const ComposerMoreMenu = lazy(async () => ({
   default: (await import("./ComposerMoreMenu")).ComposerMoreMenu,
 }));
 
-const COMPOSER_TOOLS_STORAGE_KEY = "inertia:composer-tools:v1";
 const COMPOSER_TOOL_MENUS: ReadonlySet<string> = new Set(["presets", "stash", "action"]);
 
 export function composerCheckoutStrip({
@@ -283,7 +282,7 @@ export function ComposerToolbar({
       : Boolean(checkoutModel?.project.repositoryRoot),
   });
   const toolsId = useId();
-  const [toolsOpen, setToolsOpen] = useState(() => layoutStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open");
+  const toolsOpen = useComposerToolsOpen();
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
   const hasTools = promptPresetsEnabled || promptStashEnabled || actions.length > 0;
   return (
@@ -407,8 +406,7 @@ export function ComposerToolbar({
           onClick={() => {
             const next = !toolsVisible;
             if (!next && menu !== null && COMPOSER_TOOL_MENUS.has(menu)) dismissMenu("context-change");
-            setToolsOpen(next);
-            layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, next ? "open" : "closed");
+            setComposerToolsOpen(next);
           }}
         >
           <Ellipsis size={16} />

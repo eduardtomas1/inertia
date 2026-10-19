@@ -157,7 +157,7 @@ describe("durable project and thread organization", () => {
     // Exact shape written by builds that predate claudeMaxBudgetUsd.
     const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
       actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
-    const laterDefaults = { defaultAccessMode: null, color: null, colorEmphasis: "icon", pinned: false };
+    const laterDefaults = { defaultAccessMode: null, appUnderTestAccess: null, color: null, colorEmphasis: "icon", pinned: false };
     expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     store.close(); stores.splice(stores.indexOf(store), 1);
     const database = new Database(path);
@@ -166,6 +166,24 @@ describe("durable project and thread organization", () => {
     expect(reopened.project(project.id).preferences).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     reopened.updateProject(project.id, { preferences: { ...reopened.project(project.id).preferences!, claudeMaxBudgetUsd: 2.5 } });
     expect(reopened.project(project.id).preferences).toMatchObject({ autoPull: true, claudeMaxBudgetUsd: 2.5 });
+  });
+
+  it("defaults App under test access like Browser access and tolerates older or corrupt saved values", () => {
+    const defaults = defaultProjectPreferences();
+    expect(defaults.appUnderTestAccess).toBeNull();
+    for (const value of [null, true, false]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, appUnderTestAccess: value })).toMatchObject({ success: true, data: { appUnderTestAccess: value } });
+    }
+    for (const value of ["inherit", "true", 0, 1, {}]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, appUnderTestAccess: value }).success).toBe(false);
+    }
+    // Saved before the key existed: defaults to null (inherit, on) and keeps everything else.
+    const { appUnderTestAccess: _appUnderTestAccess, ...older } = { ...defaults, autoPull: true, browserAccess: false };
+    expect(parseProjectPreferences(JSON.stringify(older))).toEqual({ ...older, appUnderTestAccess: null });
+    // A corrupt value is dropped to its default without losing the other preferences.
+    expect(parseProjectPreferences(JSON.stringify({ ...defaults, autoPull: true, appUnderTestAccess: "yes" })))
+      .toEqual({ ...defaults, autoPull: true, appUnderTestAccess: null });
+    expect(parseProjectPreferences(JSON.stringify({ ...defaults, appUnderTestAccess: false })).appUnderTestAccess).toBe(false);
   });
 
   it("accepts only the known access modes as the project's default access, inheriting by default", () => {

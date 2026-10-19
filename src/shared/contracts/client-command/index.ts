@@ -3,6 +3,7 @@ import { issueReportCommandSchemas } from "./issue-report";
 import { cliConversationCommandSchemas } from "./cli-conversations";
 
 import { agentCommandSchemas } from "./agent";
+import { appUnderTestCommandSchemas } from "./app-under-test";
 import {
   appCommandSchemas,
   configurationCommandSchemas,
@@ -24,6 +25,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...updatesCommandSchemas,
   ...gitCommandSchemas,
   ...workspaceCommandSchemas,
+  ...appUnderTestCommandSchemas,
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

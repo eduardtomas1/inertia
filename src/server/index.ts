@@ -102,6 +102,7 @@ import {
 } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
+import { createAppUnderTestRuntimeWiring } from "./runtime/app-under-test/runtime-wiring";
 import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
@@ -682,12 +683,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       systemBootId: options.systemBootId,
     },
   );
+  // App-under-test processes belong to this runtime, like terminals.
+  const appUnderTest = createAppUnderTestRuntimeWiring({ dataDirectory, store, closed: () => closed, broadcast, runtimeSync, send, onCleanupUnconfirmed: options.onOwnedProcessCleanupUnconfirmed });
+  const forgetConversationRuntimeState = (conversationId: string): void => {
+    privateConnectTranscriptCache.invalidateConversation(conversationId);
+    appUnderTest.forgetConversation(conversationId);
+  };
   agentThreads = createAgentThreadRuntime({
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
     agentBrowser: options.agentBrowser,
+    appUnderTest: appUnderTest.launches,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -721,6 +729,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
+      appUnderTest.commandHandler,
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
@@ -753,8 +762,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         deletedConversationIds,
         dataDirectory,
         rememberDeletedConversation,
-      forgetRemoteTranscript: (conversationId: string) =>
-          privateConnectTranscriptCache.invalidateConversation(conversationId),
+      forgetRemoteTranscript: forgetConversationRuntimeState,
+        clearAppUnderTestSession: appUnderTest.clearConversation,
         broadcastSnapshot: flushSnapshot,
         publicError,
         send,
@@ -819,8 +828,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         secureFileAuthorities,
         workspacePath,
         rememberDeletedConversation,
-      forgetRemoteTranscript: (conversationId: string) =>
-          privateConnectTranscriptCache.invalidateConversation(conversationId),
+      forgetRemoteTranscript: forgetConversationRuntimeState,
+        clearAppUnderTestSession: appUnderTest.clearConversation,
         broadcastSnapshot,
         reportTerminalProviderResumeRejection: (diagnostic) => {
           console.warn("Terminal provider resume rejected.", diagnostic);
@@ -1190,6 +1199,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             independentDrains: [
               () => shutdownTrace.observe("attachments", () => initializedConversationAttachments.close()),
               ({ deadlineAt }) => shutdownTrace.observe("terminals", () => terminals.disposeAll(deadlineAt)),
+              () => shutdownTrace.observe("app-under-test", () => appUnderTest.dispose()),
               () => shutdownTrace.observe("maintenance", () => providerMaintenance.dispose()),
             ],
             stopIsolatedRuns: () => shutdownTrace.observe("isolated-runs", () => isolatedRuns.dispose(cause)),

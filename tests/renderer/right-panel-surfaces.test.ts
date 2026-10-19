@@ -177,6 +177,14 @@ describe("right panel launcher shortcuts", () => {
     expect(RIGHT_PANEL_SURFACE_META.changes.shortcut).toBe("D");
     expect(RIGHT_PANEL_SURFACE_META.usage.shortcut).toBe("U");
     expect(RIGHT_PANEL_SURFACE_META.agents.shortcut).toBe("A");
+    expect(RIGHT_PANEL_SURFACE_META.app).toEqual({ label: "App", shortcut: "L" });
+  });
+
+  it("remembers the App surface with the chat's other surfaces", () => {
+    const state = withSurfaces(["preview", "terminal", "attachments", "app"], "app");
+    expect(parseRightPanelState(serializeRightPanelState(state))).toEqual(state);
+    expect(RIGHT_PANEL_SURFACES.indexOf("app")).toBe(RIGHT_PANEL_SURFACES.indexOf("attachments") + 1);
+    expect(surfaceShortcutActionForKey(actions, key("l"))?.surface).toBe("app");
   });
 
   it("matches available surfaces case-insensitively and ignores chords", () => {

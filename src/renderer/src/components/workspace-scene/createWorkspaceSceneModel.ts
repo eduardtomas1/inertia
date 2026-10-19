@@ -387,6 +387,9 @@ export function createWorkspaceSceneModel({
   if (!conversation) {
     unavailableSurfaces.preview ??= "Open a chat to use the Browser.";
   }
+  if (!persistedConversation || workspaceToolsUnavailable) {
+    unavailableSurfaces.app ??= "Available after the first message creates this chat's workspace.";
+  }
   const effectiveActiveTool = activeTool && !unavailableSurfaces[activeTool]
     ? activeTool
     : null;
@@ -785,6 +788,17 @@ export function createWorkspaceSceneModel({
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
       attachments: { attachments: environmentSummary.attachments },
+      app: {
+        conversationId: persistedConversation?.id ?? null,
+        status: connection.status,
+        // Only names and ids reach the surface; the runtime resolves the
+        // reviewed executable and arguments itself. Scratch chats have none.
+        actions: project.workspaceKind === "scratch"
+          ? EMPTY_LIST
+          : (project.preferences?.actions ?? EMPTY_LIST).map(({ id, name }) => ({ id, name })),
+        sendCommand: connection.sendCommand,
+        subscribe: connection.subscribe,
+      },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,

@@ -90,6 +90,16 @@ describe("runtime command delivery policy", () => {
     expect(publishesWorkspaceGitCompletion("checkpoint.revert")).toBe(false);
   });
 
+  it("retries App surface reads and treats launch and stop as ambiguous mutations", () => {
+    for (const type of ["app-under-test.launches.list", "app-under-test.logs.read", "app-under-test.evidence.list"] as const) {
+      expect(runtimeCommandPolicy(type)).toEqual({ timeoutMs: 15_000, timeoutDelivery: "rejected" });
+    }
+    expect(runtimeCommandPolicy("app-under-test.launch")).toEqual({ timeoutMs: 15_000, timeoutDelivery: "ambiguous" });
+    // Stopping waits for confirmed process-tree cleanup.
+    expect(runtimeCommandPolicy("app-under-test.stop").timeoutDelivery).toBe("ambiguous");
+    expect(runtimeCommandPolicy("app-under-test.stop").timeoutMs).toBeGreaterThan(60_000);
+  });
+
   it("keeps renderer deadlines beyond authoritative aggregate server bounds", () => {
     expect(GIT_READ_REQUEST_TIMEOUT_MS)
       .toBeGreaterThan(GIT_READ_OPERATION_TIMEOUT_MS);

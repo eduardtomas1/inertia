@@ -4,6 +4,7 @@ export type WorkspacePanelTab =
   | "preview"
   | "terminal"
   | "attachments"
+  | "app"
   | "agents"
   | "usage"
   | "goal"

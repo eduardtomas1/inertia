@@ -48,6 +48,12 @@ import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client";
 import {
+  APP_UNDER_TEST_TOOL_NAME_SET,
+  AppUnderTestHostTools,
+  appUnderTestFailure,
+} from "./app-under-test/host-tools";
+import type { AppUnderTestLaunchManager } from "./app-under-test/launch-manager";
+import {
   type HarnessCapabilityManifest,
   type HarnessCapabilityRegistry,
 } from "./harness-capabilities";
@@ -284,6 +290,7 @@ export interface AgentThreadManagerDependencies {
   contextRequests: ConversationContextRequestCoordinator;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
+  appUnderTest?: AppUnderTestLaunchManager;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;
@@ -335,6 +342,7 @@ export class AgentThreadManager {
   private readonly now: () => string;
   private readonly mutations = new ManagedMutationQueue();
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
+  private readonly appUnderTest: AppUnderTestHostTools | undefined;
   private readonly capabilities: HarnessCapabilityRegistry;
   private readonly htmlRenders: HtmlRenderHostTool;
   private readonly contextTool: AgentContextTool;
@@ -343,6 +351,9 @@ export class AgentThreadManager {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.agentBrowser = dependencies.agentBrowser
       ? new AgentBrowserHostTools(dependencies.agentBrowser)
+      : undefined;
+    this.appUnderTest = dependencies.appUnderTest
+      ? new AppUnderTestHostTools(dependencies.appUnderTest)
       : undefined;
     this.htmlRenders = new HtmlRenderHostTool(dependencies);
     this.contextTool = new AgentContextTool({
@@ -353,6 +364,7 @@ export class AgentThreadManager {
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
+      appUnderTestEnabled: this.appUnderTest !== undefined,
       invoke: async (context, call) => await this.invoke(context, call),
     });
   }
@@ -401,9 +413,15 @@ export class AgentThreadManager {
     source: AgentThreadSource,
     call: ProviderHostToolCall,
   ): Promise<ProviderHostToolResult> {
+    // Every App failure, even one refused here, carries the pack's full shape.
+    const appTool = this.appUnderTest !== undefined && APP_UNDER_TEST_TOOL_NAME_SET.has(call.tool);
     try {
       const current = this.assertSource(source);
-      if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
+      if (call.signal.aborted) {
+        return appTool
+          ? appUnderTestFailure("call_cancelled", "The App action was cancelled.")
+          : failure("call_cancelled", "The host tool call was cancelled.");
+      }
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
@@ -413,6 +431,25 @@ export class AgentThreadManager {
           conversationId: current.id,
           runId: source.turn.runId,
           turnId: source.turn.id,
+        });
+      }
+      if (appTool && this.appUnderTest) {
+        if (this.dependencies.store.project(current.projectId).preferences?.appUnderTestAccess === false) {
+          return appUnderTestFailure(
+            "unavailable",
+            "App under test access is disabled in this project's settings. Ask the user to turn on Agent app access in Project settings.",
+          );
+        }
+        // Private Connect turns may come from an unattended desktop; the
+        // whole pack is refused for a turn whose source message is remote.
+        const turn = this.dependencies.store.agentTurn(source.turn.id);
+        const remoteDevice = turn.conversationId !== current.id
+          || this.dependencies.store.message(turn.userMessageId).privateConnectDeviceId !== undefined;
+        return await this.appUnderTest.invoke(current, call, {
+          conversationId: current.id,
+          runId: source.turn.runId,
+          turnId: source.turn.id,
+          remoteDevice,
         });
       }
       switch (call.tool) {
@@ -451,6 +488,12 @@ export class AgentThreadManager {
           return failure("unknown_tool", "That Inertia host tool is not available.");
       }
     } catch (error) {
+      if (appTool) {
+        return appUnderTestFailure(
+          "unavailable",
+          error instanceof Error ? error.message.slice(0, 1_000) : "The App tool failed safely. Call inertia_app_status, then try again.",
+        );
+      }
       return failure(
         "host_tool_failed",
         error instanceof Error ? error.message.slice(0, 1_000) : "The Inertia host tool failed.",
@@ -1073,6 +1116,7 @@ export class AgentThreadManager {
       throw new Error("Stop the managed chat before changing its archive state.");
     }
     this.dependencies.store.archiveConversation(target.id, input.archived);
+    if (input.archived) await this.dependencies.appUnderTest?.clear(target.id);
     this.dependencies.broadcastConversationShell(target.id);
     this.dependencies.broadcastSnapshot();
     return json({ conversationId: target.id, archived: input.archived });

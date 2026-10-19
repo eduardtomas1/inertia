@@ -165,8 +165,8 @@ describe("right panel surface host", () => {
 
     const launcher = await screen.findByRole("group", { name: "Open a surface" });
     await waitFor(() => expect(launcher).toHaveFocus());
-    expect(launcher).toHaveAttribute("aria-keyshortcuts", "D F B T H A U G P");
-    for (const label of ["Changes", "Files", "Browser", "Terminal", "Attachments", "Background tasks", "Usage"]) {
+    expect(launcher).toHaveAttribute("aria-keyshortcuts", "D F B T H L A U G P");
+    for (const label of ["Changes", "Files", "Browser", "Terminal", "Attachments", "App", "Background tasks", "Usage"]) {
       expect(within(launcher).getByRole("button", { name: new RegExp(`^${label}`, "u") })).toBeVisible();
     }
     expect(within(launcher).getByRole("button", { name: /^Background tasks 2 active/u })).toBeVisible();

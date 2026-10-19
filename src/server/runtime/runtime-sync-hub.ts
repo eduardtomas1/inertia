@@ -275,6 +275,17 @@ export class RuntimeSyncHub<Socket> {
     this.broadcastCommitted(() => event);
   }
 
+  /**
+   * Unsequenced, high-volume chat detail (App log lines): only sockets whose
+   * subscription includes the exact chat receive it, and it never enters the
+   * replay log. A reconnecting client rereads authoritative state instead.
+   */
+  sendToConversationSubscribers(conversationId: string, event: ServerEvent): void {
+    for (const [socket, subscription] of this.clients) {
+      if (subscription.conversationIds.includes(conversationId)) this.send(socket, event);
+    }
+  }
+
   broadcastSnapshot(snapshot: (sync: RuntimeSyncCursor) => AppSnapshot): void {
     this.broadcastCommitted((sync) => ({
       type: "snapshot.updated",

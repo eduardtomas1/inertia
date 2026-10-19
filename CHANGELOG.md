@@ -2,6 +2,31 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Run and test your app
+
+- A new **App** surface in **Open a surface** runs the desktop app a chat is
+  building. **Launch Electron app** starts the project's own Electron from
+  `node_modules/electron` with a new, empty profile that is deleted when the
+  app stops; **Launch action…** runs one of the project's reviewed actions.
+  Follow each launch's output with stream tags, a filter and copy, see its
+  windows, and stop it with its whole process tree. A chat runs at most two
+  launches.
+- Agents on Codex, Claude, Cursor, Kimi Code and OpenCode can use the same
+  launches through twelve App tools: launch, read logs, list windows, read a
+  window, click, type, press a key, scroll, wait, take a local screenshot and
+  stop. They can only start the project's Electron app or an action you
+  reviewed, never a command of their own, and never reach your desktop, other
+  apps or Inertia. Supervised chats ask before every launch, stop and input;
+  stopping a launch you started always asks.
+- Password fields read as `[redacted]`, text the agent types into one stays
+  hidden from later reads and logs, and screenshots stay in the App surface's
+  **Evidence** list on this computer. Turns sent from Private Connect cannot
+  use the App tools, and **Settings → Projects → Agent app access** turns them
+  off for a project. Codex chats get the tools on their next new thread. See
+  [App under test](docs/APP_UNDER_TEST.md).
+
 ## 0.0.72 — 2026-10-18
 
 Keep a to-do list and hand any task to an agent, watch plan steps complete as

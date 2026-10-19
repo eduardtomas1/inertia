@@ -37,6 +37,10 @@ const appearanceFields = {
 const recoverableFields = {
   ...appearanceFields,
   defaultAccessMode: z.enum(["supervised", "auto-edit", "full"]).nullable().default(null),
+  // Agent access to the App under test tools. Null inherits the default (on),
+  // exactly like browserAccess. Preferences saved before this key existed
+  // omit it, so it defaults instead of failing the strict parse.
+  appUnderTestAccess: z.boolean().nullable().default(null),
 };
 export const projectAppearancePatchSchema = z.strictObject({
   icon: projectIconSchema.nullable(),
@@ -50,6 +54,7 @@ export const projectPreferencesSchema = z.strictObject({
   defaultAccessMode: recoverableFields.defaultAccessMode,
   autoPull: z.boolean(),
   browserAccess: z.boolean().nullable(),
+  appUnderTestAccess: recoverableFields.appUnderTestAccess,
   icon: projectIconSchema.nullable(),
   actions: z.array(z.strictObject({
     id: z.string().uuid(),
@@ -69,7 +74,7 @@ export const projectPreferencesSchema = z.strictObject({
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
+  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, appUnderTestAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
 }
 
 export function applyProjectAppearance(preferences: ProjectPreferences | undefined, appearance: ProjectAppearancePatch): ProjectPreferences {

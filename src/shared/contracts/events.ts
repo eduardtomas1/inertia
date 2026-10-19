@@ -1,4 +1,10 @@
 import type { LimitResetResult } from "../limit-reset";
+import type {
+  AppUnderTestLogsAppendedEvent,
+  AppUnderTestMutationEvent,
+  AppUnderTestWindowsUpdatedEvent,
+  AppUnderTestRequestResult,
+} from "../app-under-test";
 import type { UpdatesRunResult } from "../updates";
 import type { BackgroundTasksResult } from "../background-tasks";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
@@ -80,6 +86,7 @@ export type RuntimeEventScope =
  * layer unwraps a frame.
  */
 export type RuntimeMutationEvent =
+  | AppUnderTestMutationEvent
   | { type: "snapshot.updated"; snapshot: AppSnapshot }
   | {
       type: "conversation.shell.updated";
@@ -240,7 +247,8 @@ export type ServerEvent =
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
-        | MessageSearchResult;
+        | MessageSearchResult
+        | AppUnderTestRequestResult;
     }
   | RuntimeMutationEvent
   | ({
@@ -257,5 +265,7 @@ export type ServerEvent =
           providerResumeConversationId?: undefined;
         }
     ))
+  | AppUnderTestLogsAppendedEvent
+  | AppUnderTestWindowsUpdatedEvent
   | { type: "terminal.output"; terminalId: string; data: string }
   | { type: "terminal.exit"; terminalId: string; exitCode: number };

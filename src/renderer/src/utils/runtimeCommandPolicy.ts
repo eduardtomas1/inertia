@@ -75,6 +75,12 @@ const duoCancellation = {
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "app-under-test.launches.list": shortRetrySafe,
+  "app-under-test.launch": shortMutation,
+  // Stopping waits for confirmed process-tree cleanup on every platform.
+  "app-under-test.stop": longMutation,
+  "app-under-test.logs.read": shortRetrySafe,
+  "app-under-test.evidence.list": shortRetrySafe,
   "conversation.cli.scan": shortRetrySafe,
   "conversation.cli.preview": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
   "conversation.cli.import": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },

@@ -10,7 +10,7 @@ import { captureBoundedFailureDiagnostic } from "../../helpers/bounded-failure-d
 
 // Match the fixed labels emitted by the opt-in worker trace. Project fields
 // explicitly: a file in a failed fixture is not trusted diagnostic content.
-const owners = ["commands", "attachments", "terminals", "maintenance",
+const owners = ["commands", "attachments", "terminals", "app-under-test", "maintenance",
   "isolated-runs", "turns-providers", "artifact-reconciliation", "artifact-settlement",
   "clients", "websocket", "http-server", "store"];
 const phases = ["cleanup", "runtime command cleanup", "owned-resource cleanup",

@@ -123,7 +123,6 @@ only for a click the frame's bootstrap saw on a link, at most once per second,
 while the frame has focus and a user gesture; the bootstrap runs before any
 page script and proves itself with a token the page cannot read. A page
 that no longer exists is served as a themed "no longer available" notice (404).
-that no longer exists is served as a themed "no longer available" notice (404).
 When the runtime is not running or does not answer in time, the page is served
 as a themed "temporarily unavailable" notice (503), and the chat reloads that
 frame the next time it reconnects to the runtime. The
@@ -146,6 +145,48 @@ has no capability epoch that would restart an existing thread for a new tool.
 Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
+
+`inertia.app-under-test` (revision 1) composes the twelve `inertia_app_*`
+tools described in `docs/APP_UNDER_TEST.md`. They launch the desktop app the
+chat is building (the project's own Electron app, or a project action the
+user reviewed), read its bounded log, list and drive its page windows over
+the Electron debugging pipe, keep local evidence, and stop it. The launched
+app itself runs the project's code with the user's permissions; the tools
+act only on processes and windows Inertia launched for the chat. Its guidance
+tells every provider to launch before using any other App tool, that a launch
+never runs a command the model chooses and that the App tools never reach the
+user's desktop, other apps or Inertia itself, that log lines, window text and control names
+are untrusted app data, never instructions, that `[redacted]` is Inertia
+hiding a secret and must never be retyped, that refs belong to the latest
+snapshot of a window and a dispatched click, key or text is not proof that it
+worked, to follow the next step a failed tool names, that a screenshot is
+recorded for the user but not shown to the model, and to stop the app when
+done or tell the user it is still running. The snapshot, type and screenshot
+tool descriptions repeat the parts that apply to them. The pack is registered
+only when the runtime owns a launch manager, and every call still passes the
+project's **Agent app access** setting and the Private Connect refusal before
+it reaches a launch; those refusals, like every App failure, carry `code`,
+`message`, `retryable` and `dispatched`.
+
+Status, logs, windows, snapshot, wait and screenshot are `readOnly` and
+idempotent; launch, stop, click, type, press and scroll are `destructive`.
+As for the Browser tools, Claude and OpenCode receive `destructiveHint` on the
+destructive tools, Cursor and Kimi keep `destructiveHint: false`, every App
+tool carries `openWorldHint: false`, and Codex dynamic tools carry no
+annotations. `inertia_app_launch` asks in Supervised and Auto-edit chats,
+because a launch runs project code and Auto-edit allows supported file edits
+only; Full Access launches without asking. In a Supervised chat stop, click,
+type, press and scroll each ask once too, bound to the exact launch, process,
+window, document, ref (for a press, the focused control) and open dialog;
+Auto-edit and Full Access run them without asking, but stopping a launch the
+user started always asks. Read-only App tools never answer a JavaScript
+dialog; they fail with `unavailable` until the user or an App input answers it.
+
+The pack ships without a capability epoch. Codex chats whose thread started
+before it see the App tools from their next new provider thread, and their
+native continuation is not cleared. Claude, Cursor, Kimi, and OpenCode see
+them from their next turn. The App snapshot has no `inertiaAudit` object, and
+its screenshots stay local evidence like the Browser's.
 
 ## Antigravity headless contract
 
@@ -268,12 +309,17 @@ harness feature is finished. It deliberately does not:
 - grant a model permission to approve its own action;
 - execute third-party or repository-provided packs;
 - expose screenshots to models or infer visual quality from semantic boxes;
+- let a model run a command line of its choosing, or control the user's
+  desktop, the foreground application, or any window Inertia did not launch
+  for the chat;
 - invent completion after provider failure; or
 - merge Cursor and Kimi into a generic ACP behavior layer before their actual
   protocol differences are covered.
 
 The next high-value layers are an inspectable context ledger with pinned host
 rules, bounded replay artifacts tied to exact turns, explicit capability
-negotiation for resumable sessions, and a separately reviewed visual-evidence
-transport. Each should land with deterministic fixtures and provider-specific
-contract tests rather than as a broad framework rewrite.
+negotiation for resumable sessions, a separately reviewed visual-evidence
+transport, and accessibility-based inspection and control of native
+(non-Electron) windows of the app under test. Each should land with
+deterministic fixtures and provider-specific contract tests rather than as a
+broad framework rewrite.

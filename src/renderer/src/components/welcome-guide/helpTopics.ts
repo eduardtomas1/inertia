@@ -179,7 +179,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Surfaces",
-        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
+        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, App, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
       },
       {
         name: "Terminal",

@@ -36,6 +36,40 @@ Chats open with recent history. Choose **Load earlier messages** at the top of t
 
 If an individual turn is too large to display, Inertia reports that without disconnecting your other chats. Its saved history remains in the database and can be included in a data export from Settings.
 
+## Launch Electron app is unavailable
+
+**Launch Electron app** is greyed out while Inertia's local service is reconnecting, while a launch is starting, and while the chat already runs two launches; stop one first. The App surface itself is unavailable until the chat's first message has created its workspace.
+
+When the button works but the launch fails, the App surface shows why:
+
+- *This project has no node_modules/electron.* Install the project's dependencies in the chat's workspace, including its worktree if the chat has one, then launch again. Electron must be installed in the project folder itself; a global Electron, or one hoisted to or linked from a folder outside the project, is not used.
+- *node_modules/electron has no Electron build for this platform.* Reinstall the project's dependencies on this computer.
+- *The project's Electron files resolve outside its folder.* Install Electron as a dependency of this project instead of linking it.
+- *No readable package.json*, or *the package.json main entry does not exist yet.* Open the chat in the Electron project's own folder, and build the app if its `main` points at build output.
+
+**Settings → Projects → Agent app access** set to **Off** stops only the agent's App tools, which then report that access is disabled. You can still launch the app yourself. A project action needs no Electron; it shows output only.
+
+## The agent says the app is showing a dialog
+
+While an app window shows an alert, confirmation or prompt, nothing can be read from it, so the agent's snapshots, waits, screenshots and window list stop with a note naming the kind of dialog. Answer it yourself in the app window, or let the agent's next click, type or press answer it. In a **Supervised** chat that approval only answers the dialog; the agent then asks again for its action.
+
+## A chat or project cannot be deleted because its app is still running
+
+Deleting a chat or removing a project first stops every app it launched and waits until Inertia has confirmed that the whole process tree is gone. If that cannot be confirmed, the chat and its worktree are kept. Stop the app from the App surface, or quit it yourself, then try again.
+
+## Log lines say console events were dropped
+
+Inertia keeps at most 200 console messages a second from one launch, with short bursts of up to 400. When an app logs faster, the rest are counted and **Logs** shows one "console events dropped" line at most once a second.
+
+## The app opened but no window is listed
+
+- Only **Launch Electron app** lists windows. A project action shows its output in **Logs** but never has windows, even when the action itself starts Electron, for example through your dev script.
+- Windows appear once the app has created them and Inertia has connected to them, which can take a few seconds after the launch shows **Running**. DevTools windows are never listed. If nothing appears, check **Logs** for errors.
+- Windows opened by a separate process that the app starts are not owned by the launch and are not listed.
+- At most eight windows are listed per chat.
+- A window whose page turns into DevTools or another internal page is removed from the list.
+- If the app has exited, its launch shows **Exited** with its exit code; read **Logs** to see why.
+
 ## Pull, push or commit fails
 
 Inertia explains Git failures, such as authentication, connectivity, a rejected non-fast-forward push, an index lock, a branch checked out elsewhere or a missing author identity, without exposing credentials. Pull only fast-forwards, and Inertia never force-pushes. See [Git workflows](../GIT_WORKFLOWS.md).

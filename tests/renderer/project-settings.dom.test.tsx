@@ -115,6 +115,30 @@ describe("project settings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("changed in another window");
     expect(screen.getByRole("combobox", { name: "Agent browser access" })).toBeEnabled();
   });
+  it("saves agent browser and app access with the same tri-state default next to each other", async () => {
+    const { request, container } = setup();
+    const browser = screen.getByRole("combobox", { name: "Agent browser access" });
+    const app = screen.getByRole("combobox", { name: "Agent app access" });
+    expect(app).toHaveValue("inherit");
+    expect(within(app).getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (On)", "On", "Off"]);
+    expect(within(browser).getAllByRole("option").map((option) => option.textContent)).toEqual(["Default (On)", "On", "Off"]);
+    const browserRow = container.querySelector('[data-setting-id="project-browser-access"]')!;
+    expect(browserRow.nextElementSibling).toBe(container.querySelector('[data-setting-id="project-app-under-test-access"]'));
+    expect(screen.getByText(/still launch the app from the App surface/u)).toBeInTheDocument();
+    fireEvent.change(app, { target: { value: "false" } });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), appUnderTestAccess: false } } }));
+    await waitFor(() => expect(app).not.toHaveAttribute("aria-disabled"));
+    request.mockClear();
+    fireEvent.change(app, { target: { value: "inherit" } });
+    await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), appUnderTestAccess: null } } }));
+  });
+  it("shows a saved app access choice and keeps browser access independent", () => {
+    setup({ projects: [{ ...project, preferences: { ...defaultProjectPreferences(), appUnderTestAccess: true, browserAccess: false } }] });
+    expect(screen.getByRole("combobox", { name: "Agent app access" })).toHaveValue("true");
+    expect(screen.getByRole("combobox", { name: "Agent browser access" })).toHaveValue("false");
+  });
   it("saves an optional Claude spend limit on blur, rejects amounts the schema rejects, and clears back to no limit", async () => {
     const view = setup();
     const field = screen.getByRole("textbox", { name: "Claude spend limit per turn (USD)" });

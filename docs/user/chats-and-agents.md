@@ -30,6 +30,20 @@ An agent can answer with a page as well as text: a chart, a table, a diagram or 
 - The page runs in a sandbox. It cannot fetch from the network, load remote content, or reach your files, the project or the rest of Inertia, so everything it shows must be inside the page itself. A script in the page can still open a WebRTC connection through a relay server over TCP.
 - Private Connect clients, chats you share as context, and another model continuing the chat see only a one-line *[page: title]* note in its place, so the agent’s reply also says in one sentence what the page shows.
 
+## Run and test your app
+
+The **App** surface runs the desktop app the chat is building, shows its output and windows, and lets the agent test it. Open the panel and choose **App** in **Open a surface** (or press L there). It is available once the chat's first message has created its workspace.
+
+- **Launch Electron app** starts the project's own Electron app: the Electron installed in the project's `node_modules/electron`, with the entry from `package.json` `main`. Electron's own profile folder (its cookies, storage and caches) is a new, empty one, so your everyday profile of that app is not used, and it is deleted when the app stops. The app is not sandboxed: it runs the project's code with your permissions and can read and write your files like any program you start.
+- **Launch action…** runs one of the project's reviewed actions from **Settings → Projects → Actions**, such as a dev server or a build. Actions show output and status only; window control needs an Electron launch.
+- **Stop** ends the app and every process it started. Inertia asks you to confirm before stopping a launch you started yourself. A chat can run two launches at once.
+- **Logs** shows the app's output with a tag on each line: `stdout` and `stderr`, `console` and `exception` from an Electron app's windows, and `inertia` for Inertia's own notes. Filter lines, copy them, or choose **Jump to latest** after scrolling up. Inertia keeps the newest 64 KiB of each launch.
+- **Windows** lists the app's open windows, at most eight per chat. **Evidence** records launches, exits, the agent's actions and screenshots. Everything stays on this computer and clears when you archive or delete the chat, remove its project or quit Inertia. Inertia also forgets the App history of chats you have not used recently once more than 16 chats have finished launches, or their screenshots pass 16 MiB; a chat with a running launch is never forgotten.
+
+The agent can do the same with its App tools: launch the app, read its logs, read a window's text and controls, click, type, press keys, scroll, wait for text, take a screenshot for your Evidence list and stop the app. It can only start the project's Electron app or an action you reviewed, never a command of its own, and its App tools act only on the windows of apps Inertia launched for that chat, never on your desktop, other apps or Inertia itself. Password fields show as `[redacted]`, and a secret the app shows or the agent types into such a field is hidden from later logs and window titles too. The agent never sees screenshot pixels. In **Supervised** and **Auto-edit** mode it asks before every launch, because the app runs project code with your permissions; only **Full Access** launches without asking. In **Supervised** mode it also asks before every stop, click, key press, typing and scroll. When the app shows a dialog, the agent's next click, type or press answers it, as accept or dismiss; reading the window waits for that. Turns sent through Private Connect cannot use the App tools.
+
+To keep agents out of the App surface for one project, set **Settings → Projects → Agent app access** to **Off**. You can still launch the app yourself. See [App under test](../APP_UNDER_TEST.md) for the full contract.
+
 ## Keep work organized
 
 Right-click a chat in the sidebar, or focus it and press Shift+F10 or the Menu key, to open its actions:

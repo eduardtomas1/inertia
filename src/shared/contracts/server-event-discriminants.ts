@@ -341,6 +341,9 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "provider.maintenance.operation":
       return null;
     case "conversation.detail.invalidated":
+    case "app-under-test.launch.updated":
+    case "app-under-test.evidence.appended":
+    case "app-under-test.session.cleared":
     case "agent.started":
     case "agent.text":
     case "agent.text.replaced":

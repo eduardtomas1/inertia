@@ -172,6 +172,7 @@ export default defineConfig({
             const compactNames: Record<string, string> = {
               attentionVisibility: "chat",
               BackgroundTasksSurface: "tasks",
+              AppSurface: "app-surface",
               TasksView: "todo",
               BrowserEvidenceTimeline: "evidence",
               "external-link": "link",

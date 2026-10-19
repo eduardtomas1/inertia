@@ -686,7 +686,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
+    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes, turnGitArtifacts,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,

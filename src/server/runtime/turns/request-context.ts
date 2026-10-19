@@ -28,6 +28,10 @@ import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
 } from "../attachments/document-attachment-context";
+import {
+  MAX_TRACKED_GOAL_CONTEXT_BYTES,
+  TRACKED_GOAL_CONTEXT_LABEL,
+} from "./turn-goal-context";
 
 export const MAX_EXECUTION_CONTEXT_REFERENCES = 32;
 export const MAX_EXECUTION_MESSAGE_SEGMENTS = 48;
@@ -144,6 +148,12 @@ export interface AssembleTurnRequestInput {
   carriedConversationContexts?: readonly MaterializedConversationContext[];
   internalInstructions?: readonly HiddenProviderInstruction[];
   restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
+  /**
+   * The chat's tracked Inertia-local goal as one bounded, neutralized line
+   * from `trackedGoalContextLine`. It travels as execution context, never as a
+   * hidden instruction, and is left out when the turn's limits leave no room.
+   */
+  trackedGoalLine?: string;
 }
 
 interface MaterializedContext {
@@ -795,6 +805,17 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     assembledPayloadBytes = fit.candidateBytes;
     executionSegmentCount += appended.length;
   };
+
+  if (input.trackedGoalLine) {
+    const goal = [providerContext({
+      kind: "attachment",
+      label: TRACKED_GOAL_CONTEXT_LABEL,
+      content: boundedText(input.trackedGoalLine, "Tracked goal", MAX_TRACKED_GOAL_CONTEXT_BYTES),
+      truncated: false,
+    })];
+    const fit = fitAppended(goal);
+    if (fit) append(goal, fit);
+  }
 
   const carriedPackets = [...new Set((input.carriedConversationContexts ?? []).map(({ packetId }) => packetId))];
   let carried: typeof providerContexts = [];

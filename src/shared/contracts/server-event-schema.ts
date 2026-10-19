@@ -466,7 +466,7 @@ function conversationContextPacketSummary(value: unknown): value is UnknownRecor
 }
 function agentContextReadSummary(value: unknown): boolean {
   return recordWithStrings(value, "targetMessageId", "targetTurnId", "sourceConversationId", "sourceConversationTitle", "sourceState", "access", "firstReadAt", "lastReadAt")
-    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved"])
+    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved", "managed"])
     && booleanField(value, "listedTurns") && arrayOf(value.turnIds, (entry) => typeof entry === "string");
 }
 function conversationContextPacket(value: unknown): boolean {

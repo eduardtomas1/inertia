@@ -179,10 +179,22 @@ export class ConversationContextTurnReads {
     `).all(target.id, input.targetTurnId, source.id) as Array<{
       workspace_relation: "same-workspace" | "different-workspace";
     }>;
-    return approved.some(({ workspace_relation }) =>
-      sameWorkspace || workspace_relation === "different-workspace")
-      ? "approved"
-      : null;
+    if (approved.some(({ workspace_relation }) =>
+      sameWorkspace || workspace_relation === "different-workspace")) return "approved";
+    return this.managesDirectly(target, source) ? "managed" : null;
+  }
+
+  /**
+   * A chat this chat created through the orchestration tools, with the user's
+   * approval, in the same project. Only the direct parent counts: a child's
+   * own children are not managed by the grandparent.
+   */
+  private managesDirectly(parent: ConversationRow, child: ConversationRow): boolean {
+    return parent.project_id === child.project_id
+      && this.context.database.prepare(`
+        SELECT 1 FROM agent_managed_conversations
+        WHERE child_conversation_id = ? AND source_conversation_id = ?
+      `).get(child.id, parent.id) !== undefined;
   }
 
   private resentReferenceMessageIds(

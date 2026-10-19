@@ -16,6 +16,7 @@ import type {
   AgentTurn,
   TurnGitArtifact,
   TurnGitArtifactAbsenceReason,
+  TurnGitArtifactFile,
   TurnGitDiffSnapshot,
 } from "../shared/contracts";
 import {
@@ -566,6 +567,68 @@ export class TurnGitArtifactManager {
       truncated: artifact.completeness !== "complete",
       files: artifact.files,
     };
+  }
+
+  /**
+   * The changes an unfinished turn has made so far: its pre-turn snapshot
+   * against a short-lived snapshot of the current worktree. The temporary
+   * checkpoint uses a private index and Inertia's own ref namespace, and its
+   * ref is removed before this returns; the user's index and files are never
+   * written.
+   */
+  async liveTurnDiff(
+    turnId: string,
+    options: TurnGitArtifactOperationOptions = {},
+  ): Promise<{
+    turnId: string;
+    patch: string;
+    truncated: boolean;
+    patchTruncated: boolean;
+    files: TurnGitArtifactFile[];
+  }> {
+    const artifact = this.store.turnGitArtifact(turnId)
+      ? this.store.turnGitArtifactStorage(turnId)
+      : null;
+    if (!artifact) {
+      throw new TurnGitArtifactError("This turn's starting repository snapshot has not been captured yet.");
+    }
+    if (artifact.status !== "pending" || !artifact.beforeRef) {
+      throw new TurnGitArtifactError(
+        artifact.failureReason ?? "This turn has no starting repository snapshot to compare against.",
+      );
+    }
+    const repositoryPath = this.store.conversationPath(artifact.conversationId);
+    const operation = this.#operationOptions(this.#finalizationTimeoutMs, options);
+    let afterRef: string | null = null;
+    try {
+      afterRef = (await createCheckpoint(
+        repositoryPath,
+        this.#checkpointDirectory,
+        artifact.conversationId,
+        operation,
+      )).ref;
+      const comparison = await compareGitSnapshots(
+        repositoryPath,
+        artifact.beforeRef,
+        afterRef,
+        { ...operation, maxBytes: MAX_PATCH_BYTES },
+      );
+      return {
+        turnId: artifact.turnId,
+        patch: comparison.patch,
+        truncated: comparison.truncated,
+        patchTruncated: comparison.patchTruncated,
+        files: comparison.files,
+      };
+    } catch (error) {
+      this.#recordCleanupFailure(error);
+      throw error;
+    } finally {
+      if (afterRef) {
+        await deleteCheckpoint(repositoryPath, afterRef, artifact.conversationId)
+          .catch(() => undefined);
+      }
+    }
   }
 
   async compare(

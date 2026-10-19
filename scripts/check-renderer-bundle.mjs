@@ -238,7 +238,9 @@ const budgets = {
   // including the 1,199 terminal bytes above).
   // Tools-offer wave 2 polish: content results in the Files main area and
   // the Attachments gallery tile fix add 1,424 bytes (2,348,074 measured on Linux x64).
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 9_887 + 1_199 + 19_710 + 1_424,
+  // Tools-offer wave 3: the managed context-read access value in the shared
+  // contracts adds 10 core bytes (2,348,084 measured on Linux x64).
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 9_887 + 1_199 + 19_710 + 1_424 + 10,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

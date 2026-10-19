@@ -13,6 +13,7 @@ import {
   createInertiaHarnessCapabilities,
   inertiaCapabilityOfferForProject,
 } from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 
 const THREAD_ID = "thread-host-tools";
 const TURN_ID = "turn-host-tools";
@@ -121,6 +122,7 @@ describe("Codex host-tool registration", () => {
     const names = (started!.params.dynamicTools as Array<{ name: string }>).map(({ name }) => name);
     expect(names.filter((name) => name.startsWith("inertia_browser_"))).toHaveLength(browserTools);
     expect(names).toContain("inertia_render_html");
+    expect(names).toEqual(expect.arrayContaining(WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name)));
   });
 
   it("advertises exact dynamic tools when opening a new provider thread", async () => {

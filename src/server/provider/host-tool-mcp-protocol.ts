@@ -17,7 +17,7 @@ const MAX_MCP_BATCH_MESSAGES = 32;
  * permission rules are derived from it.
  */
 export const INERTIA_HOST_MCP_INSTRUCTIONS = [
-  "Inertia host tools for this turn: coordinate bounded top-level Inertia chats in the current project, read turns from this chat and from chats the user references or shares, use this chat's Inertia Browser when its tools are listed, and show a visual reply inline.",
+  "Inertia host tools for this turn: coordinate bounded top-level Inertia chats in the current project, read turns from this chat and from chats the user references or shares, use this chat's Inertia Browser when its tools are listed, show a visual reply inline, and read this chat's Git status, turn diffs, plan, goal, project tasks, and Run actions.",
   "Only the tools listed for this turn are available.",
   "Inertia asks the user for approval before any mutation.",
 ].join(" ");

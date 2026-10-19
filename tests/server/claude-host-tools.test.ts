@@ -13,6 +13,7 @@ import {
   createInertiaHarnessCapabilities,
   inertiaCapabilityOfferForProject,
 } from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 
 function hostBridge(): ProviderHostToolBridge {
   return {
@@ -83,6 +84,7 @@ describe("Claude in-process Inertia chat tools", () => {
     const listed = (await client.listTools()).tools.map(({ name }) => name);
     expect(listed.filter((name) => name.startsWith("inertia_browser_"))).toHaveLength(browserTools);
     expect(listed).toContain("inertia_render_html");
+    expect(listed).toEqual(expect.arrayContaining(WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name)));
     expect([...tools.providerToolNames].filter((name) => name.includes("inertia_browser_")))
       .toHaveLength(browserTools);
     await tools.close();

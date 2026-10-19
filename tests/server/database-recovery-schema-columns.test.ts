@@ -110,7 +110,7 @@ describe("database health check for settings and subagent columns", () => {
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

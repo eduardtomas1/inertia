@@ -15,11 +15,16 @@ import { MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversati
 import {
   BUILD_MODE_INSTRUCTION,
   MAX_EXECUTION_PAYLOAD_BYTES,
+  MAX_EXECUTION_CONTEXT_REFERENCES,
   type AssembleTurnRequestInput,
   assembleTurnRequest,
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
 } from "../../src/server/runtime/turns/request-context";
+import {
+  TRACKED_GOAL_CONTEXT_LABEL,
+  trackedGoalContextLine,
+} from "../../src/server/runtime/turns/turn-goal-context";
 
 const directories: string[] = [];
 
@@ -684,5 +689,83 @@ describe("restored history respects the selected request's capacity", () => {
     expect(assembleTurnRequest({ ...request, restoredHistory })).toEqual({ ...assembleTurnRequest(request), sessionRecovery: unrestored });
     request.visibleContent += "x";
     expect(() => assembleTurnRequest({ ...request, restoredHistory })).toThrow(/Assembled execution payload exceeds/u);
+  });
+});
+
+describe("tracked goal execution context", () => {
+  const trackedGoalLine = trackedGoalContextLine({
+    objective: "Ship the CSV export",
+    status: "active",
+    tokenBudget: 10_000,
+    tokensUsed: null,
+    timeUsedSeconds: null,
+  });
+
+  it("adds the goal line as counted execution context after the user's selections, before restored history", async () => {
+    const cwd = await workspace();
+    const request: AssembleTurnRequestInput = {
+      cwd, visibleContent: "Continue.", interactionMode: "build", trackedGoalLine,
+      context: { terminalContexts: [{ terminalId: "terminal-1", terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "selected output" }] },
+      restoredHistory: () => ({ blocks: [{ label: "Earlier messages", content: "{}" }], messageCount: 1, omittedMessageCount: 0 }),
+    };
+    const assembled = assembleTurnRequest(request);
+    const without = assembleTurnRequest({ ...request, trackedGoalLine: undefined });
+    expect(assembled.persistence.manifest.references.map(({ kind, label }) => ({ kind, label }))).toEqual([
+      { kind: "terminal", label: "Logs · lines 1-1" },
+      { kind: "attachment", label: TRACKED_GOAL_CONTEXT_LABEL },
+      { kind: "attachment", label: "Earlier messages" },
+    ]);
+    expect(assembled.persistence.manifest.contextBytes - without.persistence.manifest.contextBytes)
+      .toBe(Buffer.byteLength(trackedGoalLine));
+    expect(assembled.persistence.manifest.executionSegmentCount).toBe(without.persistence.manifest.executionSegmentCount + 1);
+    expect(assembled.persistence.manifest.internalInstructionCount).toBe(without.persistence.manifest.internalInstructionCount);
+    expect(assembled.persistence.manifest.assembledPayloadBytes).toBe(Buffer.byteLength(assembled.executionPrompt));
+    const structured = assembled.executionPrompt.indexOf("Structured execution context");
+    const internal = assembled.executionPrompt.indexOf("Internal provider instructions");
+    const goal = assembled.executionPrompt.indexOf("tracked objective");
+    expect(structured).toBeGreaterThan(0);
+    expect(goal).toBeGreaterThan(structured);
+    expect(goal).toBeLessThan(internal);
+    expect(parseSanitizedTurnExecutionManifest(assembled.persistence.manifest)).toEqual(assembled.persistence.manifest);
+  });
+
+  it("rejects a goal line over 512 bytes", async () => {
+    const cwd = await workspace();
+    expect(() => assembleTurnRequest({
+      cwd, visibleContent: "Continue.", trackedGoalLine: "x".repeat(513),
+    })).toThrow(/Tracked goal exceeds the 512 byte limit/u);
+  });
+
+  it("leaves the goal line out when the turn has no reference, segment, or byte room for it", async () => {
+    const cwd = await workspace();
+    await writeFile(join(cwd, "source.ts"), "export const answer = 42;");
+    const fullReferences: AssembleTurnRequestInput = {
+      cwd, visibleContent: "Review my selections.",
+      context: {
+        fileReferences: Array.from({ length: 16 }, () => ({ path: "source.ts" })),
+        diffSelections: Array.from({ length: 8 }, () => ({ path: "source.ts", hunkHeader: "@@ -1 +1 @@", content: "+answer = 42", selectedLineCount: 1 })),
+        terminalContexts: Array.from({ length: 8 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Tests", lineStart: 1, lineEnd: 1, content: `output-${i}` })),
+      },
+    };
+    expect(assembleTurnRequest({ ...fullReferences, trackedGoalLine }).persistence.manifest.contextReferenceCount)
+      .toBe(MAX_EXECUTION_CONTEXT_REFERENCES);
+    expect(assembleTurnRequest({ ...fullReferences, trackedGoalLine })).toEqual(assembleTurnRequest(fullReferences));
+
+    const fullSegments: AssembleTurnRequestInput = {
+      cwd, visibleContent: "Continue.",
+      internalInstructions: Array.from({ length: 47 }, (_, i) => ({ label: `control-${i}`, text: "Keep the sandbox." })),
+    };
+    expect(assembleTurnRequest({ ...fullSegments, trackedGoalLine })).toEqual(assembleTurnRequest(fullSegments));
+
+    const fullBytes: AssembleTurnRequestInput = {
+      cwd, visibleContent: "x",
+      context: {
+        terminalContexts: Array.from({ length: 3 }, (_, i) => ({ terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "y".repeat(60_000) })),
+      },
+    };
+    fullBytes.visibleContent += "x".repeat(MAX_EXECUTION_PAYLOAD_BYTES - assembleTurnRequest(fullBytes).persistence.manifest.assembledPayloadBytes - 100);
+    const crowded = assembleTurnRequest({ ...fullBytes, trackedGoalLine });
+    expect(crowded).toEqual(assembleTurnRequest(fullBytes));
+    expect(crowded.persistence.manifest.assembledPayloadBytes).toBeLessThanOrEqual(MAX_EXECUTION_PAYLOAD_BYTES);
   });
 });

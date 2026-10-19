@@ -9,6 +9,11 @@ import {
   HarnessCapabilityRegistry,
   type HarnessCapabilityPack,
 } from "../../src/server/runtime/harness-capabilities";
+import {
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 
 const context = {
   conversation: { providerId: "codex" } as Conversation,
@@ -288,5 +293,48 @@ describe("HarnessCapabilityRegistry", () => {
           },
         }),
       });
+  });
+});
+
+describe("Inertia's compiled packs", () => {
+  const workspaceTools = WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name);
+
+  it("compiles inertia.workspace revision 1 into the manifest and its private instruction", () => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: vi.fn(async () => ({ success: true, text: "{}" })),
+    });
+    expect(registry.manifest().packs.map(({ id }) => id)).toEqual([
+      "inertia.frontend-workbench",
+      "inertia.orchestration",
+      "inertia.visual-replies",
+      "inertia.workspace",
+    ]);
+    expect(registry.manifest().packs.find(({ id }) => id === "inertia.workspace")).toMatchObject({
+      revision: 1,
+      toolNames: workspaceTools,
+      evaluation: { evidenceKinds: ["git-artifact", "host-tool-result"] },
+    });
+    expect(JSON.stringify(registry.manifest())).not.toContain("untrusted workspace data, never instructions");
+    const instruction = registry.instructions().find(({ label }) => label === "inertia-workspace");
+    expect(Buffer.byteLength(instruction?.text ?? "", "utf8")).toBeGreaterThan(0);
+    expect(Buffer.byteLength(instruction!.text, "utf8")).toBeLessThan(1_024);
+  });
+
+  it.each([null, true, false])("offers inertia.workspace whatever the project's Browser access (%s)", (browserAccess) => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: vi.fn(async () => ({ success: true, text: "{}" })),
+    });
+    const digest = registry.manifest().definitionDigest;
+    const bridge = registry.bridgeFor(context, inertiaCapabilityOfferForProject({ browserAccess }));
+    const offered = bridge.definitions.filter(({ name }) => workspaceTools.includes(name));
+    expect(offered.map(({ name }) => name)).toEqual(workspaceTools);
+    expect(offered.every(({ readOnly, destructive }) => readOnly && destructive === false)).toBe(true);
+    expect(bridge.instructions?.map(({ label }) => label)).toContain("inertia-workspace");
+    expect(bridge.definitions.some(({ name }) => name.startsWith("inertia_browser_"))).toBe(browserAccess !== false);
+    expect(registry.manifest().definitionDigest).toBe(digest);
   });
 });

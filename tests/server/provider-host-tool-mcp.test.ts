@@ -245,7 +245,7 @@ describe("provider host-tool MCP transport", () => {
 
   it("describes the whole host-tool offer in the MCP instructions", () => {
     expect(INERTIA_HOST_MCP_INSTRUCTIONS).toBe(
-      "Inertia host tools for this turn: coordinate bounded top-level Inertia chats in the current project, read turns from this chat and from chats the user references or shares, use this chat's Inertia Browser when its tools are listed, and show a visual reply inline. Only the tools listed for this turn are available. Inertia asks the user for approval before any mutation.",
+      "Inertia host tools for this turn: coordinate bounded top-level Inertia chats in the current project, read turns from this chat and from chats the user references or shares, use this chat's Inertia Browser when its tools are listed, show a visual reply inline, and read this chat's Git status, turn diffs, plan, goal, project tasks, and Run actions. Only the tools listed for this turn are available. Inertia asks the user for approval before any mutation.",
     );
   });
 

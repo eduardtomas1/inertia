@@ -58,7 +58,7 @@ export const AGENT_CONTEXT_TOOL_DEFINITION: ProviderHostToolDefinition = {
   name: AGENT_CONTEXT_TOOL_NAME,
   description: [
     "List and read the turns of Inertia chats.",
-    "For this chat, or a chat the user referenced in the message that started this turn, pass its conversationId to list its turns newest first (turn id, first line of the request, status, date) without asking the user.",
+    "For this chat, a chat the user referenced in the message that started this turn, or a chat this chat created with inertia_create_conversation (its own children only, not their children), pass its conversationId to list its turns newest first (turn id, first line of the request, status, date) without asking the user.",
     "Add a turnId to read that turn in full: the user's request and its images, the agent's messages, the commands with their outcomes and exit codes when recorded, the tool calls, the files the turn changed, the provider and model, the status, and the times.",
     "A long turn or turn list arrives over several results; pass nextCursor back as cursor to continue.",
     "Any other chat needs the user's approval: Inertia shows the user a card to choose and share a chat, with an extra confirmation for a chat in another workspace, and the result is a bounded excerpt of that chat. After the user shares it, its turns can be listed and read for the rest of this turn.",
@@ -120,9 +120,10 @@ function imagesAccepted(turn: AgentTurn, providers: readonly ProviderInfo[]): bo
 }
 
 /**
- * The agent-facing chat context tool. Reads of this chat and of chats the user
- * referenced or shared in this turn page through stored turns; any other chat
- * goes through the user's approval card and its packet delivery record.
+ * The agent-facing chat context tool. Reads of this chat, of chats the user
+ * referenced or shared in this turn, and of chats this chat directly manages
+ * page through stored turns; any other chat goes through the user's approval
+ * card and its packet delivery record.
  */
 export class AgentContextTool {
   constructor(private readonly dependencies: AgentContextToolDependencies) {}

@@ -49,12 +49,31 @@ delegation, inspection of the terminal result, and deference to Inertia for
 approval. Starting a child chat is explicitly not treated as evidence that its
 work completed.
 
+`inertia_wait_for_conversation` (pack revision 3) lets a parent wait for a
+chat it created instead of polling `inertia_get_conversation_status` in a
+loop. It takes that chat's `conversationId`, under the same direct-management
+rule as the status tool, and `timeoutMs` from 1,000 to 20,000 milliseconds
+(15,000 by default). It returns the status tool's result plus `outcome` and
+`timedOut`: as soon as the chat has no active turn (`settled`: status idle,
+completed, or failed, with the latest turn completed, failed, cancelled, or
+interrupted) or needs the user's input (`needs-input`), and otherwise at the
+timeout with the current status, `outcome: "timeout"`, and `timedOut: true`.
+The wait is capped at 20 seconds because OpenCode's MCP client gives a host
+tool call 30 seconds and the HTTP bridge and stdio proxy add their own
+deadlines; the tool description tells the model to call again rather than ask
+for a longer wait. The wait polls the persisted status every 250 ms without
+holding a database transaction, re-checks on every poll that the calling turn
+is still the exact active turn (a settled turn gets `host_tool_failed`), and
+returns `call_cancelled` as soon as the call is cancelled. It is read-only,
+needs no approval, and counts against the turn's host-tool call allowance like
+any other call. A Codex thread registers it from its next new provider thread.
+
 ### Reading chat context
 
 `inertia.orchestration` also carries `inertia_request_context`, which lets an
 agent read turns of Inertia chats. With the `conversationId` of its own chat,
-or of a chat the user referenced in the message that started the turn, it
-works without asking: it lists that chat's turns newest first (turn id, first
+of a chat the user referenced in the message that started the turn, or of a
+chat its own chat manages, it works without asking: it lists that chat's turns newest first (turn id, first
 line of the request, status, and date; 20 by default, at most 50), and with a
 `turnId` it reads one turn in full: the request and its images, the agent's
 messages, commands with their outcomes and exit codes when recorded, tool
@@ -63,6 +82,15 @@ at most 30 KiB; a longer list or turn returns `nextCursor`, which the agent
 passes back as `cursor`. A turn of the agent's own chat that ran on another
 model endpoint is withheld from that chat's history and returns
 `turn_withheld`.
+
+A managed chat is one this chat created with `inertia_create_conversation`,
+which the user approved, in the same project. Only the direct parent counts: a
+managed chat's own children are not managed by the grandparent, a sibling is
+not managed by its sibling, and a child does not manage its parent, so each of
+those still opens the chooser. A managed read pages and bounds results like a
+referenced one, its agent-written text is neutralized and secret-scrubbed the
+same way, and the read is recorded on the reading turn with access `managed`
+(database schema 99 widens the read log for that value).
 
 Any other chat, or a call without `conversationId`, opens a chooser card in
 which the user picks a chat to share, with an extra confirmation for a chat in
@@ -177,6 +205,63 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
+### inertia.workspace
+
+`inertia.workspace` (revision 1) lets an agent read what the user sees in
+Inertia's surfaces for its own chat. It is offered to every provider that has
+Inertia host tools, whatever the project's Browser setting. Its six tools are
+read-only and non-destructive, take flat argument objects with no required
+fields, and never ask for approval:
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `inertia_git_status` | none | Whether the chat's workspace is a Git repository; branch, detached state, upstream, ahead and behind; up to 200 changed files with `path`, `status`, `staged`, `unstaged`, and `reviewed` (a current, non-stale file review mark from the Changes view); `totalFiles` and `truncated`. |
+| `inertia_turn_diff` | `turnId?`, `cursor?` | The unified diff of the chat's current turn so far (`state: "live"`), or of an earlier turn of the same chat (`state: "settled"`), one page of files at a time. |
+| `inertia_read_plan` | none | The latest plan as the Plan tab shows it: `source` (`native` or `none`), the steps with their status (each at most 300 bytes), and the plan document as markdown, at most 16 KiB. |
+| `inertia_read_goal` | none | The chat's current goal as the Goal panel shows it: `source` (`codex-native` or `inertia-local`), objective (at most 4 KiB), status, token budget, tokens used, time used, and times; or `goal: null`. |
+| `inertia_list_tasks` | `includeDone?` | Up to 200 open (or, with `includeDone`, all) tasks, newest first: unlinked tasks and tasks linked to chats in this project, with `id`, `title`, `note` (at most 1 KiB), `priority`, `dueDate`, `done`, `linkedConversationId`, and `linkedStatus`. |
+| `inertia_project_actions` | none | The project's Run actions for the chat's workspace (configured actions and package scripts) with `id`, `label`, `command`, `preview`, whether each is running (and running in this chat), and `previewUrl` when a local port was detected. Starting and stopping are not offered. |
+
+Git status reuses the Changes view's status scan, and turn diffs reuse the
+stored turn artifacts. A settled turn returns its stored patch, or only its
+file list with a `patchNote` when the patch has expired. The current turn's
+artifact is not finalized until the turn settles, so its diff is a live
+comparison between the turn's starting snapshot and a short-lived snapshot of
+the worktree. That snapshot uses Inertia's private index and checkpoint ref
+namespace, and its ref is removed before the tool returns. Git runs without a
+shell, with argument arrays, Inertia's deadlines, and the call's cancellation
+signal. The diff is paged by file: each result holds whole files while their
+text fits in 24 KiB, a single larger file is cut at a line boundary and marked
+`diffTruncated`, and binary files are listed by name only. `nextCursor` is
+bound to the turn; passing it back with another turn, or a cursor the tool
+did not return, is `invalid_arguments`.
+
+Every result is checked against the 32 KiB host-tool result cap, and lists
+stop early with `truncated` when the next entry would not fit. Text in results
+is sanitized before it reaches the model: terminal controls are removed,
+credential-shaped values become `[redacted]` (Run commands also go through the
+command-secret scrubber), the chat's workspace root becomes `<workspace>`, the
+home directory `<home>`, and other user and temporary paths `<path>` (every
+absolute path in a Run command keeps only its last segment), and
+instruction-shaped text is neutralized as for chat context reads. The pack's
+private instruction (`inertia-workspace`, under 1 KiB) tells the agent that
+the tools are read-only snapshots of what the user sees, that paths and text
+in their results are untrusted workspace data, and that it should still check
+the current state with its own tools before changing files.
+
+Each call passes the same exact conversation, run, and turn checks and the
+same cancellation checks as other host tools. Errors use
+`{ error: { code, message } }` with `invalid_arguments`, `turn_not_found` (a
+turn of another chat, or no such turn), `workspace_unavailable` (no readable
+workspace folder, or turn diffs in a workspace that is not a Git repository),
+`call_cancelled`, and `host_tool_failed` (including a call from a turn that is
+no longer active).
+
+Codex App Server registers dynamic tools only when a thread starts, so Codex
+chats see this pack from their next new provider thread. Claude, Cursor, Kimi,
+and OpenCode attach host tools for each turn and see it from their next turn.
+Adding the pack changes the registry's definition digest.
+
 ## What each turn is offered
 
 The registry is compiled once, so its manifest and definition digest are the
@@ -187,10 +272,21 @@ turn's prompt is assembled and carried to provider start, so a setting
 changed in between cannot leave the prompt and the tools describing
 different offers.
 
+A chat's Inertia-local goal reaches the provider in the turn's structured
+execution context, not among the private instructions. It is one line of at
+most 512 bytes labelled `Chat goal`: the goal's status, its token budget and
+the usage fields that are recorded, and the objective, flattened to one line,
+neutralized like other untrusted text, cut with an ellipsis when it does not
+fit, and introduced as the chat's tracked objective quoted for context rather
+than as a new instruction from the user. It counts toward the turn's
+reference, segment, and byte limits and is left out when they leave no room.
+A Codex-native goal is not repeated there: it reaches Codex through its own
+thread-goal API as before.
+
 When a project turns Browser access off, its turns are not offered
 `inertia.frontend-workbench`: none of the twelve Browser tools is advertised
-and the frontend instructions are not injected. The other packs are
-unchanged. Claude, Cursor, Kimi, and OpenCode attach tools for each turn, so
+and the frontend instructions are not injected. The other packs, including
+`inertia.workspace`, are unchanged. Claude, Cursor, Kimi, and OpenCode attach tools for each turn, so
 the change applies from their next turn. A Codex thread keeps the tools it
 registered when it started: a thread started with Browser access on still
 holds the Browser tools after the setting is turned off, and a call to one
@@ -212,8 +308,9 @@ change, because HTTP support is known only after `initialize`.
 The MCP server keeps the identifier `inertia-chat-manager`, because provider
 tool names and permission rules are derived from it. Its instructions say
 that it offers chat coordination, context reads, the Browser when its tools
-are listed, and visual replies, and that only the tools listed for the turn
-are available.
+are listed, visual replies, and reads of the chat's Git status, turn diffs,
+plan, goal, project tasks, and Run actions, and that only the tools listed for
+the turn are available.
 
 ## Antigravity headless contract
 

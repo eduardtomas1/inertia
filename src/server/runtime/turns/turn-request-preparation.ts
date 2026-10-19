@@ -26,6 +26,7 @@ import {
   type ConversationContextMaterialization,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
@@ -246,6 +247,9 @@ export function resolveTurnRequest(
     .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
+  // Codex-native goals reach the provider through its own thread-goal API;
+  // only an Inertia-local goal is described here, as visible context.
+  const localGoal = trackedLocalGoal(dependencies.store.agentGoals(conversation.id));
   const assemblyInput = {
     ...(contextPacketIds.length > 0
       ? {
@@ -273,6 +277,7 @@ export function resolveTurnRequest(
       )]),
       ...(request.internalInstructions ?? []),
     ],
+    ...(localGoal ? { trackedGoalLine: trackedGoalContextLine(localGoal) } : {}),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);

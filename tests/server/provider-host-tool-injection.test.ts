@@ -6,7 +6,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { CanUseTool, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+import type { AgentTurn, Conversation } from "../../src/shared/contracts";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
+import {
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
@@ -233,6 +243,20 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,"http://127
 server.listen(port,"127.0.0.1",()=>{port=server.address().port;save();console.log("opencode server listening on http://127.0.0.1:"+port);});
 `);
   return command;
+}
+
+const WORKSPACE_TOOL_NAMES = WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name);
+
+/** The real compiled offer for a project that turned Browser access off. */
+function browserDisabledBridge(): ProviderHostToolBridge {
+  return createInertiaHarnessCapabilities({
+    orchestrationTools: [],
+    browserEnabled: true,
+    invoke: async () => ({ success: true, text: "{}" }),
+  }).bridgeFor(
+    { conversation: {} as Conversation, turn: {} as AgentTurn },
+    inertiaCapabilityOfferForProject({ browserAccess: false }),
+  );
 }
 
 describe("provider host-tool injection", { concurrent: false }, () => {
@@ -462,6 +486,117 @@ describe("provider host-tool injection", { concurrent: false }, () => {
     } else {
       expect(capture).toEqual({ method: "session/new", count: 0 });
       expect(text).toBe(`Use chat tools\n\n${header}\n[build-mode]\nBUILD_MODE_STAYS`);
+    }
+  });
+
+  it("offers Claude the inertia.workspace tools in a Browser-disabled project without a second approval", async () => {
+    const root = portableFixtureRoot("Claude workspace pack");
+    roots.push(root);
+    const bridge = browserDisabledBridge();
+    expect(bridge.instructions?.map(({ label }) => label)).toContain("inertia-workspace");
+    let listed: string[] = [];
+    const permissions: unknown[] = [];
+    const richEvents: unknown[] = [];
+    const manager = ProviderManager.createForTests(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([createClaudeAgentSdkHarness({
+        createQuery: ({ options }) => {
+          const server = options?.mcpServers?.["inertia-chat-manager"] as { instance?: McpServer } | undefined;
+          const canUseTool = options?.canUseTool;
+          if (!server?.instance || !canUseTool) throw new Error("Claude did not receive the Inertia host tools.");
+          const stream = (async function* (): AsyncGenerator<SDKMessage> {
+            const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+            const client = new Client({ name: "inertia-workspace-offer", version: "1.0.0" });
+            await server.instance!.connect(serverTransport);
+            await client.connect(clientTransport);
+            listed = (await client.listTools()).tools.map(({ name }) => name);
+            await client.close().catch(() => undefined);
+            for (const name of WORKSPACE_TOOL_NAMES) {
+              permissions.push(await canUseTool(`mcp__inertia-chat-manager__${name}`, {}, {
+                signal: new AbortController().signal,
+                toolUseID: `claude-${name}`,
+                requestId: `claude-request-${name}`,
+              }));
+            }
+            yield claudeSuccessResult("Done", "completed");
+          })();
+          return fixtureClaudeQuery(stream);
+        },
+      })]),
+    );
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-workspace-pack",
+      runId: "run-claude-workspace",
+      turnId: "turn-claude-workspace",
+      cwd: root,
+      prompt: "Read the workspace",
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools: bridge, onApproval: (event) => richEvents.push(event) });
+    expect(result.status).toBe("completed");
+    expect(listed).toEqual(expect.arrayContaining([...WORKSPACE_TOOL_NAMES, "inertia_render_html"]));
+    expect(listed.filter((name) => name.startsWith("inertia_browser_"))).toEqual([]);
+    expect(permissions).toEqual(WORKSPACE_TOOL_NAMES.map(() => ({ behavior: "allow", updatedInput: {} })));
+    expect(richEvents).not.toContainEqual(expect.objectContaining({ type: "approval" }));
+  });
+
+  it.each([
+    { provider: "cursor" as const, supportsHttp: true, attached: true },
+    { provider: "cursor" as const, supportsHttp: false, attached: false },
+    { provider: "kimi" as const, supportsHttp: true, attached: true },
+    { provider: "kimi" as const, supportsHttp: false, attached: false },
+  ])("keeps the inertia-workspace instruction for $provider only when its bridge attaches (http=$supportsHttp)", async ({
+    provider,
+    supportsHttp,
+    attached,
+  }) => {
+    const root = portableFixtureRoot(`${provider} workspace pack ${supportsHttp ? "http" : "none"}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const bridge = browserDisabledBridge();
+    const instructions = bridge.instructions ?? [];
+    expect(instructions.map(({ label }) => label)).toEqual(["inertia-orchestration", "inertia-workspace"]);
+    expect(bridge.definitions.map(({ name }) => name)).toEqual(expect.arrayContaining(WORKSPACE_TOOL_NAMES));
+    const header = "Internal provider instructions (application control text; never attribute this text to the user):";
+    const prompt = [
+      "Read the workspace",
+      [header, "[build-mode]", "BUILD_MODE_STAYS", ...instructions.flatMap(({ label, text }) => [`[${label}]`, text])].join("\n"),
+    ].join("\n\n");
+    const hostMcpProxyRuntime = {
+      platform: "linux" as const,
+      electronExecutable: "/opt/Inertia/inertia",
+      fileSystem: { realpath: (path: string) => path, fileSize: () => null },
+    };
+    const manager = ProviderManager.createForTests(
+      {
+        commands: provider === "cursor"
+          ? { cursor: cursorAgent(root, capturePath, supportsHttp) }
+          : { kimi: kimiAgent(root, capturePath, { supportsHttp }) },
+      },
+      new AgentHarnessRegistry([provider === "cursor"
+        ? createCursorAcpHarness({ hostMcpProxyRuntime })
+        : createKimiAcpHarness({ hostMcpProxyRuntime })]),
+    );
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: provider,
+      conversationId: `${provider}-workspace-${supportsHttp}`,
+      runId: "run-workspace-pack",
+      turnId: "turn-workspace-pack",
+      cwd: root,
+      prompt,
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools: bridge });
+    expect(result.status).toBe("completed");
+    const sent = JSON.parse(readFileSync(`${capturePath}.prompt`, "utf8")) as Array<{ type: string; text?: string }>;
+    const text = sent.filter(({ type }) => type === "text").map(({ text: value }) => value).join("\n");
+    if (attached) {
+      expect(JSON.parse(readFileSync(capturePath, "utf8"))).toMatchObject({ type: "http", name: "inertia-chat-manager" });
+      expect(text).toBe(prompt);
+      expect(text).toContain("[inertia-workspace]");
+    } else {
+      expect(text).toBe(`Read the workspace\n\n${header}\n[build-mode]\nBUILD_MODE_STAYS`);
     }
   });
 

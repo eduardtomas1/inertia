@@ -92,7 +92,12 @@ export interface ConversationContextSourceTranscript {
   messages: ConversationContextExcerpt[];
 }
 
-export type AgentContextReadAccess = "own" | "referenced" | "approved";
+/**
+ * How a turn may read a chat: its own chat, a chat the user referenced in the
+ * turn's message, a chat the user shared through the chooser in this turn, or
+ * a chat this chat directly manages (created with the user's approval).
+ */
+export type AgentContextReadAccess = "own" | "referenced" | "approved" | "managed";
 
 /** What an agent read from one chat during one turn, through the context tool. */
 export interface AgentContextReadSummary {

@@ -13,6 +13,7 @@ import {
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import type { RuntimeStore } from "../../src/server/database";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import { routeUsesTrustedHostBridge } from "../../src/server/runtime/turns/turn-provider-host-tools";
@@ -77,8 +78,11 @@ function setBrowserAccess(store: RuntimeStore, conversationId: string, browserAc
 function offeredFrontend(runtime: Awaited<ReturnType<typeof offerRuntime>>["runtime"]) {
   const prompt = runtime.provider.input?.prompt ?? "";
   expect(prompt).toContain("[inertia-orchestration]");
+  // Browser access never withholds the read-only workspace pack.
+  expect(prompt).toContain("[inertia-workspace]");
   const tools = runtime.provider.callbacks?.hostTools?.definitions.map(({ name }) => name) ?? [];
   expect(tools).toContain("inertia_render_html");
+  expect(tools).toEqual(expect.arrayContaining(WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name)));
   return {
     prompt: prompt.includes("[inertia-frontend-workbench]"),
     tools: tools.some((name) => name.startsWith("inertia_browser_")),
@@ -182,8 +186,8 @@ describe("turn provider host-tool route authority", () => {
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(offeredFrontend(runtime)).toEqual({ prompt: frontend, tools: frontend });
     expect(runtime.provider.callbacks?.hostTools?.instructions?.map(({ label }) => label)).toEqual(frontend
-      ? ["inertia-frontend-workbench", "inertia-orchestration"]
-      : ["inertia-orchestration"]);
+      ? ["inertia-frontend-workbench", "inertia-orchestration", "inertia-workspace"]
+      : ["inertia-orchestration", "inertia-workspace"]);
     expect(manager.capabilityManifest().definitionDigest).toBe(digest);
 
     runtime.provider.resolve();

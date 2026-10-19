@@ -11,7 +11,7 @@
 Type in the search field at the top of the explorer, then choose what to search:
 
 - **Names** matches file and folder paths.
-- **Contents** finds text inside files. The search matches your text literally and ignores case, and shows each matching line with a short excerpt. Enter or a click opens the file at that line. Hidden files, binary files and files over 1 MB are skipped. A search stops after 200 matches, 64 MB read or 3 seconds and then says **Partial results**; make the text more specific to narrow it.
+- **Contents** finds text inside files. The search matches your text literally and ignores case, and shows each matching line with a short excerpt. Results take the preview area with the match count at the top; Enter or a click opens the file at that line, and **Back to results** returns to the list. Hidden files, binary files and files over 1 MB are skipped. A search stops after 200 matches, 64 MB read or 3 seconds and then says **Partial results**; make the text more specific to narrow it.
 
 ## Ask about or add selected lines
 

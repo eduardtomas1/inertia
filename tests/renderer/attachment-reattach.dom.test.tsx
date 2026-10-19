@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -266,4 +268,31 @@ it("explains an empty filter result", () => {
   fireEvent.click(screen.getByRole("button", { name: "Text" }));
   expect(screen.getByText("No text files")).toBeVisible();
   expect(screen.queryByRole("list", { name: "Chat attachments" })).toBeNull();
+});
+
+it("keeps each gallery tile's thumbnail, name and size above its re-attach action", () => {
+  const css = readFileSync("src/renderer/src/components/AttachmentsSurface.css", "utf8").replaceAll("\r\n", "\n");
+  const rule = (selector: string): string => {
+    const start = css.indexOf(`${selector} {`);
+    expect(start, selector).toBeGreaterThanOrEqual(0);
+    return css.slice(start, css.indexOf("}", start));
+  };
+  // A side-by-side action column once squeezed the preview tile to zero width.
+  expect(rule(".attachments-surface .sent-attachment[data-attachment-actions]"))
+    .toMatch(/grid-template-columns: minmax\(0, 1fr\);/u);
+  expect(rule(".attachments-surface .environment-attachments[data-expanded=\"true\"] .sent-attachments"))
+    .toMatch(/minmax\(min\(128px, 100%\), 1fr\)/u);
+  const size = rule(".attachments-surface .environment-attachments[data-expanded=\"true\"] .sent-attachment-copy small");
+  expect(size).toMatch(/position: static;/u);
+  expect(size).toMatch(/clip: auto;/u);
+  // Theme tokens only, so light and dark themes both apply.
+  expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch)\(/iu);
+
+  render(<AttachmentsSurface attachments={[{ id: "55555555-5555-4555-8555-555555555555", name: "preview.png", mimeType: "image/png", size: 68 }]} conversationId={chat} />);
+  const item = within(screen.getByRole("list", { name: "Chat attachments" })).getByRole("listitem");
+  const [tile, action] = [...item.children];
+  expect(tile).toHaveAccessibleName("Preview attachment preview.png");
+  expect(tile).toHaveTextContent("preview.png");
+  expect(tile).toHaveTextContent("PNG image · 68 B");
+  expect(action).toHaveAccessibleName("Re-attach preview.png to the message");
 });

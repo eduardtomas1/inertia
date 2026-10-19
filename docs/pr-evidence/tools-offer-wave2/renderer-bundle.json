@@ -1,0 +1,493 @@
+{
+  "baseline": "be447f83234b288f3babd9f351ff4e727f5d6615",
+  "platform": "Linux x64, Node 22.22.0, same package-lock.json",
+  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of the branch head before Wave 2 (be447f83, tools-offer wave 1 merged with main) and of that head merged with Wave 2 (d5ac7957, merge 2d0943ad). Wave 2 brings the terminal-to-chat links, Files line selection and content search, task creation from messages and plan steps with its notice, and attachment re-attach. Only the closures that exceeded the caps are raised, each to its exact measured size with no headroom: deferredBackgroundTasksJavaScript (+22), mainWorkbenchFirstLoadJavaScript (+139 terminal, +5,485), detachedChatFirstLoadJavaScript (+47 terminal, +2,299), entryCss (+781 terminal, +2,712), filesFirstLoadJavaScript (+672) and coreJavaScript (+1,199 terminal, +19,710). The terminal estimates were measured before the merge and are part of the cap change. deferredTerminalJavaScript grows by 41,142 bytes against the 41,125-byte terminal estimate and stays within its cap; every other closure keeps its cap.",
+  "measurements": {
+    "deferredLegacyPromptStashJavaScript": {
+      "baselineBytes": 1163,
+      "baselineCapBytes": 1536,
+      "afterBytes": 1163,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 1536,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredUsageLimitsJavaScript": {
+      "baselineBytes": 21769,
+      "baselineCapBytes": 21769,
+      "afterBytes": 21769,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 21769,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredWelcomeGuideJavaScript": {
+      "baselineBytes": 38361,
+      "baselineCapBytes": 38361,
+      "afterBytes": 38361,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 38361,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredWorkingOrbJavaScript": {
+      "baselineBytes": 21829,
+      "baselineCapBytes": 22528,
+      "afterBytes": 21829,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 22528,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSnapshotSettingsJavaScript": {
+      "baselineBytes": 4054,
+      "baselineCapBytes": 6210,
+      "afterBytes": 4054,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 6210,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSnapshotControlJavaScript": {
+      "baselineBytes": 6889,
+      "baselineCapBytes": 7372,
+      "afterBytes": 6889,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 7372,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredAttachmentStorageSettingsJavaScript": {
+      "baselineBytes": 5330,
+      "baselineCapBytes": 5504,
+      "afterBytes": 5330,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 5504,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredBackgroundTasksJavaScript": {
+      "baselineBytes": 19408,
+      "baselineCapBytes": 19408,
+      "afterBytes": 19430,
+      "deltaFromBaselineBytes": 22,
+      "capBytes": 19430,
+      "capChangeBytes": 22,
+      "withinCap": true
+    },
+    "deferredTasksViewJavaScript": {
+      "baselineBytes": 21128,
+      "baselineCapBytes": 21128,
+      "afterBytes": 21128,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 21128,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredIconRegionJavaScript": {
+      "baselineBytes": 12995,
+      "baselineCapBytes": 12995,
+      "afterBytes": 12995,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 12995,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProjectSettingsJavaScript": {
+      "baselineBytes": 17133,
+      "baselineCapBytes": 17658,
+      "afterBytes": 17133,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 17658,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredCliConversationImportJavaScript": {
+      "baselineBytes": 9645,
+      "baselineCapBytes": 10053,
+      "afterBytes": 9645,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 10053,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredReviewNoteJavaScript": {
+      "baselineBytes": 1497,
+      "baselineCapBytes": 1536,
+      "afterBytes": 1497,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 1536,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredThreadActionsJavaScript": {
+      "baselineBytes": 8251,
+      "baselineCapBytes": 8267,
+      "afterBytes": 8251,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 8267,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProjectCustomizeJavaScript": {
+      "baselineBytes": 12016,
+      "baselineCapBytes": 12161,
+      "afterBytes": 12016,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 12161,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProjectColorContrastJavaScript": {
+      "baselineBytes": 1824,
+      "baselineCapBytes": 1920,
+      "afterBytes": 1824,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 1920,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredDiagnosticsJavaScript": {
+      "baselineBytes": 18426,
+      "baselineCapBytes": 19858,
+      "afterBytes": 18426,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 19858,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredDiagnosticCatalogJavaScript": {
+      "baselineBytes": 9980,
+      "baselineCapBytes": 12288,
+      "afterBytes": 9980,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 12288,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredIssueReportJavaScript": {
+      "baselineBytes": 13370,
+      "baselineCapBytes": 14136,
+      "afterBytes": 13370,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 14136,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mascotFirstLoadJavaScript": {
+      "baselineBytes": 11506,
+      "baselineCapBytes": 11562,
+      "afterBytes": 11506,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 11562,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mascotJavaScript": {
+      "baselineBytes": 11506,
+      "baselineCapBytes": 11562,
+      "afterBytes": 11506,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 11562,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mascotSettingsJavaScript": {
+      "baselineBytes": 7495,
+      "baselineCapBytes": 7804,
+      "afterBytes": 7495,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 7804,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "entryJavaScript": {
+      "baselineBytes": 222556,
+      "baselineCapBytes": 222720,
+      "afterBytes": 222575,
+      "deltaFromBaselineBytes": 19,
+      "capBytes": 222720,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "baselineBytes": 897901,
+      "baselineCapBytes": 897901,
+      "afterBytes": 903528,
+      "deltaFromBaselineBytes": 5627,
+      "capBytes": 903528,
+      "capChangeBytes": 5627,
+      "withinCap": true
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "baselineBytes": 682589,
+      "baselineCapBytes": 682589,
+      "afterBytes": 684935,
+      "deltaFromBaselineBytes": 2346,
+      "capBytes": 684935,
+      "capChangeBytes": 2346,
+      "withinCap": true
+    },
+    "entryCss": {
+      "baselineBytes": 241102,
+      "baselineCapBytes": 241260,
+      "afterBytes": 246196,
+      "deltaFromBaselineBytes": 5094,
+      "capBytes": 246196,
+      "capChangeBytes": 4936,
+      "withinCap": true
+    },
+    "colorThemesCss": {
+      "baselineBytes": 8675,
+      "baselineCapBytes": 8864,
+      "afterBytes": 8675,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 8864,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "detachedChatCss": {
+      "baselineBytes": 3069,
+      "baselineCapBytes": 8192,
+      "afterBytes": 3069,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "settingsJavaScript": {
+      "baselineBytes": 78006,
+      "baselineCapBytes": 81511,
+      "afterBytes": 78006,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 81511,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "filesFirstLoadJavaScript": {
+      "baselineBytes": 110877,
+      "baselineCapBytes": 117760,
+      "afterBytes": 120029,
+      "deltaFromBaselineBytes": 9152,
+      "capBytes": 120029,
+      "capChangeBytes": 2269,
+      "withinCap": true
+    },
+    "deferredMarkdownJavaScript": {
+      "baselineBytes": 434721,
+      "baselineCapBytes": 450560,
+      "afterBytes": 434721,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 450560,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "transcriptJavaScript": {
+      "baselineBytes": 573513,
+      "baselineCapBytes": 614400,
+      "afterBytes": 576373,
+      "deltaFromBaselineBytes": 2860,
+      "capBytes": 614400,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredFailureDiagnosticsJavaScript": {
+      "baselineBytes": 5766,
+      "baselineCapBytes": 8192,
+      "afterBytes": 5771,
+      "deltaFromBaselineBytes": 5,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredAttachmentPreviewJavaScript": {
+      "baselineBytes": 17839,
+      "baselineCapBytes": 18701,
+      "afterBytes": 17839,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 18701,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredPreviewJavaScript": {
+      "baselineBytes": 7653,
+      "baselineCapBytes": 8192,
+      "afterBytes": 7675,
+      "deltaFromBaselineBytes": 22,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredBrowserEvidenceJavaScript": {
+      "baselineBytes": 3453,
+      "baselineCapBytes": 5120,
+      "afterBytes": 3453,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 5120,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSpreadsheetJavaScript": {
+      "baselineBytes": 487396,
+      "baselineCapBytes": 522240,
+      "afterBytes": 487396,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 522240,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredDiscordSettingsJavaScript": {
+      "baselineBytes": 7913,
+      "baselineCapBytes": 8711,
+      "afterBytes": 7913,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 8711,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredCanaryRollbackJavaScript": {
+      "baselineBytes": 2254,
+      "baselineCapBytes": 4096,
+      "afterBytes": 2254,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 4096,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredLifecycleIntegritySettingsJavaScript": {
+      "baselineBytes": 2595,
+      "baselineCapBytes": 6222,
+      "afterBytes": 2595,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 6222,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSidebarUpdateControlJavaScript": {
+      "baselineBytes": 15842,
+      "baselineCapBytes": 15891,
+      "afterBytes": 15864,
+      "deltaFromBaselineBytes": 22,
+      "capBytes": 15891,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProviderAuthJavaScript": {
+      "baselineBytes": 11204,
+      "baselineCapBytes": 12288,
+      "afterBytes": 11204,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 12288,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProviderMaintenanceJavaScript": {
+      "baselineBytes": 4410,
+      "baselineCapBytes": 5120,
+      "afterBytes": 4410,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 5120,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredComposerQueueJavaScript": {
+      "baselineBytes": 13029,
+      "baselineCapBytes": 13187,
+      "afterBytes": 13029,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 13187,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredTerminalJavaScript": {
+      "baselineBytes": 27152,
+      "baselineCapBytes": 27229,
+      "afterBytes": 68294,
+      "deltaFromBaselineBytes": 41142,
+      "capBytes": 68354,
+      "capChangeBytes": 41125,
+      "withinCap": true
+    },
+    "deferredGitMenusJavaScript": {
+      "baselineBytes": 8120,
+      "baselineCapBytes": 9383,
+      "afterBytes": 8142,
+      "deltaFromBaselineBytes": 22,
+      "capBytes": 9383,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredWorkspaceHeaderActionsJavaScript": {
+      "baselineBytes": 17584,
+      "baselineCapBytes": 22082,
+      "afterBytes": 17606,
+      "deltaFromBaselineBytes": 22,
+      "capBytes": 22082,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "detachedChatJavaScript": {
+      "baselineBytes": 11145,
+      "baselineCapBytes": 16384,
+      "afterBytes": 11145,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 16384,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "preMergeConfidenceJavaScript": {
+      "baselineBytes": 27473,
+      "baselineCapBytes": 28672,
+      "afterBytes": 27257,
+      "deltaFromBaselineBytes": -216,
+      "capBytes": 28672,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "morphiconsJavaScript": {
+      "baselineBytes": 20685,
+      "baselineCapBytes": 20685,
+      "afterBytes": 20685,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 20685,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "morphingIconFeedbackJavaScript": {
+      "baselineBytes": 3948,
+      "baselineCapBytes": 8192,
+      "afterBytes": 3948,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "coreJavaScript": {
+      "baselineBytes": 2325741,
+      "baselineCapBytes": 2325741,
+      "afterBytes": 2348074,
+      "deltaFromBaselineBytes": 22333,
+      "capBytes": 2348074,
+      "capChangeBytes": 22333,
+      "withinCap": true
+    },
+    "deferredPdfJavaScript": {
+      "baselineBytes": 437503,
+      "baselineCapBytes": 512000,
+      "afterBytes": 437503,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 512000,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredPdfWorker": {
+      "baselineBytes": 1264342,
+      "baselineCapBytes": 1382400,
+      "afterBytes": 1264342,
+      "deltaFromBaselineBytes": 0,
+      "capBytes": 1382400,
+      "capChangeBytes": 0,
+      "withinCap": true
+    }
+  }
+}

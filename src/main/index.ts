@@ -574,11 +574,8 @@ function registerIpcHandlers(): void {
   });
 
   registerAttachmentReattachIpc({
-    ipcMain,
-    channel: IPC.reattachAttachment,
-    assertTrusted: assertTrustedChatIpc,
-    registry: attachmentRegistry,
-    imports: rendererAttachmentImports,
+    ipcMain, channel: IPC.reattachAttachment, assertTrusted: assertTrustedChatIpc,
+    registry: attachmentRegistry, imports: rendererAttachmentImports,
     retained: () => conversationAttachments,
   });
 

@@ -57,7 +57,7 @@ import { TooltipButton } from "./TooltipButton";
 import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
-import { FilesPanelContentResults, FilesSearchModeToggle, useFilesContentSearch, type FileSearchMode } from "./FilesPanelContentResults";
+import { BackToResultsButton, contentMatchCountLabel, FilesContentResultsView, FilesSearchModeToggle, useFilesContentSearch, type FileSearchMode } from "./FilesPanelContentResults";
 import { FilesPanelLineSelection, PreviewLineNumber, useFilePreviewLineSelection } from "./FilesPanelLineSelection";
 import type { FileSelectionPromptMode } from "../utils/filePreviewSelection";
 import { projectPathContextMenu } from "../utils/contextMenu";
@@ -205,7 +205,6 @@ const EMPTY_SEARCH: SearchState = {
   truncated: false,
   error: null,
 };
-const NO_ROWS: WorkspaceTreeRow[] = [];
 
 const MAX_RENDERED_PREVIEW_LINES = 2_000;
 export const MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS = 100_000;
@@ -268,6 +267,14 @@ export function FilesPanel({
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
   const [searchMode, setSearchMode] = useState<FileSearchMode>("names");
+  // Content results occupy the main area until a match (or any file) opens.
+  const [contentResultsDismissed, setContentResultsDismissed] = useState(false);
+  const selectionKey = `${selectedPath}\0${selectedLocation?.startLine ?? ""}`;
+  const [seenSelectionKey, setSeenSelectionKey] = useState(selectionKey);
+  if (seenSelectionKey !== selectionKey) {
+    setSeenSelectionKey(selectionKey);
+    setContentResultsDismissed(true);
+  }
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const [editingFile, setEditingFile] =
     useState<WorkspaceFilePreview | null>(null);
@@ -682,12 +689,14 @@ export function FilesPanel({
     setQuery(value);
     setSearch(EMPTY_SEARCH);
     resetContentSearch();
+    setContentResultsDismissed(false);
   }, [conversationId, projectId, resetContentSearch, selectedPath]);
 
   const chooseSearchMode = useCallback((mode: FileSearchMode): void => {
     ++searchGeneration.current;
     setSearch(EMPTY_SEARCH);
     resetContentSearch();
+    setContentResultsDismissed(false);
     setSearchMode(mode);
   }, [resetContentSearch]);
 
@@ -733,9 +742,11 @@ export function FilesPanel({
       expanded: false,
     }))
   ), [search.entries]);
-  const searchActive = Boolean(query.trim());
-  const contentSearchActive = searchActive && contentMode;
-  const rows = contentSearchActive ? NO_ROWS : searchActive ? searchRows : treeRows;
+  // Names search drives the tree column; content search uses the main area.
+  const searchActive = Boolean(query.trim()) && !contentMode;
+  const contentSearchActive = Boolean(query.trim()) && contentMode;
+  const showContentResults = contentSearchActive && !contentResultsDismissed;
+  const rows = searchActive ? searchRows : treeRows;
   const visiblePaths = useMemo(
     () => new Set(rows.map(({ entry }) => entry.path)),
     [rows],
@@ -886,25 +897,23 @@ export function FilesPanel({
     return () => observer.disconnect();
   }, [selectedPath, visiblePaths]);
 
-  const searchPending = contentSearchActive ? contentSearch.matches === null : searchActive && search.entries === null;
-  const searchError = contentSearchActive ? contentSearch.error : search.error;
-  const searchTruncated = contentSearchActive ? contentSearch.truncated : search.truncated;
+  const searchPending = searchActive && search.entries === null;
   const treeBusy = loading
     || searchPending
     || loadingDirectories.size > 0;
   const hasRootFailure = !searchActive && Boolean(error) && treeRows.length === 0;
-  const hasSearchFailure = searchActive && Boolean(searchError);
+  const hasSearchFailure = searchActive && Boolean(search.error);
   const showTreeLoading = searchActive
     ? searchPending
     : loading && treeRows.length === 0;
-  const resultCount = contentSearchActive ? contentSearch.matches?.length ?? 0 : rows.length;
-  const countLabel = contentSearchActive
-    ? `${resultCount} matches`
+  const countLabel = showContentResults
+    ? contentMatchCountLabel(contentSearch.matches?.length ?? 0)
     : searchActive
       ? `${search.entries?.length ?? 0} results`
       : `${treeRows.length} visible`;
 
   const openContentMatch = (match: WorkspaceContentMatch): void => {
+    setContentResultsDismissed(true);
     setPendingMarkdownHeading(null);
     onSelectFile(match.projectPath, { startLine: match.line, endLine: match.line, startColumn: match.column }, true);
   };
@@ -961,17 +970,14 @@ export function FilesPanel({
           ) : hasRootFailure || hasSearchFailure ? (
             <div className={`${PANEL_EMPTY_CLASS} compact ${FILE_PANEL_ERROR_CLASS}`} role="alert">
               <CircleAlert size={16} aria-hidden="true" />
-              <p>{searchActive ? searchError : error}</p>
+              <p>{searchActive ? search.error : error}</p>
             </div>
-          ) : resultCount === 0 ? (
+          ) : rows.length === 0 ? (
             <div className={`${PANEL_EMPTY_CLASS} compact`}>
               <p>{searchActive ? "No matches" : "Empty project"}</p>
             </div>
           ) : null}
-          {contentSearchActive ? (
-            <FilesPanelContentResults query={query} matches={contentSearch.matches ?? []} busy={searchPending}
-              selectedPath={selectedPath} selectedLine={selectedLocation?.startLine ?? null} onOpen={openContentMatch} />
-          ) : <FileTree
+          <FileTree
             label={searchActive ? "Search results" : "Files"}
             busy={treeBusy}
             rows={rows}
@@ -987,7 +993,7 @@ export function FilesPanel({
             onActivate={treeActions.activate}
             onKeyDown={treeActions.keyDown}
             contextMenuFor={treeContextMenu}
-          />}
+          />
           {!searchActive && error && treeRows.length > 0 && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">{error}</p>
           )}
@@ -996,9 +1002,9 @@ export function FilesPanel({
               More files.
             </p>
           )}
-          {searchActive && searchTruncated && (
+          {searchActive && search.truncated && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
-              {contentSearchActive ? "Partial results. Refine for more." : "Refine for more."}
+              Refine for more.
             </p>
           )}
         </div>
@@ -1011,12 +1017,12 @@ export function FilesPanel({
               role="status"
               aria-live="polite"
             >
-              <strong>{preview || selectedPath
+              <strong>{showContentResults ? "Search in files" : preview || selectedPath
                 ? workspacePathName(preview?.path ?? selectedPath ?? "")
                 : "Project files"}</strong>
-              <span>{preview?.path ?? selectedPath ?? countLabel}</span>
+              <span>{showContentResults ? countLabel : preview?.path ?? selectedPath ?? countLabel}</span>
             </div>
-            <div className={`${FILE_PREVIEW_CLASS}-metadata`}>
+            <div className={`${FILE_PREVIEW_CLASS}-metadata`} hidden={showContentResults}>
               {selectedPath && <FileGitBadge index={gitIndex} path={selectedPath} />}
               {previewLanguage && !markdownPreview && (
                 <span
@@ -1033,7 +1039,8 @@ export function FilesPanel({
               )}
             </div>
             <div className={`${FILE_PREVIEW_CLASS}-actions`}>
-              {markdownPreview && preview && (
+              {contentSearchActive && !showContentResults && <BackToResultsButton onBack={() => setContentResultsDismissed(false)} />}
+              {markdownPreview && preview && !showContentResults && (
                 <div
                   className={`${FILE_PREVIEW_CLASS}-view-toggle`}
                   role="group"
@@ -1065,7 +1072,7 @@ export function FilesPanel({
                   </button>
                 </div>
               )}
-              {preview && onSaveFile && (
+              {preview && onSaveFile && !showContentResults && (
                 <IconButton
                   label={previewEditable
                     ? `Edit ${preview.path}`
@@ -1076,7 +1083,7 @@ export function FilesPanel({
                   <Pencil size={14} />
                 </IconButton>
               )}
-              {preview && onOpenFile && (
+              {preview && onOpenFile && !showContentResults && (
                 <IconButton
                   label="Open file"
                   onClick={() => onOpenFile(preview.path)}
@@ -1096,7 +1103,10 @@ export function FilesPanel({
               </IconButton>
             </div>
           </header>
-          {previewLoading && selectedPath ? (
+          {showContentResults ? (
+            <FilesContentResultsView query={query} state={contentSearch} selectedPath={selectedPath}
+              selectedLine={selectedLocation?.startLine ?? null} onOpen={openContentMatch} />
+          ) : previewLoading && selectedPath ? (
             <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
               <LoadingMark label="Loading" />
               <span>Loading {workspacePathName(selectedPath)}…</span>

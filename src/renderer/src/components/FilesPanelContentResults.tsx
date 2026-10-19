@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import clsx from "clsx";
+import { ArrowLeft, CircleAlert } from "lucide-react";
 import type {
   WorkspaceContentMatch,
   WorkspaceContentSearchPage,
@@ -13,6 +14,7 @@ import type {
 import { isWorkspaceContentSearchQuery } from "@shared/contracts/workspace";
 import { contentSnippetParts } from "../utils/filePreviewSelection";
 import { workspaceParentPath, workspacePathName } from "../utils/workspaceTree";
+import { LoadingMark } from "./ui";
 
 export interface FilesPanelContentResultsProps {
   query: string;
@@ -203,8 +205,8 @@ export function FilesPanelContentResults({
             >
               <span className="file-content-result-location" aria-hidden="true">
                 <strong>{workspacePathName(match.projectPath)}</strong>
-                <span>:{match.line}</span>
                 {parent && <small>{parent}</small>}
+                <span className="file-content-result-line">Line {match.line}</span>
               </span>
               <code className="file-content-result-snippet" aria-hidden="true">
                 {parts
@@ -216,5 +218,84 @@ export function FilesPanelContentResults({
         );
       })}
     </ul>
+  );
+}
+
+export function contentMatchCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "match" : "matches"}`;
+}
+
+export interface FilesContentResultsViewProps {
+  query: string;
+  state: ContentSearchState;
+  selectedPath: string | null;
+  selectedLine: number | null;
+  onOpen: (match: WorkspaceContentMatch) => void;
+}
+
+/** Content search results shown in the Files panel's main (preview) area. */
+export function FilesContentResultsView({
+  query,
+  state,
+  selectedPath,
+  selectedLine,
+  onOpen,
+}: FilesContentResultsViewProps): React.JSX.Element {
+  const term = `\u201c${query}\u201d`;
+  if (state.error) {
+    return (
+      <div className="panel-empty file-panel-error" role="alert">
+        <CircleAlert size={16} aria-hidden="true" />
+        <p>{state.error}</p>
+      </div>
+    );
+  }
+  if (state.matches === null) {
+    return (
+      <div className="panel-loading" role="status">
+        <LoadingMark label="Searching" />
+        <span>Searching for {term}…</span>
+      </div>
+    );
+  }
+  return (
+    <div className="file-content-results-view">
+      <div className="file-content-results-header" role="status">
+        <strong>
+          {state.matches.length === 0
+            ? `No matches for ${term}`
+            : `${contentMatchCountLabel(state.matches.length)} for ${term}`}
+        </strong>
+        {state.truncated && <span>Partial results. Refine for more.</span>}
+      </div>
+      <FilesPanelContentResults
+        query={query}
+        matches={state.matches}
+        busy={false}
+        selectedPath={selectedPath}
+        selectedLine={selectedLine}
+        onOpen={onOpen}
+      />
+    </div>
+  );
+}
+
+/** Returns from an opened match to the content results and focuses the list. */
+export function BackToResultsButton({ onBack }: { onBack: () => void }): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className="file-back-to-results"
+      onClick={(event) => {
+        const panel = event.currentTarget.closest(".files-panel");
+        onBack();
+        window.requestAnimationFrame(() => panel
+          ?.querySelector<HTMLElement>(".file-content-result[tabindex='0']")
+          ?.focus());
+      }}
+    >
+      <ArrowLeft size={14} aria-hidden="true" />
+      <span>Back to results</span>
+    </button>
   );
 }

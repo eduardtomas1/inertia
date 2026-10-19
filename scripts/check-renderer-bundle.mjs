@@ -78,7 +78,13 @@ const budgets = {
   // shrinks by 3,233 bytes and keeps its cap.
   // Terminal-to-chat links: the workspace.path.resolve command schema, its
   // result validator and the terminal's Files opener add 139 bytes.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 7_975 + 139,
+  // Tools-offer wave 2: Files line selection and content search, task creation
+  // from messages and plan steps, and attachment re-attach add 5,485 bytes to
+  // this route (903,525 measured on Linux x64 against 897,901 at be447f83,
+  // including the 139 terminal bytes above).
+  // Tools-offer wave 2 polish: content results in the Files main area and
+  // the Attachments gallery tile fix add 3 bytes (903,528 measured on Linux x64).
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 7_975 + 139 + 5_485 + 3,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -88,11 +94,22 @@ const budgets = {
   // shortcut dispatch add 596 bytes to this route (682,589 measured against
   // 681,993 on main e165a0aa).
   // Terminal-to-chat links add the shared path-resolve contract: 47 bytes.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 596 + 47,
+  // Tools-offer wave 2: Files line selection and content search, task creation
+  // from messages and plan steps, and attachment re-attach add 2,299 bytes to
+  // this route (684,935 measured on Linux x64 against 682,589 at be447f83,
+  // including the 47 terminal bytes above).
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 596 + 47 + 2_299,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The terminal find bar's floating rules add 781 bytes.
-  entryCss: 241_004 + 256 + 781,
+  // Tools-offer wave 2: Files line selection and content search, task creation
+  // from messages and plan steps, and attachment re-attach add 2,712 bytes to
+  // this stylesheet beyond the previous cap (244,753 measured on Linux x64
+  // against 241,102 at be447f83, including the 781 terminal bytes above and
+  // the 158 bytes of earlier headroom).
+  // Tools-offer wave 2 polish: content results in the Files main area and
+  // the Attachments gallery tile fix add 1,443 bytes (246,196 measured on Linux x64).
+  entryCss: 241_004 + 256 + 781 + 2_712 + 1_443,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -113,7 +130,11 @@ const budgets = {
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
   // measured).
-  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21,
+  // Tools-offer wave 2: Files line selection and content search, task creation
+  // from messages and plan steps, and attachment re-attach add 22 bytes to
+  // this chunk, one static import of a new shared chunk (19,430 measured on
+  // Linux x64 against 19,408 at be447f83).
+  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21 + 22,
   // Tools-offer wave 1: longer minified import aliases from the grown shared
   // chunk add 2 bytes (21,128 measured against 21,126 on main).
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 2,
@@ -125,7 +146,13 @@ const budgets = {
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
-  filesFirstLoadJavaScript: 115 * kibibyte,
+  // Tools-offer wave 2: Files line selection and content search, task creation
+  // from messages and plan steps, and attachment re-attach add 7,555 bytes to
+  // this closure (118,432 measured on Linux x64 against 110,877 at be447f83);
+  // raise the cap by the 672-byte overflow.
+  // Tools-offer wave 2 polish: content results in the Files main area and
+  // the Attachments gallery tile fix add 1,597 bytes (120,029 measured on Linux x64).
+  filesFirstLoadJavaScript: 115 * kibibyte + 672 + 1_597,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
@@ -205,7 +232,13 @@ const budgets = {
   // Linux x64 against 2,315,854 on main e165a0aa).
   // Terminal-to-chat links add 1,199 core bytes on the same baseline: the
   // shared path-resolve contract, result validator and context-menu flag.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 9_887 + 1_199,
+  // Tools-offer wave 2: Files line selection and content search, task creation
+  // from messages and plan steps, and attachment re-attach add 19,710 core
+  // bytes (2,346,650 measured on Linux x64 against 2,325,741 at be447f83,
+  // including the 1,199 terminal bytes above).
+  // Tools-offer wave 2 polish: content results in the Files main area and
+  // the Attachments gallery tile fix add 1,424 bytes (2,348,074 measured on Linux x64).
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 9_887 + 1_199 + 19_710 + 1_424,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

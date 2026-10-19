@@ -5,6 +5,7 @@ import { RuntimeComposerQueuedActions } from "../../src/renderer/src/components/
 import { enqueueRuntimePrompt, finishQueueIntent, queueIntent, RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
 import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
+import { readSourceText } from "../helpers/source-text";
 
 const conversationId = "40404040-4040-4040-8040-404040404040";
 const queued: QueuedMessage = { id: "50505050-5050-4050-8050-505050505050", conversationId, content: "Next task", attachments: [], state: "waiting", createdAt: "2026-09-26T00:00:00.000Z", error: null, turnId: null, userMessageId: null };
@@ -17,7 +18,7 @@ describe("runtime queue presentation and durable draft identity", () => {
     const pending = new Promise<MessageQueueResult>((resolve) => { resolveRead = resolve; });
     const run = vi.fn<QueueCommandRunner>().mockReturnValueOnce(pending).mockResolvedValue(response());
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend
+    const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
       latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
     try {
       visibility.mockReturnValue("hidden");
@@ -36,7 +37,7 @@ describe("runtime queue presentation and durable draft identity", () => {
       const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => structuredClone(response(hasEntry ? [queued] : [])));
       let commits = 0;
       const view = render(<Profiler id="queue" onRender={() => { commits += 1; }}>
-        <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend
+        <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
           latestTurnId="first" latestTurnStatus="completed" queueHost={null} />
       </Profiler>);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -100,7 +101,7 @@ describe("runtime queue presentation and durable draft identity", () => {
 
   it("only reads on mount or completion and sends exclusively after an explicit click", async () => {
     const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response());
-    const props = { conversationId, onCommand: run, running: false, canSend: true, latestTurnId: "first", latestTurnStatus: "completed", queueHost: null };
+    const props = { conversationId, onCommand: run, canSend: true, latestTurnId: "first", latestTurnStatus: "completed", queueHost: null };
     const view = render(<RuntimeComposerQueuedActions {...props} />);
     await screen.findByText("Next task");
     view.rerender(<RuntimeComposerQueuedActions {...props} latestTurnId="second" />);
@@ -110,12 +111,26 @@ describe("runtime queue presentation and durable draft identity", () => {
     expect(run.mock.calls.some(([command]) => command.type === "message.queue.send")).toBe(true);
   });
 
+  it("lets Send now hand a queued message to a working agent that takes follow-ups, and shows when it cannot", async () => {
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response());
+    const props = { conversationId, onCommand: run, canSend: true, latestTurnId: "first", latestTurnStatus: "running", queueHost: null };
+    const view = render(<RuntimeComposerQueuedActions {...props} />);
+    const send = await screen.findByRole("button", { name: "Send queued message now" });
+    expect(send).toBeEnabled();
+    await act(async () => fireEvent.click(send));
+    expect(run.mock.calls.some(([command]) => command.type === "message.queue.send")).toBe(true);
+    view.rerender(<RuntimeComposerQueuedActions {...props} canSend={false} />);
+    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeDisabled();
+    const css = readSourceText("src/renderer/src/components/composer/ComposerSendActions.css");
+    expect(css).toContain(".composer-queue-send:disabled {\n  color: var(--text-muted);\n  opacity: var(--disabled-opacity);\n}");
+  });
+
   it("does not resurrect a removed entry when an earlier queue read finishes late", async () => {
     let resolveRead!: (value: MessageQueueResult) => void;
     const pending = new Promise<MessageQueueResult>((resolve) => { resolveRead = resolve; });
     const run = vi.fn<QueueCommandRunner>().mockResolvedValueOnce(response())
       .mockReturnValueOnce(pending).mockResolvedValue(response([]));
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
     await screen.findByText("Next task");
     await act(async () => window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove queued message" })));
@@ -127,7 +142,7 @@ describe("runtime queue presentation and durable draft identity", () => {
   it("states a blocked entry's error once, in the status line, without repeating it in a tooltip", async () => {
     const blocked: QueuedMessage = { ...queued, state: "blocked", error: "The route is no longer available." };
     const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([blocked]));
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} running={false} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
     const label = await screen.findByText("Needs attention");
     expect(label.tagName.toLowerCase()).toBe("small");
     expect(screen.getByRole("status")).toHaveTextContent("The route is no longer available.");

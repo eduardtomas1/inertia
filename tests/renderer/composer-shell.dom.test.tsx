@@ -211,4 +211,28 @@ describe("composer shell", () => {
     expect(within(queue).getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Send now");
     expect(within(queue).getByRole("button", { name: "Remove queued message" })).toHaveTextContent("");
   });
+
+  it.each([
+    ["codex-app-server", true],
+    ["claude-agent-sdk", true],
+    ["kimi-acp", false],
+  ] as const)("offers Send now on a queued message during a %s turn with an empty composer: %s", async (harnessId, enabled) => {
+    const current = conversation(`queued-${harnessId}`);
+    window.localStorage.setItem(
+      `inertia:queued-prompts:v2:${current.id}`,
+      JSON.stringify([{ id: "queued-1", content: "Look at this too", createdAt: "2026-08-21T10:00:00.000Z", attachments: [] }]),
+    );
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-running",
+      status: "running" as const,
+      harnessId,
+    };
+    render(<Composer {...composerProps(current, { running: true, latestTurn })} />);
+    const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+    const sendNow = within(queue).getByRole("button", { name: "Send queued message now" });
+    if (enabled) expect(sendNow).toBeEnabled();
+    else expect(sendNow).toBeDisabled();
+  });
 });

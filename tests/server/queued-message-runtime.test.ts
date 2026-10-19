@@ -239,6 +239,74 @@ describe("follow-ups that never reach the running agent", () => {
   });
 });
 
+describe("Send now while the agent works", () => {
+  it("hands the queued message to the running turn as a follow-up and completes its queue entry once", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id); await f.drain();
+      await f.command("message.queue.send", id);
+      expect(f.provider.steerCalls).toEqual(["Do the next task."]);
+      const receipt = f.store.queuedMessages.get(f.conversationId, id)!;
+      expect(receipt).toMatchObject({ state: "accepted", turnId: initial.turn.id, content: "", attachments: [] });
+      expect(f.store.message(receipt.userMessageId!)).toMatchObject({ content: "Do the next task.", turnId: initial.turn.id });
+      expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("keeps the message queued for the next turn when the agent does not take it now", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id); await f.drain();
+      f.provider.steerSupported = false;
+      await expect(f.command("message.queue.send", id)).rejects.toThrow("It will send when the turn ends.");
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("holds a queued message whose mid-turn delivery became unknown instead of sending it again", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id); await f.drain();
+      vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError());
+      await expect(f.command("message.queue.send", id)).rejects.toMatchObject({ delivery: "ambiguous" });
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("blocked");
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("sends a queued message's images with the follow-up and keeps them referenced by its message", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const id = randomUUID();
+      const image = { id: randomUUID(), name: "queued.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
+      await f.command("message.queue.enqueue", id, [image]); await f.drain();
+      const steer = vi.spyOn(f.provider, "steer");
+      await f.command("message.queue.send", id);
+      expect(steer).toHaveBeenCalledOnce();
+      expect(steer.mock.calls[0]![1].imagePaths).toHaveLength(1);
+      const receipt = f.store.queuedMessages.get(f.conversationId, id)!;
+      expect(receipt.state).toBe("accepted");
+      expect(f.store.message(receipt.userMessageId!).attachments).toMatchObject([{ id: image.id }]);
+      expect(f.store.evictableAttachmentIds()).not.toContain(image.id);
+      expect(await f.attachments.preview(image.id)).not.toBeNull();
+    } finally { await f.close(); }
+  });
+});
+
 describe("durable runtime message queue", () => {
   it("dispatches in the background after completion and replays a lost enqueue acknowledgement without a duplicate turn", async () => {
     const f = await fixture();

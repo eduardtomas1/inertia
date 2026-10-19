@@ -8149,12 +8149,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   overscroll-behavior: contain;
   scroll-behavior: smooth;
   scrollbar-width: none;
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease-fade);
-}
-
-.timeline-minimap:is(:hover, :focus-within) .timeline-minimap-track {
-  opacity: 1;
 }
 
 .timeline-minimap-track::-webkit-scrollbar {
@@ -8276,7 +8270,6 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 @media (prefers-reduced-motion: reduce) {
   .timeline-minimap-track {
     scroll-behavior: auto;
-    transition: none;
   }
 
   .timeline-minimap button::before {

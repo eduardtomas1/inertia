@@ -627,3 +627,40 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await ensureWorkspaceTools(page);
   expect(rendererErrors).toEqual([]);
 });
+
+test("offers Auto routing after Settings enable it and shows the Auto badge", async () => {
+  await resizeWindow(1440, 920);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Routing", exact: true }).click();
+  const enable = page.getByRole("switch", { name: "Enable Auto routing" });
+  await expect(enable).toHaveAttribute("aria-checked", "false");
+  await enable.click();
+  await expect(enable).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  const modelTrigger = page.getByRole("button", { name: /^Choose model\./u });
+  await expect(modelTrigger).not.toHaveAttribute("data-routing-mode", "auto");
+  await modelTrigger.click();
+  const chooser = page.getByRole("dialog", { name: "Choose model" });
+  const auto = chooser.getByRole("button", { name: /^Auto:/u });
+  await expect(auto).toHaveAttribute("aria-pressed", "false");
+  await auto.click();
+  await expect(chooser).toBeHidden();
+  await expect(modelTrigger).toHaveAttribute("data-routing-mode", "auto");
+  // The badge names the model only and fits it; the effort control shows the effort.
+  const badgeLabel = modelTrigger.locator(".selected-model-chip-label");
+  await expect(badgeLabel).toHaveText(/^Auto · [^·]+$/u);
+  expect(await badgeLabel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(modelTrigger).toHaveAccessibleName(/Auto routing is on; currently .+ · .+\./u);
+  await expect.poll(() => {
+    const database = new Database(join(testDirectory, "data", "inertia.sqlite"), { readonly: true });
+    try {
+      return (database.prepare(`
+        SELECT conversations.routing_mode AS mode FROM conversations
+        JOIN app_state ON app_state.active_conversation_id = conversations.id WHERE app_state.id = 1
+      `).get() as { mode: string } | undefined)?.mode;
+    } finally {
+      database.close();
+    }
+  }).toBe("auto");
+  expect(rendererErrors).toEqual([]);
+});

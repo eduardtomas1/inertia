@@ -2,6 +2,28 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Auto routing
+
+- **Auto** in the model chooser lets Inertia choose the model and reasoning
+  level for each new message. Turn it on in **Settings → Routing**; it is off
+  by default and nothing changes until you do.
+- The built-in Rules picker reads your message locally and picks a tier —
+  Light, Standard, Heavy or Max — then the best available model in that tier.
+  It never names a model itself, and nothing leaves your computer.
+- The model button reads *Auto · model*, and its tooltip explains the latest
+  choice. Picking a model, reasoning level or Fast mode yourself
+  turns Auto off for that chat.
+- **Settings → Routing** sets the confidence threshold, fallback tier,
+  whether Auto may switch providers mid-chat, a quota reserve, Auto for new
+  chats and tasks, and each tier's presets with Prefer, Normal, Less often or
+  Never weights. Tiers you do not customise follow your signed-in providers.
+- Auto only changes the model when you send a message, through the same
+  checks as choosing a model yourself. If the chosen model can't be used, the
+  chat keeps its model and the message is sent. Duo, queued follow-ups,
+  scheduled resumes, Private Connect and agent-created chats keep their model.
+
 ## 0.0.73 — 2026-10-19
 
 Open a chat for any folder straight from a terminal, send a queued message

@@ -20,6 +20,11 @@ afterEach(() => {
 
 const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold", "notify_only_in_background"];
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
+const routingColumns = [
+  ["app_state", "routing_settings_json"],
+  ["conversations", "routing_mode"],
+  ["agent_turns", "routing_json"],
+] as const;
 const contextPacketTriggers = [
   "conversation_context_packets_immutable",
   "conversation_context_packets_consume_once",
@@ -28,6 +33,9 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 99) {
+    for (const [table, column] of routingColumns) database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+  }
   if (version < 98) database.exec("DROP TABLE conversation_title_locks");
   if (version < 97) database.exec("DROP TABLE restart_continuation_plans");
   if (version < 96) database.exec("DROP TABLE todos");
@@ -104,13 +112,14 @@ describe("database health check for settings and subagent columns", () => {
     { version: 97, sql: "DROP TABLE restart_continuation_plans" },
     { version: 97, sql: "ALTER TABLE restart_continuation_plans DROP COLUMN route_identity" },
     { version: 98, sql: "DROP TABLE conversation_title_locks" },
+    ...routingColumns.map(([table, column]) => ({ version: 99, sql: `ALTER TABLE ${table} DROP COLUMN ${column}` })),
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

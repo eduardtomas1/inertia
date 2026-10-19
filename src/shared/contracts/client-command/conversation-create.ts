@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { modelSelectionSchema } from "../../model-routing";
+import { routingModeSchema } from "../../routing/routing-policy";
 import {
   accessModeSchema,
   interactionModeSchema,
@@ -19,6 +20,8 @@ export const conversationCreatePayloadSchema = z
     reasoningEffort: z.string().trim().max(40).optional(),
     interactionMode: interactionModeSchema.optional(),
     accessMode: accessModeSchema.optional(),
+    /** Omitted uses the "Use Auto for new chats" setting. */
+    routingMode: routingModeSchema.optional(),
     activate: z.boolean().optional(),
     useWorktree: z.boolean().optional(),
     branch: z.string().trim().min(1).max(255).nullable().optional(),

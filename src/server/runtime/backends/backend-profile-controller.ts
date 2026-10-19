@@ -458,7 +458,7 @@ export class BackendProfileController {
   }
 
   replaceGlobalDefaultWithSettings(
-    update: Parameters<RuntimeStore["updateSettingsClearingGlobalDefault"]>[0],
+    update: Parameters<RuntimeStore["settings"]["updateClearingGlobalDefault"]>[0],
   ): void {
     const current = this.store.listModelBackendDefaults().find(
       (candidate) => candidate.projectId === null,
@@ -466,7 +466,7 @@ export class BackendProfileController {
     if (current) {
       this.runtime.assertConfigurationMutable(current.selection.harnessId);
     }
-    this.store.updateSettingsClearingGlobalDefault(update);
+    this.store.settings.updateClearingGlobalDefault(update);
   }
 
   async deleteProfile(profileId: string): Promise<void> {

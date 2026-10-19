@@ -2156,6 +2156,7 @@ describe("runtime migration catalog", () => {
       { version: 96 },
       { version: 97 },
       { version: 98 },
+      { version: 99 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2198,6 +2199,15 @@ describe("runtime migration catalog", () => {
     expect((migrated.prepare(
       "SELECT completion_sound_json AS completionSound FROM app_state WHERE id = 1",
     ).get() as { completionSound: string }).completionSound).toBe("{}");
+    expect((migrated.prepare(
+      "SELECT routing_settings_json AS routing FROM app_state WHERE id = 1",
+    ).get() as { routing: string }).routing).toBe("{}");
+    expect(new Set((migrated.prepare("PRAGMA table_info(conversations)").all() as Array<{
+      name: string;
+    }>).map(({ name }) => name)).has("routing_mode")).toBe(true);
+    expect(new Set((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
+      name: string;
+    }>).map(({ name }) => name)).has("routing_json")).toBe(true);
     migrated.close();
   });
 });

@@ -32,6 +32,8 @@ function projectedSettings(settings: AppSettings): AppSettings {
     providerIdentityLabels: { ...settings.providerIdentityLabels },
     keybindings: { ...defaultSettings.keybindings },
     workingIndicator: { ...settings.workingIndicator },
+    // The detached composer may offer Auto; tier presets stay in the main window.
+    routing: { ...defaultSettings.routing, enabled: settings.routing?.enabled === true },
   };
 }
 

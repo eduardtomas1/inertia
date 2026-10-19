@@ -33,6 +33,7 @@ import {
   type RuntimeInterruption,
 } from "../runtime/turns/turn-runtime-interruption-note";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
+import { parseRoutingDecisionJson, safeRoutingDecisionSummary, type RoutingTier } from "../../shared/routing/routing-policy";
 import { assertConversationProvider } from "./conversation-provider-policy";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
@@ -150,6 +151,9 @@ export class TurnLedgerRepository {
     if (sessionRecovery !== null && !isTurnSessionRecovery(sessionRecovery)) {
       throw new Error("The turn session recovery is invalid.");
     }
+    // Routing evidence is advisory: an invalid summary is dropped, never fatal to the turn.
+    const routing = input.routing ? safeRoutingDecisionSummary(input.routing) : null;
+    const routingJson = routing ? JSON.stringify(routing) : null;
     if (new TextEncoder().encode(modelSelectionJson).byteLength > 65_536) {
       throw new Error("Turn model selection is too large.");
     }
@@ -204,6 +208,7 @@ export class TurnLedgerRepository {
       association: input.association,
       createdAt: requestedAt,
       updatedAt: requestedAt,
+      ...(routing ? { routing } : {}),
     };
 
     const userMessage = this.context.database.prepare("SELECT * FROM messages WHERE id = ?").get(turn.userMessageId) as MessageRow | undefined;
@@ -224,7 +229,7 @@ export class TurnLedgerRepository {
         requested_at, started_at, completed_at, status, run_state,
         provider_state, run_state_revision, terminal_reason, checkpoint_id,
         usage_start_json, usage_completion_json, configuration_revision, association,
-        created_at, updated_at
+        routing_json, created_at, updated_at
       ) VALUES (
         @id, @conversationId, @runId, @userMessageId, @terminalAssistantMessageId,
         @providerId, @modelSelectionJson, @continuationIdentityJson,
@@ -233,7 +238,8 @@ export class TurnLedgerRepository {
         @interactionMode, @accessMode, @providerSessionBefore, @providerSessionAfter,
         @requestedAt, @startedAt, @completedAt, @status, @runStateValue,
         @providerState, @runStateRevision, @terminalReason, @checkpointId,
-        @usageStartJson, NULL, @configurationRevision, @association, @createdAt, @updatedAt
+        @usageStartJson, NULL, @configurationRevision, @association,
+        @routingJson, @createdAt, @updatedAt
       )
     `);
     this.context.database.transaction(() => {
@@ -243,6 +249,7 @@ export class TurnLedgerRepository {
         modelSelectionJson,
         continuationIdentityJson,
         sessionRecoveryJson: sessionRecovery ? JSON.stringify(sessionRecovery) : null,
+        routingJson,
         runStateValue: turn.runState?.state ?? turn.status,
         providerState: turn.runState?.providerState ?? null,
         runStateRevision: turn.runState?.revision ?? 0,
@@ -655,6 +662,30 @@ export class TurnLedgerRepository {
       LIMIT 1
     `).get(conversationId) as AgentTurnRow | undefined;
     return row ? agentTurnFromRow(row) : null;
+  }
+
+  /** Bounded routing context: the latest turn, the turn count and the last routed tier. */
+  routingHistory(conversationId: string): {
+    latestTurn: AgentTurn | null;
+    turnCount: number;
+    lastRoutedTier: RoutingTier | null;
+  } {
+    const latestTurn = this.latestForConversation(conversationId);
+    if (!latestTurn) return { latestTurn, turnCount: 0, lastRoutedTier: null };
+    const { count } = this.context.database.prepare(
+      "SELECT COUNT(*) AS count FROM agent_turns WHERE conversation_id = ?",
+    ).get(conversationId) as { count: number };
+    const routed = this.context.database.prepare(`
+      SELECT routing_json FROM agent_turns
+      WHERE conversation_id = ? AND routing_json IS NOT NULL
+      ORDER BY requested_at DESC, id DESC
+      LIMIT 1
+    `).get(conversationId) as { routing_json: string } | undefined;
+    return {
+      latestTurn,
+      turnCount: count,
+      lastRoutedTier: routed ? parseRoutingDecisionJson(routed.routing_json)?.tier ?? null : null,
+    };
   }
 
   assertIdentity(conversationId: string, runId: string, turnId: string): AgentTurn {

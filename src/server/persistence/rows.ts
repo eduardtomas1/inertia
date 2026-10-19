@@ -72,6 +72,7 @@ export interface ConversationRow {
   marked_unread_at?: string | null;
   pinned_at: string | null;
   snoozed_until: string | null;
+  routing_mode?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -124,6 +125,7 @@ export interface AgentTurnRow {
   configuration_revision: number;
   association: AgentTurnAssociation;
   origin?: string | null;
+  routing_json?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -350,6 +352,7 @@ export interface StateRow {
   codex_binary_path: string;
   discord_release_repository_url: string;
   working_indicator_json?: string | null;
+  routing_settings_json?: string | null;
   completion_sound_json?: string | null;
   quota_warnings_enabled?: number;
   quota_warning_threshold?: number;

@@ -202,6 +202,7 @@ type ChatWorkspaceProps = {
   onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
+  routingEnabled?: boolean;
   loading: boolean;
   detailLoading?: boolean;
   history?: { hasOlder: boolean; loading: boolean; error: string | null; loadOlder: () => void;
@@ -222,7 +223,7 @@ type ChatWorkspaceProps = {
   onPromptPresetCommand?: PromptPresetCommandRunner;
   onRespondToApproval: (request: AgentApprovalRequest, decision: AgentApprovalDecision) => Promise<void>;
   onRespondToInput: (request: AgentInputRequest, answers: Record<string, string[]>) => Promise<void>;
-  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode">>) => Promise<void>;
+  onUpdateConversation: (update: Partial<Pick<Conversation, "providerId" | "modelSelection" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "routingMode">>) => Promise<void>;
   onChooseAttachments: (
     mode?: import("@shared/desktop").AttachmentPickerMode,
   ) => Promise<ComposerAttachmentImportLease | null>;
@@ -312,6 +313,7 @@ export function ChatWorkspace({
   onLimitResetCommand,
   previewContextUrl,
   providerIdentityLabels,
+  routingEnabled = false,
   loading,
   detailLoading = false,
   history,
@@ -1107,6 +1109,7 @@ export function ChatWorkspace({
           onLimitResetCommand={onLimitResetCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}
+          routingEnabled={routingEnabled}
           disabled={!conversation}
           sending={sending}
           running={conversation.status === "running" || conversation.status === "needs-input"}

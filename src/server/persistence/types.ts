@@ -1,3 +1,4 @@
+import type { RoutingDecisionSummary, RoutingMode } from "../../shared/routing/routing-policy";
 import type {
   AccessMode,
   AgentActivity,
@@ -55,6 +56,7 @@ export interface NewConversationOptions {
   reasoningEffort?: string;
   interactionMode?: InteractionMode;
   accessMode?: AccessMode;
+  routingMode?: RoutingMode;
   activate?: boolean;
   branch?: string | null;
   worktreePath?: string | null;
@@ -120,6 +122,8 @@ export interface CreateAgentTurnInput {
   usageAtStart?: AgentTurnUsageSnapshot | null;
   configurationRevision: number;
   association: AgentTurnAssociation;
+  /** Auto routing evidence recorded with the queued turn. */
+  routing?: RoutingDecisionSummary | null;
 }
 
 export interface AgentTurnLifecycleUpdate {

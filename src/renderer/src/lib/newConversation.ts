@@ -154,6 +154,7 @@ export function buildDraftConversation(
       })),
     },
     continuationIdentity: null,
+    ...(payload.routingMode ? { routingMode: payload.routingMode } : {}),
     model: selection.modelId === "provider-default" ? "" : selection.modelId,
     reasoningEffort: selection.reasoningEffort ?? payload.reasoningEffort ?? "",
     interactionMode: payload.interactionMode ?? "build",

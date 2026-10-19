@@ -59,6 +59,7 @@ export interface AppRuntimeActions {
       | "reasoningEffort"
       | "interactionMode"
       | "accessMode"
+      | "routingMode"
     >>,
   ) => Promise<void>;
 }

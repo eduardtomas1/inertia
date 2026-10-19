@@ -68,6 +68,8 @@ export interface ComposerProps {
   onLimitResetCommand?: LimitResetCommandRunner;
   previewContextUrl?: string | null;
   providerIdentityLabels?: ProviderIdentityLabels;
+  /** Settings → Routing → Enable Auto routing. */
+  routingEnabled?: boolean;
   goal?: ChatGoalControlProps | null;
   onSend: (
     message: string,
@@ -90,6 +92,7 @@ export interface ComposerProps {
       | "reasoningEffort"
       | "interactionMode"
       | "accessMode"
+      | "routingMode"
     >>,
   ) => Promise<void>;
   onChooseAttachments: (

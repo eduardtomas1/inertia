@@ -3,22 +3,8 @@ import { resolve } from "node:path";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 
-import {
-  type AgentTurn,
-  type Conversation,
-  type ServerEvent,
-} from "../../../shared/contracts";
-import {
-  continuationSelectionMoved,
-  officiallyAllowsFastModeSwitchWithinSession,
-  officiallyAllowsModelSwitchWithinSession,
-  resolveContinuationDecision,
-} from "../../../shared/continuation-policy";
-import {
-  providerNativeModelSelection,
-  type ModelSelection,
-} from "../../../shared/model-routing";
-import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
+import type { ServerEvent } from "../../../shared/contracts";
+import { newChatRoutingMode } from "../../../shared/routing/routing-policy";
 import { deleteCheckpoints } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import {
@@ -30,6 +16,7 @@ import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import { ConversationCreationService } from "../conversation-creation-service";
+import { ConversationUpdateService } from "../conversation-update-service";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
 import type { RuntimeSyncHub } from "../runtime-sync-hub";
 import type { WorkspaceRunController } from "../workspace-run-controller";
@@ -41,60 +28,6 @@ import { ConversationContextService } from "../conversation-context-service";
 import type {
   ConversationContextRequestCoordinator,
 } from "../conversation-context-request-coordinator";
-
-type ConversationUpdatePayload = Extract<
-  Parameters<RuntimeCommandHandler>[1],
-  { type: "conversation.update" }
->["payload"];
-
-function selectionMovedSinceTurn(
-  dependencies: ConversationCommandDependencies,
-  current: Conversation,
-  turn: AgentTurn,
-): boolean {
-  try {
-    return continuationSelectionMoved(
-      turn.continuationIdentity,
-      turn.modelSelection.modelId,
-      dependencies.providers.resolveModelRoute(current.modelSelection).continuationIdentity,
-      current.modelSelection.modelId,
-    );
-  } catch {
-    return false;
-  }
-}
-
-function requestedConversationModelSelection(
-  current: Conversation,
-  update: ConversationUpdatePayload,
-): ModelSelection {
-  if (update.modelSelection) return update.modelSelection;
-  if (
-    update.providerId === undefined
-    && update.model === undefined
-    && update.reasoningEffort === undefined
-  ) {
-    return current.modelSelection;
-  }
-
-  const providerId = update.providerId ?? current.providerId;
-  const providerChanged = providerId !== current.providerId;
-  return providerNativeModelSelection({
-    providerId,
-    modelId: update.model ?? (
-      providerChanged ? "provider-default" : current.modelSelection.modelId
-    ),
-    alias: update.model ?? (
-      providerChanged ? null : current.modelSelection.alias
-    ),
-    reasoningEffort: update.reasoningEffort ?? (
-      providerChanged ? null : current.modelSelection.reasoningEffort
-    ),
-    providerOptions: providerChanged
-      ? {}
-      : current.modelSelection.providerOptions,
-  });
-}
 
 export interface ConversationCommandDependencies {
   store: RuntimeStore;
@@ -127,6 +60,7 @@ export function createConversationCommandHandler(
 ): RuntimeCommandHandler {
   const creation = dependencies.creation
     ?? new ConversationCreationService(dependencies);
+  const updates = new ConversationUpdateService(dependencies);
   return defineRuntimeCommandHandler([
     "project.ensure-scratch",
     "conversation.create",
@@ -170,7 +104,11 @@ export function createConversationCommandHandler(
         return "mutation";
       case "conversation.create": {
         const conversation = await creation.create(
-          command.payload,
+          {
+            ...command.payload,
+            routingMode: command.payload.routingMode
+              ?? newChatRoutingMode(dependencies.store.settings.current().routing),
+          },
           command.requestId,
         );
         if (command.payload.activate !== false) return "mutation";
@@ -373,162 +311,9 @@ export function createConversationCommandHandler(
         });
         return "handled";
       }
-      case "conversation.update": {
-        const {
-          conversationId,
-          pinned,
-          snoozedUntil,
-          ...update
-        } = command.payload;
-        const current = dependencies.store.conversation(conversationId);
-        if (
-          dependencies.backendProfileController.isExternalSelection(
-            current.modelSelection,
-          )
-          && update.modelSelection === undefined
-          && (
-            update.model !== undefined
-            || update.reasoningEffort !== undefined
-          )
-        ) {
-          throw new RuntimeRequestError(
-            "External backend model and reasoning changes require a verified model selection.",
-          );
-        }
-        const changesSelection = (
-          update.providerId !== undefined
-          || update.modelSelection !== undefined
-          || update.model !== undefined
-          || update.reasoningEffort !== undefined
-        );
-        let canonicalSelection: ModelSelection | null = null;
-        let canonicalProviderId: Conversation["providerId"] | null = null;
-        let resetProviderSession = false;
-        let restoredProviderSession: Pick<Conversation, "providerSessionId" | "continuationIdentity"> | null = null;
-        if (changesSelection) {
-          const selection = dependencies.backendProfileController
-            .validateSelection(
-              requestedConversationModelSelection(
-                current,
-                command.payload,
-              ),
-            );
-          const route = dependencies.providers.resolveModelRoute(selection);
-          if (
-            update.providerId !== undefined
-            && update.providerId !== route.providerId
-          ) {
-            throw new RuntimeRequestError(
-              "The selected provider does not match the verified model route.",
-            );
-          }
-          canonicalSelection = selection;
-          canonicalProviderId = route.providerId;
-          const latestTurn = dependencies.store
-            .latestAgentTurnForConversation(conversationId);
-          const savedSessionId = current.providerSessionId
-            ?? (latestTurn && isAgentTurnTerminalStatus(latestTurn.status)
-              && selectionMovedSinceTurn(dependencies, current, latestTurn)
-              ? latestTurn.providerSessionAfter
-              : null);
-          const latestTurnMatchesSession = latestTurn !== null
-            && savedSessionId !== null
-            && latestTurn.providerSessionAfter === savedSessionId;
-          const decision = resolveContinuationDecision({
-            previousProviderId: latestTurn?.providerId ?? current.providerId,
-            previousIdentity: latestTurn
-              ? latestTurnMatchesSession
-                ? latestTurn.continuationIdentity
-                : null
-              : current.continuationIdentity ?? null,
-            nextIdentity: route.continuationIdentity,
-            previousModelId: latestTurn
-              ? latestTurnMatchesSession
-                ? latestTurn.modelSelection.modelId
-                : null
-              : current.continuationIdentity
-              ? current.modelSelection.modelId
-              : null,
-            nextModelId: selection.modelId,
-            hasProviderSession: savedSessionId !== null,
-            hasTurns: latestTurn !== null,
-            allowsModelSwitchWithinSession:
-              officiallyAllowsModelSwitchWithinSession(route.compatibility),
-            allowsPerformanceModeSwitchWithinSession:
-              officiallyAllowsFastModeSwitchWithinSession(route.compatibility)
-              && dependencies.backendProfileController
-                .supportsNativeFastModeControl(selection),
-          });
-          resetProviderSession = decision.action === "start-session"
-            && (current.providerSessionId !== null || latestTurn !== null);
-          restoredProviderSession = decision.action === "resume-session"
-            && current.providerSessionId === null
-            && latestTurnMatchesSession
-            ? {
-                providerSessionId: savedSessionId,
-                continuationIdentity: latestTurn.continuationIdentity,
-              }
-            : null;
-        }
-        const changesRunConfiguration = (
-          update.providerId !== undefined
-          || update.modelSelection !== undefined
-          || update.model !== undefined
-          || update.reasoningEffort !== undefined
-          || update.interactionMode !== undefined
-          || update.accessMode !== undefined
-        );
-        if (changesRunConfiguration) {
-          try {
-            dependencies.store.assertDuoComparisonTurnAllowed(
-              conversationId,
-            );
-          } catch (error) {
-            throw new RuntimeRequestError(
-              error instanceof Error
-                ? error.message
-                : "That judge chat is reserved for a Duo comparison.",
-            );
-          }
-        }
-        if (
-          changesRunConfiguration
-          && dependencies.store.hasActiveWorkspaceRunForConversation(
-            conversationId,
-          )
-        ) {
-          throw new RuntimeRequestError(
-            "Stop the active run or review before changing its agent configuration.",
-          );
-        }
-        const canonicalUpdate = canonicalSelection && canonicalProviderId
-          ? {
-              ...update,
-              providerId: canonicalProviderId,
-              modelSelection: canonicalSelection,
-            }
-          : update;
-        if (canonicalSelection) {
-          delete canonicalUpdate.model;
-          delete canonicalUpdate.reasoningEffort;
-        }
-        dependencies.store.updateConversation(conversationId, {
-          ...canonicalUpdate,
-          ...(resetProviderSession
-            ? {
-                providerSessionId: null,
-                continuationIdentity: null,
-              }
-            : restoredProviderSession ?? {}),
-          pinnedAt: pinned === undefined
-            ? current.pinnedAt ?? null
-            : pinned ? new Date().toISOString() : null,
-          snoozedUntil: snoozedUntil === undefined
-            ? current.snoozedUntil ?? null
-            : snoozedUntil,
-        });
+      case "conversation.update":
+        updates.update(command.payload);
         return "mutation";
-      }
       case "conversation.archive":
         if (dependencies.providerTerminalResumes.isActive(command.payload.conversationId)) {
           throw new RuntimeRequestError(

@@ -1,16 +1,18 @@
 import { DEFAULT_COMPLETION_SOUND } from "../completion-sound";
 import { DEFAULT_QUOTA_WARNINGS } from "../quota-warnings";
+import { defaultRoutingSettings } from "../routing/routing-policy";
 import type { AppSnapshot } from "./app";
 import type { ServerEvent } from "./events";
 
 function completeSnapshot(snapshot: AppSnapshot): AppSnapshot {
   const { settings } = snapshot;
-  if (settings.completionSound !== undefined && settings.quotaWarnings !== undefined && settings.notifyOnlyInBackground !== undefined) return snapshot;
+  if (settings.completionSound !== undefined && settings.quotaWarnings !== undefined && settings.notifyOnlyInBackground !== undefined && settings.routing !== undefined) return snapshot;
   return { ...snapshot, settings: {
     ...settings,
     completionSound: settings.completionSound ?? { ...DEFAULT_COMPLETION_SOUND, library: [] },
     quotaWarnings: settings.quotaWarnings ?? { ...DEFAULT_QUOTA_WARNINGS },
     notifyOnlyInBackground: settings.notifyOnlyInBackground ?? false,
+    routing: settings.routing ?? defaultRoutingSettings(),
   } };
 }
 

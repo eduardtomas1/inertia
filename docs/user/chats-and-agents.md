@@ -12,6 +12,19 @@
 - **Capture a window.** Turn on [Snapshots](../SNAPSHOTS_AND_COMPACTION.md) in **Settings → Devices & integrations → Snapshots** to attach a screenshot of the foreground window with its accessibility context.
 - **Compact long chats** with `/compact`. A successful compaction leaves a receipt in the timeline with the provider-reported context counts.
 
+## Auto routing
+
+Auto routing lets Inertia choose the model for each new message. It is off until you turn it on in **Settings → Routing → Enable Auto routing**.
+
+- **Pick Auto** at the top of a chat's model chooser. The model button then reads *Auto · model*, with the reasoning level beside it as usual, and its tooltip explains the latest choice: the model and reasoning level, then the picker, the kind of task, the tier, how confident the picker was and whether it switched model.
+- **Pick a model yourself** at any time to turn Auto off for that chat. Changing the reasoning level or Fast mode does the same, in a saved chat or a new one. Choose Auto again to hand the choice back; you can do that even while the agent is working, and it applies to your next message.
+- **Use Auto for new chats** makes new chats and tasks you hand to an agent start in Auto.
+- **How it chooses.** The built-in Rules picker reads your message locally — its length, code blocks, attachments, referenced files and chats, and words such as *fix*, *review* or *plan* — and picks a tier: **Light** for questions and small edits, **Standard** for everyday feature work, **Heavy** for debugging, reviews and plans, **Max** for the hardest problems. Nothing leaves your computer to make this choice.
+- **Tier presets.** Each tier lists the models Auto may use, in order, with a weight: Prefer, Normal, Less often or Never. Until you customise a tier it follows your signed-in providers. In **Settings → Routing → Tier presets** you can add a model and reasoning level, reorder or remove presets, set a weight, or **Reset to defaults**.
+- **When Auto is unsure** (below the **Confidence threshold**) it uses the **Fallback tier**. With **Provider switching** set to *Stay on provider*, an established chat stays with its provider so its session continues, and Auto only adjusts the model and reasoning there, trying a nearby tier on the same provider before it leaves. While a provider is still being checked, Auto keeps the chat's current model. **Quota reserve** skips an account that is nearly out of usage.
+- Auto only changes the model when you send a message, never while the agent is working. A model switch to another provider is a normal **Context handoff**. If the chosen model can't be used, the chat keeps its current model and your message is sent as usual.
+- Duo, queued follow-ups, scheduled resumes after a usage limit, Private Connect and chats created by agents keep the model they were given.
+
 ## Follow the work
 
 - The **Work** tab lists your chats. Running chats show the agent pixels and elapsed time, and a chat that needs your input or finishes gets a brief cue.

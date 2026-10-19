@@ -64,6 +64,7 @@ export class ConversationRepository {
       providerId,
       modelSelection,
       continuationIdentity: null,
+      routingMode: options.routingMode === "auto" ? "auto" : "manual",
       model: modelSelection.modelId === "provider-default" ? "" : modelSelection.modelId,
       reasoningEffort: modelSelection.reasoningEffort ?? "",
       interactionMode: options.interactionMode ?? state.default_interaction_mode,
@@ -90,13 +91,13 @@ export class ConversationRepository {
           model, reasoning_effort, interaction_mode,
           access_mode, status, attention_kind, branch, worktree_path, provider_session_id,
           archived_at, settled_at, completed_at, last_viewed_at, pinned_at, snoozed_until,
-          created_at, updated_at
+          routing_mode, created_at, updated_at
         ) VALUES (
           @id, @projectId, @title, @providerId, @modelSelectionJson, NULL,
           @model, @reasoningEffort, @interactionMode,
           @accessMode, @status, @attentionKind, @branch, @worktreePath, @providerSessionId,
           @archivedAt, @settledAt, @completedAt, @lastViewedAt, @pinnedAt, @snoozedUntil,
-          @createdAt, @updatedAt
+          @routingMode, @createdAt, @updatedAt
         )
       `).run({ ...conversation, modelSelectionJson });
       if (conversation.worktreePath !== null) {
@@ -205,7 +206,7 @@ export class ConversationRepository {
 
   update(
     conversationId: string,
-    update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
+    update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "routingMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
   ): Conversation {
     const current = conversationFromRow(this.context.requireConversation(conversationId));
     const requestedProviderId = update.providerId ?? current.providerId;
@@ -271,6 +272,7 @@ export class ConversationRepository {
         : update.providerSessionId === null
           ? null
           : (update.continuationIdentity ?? current.continuationIdentity),
+      routingMode: (update.routingMode ?? current.routingMode) === "auto" ? "auto" as const : "manual" as const,
       model: modelSelection.modelId === "provider-default" ? "" : modelSelection.modelId,
       reasoningEffort: modelSelection.reasoningEffort ?? "",
       attentionKind: update.status && update.status !== "needs-input"
@@ -315,7 +317,7 @@ export class ConversationRepository {
         attention_kind = @attentionKind, settled_at = @settledAt,
         completed_at = @completedAt, last_viewed_at = @lastViewedAt,
         pinned_at = @pinnedAt, snoozed_until = @snoozedUntil,
-        updated_at = @updatedAt
+        routing_mode = @routingMode, updated_at = @updatedAt
       WHERE id = @id
     `).run({ ...next, modelSelectionJson, continuationIdentityJson });
     this.context.touchProject(current.projectId, next.updatedAt);

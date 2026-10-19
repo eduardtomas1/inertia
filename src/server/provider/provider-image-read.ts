@@ -15,15 +15,27 @@ export const MAX_PROVIDER_REQUEST_IMAGE_COUNT = 32;
 const MAX_IMAGE_BYTES = MAX_PROVIDER_REQUEST_IMAGE_BYTES;
 const INLINE_IMAGE_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "cursor", "kimi"]);
 
+type ProviderImageRequestAttachment = { readonly mimeType: ChatAttachmentMimeType; readonly size: number };
+
+/** The image-count limit every provider request shares; the provider only names the refusal. */
+export function providerImageCountLimitError(
+  providerId: ProviderId,
+  attachments: readonly ProviderImageRequestAttachment[],
+): string | null {
+  const count = attachments.filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image").length;
+  return count > MAX_PROVIDER_REQUEST_IMAGE_COUNT
+    ? `${PROVIDER_INFO[providerId].name} accepts at most ${MAX_PROVIDER_REQUEST_IMAGE_COUNT} images per message. Remove some images and send again.`
+    : null;
+}
+
 export function providerImageRequestLimitError(
   providerId: ProviderId,
-  attachments: readonly { readonly mimeType: ChatAttachmentMimeType; readonly size: number }[],
+  attachments: readonly ProviderImageRequestAttachment[],
 ): string | null {
+  const countLimit = providerImageCountLimitError(providerId, attachments);
+  if (countLimit) return countLimit;
   const images = attachments.filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
   const name = PROVIDER_INFO[providerId].name;
-  if (images.length > MAX_PROVIDER_REQUEST_IMAGE_COUNT) {
-    return `${name} accepts at most ${MAX_PROVIDER_REQUEST_IMAGE_COUNT} images per message. Remove some images and send again.`;
-  }
   return INLINE_IMAGE_PROVIDERS.has(providerId)
     && images.reduce((total, { size }) => total + size, 0) > MAX_PROVIDER_REQUEST_IMAGE_BYTES
     ? `${name} accepts at most 20 MiB of images per message. Remove some images and send again.`

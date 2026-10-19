@@ -237,6 +237,8 @@ export interface QueueTurnRequest {
     status: AgentTurnTerminalStatus,
     turnId: string,
   ) => void | Promise<void>;
+  /** Server-computed Auto routing evidence; never accepted from renderer IPC. */
+  routing?: import("../../../shared/routing/routing-policy").RoutingDecisionSummary | null;
   /** Privileged runtime-only launch mode; never accepted from renderer IPC. */
   goalStart?: {
     objective?: string;

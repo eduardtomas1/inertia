@@ -655,6 +655,7 @@ export function createWorkspaceSceneModel({
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
+      routingEnabled: Boolean(settings.routing?.enabled),
       loading: (!connection.snapshot && connection.status !== "offline")
         || chatProjection.detailLoading,
       detailLoading: chatProjection.detailLoading,

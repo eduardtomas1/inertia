@@ -21,7 +21,8 @@ import {
   ModelChooserRow,
   type ModelChooserRowData,
 } from "./ModelChooserRow";
-import { SelectedModelChip } from "./SelectedModelChip";
+import { SelectedModelChip, type SelectedModelChipProps } from "./SelectedModelChip";
+import { ModelChooserAutoRow, type ModelChooserAutoOption } from "./routing/ModelChooserAutoRow";
 import {
   modelFavoriteKey,
   readModelFavorites,
@@ -68,6 +69,10 @@ export interface ModelChooserProps {
   closeSignal?: string | null;
   onSelect: (route: ComposerModelRoute) => void | Promise<void>;
   onOpenChange?: (open: boolean) => void;
+  /** Present only while Auto routing is enabled in Settings. */
+  auto?: ModelChooserAutoOption;
+  /** Replaces the chip's label and tooltip while the chat is in Auto. */
+  chipOverride?: SelectedModelChipProps["override"];
 }
 
 export const MODEL_CHOOSER_VIRTUALIZATION_MIN_RESULTS = 100;
@@ -228,6 +233,8 @@ export function ModelChooser({
   closeSignal = null,
   onSelect,
   onOpenChange,
+  auto,
+  chipOverride,
 }: ModelChooserProps): JSX.Element {
   const reactId = useId().replaceAll(":", "");
   const dialogId = `${reactId}-model-chooser`;
@@ -470,6 +477,11 @@ export function ModelChooser({
     close(false);
   }, [close, closeSignal, disabled, open]);
 
+  const closeAfter = useCallback((completion: void | Promise<void>): void => {
+    if (!completion) close(true);
+    else void completion.then(() => close(true), () => undefined);
+  }, [close]);
+
   const select = useCallback((route: ComposerModelRoute): void => {
     if (!route.selectable) return;
     const completion = onSelect(route);
@@ -573,11 +585,12 @@ export function ModelChooser({
   return (
     <div
       ref={anchorRef}
-      className={`model-chooser-anchor${open ? " is-open" : ""}`}
+      className={`model-chooser-anchor${open ? " is-open" : ""}${chipOverride ? " is-auto-routing" : ""}`}
     >
       <SelectedModelChip
         ref={triggerRef}
         route={selectedRoute}
+        override={chipOverride}
         expanded={open}
         controlsId={dialogId}
         disabled={disabled}
@@ -594,7 +607,7 @@ export function ModelChooser({
       {open && (
         <div
           id={dialogId}
-          className="model-chooser-palette"
+          className={auto ? "model-chooser-palette has-auto-route" : "model-chooser-palette"}
           role="dialog"
           aria-modal="false"
           aria-label="Choose model"
@@ -623,6 +636,9 @@ export function ModelChooser({
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
+          {/* The Auto row sits outside the route grid: from the search field it is
+              reached with Tab, not with the arrow keys that move through routes. */}
+          {auto && <ModelChooserAutoRow option={auto} onChosen={closeAfter} />}
           <div className="model-chooser-body">
             {ModelSourceRail ? (
               <ModelSourceRail

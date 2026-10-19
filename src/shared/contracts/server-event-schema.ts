@@ -23,7 +23,10 @@ import { COLOR_THEME_IDS } from "./app";
 import { projectPreferencesSchema } from "../project-preferences";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_ATTACHMENTS_PER_MESSAGE, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
-import { appKeybindings } from "./app-keybindings-schema"; import { isWorkingIndicatorSettings } from "../working-indicator"; import { isCompletionSoundSettings } from "../completion-sound";
+import { appKeybindings } from "./app-keybindings-schema";
+import { isWorkingIndicatorSettings } from "../working-indicator";
+import { isCompletionSoundSettings } from "../completion-sound";
+import { isRoutingDecisionSummary, isRoutingSettings, ROUTING_MODES } from "../routing/routing-policy";
 import { validNotificationSettings } from "./notification-settings-schema";
 import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
@@ -188,7 +191,8 @@ function latestTurn(value: unknown): boolean {
     && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value)
-    && optionalBooleanField(value, "usageLimited");
+    && optionalBooleanField(value, "usageLimited")
+    && (value.routing === undefined || isRoutingDecisionSummary(value.routing));
 }
 
 function conversation(value: unknown): value is UnknownRecord {
@@ -223,6 +227,7 @@ function conversation(value: unknown): value is UnknownRecord {
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "lastViewedAt")
     && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key))
+    && (value.routingMode === undefined || oneOf(value, "routingMode", ROUTING_MODES))
     && optionalBooleanField(value, "hasHistory");
 }
 
@@ -363,6 +368,7 @@ function appSettings(value: unknown): boolean {
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
     && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
+    && (value.routing === undefined || isRoutingSettings(value.routing))
     && validNotificationSettings(value);
 }
 function appSnapshot(value: unknown): boolean {
@@ -901,6 +907,7 @@ function agentTurn(value: unknown): boolean {
     && modelRouteIdentityCoherent(value)
     && nullableStringField(value, "modelAlias")
     && (value.usageLimited === undefined || value.usageLimited === true)
+    && (value.routing === undefined || isRoutingDecisionSummary(value.routing))
     && nullableStringField(value, "providerSessionBefore")
     && nullableStringField(value, "providerSessionAfter")
     && nullableStringField(value, "startedAt")

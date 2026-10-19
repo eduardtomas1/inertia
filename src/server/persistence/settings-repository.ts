@@ -1,5 +1,6 @@
 import {
   defaultSettings,
+  type AppSettings,
   type AppSettingsUpdate,
 } from "../../shared/contracts";
 import { settingsFromState } from "./codecs";
@@ -9,6 +10,7 @@ import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorSettings } from "../../shared/working-indicator";
 import { COMPLETION_SOUND_JSON_MAX_LENGTH, parseCompletionSoundSettings } from "../../shared/completion-sound";
+import { mergeRoutingSettings, serializeRoutingSettings } from "../../shared/routing/routing-policy";
 
 type SettingsPersistenceContext = Pick<PersistenceContext, "database">;
 
@@ -19,6 +21,10 @@ export class SettingsRepository {
     const state = this.context.database.prepare("SELECT * FROM app_state WHERE id = 1").get() as StateRow | undefined;
     if (!state) throw new Error("Runtime state is unavailable.");
     return state;
+  }
+
+  current(): AppSettings {
+    return settingsFromState(this.state());
   }
 
   update(update: AppSettingsUpdate): void {
@@ -33,7 +39,8 @@ export class SettingsRepository {
       ...update.completionSound,
     });
     const quotaWarnings = { ...current.quotaWarnings, ...update.quotaWarnings };
-    const next = { ...current, ...update, workingIndicator, completionSound, quotaWarnings };
+    const routing = mergeRoutingSettings(current.routing, update.routing);
+    const next = { ...current, ...update, workingIndicator, completionSound, quotaWarnings, routing };
     const completionSoundJson = JSON.stringify(next.completionSound);
     // A legacy whole-family selection still updates both halves atomically.
     const lightColorTheme = update.lightColorTheme ?? update.colorTheme ?? current.lightColorTheme ?? current.colorTheme;
@@ -62,6 +69,7 @@ export class SettingsRepository {
         discord_release_repository_url = ?,
         attachment_storage_gib = ?, auto_remove_old_attachments = ?,
         working_indicator_json = ?,
+        routing_settings_json = ?,
         completion_sound_json = ?,
         quota_warnings_enabled = ?, quota_warning_threshold = ?,
         notify_only_in_background = ?,
@@ -103,6 +111,7 @@ export class SettingsRepository {
       next.discordReleaseRepositoryUrl,
       next.attachmentStorageGiB, Number(next.autoRemoveOldAttachments),
       JSON.stringify(next.workingIndicator),
+      serializeRoutingSettings(next.routing),
       completionSoundJson.length <= COMPLETION_SOUND_JSON_MAX_LENGTH
         ? completionSoundJson
         : state.completion_sound_json ?? "{}",

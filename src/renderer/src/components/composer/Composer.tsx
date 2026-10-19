@@ -14,6 +14,8 @@ import {
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
 import { buildComposerTurnRequest } from "../../utils/requestContext";
+import { selectedModelChipLabel } from "../../utils/selectedModelChip";
+import { useAutoRouting } from "../routing/useAutoRouting";
 import { providerBackendName } from "../../utils/providerBackendName";
 import { providerRouteLabel } from "../../utils/providerHandoff";
 import {
@@ -102,6 +104,7 @@ export const Composer = memo(function Composer({
   onLimitResetCommand,
   previewContextUrl,
   providerIdentityLabels,
+  routingEnabled = false,
   goal,
   onSend,
   onCompact = unavailableCompaction,
@@ -818,12 +821,21 @@ export const Composer = memo(function Composer({
     modelRoutes,
     conversation.modelSelection,
   ), [conversation.modelSelection, modelRoutes]);
+  const autoRouting = useAutoRouting({
+    enabled: routingEnabled,
+    conversation,
+    decision: latestTurn?.routing ?? latestTurnSummary?.routing ?? null,
+    routeLabel: selectedModelChipLabel(selectedModelRoute),
+    reasoningLabel: selectedReasoning ? reasoningLabel : null,
+    onUpdateConversation: updateConversation,
+  });
   const chooseModelRoute = async (route: ComposerModelRoute): Promise<void> => {
     const providerId = route.providerId
       ?? providerIdForHarness(route.selection.harnessId);
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: route.selection,
+      ...autoRouting.manualOverride,
       ...(route.configuration && {
         accessMode: route.configuration.accessMode,
         interactionMode: route.configuration.interactionMode,
@@ -1106,6 +1118,8 @@ export const Composer = memo(function Composer({
               setPromptStashRecurrence(current, entryId, recurrence))}
           modelRoutes={modelRoutes}
           selectedModelRoute={selectedModelRoute}
+          modelChooserAuto={autoRouting.chooserOption}
+          modelChipOverride={autoRouting.chipOverride}
           onChooseModelRoute={chooseModelRoute}
           selectedModel={selectedModel}
           selectedReasoning={selectedReasoning}

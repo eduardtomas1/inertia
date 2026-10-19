@@ -296,7 +296,8 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(firstDetail?.messages).toHaveLength(messageCount);
     expect(firstDetail?.messages.every(({ conversationId }) => conversationId === first.id)).toBe(true);
     expect(firstDetail?.messages.some(({ content }) => content.startsWith("second:"))).toBe(false);
-    expect(JSON.stringify(firstDetail).length).toBeGreaterThan(shellSizeAfter * 100);
+    // Global settings are not per-chat navigation state; measure the shells themselves.
+    expect(JSON.stringify(firstDetail).length).toBeGreaterThan(JSON.stringify({ ...shell, settings: null }).length * 100);
     expect(store.conversationDetail("missing-conversation")).toBeNull();
     store.close();
   }, 30_000);

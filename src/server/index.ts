@@ -93,6 +93,8 @@ import {
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
+import { RouteAdvisor } from "./runtime/routing/route-advisor";
+import { ConversationUpdateService } from "./runtime/conversation-update-service";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
@@ -700,8 +702,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     { workspaceRuns, runtimeClosed: () => closed },
   );
   duoLaunches = duoLaunchCoordinator;
+  const routeAdvisor = new RouteAdvisor({
+    store,
+    providerInfo: () => providerInfo,
+    backendProfiles: () => backendProfileController.profiles(providerInfo),
+    validateSelection: (selection) => backendProfileController.validateSelection(selection),
+    updates: new ConversationUpdateService({ store, providers, backendProfileController }),
+  });
   const turnInteractionDependencies: TurnInteractionCommandDependencies = {
-    store, conversationAttachments: initializedConversationAttachments,
+    routeAdvisor, store, conversationAttachments: initializedConversationAttachments,
     backendProfileController, turns, isolatedRuns, workspaceRuns,
     pendingApprovals, pendingInputs, dataDirectory, enableProviders,
     attachmentResolver, generatedAttachments,

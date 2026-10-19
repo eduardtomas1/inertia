@@ -395,7 +395,8 @@ test("Settings → Projects lists the project's worktrees without removing any",
   await expect(main).toHaveCount(1);
   // The main checkout is named, with its folder name muted beside it.
   await expect(main.locator(".worktree-list-title strong")).toHaveText("Main checkout");
-  await expect(main.locator(".worktree-list-folder")).toHaveText("Inertia");
+  // Windows reports the fixture folder with the casing of its temp path.
+  await expect(main.locator(".worktree-list-folder")).toHaveText(/^inertia$/iu);
   await expect(main.locator(".worktree-list-path")).toHaveCount(0);
   await expect(main.locator('.worktree-badge[data-state="dirty"]')).toHaveText("1 change");
   await expect(main.getByRole("button", { name: /^Remove worktree/u })).toHaveCount(0);

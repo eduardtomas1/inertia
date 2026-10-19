@@ -17,6 +17,24 @@ export type AppUnderTestLaunchKind = (typeof APP_UNDER_TEST_LAUNCH_KINDS)[number
 export const APP_UNDER_TEST_LAUNCH_STATES = ["starting", "running", "stopping", "exited"] as const;
 export type AppUnderTestLaunchState = (typeof APP_UNDER_TEST_LAUNCH_STATES)[number];
 
+/** `cdp` serves Electron launches; `accessibility` serves native windows of action launches. */
+export const APP_UNDER_TEST_TRANSPORTS = ["cdp", "accessibility"] as const;
+export type AppUnderTestTransport = (typeof APP_UNDER_TEST_TRANSPORTS)[number];
+
+/**
+ * Why an accessibility launch's windows cannot be inspected now, as a fixed
+ * category the App surface words itself: macOS Accessibility not granted
+ * (`permission`), granted but denied to the helper (`helper-permission`), an
+ * app that exposes an empty tree (`accessibility-tree`), a desktop session
+ * with accessibility support turned off (`accessibility-bus`), an elevated
+ * Windows app (`elevated`), a platform without native window control
+ * (`unsupported`) or an App control helper that could not start (`start-failed`).
+ */
+export const APP_UNDER_TEST_WINDOW_ACCESS_GATES = [
+  "permission", "helper-permission", "accessibility-tree", "accessibility-bus", "elevated", "unsupported", "start-failed",
+] as const;
+export type AppUnderTestWindowAccessGate = (typeof APP_UNDER_TEST_WINDOW_ACCESS_GATES)[number];
+
 export const APP_UNDER_TEST_STARTERS = ["agent", "user"] as const;
 export type AppUnderTestStarter = (typeof APP_UNDER_TEST_STARTERS)[number];
 
@@ -154,6 +172,18 @@ export interface AppUnderTestLaunch {
    */
   stopRequested: boolean;
   cdp: boolean;
+  /**
+   * What serves the launch's windows: the debugging pipe (Electron), the
+   * operating system's accessibility API (actions), or nothing.
+   */
+  transport: AppUnderTestTransport | null;
+  /**
+   * Accessibility launches only: apps in the launch's process tree whose
+   * windows Inertia never reads (password managers, credential and system prompts).
+   */
+  protectedApps?: number;
+  /** Accessibility launches only: the gate that blocks reading its windows, or null. */
+  windowAccess?: AppUnderTestWindowAccessGate | null;
   windowCount: number;
   /**
    * The launch's current windows (at most MAX_APP_WINDOWS, sanitized) when
@@ -216,13 +246,18 @@ export const appUnderTestLaunchSchema = z.object({
   signal: z.string().max(32).regex(SINGLE_LINE).nullable(),
   stopRequested: z.boolean(),
   cdp: z.boolean(),
+  transport: z.enum(APP_UNDER_TEST_TRANSPORTS).nullable(),
+  protectedApps: z.number().int().min(0).max(64).optional(),
+  windowAccess: z.enum(APP_UNDER_TEST_WINDOW_ACCESS_GATES).nullable().optional(),
   windowCount: z.number().int().min(0).max(MAX_APP_WINDOWS),
   windows: z.array(appUnderTestWindowSchema).max(MAX_APP_WINDOWS),
   cleanupConfirmed: z.boolean().nullable(),
   failure: z.string().max(300).regex(SINGLE_LINE).nullable(),
 }).strict().refine(
   (value) => value.windows.length === value.windowCount
-    && value.windows.every((window) => window.launchId === value.launchId),
+    && value.windows.every((window) => window.launchId === value.launchId)
+    && value.cdp === (value.transport === "cdp")
+    && (value.transport === "accessibility" || (value.protectedApps === undefined && value.windowAccess === undefined)),
   "A launch lists exactly its own windows.",
 );
 

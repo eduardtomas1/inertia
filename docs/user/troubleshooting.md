@@ -47,7 +47,7 @@ When the button works but the launch fails, the App surface shows why:
 - *The project's Electron files resolve outside its folder.* Install Electron as a dependency of this project instead of linking it.
 - *No readable package.json*, or *the package.json main entry does not exist yet.* Open the chat in the Electron project's own folder, and build the app if its `main` points at build output.
 
-**Settings → Projects → Agent app access** set to **Off** stops only the agent's App tools, which then report that access is disabled. You can still launch the app yourself. A project action needs no Electron; it shows output only.
+**Settings → Projects → Agent app access** set to **Off** stops only the agent's App tools, which then report that access is disabled. You can still launch the app yourself. A project action needs no Electron; its windows, if it opens any, are read through accessibility.
 
 ## The agent says the app is showing a dialog
 
@@ -63,12 +63,27 @@ Inertia keeps at most 200 console messages a second from one launch, with short 
 
 ## The app opened but no window is listed
 
-- Only **Launch Electron app** lists windows. A project action shows its output in **Logs** but never has windows, even when the action itself starts Electron, for example through your dev script.
+- An Electron launch lists its windows over its debugging pipe. A project action lists its windows through the system's accessibility support; if none appear, see [The agent cannot inspect my app's windows](#the-agent-cannot-inspect-my-apps-windows).
 - Windows appear once the app has created them and Inertia has connected to them, which can take a few seconds after the launch shows **Running**. DevTools windows are never listed. If nothing appears, check **Logs** for errors.
 - Windows opened by a separate process that the app starts are not owned by the launch and are not listed.
 - At most eight windows are listed per chat.
 - A window whose page turns into DevTools or another internal page is removed from the list.
 - If the app has exited, its launch shows **Exited** with its exit code; read **Logs** to see why.
+
+## The agent cannot inspect my app's windows
+
+Electron launches use their debugging pipe and are not affected. For a project action, open **Settings → Devices & integrations → App control**, and check the **Windows** section of the App surface, which names what blocks the launch:
+
+- **macOS.** Allow Inertia in **System Settings → Privacy & Security → Accessibility** (the card's **Accessibility settings** button shows macOS's permission prompt and opens that pane), then return to Inertia. Screenshots also need **Screen Recording**.
+- **macOS, helper denied.** If the card says macOS denied access to Inertia's App control helper although Inertia is allowed, this build's helper does not share Inertia's permission, so native windows cannot be read on this Mac. Read the app's output in **Logs** instead, and report the build and macOS version with **Settings → Help → Report an issue** ([Report a problem](#report-a-problem)).
+- **Windows.** An app that runs as administrator cannot be read by Inertia, which runs without elevation. Start the app without administrator rights.
+- **Linux.** Native windows are read over AT-SPI. If the card says the AT-SPI bus did not answer, or the App surface says accessibility support is turned off for this desktop session, turn on accessibility support for your desktop session (the `at-spi2-core` service) and restart Inertia. Chromium and Electron apps expose their windows only when started with `--force-renderer-accessibility` or with `ACCESSIBILITY_ENABLED=1`; until then the App surface says the app is not exposing its accessibility tree. Actions get the variable, but an app that clears its environment needs the switch in the action's arguments. On Wayland, windows can be read but screenshots are unavailable.
+- **Fields that cannot be filled.** Some toolkits do not let accessibility clients set a field's value; Chromium and Electron on Linux are one. The agent then reports that the control does not support the action, and nothing is typed.
+- **Protected apps.** Password managers, credential, password and PIN prompts (such as `ssh-askpass`, `pinentry` and Git Credential Manager), keyrings and wallets, consent prompts and system settings are never read, even when the app started them. The **Windows** list only counts them as protected apps.
+- **Very large process trees.** If the app has started more than 1,024 processes, Inertia does not check part of them: window tools report that the app's process tree is too large to check. Stop processes the app started, or restart it.
+- **App control could not start.** If Inertia's App control helper fails to start three times in a row, App control stays off and the App surface says so. Open **Settings → Devices & integrations → App control** to try again, or restart Inertia.
+- **Screenshots after typing a password.** Once the agent has typed into a password or credential field of a launch, screenshots of every window of that launch are withheld. Restart the app to take one.
+- **App control is off until Inertia restarts.** One of Inertia's helper processes could not be confirmed stopped. Quit and reopen Inertia.
 
 ## Pull, push or commit fails
 

@@ -74,6 +74,7 @@ import {
   APP_READY_STATE_EXPRESSION,
   APP_SNAPSHOT_EXPRESSION,
   APP_VIEWPORT_EXPRESSION,
+  APP_WAIT_READ_EXPRESSION,
   appDescribeExpression,
   appLocateExpression,
   appRefHasFocusExpression,
@@ -521,8 +522,8 @@ export class CdpWindowTransport implements AppUnderTestWindowTransport {
     if (blankUrl(scope.window.url)) throw refusal("not-found", MESSAGES.blank);
   }
 
-  private async readPage(scope: Scope): Promise<PageRead> {
-    const raw = record(await this.evaluate(scope, APP_SNAPSHOT_EXPRESSION));
+  private async readPage(scope: Scope, expression = APP_SNAPSHOT_EXPRESSION): Promise<PageRead> {
+    const raw = record(await this.evaluate(scope, expression));
     const value = record(raw?.value);
     if (!raw || !value || !Array.isArray(value.elements)) {
       throw new CdpPipeError("protocol", "The snapshot was malformed.");
@@ -581,7 +582,7 @@ export class CdpWindowTransport implements AppUnderTestWindowTransport {
           if (command.state === "loaded") {
             matched = !window.loading && await this.evaluate(scope, APP_READY_STATE_EXPRESSION) === "complete";
           } else if (needle !== undefined) {
-            const page = await this.readPage(scope);
+            const page = await this.readPage(scope, APP_WAIT_READ_EXPRESSION);
             if (page.withheld) throw refusal("sensitive", withheldMessage(page.withheld, "Waiting on text is"));
             matched = snapshotContains(page.value, needle) === (command.state === "visible");
           }

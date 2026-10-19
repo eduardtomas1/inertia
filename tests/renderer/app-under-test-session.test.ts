@@ -29,7 +29,7 @@ const appWindow = (windowId: string, launchId: string): AppUnderTestWindow => ({
 });
 const appLaunch = (launchId: string, windows: AppUnderTestWindow[], overrides: Partial<AppUnderTestLaunch> = {}): AppUnderTestLaunch => ({
   launchId, conversationId: "chat", kind: "electron", actionId: null, label: "Electron app", startedBy: "agent", state: "running",
-  pid: 1, startedAt: "2026-10-19T10:00:00.000Z", readyAt: null, exitedAt: null, exitCode: null, signal: null, stopRequested: false, cdp: true,
+  pid: 1, startedAt: "2026-10-19T10:00:00.000Z", readyAt: null, exitedAt: null, exitCode: null, signal: null, stopRequested: false, cdp: true, transport: "cdp",
   windowCount: windows.length, windows, cleanupConfirmed: null, failure: null, ...overrides,
 });
 

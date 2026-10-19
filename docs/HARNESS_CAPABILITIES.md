@@ -188,6 +188,22 @@ native continuation is not cleared. Claude, Cursor, Kimi, and OpenCode see
 them from their next turn. The App snapshot has no `inertiaAudit` object, and
 its screenshots stay local evidence like the Browser's.
 
+The same twelve tools, schemas, annotations and approval rules also serve the
+native windows of a project action launch (a GTK, Qt, WinUI, AppKit or
+Electron app started without a debugging pipe) through the operating
+system's accessibility API. That transport adds no tool and no argument: the
+launch and status results say `transport: "accessibility"` instead of
+`"cdp"`, and actions map to accessibility actions (press, toggle, select,
+expand, set value, type text, scroll into view), never to synthesized mouse or
+keyboard input. The native work runs in a main-owned utility process
+("Inertia App Control") reached from the runtime through a correlated,
+strictly parsed broker, the same path the Browser uses; the runtime never
+loads the native binding. It reads only windows of the launch's own process
+tree, never a password manager, credential prompt, system settings or Inertia
+itself, and its permission or platform gates fail with `unavailable` and the
+next step the user must take. `docs/APP_UNDER_TEST.md` describes the contract,
+the per-platform matrix and what was verified.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider
@@ -319,7 +335,8 @@ harness feature is finished. It deliberately does not:
 The next high-value layers are an inspectable context ledger with pinned host
 rules, bounded replay artifacts tied to exact turns, explicit capability
 negotiation for resumable sessions, a separately reviewed visual-evidence
-transport, and accessibility-based inspection and control of native
-(non-Electron) windows of the app under test. Each should land with
+transport, and synthesized input (pointer, wheel and arbitrary keys) for
+native windows of the app under test, whose accessibility-based inspection
+and control has landed. Each should land with
 deterministic fixtures and provider-specific contract tests rather than as a
 broad framework rewrite.

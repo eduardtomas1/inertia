@@ -23,7 +23,7 @@ import { detachedRuntimeConnection, runtimeConnection,
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { reconcileStoppedRuntimeQuarantine, runtimeStopAttemptState, trackRuntimeStopAttempt } from "./runtime-supervisor-stop-recovery.js";
-import { isRuntimeSecureFileBrokerEvent, RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
+import { isRuntimeSecureFileBrokerEvent, RuntimeSecureFileCoordinator, runtimeSecureFileCoordinatorBrokers } from "./runtime-secure-file-coordinator.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator, type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
@@ -191,15 +191,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
     });
     this.secureFiles = new RuntimeSecureFileCoordinator({
-      retryUnconfirmedShutdown: true, broker: options.secureFileBroker,
-      conversationAttachmentStoreRunner:
-        options.conversationAttachmentStoreRunner,
-      documentPreparationRunner: options.documentPreparationRunner,
-      conversationAttachmentSourceRoot: options.conversationAttachmentSourceRoot,
-      conversationAttachmentStoreAuthority:
-        options.conversationAttachmentStoreAuthority,
-      agentBrowserBroker: options.agentBrowserBroker,
-      issueEvidenceBroker: options.issueEvidenceBroker,
+      ...runtimeSecureFileCoordinatorBrokers(options),
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, command) => this.post(record.child, command),
     });

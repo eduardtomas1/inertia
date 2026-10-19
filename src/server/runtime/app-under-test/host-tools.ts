@@ -42,6 +42,7 @@ import type { AppUnderTestLaunchManager } from "./launch-manager";
 import type {
   AppUnderTestDestructiveWindowCommand,
   AppUnderTestPendingDialog,
+  AppUnderTestTurn,
   AppUnderTestWindowCommand,
   AppUnderTestWindowInspection,
   AppUnderTestWindowTransport,
@@ -391,6 +392,7 @@ function launchSummary(launch: AppUnderTestLaunch, nowMs: number): Record<string
     stopRequested: launch.stopRequested,
     uptimeMs: Number.isFinite(started) ? Math.max(0, ended - started) : 0,
     cdp: launch.cdp,
+    transport: launch.transport,
     windowCount: launch.windowCount,
     cleanupConfirmed: launch.cleanupConfirmed,
     ...(launch.failure ? { failure: launch.failure } : {}),
@@ -541,7 +543,7 @@ export class AppUnderTestHostTools {
     }
     if (call.signal.aborted) return failure("call_cancelled", "The App action was cancelled.");
     try {
-      return await this.dispatch(conversation, call);
+      return await this.dispatch(conversation, call, { runId: identity.runId, turnId: identity.turnId });
     } catch (error) {
       if (error instanceof z.ZodError) return invalidArguments(error);
       if (error instanceof AppUnderTestError) return failure(error.code, error.message, error.dispatched);
@@ -549,7 +551,7 @@ export class AppUnderTestHostTools {
     }
   }
 
-  private async dispatch(conversation: Conversation, call: ProviderHostToolCall): Promise<ProviderHostToolResult> {
+  private async dispatch(conversation: Conversation, call: ProviderHostToolCall, turn: AppUnderTestTurn): Promise<ProviderHostToolResult> {
     const conversationId = conversation.id;
     switch (call.tool) {
       case "inertia_app_status": {
@@ -581,29 +583,34 @@ export class AppUnderTestHostTools {
         if (pending) {
           return failure("unavailable", `${dialogPendingMessage(pending.windowNumber, pending.kind)} Its windowId is ${pending.windowId}.`);
         }
+        // Native windows are polled: read the current list before answering.
+        await this.launches.refreshWindows(conversationId, call.signal, turn);
         const windows = this.launches.windows(conversationId);
         const live = this.launches.status(conversationId).some((launch) => launch.state !== "exited");
+        const status = this.launches.transportStatus(conversationId);
         return success({
           windows,
+          ...(status.protectedApps > 0 ? { protectedApps: status.protectedApps } : {}),
           ...(windows.length > 0 ? {} : {
             nextStep: !live
               ? "No app is running. Launch it with inertia_app_launch first."
-              : this.launches.hasWindowTransport(conversationId)
-                ? "No window is open yet. Check inertia_app_logs, then call inertia_app_windows again."
-                : "No window transport for this launch. Read its output with inertia_app_logs instead.",
+              : status.unavailable
+                ?? (this.launches.hasWindowTransport(conversationId)
+                  ? "No window is open yet. Check inertia_app_logs, then call inertia_app_windows again."
+                  : "No window transport for this launch. Read its output with inertia_app_logs instead."),
           }),
         }, false);
       }
       case "inertia_app_launch":
-        return await this.launch(conversation, call);
+        return await this.launch(conversation, call, turn);
       case "inertia_app_stop":
         return await this.stop(conversation, call);
       default:
-        return await this.window(conversation, call);
+        return await this.window(conversation, call, turn);
     }
   }
 
-  private async launch(conversation: Conversation, call: ProviderHostToolCall): Promise<ProviderHostToolResult> {
+  private async launch(conversation: Conversation, call: ProviderHostToolCall, turn: AppUnderTestTurn): Promise<ProviderHostToolResult> {
     const args = launchSchema.parse(call.arguments);
     const label = this.launches.describeTarget(conversation.id, args.kind, args.actionId);
     // A launch runs project code with the user's permissions: Auto-edit
@@ -630,12 +637,14 @@ export class AppUnderTestHostTools {
       signal: call.signal,
     });
     let ready = false;
-    if (launch.cdp && launch.state !== "exited") {
+    // Electron waits for its first page target, an action for its first native window.
+    if (launch.transport !== null && launch.state !== "exited") {
       ready = await this.launches.waitForReady(
         conversation.id,
         launch.launchId,
         call.signal,
         this.options.launchReadyMs ?? APP_LAUNCH_READY_MS,
+        turn,
       );
     }
     if (call.signal.aborted) {
@@ -644,22 +653,24 @@ export class AppUnderTestHostTools {
     }
     const [current] = this.launches.status(conversation.id, launch.launchId);
     const state = current ?? launch;
+    const blocked = state.transport === null ? null : this.launches.transportStatus(conversation.id).unavailable;
     return success({
       launchId: state.launchId,
       kind: state.kind,
       pid: state.pid,
       state: state.state,
       cdp: state.cdp,
-      windows: state.cdp ? this.launches.launchWindows(conversation.id, state.launchId) : [],
+      transport: state.transport,
+      windows: state.transport === null ? [] : this.launches.launchWindows(conversation.id, state.launchId),
       logTail: this.launches.logTail(conversation.id, state.launchId, APP_LAUNCH_LOG_TAIL_LINES),
       ...(state.failure ? { failure: state.failure } : {}),
       nextStep: state.state === "exited"
         ? "The app exited. Read inertia_app_logs with this launchId to see why, fix the cause, then launch again."
-        : !state.cdp
+        : state.transport === null
           ? "Read its output with inertia_app_logs. Window tools are unavailable for this launch. Stop it with inertia_app_stop when you are done, or tell the user it is still running."
           : ready
             ? "Read a window with inertia_app_snapshot and its windowId. Stop the app with inertia_app_stop when you are done."
-            : "No window opened yet. Check inertia_app_logs, then call inertia_app_windows again.",
+            : blocked ?? "No window opened yet. Check inertia_app_logs, then call inertia_app_windows again.",
     }, true);
   }
 
@@ -692,7 +703,7 @@ export class AppUnderTestHostTools {
     }, true);
   }
 
-  private async window(conversation: Conversation, call: ProviderHostToolCall): Promise<ProviderHostToolResult> {
+  private async window(conversation: Conversation, call: ProviderHostToolCall, turn: AppUnderTestTurn): Promise<ProviderHostToolResult> {
     const parsed = windowCommand(call);
     if (!parsed) return failure("unknown_tool", "That Inertia App tool is unavailable.");
     const { command } = parsed;
@@ -707,7 +718,7 @@ export class AppUnderTestHostTools {
       const inspected = await this.launches.withAction(
         conversation.id,
         launch.launchId,
-        () => transport.inspect(action, call.signal),
+        () => transport.inspect(action, call.signal, turn),
         call.signal,
       );
       const binding: AppApprovalBinding = {
@@ -742,6 +753,7 @@ export class AppUnderTestHostTools {
     if (call.signal.aborted) return failure("call_cancelled", "The App action was cancelled.");
     const result = await this.launches.withAction(conversation.id, launch.launchId, () => transport.perform(command, {
       signal: call.signal,
+      turn,
       ...(expected ? { expected } : {}),
       ...(dialogOnly ? { dialogOnly } : {}),
     }), call.signal);

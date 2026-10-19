@@ -98,6 +98,9 @@ const budgets = {
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
+  // The App control card and its state hook load only in Devices &
+  // integrations (6,013 bytes measured on Linux x64).
+  deferredAppControlSettingsJavaScript: 6.25 * kibibyte,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
@@ -105,8 +108,10 @@ const budgets = {
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23,
   // App under test: launches, the bounded log tail, windows and evidence load
   // only when the App surface opens; its session projection rides with it
-  // (20,445 bytes measured on Linux x64).
-  deferredAppSurfaceJavaScript: 20.25 * kibibyte,
+  // (20,445 bytes measured on Linux x64). Native launches add the transport
+  // label, the protected-window count and the fixed gate notices with their
+  // App control link: 1,997 bytes (22,442 measured).
+  deferredAppSurfaceJavaScript: 20.25 * kibibyte + 1_997 + 256,
   deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   // The agent app access row adds 532 bytes (17,619 measured).
@@ -190,8 +195,11 @@ const budgets = {
   // App under test: the runtime's command, result and event contracts add
   // 3,479 bytes (2,305,949 measured before the surface); the surface wiring
   // and tool wording add 2,459 more (2,308,408 measured on Linux x64); keep
-  // 256 bytes of headroom.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 3_479 + 2_459 + 256,
+  // 256 bytes of headroom. Native windows add the launch's access fields to
+  // the shared launch schema, the App control desktop bridge contract, its
+  // two searchable settings rows and the App surface's settings link: 1,328
+  // bytes (2,309,736 measured on Linux x64); the card itself is deferred.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 3_479 + 2_459 + 256 + 1_328,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -677,6 +685,12 @@ if (entryJavaScriptClosure.has(snapshotSettingsEntry) || mainWorkbenchJavaScript
 }
 // Charge only this feature's new module separately. Shared helpers stay in core.
 const deferredSnapshotSettingsJavaScriptBytes = await assetBytes(`assets/${snapshotSettingsEntry}`);
+const appControlSettingsEntry = assetNames.find((name) => /^AppControlSettings-.*\.js$/u.test(name));
+if (!appControlSettingsEntry) throw new Error("Missing deferred App control settings");
+if (entryJavaScriptClosure.has(appControlSettingsEntry) || mainWorkbenchJavaScriptClosure.has(appControlSettingsEntry) || detachedChatJavaScriptClosure.has(appControlSettingsEntry)) {
+  throw new Error("App control settings must remain deferred from the initial chat routes");
+}
+const deferredAppControlSettingsJavaScriptBytes = await assetBytes(`assets/${appControlSettingsEntry}`);
 const snapshotControlEntry = assetNames.find((name) => /^SnapshotControl-.*\.js$/u.test(name));
 if (!snapshotControlEntry) throw new Error("Missing deferred screenshot review");
 if (entryJavaScriptClosure.has(snapshotControlEntry) || mainWorkbenchJavaScriptClosure.has(snapshotControlEntry) || detachedChatJavaScriptClosure.has(snapshotControlEntry)) {
@@ -714,6 +728,7 @@ const coreJavaScriptBytes =
   - deferredWelcomeGuideJavaScriptBytes
   - deferredWorkingOrbJavaScriptBytes
   - deferredSnapshotSettingsJavaScriptBytes
+  - deferredAppControlSettingsJavaScriptBytes
   - deferredSnapshotControlJavaScriptBytes
   - deferredAttachmentStorageSettingsJavaScriptBytes
   - deferredCliConversationImportJavaScriptBytes
@@ -758,6 +773,7 @@ const measurements = {
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredWorkingOrbJavaScript: deferredWorkingOrbJavaScriptBytes,
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,
+  deferredAppControlSettingsJavaScript: deferredAppControlSettingsJavaScriptBytes,
   deferredSnapshotControlJavaScript: deferredSnapshotControlJavaScriptBytes,
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
   deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,

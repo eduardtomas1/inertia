@@ -97,6 +97,7 @@ import { setDiagnosticsReportSource } from "./diagnostic-export.js";
 import { registerCompletionSoundIpc } from "./completion-sound-main.js";
 import { DESKTOP_IPC as IPC } from "../shared/desktop-ipc.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
+import { cleanupWithAppControl, createAppControlMain } from "./app-control-main.js";
 import { confirmPreviewPageUnload } from "./preview-unload-confirm.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
@@ -201,6 +202,8 @@ const previewBroker = new PreviewBroker({
   confirmPageUnload: confirmPreviewPageUnload,
   partitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary-preview" : "inertia-preview",
 });
+// Native App control for launches without a debugging pipe; the runtime reaches it only through its broker.
+const appControl = createAppControlMain();
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
 let conversationAttachments: ConversationAttachmentAccess | null = null;
@@ -536,6 +539,8 @@ function registerIpcHandlers(): void {
     rollbackManager: () => canaryRollbackManager,
     assertTrustedIpc,
   });
+
+  appControl.registerIpc({ ipcMain, assertTrusted: assertTrustedIpc });
 
   snapshotService = registerSnapshotIpc({
     owner: (event, count) => {
@@ -893,7 +898,7 @@ function runPrivilegedCleanup(): Promise<boolean> {
   }
   const owners = privilegedCleanupOwners; const cleanup = cleanupWithSnapshots(snapshotService, async () => {
     await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
-    previewBroker.close(); runtimeDiagnostics?.record("app.stop"); const confirmed = await owners.cleanup();
+    previewBroker.close(); runtimeDiagnostics?.record("app.stop"); const confirmed = await cleanupWithAppControl(appControl, () => owners.cleanup());
     if (confirmed) await disposeWindowsRuntimeJobExecutableLock();
     return confirmed; });
   const tracked = cleanup.then((confirmed) => { if (!confirmed && privilegedCleanup === tracked) privilegedCleanup = null; return confirmed;
@@ -1019,6 +1024,7 @@ async function bootstrap(): Promise<void> {
     platform: process.platform,
     ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     agentBrowserBroker: previewBroker,
+    appControlBroker: appControl.broker,
     issueEvidenceBroker: runtimeIssueEvidenceBroker({ channel: releaseChannel.channel }),
     getProcessMetrics: () => app.getAppMetrics(),
     systemBootId: bootstrapSafety.systemBootId,

@@ -35,6 +35,7 @@ function launch(overrides: Partial<AppUnderTestLaunch> = {}): AppUnderTestLaunch
     signal: null,
     stopRequested: false,
     cdp: true,
+    transport: "cdp",
     windowCount: 0,
     windows: [],
     cleanupConfirmed: null,
@@ -380,6 +381,75 @@ describe("App surface", () => {
     expect(within(screen.getByRole("list", { name: "App windows" })).getAllByRole("listitem")).toHaveLength(1);
     runtime.emit({ type: "app-under-test.launch.updated", conversationId: CONVERSATION, launch: launch({ state: "exited", exitCode: 0, exitedAt: new Date().toISOString() }) });
     expect(screen.queryByRole("list", { name: "App windows" })).not.toBeInTheDocument();
+  });
+
+  it("names each launch's window transport", async () => {
+    setup(fakeRuntime({ launches: [
+      launch({ launchId: SECOND_LAUNCH, kind: "action", actionId: ACTION, label: "Native app", cdp: false, transport: "accessibility",
+        protectedApps: 0, windowAccess: null }),
+      launch({ launchId: WINDOW, kind: "action", actionId: ACTION, label: "Dev server", cdp: false, transport: null, state: "exited", exitCode: 0,
+        exitedAt: new Date().toISOString() }),
+      launch(),
+    ] }));
+    const list = await screen.findByRole("list", { name: "App launches" });
+    const [electron, plain, native] = within(list).getAllByRole("listitem");
+    expect(electron).toHaveTextContent("TransportDebugging pipe");
+    expect(native).toHaveTextContent("TransportAccessibility");
+    expect(plain).toHaveTextContent("TransportNone yet");
+  });
+
+  it("shows protected apps as a muted count and a permission gate with a keyboard-reachable link to App control", async () => {
+    const onOpenAppControlSettings = vi.fn();
+    const nativeWindow: AppUnderTestWindow = { windowId: WINDOW, launchId: LAUNCH, title: "Editor", origin: null, active: true, loading: false };
+    const native = launch({
+      kind: "action", actionId: ACTION, label: "Native app", cdp: false, transport: "accessibility",
+      windowCount: 1, windows: [nativeWindow], protectedApps: 2, windowAccess: null,
+    });
+    const runtime = fakeRuntime({ launches: [native] });
+    setup(runtime, { onOpenAppControlSettings });
+    expect(await screen.findByText("2 protected apps are not inspectable")).toBeVisible();
+    expect(screen.getByRole("list", { name: "App windows" })).toHaveTextContent("Editor");
+    expect(screen.queryByRole("button", { name: "Open App control settings" })).not.toBeInTheDocument();
+
+    runtime.emit({ type: "app-under-test.launch.updated", conversationId: CONVERSATION, launch: {
+      ...native, windowCount: 0, windows: [], protectedApps: 1, windowAccess: "permission",
+    } });
+    expect(screen.getByText("1 protected app is not inspectable")).toBeVisible();
+    const notice = screen.getByText(/not allowed to use accessibility/u).closest("[role='status']") as HTMLElement;
+    expect(notice).toBeVisible();
+    const link = within(notice).getByRole("button", { name: "Open App control settings" });
+    link.focus();
+    expect(link).toHaveFocus();
+    fireEvent.click(link);
+    expect(onOpenAppControlSettings).toHaveBeenCalledOnce();
+
+    // An elevated app needs no settings change, and an ended gate removes the notice.
+    runtime.emit({ type: "app-under-test.launch.updated", conversationId: CONVERSATION, launch: {
+      ...native, windowCount: 0, windows: [], protectedApps: 0, windowAccess: "elevated",
+    } });
+    expect(screen.getByText(/higher privileges than Inertia/u)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open App control settings" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/protected app/u)).not.toBeInTheDocument();
+    // A disabled accessibility bus and a helper that could not start both link to the card.
+    for (const [gate, text] of [["accessibility-bus", /Accessibility support is turned off/u], ["start-failed", /App control could not start/u]] as const) {
+      runtime.emit({ type: "app-under-test.launch.updated", conversationId: CONVERSATION, launch: {
+        ...native, windowCount: 0, windows: [], protectedApps: 0, windowAccess: gate,
+      } });
+      expect(await screen.findByText(text)).toBeVisible();
+      expect(screen.getByRole("button", { name: "Open App control settings" })).toBeVisible();
+    }
+    runtime.emit({ type: "app-under-test.launch.updated", conversationId: CONVERSATION, launch: {
+      ...native, windowCount: 0, windows: [], protectedApps: 0, windowAccess: null,
+    } });
+    expect(screen.queryByText(/higher privileges/u)).not.toBeInTheDocument();
+  });
+
+  it("offers no settings link where the surface cannot open settings", async () => {
+    setup(fakeRuntime({ launches: [launch({
+      kind: "action", actionId: ACTION, label: "Native app", cdp: false, transport: "accessibility", protectedApps: 0, windowAccess: "helper-permission",
+    })] }));
+    expect(await screen.findByText(/denied Inertia's App control helper/u)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open App control settings" })).not.toBeInTheDocument();
   });
 
   it("renders evidence newest first with inline thumbnails and refreshes when a screenshot arrives", async () => {

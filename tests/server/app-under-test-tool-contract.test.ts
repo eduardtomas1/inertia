@@ -41,6 +41,7 @@ const identity = {
   turnId: "66666666-6666-4666-8666-666666666666",
   remoteDevice: false,
 };
+const turn = { runId: identity.runId, turnId: identity.turnId };
 const NO_TRANSPORT = {
   error: { code: "unavailable", message: "No window transport for this launch.", retryable: true, dispatched: false },
 };
@@ -65,7 +66,7 @@ function launch(overrides: Partial<AppUnderTestLaunch> = {}): AppUnderTestLaunch
   return {
     launchId, conversationId, kind: "electron", actionId: null, label: "Electron app", startedBy: "agent",
     state: "running", pid: 4_321, startedAt: "2026-10-19T10:00:00.000Z", readyAt: null, exitedAt: null,
-    exitCode: null, signal: null, stopRequested: false, cdp: true, windowCount: 1, windows: [], cleanupConfirmed: null, failure: null,
+    exitCode: null, signal: null, stopRequested: false, cdp: true, transport: "cdp", windowCount: 1, windows: [], cleanupConfirmed: null, failure: null,
     ...overrides,
   };
 }
@@ -102,6 +103,8 @@ function fakeManager(options: { launch?: AppUnderTestLaunch; transport?: ReturnT
     pendingDialog: vi.fn((): AppUnderTestPendingDialog | null => null),
     windowOwner: vi.fn((_conversationId: string, id: string) => (transport && id === windowId ? { launch: current, transport } : null)),
     waitForReady: vi.fn(async () => true),
+    refreshWindows: vi.fn(async () => undefined),
+    transportStatus: vi.fn(() => ({ unavailable: null as string | null, protectedApps: 0 })),
     withAction: vi.fn(async (_conversationId: string, _launchId: string, operation: () => Promise<unknown>) => await operation()),
     appendEvidence: vi.fn(),
     stop: vi.fn(async () => ({ ...current, state: "exited" as const, signal: "SIGTERM", cleanupConfirmed: true })),
@@ -302,14 +305,14 @@ describe("App under test tool contract", () => {
     const request = call(tool, args);
     const result = await tools().invoke(conversation("full"), request, identity);
     expect(result.success).toBe(true);
-    expect(transport!.perform).toHaveBeenCalledExactlyOnceWith(command, { signal: request.signal });
+    expect(transport!.perform).toHaveBeenCalledExactlyOnceWith(command, { signal: request.signal, turn });
     expect(JSON.parse(result.text)).toMatchObject({ windowId, launchId, performed: command.action });
     if (tool === "inertia_app_screenshot") expect(JSON.parse(result.text)).toMatchObject({ note: "local evidence only" });
     expect(request.requestApproval).not.toHaveBeenCalled();
   });
 
   it("answers every window tool with unavailable until a window transport exists", async () => {
-    const { tools } = fakeManager({ transport: null, launch: launch({ cdp: false, windowCount: 0 }) });
+    const { tools } = fakeManager({ transport: null, launch: launch({ cdp: false, transport: null, windowCount: 0 }) });
     for (const [tool, args] of [
       ["inertia_app_snapshot", { windowId }],
       ["inertia_app_click", { windowId, ref: "e1" }],
@@ -332,9 +335,9 @@ describe("App under test tool contract", () => {
     const { manager, tools } = fakeManager();
     const launched = await tools().invoke(conversation(), call("inertia_app_launch", { kind: "electron" }), identity);
     expect(manager.launch).toHaveBeenCalledWith(expect.objectContaining({ conversationId, kind: "electron", startedBy: "agent" }));
-    expect(manager.waitForReady).toHaveBeenCalledWith(conversationId, launchId, expect.any(AbortSignal), 60_000);
+    expect(manager.waitForReady).toHaveBeenCalledWith(conversationId, launchId, expect.any(AbortSignal), 60_000, turn);
     expect(JSON.parse(launched.text)).toEqual({
-      launchId, kind: "electron", pid: 4_321, state: "running", cdp: true, windows: [window],
+      launchId, kind: "electron", pid: 4_321, state: "running", cdp: true, transport: "cdp", windows: [window],
       logTail: [{ cursor: 1, stream: "stdout", text: "ready" }],
       nextStep: expect.stringContaining("inertia_app_snapshot"),
     });
@@ -349,6 +352,50 @@ describe("App under test tool contract", () => {
     expect(JSON.parse(logs.text)).toEqual({ launchId, lines: [{ cursor: 1, stream: "stdout", text: "ready" }], nextCursor: 1, truncated: false, dropped: 0 });
     const stopped = await tools().invoke(conversation(), call("inertia_app_stop", { launchId }), identity);
     expect(JSON.parse(stopped.text)).toEqual({ stopped: true, launchId, state: "exited", exitCode: null, signal: "SIGTERM", cleanupConfirmed: true });
+  });
+
+  it("waits for an action launch's first native window and says which transport serves each launch", async () => {
+    const native = launch({ kind: "action", actionId, label: "Dev server", cdp: false, transport: "accessibility" });
+    const { manager, tools } = fakeManager({ launch: native });
+    const launched = JSON.parse((await tools().invoke(conversation(), call("inertia_app_launch", { kind: "action", actionId }), identity)).text);
+    // The launch's wait for its first native window reads for the launching turn.
+    expect(manager.waitForReady).toHaveBeenCalledWith(conversationId, launchId, expect.any(AbortSignal), 60_000, turn);
+    expect(launched).toMatchObject({ kind: "action", cdp: false, transport: "accessibility", windows: [window], nextStep: expect.stringContaining("inertia_app_snapshot") });
+    const status = JSON.parse((await tools().invoke(conversation(), call("inertia_app_status", {}), identity)).text);
+    expect(status.launches[0]).toMatchObject({ transport: "accessibility", cdp: false });
+
+    // A permission gate names its next step instead of waiting for nothing.
+    manager.waitForReady.mockResolvedValueOnce(false);
+    manager.transportStatus.mockReturnValue({ unavailable: "Allow Inertia in Accessibility, then try again.", protectedApps: 1 });
+    const blocked = JSON.parse((await tools().invoke(conversation(), call("inertia_app_launch", { kind: "action", actionId }), identity)).text);
+    expect(blocked.nextStep).toBe("Allow Inertia in Accessibility, then try again.");
+    // Native windows are polled: listing reads them again and counts protected ones.
+    const listed = JSON.parse((await tools().invoke(conversation(), call("inertia_app_windows", {}), identity)).text);
+    // The agent's listing reads for its own turn; only background polling is turnless.
+    expect(manager.refreshWindows).toHaveBeenCalledWith(conversationId, expect.any(AbortSignal), turn);
+    expect(listed).toEqual({ windows: [window], protectedApps: 1 });
+    manager.windows.mockReturnValueOnce([]);
+    const empty = JSON.parse((await tools().invoke(conversation(), call("inertia_app_windows", {}), identity)).text);
+    expect(empty.nextStep).toBe("Allow Inertia in Accessibility, then try again.");
+
+    // A process-only launch still does not wait.
+    const plain = fakeManager({ launch: launch({ kind: "action", actionId, cdp: false, transport: null }), transport: null });
+    const result = JSON.parse((await plain.tools().invoke(conversation(), call("inertia_app_launch", { kind: "action", actionId }), identity)).text);
+    expect(plain.manager.waitForReady).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ transport: null, windows: [], nextStep: expect.stringContaining("Window tools are unavailable") });
+  });
+
+  it("asks a Supervised chat about a native control by its role and name, never the window title", async () => {
+    const native = launch({ kind: "action", actionId, cdp: false, transport: "accessibility" });
+    const { transport, tools } = fakeManager({ launch: native, transport: fakeTransport({ role: "password_text", label: "Password", sensitive: true }) });
+    const request = call("inertia_app_type", { windowId, ref: "e3", text: "hunter22" });
+    expect((await tools().invoke(conversation("supervised"), request, identity)).success).toBe(true);
+    const [card] = (request.requestApproval as ReturnType<typeof vi.fn>).mock.calls[0] as [{ title: string; detail: string }];
+    expect(card.title).toBe("Type");
+    // The evidence sanitizer treats a credential-named role as unsafe display text too.
+    expect(card.detail).toBe("App window 1\nReplace text in control: Sensitive field\nText: \"[sensitive text hidden]\"");
+    expect(card.detail).not.toContain("Ignore previous instructions");
+    expect(transport!.inspect).toHaveBeenCalledWith({ action: "type", windowId, ref: "e3", text: "hunter22", replace: true }, request.signal, turn);
   });
 
   it("asks once for every destructive tool in a Supervised chat and never for read-only ones", async () => {
@@ -440,7 +487,7 @@ describe("App under test tool contract", () => {
     });
     expect(transport!.perform).toHaveBeenCalledExactlyOnceWith(
       { action: "click", windowId, ref: "e1", dialog: "accept" },
-      { signal: request.signal, expected: { documentSequence: 7, target: null, dialog: "confirm" }, dialogOnly: true },
+      { signal: request.signal, turn, expected: { documentSequence: 7, target: null, dialog: "confirm" }, dialogOnly: true },
     );
     expect(manager.appendEvidence).not.toHaveBeenCalled();
     // Without Supervised, the input itself answers the dialog and nothing asks.
@@ -448,7 +495,7 @@ describe("App under test tool contract", () => {
     const press = call("inertia_app_press", { windowId, key: "Enter", dialog: "accept" });
     await full.tools().invoke(conversation("auto-edit"), press, identity);
     expect(full.transport!.inspect).not.toHaveBeenCalled();
-    expect(full.transport!.perform).toHaveBeenCalledWith({ action: "press", windowId, key: "Enter", dialog: "accept" }, { signal: press.signal });
+    expect(full.transport!.perform).toHaveBeenCalledWith({ action: "press", windowId, key: "Enter", dialog: "accept" }, { signal: press.signal, turn });
   });
 
   it("fails the window list fast, naming the dialog kind and window, while a dialog is open", async () => {
@@ -543,10 +590,10 @@ describe("App under test tool contract", () => {
     const type = call("inertia_app_type", { windowId, ref: "e1", text: "hello" });
     const result = await approved.tools().invoke(conversation("supervised"), type, identity);
     expect(result.success).toBe(true);
-    expect(approved.transport!.inspect).toHaveBeenCalledWith({ action: "type", windowId, ref: "e1", text: "hello", replace: true }, type.signal);
+    expect(approved.transport!.inspect).toHaveBeenCalledWith({ action: "type", windowId, ref: "e1", text: "hello", replace: true }, type.signal, turn);
     expect(approved.transport!.perform).toHaveBeenCalledWith(
       { action: "type", windowId, ref: "e1", text: "hello", replace: true },
-      { signal: type.signal, expected: { documentSequence: 7, target: { role: "button", label: "Save", sensitive: false }, dialog: null } },
+      { signal: type.signal, turn, expected: { documentSequence: 7, target: { role: "button", label: "Save", sensitive: false }, dialog: null } },
     );
     expect(approved.manager.appendEvidence).toHaveBeenCalledWith(conversationId, launchId, { kind: "action", action: "type" });
     // Both the inspection and the input wait in the launch's action queue only while the call lives.

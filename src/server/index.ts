@@ -172,6 +172,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
+  // Set once the App under test wiring exists; turn hooks that fire earlier have no launches to wake.
+  let appUnderTestWatchChanged: ((conversationId: string) => void) | null = null;
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
@@ -643,7 +645,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
       harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
-      hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
+      hostToolsForTurn: (input) => {
+        const bridge = agentThreads?.manager.bridgeFor(input);
+        // A turn that can call App tools keeps its launches' native windows polled.
+        appUnderTestWatchChanged?.(input.conversation.id);
+        return bridge;
+      },
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
@@ -675,6 +682,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
+        (settled) => appUnderTestWatchChanged?.(settled.conversationId),
       ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
     },
@@ -684,7 +692,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   // App-under-test processes belong to this runtime, like terminals.
-  const appUnderTest = createAppUnderTestRuntimeWiring({ dataDirectory, store, closed: () => closed, broadcast, runtimeSync, send, onCleanupUnconfirmed: options.onOwnedProcessCleanupUnconfirmed });
+  const appUnderTest = createAppUnderTestRuntimeWiring({
+    dataDirectory, store, closed: () => closed, broadcast, runtimeSync, send,
+    onCleanupUnconfirmed: options.onOwnedProcessCleanupUnconfirmed, appControl: options.appControl,
+    turnActive: (conversationId) => turns.isActive(conversationId),
+  });
+  appUnderTestWatchChanged = (conversationId) => appUnderTest.launches.watchChanged(conversationId);
   const forgetConversationRuntimeState = (conversationId: string): void => {
     privateConnectTranscriptCache.invalidateConversation(conversationId);
     appUnderTest.forgetConversation(conversationId);

@@ -109,7 +109,7 @@ function fakeManager(reached: string[]) {
   const launch = {
     launchId: LAUNCH_ID, conversationId: "11111111-1111-4111-8111-111111111111", kind: "electron", actionId: null,
     label: "Electron app", startedBy: "agent", state: "running", pid: 1, startedAt: new Date(0).toISOString(),
-    readyAt: null, exitedAt: null, exitCode: null, signal: null, stopRequested: false, cdp: true, windowCount: 1, windows: [], cleanupConfirmed: null, failure: null,
+    readyAt: null, exitedAt: null, exitCode: null, signal: null, stopRequested: false, cdp: true, transport: "cdp", windowCount: 1, windows: [], cleanupConfirmed: null, failure: null,
   };
   const transport = {
     windows: () => [],
@@ -135,6 +135,8 @@ function fakeManager(reached: string[]) {
     pendingDialog: () => null,
     windowOwner: () => ({ launch, transport }),
     waitForReady: async () => true,
+    refreshWindows: async () => undefined,
+    transportStatus: () => ({ unavailable: null, protectedApps: 0 }),
     withAction: async (_conversationId: string, _launchId: string, operation: () => Promise<unknown>) => await operation(),
     appendEvidence: () => null,
     stop: vi.fn(async () => { reached.push("stop"); return { ...launch, state: "exited" }; }),

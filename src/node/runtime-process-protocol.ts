@@ -8,8 +8,7 @@ import { isMascotFocus } from "../shared/mascot.js";
 import { isMascotRequest, parseMascotFeed, type MascotFeed } from "../shared/mascot-feed.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
-import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
-import { parseRuntimeIssueEvidenceRequest, parseRuntimeIssueEvidenceResult, type RuntimeIssueEvidenceRequest, type RuntimeIssueEvidenceResult } from "./runtime-issue-evidence-protocol";
+import { parseRuntimeMainBrokerEvent, parseRuntimeMainBrokerResult, type RuntimeMainBrokerEvent, type RuntimeMainBrokerResult } from "./runtime-main-broker-protocol";
 import { parseRuntimeHtmlRenderEvent, parseRuntimeHtmlRenderReadCommand, type RuntimeHtmlRenderEvent, type RuntimeHtmlRenderReadCommand } from "./runtime-html-render-protocol";
 import {
   isBackendCredentialGeneration,
@@ -143,7 +142,7 @@ export type RuntimeWorkerCommand =
   | RuntimeAttachmentRelinquishResult
   | RuntimeConversationAttachmentStoreResult
   | RuntimeDocumentPreparationResult
-  | RuntimeSecureFileResult | RuntimeAgentBrowserResult | RuntimeIssueEvidenceResult;
+  | RuntimeSecureFileResult | RuntimeMainBrokerResult;
 
 export type RuntimeCredentialOperation = "resolve" | "status" | "clear" | "forget";
 export type RuntimeCredentialFailureCode = "not-found" | "unavailable" | "invalid";
@@ -319,7 +318,7 @@ export type RuntimeWorkerEvent =
       type: "runtime.secure-file-request";
       requestId: string;
     } & SecureFileRequest)
-  | RuntimeAgentBrowserEvent | RuntimeIssueEvidenceRequest | RuntimeHtmlRenderEvent;
+  | RuntimeMainBrokerEvent | RuntimeHtmlRenderEvent;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -387,8 +386,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     return parseRuntimeConversationAttachmentStoreResult(value);
   }
   if (value.type === "runtime.document-preparation-result") return parseRuntimeDocumentPreparationResult(value);
-  const browserResult = parseRuntimeAgentBrowserResult(value); if (browserResult) return browserResult;
-  if (value.type === "runtime.issue-evidence-result") return parseRuntimeIssueEvidenceResult(value);
+  const brokerResult = parseRuntimeMainBrokerResult(value); if (brokerResult) return brokerResult;
   if (value.type === "runtime.read-html-render") return parseRuntimeHtmlRenderReadCommand(value);
   if (
     value.type === "runtime.secure-file-result"
@@ -710,8 +708,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   }
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
-  const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
-  if (value.type === "runtime.issue-evidence-request") return parseRuntimeIssueEvidenceRequest(value);
+  const brokerEvent = parseRuntimeMainBrokerEvent(value); if (brokerEvent) return brokerEvent;
   const htmlRenderEvent = parseRuntimeHtmlRenderEvent(value); if (htmlRenderEvent) return htmlRenderEvent;
   const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
   if (recoveryEvent) return recoveryEvent;

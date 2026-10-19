@@ -11,7 +11,9 @@ import {
   APP_UNDER_TEST_TOOL_NAMES,
   MAX_APP_LAUNCHES_PER_CONVERSATION,
   MAX_APP_LAUNCHES_PER_RUNTIME,
+  appUnderTestLaunchSchema,
   type AppUnderTestWindow,
+  type AppUnderTestWindowAccessGate,
 } from "../../src/shared/app-under-test";
 import { AppUnderTestError } from "../../src/server/runtime/app-under-test/errors";
 import { containedPath, resolveElectronLaunchTarget } from "../../src/server/runtime/app-under-test/electron-target";
@@ -191,6 +193,74 @@ describe("AppUnderTestLaunchManager", () => {
       .rejects.toMatchObject({ code: "not-found" });
     await expect(manager.launch({ conversationId, kind: "action", startedBy: "agent" })).rejects.toMatchObject({ code: "invalid" });
     await manager.dispose();
+  });
+
+  it("serves an action launch's native windows through the accessibility transport, with the spawn time as identity", async () => {
+    const paths = await workspace();
+    const contexts: Array<Parameters<NonNullable<AppUnderTestLaunchManagerOptions["accessibilityTransports"]>["create"]>[0]> = [];
+    const window: AppUnderTestWindow = {
+      windowId: "55555555-5555-4555-8555-555555555555", launchId: "", title: "Native", origin: null, active: true, loading: false,
+    };
+    const refreshWindows = vi.fn(async () => undefined);
+    const transport: AppUnderTestWindowTransport = {
+      windows: () => (contexts[0] ? [{ ...window, launchId: contexts[0].launchId }] : []),
+      pendingDialog: () => null,
+      redactLog: (text) => text,
+      inspect: vi.fn(),
+      perform: vi.fn(),
+      waitForWindow: async () => true,
+      close: vi.fn(),
+      refreshWindows,
+      status: () => status,
+      watchChanged: vi.fn(),
+    };
+    let status: { unavailable: string | null; protectedApps: number; access: AppUnderTestWindowAccessGate | null } = {
+      unavailable: "Allow accessibility.", protectedApps: 2, access: "permission",
+    };
+    let watched = false;
+    const before = Date.now();
+    const { manager, events } = harness(paths, {
+      accessibilityTransports: { create: (context) => { contexts.push(context); return transport; } },
+      watched: (id) => id === conversationId && watched,
+    });
+    const launch = await manager.launch({ conversationId, kind: "action", actionId, startedBy: "agent" });
+    expect(launch).toMatchObject({ cdp: false, transport: "accessibility", windowCount: 1, protectedApps: 2, windowAccess: "permission" });
+    expect(appUnderTestLaunchSchema.safeParse(launch).success).toBe(true);
+    // Polling follows the chat's subscribers and turns.
+    expect(contexts[0]!.watched?.()).toBe(false);
+    watched = true;
+    expect(contexts[0]!.watched?.()).toBe(true);
+    manager.watchChanged("99999999-9999-4999-8999-999999999999");
+    expect(transport.watchChanged).not.toHaveBeenCalled();
+    manager.watchChanged(conversationId);
+    manager.watchChanged();
+    expect(transport.watchChanged).toHaveBeenCalledTimes(2);
+    // A gate that ends is republished as launch state.
+    status = { unavailable: null, protectedApps: 0, access: null };
+    contexts[0]!.windowsChanged();
+    const updates = events.filter((event) => event.type === "app-under-test.launch.updated");
+    expect(updates.at(-1)).toMatchObject({ launch: { protectedApps: 0, windowAccess: null } });
+    status = { unavailable: "Allow accessibility.", protectedApps: 2, access: "permission" };
+    expect(contexts[0]).toMatchObject({ launchId: launch.launchId, conversationId, pid: launch.pid });
+    expect(contexts[0]!.processStartedAt).toBeGreaterThanOrEqual(before);
+    expect(contexts[0]!.processStartedAt).toBeLessThanOrEqual(Date.now());
+    expect(manager.hasWindowTransport(conversationId)).toBe(true);
+    const turn = { runId: "66666666-6666-4666-8666-666666666666", turnId: "77777777-7777-4777-8777-777777777777" };
+    await manager.refreshWindows(conversationId, new AbortController().signal, turn);
+    expect(refreshWindows).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal), turn);
+    const waitForWindow = vi.spyOn(transport, "waitForWindow");
+    await manager.waitForReady(conversationId, launch.launchId, new AbortController().signal, 1_000, turn);
+    expect(waitForWindow).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal), 1_000, turn);
+    expect(manager.transportStatus(conversationId)).toEqual({ unavailable: "Allow accessibility.", protectedApps: 2, access: "permission" });
+    expect(manager.windowOwner(conversationId, window.windowId)?.transport).toBe(transport);
+    // An Electron launch never uses it.
+    const electron = await manager.launch({ conversationId, kind: "electron", startedBy: "agent" });
+    expect(electron).toMatchObject({ transport: null, cdp: false });
+    expect(electron).not.toHaveProperty("protectedApps");
+    expect(electron).not.toHaveProperty("windowAccess");
+    expect(contexts).toHaveLength(1);
+    await manager.dispose();
+    expect(transport.close).toHaveBeenCalled();
   });
 
   it("runs a Windows batch action only through the reviewed workspace-action invocation, never a shell option", async () => {

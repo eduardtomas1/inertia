@@ -26,6 +26,20 @@ The useful changes in each Inertia release, in plain language.
   use the App tools, and **Settings → Projects → Agent app access** turns them
   off for a project. Codex chats get the tools on their next new thread. See
   [App under test](docs/APP_UNDER_TEST.md).
+- The same tools also work on the native windows a project action opens (a
+  GTK, Qt, WinUI or macOS app, or Electron without its debugging pipe),
+  through the system's accessibility API: read controls and text, press,
+  choose, set values where the app allows it, Enter or Space on the focused
+  control, scroll into view, and local screenshots. Only that launch's
+  processes are reached, password managers, keyrings and credential,
+  password and system prompts are never read (the App surface counts them as
+  protected apps), and no pointer or keyboard input is synthesized. Each launch shows its
+  **Transport**, and a blocked launch says why with a link to the new
+  **Settings → Devices & integrations → App control** card, which shows the
+  macOS Accessibility and Screen Recording state, Windows availability or the
+  Linux AT-SPI state, and shows the macOS prompt or opens macOS settings only
+  when you click. Window lists are polled only while the chat is open or a
+  turn runs.
 
 ## 0.0.72 — 2026-10-18
 

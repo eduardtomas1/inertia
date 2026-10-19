@@ -432,3 +432,18 @@
     outline: 1px solid Highlight;
   }
 }
+
+.app-surface-access-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 8px;
+}
+
+.app-surface-muted {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}

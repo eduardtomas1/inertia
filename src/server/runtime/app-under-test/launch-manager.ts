@@ -41,6 +41,7 @@ import {
   type AppUnderTestMutationEvent,
   type AppUnderTestStarter,
   type AppUnderTestWindow,
+  type AppUnderTestWindowAccessGate,
   type AppUnderTestWindowsUpdatedEvent,
 } from "../../../shared/app-under-test";
 import type { ProjectPreferences } from "../../../shared/project-preferences";
@@ -71,8 +72,12 @@ import {
 } from "./electron-target";
 import {
   NO_CDP_TRANSPORT,
+  type AccessibilityTransportFactory,
   type AppUnderTestEvidenceInput,
   type AppUnderTestPendingDialog,
+  type AppUnderTestTransportKind,
+  type AppUnderTestTransportStatus,
+  type AppUnderTestTurn,
   type AppUnderTestWindowTransport,
   type CdpTransportFactory,
 } from "./window-transport";
@@ -104,6 +109,14 @@ export interface AppUnderTestLaunchManagerOptions {
   workspace(conversationId: string): AppUnderTestWorkspace;
   emit?(event: AppUnderTestRuntimeEvent): void;
   cdpTransports?: CdpTransportFactory;
+  /** Native windows of action launches; absent when main's App control broker is unavailable. */
+  accessibilityTransports?: AccessibilityTransportFactory;
+  /**
+   * True while the chat has a live renderer subscriber or an active turn.
+   * Accessibility launches poll their windows only then; call watchChanged()
+   * when it may have changed. Absent means always watched.
+   */
+  watched?(conversationId: string): boolean;
   onCleanupUnconfirmed?(): void;
   electronSwitches?: readonly AppUnderTestElectronSwitch[];
   platform?: NodeJS.Platform;
@@ -144,6 +157,9 @@ interface LaunchRecord {
   terminate: OwnedProcessTreeTermination | null;
   userDataDir: string | null;
   transport: AppUnderTestWindowTransport | null;
+  transportKind: AppUnderTestTransportKind | null;
+  /** Epoch milliseconds just before the spawn, the root's start-time identity for App control. */
+  spawnedAtMs: number;
   stopRequested: boolean;
   stopping: Promise<boolean> | null;
   settled: Promise<void> | null;
@@ -412,6 +428,48 @@ export class AppUnderTestLaunchManager {
       .some((record) => record.state !== "exited" && record.transport !== null);
   }
 
+  /** Re-reads polled window lists (accessibility launches) before they are listed, for the asking turn. */
+  async refreshWindows(conversationId: string, signal: AbortSignal, turn?: AppUnderTestTurn): Promise<void> {
+    const live = [...(this.sessions.get(conversationId)?.launches.values() ?? [])]
+      .filter((record) => record.state !== "exited" && record.transport?.refreshWindows);
+    await Promise.all(live.map(async (record) => {
+      await record.transport!.refreshWindows!(signal, turn).catch(() => undefined);
+      this.windowsChanged(record);
+    }));
+  }
+
+  /** Why a live launch of this chat shows no windows, and how many it keeps protected. */
+  transportStatus(conversationId: string): AppUnderTestTransportStatus {
+    let unavailable: string | null = null;
+    let access: AppUnderTestTransportStatus["access"] = null;
+    let protectedApps = 0;
+    for (const record of this.sessions.get(conversationId)?.launches.values() ?? []) {
+      if (record.state === "exited" || !record.transport?.status) continue;
+      const status = record.transport.status();
+      unavailable ??= status.unavailable;
+      access ??= status.access;
+      protectedApps += status.protectedApps;
+    }
+    return { unavailable, protectedApps, access };
+  }
+
+  /**
+   * Re-checks who watches the chat's launches (all chats without an id), so
+   * accessibility launches start polling for a new subscriber or turn and
+   * stop when nobody is left.
+   */
+  watchChanged(conversationId?: string): void {
+    for (const record of this.live) {
+      if (conversationId !== undefined && record.conversationId !== conversationId) continue;
+      if (record.state === "exited") continue;
+      try {
+        record.transport?.watchChanged?.();
+      } catch {
+        // A transport that cannot reschedule keeps serving explicit reads.
+      }
+    }
+  }
+
   /** The first window of this chat's live launches that shows an unanswered JavaScript dialog. */
   pendingDialog(conversationId: string): AppUnderTestPendingDialog | null {
     for (const record of this.sessions.get(conversationId)?.launches.values() ?? []) {
@@ -442,11 +500,12 @@ export class AppUnderTestLaunchManager {
     launchId: string,
     signal: AbortSignal,
     timeoutMs: number,
+    turn?: AppUnderTestTurn,
   ): Promise<boolean> {
     const record = this.record(conversationId, launchId);
     if (!record.transport || record.state === "exited") return false;
     const ready = await Promise.race([
-      record.transport.waitForWindow(signal, timeoutMs).catch(() => false),
+      record.transport.waitForWindow(signal, timeoutMs, turn).catch(() => false),
       record.exited.then(() => false),
     ]);
     if (ready) this.windowsChanged(record);
@@ -643,6 +702,8 @@ export class AppUnderTestLaunchManager {
       terminate: null,
       userDataDir: null,
       transport: null,
+      transportKind: null,
+      spawnedAtMs: 0,
       stopRequested: false,
       stopping: null,
       settled: null,
@@ -719,6 +780,7 @@ export class AppUnderTestLaunchManager {
     }
     if (this.closed) throw new AppUnderTestError("unavailable", "The runtime is shutting down.");
     const owned = runtimeOwnedProcessInvocation(command, args);
+    record.spawnedAtMs = Date.now();
     let child: ChildProcess;
     try {
       child = spawnRuntimeOwnedProcess(() => this.spawnProcess(owned.command, owned.args, {
@@ -806,7 +868,20 @@ export class AppUnderTestLaunchManager {
           evidence: (entry) => (record.state === "exited" ? null : this.appendEvidenceFor(record, entry)),
           windowsChanged: () => this.windowsChanged(record),
         });
+        record.transportKind = record.transport ? "cdp" : null;
       }
+    } else if (record.kind === "action" && record.pid !== null && this.options.accessibilityTransports) {
+      // An action has no debugging pipe: its native windows go through main's App control.
+      record.transport = this.options.accessibilityTransports.create({
+        launchId: record.launchId,
+        conversationId: record.conversationId,
+        pid: record.pid,
+        processStartedAt: record.spawnedAtMs,
+        evidence: (entry) => (record.state === "exited" ? null : this.appendEvidenceFor(record, entry)),
+        windowsChanged: () => this.windowsChanged(record),
+        watched: () => this.options.watched?.(record.conversationId) ?? true,
+      });
+      record.transportKind = record.transport ? "accessibility" : null;
     }
     this.emitLaunch(record);
   }
@@ -969,6 +1044,8 @@ export class AppUnderTestLaunchManager {
       record.readyAt = this.now().toISOString();
       this.evidence(record, "ready", "ready");
     }
+    // A protected-window count or a gate is launch state: republished only when it changed.
+    if (record.transportKind === "accessibility") this.emitLaunch(record);
     if (record.windowTimer || !this.options.emit) return;
     record.windowTimer = setTimeout(() => {
       record.windowTimer = null;
@@ -1072,7 +1149,8 @@ export class AppUnderTestLaunchManager {
     if (!this.sessions.get(record.conversationId)?.launches.has(record.launchId)) return;
     const key = JSON.stringify([
       record.state, record.pid, record.exitedAt, record.exitCode, record.signal, record.stopRequested,
-      record.cleanupConfirmed, record.failure, record.transport !== null,
+      record.cleanupConfirmed, record.failure, record.transport !== null, record.transportKind,
+      ...this.accessFields(record),
     ]);
     if (key === record.publishedLaunch) return;
     record.publishedLaunch = key;
@@ -1085,6 +1163,7 @@ export class AppUnderTestLaunchManager {
 
   private view(record: LaunchRecord): AppUnderTestLaunch {
     const windows = this.windowsOf(record);
+    const access = record.transport && record.transportKind === "accessibility" ? this.accessFields(record) : null;
     return {
       launchId: record.launchId,
       conversationId: record.conversationId,
@@ -1100,12 +1179,21 @@ export class AppUnderTestLaunchManager {
       exitCode: record.exitCode,
       signal: record.signal,
       stopRequested: record.stopRequested,
-      cdp: record.transport !== null,
+      cdp: record.transport !== null && record.transportKind === "cdp",
+      transport: record.transport ? record.transportKind : null,
+      ...(access ? { protectedApps: access[0], windowAccess: access[1] } : {}),
       windowCount: windows.length,
       windows,
       cleanupConfirmed: record.cleanupConfirmed,
       failure: record.failure,
     };
+  }
+
+  /** An accessibility launch's protected-app count and gate while it runs. */
+  private accessFields(record: LaunchRecord): [number, AppUnderTestWindowAccessGate | null] {
+    if (record.transportKind !== "accessibility" || !record.transport?.status || record.state === "exited") return [0, null];
+    const status = record.transport.status();
+    return [Math.min(Math.max(0, status.protectedApps), 64), status.access];
   }
 
   private async ensureProfileRoot(): Promise<void> {

@@ -15,6 +15,7 @@ import type {
   AppUnderTestLaunch,
   AppUnderTestLogLine,
   AppUnderTestWindow,
+  AppUnderTestWindowAccessGate,
 } from "@shared/app-under-test";
 import type { ClientCommand, ServerEvent } from "@shared/contracts";
 import { INTERFACE_LOCALE } from "../lib/locale";
@@ -51,6 +52,8 @@ export interface AppSurfaceProps {
   actions: readonly AppSurfaceAction[];
   sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
+  /** Opens Settings → Devices & integrations → App control; absent where settings cannot open. */
+  onOpenAppControlSettings?: () => void;
 }
 
 /** Live launches one chat may run at once; the runtime enforces the same bound. */
@@ -63,6 +66,31 @@ const THUMBNAIL_DATA_URL = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u;
 function kindLabel(launch: AppUnderTestLaunch): string {
   return launch.kind === "electron" ? "Electron app" : "Action";
 }
+
+function transportLabel(launch: AppUnderTestLaunch): string {
+  switch (launch.transport) {
+    case "cdp": return "Debugging pipe";
+    case "accessibility": return "Accessibility";
+    case null: return "None yet";
+  }
+}
+
+/** Fixed wording for a gate; the runtime sends only its category. */
+function accessGateMessage(gate: AppUnderTestWindowAccessGate): string {
+  switch (gate) {
+    case "permission": return "Inertia is not allowed to use accessibility, so this app's windows cannot be inspected.";
+    case "helper-permission": return "macOS denied Inertia's App control helper, so this app's windows cannot be inspected with this build.";
+    case "accessibility-tree": return "This app is not exposing its accessibility tree. Restart it with ACCESSIBILITY_ENABLED=1 or --force-renderer-accessibility.";
+    case "accessibility-bus": return "Accessibility support is turned off for this desktop session, so this app's windows cannot be inspected.";
+    case "elevated": return "This app runs with higher privileges than Inertia, so Windows blocks inspecting its windows. Start it without elevation.";
+    case "unsupported": return "Native window inspection is not available on this platform.";
+    case "start-failed": return "App control could not start. Restart Inertia or check App control settings.";
+  }
+}
+
+const SETTINGS_GATES: ReadonlySet<AppUnderTestWindowAccessGate> = new Set([
+  "permission", "helper-permission", "accessibility-tree", "accessibility-bus", "start-failed",
+]);
 
 function evidenceKindLabel(kind: AppUnderTestEvidenceWithThumbnail["kind"]): string {
   switch (kind) {
@@ -261,6 +289,7 @@ function LaunchRow({
       <dl className="app-surface-launch-meta">
         <div><dt>Kind</dt><dd>{kindLabel(launch)}</dd></div>
         <div><dt>Started by</dt><dd>{launch.startedBy === "user" ? "You" : "Agent"}</dd></div>
+        <div><dt>Transport</dt><dd>{transportLabel(launch)}</dd></div>
         {launch.pid !== null && <div><dt>PID</dt><dd>{launch.pid}</dd></div>}
         {Number.isFinite(started) && (
           <div><dt>{live ? "Uptime" : "Ran for"}</dt><dd>{formatAppUptime(ended - started)}</dd></div>
@@ -468,17 +497,32 @@ function LogPane({
 function WindowList({
   launches,
   windows,
+  onOpenAppControlSettings,
 }: {
   launches: readonly AppUnderTestLaunch[];
   windows: Readonly<Record<string, readonly AppUnderTestWindow[]>>;
+  onOpenAppControlSettings?: (() => void) | undefined;
 }): React.JSX.Element {
   const headingId = useId();
   const live = launches.filter(isLiveLaunch);
   const labels = new Map(launches.map((launch) => [launch.launchId, launch.label]));
   const entries = live.flatMap((launch) => windows[launch.launchId] ?? []);
+  const prefix = (launch: AppUnderTestLaunch): string => (live.length > 1 ? `${launch.label}: ` : "");
+  const gated = live.filter((launch) => launch.transport === "accessibility" && launch.windowAccess);
+  const guarded = live.filter((launch) => launch.transport === "accessibility" && (launch.protectedApps ?? 0) > 0);
   return (
     <section className="workspace-surface-section app-surface-windows" aria-labelledby={headingId}>
       <h3 id={headingId}>Windows</h3>
+      {gated.map((launch) => (
+        <div key={launch.launchId} className="app-surface-notice app-surface-access-notice" role="status">
+          <span>{`${prefix(launch)}${accessGateMessage(launch.windowAccess!)}`}</span>
+          {onOpenAppControlSettings && SETTINGS_GATES.has(launch.windowAccess!) && (
+            <button type="button" className="workspace-surface-button" onClick={onOpenAppControlSettings}>
+              Open App control settings
+            </button>
+          )}
+        </div>
+      ))}
       {entries.length === 0 ? (
         <p className="workspace-surface-empty">No windows open.</p>
       ) : (
@@ -502,6 +546,14 @@ function WindowList({
           ))}
         </ul>
       )}
+      {guarded.map((launch) => {
+        const count = launch.protectedApps!;
+        return (
+          <p key={launch.launchId} className="app-surface-muted">
+            {`${prefix(launch)}${count.toLocaleString(INTERFACE_LOCALE)} protected app${count === 1 ? " is" : "s are"} not inspectable`}
+          </p>
+        );
+      })}
     </section>
   );
 }
@@ -567,6 +619,7 @@ export function AppSurface({
   actions,
   sendCommand,
   subscribe,
+  onOpenAppControlSettings,
 }: AppSurfaceProps): React.JSX.Element {
   const headingId = useId();
   const [error, setError] = useState<string | null>(null);
@@ -701,7 +754,7 @@ export function AppSurface({
           lines={selected ? logs[selected.launchId] ?? [] : []}
           onSelect={setSelectedLaunchId}
         />
-        <WindowList launches={launches} windows={windows} />
+        <WindowList launches={launches} windows={windows} onOpenAppControlSettings={onOpenAppControlSettings} />
         <EvidenceList launches={launches} evidence={evidence} />
       </div>
     </section>

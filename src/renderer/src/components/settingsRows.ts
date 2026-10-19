@@ -148,6 +148,10 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["snapshots-enabled", "Window snapshots", ["screenshot", "capture", "snapshot"]],
       ["snapshot-access", "Capture access", ["permissions", "accessibility", "screen recording", "screenshot", "snapshot"]],
     ],
+    "App control": [
+      ["app-control-access", "Native window access", ["app control", "app under test", "native windows", "accessibility", "at-spi", "permissions"]],
+      ["app-control-screenshots", "Window screenshots", ["app control", "screen recording", "screenshot", "wayland"]],
+    ],
     Discord: [
       ["discord-repository", "Repository URL", ["github", "gitlab", "release", "discord"]],
       ["discord-webhook", "Webhook URL", ["discord webhook", "discord", "token"]],

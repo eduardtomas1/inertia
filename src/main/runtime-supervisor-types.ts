@@ -61,6 +61,7 @@ export interface RuntimeProcessRecord {
   credentialRequestIds: Set<string>;
   secureFileRequestIds: Set<string>;
   agentBrowserRequestIds: Set<string>;
+  appControlRequestIds: Set<string>;
   attachmentRequestIds: Set<string>;
   attachmentClaimCounts: Map<string, number>;
   deferredAttachmentReleaseIds: Set<string>;
@@ -187,6 +188,7 @@ export interface RuntimeSupervisorOptions {
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;
   agentBrowserBroker?: RuntimeAgentBrowserBroker;
+  appControlBroker?: import("./runtime-app-control-coordinator.js").RuntimeAppControlMainBroker;
   issueEvidenceBroker?: import("./runtime-issue-evidence-coordinator.js").RuntimeIssueEvidenceBroker;
   conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   documentPreparationRunner?: DocumentPreparationRunner;

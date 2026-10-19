@@ -45,8 +45,9 @@ export const MAX_APP_REPORTED_SECRET_CHARS = 128 * 1024;
  * hide them from log lines and window titles. The runtime strips it before
  * anything reaches a model.
  */
-export const APP_SNAPSHOT_EXPRESSION = json(`(() => {
-  const value = ${AGENT_PAGE_SEMANTIC_SNAPSHOT_SCRIPT};
+function snapshotExpression(scan: string): string {
+  return json(`(() => {
+  const value = ${scan};
   const state = ${STATE};
   const remember = [];
   if (state?.passwordValues) {
@@ -69,6 +70,41 @@ export const APP_SNAPSHOT_EXPRESSION = json(`(() => {
     remember,
   };
 })()`);
+}
+
+export const APP_SNAPSHOT_EXPRESSION = snapshotExpression(AGENT_PAGE_SEMANTIC_SNAPSHOT_SCRIPT);
+
+/**
+ * Runs `scan` against a scratch overlay of the document's state: privacy
+ * memory is shared, but refs, the node map and the ref counter are the
+ * scratch's own and are discarded, so a read the agent never sees mints no
+ * ref and leaves the latest snapshot's refs in place. Anything else the scan
+ * records (withheld evidence, observed frames) is copied back.
+ */
+export function appScratchRefsScript(scan: string): string {
+  return `(() => {
+  const owner = globalThis;
+  const base = owner.__inertiaAgentBrowser ??= {
+    refs: new Map(), nodes: new WeakMap(), passwordNodes: new WeakSet(), passwordValues: new Set(), next: 1,
+  };
+  const scratch = Object.create(base);
+  scratch.refs = new Map();
+  scratch.nodes = new WeakMap();
+  scratch.next = 1;
+  owner.__inertiaAgentBrowser = scratch;
+  try {
+    return ${scan};
+  } finally {
+    owner.__inertiaAgentBrowser = base;
+    for (const key of Object.keys(scratch)) {
+      if (key !== "refs" && key !== "nodes" && key !== "next") base[key] = scratch[key];
+    }
+  }
+})()`;
+}
+
+/** A wait poll's read: the snapshot value and privacy state without minting or clearing refs. */
+export const APP_WAIT_READ_EXPRESSION = snapshotExpression(appScratchRefsScript(AGENT_PAGE_SEMANTIC_SNAPSHOT_SCRIPT));
 
 export function appLocateExpression(ref: string, focus = false, replace = false): string {
   return json(agentPageLocateRefScript(ref, focus, replace));

@@ -498,6 +498,19 @@ try {
   await page.evaluate(() => document.activeElement?.blur());
   await page.mouse.move(400, 700);
   await capture(page, "inertia-app-under-test-settings.png");
+
+  // The App control card reads its state from main's App control service.
+  await page.getByRole("combobox", { name: "Search settings" }).fill("Native window access");
+  await page.getByRole("listbox", { name: "Matching settings" })
+    .getByRole("option", { name: "Native window access" }).click();
+  const card = page.getByRole("region", { name: "App control", exact: true });
+  await card.waitFor();
+  await card.getByText(/AT-SPI is available|did not answer|macOS|Windows blocks/u).first().waitFor({ timeout: 15_000 });
+  await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.mouse.move(400, 700);
+  await capture(page, "inertia-app-control-settings.png");
 } finally {
   await app?.close().catch(() => undefined);
   await rm(captureRoot, { recursive: true, force: true });

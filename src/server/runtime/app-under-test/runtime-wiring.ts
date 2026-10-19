@@ -11,7 +11,9 @@ import type { RuntimeCommandHandler } from "../commands/command-router";
 import { createAppUnderTestCommandHandler } from "../commands/app-under-test-commands";
 import { createCdpTransportFactory } from "./cdp-window-transport";
 import { AppUnderTestLaunchManager, type AppUnderTestLaunchManagerOptions } from "./launch-manager";
-import type { CdpTransportFactory } from "./window-transport";
+import { createAccessibilityTransportFactory } from "./accessibility-window-transport";
+import type { RuntimeAppControlBroker } from "./app-control-broker-client";
+import type { AccessibilityTransportFactory, CdpTransportFactory } from "./window-transport";
 
 export interface AppUnderTestRuntimeWiringOptions {
   dataDirectory: string;
@@ -24,11 +26,20 @@ export interface AppUnderTestRuntimeWiringOptions {
       conversationId: string,
       event: AppUnderTestLogsAppendedEvent | AppUnderTestWindowsUpdatedEvent,
     ): void;
+    /** Whether a renderer socket is subscribed to the chat's detail now. */
+    hasConversationSubscriber?(conversationId: string): boolean;
+    /** Calls `listener` after any socket's chat subscriptions changed. */
+    onConversationSubscriptionsChanged?(listener: () => void): void;
   };
+  /** Whether a provider turn of the chat is running; with a subscriber, it keeps native window polling on. */
+  turnActive?(conversationId: string): boolean;
   send(socket: WebSocket, event: ServerEvent): void;
   onCleanupUnconfirmed?: (() => void) | undefined;
+  /** Main's App control broker: native windows of action launches. */
+  appControl?: RuntimeAppControlBroker | undefined;
   // Test seams; production callers omit them.
   cdpTransports?: CdpTransportFactory;
+  accessibilityTransports?: AccessibilityTransportFactory;
   launchManager?: Partial<AppUnderTestLaunchManagerOptions>;
 }
 
@@ -73,9 +84,19 @@ export function createAppUnderTestRuntimeWiring(options: AppUnderTestRuntimeWiri
       }
     },
     cdpTransports: options.cdpTransports ?? createCdpTransportFactory(),
+    ...(options.runtimeSync.hasConversationSubscriber || options.turnActive
+      ? {
+          watched: (conversationId: string) => Boolean(options.runtimeSync.hasConversationSubscriber?.(conversationId)
+            || options.turnActive?.(conversationId)),
+        }
+      : {}),
+    ...(options.accessibilityTransports
+      ? { accessibilityTransports: options.accessibilityTransports }
+      : options.appControl ? { accessibilityTransports: createAccessibilityTransportFactory(options.appControl) } : {}),
     ...(options.onCleanupUnconfirmed ? { onCleanupUnconfirmed: options.onCleanupUnconfirmed } : {}),
     ...options.launchManager,
   });
+  options.runtimeSync.onConversationSubscriptionsChanged?.(() => launches.watchChanged());
   return {
     launches,
     commandHandler: createAppUnderTestCommandHandler({

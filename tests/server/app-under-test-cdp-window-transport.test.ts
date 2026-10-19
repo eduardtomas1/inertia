@@ -16,6 +16,7 @@ import {
   APP_PRESS_CONTINUE_EXPRESSION,
   APP_READY_STATE_EXPRESSION,
   APP_SNAPSHOT_EXPRESSION,
+  APP_WAIT_READ_EXPRESSION,
   APP_VIEWPORT_EXPRESSION,
   appDescribeExpression,
   appLocateExpression,
@@ -130,6 +131,8 @@ class FakePeer {
   readonly handlers = new Map<string, Handler>();
   readonly targets: Array<{ targetId: string; type: string; url: string; title: string }> = [];
   model = page();
+  /** Which read expression each page read used. */
+  readonly reads: Array<"snapshot" | "wait"> = [];
   private buffer = "";
   private worlds = 0;
 
@@ -208,7 +211,8 @@ class FakePeer {
 
   private evaluate(expression: string): unknown {
     const model = this.model;
-    if (expression === APP_SNAPSHOT_EXPRESSION) {
+    if (expression === APP_SNAPSHOT_EXPRESSION || expression === APP_WAIT_READ_EXPRESSION) {
+      this.reads.push(expression === APP_SNAPSHOT_EXPRESSION ? "snapshot" : "wait");
       const remember = model.remember;
       model.remember = [];
       return { value: snapshotValue(model), withheld: model.withheld, remembered: model.remembered, readyState: model.readyState, remember };
@@ -519,6 +523,9 @@ describe("App under test CDP window transport: reading", () => {
     await until(() => transport.windows()[0]?.loading === false);
     expect(value(await perform(transport, { action: "wait", windowId, state: "loaded", timeoutMs: 500 })))
       .toMatchObject({ matched: true });
+    // Wait polls read through the scratch-ref expression: they never mint or clear the agent's refs.
+    expect(peer.reads.length).toBeGreaterThan(2);
+    expect(peer.reads.every((kind) => kind === "wait")).toBe(true);
   });
 
   it("captures a bounded local thumbnail and returns metadata only", async () => {

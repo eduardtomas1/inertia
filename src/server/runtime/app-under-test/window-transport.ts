@@ -3,16 +3,37 @@ import type { Readable, Writable } from "node:stream";
 import type {
   AppUnderTestErrorCode,
   AppUnderTestLogStream,
+  AppUnderTestTransport,
   AppUnderTestWindow,
+  AppUnderTestWindowAccessGate,
 } from "../../../shared/app-under-test";
 import type { AgentBrowserKey } from "../../../shared/agent-browser";
 import type { PreviewAgentDialogKind } from "../../../shared/preview-agent-dialogs";
 
 /**
  * Seams between the process-owning launch manager and a window transport.
- * Phase 1 ships one transport, a CDP client over the Electron debugging pipe
- * (fds 3 and 4); until it is installed every launch reports `cdp: false`.
+ * Electron launches use a CDP client over the debugging pipe (fds 3 and 4);
+ * action launches use the accessibility transport over main's App control
+ * broker when one is installed. Either way the host tools see one interface.
  */
+
+export type AppUnderTestTransportKind = AppUnderTestTransport;
+
+/** The provider turn a window command runs for; absent for background reads. */
+export interface AppUnderTestTurn {
+  runId: string;
+  turnId: string;
+}
+
+/** What a transport can say about why it shows no windows. */
+export interface AppUnderTestTransportStatus {
+  /** A permission or platform gate with its next step, or null. */
+  unavailable: string | null;
+  /** Apps of the launch's process tree whose windows Inertia never reads (password managers, system prompts). */
+  protectedApps: number;
+  /** The fixed category of `unavailable`, for the App surface; null when nothing blocks reading. */
+  access: AppUnderTestWindowAccessGate | null;
+}
 
 export type AppUnderTestWindowCommand =
   | { action: "snapshot"; windowId: string }
@@ -101,6 +122,7 @@ export interface AppUnderTestWindowPerformOptions {
    * inspected while the dialog was open.
    */
   dialogOnly?: boolean;
+  turn?: AppUnderTestTurn;
 }
 
 export interface AppUnderTestWindowTransport {
@@ -117,15 +139,24 @@ export interface AppUnderTestWindowTransport {
   inspect(
     command: AppUnderTestDestructiveWindowCommand,
     signal: AbortSignal,
+    turn?: AppUnderTestTurn,
   ): Promise<AppUnderTestWindowInspectionResult>;
   perform(
     command: AppUnderTestWindowCommand,
     options: AppUnderTestWindowPerformOptions,
   ): Promise<AppUnderTestWindowResult>;
-  /** Resolves true once the first page window exists, false on timeout or abort. */
-  waitForWindow(signal: AbortSignal, timeoutMs: number): Promise<boolean>;
+  /** Resolves true once the first page window exists, false on timeout or abort; `turn` is the launching turn. */
+  waitForWindow(signal: AbortSignal, timeoutMs: number, turn?: AppUnderTestTurn): Promise<boolean>;
   /** Idempotent; called on stop, exit, chat clear and runtime shutdown. */
   close(): void;
+  /**
+   * Re-reads the window list when the transport polls it; CDP pushes changes
+   * instead. `turn` is the agent turn asking; background polling has none.
+   */
+  refreshWindows?(signal: AbortSignal, turn?: AppUnderTestTurn): Promise<void>;
+  status?(): AppUnderTestTransportStatus;
+  /** Polling transports: re-checks whether anyone watches the launch, starting or stopping background reads. */
+  watchChanged?(): void;
 }
 
 export type AppUnderTestEvidenceInput =
@@ -146,6 +177,28 @@ export interface AppUnderTestCdpTransportContext {
   evidence(entry: AppUnderTestEvidenceInput): string | null;
   /** Call after windows() changed so the App surface can refresh. */
   windowsChanged(): void;
+}
+
+/** An action launch's native windows, reached through main's App control broker. */
+export interface AppUnderTestAccessibilityTransportContext {
+  launchId: string;
+  conversationId: string;
+  pid: number;
+  /** Epoch milliseconds just before the launch was spawned; main checks the root against it. */
+  processStartedAt: number;
+  evidence(entry: AppUnderTestEvidenceInput): string | null;
+  /** Call after windows(), the protected count or the gate changed. */
+  windowsChanged(): void;
+  /**
+   * True while the chat has a live renderer subscriber or an active turn;
+   * background window polling runs only then. Absent means always.
+   */
+  watched?(): boolean;
+}
+
+export interface AccessibilityTransportFactory {
+  /** Returns null when no App control broker is available. */
+  create(context: AppUnderTestAccessibilityTransportContext): AppUnderTestWindowTransport | null;
 }
 
 export interface CdpTransportFactory {

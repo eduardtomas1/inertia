@@ -267,6 +267,8 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.on(IPC.snapshotReady, handler);
     return () => { ipcRenderer.removeListener(IPC.snapshotReady, handler); };
   },
+  appControl: (request: import("../shared/app-control-settings").AppControlSettingsRequest) =>
+    ipcRenderer.invoke(IPC.appControl, request) as ReturnType<DesktopBridge["appControl"]>,
   selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
   beginAttachmentImport: () => ipcRenderer.invoke(IPC.beginAttachmentImport) as ReturnType<DesktopBridge["beginAttachmentImport"]>,
   importAttachments: (batchId: string, files: Parameters<DesktopBridge["importAttachments"]>[1]) => ipcRenderer.invoke(IPC.importAttachments, batchId, files) as ReturnType<DesktopBridge["importAttachments"]>,

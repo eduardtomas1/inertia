@@ -226,6 +226,8 @@ export interface WorkspaceSceneActions {
   openProviderSetup: (providerId: ProviderId) => void;
   openBackendSetup: (profileId: string) => void;
   openSettings: () => void;
+  /** Settings → Devices & integrations → App control. */
+  openAppControlSettings?: () => void;
   openUsageView?: () => void;
   openProjectPath: (
     request: Parameters<typeof window.inertia.openProjectPath>[0],
@@ -798,6 +800,7 @@ export function createWorkspaceSceneModel({
           : (project.preferences?.actions ?? EMPTY_LIST).map(({ id, name }) => ({ id, name })),
         sendCommand: connection.sendCommand,
         subscribe: connection.subscribe,
+        ...(actions.openAppControlSettings ? { onOpenAppControlSettings: actions.openAppControlSettings } : {}),
       },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,

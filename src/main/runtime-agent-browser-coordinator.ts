@@ -7,6 +7,7 @@ import type {
   RuntimeAgentBrowserBroker,
   RuntimeProcessRecord,
 } from "./runtime-supervisor-types.js";
+import { RuntimeCorrelatedRequests } from "./runtime-correlated-requests.js";
 
 type BrowserRequest = Extract<
   RuntimeWorkerEvent,
@@ -16,12 +17,6 @@ type BrowserCancel = Extract<
   RuntimeWorkerEvent,
   { type: "runtime.agent-browser-cancel" }
 >;
-
-interface PendingBrowserRequest {
-  record: RuntimeProcessRecord;
-  identity: BrowserRequest["identity"];
-  controller: AbortController;
-}
 
 function sameIdentity(
   left: BrowserRequest["identity"],
@@ -39,26 +34,37 @@ interface RuntimeAgentBrowserCoordinatorOptions {
 }
 
 export class RuntimeAgentBrowserCoordinator {
-  private readonly pending = new Map<string, PendingBrowserRequest>();
+  private readonly requests: RuntimeCorrelatedRequests<BrowserRequest["identity"], RuntimeAgentBrowserResult["result"]>;
 
-  constructor(private readonly options: RuntimeAgentBrowserCoordinatorOptions) {}
+  constructor(private readonly options: RuntimeAgentBrowserCoordinatorOptions) {
+    this.requests = new RuntimeCorrelatedRequests({
+      requestIds: (record) => record.agentBrowserRequestIds,
+      sameIdentity,
+      accepts: (record) => this.options.accepts(record),
+      reply: (record, requestId, result) => this.reply(record, requestId, result),
+      repeated: {
+        ok: false,
+        code: "invalid",
+        message: "The browser request identifier was already used.",
+      },
+      failed: {
+        ok: false,
+        code: "unavailable",
+        message: "The browser action could not be completed.",
+      },
+    });
+  }
 
   handle(
     record: RuntimeProcessRecord,
     event: BrowserRequest | BrowserCancel,
   ): void {
     if (event.type === "runtime.agent-browser-cancel") {
-      const pending = this.pending.get(event.requestId);
-      if (
-        pending?.record === record
-        && sameIdentity(pending.identity, event.identity)
-      ) {
-        this.pending.delete(event.requestId);
-        pending.controller.abort();
-      }
+      this.requests.cancel(record, event.requestId, event.identity);
       return;
     }
-    if (!this.options.accepts(record) || !this.options.broker) {
+    const broker = this.options.broker;
+    if (!this.options.accepts(record) || !broker) {
       this.reply(record, event.requestId, {
         ok: false,
         code: "unavailable",
@@ -66,7 +72,8 @@ export class RuntimeAgentBrowserCoordinator {
       });
       return;
     }
-    if (!event.command) {
+    const command = event.command;
+    if (!command) {
       this.reply(record, event.requestId, {
         ok: false,
         code: "invalid",
@@ -74,64 +81,15 @@ export class RuntimeAgentBrowserCoordinator {
       });
       return;
     }
-    if (record.agentBrowserRequestIds.has(event.requestId)) {
-      const repeated = this.pending.get(event.requestId);
-      if (repeated?.record === record) {
-        this.pending.delete(event.requestId);
-        repeated.controller.abort();
-      }
-      this.reply(record, event.requestId, {
-        ok: false,
-        code: "invalid",
-        message: "The browser request identifier was already used.",
-      });
-      return;
-    }
-    record.agentBrowserRequestIds.add(event.requestId);
-    if (record.agentBrowserRequestIds.size > 512) {
-      const oldest = record.agentBrowserRequestIds.values().next().value;
-      if (typeof oldest === "string") record.agentBrowserRequestIds.delete(oldest);
-    }
-    const controller = new AbortController();
-    const pending = {
-      record,
-      identity: event.identity,
-      controller,
-    };
-    this.pending.set(event.requestId, pending);
-    void this.options.broker.perform(
+    this.requests.begin(record, event.requestId, event.identity, (signal) => broker.perform(
       event.identity,
-      event.command,
-      controller.signal,
-    ).then(
-      (result) => {
-        if (this.pending.get(event.requestId) !== pending) return;
-        this.pending.delete(event.requestId);
-        if (this.options.accepts(record)) {
-          this.reply(record, event.requestId, result);
-        }
-      },
-      () => {
-        if (this.pending.get(event.requestId) !== pending) return;
-        this.pending.delete(event.requestId);
-        if (this.options.accepts(record)) {
-          this.reply(record, event.requestId, {
-            ok: false,
-            code: "unavailable",
-            message: "The browser action could not be completed.",
-          });
-        }
-      },
-    );
+      command,
+      signal,
+    ));
   }
 
   clear(record: RuntimeProcessRecord | null): void {
-    if (!record) return;
-    for (const [requestId, pending] of this.pending) {
-      if (pending.record !== record) continue;
-      this.pending.delete(requestId);
-      pending.controller.abort();
-    }
+    this.requests.clear(record);
   }
 
   private reply(

@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppUnderTestRuntimeWiring } from "../../src/server/runtime/app-under-test/runtime-wiring";
 import {
   NO_CDP_TRANSPORT,
+  type AccessibilityTransportFactory,
+  type AppUnderTestAccessibilityTransportContext,
   type AppUnderTestCdpTransportContext,
   type CdpTransportFactory,
 } from "../../src/server/runtime/app-under-test/window-transport";
@@ -37,7 +39,13 @@ class FakeChild extends EventEmitter {
   }
 }
 
-async function setup(options: { exits?: boolean; cdpTransports?: CdpTransportFactory } = {}) {
+async function setup(options: {
+  exits?: boolean;
+  cdpTransports?: CdpTransportFactory;
+  accessibilityTransports?: AccessibilityTransportFactory;
+  subscribed?: (conversationId: string) => boolean;
+  turnActive?: (conversationId: string) => boolean;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "inertia-app-wiring-"));
   roots.push(root);
   let closed = false;
@@ -54,12 +62,21 @@ async function setup(options: { exits?: boolean; cdpTransports?: CdpTransportFac
     project: vi.fn(() => ({ preferences: { actions: [{ id: actionId, name: "Dev server", executable: "node", args: ["server.js"] }] } })),
   };
   const onCleanupUnconfirmed = vi.fn();
+  const subscriptionListeners: Array<() => void> = [];
   const wiring = createAppUnderTestRuntimeWiring({
     dataDirectory: join(root, "data"),
     store: store as never,
     closed: () => closed,
     broadcast,
-    runtimeSync: { sendToConversationSubscribers: subscribers },
+    runtimeSync: {
+      sendToConversationSubscribers: subscribers,
+      ...(options.subscribed ? {
+        hasConversationSubscriber: options.subscribed,
+        onConversationSubscriptionsChanged: (listener: () => void) => { subscriptionListeners.push(listener); },
+      } : {}),
+    },
+    ...(options.turnActive ? { turnActive: options.turnActive } : {}),
+    ...(options.accessibilityTransports ? { accessibilityTransports: options.accessibilityTransports } : {}),
     send: (_socket, event) => sent.push(event),
     onCleanupUnconfirmed,
     cdpTransports: options.cdpTransports ?? NO_CDP_TRANSPORT,
@@ -83,7 +100,10 @@ async function setup(options: { exits?: boolean; cdpTransports?: CdpTransportFac
       stopExitWaitMs: 20,
     },
   });
-  return { wiring, broadcast, subscribers, sent, children, onCleanupUnconfirmed, close: () => { closed = true; } };
+  return {
+    wiring, broadcast, subscribers, sent, children, onCleanupUnconfirmed, close: () => { closed = true; },
+    subscriptionsChanged: () => { for (const listener of subscriptionListeners) listener(); },
+  };
 }
 
 describe("App under test runtime wiring", () => {
@@ -125,6 +145,40 @@ describe("App under test runtime wiring", () => {
     }));
     const types = broadcast.mock.calls.map(([event]) => (event as { type: string }).type);
     expect(types).not.toContain("app-under-test.windows.updated");
+    await expect(wiring.clearConversation(conversationId)).resolves.toBe(true);
+    await wiring.dispose();
+  });
+
+  it("polls native windows only while the chat has a subscriber or an active turn", async () => {
+    let subscribed = false;
+    let turn = false;
+    let context: AppUnderTestAccessibilityTransportContext | undefined;
+    const watchChanged = vi.fn();
+    const { wiring, subscriptionsChanged } = await setup({
+      subscribed: (id) => id === conversationId && subscribed,
+      turnActive: (id) => id === conversationId && turn,
+      accessibilityTransports: {
+        create: (value) => {
+          context = value;
+          return {
+            windows: () => [], pendingDialog: () => null, redactLog: (text) => text, inspect: vi.fn(), perform: vi.fn(),
+            waitForWindow: async () => false, close: () => undefined, watchChanged,
+            status: () => ({ unavailable: null, protectedApps: 0, access: null }),
+          };
+        },
+      },
+    });
+    await wiring.launches.launch({ conversationId, kind: "action", actionId, startedBy: "user" });
+    expect(context!.watched!()).toBe(false);
+    subscribed = true;
+    subscriptionsChanged();
+    expect(watchChanged).toHaveBeenCalledTimes(1);
+    expect(context!.watched!()).toBe(true);
+    subscribed = false;
+    turn = true;
+    expect(context!.watched!()).toBe(true);
+    turn = false;
+    expect(context!.watched!()).toBe(false);
     await expect(wiring.clearConversation(conversationId)).resolves.toBe(true);
     await wiring.dispose();
   });

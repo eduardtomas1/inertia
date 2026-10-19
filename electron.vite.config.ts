@@ -95,6 +95,7 @@ export default defineConfig({
           "snapshot-capture-worker": resolve("src/main/snapshot-capture-worker.ts"),
           "snapshot-binding-worker": resolve("src/main/snapshot-binding-worker.ts"),
           "snapshot-shortcut-worker": resolve("src/main/snapshot-shortcut-worker.ts"),
+          "app-control-worker": resolve("src/main/app-control-worker.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
           "message-search-worker": resolve("src/server/persistence/message-search-worker.ts"),
           "app-update-candidate-viability-worker": resolve(
@@ -190,7 +191,7 @@ export default defineConfig({
               "DiscordSettings", "DocumentAttachmentPreview", "SidebarUpdateControl", "CanaryRollbackSetting",
               "LifecycleIntegritySettings", "failurePanel", "evidence", "morphicons", "pdf", "xlsx",
               "WorkspaceBranchMenu", "WorkspaceGitActionMenu", "application-diagnostics", "LegacyPromptStash", "UsageLimitsPanel", "ReviewNoteDialog",
-              "WelcomeGuide", "SnapshotSettings", "SnapshotControl", "AttachmentStorageSettings", "WorkspaceHeaderActions", "OrbCanvas", "ProjectCustomizePanel", "project-color-contrast",
+              "WelcomeGuide", "SnapshotSettings", "AppControlSettings", "SnapshotControl", "AttachmentStorageSettings", "WorkspaceHeaderActions", "OrbCanvas", "ProjectCustomizePanel", "project-color-contrast",
             ]);
             const label = compactNames[name] ?? (budgetedChunks.has(name) ? name : null);
             return `assets/${label ? `${label}-` : ""}[hash].js`;

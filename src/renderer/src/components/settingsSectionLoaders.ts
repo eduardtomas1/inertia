@@ -33,6 +33,10 @@ export const loadSnapshotSettings = createSurfaceLoader(async () => ({
   default: (await import("./SnapshotSettings")).SnapshotSettings,
 }));
 
+export const loadAppControlSettings = createSurfaceLoader(async () => ({
+  default: (await import("./AppControlSettings")).AppControlSettings,
+}));
+
 export const loadDiscordSettings = createSurfaceLoader(async () => ({
   default: (await import("./DiscordSettings")).DiscordSettings,
 }));

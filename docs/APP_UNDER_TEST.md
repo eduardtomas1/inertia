@@ -4,7 +4,9 @@ The App under test lets the user and the coding agent run the desktop
 application a chat is building, read its output, see its windows, drive them,
 keep local evidence, and stop it. It is not general desktop automation: the
 only processes the App tools act on are the ones Inertia launched for that
-chat, and the only windows are the page windows of those processes. The user's
+chat, and the only windows are the windows of those processes: the page
+windows of an Electron launch, or the native windows of a project action's
+process tree (see [Native windows](#native-windows-accessibility-transport)). The user's
 desktop, the foreground application, other copies of the app, and Inertia
 itself are never targets of an App tool. The launched app is not sandboxed by
 Inertia: it runs the project's own code with the user's permissions, like any
@@ -39,11 +41,13 @@ program the user starts.
     with the user's permissions. The app is started as `electron
     --remote-debugging-pipe --user-data-dir=<profile> <workspace>`, which is
     what `electron .` would run, with the chat's workspace as its working
-    directory. Only this kind has window tools.
+    directory. Its windows are served over the debugging pipe
+    (`transport: "cdp"`).
   - **Project action** (`action`) runs one of the project's reviewed actions
     (**Settings → Projects → Actions**) with its own executable and arguments,
-    from the chat's workspace. It has process tools only: status, logs and
-    stop.
+    from the chat's workspace. Status, logs and stop always work; its native
+    windows are served through the operating system's accessibility API
+    (`transport: "accessibility"`) when the desktop allows it.
 - Every Electron launch gets a new, empty, owner-only (0700) profile folder
   under Inertia's runtime data folder in `app-under-test/<launchId>`, passed
   as `--user-data-dir`. Electron's own profile data (cookies, local storage,
@@ -75,11 +79,11 @@ every provider transport advertises the arguments the runtime validates.
 
 | Tool | Arguments | Purpose |
 | --- | --- | --- |
-| `inertia_app_launch` | `kind` (`electron` or `action`), `actionId` exactly when `kind` is `action` | Start the app and return its `launchId`, `pid`, `state`, `cdp`, its windows once the first one opens (Electron, up to 60 seconds), the last 20 log lines and a `nextStep`. |
-| `inertia_app_status` | optional `launchId` | List the chat's launches with kind, label, who started each, state, exit code or signal, `uptimeMs`, `cdp`, window count and whether cleanup was confirmed. |
+| `inertia_app_launch` | `kind` (`electron` or `action`), `actionId` exactly when `kind` is `action` | Start the app and return its `launchId`, `pid`, `state`, `cdp`, `transport` (`cdp`, `accessibility` or null), its windows once the first one opens (up to 60 seconds for either transport), the last 20 log lines and a `nextStep`. |
+| `inertia_app_status` | optional `launchId` | List the chat's launches with kind, label, who started each, state, exit code or signal, `uptimeMs`, `cdp`, `transport`, window count and whether cleanup was confirmed. |
 | `inertia_app_logs` | `launchId`, optional `cursor`, `limit` (1 to 200, default 100), `grep` | Read the launch's log. Without `cursor` it returns the newest lines; with the previous `nextCursor` it returns only later lines. |
 | `inertia_app_stop` | `launchId` | Stop the launch and every process it started, and report whether that was confirmed. |
-| `inertia_app_windows` | none | List the page windows of the chat's running launches, at most eight per chat. |
+| `inertia_app_windows` | none | List the windows of the chat's running launches, at most eight per chat, and how many apps in their process trees are protected (`protectedApps`). |
 | `inertia_app_snapshot` | `windowId` | Read one window and get element refs. |
 | `inertia_app_click` | `windowId`, `ref`, optional `dialog` | Click one element from the latest snapshot of that window. |
 | `inertia_app_type` | `windowId`, `ref`, `text`, optional `replace` (default true), optional `dialog` | Type into one editable element. |
@@ -251,6 +255,282 @@ Browser.
 - There is no navigation tool. The app navigates itself; the agent observes
   the result.
 
+## Native windows (accessibility transport)
+
+A project action launch has no debugging pipe, so its windows (a GTK, Qt,
+WinUI, AppKit or Electron app started by the action) are read and driven
+through the operating system's accessibility API with the `@crowecawcaw/xa11y`
+binding Inertia already ships for Snapshots. The twelve tools, their schemas,
+annotations, results, error codes and approvals are the same; the launch and
+status results say `transport: "accessibility"`, and `inertia_app_launch`
+waits up to 60 seconds for the first native window as it does for an Electron
+page. Electron launches always keep the debugging-pipe transport.
+
+### Where the native work runs
+
+The runtime never loads the native binding. It sends one strictly parsed
+request per tool step to the Electron main process over the same supervised
+channel the Browser uses (`runtime.app-control-request`, `-cancel`,
+`-result`): exact keys, UUID request ids, opaque window and control tokens
+minted by the worker, and every request carries the chat, run, turn, launch,
+the launch's process id and the time the runtime recorded just before it
+spawned the launch. Payloads are bounded at 24 KiB (a screenshot thumbnail of
+at most 256 KiB travels beside it), at most 16 requests are pending per
+runtime, and each has a 90-second backstop; a cancelled or timed-out call is
+cancelled in main too. Main remembers the last 512 request ids of each
+runtime process and refuses a reused one, cancels only when the runtime and
+every identity field match, drops results meant for a runtime that was
+replaced, and aborts everything of a runtime that stops.
+
+Main's App control service runs the native calls in its own utility process,
+"Inertia App Control", with the same allowlisted environment as the Snapshots
+helper. It runs one command at a time under a watchdog of 10 seconds for
+reads and 20 seconds for actions and screenshots. A worker that times out,
+crashes, answers with a malformed message or reports a native failure is
+killed and a fresh one starts with the next command; if its exit is not
+confirmed within three seconds it is killed by force (`SIGKILL`), and if that
+exit is not confirmed within two more seconds, App control stays off until
+Inertia restarts and quitting reports the cleanup as unconfirmed. A worker
+that fails to become ready three times in a row latches App control off
+(`native-failure`, "App control could not start; restart Inertia or check
+Settings → Devices & integrations → App control") until the App control card
+probes it again or Inertia restarts; meanwhile the launch shows the
+`start-failed` gate and polls at the gated ten-second interval. An idle
+worker exits after a minute. Each command waits on one exit promise per
+worker and removes its own listeners when it completes. A hang or crash in
+the native binding therefore never reaches the runtime or Inertia's
+windows. Failures cross the boundary as fixed categories only
+(`permission-denied`, `helper-permission-denied`, `accessibility-unavailable`,
+`not-found`, `denied`, `native-failure`, `timeout` and the protocol's own
+`invalid`, `unavailable`, `unsupported`, `elevated`, `cancelled`, `sensitive`,
+`busy`); no native message text, window title or control name reaches a log.
+The runtime turns each category into the pack's error codes with fixed
+wording and a next step.
+
+### Scope: the launch's own process tree
+
+Every command first resolves the live process tree under the launch's
+process, and every member carries its own start time: on Linux from `/proc`
+(each process's `stat` start time in clock ticks plus the boot time) without
+starting a process, on macOS in the worker from libproc
+(`proc_listchildpids` from the root down, then `proc_pidinfo` for each
+process's parent and start time, to microseconds, and `proc_pidpath` for its
+executable, without starting a process or reading any other part of the
+process table), and on Windows from a Toolhelp32 snapshot in the worker with
+`GetProcessTimes` for every process under the root. The root must still be
+the process the runtime spawned: its start time has to lie between two
+seconds before and fifteen seconds after the time the runtime recorded just
+before the spawn, and a root whose start time cannot be read counts as gone.
+The root must also be a direct child of the runtime process that sent the
+request (main checks the root's parent against the runtime's process record).
+Otherwise the command fails with `not-found` and "That launch is no longer
+running". Each descendant is compared with its direct parent: one that
+started before its parent is a reused process id, and one whose start time
+cannot be read is not trusted, so either is dropped with its whole subtree.
+A tree of more than 1,024 processes is not read in part: the command fails
+with `unavailable` and "the app's process tree is too large to check". A
+resolved tree is reused for one second. The worker then looks up the
+accessibility application of each process in the tree (`App.byPid`, or one
+filtered `App.list()` for a tree of more than 16 processes), and then their
+windows; a window of any other process is never listed and is `not-found` if
+a token names it.
+
+Inside the tree, App control never reads or acts on an application whose
+name, bundle id or executable base name is a password manager or a system
+credential, consent or settings surface: 1Password (and its `op` CLI),
+Bitwarden, Dashlane, LastPass, KeePass and its variants, Keychain Access,
+Passwords, System Settings and System Preferences, SecurityAgent,
+UserNotificationCenter, loginwindow, Windows Credential Manager
+(`CredentialUIBroker.exe`), `consent.exe`, `LogonUI.exe`, Git Credential
+Manager and its `GitHub.UI` and `Atlassian.Bitbucket.UI` helpers, every
+`ssh-askpass` and `SUDO_ASKPASS`-style helper (`ssh-askpass`, `ksshaskpass`,
+`x11-ssh-askpass`, `lxqt-openssh-askpass`, `gnome-ssh-askpass` and any other
+name containing "askpass"), `pinentry` and its variants, `gnome-keyring`,
+`kwalletmanager`, `kwalletd`, `ksecretd`, `secret-tool`, Seahorse and polkit
+authentication agents, and Inertia's own processes. A process of the tree
+whose executable cannot be read is treated the same way. Such an application
+is counted once in `protectedApps` in `inertia_app_windows`, without a window
+id, and its windows are not read. There is no setting to override the list
+(`src/shared/app-control-denylist.ts`).
+
+### Windows, snapshots and refs
+
+Native windows are polled every two seconds (every ten while a permission
+gate blocks the launch), but only while the chat has a live subscriber (a
+renderer showing it) or a turn that can use the App tools is running, and
+again whenever the agent lists windows. When the last subscriber leaves and
+no turn runs, the next poll does not read or reschedule; a new subscriber or
+turn reads at once and resumes the polling. A launch never polled meanwhile
+still answers every App tool, which reads what it needs itself. Background
+polls carry no turn; the agent's `inertia_app_windows` and the launch's wait
+for its first window carry the asking turn. The worker cuts each title to 480
+characters and leaves the newest windows out of a list that would not fit
+the 24 KiB payload, with an `omitted` count. A launch shows at most eight;
+each gets an Inertia window id and a stable number ("App window N") that is
+not reused, a sanitized and redacted title of at most 120 characters,
+`origin: null` and `loading: false`.
+
+A snapshot walks the window's accessibility tree depth first with at most
+4,096 node visits, sixteen levels and three seconds. Interactive controls
+(buttons, check boxes, fields, links, list and tree items, menu items, tabs,
+sliders and anything that advertises a press, toggle, select or expand
+action) become elements with refs `e1`, `e2`..., at most 200, each with its
+`role` (xa11y's normalized role name), `name`, `value`, `enabled`, `focused`,
+`checked` and `expanded` when known, `editable`, its `rect` relative to the
+window and `offscreen` when it lies outside the window or is hidden. The
+names and values of other nodes become the visible text, at most 12,000
+characters. The worker keeps its answer within 24 KiB by shortening the text
+first and then dropping off-screen and later controls, and the result says
+what it left out (`omitted`, `nextStep`), as does a walk that hit a bound.
+`notInspected: ["unlabelled-regions"]` means the window has content without
+any accessible name or value, such as images or custom-drawn areas, that
+cannot be read. The viewport is the window's size and there is no `url`. On
+Linux a window whose accessibility root has no children is not an empty
+snapshot: it fails with `unavailable` and "start the app with
+ACCESSIBILITY_ENABLED=1 or --force-renderer-accessibility" (the
+`accessibility-tree` gate).
+
+A ref is bound to the control's xa11y `stableId` (or, where the platform
+offers none, its position in the tree, its role and its cleaned name, so a
+renamed control at the same position is a different control), its process
+and its window, and to the window's document sequence. The sequence
+increments when the identity of the window's direct children changes, which
+is how a replaced content root (a new page, a rebuilt view) shows up; refs of
+the older document fail with `not-found` and "take a new snapshot". Ref
+numbers keep increasing for the window's lifetime, across documents, and only
+`inertia_app_snapshot` hands them out (a wait's reads never do), so a ref
+never names a control of another document. A ref whose control disappeared
+or was renamed fails the same way.
+
+### Actions
+
+Only accessibility actions are used. No pointer, wheel or keyboard event is
+synthesized in this release.
+
+| Tool | Accessibility action |
+| --- | --- |
+| `inertia_app_click` | `toggle` for a check box, switch or other control with a checked state; `select` for list, tree and table items, tabs and options; `expand` for a disclosure that offers no press; otherwise `press`. |
+| `inertia_app_type` | `focus` (best effort), then `setValue` to replace or `typeText` to append. A control that is not editable or is disabled is refused before anything is sent. |
+| `inertia_app_press` | Enter and Space press the focused control. Every other key, including Escape and Tab, fails with `invalid` because the accessibility API has no equivalent; with no focused control the press fails with `invalid`. |
+| `inertia_app_scroll` | With `ref`, `scrollIntoView` (a no-op on macOS, whose API has none). `deltaY` fails with `invalid`. |
+| `inertia_app_wait_for` | Reads a snapshot every 500 milliseconds, without handing out refs, until the text or control name appears or disappears; `loaded` is reached once the window can be read. |
+| `inertia_app_screenshot` | See below. |
+
+A Supervised approval works as for Electron windows: before the card is
+shown the control is inspected without changing the app, the card names the
+fixed title, "App window N" and the control's sanitized role and name (never
+the window title), and after approval the control is inspected again. The
+action is refused with `not-found` and nothing sent when the document
+sequence or the control changed; main then checks the window's root
+identity, the control's role and its name once more immediately before it
+acts. A press names the focused control. There are no JavaScript dialogs in
+native windows, so `dialog` has no effect. An action whose window closed
+reports `windowClosed: true`; one after which the window's root changed
+reports `navigated: true` with a next step to take a new snapshot. A
+`timeout` or a native failure after the action was handed to the platform
+reports `dispatched: true`.
+
+### Privacy
+
+Password roles (and macOS secure text fields, AT-SPI password text) and
+editable controls whose name words name a credential, by the Browser's word
+rules, are sensitive: their value is reported as `[redacted]`, their name as
+"Sensitive field" when they have none, and their descendants are not read.
+The worker never sends a sensitive control's value to main or the runtime.
+Text the agent types into a sensitive control is remembered before it is
+sent, per window (at most 256 values) and for the launch's log, and replaced
+with `[redacted]` in later snapshot text, control names and values, window
+titles and log lines, with the Browser's matching (values of four or more
+characters anywhere, shorter ones as whole words). Approval cards hide typed
+text for sensitive controls. On Windows a password box is recognized by UI
+Automation's `IsPassword` when xa11y reports it (`raw.uia_is_password`) and
+otherwise by its name.
+
+Screenshots are withheld (`sensitive`) while any window of the launch holds a
+remembered value (a secret typed into one window withholds every window's
+screenshots), while a sensitive control holds any value, and when the walk
+could not check the whole window or found an editable control without a
+position.
+Otherwise every editable and sensitive control is masked in the image with
+Snapshots' geometry rules before the pixels leave the worker.
+
+### Screenshots
+
+- **macOS** captures exactly that window with `screencapture -l` through the
+  Snapshots helper (window-server match by process and bounds, empty
+  environment, three-second limit, private capture folder removed with the
+  worker) and needs Screen Recording permission.
+- **Windows and Linux X11** capture the pixels under the window's bounds, so
+  the image can include windows overlapping it; the result says
+  `mayIncludeOverlappingWindows: true`.
+- **Wayland** has no capture path and answers `unavailable`.
+
+The worker reduces the masked image to at most 1,024 by 640 pixels, and main
+reduces it with Electron's image codec to a thumbnail of at most 512 by 320
+pixels and 256 KiB before it reaches the runtime's evidence ledger. The
+result reports the window's size and an `evidenceId`; no provider receives
+pixels.
+
+### Permissions and platform gates
+
+- **macOS** requires Accessibility for Inertia. Main checks it before any
+  native call; when it is missing every window tool fails with `unavailable`
+  and the next step to allow Inertia in System Settings → Privacy & Security
+  → Accessibility. A typed denial from the helper while macOS lists Inertia as
+  allowed is reported as the helper's own denial
+  (`helper-permission-denied`), as for Snapshots, because the utility process
+  may not share the grant. Screenshots also need Screen Recording.
+- **Windows** refuses a window whose process runs at a higher integrity level
+  than Inertia (an elevated app), because UI Automation blocks it (UIPI):
+  `unavailable`, with the next step to start the app without elevation. An
+  integrity level that cannot be read does not block.
+- **Linux** reads and acts over AT-SPI on X11 and Wayland. A Chromium or
+  Electron app that exposes an empty tree fails with `unavailable` and "start
+  the app with ACCESSIBILITY_ENABLED=1 or --force-renderer-accessibility";
+  action launches already receive `ACCESSIBILITY_ENABLED=1`. A desktop
+  session whose accessibility bus is turned off fails with `unavailable` and
+  its own next step (turn on accessibility support, the AT-SPI bus, and
+  restart Inertia).
+
+While a gate blocks a launch, `inertia_app_launch` and `inertia_app_windows`
+return its next step instead of "No window opened yet". A Screen Recording
+denial blocks only screenshots and is not a gate for the launch.
+
+The App surface sees the same state as fixed categories on the launch
+record, never as native text: `protectedApps` (the denied apps of the tree)
+and `windowAccess` (`permission`, `helper-permission`, `accessibility-tree`,
+`accessibility-bus`, `elevated`, `unsupported` or `start-failed`, or null),
+present only on
+accessibility launches and republished as a sequenced launch update when
+they change.
+
+**Settings → Devices & integrations → App control** reads its state from
+main's App control service over one validated IPC channel
+(`inertia:app-control`, accepted only from the main window, exact keys):
+on macOS the Accessibility grant, a helper denial and Screen Recording; on
+Windows availability; on Linux whether the AT-SPI bus answered and whether
+the session is Wayland. macOS and Linux find this out by sending the worker a
+`windows` command with an empty scope, which lists accessibility
+applications and reads none of their windows; on macOS it is not sent until
+Inertia is trusted, so reading the state never prompts. The card's buttons
+act only when clicked: **Accessibility settings** asks macOS to show its
+Accessibility prompt (`isTrustedAccessibilityClient(true)`, which also lists
+Inertia in the pane) and opens the Accessibility pane, and the Screen
+Recording button opens that pane. Opening the card also clears a
+`start-failed` latch: its probe starts a fresh worker. There
+is no global switch: **Agent app access** remains the per-project control.
+
+### Per-platform matrix
+
+| | macOS | Windows | Linux X11 | Linux Wayland |
+| --- | --- | --- | --- | --- |
+| Read windows and controls | Accessibility permission | Yes, unless the app is elevated | AT-SPI | AT-SPI |
+| Click, type, Enter/Space, scroll into view | Yes (scroll into view is a no-op) | Yes | Yes | Yes |
+| Other keys, pixel scrolling, pointer input | No | No | No | No |
+| Screenshot | Exact window, Screen Recording permission | Window bounds, may show overlapping windows | Window bounds, may show overlapping windows | Unavailable |
+| Password field detection | Role and secure subrole, credential names | UI Automation `IsPassword` when reported, credential names | Password text role, credential names | Password text role, credential names |
+| Process tree | libproc (worker) | Toolhelp32 (worker) | `/proc` | `/proc` |
+
 ## Permission behavior
 
 Status, logs, windows, snapshots, waits and screenshots are read-only and never
@@ -327,7 +607,8 @@ created its workspace.
   because the workspace has no `node_modules/electron`, shows the reason
   under the toolbar.
 - **Launches** lists each launch with its state, kind, who started it, its
-  process id, uptime or run time, and exit code or signal. **Stop** ends the
+  window transport (**Debugging pipe**, **Accessibility** or **None yet**),
+  its process id, uptime or run time, and exit code or signal. **Stop** ends the
   launch and its whole process tree. Stopping a launch you started asks you
   to confirm first; stopping one the agent started does not. A launch whose
   cleanup could not be confirmed says so.
@@ -341,7 +622,13 @@ created its workspace.
   as plain text. Window changes arrive live at most every 500 milliseconds,
   only while the chat is subscribed and only when the list changed; they are
   not replayed, so the surface rereads the launch list, which carries each
-  launch's windows, when it opens or reconnects.
+  launch's windows, when it opens or reconnects. Under the list, an
+  accessibility launch with protected apps shows a muted line ("2
+  protected apps are not inspectable"), and one whose windows a gate
+  blocks shows a notice in the surface's own wording with, for a permission,
+  helper, accessibility-tree, accessibility-bus or start-failed gate, an
+  **Open App control settings** button
+  that opens that card.
 - **Evidence** lists launches, the first window opening, exits, agent actions
   and screenshot thumbnails, newest first, with fixed labels. It stays on the
   device and clears with the chat's App session.
@@ -473,8 +760,109 @@ cleanup. It runs as root with `--no-sandbox`, and it supplies the Electron
 binary directly instead of resolving the fixture's own `node_modules/electron`;
 that resolution is covered by unit tests only.
 
+The accessibility transport is covered by unit tests at each layer: the
+strict runtime/main protocol parser (exact keys, UUIDs, identity, turnless
+writes, payload and thumbnail bounds), the runtime broker client (fresh ids,
+16 pending, the 90-second backstop, cancel on abort, late and wrong-kind
+results), the main coordinator (identity-exact cancel, the 512-id replay
+set, late results after clear and after runtime replacement, registration
+with the secure-file coordinator, and the runtime record's own pid as the
+only allowed parent), the denylist, process-tree scoping and start-time
+identity (every child against its direct parent, unknown start times
+dropped, unreadable executables denied, trees over 1,024 processes refused)
+on fake `/proc` tables and a fake libproc behind a fake
+ffi-rs (child lists that report counts or bytes, cycles, processes that
+exit mid-walk, `proc_bsdinfo`, path and command fallbacks), the Windows record,
+FILETIME and integrity-label parsers, per-pid Windows start times and the
+UIPI rule, the App control service with a fake worker (scope and denied
+pids, the runtime-parent check, macOS permission and helper-denial
+categories, Screen Recording and Wayland gates, thumbnail bounds, both
+watchdogs including screenshots, the forced kill before an unconfirmed exit,
+recycling after native failure, crash and malformed answers, cancellation
+while a native call runs, the queue bound, the one-second tree cache,
+listener counts across 100 commands, the Windows table read in the worker, a
+worker that never loads and the start-failure latch), the worker logic with a
+fake accessibility module (scoping, `byPid` lookups, denied apps, elevated
+windows, Browser-shaped snapshots with source-side redaction, root identity,
+renamed controls, the empty Linux tree, walk bounds, actions, expectation
+checks, error categories, closed windows, screenshot planning and payload
+fitting for snapshots and window lists), the capture masking
+on X11, Windows and macOS paths with real image encoding, and the runtime
+transport with a fake broker (window ids and titles, protected apps,
+permission gates while waiting, refs and document sequence with numbering
+that never repeats across documents and waits that mint no refs, the asking
+turn on window reads, launch-wide screenshot withholding, action and key
+mapping, typed-secret redaction in snapshots, titles and logs, withheld
+screenshots, approval expectation, failure wording, one native command at a
+time and waits, gate categories, and window polling that runs only while
+the chat is watched and resumes when it is again), the launch manager
+(protected-app and gate fields on accessibility launches only, their
+republication, and watch changes per chat), the runtime wiring (subscriber
+or active turn), the sync hub's subscriber tracking, the App control card's
+state per platform and its probe, and the validated IPC channel. Tool
+contract tests cover the `transport` field and the action launch waiting for
+its first native window. Happy DOM tests cover the App control card (every
+platform state, settings opened only on click, focus refresh, malformed
+state) and the App surface's transport label, protected-app line and
+gate notice with its settings link.
+
+One Linux scenario (`tests/e2e/app-under-test-native.spec.ts`) runs the
+accessibility transport against a real desktop: inside its own Xvfb, D-Bus
+session and AT-SPI bus with Openbox (the Snapshots native session helper), an
+Electron harness process plays Inertia's main and runtime. It runs the real
+App control service, which forks the real "Inertia App Control" utility
+process with `@crowecawcaw/xa11y` loaded through the shipped binding; the
+runtime's broker client reaches main's coordinator through the strict
+protocol parsers (every message structurally cloned); and the real launch
+manager and App host tools, in a Supervised chat with approvals answered by
+the test, launch the phase 1 fixture as a project action whose executable
+is the repository's Electron binary with `--force-renderer-accessibility`, a
+private `--user-data-dir` and, as root only, `--no-sandbox`. It checks that
+`inertia_app_launch` reports `transport: "accessibility"` with the native
+window, waits for text, lists the window without protected apps, takes a
+snapshot with the heading text and refs for the buttons, both text fields
+and the link (the password field reads `[redacted]`), presses **Change
+text** through AT-SPI and waits for "Button clicked", captures an X11
+screenshot whose thumbnail stays within 512 by 320 pixels, types into the
+password field and checks that the value appears nowhere and that the next
+screenshot is withheld as `sensitive`, stops the app with confirmed cleanup
+and disposes the worker. It skips on other platforms. On Linux it skips
+locally when `xvfb-run`, `dbus-run-session`, Openbox, `xdotool`, the
+repository's Electron binary or the AT-SPI bus is missing, but fails instead
+when `CI` is set, so CI cannot pass without exercising the real desktop. It
+takes about five seconds.
+
+Setting a value is the one step the fixture cannot pass on Linux. A probe of
+the same session found that Chromium's AT-SPI bridge in this Electron
+version implements no `EditableText` interface: `SetTextContents` and
+`InsertText` fail (`ATK_IS_EDITABLE_TEXT` assertions, `UnknownMethod` over
+D-Bus), so xa11y's `setValue` raises `ActionNotSupportedError` and
+`typeText` a platform error. The scenario therefore asserts what Inertia
+does with that: replacing text fails with `invalid`, "does not support this
+action" and `dispatched: false`; appending text is a native failure after
+which main recycles the worker, and the next snapshot from a fresh worker
+still lists the field, unchanged. GTK and Qt text fields implement
+the interface; no such app is available to the CI image.
+
 Not exercised:
 
+- the accessibility transport on macOS and Windows: `screencapture`, the
+  Windows region capture, the Toolhelp32, `GetProcessTimes` and token
+  integrity calls and the libproc calls through ffi-rs ran only as fakes
+  (ffi-rs writing into caller buffers was checked on Linux with libc);
+- setting or appending a field value through accessibility in a real app
+  (Chromium on Linux refuses it, see above), toggle, select, expand and
+  scroll into view against a real tree, Enter and Space on a focused
+  control, a denied application in a real tree, and Wayland;
+- the App control card and the App surface's gate notice in the full
+  desktop app against a real denial (the card was captured on Linux with
+  AT-SPI available; the gate states ran in Happy DOM only);
+- background polling stopping and resuming with a real renderer
+  subscription and provider turn (unit tests drive the sync hub, the wiring
+  and the transport separately);
+- whether macOS grants the Accessibility permission to the "Inertia App
+  Control" helper of a signed build (see the Snapshots owner verification
+  steps);
 - macOS and Windows launches, including Windows job-object cleanup of an
   Electron tree and `.cmd` actions;
 - Electron running as a non-root user with its sandbox on;
@@ -489,17 +877,17 @@ Not exercised:
   live launch;
 - Wayland sessions;
 - the full Inertia desktop path from a provider turn through to the App
-  surface; the README-style screenshots are produced by
+  surface; the README-style screenshots, including the App control card
+  (`docs/screenshots/inertia-app-control-settings.png`), are produced by
   `scripts/capture-app-under-test-screenshots.mjs`, which uses the App
-  surface directly.
+  surface and Settings directly.
 
 ## Not in this release
 
-- Native (non-Electron) window inspection and control through accessibility
-  APIs.
 - Screenshots visible to the model.
-- Synthesized operating-system input (mouse, keyboard or drag outside the
-  debugging protocol).
+- Synthesized operating-system input (mouse, keyboard, wheel or drag outside
+  the debugging protocol), keys other than Enter and Space on native windows,
+  and detection of the user taking over a native window.
 - Attaching to an app that is already running, or to a window the user picks.
 - Launching package scripts. They need a shell or a package manager; add a
   project action instead.

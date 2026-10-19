@@ -95,8 +95,7 @@
 }
 .composer-shell .composer-more-tools {
   display: flex;
-  min-width: 0;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
 }
@@ -115,6 +114,22 @@
 }
 .composer-shell .composer-primary-rail:not(:has(> .composer-tools-toggle)) > .composer-actions {
   margin-left: auto;
+}
+@container (max-width: 820px) {
+  .composer-shell .composer-options {
+    min-width: var(--composer-control-height);
+  }
+  .composer-shell .composer-primary-rail:not(:has(.prompt-presets-control, .prompt-stash-control)) > :is(.composer-tools-toggle, .composer-more-tools) {
+    display: none;
+  }
+  .composer-shell .composer-primary-rail:not(:has(.prompt-presets-control, .prompt-stash-control)) > .composer-actions {
+    margin-left: auto;
+  }
+}
+@container (max-width: 320px) {
+  .composer-shell .composer-primary-rail:has(> .composer-tools-toggle[aria-expanded="true"]) > .composer-options {
+    display: none;
+  }
 }
 .composer-input-actions {
   --composer-send-size: max(32px, var(--composer-control-height));

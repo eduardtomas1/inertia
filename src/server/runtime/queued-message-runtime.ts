@@ -227,6 +227,74 @@ export function createQueuedMessageRuntime(
     retryAfterCleanup(conversationId, id);
   }
 
+  async function sendDuringTurn(conversationId: string, id: string): Promise<void> {
+    const conversation = requireConversation(conversationId);
+    const first = store.queuedMessages.list(conversationId)[0];
+    if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
+    if (first.state === "dispatching") return;
+    if (!store.queuedMessages.routeMatches(first, conversation)) {
+      store.queuedMessages.block(conversationId, first.id, "This chat's model, access or workspace changed. Remove and queue the message again.");
+      changed(conversationId);
+      return;
+    }
+    const admission = turns.acquireFollowUpAdmission(conversationId);
+    if (!admission) throw new RuntimeRequestError("This agent cannot take a message while it works. It will send when the turn ends.");
+    let claimed = false;
+    let acknowledged = false;
+    try {
+      if (first.attachments.length > 0 && !admission.supportsImages) {
+        throw new RuntimeRequestError("The active model cannot inspect follow-up images. It will send when the turn ends.");
+      }
+      const deadline = messageSendPreparationDeadline();
+      const attachments: ChatAttachment[] = [];
+      for (const attachment of first.attachments) {
+        const preview = await awaitMessageSendPreparation(conversationAttachments.resolve(attachment.id), deadline);
+        if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
+        attachments.push({ ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) });
+      }
+      if (!store.queuedMessages.claim(conversationId, first.id)) return;
+      claimed = true;
+      changed(conversationId);
+      const steered = await turns.steer(
+        admission,
+        { content: first.content, imagePaths: attachments.map(({ path }) => path) },
+        attachments,
+        () => { acknowledged = true; },
+        AbortSignal.timeout(Math.max(0, deadline - Date.now())),
+        first.id,
+      );
+      if (steered.kind === "accepted") {
+        claimed = false;
+        dependencies.broadcast({ type: "conversation.message.persisted", message: steered.message });
+        dependencies.broadcastSnapshot();
+        return;
+      }
+      if (steered.kind === "unconfirmed") {
+        claimed = false;
+        store.queuedMessages.block(conversationId, first.id, steered.message);
+        return;
+      }
+      store.queuedMessages.release(conversationId, first.id);
+      claimed = false;
+      if (steered.kind === "turn-ended") void schedule(conversationId).catch(() => undefined);
+      else throw new RuntimeRequestError("The agent did not take this message now. It will send when the turn ends.");
+    } catch (error) {
+      if (claimed) {
+        if (acknowledged) {
+          store.queuedMessages.block(conversationId, first.id, "The agent received this message, but Inertia could not record it. Check the chat before sending it again.");
+        } else if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") {
+          store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
+        } else {
+          store.queuedMessages.release(conversationId, first.id);
+        }
+      }
+      throw error;
+    } finally {
+      admission.release();
+      changed(conversationId);
+    }
+  }
+
   const handler = defineRuntimeCommandHandler([
     "message.queue.get", "message.queue.enqueue", "message.queue.remove", "message.queue.send", "message.queue.stop-and-send",
   ], async (socket, command) => {
@@ -253,7 +321,8 @@ export function createQueuedMessageRuntime(
     } else if (command.type === "message.queue.send") {
       requireConversation(conversationId);
       await running.get(conversationId);
-      await dispatch(conversationId, command.payload.id);
+      if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id);
+      else await dispatch(conversationId, command.payload.id);
     } else if (command.type === "message.queue.stop-and-send") {
       await stopAndSend(command.payload, command.requestId);
     }

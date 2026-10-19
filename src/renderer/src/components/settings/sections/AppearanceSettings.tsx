@@ -37,6 +37,7 @@ export function AppearanceSettings({
         <SettingSwitch
           id="muted-custom-colours"
           title="Muted colours"
+          description={!settings.lightCustomColor && !settings.darkCustomColor ? "Choose a custom colour to mute it." : undefined}
           checked={Boolean(settings.mutedCustomColors)}
           disabled={disabled}
           inactive={!settings.lightCustomColor && !settings.darkCustomColor}

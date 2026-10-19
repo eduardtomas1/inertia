@@ -112,8 +112,8 @@ export function antigravityArguments(
   const effort = input.modelSelection.reasoningEffort ?? input.reasoningEffort;
   if (effort && EFFORTS.has(effort)) args.push("--effort", effort);
   if (input.interactionMode === "plan") args.push("--mode", "plan");
-  else if (input.access === "auto-edit") args.push("--mode", "accept-edits");
   else if (input.access === "full") args.push("--dangerously-skip-permissions");
+  else args.push("--mode", "accept-edits");
   return args;
 }
 

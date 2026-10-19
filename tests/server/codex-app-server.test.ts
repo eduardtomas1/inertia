@@ -655,7 +655,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       id: 2,
       params: {
         cwd: fake.root,
-        approvalPolicy: "on-request",
+        approvalPolicy: "untrusted",
         approvalsReviewer: "user",
         sandbox: "workspace-write",
       },
@@ -666,7 +666,7 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
       params: {
         threadId: "thread-new",
         input: [{ type: "text", text: "Try an edit", text_elements: [] }],
-        approvalPolicy: "on-request",
+        approvalPolicy: "untrusted",
         approvalsReviewer: "user",
         sandboxPolicy: {
           type: "workspaceWrite",

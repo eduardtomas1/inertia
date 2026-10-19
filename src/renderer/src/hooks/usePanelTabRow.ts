@@ -10,6 +10,7 @@ import {
 
 const DRAG_THRESHOLD = 4;
 const EDGE_MARGIN = 24;
+const CLIP_TOLERANCE = 1;
 
 interface DragState<K extends string> {
   key: K;
@@ -76,8 +77,13 @@ export function usePanelTabRow<K extends string>({
     let clipEnd = 0;
     for (const tab of tabElements(list)) {
       const box = tab.getBoundingClientRect();
-      if (box.left < bounds.left - 0.5 && box.right > bounds.left) clipStart = box.right - bounds.left;
-      if (box.right > bounds.right + 0.5 && box.left < bounds.right) clipEnd = bounds.right - box.left;
+      const cutStart = box.left < bounds.left - CLIP_TOLERANCE && box.right > bounds.left;
+      const cutEnd = box.right > bounds.right + CLIP_TOLERANCE && box.left < bounds.right;
+      const clipped = tab.dataset.tabKey !== activeKey && (cutStart || cutEnd);
+      tab.toggleAttribute("data-clipped", clipped);
+      if (!clipped) continue;
+      if (cutStart) clipStart = box.right - bounds.left;
+      if (cutEnd) clipEnd = bounds.right - box.left;
     }
     list.style.setProperty("--tab-row-clip-start", `${clipStart}px`);
     list.style.setProperty("--tab-row-clip-end", `${clipEnd}px`);
@@ -110,16 +116,28 @@ export function usePanelTabRow<K extends string>({
     revealActiveRef.current = revealActive;
   }, [revealActive]);
 
+  const observerRef = useRef<ResizeObserver | null>(null);
   const setList = useCallback((node: HTMLElement | null) => {
     listRef.current = node;
     if (!node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => revealActiveRef.current());
+    observerRef.current = observer;
     observer.observe(node);
+    for (const tab of tabElements(node)) observer.observe(tab);
     return () => {
       observer.disconnect();
+      observerRef.current = null;
       listRef.current = null;
     };
   }, []);
+
+  const tabSignature = keys.join("\n");
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const observer = observerRef.current;
+    if (!list || !observer) return;
+    for (const tab of tabElements(list)) observer.observe(tab);
+  }, [tabSignature]);
 
   const endDrag = useCallback((commit: boolean) => {
     const current = dragRef.current;

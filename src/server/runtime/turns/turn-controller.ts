@@ -937,6 +937,7 @@ export class TurnController {
     attachments: readonly ChatAttachment[] = [],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
+    queuedMessageId?: string,
   ): Promise<FollowUpSteerResult> {
     return this.followUps.steer(
       lease,
@@ -944,6 +945,7 @@ export class TurnController {
       attachments,
       onProviderAcknowledged,
       signal,
+      queuedMessageId,
     );
   }
 

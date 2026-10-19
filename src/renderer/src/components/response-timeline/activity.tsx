@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -818,6 +819,7 @@ function ThinkingSummary({
   return (
     <>
       <span className="turn-thinking-pulse">
+        <Brain size={16} className="turn-thinking-icon" aria-hidden="true" />
         <span className="turn-thinking-label" key={live ? "live" : "folded"}>
           {live
             ? "Thinking"

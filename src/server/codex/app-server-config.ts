@@ -123,9 +123,9 @@ export function codexAccessPolicy(
 
   const readOnly = options.planMode || options.access === "supervised";
   return {
-    approvalPolicy: options.access === "supervised"
-      ? "untrusted"
-      : "on-request",
+    approvalPolicy: options.planMode && options.access !== "supervised"
+      ? "on-request"
+      : "untrusted",
     threadSandbox: readOnly ? "read-only" : "workspace-write",
     turnSandboxPolicy: readOnly
       ? { type: "readOnly", networkAccess: false }

@@ -18,8 +18,8 @@ function loadQueue(run: QueueCommandRunner, conversationId: string): Promise<Mes
   return operation;
 }
 
-export function RuntimeComposerQueuedActions({ conversationId, onCommand, running, canSend, latestTurnId, latestTurnStatus, queueHost }: {
-  conversationId: string; onCommand: QueueCommandRunner; running: boolean; canSend: boolean;
+export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSend, latestTurnId, latestTurnStatus, queueHost }: {
+  conversationId: string; onCommand: QueueCommandRunner; canSend: boolean;
   latestTurnId: string | null; latestTurnStatus: string | null; queueHost: HTMLElement | null;
 }): React.JSX.Element | null {
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
@@ -34,6 +34,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
   const [error, setError] = useState<string | null>(null);
   const latestError = useRef(error);
   latestError.current = error;
+  const errorEntry = useRef<string | null>(null);
   const owner = useRef(conversationId);
   const revision = useRef(0);
   owner.current = conversationId;
@@ -45,7 +46,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
       void loadQueue(onCommand, conversationId).then((result) => {
         if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
           updateQueue(result.entries);
-          if (latestError.current !== null) setError(null);
+          if (latestError.current !== null && result.entries[0]?.id !== errorEntry.current) setError(null);
         }
       }, () => undefined);
     };
@@ -75,7 +76,10 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
       if (owner.current === conversationId) { revision.current += 1; updateQueue(result.entries); }
       window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
     } catch (failure) {
-      if (owner.current === conversationId) setError(failure instanceof Error ? failure.message : "The queue could not be updated.");
+      if (owner.current === conversationId) {
+        errorEntry.current = first.id;
+        setError(failure instanceof Error ? failure.message : "The queue could not be updated.");
+      }
     } finally { if (owner.current === conversationId) setBusy(false); }
   };
   const element = <div className="composer-queue" role="list" aria-label="Queued messages">
@@ -84,7 +88,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, runnin
       <span className="composer-queue-copy" title={first.content}>{first.content}</span>
       {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={14} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
       <small className="composer-queue-count">{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>
-      <button type="button" className="composer-queue-send" aria-label="Send queued message now" disabled={busy || dispatching || running || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>
+      <button type="button" className="composer-queue-send" aria-label="Send queued message now" disabled={busy || dispatching || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>
       <IconButton label="Remove" aria-label="Remove queued message" className="composer-queue-remove" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></IconButton>
     </div>
     {(error ?? first.error) && <span role="status">{error ?? first.error}</span>}

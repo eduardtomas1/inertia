@@ -254,6 +254,7 @@ describe("global chat draft visibility", () => {
         conversation: detail,
         contextPackets: [contextPacket],
       } as never,
+      history: { hasOlder: true, loading: false, error: null, loadOlder: () => undefined, online: true } as never,
       streaming: createStreamingAgentStore(),
       terminalProjections: { stale: {} } as never,
       usage: usage as never,
@@ -265,6 +266,7 @@ describe("global chat draft visibility", () => {
       terminalProjections: {},
       usage: null,
       contextPackets: [],
+      history: undefined,
     });
   });
 
@@ -273,12 +275,14 @@ describe("global chat draft visibility", () => {
     const usage = { conversationId: draft.id };
     const terminalProjections = { current: {} };
     const streaming = createStreamingAgentStore();
+    const history = { hasOlder: true, loading: false, error: null, loadOlder: () => undefined, online: true };
     const projection = visibleChatProjection(draft as never, {
       conversation: draft as never,
       detail: {
         conversation: draft,
         contextPackets,
       } as never,
+      history: history as never,
       streaming,
       terminalProjections: terminalProjections as never,
       usage: usage as never,
@@ -289,6 +293,7 @@ describe("global chat draft visibility", () => {
     expect(projection.terminalProjections).toBe(terminalProjections);
     expect(projection.usage).toBe(usage);
     expect(projection.contextPackets).toBe(contextPackets);
+    expect(projection.history).toBe(history);
   });
 
   it("keeps live scalars but rejects detail context with mixed ownership", () => {
@@ -300,6 +305,7 @@ describe("global chat draft visibility", () => {
         conversation: detail,
         contextPackets: [{ id: "stale-context" }],
       } as never,
+      history: undefined as never,
       streaming,
       terminalProjections: { draft: {} } as never,
       usage: usage as never,

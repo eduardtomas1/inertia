@@ -263,6 +263,8 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     const minimap = transcript.getByRole("navigation", { name: "Conversation minimap" });
     await expect(minimap).toBeVisible();
     await expect(minimap.getByRole("button")).toHaveCount(40);
+    await page.mouse.move(1, 1);
+    await expect(minimap.locator(".timeline-minimap-track")).toHaveCSS("opacity", "1");
     const firstMinimapMarker = minimap.getByRole("button").first();
     await expect(firstMinimapMarker).toHaveAttribute(
       "aria-label",

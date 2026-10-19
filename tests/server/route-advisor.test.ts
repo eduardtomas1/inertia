@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -481,7 +481,9 @@ describe("Auto routing safeguards on message.send", () => {
         const turn = await messageSender(runtime, advisor(runtime, { providerInfo: () => providers }), { providers, attachments })(QUESTION);
         expect(turn).toMatchObject({ providerId: "codex", modelSelection: expect.objectContaining({ modelId: "gpt-test" }) });
         expect(turn.routing).toMatchObject({ outcome: "applied", previousRoute: { providerId: "claude", modelId: "claude-test" } });
-        expect(runtime.provider.input?.imagePaths).toEqual(attachments.map(({ path }) => path));
+        // The runtime hands providers real paths; macOS resolves the temporary directory through /private.
+        expect(runtime.provider.input?.imagePaths?.map((path) => realpathSync(path)))
+          .toEqual(attachments.map(({ path }) => realpathSync(path)));
         expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({ providerId: "codex", routingMode: "auto" });
         await finish(runtime, "thread-1");
       });

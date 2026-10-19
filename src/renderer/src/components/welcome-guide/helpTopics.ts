@@ -57,7 +57,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Start a chat from a terminal",
-        detail: "Run Inertia with --new-chat in a folder, or --new-chat followed by a path, to open a new chat in its project. A new folder is added as a project first. On Linux and macOS, Inertia then returns the terminal; add --foreground to keep it attached.",
+        detail: "Run Inertia with --new-chat to open a new chat for the current folder, or --new-chat followed by a path for another folder. The chat opens in the deepest existing project that contains the folder; any other folder is added as a project first. It works on a first launch and when Inertia is already running. Started from a terminal on Linux or macOS, the installed app relaunches itself in the background so the terminal is free at once; add --foreground to keep it attached. Extracted AppImages, development builds and app update candidates stay attached to the terminal.",
       },
       {
         name: "Chats without a project",

@@ -283,7 +283,7 @@
     "ffi-rs": "1.3.7",
     "highlight.js": "^11.12.0",
     "lucide-react": "1.56.0",
-    "morphicons": "1.7.1",
+    "morphicons": "2.0.0",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.4.299",
     "qrcode": "1.5.4",

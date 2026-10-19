@@ -115,7 +115,7 @@ describe("workspace panel tab row", () => {
   });
 
   it("hides a tab the row cuts at either edge instead of fading part of it", () => {
-    render(<Host initial={state("terminal", "changes", "files", "preview", "terminal")} />);
+    render(<Host initial={state("changes", "changes", "files", "preview", "terminal")} />);
     const list = screen.getByRole("tablist", { name: "Panel surfaces" });
     Object.defineProperty(list, "clientWidth", { configurable: true, value: 250 });
     Object.defineProperty(list, "scrollWidth", { configurable: true, value: 400 });
@@ -133,6 +133,51 @@ describe("workspace panel tab row", () => {
     expect(list).not.toHaveAttribute("data-overflow-end");
     expect(list.style.getPropertyValue("--tab-row-clip-start")).toBe("50px");
     expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("0px");
+  });
+
+  it("keeps the active tab visible when the row cuts it and stops hidden tabs taking clicks", () => {
+    render(<Host initial={state("agents", "usage", "agents")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    const [usage, agents] = list.querySelectorAll<HTMLElement>(":scope > [data-tab-key]");
+    Object.defineProperty(list, "clientWidth", { configurable: true, value: 160 });
+    Object.defineProperty(list, "scrollWidth", { configurable: true, value: 229 });
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 160, 32);
+    usage!.getBoundingClientRect = () => new DOMRect(-list.scrollLeft, 0, 79.5, 32);
+    agents!.getBoundingClientRect = () => new DOMRect(81.5 - list.scrollLeft, 0, 147.75, 32);
+
+    list.scrollLeft = 0;
+    fireEvent.scroll(list);
+    expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("0px");
+    expect(agents).not.toHaveAttribute("data-clipped");
+
+    list.scrollLeft = 69;
+    fireEvent.scroll(list);
+    expect(list.style.getPropertyValue("--tab-row-clip-start")).toBe("10.5px");
+    expect(usage).toHaveAttribute("data-clipped");
+    expect(agents).not.toHaveAttribute("data-clipped");
+    expect(list.style.getPropertyValue("--tab-row-clip-end")).toBe("0px");
+  });
+
+  it("brings the active tab back into view when a tab grows without the row resizing", () => {
+    const observed: Element[] = [];
+    let notify = () => {};
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) {
+        notify = callback;
+      }
+      observe(element: Element): void {
+        observed.push(element);
+      }
+      disconnect(): void {}
+    });
+    render(<Host initial={state("plan", "changes", "preview", "terminal", "files", "plan")} />);
+    const list = screen.getByRole("tablist", { name: "Panel surfaces" });
+    const plan = list.querySelector<HTMLElement>('[data-tab-key="plan"]')!;
+    expect(observed).toContain(plan);
+    stubTabBoxes(list, 100, 220);
+    list.scrollLeft = 0;
+    act(() => notify());
+    expect(list.scrollLeft).toBe(304);
   });
 
   it("lists every tab behind one control, marks the active one and returns focus to it", async () => {

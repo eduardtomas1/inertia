@@ -273,7 +273,7 @@ export function ComposerQueuedActions(props: React.ComponentProps<typeof LegacyC
   if (!props.onQueueCommand) return <LegacyComposerQueuedActions {...props} />;
   return <>
     <RuntimeComposerQueuedActions conversationId={props.conversationId} onCommand={props.onQueueCommand}
-      running={props.running} canSend={props.canSendQueuedNow} latestTurnId={props.latestTurnId}
+      canSend={props.canSendQueuedNow} latestTurnId={props.latestTurnId}
       latestTurnStatus={props.latestTurnStatus} queueHost={props.queueHost} />
     {/* Older local drafts retain their explicit retry control; an unknown old
         delivery must never be silently re-admitted as a new runtime intent. */}

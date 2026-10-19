@@ -15,6 +15,7 @@ import type {
   ProviderId,
 } from "@shared/contracts";
 import { providerIdForHarness } from "../../../shared/model-routing";
+import { accessModeUnavailableReason, effectiveAccessMode } from "../../../shared/access-modes";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   composerRouteReadiness,
@@ -238,7 +239,7 @@ function MultiSpawnSideEditor({
           <select
             id={accessId}
             aria-label={`${chatLabel} access`}
-            value={side.accessMode}
+            value={effectiveAccessMode(providerIdForHarness(side.selection.harnessId) ?? "", side.accessMode)}
             disabled={disabled}
             onChange={(event) => onChange({
               ...side,
@@ -246,7 +247,11 @@ function MultiSpawnSideEditor({
             })}
           >
             {accessOptions.map((option) => (
-              <option value={option.value} key={option.value}>
+              <option
+                value={option.value}
+                key={option.value}
+                disabled={accessModeUnavailableReason(providerIdForHarness(side.selection.harnessId) ?? "", option.value) !== null}
+              >
                 {option.label}
               </option>
             ))}

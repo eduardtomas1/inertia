@@ -140,7 +140,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(main.indexOf("windowToClose.destroy()")).toBeLessThan(
       main.indexOf('recordPackageSmokeStage("app-exit")'),
     );
-    expect(main).not.toContain("app.exit(0)");
+    expect(main.split("app.exit(0)")).toHaveLength(2);
+    expect(main).toContain("(detached) => detached ? app.exit(0) : startApplicationWithUpdateHandoff({");
     expect(main).toContain("attachmentReservation = orphanReservation");
     expect(main).toContain(
       "reservedRecords: attachmentReservation.records",

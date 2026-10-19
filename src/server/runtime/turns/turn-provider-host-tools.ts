@@ -32,11 +32,12 @@ export function resolveTurnHostTools(
       harnessId: active.providerInput.harnessId,
       backendProfile: active.providerInput.backendProfile,
     });
-  if (!hostToolsAttested) return undefined;
+  if (!hostToolsAttested || !active.capabilityOffer) return undefined;
   if (active.providerInput.providerId === "codex" && importedSession(store, active.conversation.id, active.providerInput.sessionId)) return undefined;
   return hooks.hostToolsForTurn?.({
     conversation: active.conversation,
     turn: active.turn,
+    offer: active.capabilityOffer,
   });
 }
 

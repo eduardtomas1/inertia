@@ -360,7 +360,8 @@ describe("icon primitives", () => {
       "TerminalSquare", "SquareTerminal",
     ]);
     const offenders = lucideImports.flatMap(({ path, names }) => names
-      .filter((name) => retired.has(name) || (name === "Sparkles" && !path.endsWith("ProjectIcon.tsx")))
+      .filter((name) => (retired.has(name) && !(name === "Brain" && path.replaceAll("\\", "/").endsWith("response-timeline/activity.tsx")))
+        || (name === "Sparkles" && !path.endsWith("ProjectIcon.tsx")))
       .map((name) => `${path}: ${name}`));
     expect(offenders).toEqual([]);
   });

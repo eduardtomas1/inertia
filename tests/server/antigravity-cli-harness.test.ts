@@ -179,7 +179,8 @@ describe("Antigravity headless arguments", () => {
   });
 
   it("maps access, plan, effort, model, and resume onto documented flags only", () => {
-    expect(antigravityArguments(routeInput())).toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS]);
+    expect(antigravityArguments(routeInput({ access: "supervised" })).slice(4))
+      .toEqual(["--mode", "accept-edits"]);
     expect(antigravityArguments(routeInput({ access: "auto-edit" })).slice(4))
       .toEqual(["--mode", "accept-edits"]);
     expect(antigravityArguments(routeInput({ access: "full" })).slice(4))
@@ -194,6 +195,7 @@ describe("Antigravity headless arguments", () => {
       "--conversation", CONVERSATION,
       "--model", "fixture-model",
       "--effort", "medium",
+      "--mode", "accept-edits",
     ]);
   });
 
@@ -202,9 +204,9 @@ describe("Antigravity headless arguments", () => {
       sessionId: "--dangerously-skip-permissions",
       model: "-p",
       reasoningEffort: "maximum",
-    }))).toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS]);
+    }))).toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS, "--mode", "accept-edits"]);
     expect(antigravityArguments(routeInput({ model: "fixture model; rm -rf" })))
-      .toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS]);
+      .toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS, "--mode", "accept-edits"]);
   });
 
   it("sends the prompt as one stream-json user event on stdin", () => {
@@ -472,7 +474,7 @@ process.exit(0);
     expect(usage).toHaveLength(1);
     expect(usage[0]!.usage).toMatchObject({ inputTokens: 120, outputTokens: 30 });
     const capture = captured(capturePath);
-    expect(capture.argv).toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS]);
+    expect(capture.argv).toEqual([...ANTIGRAVITY_HEADLESS_ARGUMENTS, "--mode", "accept-edits"]);
     expect(capture.stdin).toBe(antigravityUserLine("Inspect the change"));
   });
 

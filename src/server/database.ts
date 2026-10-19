@@ -879,13 +879,14 @@ export class RuntimeStore {
     content: string,
     createdAt?: string,
     acknowledgedAt?: string, attachments: readonly ChatAttachment[] = [],
+    queuedMessageId?: string,
   ): ChatMessage {
     return this.transcriptRepository.createAcknowledgedFollowUpMessage(
       conversationId,
       turnId,
       content,
       createdAt,
-      acknowledgedAt, attachments,
+      acknowledgedAt, attachments, queuedMessageId,
     );
   }
 

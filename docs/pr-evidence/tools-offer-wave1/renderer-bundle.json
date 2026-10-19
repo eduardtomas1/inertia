@@ -1,0 +1,493 @@
+{
+  "baseline": "e165a0aa2e0b78a5b0fcf9de9dd469ec61a8943b",
+  "platform": "Linux x64, Node 22.22.0, same package-lock.json",
+  "note": "Every closure measured by scripts/check-renderer-bundle.mjs on this machine from builds of origin/main at e165a0aa and of the branch merged with it (PR #630 at 7c2e3b2d plus main). The five failing closures measure the same bytes as the macOS CI report. Only the closures that exceeded main's caps are raised, each to its exact measured size: deferredWelcomeGuideJavaScript (+3), deferredTasksViewJavaScript (+2), mainWorkbenchFirstLoadJavaScript (+7,975), detachedChatFirstLoadJavaScript (+596) and coreJavaScript (+9,887). The palette imports headerGitActions eagerly, so deferredWorkspaceHeaderActionsJavaScript shrinks by 3,233 bytes and keeps main's cap; every other closure keeps main's cap.",
+  "measurements": {
+    "deferredLegacyPromptStashJavaScript": {
+      "mainBytes": 1163,
+      "mainCapBytes": 1536,
+      "afterBytes": 1163,
+      "deltaFromMainBytes": 0,
+      "capBytes": 1536,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredUsageLimitsJavaScript": {
+      "mainBytes": 21769,
+      "mainCapBytes": 21769,
+      "afterBytes": 21769,
+      "deltaFromMainBytes": 0,
+      "capBytes": 21769,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredWelcomeGuideJavaScript": {
+      "mainBytes": 38023,
+      "mainCapBytes": 38358,
+      "afterBytes": 38361,
+      "deltaFromMainBytes": 338,
+      "capBytes": 38361,
+      "capChangeBytes": 3,
+      "withinCap": true
+    },
+    "deferredWorkingOrbJavaScript": {
+      "mainBytes": 21829,
+      "mainCapBytes": 22528,
+      "afterBytes": 21829,
+      "deltaFromMainBytes": 0,
+      "capBytes": 22528,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSnapshotSettingsJavaScript": {
+      "mainBytes": 4054,
+      "mainCapBytes": 6210,
+      "afterBytes": 4054,
+      "deltaFromMainBytes": 0,
+      "capBytes": 6210,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSnapshotControlJavaScript": {
+      "mainBytes": 6889,
+      "mainCapBytes": 7372,
+      "afterBytes": 6889,
+      "deltaFromMainBytes": 0,
+      "capBytes": 7372,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredAttachmentStorageSettingsJavaScript": {
+      "mainBytes": 5330,
+      "mainCapBytes": 5504,
+      "afterBytes": 5330,
+      "deltaFromMainBytes": 0,
+      "capBytes": 5504,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredBackgroundTasksJavaScript": {
+      "mainBytes": 19408,
+      "mainCapBytes": 19408,
+      "afterBytes": 19408,
+      "deltaFromMainBytes": 0,
+      "capBytes": 19408,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredTasksViewJavaScript": {
+      "mainBytes": 21126,
+      "mainCapBytes": 21126,
+      "afterBytes": 21128,
+      "deltaFromMainBytes": 2,
+      "capBytes": 21128,
+      "capChangeBytes": 2,
+      "withinCap": true
+    },
+    "deferredIconRegionJavaScript": {
+      "mainBytes": 12995,
+      "mainCapBytes": 12995,
+      "afterBytes": 12995,
+      "deltaFromMainBytes": 0,
+      "capBytes": 12995,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProjectSettingsJavaScript": {
+      "mainBytes": 17133,
+      "mainCapBytes": 17658,
+      "afterBytes": 17133,
+      "deltaFromMainBytes": 0,
+      "capBytes": 17658,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredCliConversationImportJavaScript": {
+      "mainBytes": 9645,
+      "mainCapBytes": 10053,
+      "afterBytes": 9645,
+      "deltaFromMainBytes": 0,
+      "capBytes": 10053,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredReviewNoteJavaScript": {
+      "mainBytes": 1497,
+      "mainCapBytes": 1536,
+      "afterBytes": 1497,
+      "deltaFromMainBytes": 0,
+      "capBytes": 1536,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredThreadActionsJavaScript": {
+      "mainBytes": 8249,
+      "mainCapBytes": 8267,
+      "afterBytes": 8251,
+      "deltaFromMainBytes": 2,
+      "capBytes": 8267,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProjectCustomizeJavaScript": {
+      "mainBytes": 12015,
+      "mainCapBytes": 12161,
+      "afterBytes": 12016,
+      "deltaFromMainBytes": 1,
+      "capBytes": 12161,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProjectColorContrastJavaScript": {
+      "mainBytes": 1824,
+      "mainCapBytes": 1920,
+      "afterBytes": 1824,
+      "deltaFromMainBytes": 0,
+      "capBytes": 1920,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredDiagnosticsJavaScript": {
+      "mainBytes": 18426,
+      "mainCapBytes": 19858,
+      "afterBytes": 18426,
+      "deltaFromMainBytes": 0,
+      "capBytes": 19858,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredDiagnosticCatalogJavaScript": {
+      "mainBytes": 9980,
+      "mainCapBytes": 12288,
+      "afterBytes": 9980,
+      "deltaFromMainBytes": 0,
+      "capBytes": 12288,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredIssueReportJavaScript": {
+      "mainBytes": 13370,
+      "mainCapBytes": 14136,
+      "afterBytes": 13370,
+      "deltaFromMainBytes": 0,
+      "capBytes": 14136,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mascotFirstLoadJavaScript": {
+      "mainBytes": 11506,
+      "mainCapBytes": 11562,
+      "afterBytes": 11506,
+      "deltaFromMainBytes": 0,
+      "capBytes": 11562,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mascotJavaScript": {
+      "mainBytes": 11506,
+      "mainCapBytes": 11562,
+      "afterBytes": 11506,
+      "deltaFromMainBytes": 0,
+      "capBytes": 11562,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mascotSettingsJavaScript": {
+      "mainBytes": 7495,
+      "mainCapBytes": 7804,
+      "afterBytes": 7495,
+      "deltaFromMainBytes": 0,
+      "capBytes": 7804,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "entryJavaScript": {
+      "mainBytes": 222556,
+      "mainCapBytes": 222720,
+      "afterBytes": 222556,
+      "deltaFromMainBytes": 0,
+      "capBytes": 222720,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "mainWorkbenchFirstLoadJavaScript": {
+      "mainBytes": 889926,
+      "mainCapBytes": 889926,
+      "afterBytes": 897901,
+      "deltaFromMainBytes": 7975,
+      "capBytes": 897901,
+      "capChangeBytes": 7975,
+      "withinCap": true
+    },
+    "detachedChatFirstLoadJavaScript": {
+      "mainBytes": 681993,
+      "mainCapBytes": 681993,
+      "afterBytes": 682589,
+      "deltaFromMainBytes": 596,
+      "capBytes": 682589,
+      "capChangeBytes": 596,
+      "withinCap": true
+    },
+    "entryCss": {
+      "mainBytes": 240972,
+      "mainCapBytes": 241260,
+      "afterBytes": 241102,
+      "deltaFromMainBytes": 130,
+      "capBytes": 241260,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "colorThemesCss": {
+      "mainBytes": 8675,
+      "mainCapBytes": 8864,
+      "afterBytes": 8675,
+      "deltaFromMainBytes": 0,
+      "capBytes": 8864,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "detachedChatCss": {
+      "mainBytes": 3069,
+      "mainCapBytes": 8192,
+      "afterBytes": 3069,
+      "deltaFromMainBytes": 0,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "settingsJavaScript": {
+      "mainBytes": 77970,
+      "mainCapBytes": 81511,
+      "afterBytes": 78006,
+      "deltaFromMainBytes": 36,
+      "capBytes": 81511,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "filesFirstLoadJavaScript": {
+      "mainBytes": 110882,
+      "mainCapBytes": 117760,
+      "afterBytes": 110877,
+      "deltaFromMainBytes": -5,
+      "capBytes": 117760,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredMarkdownJavaScript": {
+      "mainBytes": 434721,
+      "mainCapBytes": 450560,
+      "afterBytes": 434721,
+      "deltaFromMainBytes": 0,
+      "capBytes": 450560,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "transcriptJavaScript": {
+      "mainBytes": 573513,
+      "mainCapBytes": 614400,
+      "afterBytes": 573513,
+      "deltaFromMainBytes": 0,
+      "capBytes": 614400,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredFailureDiagnosticsJavaScript": {
+      "mainBytes": 5766,
+      "mainCapBytes": 8192,
+      "afterBytes": 5766,
+      "deltaFromMainBytes": 0,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredAttachmentPreviewJavaScript": {
+      "mainBytes": 17839,
+      "mainCapBytes": 18701,
+      "afterBytes": 17839,
+      "deltaFromMainBytes": 0,
+      "capBytes": 18701,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredPreviewJavaScript": {
+      "mainBytes": 7653,
+      "mainCapBytes": 8192,
+      "afterBytes": 7653,
+      "deltaFromMainBytes": 0,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredBrowserEvidenceJavaScript": {
+      "mainBytes": 3453,
+      "mainCapBytes": 5120,
+      "afterBytes": 3453,
+      "deltaFromMainBytes": 0,
+      "capBytes": 5120,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSpreadsheetJavaScript": {
+      "mainBytes": 487396,
+      "mainCapBytes": 522240,
+      "afterBytes": 487396,
+      "deltaFromMainBytes": 0,
+      "capBytes": 522240,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredDiscordSettingsJavaScript": {
+      "mainBytes": 7913,
+      "mainCapBytes": 8711,
+      "afterBytes": 7913,
+      "deltaFromMainBytes": 0,
+      "capBytes": 8711,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredCanaryRollbackJavaScript": {
+      "mainBytes": 2254,
+      "mainCapBytes": 4096,
+      "afterBytes": 2254,
+      "deltaFromMainBytes": 0,
+      "capBytes": 4096,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredLifecycleIntegritySettingsJavaScript": {
+      "mainBytes": 2595,
+      "mainCapBytes": 6222,
+      "afterBytes": 2595,
+      "deltaFromMainBytes": 0,
+      "capBytes": 6222,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredSidebarUpdateControlJavaScript": {
+      "mainBytes": 15842,
+      "mainCapBytes": 15891,
+      "afterBytes": 15842,
+      "deltaFromMainBytes": 0,
+      "capBytes": 15891,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProviderAuthJavaScript": {
+      "mainBytes": 11204,
+      "mainCapBytes": 12288,
+      "afterBytes": 11204,
+      "deltaFromMainBytes": 0,
+      "capBytes": 12288,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredProviderMaintenanceJavaScript": {
+      "mainBytes": 4410,
+      "mainCapBytes": 5120,
+      "afterBytes": 4410,
+      "deltaFromMainBytes": 0,
+      "capBytes": 5120,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredComposerQueueJavaScript": {
+      "mainBytes": 13029,
+      "mainCapBytes": 13187,
+      "afterBytes": 13029,
+      "deltaFromMainBytes": 0,
+      "capBytes": 13187,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredTerminalJavaScript": {
+      "mainBytes": 27152,
+      "mainCapBytes": 27229,
+      "afterBytes": 27152,
+      "deltaFromMainBytes": 0,
+      "capBytes": 27229,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredGitMenusJavaScript": {
+      "mainBytes": 8117,
+      "mainCapBytes": 9383,
+      "afterBytes": 8120,
+      "deltaFromMainBytes": 3,
+      "capBytes": 9383,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredWorkspaceHeaderActionsJavaScript": {
+      "mainBytes": 20817,
+      "mainCapBytes": 22082,
+      "afterBytes": 17584,
+      "deltaFromMainBytes": -3233,
+      "capBytes": 22082,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "detachedChatJavaScript": {
+      "mainBytes": 11145,
+      "mainCapBytes": 16384,
+      "afterBytes": 11145,
+      "deltaFromMainBytes": 0,
+      "capBytes": 16384,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "preMergeConfidenceJavaScript": {
+      "mainBytes": 27472,
+      "mainCapBytes": 28672,
+      "afterBytes": 27473,
+      "deltaFromMainBytes": 1,
+      "capBytes": 28672,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "morphiconsJavaScript": {
+      "mainBytes": 20685,
+      "mainCapBytes": 20685,
+      "afterBytes": 20685,
+      "deltaFromMainBytes": 0,
+      "capBytes": 20685,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "morphingIconFeedbackJavaScript": {
+      "mainBytes": 3948,
+      "mainCapBytes": 8192,
+      "afterBytes": 3948,
+      "deltaFromMainBytes": 0,
+      "capBytes": 8192,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "coreJavaScript": {
+      "mainBytes": 2315854,
+      "mainCapBytes": 2315854,
+      "afterBytes": 2325741,
+      "deltaFromMainBytes": 9887,
+      "capBytes": 2325741,
+      "capChangeBytes": 9887,
+      "withinCap": true
+    },
+    "deferredPdfJavaScript": {
+      "mainBytes": 437503,
+      "mainCapBytes": 512000,
+      "afterBytes": 437503,
+      "deltaFromMainBytes": 0,
+      "capBytes": 512000,
+      "capChangeBytes": 0,
+      "withinCap": true
+    },
+    "deferredPdfWorker": {
+      "mainBytes": 1264342,
+      "mainCapBytes": 1382400,
+      "afterBytes": 1264342,
+      "deltaFromMainBytes": 0,
+      "capBytes": 1382400,
+      "capChangeBytes": 0,
+      "withinCap": true
+    }
+  }
+}

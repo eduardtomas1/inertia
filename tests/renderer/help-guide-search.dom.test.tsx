@@ -129,6 +129,7 @@ describe("Help search", () => {
     const result = (name: string) => results.getAllByRole("button", { name })
       .find((button) => button.classList.contains("help-guide-result"))!;
     const first = result("Add a project");
+    const terminal = result("Start a chat from a terminal");
     const second = result("Chats without a project");
     const last = result("Chat commands");
 
@@ -138,6 +139,8 @@ describe("Help search", () => {
     expect(second).toHaveAttribute("tabindex", "-1");
 
     fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(terminal).toHaveFocus();
+    fireEvent.keyDown(terminal, { key: "ArrowDown" });
     expect(second).toHaveFocus();
     expect(second).toHaveAttribute("tabindex", "0");
     expect(first).toHaveAttribute("tabindex", "-1");
@@ -148,6 +151,7 @@ describe("Help search", () => {
     expect(last).toHaveFocus();
     fireEvent.keyDown(last, { key: "ArrowUp" });
     fireEvent.keyDown(second, { key: "ArrowUp" });
+    fireEvent.keyDown(terminal, { key: "ArrowUp" });
     expect(first).toHaveFocus();
     fireEvent.keyDown(first, { key: "ArrowUp" });
     expect(field).toHaveFocus();

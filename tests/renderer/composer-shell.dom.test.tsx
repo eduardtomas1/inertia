@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
@@ -136,6 +136,58 @@ describe("composer shell", () => {
     expect(window.localStorage.getItem("inertia:composer-tools:v1")).toBe("closed");
   });
 
+  it("opens and closes More tools in every mounted composer and follows other windows", () => {
+    window.localStorage.setItem("inertia:composer-tools:v1", "closed");
+    render(
+      <>
+        <section aria-label="First pane"><Composer {...composerProps(conversation("tools-first-pane"))} /></section>
+        <section aria-label="Second pane"><Composer {...composerProps(conversation("tools-second-pane"))} /></section>
+      </>,
+    );
+    const toggle = (pane: string) => within(screen.getByRole("region", { name: pane })).getByRole("button", { name: "More tools" });
+    expect(toggle("Second pane")).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle("First pane"));
+    expect(toggle("First pane")).toHaveAttribute("aria-expanded", "true");
+    expect(toggle("Second pane")).toHaveAttribute("aria-expanded", "true");
+
+    act(() => {
+      window.localStorage.setItem("inertia:composer-tools:v1", "closed");
+      window.dispatchEvent(new StorageEvent("storage", { key: "inertia:composer-tools:v1", newValue: "closed" }));
+    });
+    expect(toggle("First pane")).toHaveAttribute("aria-expanded", "false");
+    expect(toggle("Second pane")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("still opens and closes More tools when the preference cannot be saved", () => {
+    window.localStorage.setItem("inertia:composer-tools:v1", "closed");
+    const write = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage is read-only", "SecurityError");
+    });
+    render(<Composer {...composerProps(conversation("tools-unsaved"))} />);
+    const toggle = screen.getByRole("button", { name: "More tools" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    write.mockRestore();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(window.localStorage.getItem("inertia:composer-tools:v1")).toBe("closed");
+  });
+
+  it("keeps the open tray at its full width and lets it take the options' place only when both cannot fit", () => {
+    const css = readSourceText("src/renderer/src/components/composer/ComposerSurface.css");
+    const tray = css.slice(css.indexOf(".composer-shell .composer-more-tools {"), css.indexOf("}", css.indexOf(".composer-shell .composer-more-tools {")));
+    expect(tray).toContain("flex: 0 0 auto;");
+    expect(tray).not.toContain("min-width: 0");
+    expect(css).toContain("@container (max-width: 820px) {\n  .composer-shell .composer-options {\n    min-width: var(--composer-control-height);\n  }");
+    expect(css).toContain('@container (max-width: 320px) {\n  .composer-shell .composer-primary-rail:has(> .composer-tools-toggle[aria-expanded="true"]) > .composer-options {\n    display: none;\n  }');
+    expect(css).toContain(".composer-shell .composer-primary-rail:not(:has(.prompt-presets-control, .prompt-stash-control)) > :is(.composer-tools-toggle, .composer-more-tools) {\n    display: none;\n  }");
+  });
+
   it("offers no More tools toggle when the composer has no extra tools", () => {
     render(<Composer {...composerProps(conversation("no-tools-chat"), { promptPresetsEnabled: false, promptStashEnabled: false })} />);
     expect(screen.queryByRole("button", { name: "More tools" })).toBeNull();
@@ -177,5 +229,29 @@ describe("composer shell", () => {
     expect(row).toHaveTextContent(/^Run the release checksQueuedSend now$/u);
     expect(within(queue).getByRole("button", { name: "Send queued message now" })).toHaveTextContent("Send now");
     expect(within(queue).getByRole("button", { name: "Remove queued message" })).toHaveTextContent("");
+  });
+
+  it.each([
+    ["codex-app-server", true],
+    ["claude-agent-sdk", true],
+    ["kimi-acp", false],
+  ] as const)("offers Send now on a queued message during a %s turn with an empty composer: %s", async (harnessId, enabled) => {
+    const current = conversation(`queued-${harnessId}`);
+    window.localStorage.setItem(
+      `inertia:queued-prompts:v2:${current.id}`,
+      JSON.stringify([{ id: "queued-1", content: "Look at this too", createdAt: "2026-08-21T10:00:00.000Z", attachments: [] }]),
+    );
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-running",
+      status: "running" as const,
+      harnessId,
+    };
+    render(<Composer {...composerProps(current, { running: true, latestTurn })} />);
+    const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+    const sendNow = within(queue).getByRole("button", { name: "Send queued message now" });
+    if (enabled) expect(sendNow).toBeEnabled();
+    else expect(sendNow).toBeDisabled();
   });
 });

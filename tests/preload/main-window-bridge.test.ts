@@ -76,6 +76,7 @@ describe("main window preload", () => {
       "onDetachedChatDraftMirrored",
       "onDetachedChatWindowsChanged",
       "onDiagnosticsChanged",
+      "onLaunchRequest",
       "onPreviewState",
       "onPrivateConnectState",
       "onRuntimeReady",
@@ -113,6 +114,7 @@ describe("main window preload", () => {
       "showThreadNotification",
       "snapshot",
       "syncThemePreference",
+      "takeLaunchRequests",
       "updatePrivateConnectDevice",
     ]);
   });

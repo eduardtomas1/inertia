@@ -2,6 +2,8 @@ export const DESKTOP_IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
   runtimeReady: "inertia:runtime-ready",
   selectDirectory: "inertia:select-directory",
+  takeLaunchRequests: "inertia:take-launch-requests",
+  launchRequestAvailable: "inertia:launch-request-available",
   selectCodexExecutable: "inertia:select-codex-executable",
   exportRecoveryData: "inertia:export-recovery-data",
   importRecoveryData: "inertia:import-recovery-data",

@@ -56,6 +56,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         shortcut: "new-chat",
       },
       {
+        name: "Start a chat from a terminal",
+        detail: "Run Inertia with --new-chat in a folder, or --new-chat followed by a path, to open a new chat in its project. A new folder is added as a project first. On Linux and macOS, Inertia then returns the terminal; add --foreground to keep it attached.",
+      },
+      {
         name: "Chats without a project",
         detail: "Choose No project from the composer's Project button, or Start without a project in the command palette. The chat works in its own chat folder, appears under No project in the sidebar and keeps that folder when it is deleted.",
       },

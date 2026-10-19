@@ -80,20 +80,20 @@ describe("repository staging", () => {
     writeFileSync(join(repository, "other.txt"), "unrelated edit\n");
     writeFileSync(join(repository, "new file.txt"), "new\n");
     mkdirSync(join(repository, "docs"));
-    writeFileSync(join(repository, "docs", "*.md"), "literal glob name\n");
+    writeFileSync(join(repository, "docs", "[guide].md"), "literal glob name\n");
     writeFileSync(join(repository, "docs", "guide.md"), "must stay untracked\n");
 
     const result = await stageRepositoryPaths(repository, [
       "README.md",
       "new file.txt",
-      "docs/*.md",
+      "docs/[guide].md",
     ]);
 
-    expect(result.paths.sort()).toEqual(["README.md", "docs/*.md", "new file.txt"]);
+    expect(result.paths.sort()).toEqual(["README.md", "docs/[guide].md", "new file.txt"]);
     expect(porcelain(repository)).toEqual([
       " M other.txt",
       "?? docs/guide.md",
-      "A  docs/*.md",
+      "A  docs/[guide].md",
       "A  \"new file.txt\"",
       "M  README.md",
     ].sort());

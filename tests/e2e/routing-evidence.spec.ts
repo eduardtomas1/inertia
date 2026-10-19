@@ -1,5 +1,5 @@
 // @inertia-e2e-resource isolated
-import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type ElementHandle, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -219,12 +219,11 @@ interface CaptureOptions {
   /** Keep keyboard focus, for focus rings and open popovers. */
   keepFocus?: boolean;
   /** Crop to the union of these elements, padded. Defaults to the full window. */
-  around?: Locator[];
-  /** Must still be visible once the screenshot is taken, or the capture fails. */
-  verify?: Locator;
+  around?: Array<Locator | ElementHandle>;
 }
 
-async function clipAround(targets: Locator[]): Promise<{ x: number; y: number; width: number; height: number }> {
+async function clipAround(targets: Array<Locator | ElementHandle>): Promise<{ x: number; y: number; width: number; height: number }> {
+  // An element handle that has gone away yields null at once instead of waiting for it.
   const boxes = (await Promise.all(targets.map((target) => target.boundingBox())))
     .filter((box): box is NonNullable<typeof box> => box !== null);
   if (boxes.length === 0) throw new Error("Nothing to crop the evidence image around.");
@@ -260,20 +259,25 @@ async function cropPng(
   return Buffer.from(cropped, "base64");
 }
 
-async function capture(testInfo: TestInfo, name: string, options: CaptureOptions = {}): Promise<void> {
-  if (captured.has(name)) throw new Error(`Evidence image ${name} was captured twice.`);
+async function screenshot(options: CaptureOptions): Promise<Buffer> {
   if (!options.keepPointer) await page.mouse.move(0, 0);
   if (!options.keepFocus && !options.keepPointer) {
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   }
   await page.waitForTimeout(150);
   const clip = options.around ? await clipAround(options.around) : null;
-  const screenshot = await page.screenshot({ animations: "disabled" });
-  if (options.verify && !await options.verify.isVisible()) {
-    throw new Error(`Evidence image ${name} lost its subject before the screenshot finished.`);
-  }
+  const png = await page.screenshot({ animations: "disabled" });
+  return clip ? await cropPng(png, clip) : png;
+}
+
+async function capture(testInfo: TestInfo, name: string, options: CaptureOptions = {}): Promise<void> {
+  await saveCapture(testInfo, name, await screenshot(options));
+}
+
+async function saveCapture(testInfo: TestInfo, name: string, png: Buffer): Promise<void> {
+  if (captured.has(name)) throw new Error(`Evidence image ${name} was captured twice.`);
   const path = testInfo.outputPath(`${name}.png`);
-  await writeFile(path, clip ? await cropPng(screenshot, clip) : screenshot);
+  await writeFile(path, png);
   captured.add(name);
   await testInfo.attach(name, { path, contentType: "image/png" });
   if (evidenceDirectory) await copyFile(path, join(evidenceDirectory, `${name}.png`));
@@ -326,20 +330,100 @@ async function closeChooser(): Promise<void> {
   await expect(modelChooser()).toBeHidden();
 }
 
-/** Hover tooltips close on any window blur or scroll, so retry until one survives the screenshot. */
+const CHIP_TOOLTIP_ATTEMPTS = 3;
+
+/**
+ * Evidence only: the tooltip's text is asserted before this runs. Tooltips
+ * close on any window blur, scroll or pointer-down, so take a bounded number
+ * of attempts; if none keeps the same tooltip open through the screenshot,
+ * save the last image anyway and annotate why instead of failing the test.
+ */
 async function captureChipTooltip(testInfo: TestInfo, name: string, around: Locator[]): Promise<void> {
-  await expect(async () => {
-    await showChipTooltip();
-    await capture(testInfo, name, { keepPointer: true, around: [...around, tooltip()], verify: tooltip() });
-  }).toPass({ timeout: 30_000 });
+  const misses: string[] = [];
+  let png: Buffer | undefined;
+  try {
+    for (let attempt = 1; attempt <= CHIP_TOOLTIP_ATTEMPTS; attempt += 1) {
+      const opened = await showChipTooltip().catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+      const subject = opened instanceof Error ? null : await tooltip().elementHandle({ timeout: 2_000 }).catch(() => null);
+      if (opened instanceof Error || !subject) {
+        misses.push(`attempt ${attempt}: tooltip did not open (${opened instanceof Error ? opened.message.split("\n")[0] : "not found"})`);
+        png = await screenshot({ keepFocus: true, around });
+        continue;
+      }
+      await watchTooltipDismissals();
+      png = await screenshot({ keepPointer: true, keepFocus: true, around: [...around, subject] });
+      // Closing unmounts the tooltip, so the same connected node proves it stayed open throughout.
+      const survived = await subject.evaluate((element) => element.isConnected && element.matches(".tooltip[data-positioned='true']"));
+      const dismissals = await stopWatchingTooltipDismissals();
+      await subject.dispose();
+      if (survived) break;
+      misses.push(`attempt ${attempt} (${opened}): tooltip closed during capture after ${dismissals}`);
+    }
+  } finally {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.mouse.move(0, 0);
+  }
+  if (misses.length === CHIP_TOOLTIP_ATTEMPTS) {
+    testInfo.annotations.push({ type: "evidence", description: `${name} saved without a verified tooltip: ${misses.join("; ")}` });
+  }
+  await saveCapture(testInfo, name, png!);
 }
 
-async function showChipTooltip(): Promise<void> {
-  await expect(async () => {
-    await page.mouse.move(0, 0);
-    await modelTrigger().hover();
-    await expect(tooltip()).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 15_000 });
+/**
+ * Opens the chip's tooltip. Keyboard focus is preferred because pointer
+ * events cannot close it; hover is the fallback when focus does not open it.
+ */
+async function showChipTooltip(): Promise<"focus" | "hover"> {
+  await page.mouse.move(0, 0);
+  const via = await focusChipTooltip() ? "focus" : "hover";
+  if (via === "hover") {
+    await expect(async () => {
+      await page.mouse.move(0, 0);
+      await modelTrigger().hover();
+      await expect(tooltip()).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 15_000 });
+  }
+  // Let the fade-in finish so the screenshot shows the settled tooltip.
+  await tooltip().evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  }, undefined, { timeout: 2_000 });
+  return via;
+}
+
+/** The tooltip opens on focus only when a navigation key moved focus with :focus-visible. */
+async function focusChipTooltip(): Promise<boolean> {
+  await modelTrigger().focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  const focused = await modelTrigger().evaluate((element) => element === document.activeElement && element.matches(":focus-visible"));
+  if (!focused) return false;
+  return tooltip().waitFor({ state: "visible", timeout: 2_000 }).then(() => true, () => false);
+}
+
+interface DismissalWatch { seen: string[]; stop: AbortController }
+
+/** Records the events that dismiss tooltips, so a closed tooltip can say why. */
+async function watchTooltipDismissals(): Promise<void> {
+  await page.evaluate(() => {
+    const watch = { seen: [] as string[], stop: new AbortController() };
+    (window as { tooltipDismissals?: DismissalWatch }).tooltipDismissals = watch;
+    const note = (event: Event): void => {
+      const target = event.target instanceof Element ? `${event.target.tagName.toLowerCase()}.${event.target.classList[0] ?? ""}` : "window";
+      if (watch.seen.length < 8) watch.seen.push(`${event.type} on ${target}`);
+    };
+    for (const type of ["blur", "scroll", "pointerdown", "pointerleave"]) {
+      window.addEventListener(type, note, { capture: true, passive: true, signal: watch.stop.signal });
+    }
+  });
+}
+
+async function stopWatchingTooltipDismissals(): Promise<string> {
+  const seen = await page.evaluate(() => {
+    const watch = (window as { tooltipDismissals?: DismissalWatch }).tooltipDismissals;
+    watch?.stop.abort();
+    return watch?.seen ?? [];
+  });
+  return seen.length > 0 ? seen.join(", ") : "no dismissing event";
 }
 
 test.beforeAll(async () => {

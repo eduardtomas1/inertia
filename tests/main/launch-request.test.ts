@@ -1,6 +1,6 @@
 import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,12 +18,13 @@ afterEach(() => {
 
 describe("new chat launch requests", () => {
   it("reads --new-chat with no path, a relative path, an absolute path or the = form", () => {
-    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat"], "/work/app")).toMatchObject({ path: "/work/app" });
-    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat", "--foreground"], "/work/app")).toMatchObject({ path: "/work/app" });
-    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat", "packages/web"], "/work/app")).toMatchObject({ path: "/work/app/packages/web" });
-    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat", "/srv/site"], "/work/app")).toMatchObject({ path: "/srv/site" });
-    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat=../other"], "/work/app")).toMatchObject({ path: "/work/other" });
-    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat="], "/work/app")).toMatchObject({ path: "/work/app" });
+    const cwd = resolve("/work/app");
+    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat"], cwd)).toMatchObject({ path: cwd });
+    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat", "--foreground"], cwd)).toMatchObject({ path: cwd });
+    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat", "packages/web"], cwd)).toMatchObject({ path: resolve(cwd, "packages/web") });
+    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat", resolve("/srv/site")], cwd)).toMatchObject({ path: resolve("/srv/site") });
+    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat=../other"], cwd)).toMatchObject({ path: resolve("/work/other") });
+    expect(newChatLaunchRequest(["/opt/Inertia", "--new-chat="], cwd)).toMatchObject({ path: cwd });
   });
 
   it("ignores launches without the flag", () => {

@@ -125,6 +125,28 @@ describe("runtime queue presentation and durable draft identity", () => {
     expect(css).toContain(".composer-queue-send:disabled {\n  color: var(--text-muted);\n  opacity: var(--disabled-opacity);\n}");
   });
 
+  it("keeps a Send now error through queue refreshes until that message leaves the head of the queue", async () => {
+    const next: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Another task" };
+    let entries = [queued];
+    const run = vi.fn<QueueCommandRunner>(async (command) => {
+      if (command.type === "message.queue.send") throw new Error("The active model cannot inspect follow-up images. It will send when the turn ends.");
+      return response(entries);
+    });
+    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="running" queueHost={null} />);
+    const send = await screen.findByRole("button", { name: "Send queued message now" });
+    await act(async () => fireEvent.click(send));
+    expect(screen.getByRole("status")).toHaveTextContent("cannot inspect follow-up images");
+
+    await act(async () => window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })));
+    await waitFor(() => expect(run.mock.calls.filter(([command]) => command.type === "message.queue.get").length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByRole("status")).toHaveTextContent("cannot inspect follow-up images");
+
+    entries = [next];
+    await act(async () => window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })));
+    await screen.findByText("Another task");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("does not resurrect a removed entry when an earlier queue read finishes late", async () => {
     let resolveRead!: (value: MessageQueueResult) => void;
     const pending = new Promise<MessageQueueResult>((resolve) => { resolveRead = resolve; });

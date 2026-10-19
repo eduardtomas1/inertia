@@ -34,6 +34,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
   const [error, setError] = useState<string | null>(null);
   const latestError = useRef(error);
   latestError.current = error;
+  const errorEntry = useRef<string | null>(null);
   const owner = useRef(conversationId);
   const revision = useRef(0);
   owner.current = conversationId;
@@ -45,7 +46,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
       void loadQueue(onCommand, conversationId).then((result) => {
         if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
           updateQueue(result.entries);
-          if (latestError.current !== null) setError(null);
+          if (latestError.current !== null && result.entries[0]?.id !== errorEntry.current) setError(null);
         }
       }, () => undefined);
     };
@@ -75,7 +76,10 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
       if (owner.current === conversationId) { revision.current += 1; updateQueue(result.entries); }
       window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
     } catch (failure) {
-      if (owner.current === conversationId) setError(failure instanceof Error ? failure.message : "The queue could not be updated.");
+      if (owner.current === conversationId) {
+        errorEntry.current = first.id;
+        setError(failure instanceof Error ? failure.message : "The queue could not be updated.");
+      }
     } finally { if (owner.current === conversationId) setBusy(false); }
   };
   const element = <div className="composer-queue" role="list" aria-label="Queued messages">

@@ -222,6 +222,12 @@ test("Send now hands a queued message and its images to the agent while it works
   try {
     const page = app.page;
     const composer = page.getByRole("textbox", { name: "Message" });
+    await page.getByRole("button", { name: /^Choose model\./u }).click();
+    const chooser = page.getByRole("dialog", { name: "Choose model" });
+    await chooser.getByRole("combobox", { name: "Search models" }).fill("Vision");
+    await expect(chooser.getByRole("grid", { name: "Model results" })).toContainText("Vision fixture", { timeout: 30_000 });
+    await page.keyboard.press("Escape");
+    await expect(chooser).toBeHidden();
     await startHeldTurn(page, "Keep working until I steer you.");
     const queued = [colouredPng(30, 160, 90), colouredPng(160, 30, 90)];
     await pasteImages(page, queued);

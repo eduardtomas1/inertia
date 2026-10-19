@@ -17,7 +17,28 @@ database migration.
 | `4081d661` | Send now on a queued message during a turn | `queued-message-runtime.test.ts`, `runtime-composer-queue.dom.test.tsx`, `composer-shell.dom.test.tsx`; `image-follow-up-regression.spec.ts` steers a queued message with two images into a running fake Codex turn |
 | `32e4d879` | `--new-chat` and detached terminal launch | `launch-request.test.ts`, `launch-requests.dom.test.tsx`, `app-update-startup.test.ts`; the packaged app's AppRun under a pseudo-terminal returned the terminal in 0.3 s, added the folder as a project, and a second launch from a subfolder opened a chat in the running instance |
 | `9e849ac7` | Dependabot #621 to #628 | full check, budgets measured per package, E2E below |
+| `9f000ab0` | Copy and Snooze submenus open on click | `thread-submenu.dom.test.tsx`; `thread-project-settings.spec.ts` now clicks both items; both failed on the old component |
+| `c1bb4176` | Access modes on Codex and Antigravity | `codex-access-modes.test.ts`, `codex-app-server.test.ts`, `antigravity-cli-harness.test.ts`, `composer-setting-menus.dom.test.tsx`; live table below |
+| `959157bc` | Claude usage from live rate-limit events | `claude-usage.test.ts`, `claude-rate-limit-negotiation.test.ts` with the event shape Claude Code 2.1.303 sent in a real Haiku turn |
 | `f68de5eb` | Send now errors stay visible; Send now E2E waits for the model catalog | `runtime-composer-queue.dom.test.tsx`; the first CI run failed the new spec on Linux, Windows and macOS because a turn started before the fake model list loaded records no follow-up image support. Locally it failed 2 of 6 runs; with the wait it passed 8 of 8 |
+
+## Access modes, checked live
+
+Each installed CLI ran the same two steps in a fresh folder in every mode
+(write a file with its edit tool, then run a `python3 -c` command), with
+Inertia's exact settings, recording which steps asked for approval.
+
+| Provider | Supervised | Auto-accept edits | Full access |
+| --- | --- | --- | --- |
+| Claude Code 2.1.303 | asks for both | edit unasked, command asks | nothing asks |
+| Codex 0.159.2, before | asks for both | **nothing asks** (on-request, workspace-write) | nothing asks |
+| Codex, after `c1bb4176` | asks for both | edit approved by Inertia (`grantRoot: null`), command asks | nothing asks |
+| Antigravity agy 1.4.2, before | **edit unasked**, command refused | edit unasked, command refused | both run |
+| Antigravity, after `c1bb4176` | shown as unavailable, runs as Auto-accept edits | edit unasked, command refused | both run |
+
+OpenCode could not run (its stored API key has expired); Cursor and Kimi Code
+are not installed on the verification machine. All three answer permission
+requests through Inertia, whose decisions are covered by their unit tests.
 
 ## Dependencies
 

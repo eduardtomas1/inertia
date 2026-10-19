@@ -34,6 +34,7 @@ describe("Muted colours row", () => {
     expect(control).toHaveFocus();
     fireEvent.click(control);
     expect(onUpdate).not.toHaveBeenCalled();
+    expect(screen.getByText("Choose a custom colour to mute it.")).toBeVisible();
   });
 
   it("saves the muted treatment for the custom colours", async () => {
@@ -45,6 +46,7 @@ describe("Muted colours row", () => {
     expect(onUpdate).toHaveBeenCalledWith({ mutedCustomColors: true });
     const row = container.querySelector<HTMLElement>('[data-setting-id="muted-custom-colours"]')!;
     expect(within(row).queryByText("Softens custom colours for a quieter workbench.")).toBeNull();
+    expect(within(row).queryByText("Choose a custom colour to mute it.")).toBeNull();
     expect(within(row).getByRole("status")).toHaveTextContent("Saved");
   });
 });

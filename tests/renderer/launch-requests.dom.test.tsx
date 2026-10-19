@@ -54,6 +54,12 @@ describe("launch request project matching across aliases and platforms", () => {
     expect(launchRequestProject([project("drive", "C:\\")], { path: "c:\\repo", realPath: null })?.id).toBe("drive");
   });
 
+  it("follows a symbolic link out of a project instead of matching the link's location", () => {
+    const projects = [project("work", "/work"), project("other", "/other")];
+    expect(launchRequestProject(projects, { path: "/work/link", realPath: "/other" })?.id).toBe("other");
+    expect(launchRequestProject([project("work", "/work")], { path: "/work/link", realPath: "/elsewhere" })).toBeNull();
+  });
+
   it("keeps POSIX paths case-sensitive", () => {
     expect(launchRequestProject([project("app", "/Work/App")], { path: "/work/app", realPath: null })).toBeNull();
   });

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   clearPendingMultiSpawnLaunchId,
   initialMultiSpawnDraft,
+  multiSpawnConversationPayload,
   MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
   MULTI_SPAWN_PRESET_STORAGE_KEY,
   projectsShareLocalCheckout,
@@ -431,5 +432,19 @@ describe("multi-spawn preset", () => {
     expect(projectsShareLocalCheckout(projects, "root", "module")).toBe(true);
     expect(projectsShareLocalCheckout(projects, "module", "other")).toBe(false);
     expect(projectsShareLocalCheckout(projects, "missing", "other")).toBe(false);
+  });
+});
+
+describe("multi-spawn access for providers that cannot ask for approval", () => {
+  it("launches an Antigravity side left at Supervised as Auto-accept edits and keeps Supervised elsewhere", () => {
+    const side = (providerId: "antigravity" | "claude") => ({
+      projectId: "project-1",
+      title: `${providerId} side`,
+      selection: providerNativeModelSelection({ providerId }),
+      accessMode: "supervised" as const,
+      interactionMode: "build" as const,
+    });
+    expect(multiSpawnConversationPayload(side("antigravity"), defaultSettings)).toMatchObject({ providerId: "antigravity", accessMode: "auto-edit" });
+    expect(multiSpawnConversationPayload(side("claude"), defaultSettings)).toMatchObject({ providerId: "claude", accessMode: "supervised" });
   });
 });

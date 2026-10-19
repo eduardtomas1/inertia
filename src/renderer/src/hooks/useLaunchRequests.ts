@@ -22,7 +22,7 @@ export function launchRequestProject(
   projects: readonly Project[],
   request: LaunchProjectRequest,
 ): Project | null {
-  const targets = [request.path, request.realPath].filter((target): target is string => Boolean(target));
+  const targets = [request.realPath ?? request.path];
   let match: Project | null = null;
   let matchDepth = Number.POSITIVE_INFINITY;
   for (const project of projects) {

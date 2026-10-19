@@ -140,6 +140,7 @@ export function visibleChatProjection(
     ConversationProjection,
     | "conversation"
     | "detail"
+    | "history"
     | "streaming"
     | "terminalProjections"
     | "usage"
@@ -162,6 +163,7 @@ export function visibleChatProjection(
       ? projection.usage
       : null,
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
+    history: projectionOwned ? projection.history : undefined,
   };
 }
 
@@ -657,7 +659,7 @@ export function createWorkspaceSceneModel({
       loading: (!connection.snapshot && connection.status !== "offline")
         || chatProjection.detailLoading,
       detailLoading: chatProjection.detailLoading,
-      history: projection.history,
+      history: chatProjection.history,
       sending: busyAction === "message.send",
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),

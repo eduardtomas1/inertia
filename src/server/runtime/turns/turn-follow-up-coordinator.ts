@@ -100,6 +100,7 @@ export class TurnFollowUpCoordinator {
     attachments: readonly ChatAttachment[],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
+    queuedMessageId?: string,
   ): Promise<FollowUpSteerResult> {
     await lease.ready;
     const active = this.owners.get(lease);
@@ -163,6 +164,7 @@ export class TurnFollowUpCoordinator {
           lease.submittedAt,
           this.options.now(),
           attachments,
+          queuedMessageId,
         ),
       };
     }
@@ -174,6 +176,7 @@ export class TurnFollowUpCoordinator {
       laterThan(lease.submittedAt, boundary?.after ?? null),
       this.options.now(),
       attachments,
+      queuedMessageId,
     );
     this.options.answerBoundary?.record(active, message.createdAt, boundary?.deferred ?? false);
     return { kind: "accepted", message };

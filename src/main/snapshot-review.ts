@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { desktopCapturer, nativeImage, screen, type BrowserWindow, type DesktopCapturerSource, type NativeImage, type Size } from "electron";
+import { desktopCapturer, nativeImage, screen, type BrowserWindow, type DesktopCapturerSource, type NativeImage, type Rectangle, type Size } from "electron";
 import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
 import { SNAPSHOT_MAX_IMAGE_BYTES, type SnapshotDelivery } from "../shared/snapshots.js";
 import { reviewedSnapshotBackend, type SnapshotReview, type SnapshotReviewRequest, type SnapshotReviewArea } from "../shared/snapshot-review.js";
@@ -10,8 +10,32 @@ const MAX_SOURCES = 48;
 const MAX_PREVIEW_BYTES = 4 * 1024 * 1024;
 const REVIEW_TIMEOUT = 180_000;
 const MAX_EDGE = 2048;
+const PLACEMENT_SETTLE_MS = 1000;
 
 class ReviewRejection extends Error {}
+
+interface WindowPlacement {
+  bounds: Rectangle;
+  maximized: boolean;
+  fullScreen: boolean;
+}
+
+function windowPlacement(window: BrowserWindow): WindowPlacement {
+  return { bounds: window.getBounds(), maximized: window.isMaximized(), fullScreen: window.isFullScreen() };
+}
+
+function holdWindowState(window: BrowserWindow, event: "unmaximize" | "leave-full-screen", apply: () => void): void {
+  apply();
+  const reapply = (): void => { if (!window.isDestroyed()) apply(); };
+  window.on(event as "unmaximize", reapply);
+  setTimeout(() => window.removeListener(event as "unmaximize", reapply), PLACEMENT_SETTLE_MS).unref();
+}
+
+function restoreWindowPlacement(window: BrowserWindow, placement: WindowPlacement): void {
+  if (placement.fullScreen) holdWindowState(window, "leave-full-screen", () => window.setFullScreen(true));
+  else if (placement.maximized) holdWindowState(window, "unmaximize", () => window.maximize());
+  else window.setBounds(placement.bounds);
+}
 
 function screenCaptureSize(displayId: string): Size {
   const display = screen.getAllDisplays().find((candidate) => String(candidate.id) === displayId);
@@ -197,15 +221,16 @@ export class SnapshotReviewService {
 
   private async capture(review: PendingReview, types: ("window" | "screen")[], size: Size, interactive: boolean,
     hidePicker: boolean): Promise<DesktopCapturerSource[]> {
-    const hidden = hidePicker && review.window.isVisible();
-    if (hidden) review.window.hide();
+    const placement = hidePicker && review.window.isVisible() ? windowPlacement(review.window) : null;
+    if (placement) review.window.hide();
     try {
-      if (hidden) await new Promise((resolve) => setTimeout(resolve, 150));
+      if (placement) await new Promise((resolve) => setTimeout(resolve, 150));
       return await this.acquire(types, size, interactive, review.controller.signal);
     } finally {
-      if (hidden && !review.window.isDestroyed()) {
+      if (placement && !review.window.isDestroyed()) {
         if (this.live(review)) { review.window.show(); review.window.focus(); }
         else review.window.showInactive();
+        restoreWindowPlacement(review.window, placement);
       }
     }
   }

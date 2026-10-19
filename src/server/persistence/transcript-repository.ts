@@ -7,6 +7,7 @@ import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
+import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 
 import type {
   ChatAttachment,
@@ -195,6 +196,7 @@ export class TranscriptRepository {
     createdAt?: string,
     acknowledgedAt?: string,
     attachments: readonly ChatAttachment[] = [],
+    queuedMessageId?: string,
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
@@ -233,6 +235,14 @@ export class TranscriptRepository {
         WHERE id = ?
       `).run(freshnessAt, freshnessAt, conversationId);
       this.context.touchProject(conversation.project_id, freshnessAt);
+      if (queuedMessageId) {
+        this.context.database.prepare(`
+          UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ?, error = NULL,
+            content = '', attachments_json = '[]', route_identity = ''
+          WHERE id = ? AND conversation_id = ? AND state = 'dispatching'
+        `).run(turnId, message.id, queuedMessageId, conversationId);
+        pruneTerminalQueuedMessages(this.context.database, conversationId);
+      }
     })();
     return message;
   }

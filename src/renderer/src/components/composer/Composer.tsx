@@ -1144,7 +1144,8 @@ export const Composer = memo(function Composer({
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           primaryAction={visiblePrimaryAction}
-          canSendQueuedNow={!disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
+          canSendQueuedNow={!disabled && !sending && !attachmentImporting
+            && (!running || (!stopping && !submitting && supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)))}
           queuedTurnId={latestKnownTurn?.id ?? null}
           queuedTurnStatus={latestKnownTurn?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}

@@ -1,3 +1,4 @@
+import { accessModeUnavailableReason, effectiveAccessMode } from "@shared/access-modes";
 import {
   Check,
   ChevronDown,
@@ -76,8 +77,9 @@ export function ComposerSettings({
     handleComposerMenuNavigation,
     handleComposerMenuTriggerKeyDown,
   } = menuController;
+  const effectiveAccess = effectiveAccessMode(conversation.providerId, conversation.accessMode);
   const access = accessOptions.find(
-    (item) => item.value === conversation.accessMode,
+    (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
   const ModeIcon = conversation.interactionMode === "build"
     ? Hammer
@@ -241,27 +243,30 @@ export function ComposerSettings({
             aria-label="Project access"
             onKeyDown={handleComposerMenuNavigation}
           >
-            {accessOptions.map((option) => (
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={conversation.accessMode === option.value}
-                key={option.value}
-                disabled={conversationUpdatePending}
-                onClick={() => {
-                  void onUpdateConversation({ accessMode: option.value }).then(
-                    () => dismissMenu("selection"),
-                    () => undefined,
-                  );
-                }}
-              >
-                <span>
-                  <strong>{option.label}</strong>
-                  <small>{option.description}</small>
-                </span>
-                {conversation.accessMode === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
-              </button>
-            ))}
+            {accessOptions.map((option) => {
+              const unavailable = accessModeUnavailableReason(conversation.providerId, option.value);
+              return (
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={effectiveAccess === option.value}
+                  key={option.value}
+                  disabled={conversationUpdatePending || unavailable !== null}
+                  onClick={() => {
+                    void onUpdateConversation({ accessMode: option.value }).then(
+                      () => dismissMenu("selection"),
+                      () => undefined,
+                    );
+                  }}
+                >
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small>{unavailable ?? option.description}</small>
+                  </span>
+                  {effectiveAccess === option.value && <Check className="composer-option-check" size={14} aria-hidden="true" />}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

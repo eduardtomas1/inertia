@@ -54,6 +54,41 @@ describe("Claude rate-limit negotiation", () => {
     ]);
   });
 
+  it("reports both unified windows from a current Claude Code event while the turn runs", () => {
+    const reported: unknown[] = [];
+    const emitter = {
+      capability: () => undefined,
+      rich: (event: { type: string; metadata?: { rateLimits?: unknown[] } }) => {
+        if (event.type === "metadata") reported.push(...(event.metadata?.rateLimits ?? []));
+      },
+    } as unknown as AgentHarnessEmitter;
+    const claude = new ClaudeMessageProjector({
+      emitter,
+      text: {} as never,
+      usesNativeAnthropic: true,
+      usage: new ClaudeUsageLedger(false),
+      contextUsage: () => null,
+      acceptContextUsage: () => undefined,
+      refreshContextUsage: () => undefined,
+    });
+    claude.observe({
+      type: "rate_limit_event",
+      session_id: "33333333-3333-4333-8333-333333333333",
+      rate_limit_info: {
+        status: "allowed",
+        rateLimitType: "five_hour",
+        unifiedWindows: {
+          five_hour: { utilization: 0.18, resetsAt: 1_792_417_800 },
+          seven_day: { utilization: 0.28, resetsAt: 1_792_854_000 },
+        },
+      },
+    } as unknown as SDKMessage, false);
+    expect(reported).toEqual([
+      expect.objectContaining({ id: "claude:five_hour", usedPercent: expect.closeTo(18) }),
+      expect.objectContaining({ id: "claude:seven_day", usedPercent: expect.closeTo(28) }),
+    ]);
+  });
+
   it("neither announces nor reports rate limits for a non-native backend", () => {
     const { calls, projector: claude } = projector(false);
     claude.observe(rateLimitEvent, false);

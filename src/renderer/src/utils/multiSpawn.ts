@@ -1,3 +1,4 @@
+import { effectiveAccessMode } from "@shared/access-modes";
 import type {
   AccessMode,
   AppSettings,
@@ -419,7 +420,7 @@ export function multiSpawnConversationPayload(
     title: side.title.trim(),
     providerId,
     interactionMode: side.interactionMode,
-    accessMode: side.accessMode,
+    accessMode: effectiveAccessMode(providerId, side.accessMode),
     activate: false,
   };
 }

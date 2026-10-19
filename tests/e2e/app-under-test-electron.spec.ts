@@ -93,8 +93,10 @@ test.describe("App under test with a real Electron app", () => {
       dataDirectory,
       workspace: () => ({ root: fixture, actions: [] }),
       cdpTransports: createCdpTransportFactory(),
-      // Chromium refuses to run as root with its sandbox; CI runs as a user.
-      electronSwitches: process.getuid?.() === 0 ? ["--no-sandbox"] : [],
+      // Test fixture only: the CI runner restricts unprivileged user namespaces
+      // and npm's chrome-sandbox is not setuid root, so Chromium's sandbox
+      // cannot start on Linux for any user (and refuses root regardless).
+      electronSwitches: process.platform === "linux" ? ["--no-sandbox"] : [],
       sourceEnvironment: async () => ({ env: { ...process.env }, pathEntries: [] }),
       resolveElectron: async () => ({
         root: realpathSync(fixture),

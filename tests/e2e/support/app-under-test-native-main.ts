@@ -91,7 +91,10 @@ async function run(): Promise<void> {
         name: "Native fixture",
         executable: appElectron,
         args: [
-          ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []),
+          // Test fixture only: the CI runner restricts unprivileged user
+          // namespaces and npm's chrome-sandbox is not setuid root, so
+          // Chromium's sandbox cannot start on Linux for any user.
+          ...(process.platform === "linux" ? ["--no-sandbox"] : []),
           "--force-renderer-accessibility",
           `--user-data-dir=${profile}`,
           join(fixture, "main.cjs"),

@@ -104,7 +104,8 @@ describe("App control process tree", () => {
     expect(appControlOwnedTree(table.slice(0, APP_CONTROL_MAX_TREE_PROCESSES), 100, started)).toMatchObject({ deniedPids: [] });
   });
 
-  it("reads the Linux process table from proc without spawning anything", async () => {
+  // Linux-only reader; Windows resolves the fake /proc exe symlinks to drive paths.
+  it.skipIf(process.platform === "win32")("reads the Linux process table from proc without spawning anything", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-app-control-proc-"));
     roots.push(root);
     writeFileSync(join(root, "stat"), "cpu 1 2 3\nbtime 1760000000\n");

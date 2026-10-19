@@ -992,7 +992,9 @@ image-accepting route and checks that exactly one PNG within 1,536 pixels,
 agent" evidence label, types into the password field and checks that the typed
 value never appears and that the next model-visible screenshot is refused as
 `sensitive`, reads console lines from the log, and stops the app with confirmed
-cleanup. It runs as root with `--no-sandbox`, and it supplies the Electron
+cleanup. It passes the fixture `--no-sandbox` on Linux (the CI runner
+restricts unprivileged user namespaces and npm's `chrome-sandbox` is not
+setuid; production never adds the switch), and it supplies the Electron
 binary directly instead of resolving the fixture's own `node_modules/electron`;
 that resolution is covered by unit tests only.
 
@@ -1111,7 +1113,8 @@ protocol parsers (every message structurally cloned); and the real launch
 manager and App host tools, in a Supervised chat with approvals answered by
 the test, launch the phase 1 fixture as a project action whose executable
 is the repository's Electron binary with `--force-renderer-accessibility`, a
-private `--user-data-dir` and, as root only, `--no-sandbox`. It checks that
+private `--user-data-dir` and `--no-sandbox` (the CI runner restricts
+unprivileged user namespaces and npm's `chrome-sandbox` is not setuid). It checks that
 `inertia_app_launch` reports `transport: "accessibility"` with the native
 window, waits for text, lists the window without protected apps, takes a
 snapshot with the heading text and refs for the buttons, both text fields

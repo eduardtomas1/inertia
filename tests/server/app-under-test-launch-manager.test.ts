@@ -168,8 +168,11 @@ describe("AppUnderTestLaunchManager", () => {
     expect(options.stdio).toEqual(["ignore", "pipe", "pipe", "pipe", "pipe"]);
     const profile = join(paths.data, "app-under-test", launch.launchId);
     expect(args).toEqual(["--remote-debugging-pipe", `--user-data-dir=${profile}`, paths.project]);
-    expect((await stat(profile)).mode & 0o777).toBe(0o700);
-    expect((await stat(join(paths.data, "app-under-test"))).mode & 0o777).toBe(0o700);
+    // Windows reports synthetic POSIX modes (0o666), not the requested 0o700.
+    if (process.platform !== "win32") {
+      expect((await stat(profile)).mode & 0o777).toBe(0o700);
+      expect((await stat(join(paths.data, "app-under-test"))).mode & 0o777).toBe(0o700);
+    }
     expect(options.env).toMatchObject({
       PATH: "/usr/bin", HOME: "/home/user", DISPLAY: ":1", WAYLAND_DISPLAY: "wayland-0", ACCESSIBILITY_ENABLED: "1",
     });
@@ -873,8 +876,11 @@ describe("resolveElectronLaunchTarget", () => {
     await writeFile(join(paths.project, "node_modules", "electron", "path.txt"), "../../../bin/sh");
     await expect(resolveElectronLaunchTarget(paths.project, "linux")).rejects.toMatchObject({ code: "unavailable" });
     await writeFile(join(paths.project, "node_modules", "electron", "path.txt"), "electron");
-    await chmod(join(paths.project, "node_modules", "electron", "dist", "electron"), 0o644);
-    await expect(resolveElectronLaunchTarget(paths.project, "linux")).rejects.toMatchObject({ code: "unavailable" });
+    // Windows has no execute bit, so the non-executable refusal is POSIX-only.
+    if (process.platform !== "win32") {
+      await chmod(join(paths.project, "node_modules", "electron", "dist", "electron"), 0o644);
+      await expect(resolveElectronLaunchTarget(paths.project, "linux")).rejects.toMatchObject({ code: "unavailable" });
+    }
     await rm(join(paths.project, "node_modules"), { recursive: true });
     await expect(resolveElectronLaunchTarget(paths.project, "linux"))
       .rejects.toMatchObject({ code: "unavailable", message: expect.stringContaining("node_modules/electron") });

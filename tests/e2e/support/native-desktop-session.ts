@@ -20,7 +20,8 @@ export async function withNativeDesktopSession(run: () => Promise<void>): Promis
   const wmExited = new Promise<void>((resolve) => wm.once("close", () => resolve()));
   try {
     // Openbox must publish its EWMH state before Electron can own the foreground.
-    const deadline = performance.now() + 5000;
+    // A cold start on a loaded runner can take several seconds.
+    const deadline = performance.now() + 15_000;
     while (true) {
       try {
         const { stdout } = await runFile("xdotool", ["get_desktop"], { timeout: 500, maxBuffer: 1024 });
@@ -28,7 +29,7 @@ export async function withNativeDesktopSession(run: () => Promise<void>): Promis
         break;
       } catch (error) {
         if (performance.now() >= deadline || wm.exitCode !== null) throw new Error("Native fixture window manager did not become ready", { cause: error });
-        await delay(25);
+        await delay(250);
       }
     }
     try {

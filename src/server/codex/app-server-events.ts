@@ -1,5 +1,6 @@
 import {
   codexApprovalResult,
+  codexAutoApprovesFileChange,
   isCodexApprovalRequestMethod,
   parseCodexApprovalRequest,
 } from "./approvals";
@@ -453,6 +454,9 @@ export class CodexAppServerEvents {
         );
         this.host.cancel("malformed-protocol");
         return;
+      }
+      if (codexAutoApprovesFileChange(method, params, this.host.options)) {
+        return void this.host.writeMessage({ id, result: codexApprovalResult(parsedApproval.protocol, "approve") });
       }
       if (!this.reserveServerRequest(id)) return;
       this.pendingApprovals.set(approval.requestId, {

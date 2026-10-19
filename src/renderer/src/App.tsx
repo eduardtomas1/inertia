@@ -59,6 +59,7 @@ import { workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { activeWorkspaceProject } from "./utils/activeWorkspaceProject";
 import { type NewConversationLocation } from "./lib/newConversation";
+import { useLaunchRequests } from "./hooks/useLaunchRequests";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
@@ -663,6 +664,14 @@ export default function App(): React.JSX.Element {
         }
       });
   };
+  useLaunchRequests({
+    ready: Boolean(connection.snapshot),
+    projects: connection.snapshot?.projects ?? [],
+    openProject: (target) => createConversation(target),
+    addProject: (path) => confirmProjectImport({ path }).catch((error: unknown) => {
+      setActionError(error instanceof Error ? error.message : "The project could not be added.");
+    }),
+  });
   useGlobalShortcuts({
     keybindings: settings.keybindings,
     createConversation: () => createConversation(),

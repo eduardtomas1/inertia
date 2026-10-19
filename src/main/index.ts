@@ -146,6 +146,8 @@ import { createLifecycleNotices } from "./shutdown-notice.js";
 import { testCleanupOwners, createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 import { installedUpdateTestFixture } from "./test-installed-update.js";
 import { disableShutdownBlockingProfileFeatures } from "./chromium-profile-features.js";
+import { DETACHED_LAUNCH_ENVIRONMENT, detachedRelaunchPlan, LaunchRequestQueue, newChatLaunchRequest, relaunchDetached } from "./launch-request.js";
+import { isatty } from "node:tty";
 disableShutdownBlockingProfileFeatures(app.commandLine);
 const installedUpdateFixture = installedUpdateTestFixture();
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
@@ -427,6 +429,11 @@ function registerIpcHandlers(): void {
       }
       throw error;
     }
+  });
+
+  ipcMain.handle(IPC.takeLaunchRequests, (event, ...args) => {
+    assertTrustedIpc(event, args.length);
+    return launchRequests.take();
   });
 
   ipcMain.handle(IPC.selectDirectory, async (event, ...args) => {
@@ -1199,11 +1206,19 @@ async function bootstrap(): Promise<void> {
   liveDarwinRecovery.observe(runtimeSupervisor.snapshot(), runtimeSupervisor);
 }
 
-void startApplicationWithUpdateHandoff({
+const detachedRelaunch = detachedRelaunchPlan({ platform: process.platform, isPackaged: app.isPackaged,
+  attachedToTerminal: isatty(0) || isatty(1) || isatty(2), argv: process.argv, execPath: process.execPath, environment: process.env });
+delete process.env[DETACHED_LAUNCH_ENVIRONMENT];
+const launchRequests = new LaunchRequestQueue(() => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.launchRequestAvailable);
+});
+launchRequests.add(newChatLaunchRequest(process.argv, process.cwd()));
+void (detachedRelaunch ? relaunchDetached(detachedRelaunch, process.env, process.cwd()) : Promise.resolve(false)).then((detached) => detached ? app.exit(0) : startApplicationWithUpdateHandoff({
   application: app, platform: process.platform, environment: process.env,
   channel: releaseChannel.channel, version: app.getVersion(),
   executablePath: process.execPath, dataDirectory: configuredRuntimeDataDirectory(),
   profileDirectory: app.getPath("userData"), focusMainWindow,
+  onSecondInstance: (argv, workingDirectory) => launchRequests.add(newChatLaunchRequest(argv, workingDirectory)),
   runtimeProcessGuardianPath: resolveDesktopRuntimeProcessSafetyAssets()
     .runtimeProcessGuardianPath,
   updateInstallCoordinator: () => appUpdateInstallCoordinator,
@@ -1218,7 +1233,7 @@ void startApplicationWithUpdateHandoff({
   awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),
   cleanupFailedCandidate: runPrivilegedCleanup,
   reportCandidateFailure: (message, error) => reportMainFailure("app-update-candidate-failed", message, error),
-}).catch((error: unknown) => handleStartupFailure(error, {
+})).catch((error: unknown) => handleStartupFailure(error, {
   environment: process.env,
   recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {
     phase: "starting", message,

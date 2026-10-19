@@ -181,6 +181,13 @@ const bridge: MainWindowBridge = Object.freeze({
     return () => ipcRenderer.removeListener(IPC.runtimeReady, handler);
   },
   selectDirectory: () => ipcRenderer.invoke(IPC.selectDirectory) as Promise<string | null>,
+  takeLaunchRequests: () =>
+    ipcRenderer.invoke(IPC.takeLaunchRequests) as ReturnType<DesktopBridge["takeLaunchRequests"]>,
+  onLaunchRequest: (listener: () => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on(IPC.launchRequestAvailable, handler);
+    return () => { ipcRenderer.removeListener(IPC.launchRequestAvailable, handler); };
+  },
   selectCodexExecutable: () => ipcRenderer.invoke(IPC.selectCodexExecutable) as Promise<string | null>,
   exportRecoveryData: () =>
     ipcRenderer.invoke(IPC.exportRecoveryData) as ReturnType<

@@ -62,6 +62,7 @@ export interface AppUpdateStartupOptions {
     "exit" | "on" | "quit" | "requestSingleInstanceLock" | "whenReady"
   >;
   focusMainWindow(): void;
+  onSecondInstance?(argv: readonly string[], workingDirectory: string): void;
   updateInstallCoordinator(): {
     allowBeforeQuit(): boolean;
     retryUnconfirmedNormalShutdown?(): boolean;
@@ -88,7 +89,10 @@ export function registerApplicationLifecycle(options: AppUpdateStartupOptions): 
     options.focusMainWindow();
     options.updateInstallCoordinator()?.retryUnconfirmedNormalShutdown?.();
   };
-  application.on("second-instance", focusOrRetryShutdown);
+  application.on("second-instance", (_event, argv, workingDirectory) => {
+    if (Array.isArray(argv) && typeof workingDirectory === "string") options.onSecondInstance?.(argv, workingDirectory);
+    focusOrRetryShutdown();
+  });
   application.on("activate", focusOrRetryShutdown);
   application.on("window-all-closed", () => {
     if (options.platform !== "darwin") application.quit();

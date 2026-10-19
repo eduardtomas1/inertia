@@ -28,6 +28,17 @@ export interface ParsedCodexApprovalRequest {
   undisplayable?: true;
 }
 
+export function codexAutoApprovesFileChange(
+  method: string,
+  params: JsonObject,
+  options: { access: "supervised" | "auto-edit" | "full"; planMode: boolean },
+): boolean {
+  return method === "item/fileChange/requestApproval"
+    && options.access === "auto-edit"
+    && !options.planMode
+    && (params.grantRoot === undefined || params.grantRoot === null);
+}
+
 export function isCodexApprovalRequestMethod(method: string): boolean {
   return APPROVAL_METHODS.has(method);
 }

@@ -76,13 +76,17 @@ const budgets = {
   // x64. The surface itself is deferred and capped separately below. Phase 3
   // adds the fixed work-log wording of inertia_app_activate: 23 bytes
   // (881,035 measured on Linux x64), counted at the end.
-  mainWorkbenchFirstLoadJavaScript: 1_794 + 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 23,
+  // Merging main at 0.0.73 (morphicons 2.0.0, React 19.3.1) re-measures the
+  // merged chunks on Linux x64; the sums are not purely additive after
+  // minification: workbench 892,213, detached 683,434, core 2,323,746,
+  // App control card 7,117, project customize 12,256.
+  mainWorkbenchFirstLoadJavaScript: 1_794 + 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 23 + 470,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 1_166 + 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430,
+  detachedChatFirstLoadJavaScript: 1_166 + 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 275,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   entryCss: 241_004 + 256,
@@ -94,7 +98,7 @@ const budgets = {
   settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
-  deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591,
+  deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6,
   deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
@@ -103,26 +107,26 @@ const budgets = {
   // The App control card and its state hook load only in Devices &
   // integrations (6,013 bytes measured on Linux x64). The Keyboard and mouse
   // input row and its fixed wording add 695 bytes (7,095 measured).
-  deferredAppControlSettingsJavaScript: 6.25 * kibibyte + 695,
+  deferredAppControlSettingsJavaScript: 6.25 * kibibyte + 695 + 22,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
   // measured).
-  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23,
+  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21,
   // App under test: launches, the bounded log tail, windows and evidence load
   // only when the App surface opens; its session projection rides with it
   // (20,445 bytes measured on Linux x64). Native launches add the transport
   // label, the protected-window count and the fixed gate notices with their
   // App control link: 1,997 bytes (22,442 measured).
   deferredAppSurfaceJavaScript: 20.25 * kibibyte + 1_997 + 256,
-  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52,
+  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   // The agent app access row adds 532 bytes (17,619 measured).
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 532,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   deferredThreadActionsJavaScript: 8 * kibibyte + 75,
   // The screenshot opt-in's default preference adds 73 bytes (12,234 measured).
-  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406 + 73,
+  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406 + 73 + 22,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
@@ -163,7 +167,8 @@ const budgets = {
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
-  morphiconsJavaScript: 20 * kibibyte,
+  morphiconsJavaScript: 20 * kibibyte + 205,
+  deferredIconRegionJavaScript: 12_995,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
   // Snapshot validation, optional setup, arrival UI and persisted compaction
   // receipts bring shared core to 1,985.9 KiB on macOS ARM64; keep <2 KiB headroom.
@@ -205,7 +210,7 @@ const budgets = {
   // bytes (2,309,736 measured on Linux x64); the card itself is deferred.
   // Phase 3 adds the screenshot preference, the settings state's input field
   // and two searchable settings rows: 152 bytes (2,310,144 measured).
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 3_479 + 2_459 + 256 + 1_328 + 152,
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 3_479 + 2_459 + 256 + 1_328 + 152 + 218,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -727,6 +732,12 @@ if (entryJavaScriptClosure.has(tasksViewEntry) || mainWorkbenchJavaScriptClosure
   throw new Error("The Tasks view must remain deferred from the initial chat routes");
 }
 const deferredTasksViewJavaScriptBytes = await assetBytes(`assets/${tasksViewEntry}`);
+const iconRegionEntry = assetNames.find((name) => /^iconRegion-.*\.js$/u.test(name));
+if (!iconRegionEntry) throw new Error("Missing deferred Morphicons filled-icon region chunk");
+if (entryJavaScriptClosure.has(iconRegionEntry) || mainWorkbenchJavaScriptClosure.has(iconRegionEntry) || detachedChatJavaScriptClosure.has(iconRegionEntry)) {
+  throw new Error("The Morphicons filled-icon region code must load only when a filled icon morphs");
+}
+const deferredIconRegionJavaScriptBytes = await assetBytes(`assets/${iconRegionEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
@@ -741,6 +752,7 @@ const coreJavaScriptBytes =
   - deferredBackgroundTasksJavaScriptBytes
   - deferredAppSurfaceJavaScriptBytes
   - deferredTasksViewJavaScriptBytes
+  - deferredIconRegionJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
   - deferredReviewNoteJavaScriptBytes
   - deferredThreadActionsJavaScriptBytes
@@ -785,6 +797,7 @@ const measurements = {
   deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,
   deferredAppSurfaceJavaScript: deferredAppSurfaceJavaScriptBytes,
   deferredTasksViewJavaScript: deferredTasksViewJavaScriptBytes,
+  deferredIconRegionJavaScript: deferredIconRegionJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,
   deferredCliConversationImportJavaScript: deferredCliConversationImportJavaScriptBytes,
   deferredReviewNoteJavaScript: deferredReviewNoteJavaScriptBytes,

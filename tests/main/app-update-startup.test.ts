@@ -505,6 +505,26 @@ describe("app update startup coordinator", () => {
     expect(retryUnconfirmedNormalShutdown).toHaveBeenCalledOnce();
   });
 
+  it("hands a second instance's arguments and working directory to the launch handler before focusing", async () => {
+    const application = applicationFixture(true, []);
+    const focusMainWindow = vi.fn();
+    const onSecondInstance = vi.fn();
+    const fixture = await windowsFixture();
+    registerApplicationLifecycle(startupOptions(
+      fixture,
+      application.application,
+      { platform: "linux", focusMainWindow, onSecondInstance, updateInstallCoordinator: () => null },
+    ));
+    const secondInstance = application.listeners.get("second-instance")?.[0] as
+      ((event: unknown, argv?: unknown, workingDirectory?: unknown) => void) | undefined;
+    secondInstance?.({}, ["/opt/Inertia", "--new-chat", "."], "/work/project");
+    expect(onSecondInstance).toHaveBeenCalledExactlyOnceWith(["/opt/Inertia", "--new-chat", "."], "/work/project");
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+    secondInstance?.({});
+    expect(onSecondInstance).toHaveBeenCalledOnce();
+    expect(focusMainWindow).toHaveBeenCalledTimes(2);
+  });
+
   it("retries a retained normal shutdown from a second instance on every platform", async () => {
     const application = applicationFixture(true, []);
     const focusMainWindow = vi.fn();

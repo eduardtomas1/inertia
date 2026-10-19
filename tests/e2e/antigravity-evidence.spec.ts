@@ -229,8 +229,8 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
   }
   const turns = entries.filter(({ args }) => args[0] === "--input-format");
   expect(turns.map(({ args }) => args)).toEqual([
-    ["--input-format", "stream-json", "--output-format", "stream-json"],
-    ["--input-format", "stream-json", "--output-format", "stream-json", "--conversation", SYNTHETIC_CONVERSATION],
+    ["--input-format", "stream-json", "--output-format", "stream-json", "--mode", "accept-edits"],
+    ["--input-format", "stream-json", "--output-format", "stream-json", "--conversation", SYNTHETIC_CONVERSATION, "--mode", "accept-edits"],
   ]);
   expect(conversationId).not.toBe("");
   expect(app.rendererErrors).toEqual([]);

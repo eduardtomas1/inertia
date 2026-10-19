@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseClaudeRateLimitEvent,
+  parseClaudeRateLimitEvents,
   parseClaudeUsage,
 } from "../../src/server/provider/claude-usage";
 import { parseClaudeRateLimits } from "../../src/server/provider/claude-agent-sdk-metadata";
@@ -342,6 +343,34 @@ describe("Claude Agent SDK usage accounting", () => {
     expect(parseClaudeRateLimitEvent({
       rate_limit_info: { rateLimitType: "five_hour" },
     })).toBeNull();
+  });
+
+  it("reads every unified window from a current Claude Code rate-limit event", () => {
+    expect(parseClaudeRateLimitEvents({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "allowed",
+        resetsAt: 1_792_417_800,
+        rateLimitType: "five_hour",
+        overageStatus: "rejected",
+        isUsingOverage: false,
+        unifiedWindows: {
+          five_hour: { utilization: 0.18, resetsAt: 1_792_417_800 },
+          seven_day: { utilization: 0.28, resetsAt: 1_792_854_000 },
+          seven_day_opus: { utilization: "unknown" },
+        },
+      },
+    })).toEqual([
+      { id: "claude:five_hour", label: "Claude · 5 hour", usedPercent: expect.closeTo(18), remainingPercent: expect.closeTo(82), windowMinutes: 300, resetsAt: "2026-10-19T13:50:00.000Z" },
+      { id: "claude:seven_day", label: "Claude · 7 day", usedPercent: expect.closeTo(28), remainingPercent: expect.closeTo(72), windowMinutes: 10_080, resetsAt: "2026-10-24T15:00:00.000Z" },
+    ]);
+  });
+
+  it("falls back to the single window of older rate-limit events and ignores events without utilization", () => {
+    expect(parseClaudeRateLimitEvents({
+      rate_limit_info: { rateLimitType: "five_hour", utilization: 0.5, resetsAt: 1_893_456_000 },
+    })).toEqual([expect.objectContaining({ id: "claude:five_hour", usedPercent: 50 })]);
+    expect(parseClaudeRateLimitEvents({ rate_limit_info: { rateLimitType: "five_hour", unifiedWindows: {} } })).toEqual([]);
   });
 
   it.each([0, 0.725, 1])("agrees with fetched quota percentages for live fraction %s", (fraction) => {

@@ -563,6 +563,11 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export interface LaunchProjectRequest {
+  path: string;
+  realPath: string | null;
+}
+
 export interface DesktopBridge {
   /** Identifies the main workbench or one main-owned fixed-chat renderer. */
   getWindowContext: () => Promise<DesktopWindowContext>;
@@ -607,6 +612,8 @@ export interface DesktopBridge {
   /** Wakes a reconnect attempt without exposing the runtime URL capability. */
   onRuntimeReady: (listener: () => void) => () => void;
   selectDirectory: () => Promise<string | null>;
+  takeLaunchRequests: () => Promise<LaunchProjectRequest[]>;
+  onLaunchRequest: (listener: () => void) => () => void;
   selectCodexExecutable: () => Promise<string | null>;
   /** Writes a bounded transcript-only recovery export chosen by the user. */
   exportRecoveryData: () => Promise<DatabaseRecoveryExportResult>;

@@ -12,6 +12,7 @@ export const loadDailyWorkDialog = createSurfaceLoader(async () => ({
   default: (await import("./DailyWorkDialog")).DailyWorkDialog,
 }));
 export const loadAttachmentsSurface = createSurfaceLoader(() => import("./AttachmentsSurface"));
+export const loadAppSurface = createSurfaceLoader(() => import("./AppSurface"));
 export const loadBackgroundTasksSurface = createSurfaceLoader(() => import("./BackgroundTasksSurface"));
 export const loadFilesPanel = createSurfaceLoader(() => import("./FilesPanel"));
 export const loadGoalPanel = createSurfaceLoader(() => import("./GoalPanel"));
@@ -62,6 +63,8 @@ export function prefetchWorkspaceTool(tab: WorkspacePanelTab): void {
     void loadTerminalPanel();
   } else if (tab === "attachments") {
     void loadAttachmentsSurface();
+  } else if (tab === "app") {
+    void loadAppSurface();
   } else if (tab === "usage") {
     void loadUsageSurface();
   } else if (tab === "agents") {

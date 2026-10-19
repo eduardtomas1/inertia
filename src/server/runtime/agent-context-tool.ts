@@ -107,7 +107,12 @@ function failure(code: string, message: string): ProviderHostToolResult {
   return { success: false, text: JSON.stringify({ error: { code, message } }) };
 }
 
-function imagesAccepted(turn: AgentTurn, providers: readonly ProviderInfo[]): boolean {
+/**
+ * Whether the turn's exact route takes images in host-tool results: native
+ * Claude and Codex profiles whose model accepts image input. Shared by every
+ * host tool that may return images.
+ */
+export function hostToolImagesAccepted(turn: AgentTurn, providers: readonly ProviderInfo[]): boolean {
   if (turn.providerId !== "claude" && turn.providerId !== "codex") return false;
   if (turn.modelSelection.backendProfileId !== providerNativeBackendProfile(turn.providerId).id) {
     return false;
@@ -251,7 +256,7 @@ export class AgentContextTool {
   ): Promise<{ images: ProviderHostToolImage[]; notes: AgentContextImageNote[] }> {
     const images: ProviderHostToolImage[] = [];
     const notes: AgentContextImageNote[] = [];
-    const accepted = imagesAccepted(turn, this.dependencies.providerInfo());
+    const accepted = hostToolImagesAccepted(turn, this.dependencies.providerInfo());
     let totalBytes = 0;
     for (const attachment of attachments) {
       const name = scrubMetadata(attachment.name, "Attachment", 200);

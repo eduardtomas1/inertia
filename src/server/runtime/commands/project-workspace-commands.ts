@@ -64,6 +64,11 @@ export interface ProjectWorkspaceCommandDependencies {
   workspacePath(projectId: string, conversationId?: string): string;
   rememberDeletedConversation(conversationId: string): void;
   forgetRemoteTranscript(conversationId: string): void;
+  /**
+   * Stops a chat's App launches and forgets its App session; false when a
+   * launch's process tree could not be proved stopped.
+   */
+  clearAppUnderTestSession?(conversationId: string): Promise<boolean>;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
   reportTerminalProviderResumeRejection?(
@@ -230,6 +235,18 @@ export function createProjectWorkspaceCommandHandler(
               && error.message.includes("Cancel the active Duo launch")
             ) throw new RuntimeRequestError(error.message);
             throw error;
+          }
+          // Apps under test run from the project's checkouts: every one must
+          // be proved stopped before the project goes.
+          const clearAppUnderTestSession = dependencies.clearAppUnderTestSession;
+          if (clearAppUnderTestSession) {
+            const cleared = await Promise.all(latestConversations.map(({ id }) =>
+              clearAppUnderTestSession(id)));
+            if (cleared.includes(false)) {
+              throw new RuntimeRequestError(
+                "Inertia could not confirm that this project's apps under test stopped. Stop them from the App surface, then remove the project again.",
+              );
+            }
           }
           const attachmentIds = latestConversations.flatMap(({ id }) =>
             dependencies.store.attachments(id).map(({ id: attachmentId }) =>

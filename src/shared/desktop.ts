@@ -654,6 +654,8 @@ export interface DesktopBridge {
   ) => Promise<SendDiscordReleaseInfoResult>;
   snapshot: (request: import("./snapshots").SnapshotRequest) => Promise<import("./snapshots").SnapshotState>;
   onSnapshot: (listener: (event: import("./snapshots").SnapshotDelivery) => void) => () => void;
+  /** App control card: the native window control state, or one macOS privacy pane opened on click. */
+  appControl: (request: import("./app-control-settings").AppControlSettingsRequest) => Promise<import("./app-control-settings").AppControlSettingsState>;
   selectAttachments: (
     mode?: AttachmentPickerMode,
   ) => Promise<DesktopAttachmentImportSelection | null>;

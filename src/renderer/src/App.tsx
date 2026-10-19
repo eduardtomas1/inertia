@@ -724,6 +724,9 @@ export default function App(): React.JSX.Element {
   const openBackendSetup = useCallback((profileId: string) => {
     openSettings({ section: "agents", anchor: "model-backends", profileId });
   }, [openSettings]);
+  const openAppControlSettings = useCallback(() => {
+    openSettings({ section: "devices", anchor: "app-control-access" });
+  }, [openSettings]);
   const openProjectSettings = useCallback((projectId: string) => {
     openSettings({ section: "projects", projectId });
   }, [openSettings]);
@@ -784,6 +787,7 @@ export default function App(): React.JSX.Element {
       openProviderSetup,
       openBackendSetup,
       openSettings: () => openSettings(),
+      openAppControlSettings,
       openUsageView: () => navigateToView("usage"),
       openConversation: (conversationId: string) => {
         const target = connection.snapshot?.conversations.find(({ id }) => id === conversationId);
@@ -905,6 +909,7 @@ export default function App(): React.JSX.Element {
         openProviderSetup,
         openBackendSetup,
         openSettings: () => openSettings(),
+        openAppControlSettings,
         openUsageView: () => navigateToView("usage"),
         openProjectPath,
         sendMessageToConversation,

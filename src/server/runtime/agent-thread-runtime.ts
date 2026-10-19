@@ -20,6 +20,7 @@ import {
 import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client";
+import type { AppUnderTestLaunchManager } from "./app-under-test/launch-manager";
 
 interface AgentThreadRuntimeDependencies {
   store: RuntimeStore;
@@ -32,6 +33,7 @@ interface AgentThreadRuntimeDependencies {
   pendingInputs: Map<string, AgentInputRequest>;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
+  appUnderTest?: AppUnderTestLaunchManager;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;

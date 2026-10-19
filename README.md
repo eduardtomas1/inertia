@@ -40,6 +40,7 @@ When a stopped chat has a reported subscription reset time, the composer offers 
 - **Bring CLI conversations into Inertia.** In **Settings → Projects → CLI conversations**, choose **Import conversations…** to preview and import Codex or Claude Code text history for the selected project folder. The chat resumes its original native session; close that session in your terminal before continuing here. Archived Codex sessions continue in a new session with the imported messages as context. Already imported sessions are marked, including after restarting Inertia.
 - **See visual replies.** Agents can answer with a chart, table, diagram, or mockup that appears in the chat above their reply, themed like the app and sandboxed so it cannot fetch from the network or reach your files. Open it full size from the page. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
 - **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
+- **Run and test your app.** Open **App** in **Open a surface** to launch the project's Electron app with a throwaway profile, or one of its reviewed actions, and follow its logs, windows and local evidence. Agents use the same launches to read the app's console, click, type and check their fixes, also in the native windows of an action's app through the system's accessibility API. A project can let them see reduced, masked screenshots of the app. They ask before every launch except in Full Access, because the app runs project code with your permissions, and before every action in Supervised chats; they cannot run a command of their own, and their App tools act only on the app Inertia launched. See [App under test](docs/APP_UNDER_TEST.md).
 - **Open the tools you need.** Choose Terminal in **Open a surface** for multiple terminal tabs and splits, or use the bottom dock. Find sent files in the dedicated **Attachments** surface. New chats start with the panel closed; each chat remembers its own surfaces and visibility.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
@@ -47,6 +48,10 @@ When a stopped chat has a reported subscription reset time, the composer offers 
 - **Optional desktop mascot.** Enable it in **Settings → Notifications → Desktop mascot** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. The bubble shows the chat that needs you most and lists up to five other active or unread chats; click one to open it. Hiding lasts until you choose **Unhide** in Settings, **Show mascot** in the Window menu or the macOS Dock menu, or restart Inertia. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two project conversations with independent context and composers](docs/screenshots/inertia-split-workspace.png)
+
+Launch the app you are building from the **App** surface and keep its log, windows and evidence beside the chat.
+
+![The App surface with a running Electron app, its log and its window](docs/screenshots/inertia-app-under-test-dark.png)
 
 Review changed files on the current branch, mark completed hunks, and commit only the paths you choose.
 

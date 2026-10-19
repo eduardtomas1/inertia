@@ -142,6 +142,7 @@ export function createRuntimeProcessRecord(options: {
     credentialRequestIds: new Set(),
     secureFileRequestIds: new Set(),
     agentBrowserRequestIds: new Set(),
+    appControlRequestIds: new Set(),
     attachmentRequestIds: new Set(),
     attachmentClaimCounts: new Map(),
     deferredAttachmentReleaseIds: new Set(),

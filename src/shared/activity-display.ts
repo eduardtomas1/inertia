@@ -9,6 +9,21 @@ const HOST_TOOL_TITLE =
   /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-manager(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
 const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
   inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
+  // App under test. Fixed wording only: never the window title, typed text,
+  // control names or app output, which are untrusted.
+  inertia_app_launch: ["Launching the app", "Launched the app", "Could not launch the app"],
+  inertia_app_status: ["Checking the app", "Checked the app", "Could not check the app"],
+  inertia_app_logs: ["Reading app logs", "Read app logs", "Could not read app logs"],
+  inertia_app_stop: ["Stopping the app", "Stopped the app", "Could not stop the app"],
+  inertia_app_windows: ["Listing app windows", "Listed app windows", "Could not list app windows"],
+  inertia_app_snapshot: ["Inspecting an app window", "Inspected an app window", "Could not inspect an app window"],
+  inertia_app_click: ["Clicking in the app", "Clicked in the app", "Could not click in the app"],
+  inertia_app_type: ["Typing in the app", "Typed in the app", "Could not type in the app"],
+  inertia_app_press: ["Pressing a key in the app", "Pressed a key in the app", "Could not press a key in the app"],
+  inertia_app_scroll: ["Scrolling the app", "Scrolled the app", "Could not scroll the app"],
+  inertia_app_wait_for: ["Waiting in the app", "Waited in the app", "Could not wait in the app"],
+  inertia_app_screenshot: ["Capturing app evidence", "Captured app evidence", "Could not capture app evidence"],
+  inertia_app_activate: ["Bringing the app to the front", "Brought the app to the front", "Could not bring the app to the front"],
 };
 
 export function unwrapShellCommand(command: string): string {

@@ -59,6 +59,7 @@ interface RuntimeClientSubscription extends RuntimeDetailSubscription {
 export class RuntimeSyncHub<Socket> {
   private readonly clients = new Map<Socket, RuntimeClientSubscription>();
   private readonly pendingMessageFocus = new Map<string, PendingMessageFocus>();
+  private readonly subscriptionListeners = new Set<() => void>();
 
   constructor(
     private readonly send: (
@@ -71,6 +72,30 @@ export class RuntimeSyncHub<Socket> {
 
   get connectionCount(): number {
     return this.clients.size;
+  }
+
+  /** Whether any connected socket is subscribed to this chat's detail. */
+  hasConversationSubscriber(conversationId: string): boolean {
+    for (const subscription of this.clients.values()) {
+      if (subscription.conversationIds.includes(conversationId)) return true;
+    }
+    return false;
+  }
+
+  /** Calls `listener` after a socket connected, changed its chat subscriptions or disconnected. */
+  onConversationSubscriptionsChanged(listener: () => void): () => void {
+    this.subscriptionListeners.add(listener);
+    return () => { this.subscriptionListeners.delete(listener); };
+  }
+
+  private subscriptionsChanged(): void {
+    for (const listener of this.subscriptionListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener failure must not break socket bookkeeping.
+      }
+    }
   }
 
   /** Ephemeral navigation only reaches the native window owning this chat. */
@@ -210,6 +235,7 @@ export class RuntimeSyncHub<Socket> {
       type: "runtime.sync.completed",
       sync: this.sequencer.cursor(),
     });
+    if (subscription.conversationIds.length > 0) this.subscriptionsChanged();
     if (authority.kind === "detached-chat" && this.clients.has(socket)) {
       const pending = this.pendingMessageFocus.get(authority.conversationId);
       if (pending && pending.expires > Date.now()) {
@@ -239,10 +265,12 @@ export class RuntimeSyncHub<Socket> {
       ];
       return;
     }
+    const before = subscription.conversationIds.join(",");
     subscription.mountedConversations[owner] = conversationId;
     subscription.conversationIds = RUNTIME_DETAIL_SUBSCRIPTION_OWNERS.map((paneOwner) =>
       subscription.mountedConversations[paneOwner]).filter((id, index, ids): id is string =>
       id !== null && ids.indexOf(id) === index);
+    if (subscription.conversationIds.join(",") !== before) this.subscriptionsChanged();
   }
 
   /**
@@ -268,11 +296,24 @@ export class RuntimeSyncHub<Socket> {
   }
 
   disconnect(socket: Socket): void {
+    const subscription = this.clients.get(socket);
     this.clients.delete(socket);
+    if (subscription && subscription.conversationIds.length > 0) this.subscriptionsChanged();
   }
 
   broadcast(event: RuntimeMutationEvent): void {
     this.broadcastCommitted(() => event);
+  }
+
+  /**
+   * Unsequenced, high-volume chat detail (App log lines): only sockets whose
+   * subscription includes the exact chat receive it, and it never enters the
+   * replay log. A reconnecting client rereads authoritative state instead.
+   */
+  sendToConversationSubscribers(conversationId: string, event: ServerEvent): void {
+    for (const [socket, subscription] of this.clients) {
+      if (subscription.conversationIds.includes(conversationId)) this.send(socket, event);
+    }
   }
 
   broadcastSnapshot(snapshot: (sync: RuntimeSyncCursor) => AppSnapshot): void {
@@ -284,7 +325,9 @@ export class RuntimeSyncHub<Socket> {
 
   terminateAll(terminate: (socket: Socket) => void): void {
     for (const socket of this.clients.keys()) terminate(socket);
+    const subscribed = [...this.clients.values()].some(({ conversationIds }) => conversationIds.length > 0);
     this.clients.clear();
+    if (subscribed) this.subscriptionsChanged();
   }
 
   private broadcastCommitted(

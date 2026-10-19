@@ -136,6 +136,36 @@ function fixture() {
 }
 
 describe("runtime sync hub", () => {
+  it("tells whether a chat has a live subscriber and reports only real subscription changes", () => {
+    const runtime = fixture();
+    const changed = vi.fn();
+    const stop = runtime.hub.onConversationSubscriptionsChanged(changed);
+    runtime.hub.connect("main", { kind: "none" }, { snapshot, approvals: [], inputs: [], plans: [] });
+    // A fresh socket without chats changes nobody's interest.
+    expect(changed).not.toHaveBeenCalled();
+    expect(runtime.hub.hasConversationSubscriber(CONVERSATION_A)).toBe(false);
+    runtime.hub.setConversationSubscription("main", "primary", CONVERSATION_A);
+    expect(runtime.hub.hasConversationSubscriber(CONVERSATION_A)).toBe(true);
+    expect(changed).toHaveBeenCalledTimes(1);
+    runtime.hub.setConversationSubscription("main", "primary", CONVERSATION_A);
+    expect(changed).toHaveBeenCalledTimes(1);
+    runtime.hub.setConversationSubscription("main", "primary", CONVERSATION_B);
+    expect(runtime.hub.hasConversationSubscriber(CONVERSATION_A)).toBe(false);
+    expect(runtime.hub.hasConversationSubscriber(CONVERSATION_B)).toBe(true);
+    expect(changed).toHaveBeenCalledTimes(2);
+    runtime.hub.disconnect("main");
+    expect(runtime.hub.hasConversationSubscriber(CONVERSATION_B)).toBe(false);
+    expect(changed).toHaveBeenCalledTimes(3);
+    // A failing listener never breaks the hub; an unsubscribed one hears nothing more.
+    stop();
+    runtime.hub.onConversationSubscriptionsChanged(() => { throw new Error("listener"); });
+    runtime.hub.connect("detached", { kind: "none" }, { snapshot, approvals: [], inputs: [], plans: [] }, {
+      kind: "detached-chat", conversationId: CONVERSATION_C, clientId: "detached",
+    });
+    expect(runtime.hub.hasConversationSubscriber(CONVERSATION_C)).toBe(true);
+    expect(changed).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps four live pane subscriptions independent when a pane closes", () => {
     const runtime = fixture();
     const ids = [CONVERSATION_A, CONVERSATION_B, CONVERSATION_C,

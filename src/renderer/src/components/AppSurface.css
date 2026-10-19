@@ -1,0 +1,449 @@
+.app-surface .workspace-surface-scroll {
+  gap: 16px;
+}
+
+.app-surface-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.app-surface-notice,
+.app-surface-error {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.app-surface-error {
+  color: var(--danger);
+}
+
+.app-surface-section-header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+}
+
+.app-surface-section-header > h3 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-surface-section-header > small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.app-surface-launches > h3:focus-visible {
+  border-radius: var(--radius-xs);
+}
+
+.app-surface-empty {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.app-surface-empty strong {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.app-surface-empty span {
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.app-surface-launch-list,
+.app-surface-window-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-surface-launch {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.app-surface-launch:first-child {
+  padding-top: 0;
+}
+
+.app-surface-launch-main {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-surface-launch-main > strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-surface-launch-state {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.app-surface-launch[data-state="running"] .app-surface-launch-state {
+  color: var(--status-completed);
+}
+
+.app-surface-launch[data-state="starting"] .app-surface-launch-state,
+.app-surface-launch[data-state="stopping"] .app-surface-launch-state {
+  color: var(--status-working);
+}
+
+.app-surface-launch-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-surface-launch-meta > div {
+  display: flex;
+  gap: 4px;
+}
+
+.app-surface-launch-meta dt {
+  color: var(--text-faint);
+}
+
+.app-surface-launch-meta dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.app-surface-launch-failure {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.app-surface-confirm {
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+  font-size: var(--text-xs);
+}
+
+.workspace-surface-button.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  color: var(--danger);
+}
+
+.workspace-surface-button.is-danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.app-surface-menu-anchor {
+  position: relative;
+}
+
+.app-surface-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--popover-offset));
+  left: 0;
+  display: grid;
+  min-width: 200px;
+  max-width: min(320px, 80vw);
+  max-height: 280px;
+  gap: 1px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.app-surface-menu > button {
+  display: flex;
+  min-width: 0;
+  min-height: var(--menu-item-height);
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.app-surface-menu > button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-surface-menu > button:is(:hover, :focus-visible) {
+  background: var(--fill);
+}
+
+.app-surface-select,
+.app-surface-input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: var(--fill);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.app-surface-select {
+  max-width: 60%;
+}
+
+.app-surface-log-tools {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.app-surface-input {
+  flex: 1 1 140px;
+}
+
+.app-surface-log {
+  position: relative;
+  min-height: 120px;
+  height: clamp(160px, 36vh, 360px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  color: var(--terminal-fg);
+  background: var(--terminal-bg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  overscroll-behavior: contain;
+  scroll-behavior: auto;
+}
+
+.app-surface-log > ol {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+
+.app-surface-log-line {
+  display: grid;
+  grid-template-columns: 8ch minmax(0, 1fr);
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.app-surface-log-line::selection,
+.app-surface-log-line *::selection {
+  background: var(--terminal-selection);
+}
+
+.app-surface-log-stream {
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.app-surface-log-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.app-surface-log-line[data-stream="stderr"] .app-surface-log-stream,
+.app-surface-log-line[data-stream="exception"] .app-surface-log-stream,
+.app-surface-log-line[data-stream="crash"] .app-surface-log-stream {
+  color: var(--danger);
+}
+
+.app-surface-log-line[data-stream="crash"] .app-surface-log-text,
+.app-surface-log-line[data-stream="exception"] .app-surface-log-text {
+  color: var(--danger);
+}
+
+.app-surface-log-line[data-stream="console"] .app-surface-log-stream {
+  color: var(--blue);
+}
+
+.app-surface-log-line[data-stream="inertia"] .app-surface-log-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.app-surface-log-marker {
+  margin: 2px 8px;
+  padding: 1px 0;
+  border-block: 1px dashed var(--line);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  text-align: center;
+}
+
+.app-surface-log-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+
+.app-surface-log-count {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.app-surface-window-list > li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.app-surface-window-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.app-surface-window-copy strong,
+.app-surface-window-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-surface-window-copy strong {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+.app-surface-window-copy small,
+.app-surface-window-flags small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.app-surface-window-flags {
+  display: flex;
+  gap: 6px;
+}
+
+.app-surface-evidence .browser-evidence-list {
+  overflow: visible;
+  border-top: 1px solid var(--line-soft);
+}
+
+.app-surface-evidence .browser-evidence-entry {
+  padding-inline: 0;
+}
+
+.app-surface-thumbnail {
+  display: grid;
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  margin: 4px 0 0;
+}
+
+.app-surface-thumbnail img {
+  display: block;
+  width: auto;
+  max-width: min(256px, 100%);
+  height: auto;
+  max-height: 160px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--paper);
+  object-fit: contain;
+}
+
+.app-surface-thumbnail figcaption {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-surface-log {
+    scroll-behavior: auto;
+  }
+
+  .app-surface-menu > button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .app-surface-log,
+  .app-surface-menu,
+  .app-surface-thumbnail img {
+    border-color: CanvasText;
+  }
+
+  .app-surface-menu > button:is(:hover, :focus-visible) {
+    outline: 1px solid Highlight;
+  }
+}
+
+.app-surface-access-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 8px;
+}
+
+.app-surface-muted {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}

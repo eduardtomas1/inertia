@@ -28,6 +28,7 @@ import { validNotificationSettings } from "./notification-settings-schema";
 import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
+import { appUnderTestLogsAppendedEventSchema, appUnderTestMutationEventSchema, appUnderTestRequestResultSchema, appUnderTestWindowsUpdatedEventSchema } from "../app-under-test";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -1017,6 +1018,10 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   if (!record(value) || typeof value.type !== "string") return false;
   const type = value.type as RuntimeMutationEvent["type"];
   switch (type) {
+    case "app-under-test.launch.updated":
+    case "app-under-test.evidence.appended":
+    case "app-under-test.session.cleared":
+      return appUnderTestMutationEventSchema.safeParse(value).success;
     case "snapshot.updated":
       return appSnapshot(value.snapshot);
     case "conversation.shell.updated": {
@@ -1159,6 +1164,10 @@ const REQUEST_RESULT_VALIDATORS = {
     gitDiff(value.diff) && reversalOperation(value.operation),
   "review.selection.answer": (value) => reviewSelectionAnswer(value.answer),
   "review.summary": (value) => reviewSummary(value.summary),
+  "app-under-test.launches": (value) => appUnderTestRequestResultSchema.safeParse(value).success,
+  "app-under-test.launch": (value) => appUnderTestRequestResultSchema.safeParse(value).success,
+  "app-under-test.logs": (value) => appUnderTestRequestResultSchema.safeParse(value).success,
+  "app-under-test.evidence": (value) => appUnderTestRequestResultSchema.safeParse(value).success,
 } satisfies Record<RequestResultKind, (value: UnknownRecord) => boolean>;
 function requestResult(value: unknown): value is RequestResult {
   if (!recordWithStrings(value, "kind")) return false;
@@ -1218,6 +1227,9 @@ function isServerEvent(value: unknown): value is ServerEvent {
                 value.providerResumeConversationId as string,
               )
         );
+    case "app-under-test.logs.appended":
+      return appUnderTestLogsAppendedEventSchema.safeParse(value).success;
+    case "app-under-test.windows.updated": return appUnderTestWindowsUpdatedEventSchema.safeParse(value).success;
     case "terminal.output":
       return stringField(value, "terminalId") && stringField(value, "data");
     case "terminal.exit":

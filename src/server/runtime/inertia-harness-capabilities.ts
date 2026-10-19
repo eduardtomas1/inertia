@@ -5,6 +5,10 @@ import {
   AGENT_BROWSER_TOOL_DEFINITIONS,
   RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "./agent-browser-host-tools";
+import {
+  APP_UNDER_TEST_INSTRUCTION,
+  APP_UNDER_TEST_TOOL_DEFINITIONS,
+} from "./app-under-test/host-tools";
 import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
 import {
   HarnessCapabilityRegistry,
@@ -12,6 +16,10 @@ import {
   type HarnessCapabilityPack,
 } from "./harness-capabilities";
 import type { HiddenProviderInstruction } from "./turns/request-context";
+import {
+  APP_UNDER_TEST_PACK_ID,
+  APP_UNDER_TEST_PACK_REVISION,
+} from "../../shared/app-under-test";
 
 const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
   label: "inertia-orchestration",
@@ -40,6 +48,8 @@ const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
 interface InertiaHarnessCapabilityInput {
   orchestrationTools: readonly ProviderHostToolDefinition[];
   browserEnabled: boolean;
+  /** Registered only where a runtime-owned launch manager exists. */
+  appUnderTestEnabled?: boolean;
   invoke: HarnessCapabilityTool["invoke"];
 }
 
@@ -87,6 +97,26 @@ export function createInertiaHarnessCapabilities(
         "frontend-audit",
         "semantic-browser-loop",
         "current-viewport-regression",
+      ],
+    },
+  });
+  if (input.appUnderTestEnabled) packs.push({
+    id: APP_UNDER_TEST_PACK_ID,
+    revision: APP_UNDER_TEST_PACK_REVISION,
+    title: "App under test",
+    summary: "Launch, observe and drive the desktop app this chat is building, with bounded logs, owned windows and local-only evidence.",
+    instructions: [APP_UNDER_TEST_INSTRUCTION],
+    tools: APP_UNDER_TEST_TOOL_DEFINITIONS.map((definition) => ({
+      definition,
+      invoke: input.invoke,
+    })),
+    evaluation: {
+      tags: ["app-under-test", "desktop", "logs", "process"],
+      evidenceKinds: ["app-evidence", "host-tool-result"],
+      scenarioIds: [
+        "owned-launch-lifecycle",
+        "bounded-log-tail",
+        "exact-window-control",
       ],
     },
   });

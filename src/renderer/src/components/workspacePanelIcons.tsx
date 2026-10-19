@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   FileDiff,
   Flag,
   Folder,
@@ -17,6 +18,7 @@ export const surfaceIcons: Record<WorkspacePanelTab, React.JSX.Element> = {
   preview: <Globe size={14} aria-hidden="true" />,
   terminal: <Terminal size={14} aria-hidden="true" />,
   attachments: <Paperclip size={14} aria-hidden="true" />,
+  app: <AppWindow size={14} aria-hidden="true" />,
   agents: <ListTree size={14} aria-hidden="true" />,
   usage: <Gauge size={14} aria-hidden="true" />,
   goal: <Flag size={14} aria-hidden="true" />,

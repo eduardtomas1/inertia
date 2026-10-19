@@ -634,6 +634,9 @@ describe("mascot message lines", () => {
     expect(line("mcp__inertia-chat-manager__inertia_render_html")).toBe("Rendering a page");
     expect(line("inertia-chat-manager_inertia_render_html", "completed")).toBe("Rendered a page");
     expect(line("inertia_render_html", "failed")).toBe("Could not render a page");
+    expect(line("mcp__inertia-chat-manager__inertia_app_launch")).toBe("Launching the app");
+    expect(line("inertia_app_click", "completed")).toBe("Clicked in the app");
+    expect(line("inertia-chat-manager_inertia_app_logs", "failed")).toBe("Could not read app logs");
   });
 
   it("shows the command the work log shows for heredocs, a leading cd into a quoted path and escaped quotes", () => {

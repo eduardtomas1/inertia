@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
+  <title>App under test fixture</title>
+  <style>body { font: 14px sans-serif; margin: 16px; } label { display: block; margin: 8px 0; }</style>
+</head>
+<body>
+  <h1>App under test fixture</h1>
+  <p id="status">Waiting for input</p>
+  <button id="change" type="button">Change text</button>
+  <label>Name <input id="name" type="text"></label>
+  <label>Password <input id="password" type="password"></label>
+  <button id="confirm" type="button">Delete draft</button>
+  <p id="confirmed">Draft kept</p>
+  <a href="#details">Details</a>
+  <script src="renderer.js"></script>
+</body>
+</html>

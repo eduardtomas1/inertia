@@ -21,6 +21,7 @@ export const DESKTOP_IPC = {
   sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   snapshot: "inertia:snapshot",
   snapshotReady: "inertia:snapshot-ready",
+  appControl: "inertia:app-control",
   selectAttachments: "inertia:select-attachments",
   beginAttachmentImport: "inertia:begin-attachment-import",
   importAttachments: "inertia:import-attachments",

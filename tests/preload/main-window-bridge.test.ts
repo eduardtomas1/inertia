@@ -39,6 +39,7 @@ describe("main window preload", () => {
     expect(Object.isFrozen(bridge)).toBe(true);
     expect(Object.keys(bridge).sort()).toEqual([
       "acknowledgeDetachedChatDraft",
+      "appControl",
       "approvePrivateConnectPairing",
       "beginAttachmentImport",
       "cancelAppUpdateDownload",

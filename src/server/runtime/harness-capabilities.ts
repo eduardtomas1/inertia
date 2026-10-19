@@ -24,6 +24,7 @@ const INSTRUCTION_LABEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const TOOL_NAME = /^inertia_[a-z0-9_]{1,119}$/u;
 const SAFE_METADATA = /^[^\u0000-\u001f\u007f]+$/u;
 const EVIDENCE_KINDS = new Set<HarnessCapabilityEvaluation["evidenceKinds"][number]>([
+  "app-evidence",
   "browser-evidence",
   "git-artifact",
   "host-tool-result",
@@ -38,6 +39,7 @@ export interface HarnessCapabilityContext {
 export interface HarnessCapabilityEvaluation {
   tags: readonly string[];
   evidenceKinds: readonly (
+    | "app-evidence"
     | "browser-evidence"
     | "git-artifact"
     | "host-tool-result"

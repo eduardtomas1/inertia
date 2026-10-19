@@ -102,6 +102,7 @@ import {
 } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
+import { createAppUnderTestRuntimeWiring } from "./runtime/app-under-test/runtime-wiring";
 import {
   attachRuntimeWebSocketBoundary,
 } from "./runtime/websocket-boundary";
@@ -171,6 +172,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
+  // Set once the App under test wiring exists; turn hooks that fire earlier have no launches to wake.
+  let appUnderTestWatchChanged: ((conversationId: string) => void) | null = null;
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
@@ -642,7 +645,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
       harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
-      hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
+      hostToolsForTurn: (input) => {
+        const bridge = agentThreads?.manager.bridgeFor(input);
+        // A turn that can call App tools keeps its launches' native windows polled.
+        appUnderTestWatchChanged?.(input.conversation.id);
+        return bridge;
+      },
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
@@ -674,6 +682,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
+        (settled) => appUnderTestWatchChanged?.(settled.conversationId),
       ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
     },
@@ -682,12 +691,24 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       systemBootId: options.systemBootId,
     },
   );
+  // App-under-test processes belong to this runtime, like terminals.
+  const appUnderTest = createAppUnderTestRuntimeWiring({
+    dataDirectory, store, closed: () => closed, broadcast, runtimeSync, send,
+    onCleanupUnconfirmed: options.onOwnedProcessCleanupUnconfirmed, appControl: options.appControl,
+    turnActive: (conversationId) => turns.isActive(conversationId),
+  });
+  appUnderTestWatchChanged = (conversationId) => appUnderTest.launches.watchChanged(conversationId);
+  const forgetConversationRuntimeState = (conversationId: string): void => {
+    privateConnectTranscriptCache.invalidateConversation(conversationId);
+    appUnderTest.forgetConversation(conversationId);
+  };
   agentThreads = createAgentThreadRuntime({
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
     agentBrowser: options.agentBrowser,
+    appUnderTest: appUnderTest.launches,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -721,6 +742,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createCliConversationCommandHandler({ store, providers, signal: runtimeLifetimeAbort.signal, broadcastSnapshot: flushSnapshot, send }),
+      appUnderTest.commandHandler,
       queuedMessages.handler,
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
@@ -753,8 +775,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         deletedConversationIds,
         dataDirectory,
         rememberDeletedConversation,
-      forgetRemoteTranscript: (conversationId: string) =>
-          privateConnectTranscriptCache.invalidateConversation(conversationId),
+      forgetRemoteTranscript: forgetConversationRuntimeState,
+        clearAppUnderTestSession: appUnderTest.clearConversation,
         broadcastSnapshot: flushSnapshot,
         publicError,
         send,
@@ -819,8 +841,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         secureFileAuthorities,
         workspacePath,
         rememberDeletedConversation,
-      forgetRemoteTranscript: (conversationId: string) =>
-          privateConnectTranscriptCache.invalidateConversation(conversationId),
+      forgetRemoteTranscript: forgetConversationRuntimeState,
+        clearAppUnderTestSession: appUnderTest.clearConversation,
         broadcastSnapshot,
         reportTerminalProviderResumeRejection: (diagnostic) => {
           console.warn("Terminal provider resume rejected.", diagnostic);
@@ -1190,6 +1212,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             independentDrains: [
               () => shutdownTrace.observe("attachments", () => initializedConversationAttachments.close()),
               ({ deadlineAt }) => shutdownTrace.observe("terminals", () => terminals.disposeAll(deadlineAt)),
+              () => shutdownTrace.observe("app-under-test", () => appUnderTest.dispose()),
               () => shutdownTrace.observe("maintenance", () => providerMaintenance.dispose()),
             ],
             stopIsolatedRuns: () => shutdownTrace.observe("isolated-runs", () => isolatedRuns.dispose(cause)),

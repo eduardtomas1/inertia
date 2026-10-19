@@ -162,6 +162,15 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ inherit: "Default (On)", true: "On", false: "Off" }}
           onChange={(value) => void setPreference("project-browser-access", "browserAccess", value === "inherit" ? null : value === "true")} />
       </SettingRow>
+      <SettingRow id="project-app-under-test-access" title="Agent app access" description="Turning this off blocks new App under test tool calls. You can still launch the app from the App surface." notice={notice("project-app-under-test-access")}>
+        <ProjectSelect label="Agent app access" value={preferences.appUnderTestAccess === null ? "inherit" : String(preferences.appUnderTestAccess)} disabled={unavailable} inactive={saving}
+          options={{ inherit: "Default (On)", true: "On", false: "Off" }}
+          onChange={(value) => void setPreference("project-app-under-test-access", "appUnderTestAccess", value === "inherit" ? null : value === "true")} />
+      </SettingRow>
+      <SettingRow id="project-app-visual-evidence" title="Send app screenshots to the agent" description="Images are reduced and masked, and fields that hold secrets block them." notice={notice("project-app-visual-evidence")}>
+        <Switch label="Send app screenshots to the agent" checked={preferences.appUnderTestVisualEvidence} disabled={unavailable} inactive={saving}
+          onChange={(value) => void setPreference("project-app-visual-evidence", "appUnderTestVisualEvidence", value)} />
+      </SettingRow>
       <SettingTextField id="project-spend-limit" title="Claude spend limit per turn" label="Claude spend limit per turn (USD)"
         description="Caps estimated API cost for Claude on Anthropic; subagents count toward it."
         value={preferences.claudeMaxBudgetUsd === null ? "" : String(preferences.claudeMaxBudgetUsd)}

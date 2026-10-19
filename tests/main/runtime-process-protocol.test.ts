@@ -97,6 +97,24 @@ describe("runtime process protocol", () => {
     })).toBeNull();
   });
 
+  it("dispatches App control and issue evidence messages through the main broker protocol", () => {
+    const requestId = crypto.randomUUID();
+    const identity = {
+      conversationId: crypto.randomUUID(), runId: null, turnId: null, launchId: crypto.randomUUID(), pid: 4_321, processStartedAt: 1_760_000_000_000,
+    };
+    const request = { type: "runtime.app-control-request" as const, requestId, identity, command: { command: "windows" as const } };
+    expect(parseRuntimeWorkerEvent(request)).toEqual(request);
+    expect(parseRuntimeWorkerEvent({ type: "runtime.app-control-cancel", requestId, identity })).toEqual({ type: "runtime.app-control-cancel", requestId, identity });
+    expect(parseRuntimeWorkerEvent({ ...request, extra: true })).toBeNull();
+    const result = { type: "runtime.app-control-result" as const, requestId, result: { ok: true, value: { kind: "windows", windows: [], omitted: 0 } } };
+    expect(parseRuntimeWorkerCommand(result)).toEqual(result);
+    expect(parseRuntimeWorkerCommand({ ...result, result: { ok: true, value: { kind: "windows", windows: [] } } })).toBeNull();
+    expect(parseRuntimeWorkerEvent({ type: "runtime.issue-evidence-request", requestId, attachDiagnostics: true }))
+      .toEqual({ type: "runtime.issue-evidence-request", requestId, attachDiagnostics: true });
+    expect(parseRuntimeWorkerCommand({ type: "runtime.issue-evidence-result", requestId, ok: false }))
+      .toEqual({ type: "runtime.issue-evidence-result", requestId, ok: false });
+  });
+
   it("strictly binds update preparation and release messages", () => {
     const operationId = crypto.randomUUID();
     expect(parseRuntimeWorkerCommand({

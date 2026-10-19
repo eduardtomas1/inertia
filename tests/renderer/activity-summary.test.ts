@@ -13,6 +13,7 @@ import {
   summarizeActivities,
 } from "../../src/renderer/src/utils/responseTimeline";
 import type { AgentActivity } from "../../src/shared/contracts";
+import { APP_UNDER_TEST_TOOL_NAMES } from "../../src/shared/app-under-test";
 
 function activity(
   id: string,
@@ -216,6 +217,33 @@ describe("hostToolActivityTitle", () => {
       expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "failed" })))
         .toBe("Could not render a page");
     }
+  });
+
+  it("names every App under test tool in fixed words in each state, never with its arguments", () => {
+    const expected: Record<string, readonly [string, string, string]> = {
+      inertia_app_launch: ["Launching the app", "Launched the app", "Could not launch the app"],
+      inertia_app_status: ["Checking the app", "Checked the app", "Could not check the app"],
+      inertia_app_logs: ["Reading app logs", "Read app logs", "Could not read app logs"],
+      inertia_app_stop: ["Stopping the app", "Stopped the app", "Could not stop the app"],
+      inertia_app_windows: ["Listing app windows", "Listed app windows", "Could not list app windows"],
+      inertia_app_snapshot: ["Inspecting an app window", "Inspected an app window", "Could not inspect an app window"],
+      inertia_app_click: ["Clicking in the app", "Clicked in the app", "Could not click in the app"],
+      inertia_app_type: ["Typing in the app", "Typed in the app", "Could not type in the app"],
+      inertia_app_press: ["Pressing a key in the app", "Pressed a key in the app", "Could not press a key in the app"],
+      inertia_app_scroll: ["Scrolling the app", "Scrolled the app", "Could not scroll the app"],
+      inertia_app_wait_for: ["Waiting in the app", "Waited in the app", "Could not wait in the app"],
+      inertia_app_screenshot: ["Capturing app evidence", "Captured app evidence", "Could not capture app evidence"],
+      inertia_app_activate: ["Bringing the app to the front", "Brought the app to the front", "Could not bring the app to the front"],
+    };
+    expect(Object.keys(expected).sort()).toEqual([...APP_UNDER_TEST_TOOL_NAMES].sort());
+    for (const [name, [running, done, failed]] of Object.entries(expected)) {
+      for (const title of [name, `mcp__inertia-chat-manager__${name}`, `inertia-chat-manager: ${name}`, `${name}: Secret window title`]) {
+        expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "running" }))).toBe(running);
+        expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "completed" }))).toBe(done);
+        expect(hostToolActivityTitle(activity("a", { kind: "tool", title, status: "failed" }))).toBe(failed);
+      }
+    }
+    expect(hostToolActivityTitle(activity("a", { kind: "tool", title: "mcp__other__inertia_app_click" }))).toBeNull();
   });
 
   it("keeps the provider's title for anything else", () => {

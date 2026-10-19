@@ -7,6 +7,7 @@ import type {
   RuntimeAgentBrowserBroker,
   RuntimeProcessRecord,
   RuntimeSecureFileBroker,
+  RuntimeSupervisorOptions,
 } from "./runtime-supervisor-types.js";
 import type {
   ConversationAttachmentStoreAnyOperationRunner,
@@ -14,6 +15,8 @@ import type {
 } from "../node/conversation-attachment-store-child.js";
 import { RuntimeConversationAttachmentStoreCoordinator } from "./runtime-conversation-attachment-store-coordinator.js";
 import { RuntimeAgentBrowserCoordinator } from "./runtime-agent-browser-coordinator.js";
+import { RuntimeAppControlCoordinator, type RuntimeAppControlMainBroker } from "./runtime-app-control-coordinator.js";
+import type { RuntimeAppControlEvent } from "../node/runtime-app-control-protocol.js";
 import type { DocumentPreparationRunner } from "../node/document-preparation";
 import type { RuntimeDocumentPreparationEvent } from "../node/runtime-document-preparation-protocol";
 import { RuntimeDocumentPreparationCoordinator } from "./runtime-document-preparation-coordinator";
@@ -38,13 +41,15 @@ type AgentBrowserEvent = Extract<
 >;
 
 type RuntimeSecureFileBrokerEvent = SecureFileRequestEvent | ConversationAttachmentStoreEvent
-  | AgentBrowserEvent | RuntimeDocumentPreparationEvent | RuntimeIssueEvidenceRequest;
+  | AgentBrowserEvent | RuntimeDocumentPreparationEvent | RuntimeIssueEvidenceRequest | RuntimeAppControlEvent;
 
 export function isRuntimeSecureFileBrokerEvent(event: RuntimeWorkerEvent): event is RuntimeSecureFileBrokerEvent {
   return event.type === "runtime.secure-file-request"
     || event.type === "runtime.issue-evidence-request"
     || event.type === "runtime.agent-browser-request"
     || event.type === "runtime.agent-browser-cancel"
+    || event.type === "runtime.app-control-request"
+    || event.type === "runtime.app-control-cancel"
     || event.type === "runtime.conversation-attachment-store-request"
     || event.type === "runtime.conversation-attachment-store-cancel"
     || event.type === "runtime.document-preparation-request"
@@ -63,6 +68,7 @@ interface RuntimeSecureFileCoordinatorOptions {
   readonly conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
   readonly conversationAttachmentSourceRoot?: string;
   readonly agentBrowserBroker?: RuntimeAgentBrowserBroker;
+  readonly appControlBroker?: RuntimeAppControlMainBroker;
   readonly documentPreparationRunner?: DocumentPreparationRunner;
   readonly issueEvidenceBroker?: RuntimeIssueEvidenceBroker;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
@@ -70,6 +76,23 @@ interface RuntimeSecureFileCoordinatorOptions {
     record: RuntimeProcessRecord,
     result: RuntimeWorkerCommand,
   ) => void;
+}
+
+/** The supervisor's brokers and runners this coordinator dispatches to, in the coordinator's own terms. */
+export function runtimeSecureFileCoordinatorBrokers(
+  options: RuntimeSupervisorOptions,
+): Omit<RuntimeSecureFileCoordinatorOptions, "accepts" | "post"> {
+  return {
+    retryUnconfirmedShutdown: true,
+    broker: options.secureFileBroker,
+    conversationAttachmentStoreRunner: options.conversationAttachmentStoreRunner,
+    documentPreparationRunner: options.documentPreparationRunner,
+    conversationAttachmentSourceRoot: options.conversationAttachmentSourceRoot,
+    conversationAttachmentStoreAuthority: options.conversationAttachmentStoreAuthority,
+    agentBrowserBroker: options.agentBrowserBroker,
+    appControlBroker: options.appControlBroker,
+    issueEvidenceBroker: options.issueEvidenceBroker,
+  };
 }
 
 export class RuntimeSecureFileCoordinator {
@@ -80,6 +103,7 @@ export class RuntimeSecureFileCoordinator {
   private readonly conversationAttachmentStore:
     RuntimeConversationAttachmentStoreCoordinator;
   private readonly agentBrowser: RuntimeAgentBrowserCoordinator;
+  private readonly appControl: RuntimeAppControlCoordinator;
   private readonly documents: RuntimeDocumentPreparationCoordinator;
   private readonly issueEvidence: RuntimeIssueEvidenceCoordinator;
 
@@ -110,6 +134,11 @@ export class RuntimeSecureFileCoordinator {
       accepts: options.accepts,
       post: options.post,
     });
+    this.appControl = new RuntimeAppControlCoordinator({
+      broker: options.appControlBroker,
+      accepts: options.accepts,
+      post: options.post,
+    });
   }
 
   handle(
@@ -129,6 +158,10 @@ export class RuntimeSecureFileCoordinator {
       || event.type === "runtime.agent-browser-cancel"
     ) {
       this.agentBrowser.handle(record, event);
+      return;
+    }
+    if (event.type === "runtime.app-control-request" || event.type === "runtime.app-control-cancel") {
+      this.appControl.handle(record, event);
       return;
     }
     if (event.type !== "runtime.secure-file-request") {
@@ -183,6 +216,7 @@ export class RuntimeSecureFileCoordinator {
   clear(record: RuntimeProcessRecord | null): void {
     this.issueEvidence.clear(record);
     this.agentBrowser.clear(record);
+    this.appControl.clear(record);
     this.conversationAttachmentStore.clear(record);
     this.documents.clear(record);
     if (!record) return;

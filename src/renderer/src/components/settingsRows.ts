@@ -114,6 +114,8 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["project-workspace", "Where new chats run", ["worktree", "checkout", "branch", "workspace"]],
       ["project-default-access", "Default access", ["access", "full access", "supervised", "auto-accept edits", "permissions"]],
       ["project-browser-access", "Agent browser access", ["preview browser", "browser"]],
+      ["project-app-under-test-access", "Agent app access", ["app under test", "desktop app", "electron", "launch app"]],
+      ["project-app-visual-evidence", "Send app screenshots to the agent", ["app under test", "screenshot", "image", "visual evidence"]],
       ["project-spend-limit", "Claude spend limit per turn", ["budget", "cost", "usd", "limit", "token"]],
     ],
     Checkout: [
@@ -146,6 +148,11 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
     Snapshots: [
       ["snapshots-enabled", "Window snapshots", ["screenshot", "capture", "snapshot"]],
       ["snapshot-access", "Capture access", ["permissions", "accessibility", "screen recording", "screenshot", "snapshot"]],
+    ],
+    "App control": [
+      ["app-control-access", "Native window access", ["app control", "app under test", "native windows", "accessibility", "at-spi", "permissions"]],
+      ["app-control-input", "Keyboard and mouse input", ["app control", "keyboard", "mouse wheel", "synthesized input", "xtest", "wayland"]],
+      ["app-control-screenshots", "Window screenshots", ["app control", "screen recording", "screenshot", "wayland"]],
     ],
     Discord: [
       ["discord-repository", "Repository URL", ["github", "gitlab", "release", "discord"]],

@@ -91,6 +91,7 @@ interface SplitWorkspaceActions
     | "openProviderSetup"
     | "openBackendSetup"
     | "openSettings"
+    | "openAppControlSettings"
     | "openUsageView"
     | "openProjectPath"
   > {

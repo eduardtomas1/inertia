@@ -29,6 +29,7 @@ import type { Project } from "@shared/contracts";
 import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
 import type { UsageSurfaceProps } from "./UsageSurface";
 import type { AttachmentsSurfaceProps } from "./AttachmentsSurface";
+import type { AppSurfaceProps } from "./AppSurface";
 import type { BackgroundTasksSurfaceProps } from "./BackgroundTasksSurface";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useChatMinimumHeight } from "../hooks/useChatMinimumHeight";
@@ -39,6 +40,7 @@ import {
   loadConversationSplitView,
   loadBackgroundTasksSurface,
   loadAttachmentsSurface,
+  loadAppSurface,
   loadFilesPanel,
   loadGoalPanel,
   loadHistoricalDiffPanel,
@@ -73,6 +75,7 @@ const UsageSurface = lazySurface(
   (module) => module.UsageSurface,
 );
 const AttachmentsSurface = lazySurface(loadAttachmentsSurface, (module) => module.AttachmentsSurface);
+const AppSurface = lazySurface(loadAppSurface, (module) => module.AppSurface);
 const BackgroundTasksSurface = lazySurface(
   loadBackgroundTasksSurface,
   (module) => module.BackgroundTasksSurface,
@@ -111,6 +114,7 @@ export interface WorkspaceToolScene {
   usage: UsageSurfaceProps;
   agents: BackgroundTasksSurfaceProps;
   attachments: AttachmentsSurfaceProps;
+  app: AppSurfaceProps;
   runs: WorkspaceRunsModel;
   gitNotice: string | null;
   historicalDiff: ComponentProps<typeof HistoricalDiffPanel> | null;
@@ -195,6 +199,7 @@ function WorkspaceToolSurface({
             <Suspense fallback={<WorkspaceToolFallback />}>
               {tools.activeTool === "terminal" && <div ref={terminalTarget} className="terminal-surface-slot" />}
               {tools.activeTool === "attachments" && <AttachmentsSurface {...tools.attachments} />}
+              {tools.activeTool === "app" && <AppSurface key={tools.app.conversationId ?? ""} {...tools.app} />}
               {tools.activeTool === "usage" && (
                 <UsageSurface {...tools.usage} />
               )}

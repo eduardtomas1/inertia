@@ -112,6 +112,11 @@ export interface ConversationCommandDependencies {
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
   forgetRemoteTranscript(conversationId: string): void;
+  /**
+   * Stops the chat's App launches and forgets its App session; false when a
+   * launch's process tree could not be proved stopped.
+   */
+  clearAppUnderTestSession?(conversationId: string): Promise<boolean>;
   broadcastSnapshot(): void;
   publicError(error: unknown): string;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -544,6 +549,16 @@ export function createConversationCommandHandler(
             "Stop the active run or review before archiving this thread.",
           );
         }
+        // The app under test runs from this chat's checkout: it must be
+        // proved stopped before the chat is archived.
+        if (
+          dependencies.clearAppUnderTestSession
+          && !await dependencies.clearAppUnderTestSession(command.payload.conversationId)
+        ) {
+          throw new RuntimeRequestError(
+            "Stop the chat's app before archiving it; its process could not be confirmed stopped.",
+          );
+        }
         dependencies.store.archiveConversation(
           command.payload.conversationId,
           true,
@@ -646,6 +661,16 @@ export function createConversationCommandHandler(
               && error.message.includes("Cancel the active Duo launch")
             ) throw new RuntimeRequestError(error.message);
             throw error;
+          }
+          // The app under test runs from this chat's checkout: it must be
+          // proved stopped before the worktree or the chat goes.
+          if (
+            dependencies.clearAppUnderTestSession
+            && !await dependencies.clearAppUnderTestSession(conversation.id)
+          ) {
+            throw new RuntimeRequestError(
+              "Inertia could not confirm that this thread's app under test stopped. Stop it from the App surface, then delete the thread again.",
+            );
           }
           if (ownership?.creationState === "creating") {
             const creation = await inspectUnacknowledgedWorktreeCreation(

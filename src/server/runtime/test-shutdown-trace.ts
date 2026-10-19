@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 export const TEST_SHUTDOWN_TRACE_FILE = "runtime-shutdown-trace.json";
 export const TEST_SHUTDOWN_TRACE_BYTES = 8_192;
-const owners = ["commands", "attachments", "terminals", "maintenance",
+const owners = ["commands", "attachments", "terminals", "app-under-test", "maintenance",
   "isolated-runs", "turns-providers", "artifact-reconciliation", "artifact-settlement",
   "clients", "websocket", "http-server", "store"] as const;
 type Owner = typeof owners[number];

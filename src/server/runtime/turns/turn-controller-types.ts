@@ -34,6 +34,7 @@ import type {
   ProviderSteerInput,
 } from "../../provider/contracts";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
+import type { HarnessCapabilityTurnOffer } from "../harness-capabilities";
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
@@ -144,6 +145,12 @@ export interface TurnAttachmentReleaseHookInput {
   attachmentIds: readonly string[];
 }
 
+/** One turn's capability offer and the private instructions it implies. */
+export interface TurnCapabilityOffer {
+  instructions: readonly HiddenProviderInstruction[];
+  offer: HarnessCapabilityTurnOffer;
+}
+
 export interface TurnControllerHooks {
   reportIncident?(observation: import("../../../node/application-incidents").IncidentObservation): unknown;
   broadcast(event: RuntimeMutationEvent): void;
@@ -154,14 +161,22 @@ export interface TurnControllerHooks {
    */
   broadcastConversationShell?(conversationId: string): void;
   providerInfo(): readonly ProviderInfo[];
-  /** Reviewed Inertia capability instructions, re-injected on every turn. */
-  harnessInstructionsForTurn?(input: {
+  /**
+   * Reviewed Inertia capability offer for the turn being prepared, read once.
+   * Its instructions are injected into this turn's prompt, and its offer is
+   * carried on the active turn to `hostToolsForTurn`.
+   */
+  capabilityOfferForTurn?(input: {
     conversation: Conversation;
-  }): readonly HiddenProviderInstruction[];
-  /** Exact-turn host authority; absent means the selected harness gets no tools. */
+  }): TurnCapabilityOffer;
+  /**
+   * Exact-turn host authority for the offer snapshotted when the turn's prompt
+   * was assembled; absent means the selected harness gets no tools.
+   */
   hostToolsForTurn?(input: {
     conversation: Conversation;
     turn: AgentTurn;
+    offer: HarnessCapabilityTurnOffer;
   }): ProviderHostToolBridge | undefined;
   applyProviderMetadata?(event: ProviderMetadataEvent): void;
   onNativeGoalSynchronized?(input: {
@@ -295,6 +310,12 @@ export interface ActiveTurn {
   turn: AgentTurn;
   conversation: Conversation;
   providerInput: ProviderRunInput;
+  /**
+   * The capability offer snapshotted when this turn's prompt was assembled.
+   * Absent when the prompt was assembled without a trusted host bridge, in
+   * which case the turn gets no host tools.
+   */
+  capabilityOffer?: HarnessCapabilityTurnOffer;
   attachmentIds: readonly string[];
   generatedAttachmentPaths: readonly string[];
   checkpointId: string | null;

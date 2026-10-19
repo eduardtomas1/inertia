@@ -20,6 +20,7 @@ import {
 import { RuntimeStore } from "./database";
 import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "./runtime/harness-capabilities";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { createConversationTitleRuntime } from "./runtime/conversation-title-service";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
@@ -641,8 +642,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      harnessInstructionsForTurn: ({ conversation }) => agentThreads?.manager.capabilityInstructions(conversation) ?? [],
-      hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
+      capabilityOfferForTurn: ({ conversation }) => agentThreads?.manager.capabilityOfferForTurn(conversation)
+        ?? { instructions: [], offer: FULL_HARNESS_CAPABILITY_OFFER },
+      hostToolsForTurn: ({ conversation, turn, offer }) => agentThreads?.manager.bridgeFor({ conversation, turn }, offer),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },

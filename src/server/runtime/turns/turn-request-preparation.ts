@@ -33,6 +33,7 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -153,9 +154,13 @@ export function resolveTurnRequest(
       harnessId: route.harnessId,
       backendProfile: route.backendProfile,
     });
-  const capabilityInstructions = hostToolBridgeAttested
-    ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
-    : [];
+  // Read once: the prompt's instructions and the tools attached at provider
+  // start must describe the same offer even if project settings change.
+  const capabilityOffer = hostToolBridgeAttested
+    ? dependencies.hooks.capabilityOfferForTurn?.({ conversation })
+      ?? { instructions: [], offer: FULL_HARNESS_CAPABILITY_OFFER }
+    : undefined;
+  const capabilityInstructions = capabilityOffer?.instructions ?? [];
 
   const exactModel = routeSelection.modelId === "provider-default"
     ? exactProvider?.models.find(({ isDefault }) => isDefault)
@@ -478,6 +483,7 @@ export function resolveTurnRequest(
           turn: queued.turn,
           conversation: activeConversation,
           providerInput,
+          ...(capabilityOffer ? { capabilityOffer: capabilityOffer.offer } : {}),
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
           checkpointId: request.checkpointId ?? null,

@@ -310,12 +310,30 @@ describe("AgentThreadManager", () => {
         expect(result.success).toBe(false);
         expect(result.text).toContain("browser_disabled");
       }
-      expect(manager.capabilityInstructions(source).map(({ label }) => label)).toEqual([
+      expect(manager.capabilityOfferForTurn(source).instructions.map(({ label }) => label)).toEqual([
         "inertia-orchestration",
       ]);
       expect(manager.capabilityManifest().definitionDigest).toBe(digest);
       expect(manager.capabilityManifest().packs.map(({ id }) => id)).toContain("inertia.frontend-workbench");
       expect(browser.perform).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
+  it("attaches the tools of the offer snapshotted for the turn's prompt, not the current setting", async () => {
+    const browser = { perform: vi.fn() };
+    const { manager, project, source, sourceTurn, store } = await runtime(browser);
+    try {
+      const offered = manager.capabilityOfferForTurn(source);
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
+      const withheld = manager.capabilityOfferForTurn(source);
+      store.updateProject(project.id, { preferences: defaultProjectPreferences() });
+
+      const browserTools = (offer: typeof offered) => manager.bridgeFor({ conversation: source, turn: sourceTurn }, offer.offer)
+        .definitions.filter(({ name }) => name.startsWith("inertia_browser_")).length;
+      expect(offered.instructions.map(({ label }) => label)).toContain("inertia-frontend-workbench");
+      expect(browserTools(offered)).toBe(12);
+      expect(withheld.instructions.map(({ label }) => label)).toEqual(["inertia-orchestration"]);
+      expect(browserTools(withheld)).toBe(0);
     } finally { store.close(); }
   });
 
@@ -383,7 +401,7 @@ describe("AgentThreadManager", () => {
           expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
         ],
       });
-      expect(manager.capabilityInstructions(source).map(({ label }) => label)).toEqual([
+      expect(manager.capabilityOfferForTurn(source).instructions.map(({ label }) => label)).toEqual([
         "inertia-frontend-workbench",
         "inertia-orchestration",
       ]);

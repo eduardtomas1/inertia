@@ -182,8 +182,10 @@ tools for each turn and see it from their next turn.
 The registry is compiled once, so its manifest and definition digest are the
 same for every project. Each turn then gets an offer from that registry: the
 tools it advertises and the private instructions injected into its prompt.
-Both follow the chat's project settings: the instructions as they are when
-the turn is prepared, and the tools as they are when the turn starts.
+Both come from one snapshot of the chat's project settings, taken when the
+turn's prompt is assembled and carried to provider start, so a setting
+changed in between cannot leave the prompt and the tools describing
+different offers.
 
 When a project turns Browser access off, its turns are not offered
 `inertia.frontend-workbench`: none of the twelve Browser tools is advertised

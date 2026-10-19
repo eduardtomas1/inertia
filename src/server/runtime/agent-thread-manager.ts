@@ -50,6 +50,7 @@ import type {
 import {
   type HarnessCapabilityManifest,
   type HarnessCapabilityRegistry,
+  type HarnessCapabilityTurnOffer,
 } from "./harness-capabilities";
 import {
   BROWSER_ACCESS_DISABLED,
@@ -60,7 +61,7 @@ import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
-import type { HiddenProviderInstruction } from "./turns/request-context";
+import type { TurnCapabilityOffer } from "./turns/turn-controller-types";
 import {
   boundedUntrustedAgentText,
   neutralizeUntrustedAgentText,
@@ -361,25 +362,34 @@ export class AgentThreadManager {
     });
   }
 
-  /** Instructions for the packs this conversation's project offers its next turn. */
-  capabilityInstructions(
+  /**
+   * Snapshots the packs this conversation's project offers its next turn.
+   * The turn controller injects the instructions into that turn's prompt and
+   * passes the same offer back to `bridgeFor` when the provider starts.
+   */
+  capabilityOfferForTurn(
     conversation: Pick<Conversation, "projectId">,
-  ): readonly HiddenProviderInstruction[] {
-    return this.capabilities.instructions(this.capabilityOffer(conversation));
+  ): TurnCapabilityOffer {
+    const offer = this.currentOffer(conversation);
+    return { instructions: this.capabilities.instructions(offer), offer };
   }
 
   capabilityManifest(): HarnessCapabilityManifest {
     return this.capabilities.manifest();
   }
 
-  bridgeFor(source: AgentThreadSource): ProviderHostToolBridge {
-    return this.capabilities.bridgeFor(
-      source,
-      this.capabilityOffer(source.conversation),
-    );
+  /**
+   * The exact-turn bridge for a snapshotted offer. Without one, the project's
+   * current settings decide.
+   */
+  bridgeFor(
+    source: AgentThreadSource,
+    offer: HarnessCapabilityTurnOffer = this.currentOffer(source.conversation),
+  ): ProviderHostToolBridge {
+    return this.capabilities.bridgeFor(source, offer);
   }
 
-  private capabilityOffer(conversation: Pick<Conversation, "projectId">) {
+  private currentOffer(conversation: Pick<Conversation, "projectId">): HarnessCapabilityTurnOffer {
     return inertiaCapabilityOfferForProject(
       this.dependencies.store.project(conversation.projectId).preferences,
     );

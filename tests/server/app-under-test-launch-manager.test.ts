@@ -1,6 +1,6 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmod, lstat, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { PassThrough } from "node:stream";
@@ -71,7 +71,9 @@ interface Spawned {
 }
 
 async function workspace(): Promise<{ root: string; data: string; project: string }> {
-  const root = await mkdtemp(join(tmpdir(), "inertia-app-under-test-"));
+  // Resolve once: macOS's tmpdir is a symlink (/var -> /private/var), and the
+  // launch manager compares and reports realpaths.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-app-under-test-")));
   roots.push(root);
   const project = join(root, "project");
   const data = join(root, "data");

@@ -4721,6 +4721,10 @@ button.turn-agents-line:hover {
   display: none;
 }
 
+.panel-tab-row > [data-clipped] {
+  pointer-events: none;
+}
+
 .panel-tab {
   position: relative;
   display: flex;

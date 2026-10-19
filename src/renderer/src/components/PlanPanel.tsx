@@ -4,6 +4,7 @@ import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, Play, Rotat
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
+import type { PlanStepSource } from "../utils/planFromText";
 import { ResponseMarkdown } from "./ResponseMarkdown";
 import { IconButton, LoadingMark } from "./ui";
 
@@ -14,6 +15,7 @@ export type PlanStep = {
   title: string;
   detail?: string | null;
   status: PlanStepStatus;
+  source?: PlanStepSource;
 };
 
 export type PlanMarkdownContext = Pick<
@@ -70,6 +72,7 @@ export function PlanPanel({
 }: PlanPanelProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const documentId = useId();
+  const sourceNoteId = useId();
   const planCopy = useCopiedState();
   const completed = steps.filter((step) => step.status === "completed").length;
   const counted = steps.filter((step) => step.status !== "cancelled").length;
@@ -78,6 +81,8 @@ export function PlanPanel({
   const body = parsed?.body ?? "";
   const collapsible = planDocumentIsLong(body);
   const collapsed = collapsible && !expanded;
+  const derived = steps.length > 0
+    && steps.every((step) => step.source === "derived");
 
   return (
     <section className="plan-panel" aria-label="Implementation plan">
@@ -85,7 +90,9 @@ export function PlanPanel({
         <div className="panel-heading">
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
-            {counted > 0 && <span>{completed} of {counted} complete</span>}
+            {derived
+              ? <span>Derived from the reply</span>
+              : counted > 0 && <span>{completed} of {counted} complete</span>}
           </div>
         </div>
         <div className="plan-toolbar-actions">
@@ -132,7 +139,12 @@ export function PlanPanel({
           </div>
         ) : (
           <>
-            <ol className="plan-steps">
+            {derived && (
+              <p id={sourceNoteId} className="plan-source-note">
+                The provider didn't report a plan. These steps come from the list in its reply and aren't tracked.
+              </p>
+            )}
+            <ol className="plan-steps" aria-describedby={derived ? sourceNoteId : undefined}>
               {steps.map((step, index) => {
                 const content = (
                   <>

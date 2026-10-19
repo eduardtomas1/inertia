@@ -197,6 +197,77 @@ describe("HarnessCapabilityRegistry", () => {
     ])).toThrow("duplicate capability instruction");
   });
 
+  it("withholds a pack from one turn without changing the compiled registry or its digest", async () => {
+    const kept = pack("inertia.kept", "inertia_kept_tool");
+    const withheld = pack("inertia.withheld", "inertia_withheld_tool");
+    withheld.retiredTools = [{
+      definition: {
+        name: "inertia_withheld_retired",
+        description: "Retired tool.",
+        inputSchema: { type: "object", additionalProperties: false },
+        inputValidator: z.object({}).strict(),
+        readOnly: true,
+      },
+      invoke: vi.fn(async () => ({ success: true, text: "retired" })),
+    }];
+    const registry = new HarnessCapabilityRegistry([kept, withheld]);
+    const digest = registry.manifest().definitionDigest;
+    const offer = {
+      withheldPacks: new Map([["inertia.withheld", {
+        code: "pack_disabled",
+        message: "This pack is disabled in this project's settings.",
+      }]]),
+    };
+
+    const full = registry.bridgeFor(context);
+    expect(full.definitions.map(({ name }) => name)).toEqual([
+      "inertia_kept_tool",
+      "inertia_withheld_tool",
+    ]);
+    expect(full.instructions?.map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+      "inertia.withheld-instruction",
+    ]);
+
+    const bridge = registry.bridgeFor(context, offer);
+    expect(bridge.definitions.map(({ name }) => name)).toEqual(["inertia_kept_tool"]);
+    expect(bridge.instructions?.map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+    ]);
+    expect(registry.instructions(offer).map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+    ]);
+    expect(registry.instructions().map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+      "inertia.withheld-instruction",
+    ]);
+    expect(bridge.retiredToolNames?.has("inertia_withheld_tool")).toBe(true);
+    expect(bridge.retiredToolNames?.has("inertia_withheld_retired")).toBe(true);
+    for (const tool of ["inertia_withheld_tool", "inertia_withheld_retired"]) {
+      await expect(bridge.invoke(call(tool))).resolves.toEqual({
+        success: false,
+        text: JSON.stringify({
+          error: {
+            code: "pack_disabled",
+            message: "This pack is disabled in this project's settings.",
+          },
+        }),
+      });
+    }
+    expect(withheld.tools[0]!.invoke).not.toHaveBeenCalled();
+    expect(withheld.retiredTools[0]!.invoke).not.toHaveBeenCalled();
+    await expect(bridge.invoke(call("inertia_kept_tool"))).resolves.toMatchObject({ success: true });
+
+    expect(registry.manifest().definitionDigest).toBe(digest);
+    expect(registry.manifest().packs.map(({ id }) => id)).toEqual([
+      "inertia.kept",
+      "inertia.withheld",
+    ]);
+    expect(registry.bridgeFor(context, {
+      withheldPacks: new Map([["inertia.unknown", { code: "x", message: "Unknown." }]]),
+    }).definitions).toBe(full.definitions);
+  });
+
   it("requires a process-local validator and fails unknown calls closed", async () => {
     const invalid = pack("inertia.invalid", "inertia_invalid_tool");
     invalid.tools[0]!.definition.inputValidator = undefined;

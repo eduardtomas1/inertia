@@ -279,6 +279,7 @@ function ConversationPane({
         if (containerRef) containerRef.current = node;
       }}
       className={`conversation-pane-workspace${tools ? " has-tools" : ""}`}
+      data-pane-owner={owner}
       style={style}
     >
       <div ref={chatRef} className="conversation-pane-chat">

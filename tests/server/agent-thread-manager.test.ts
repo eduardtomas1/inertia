@@ -291,13 +291,51 @@ describe("AgentThreadManager", () => {
     const browser = { perform: vi.fn() };
     const { manager, project, source, sourceTurn, store } = await runtime(browser);
     try {
+      const digest = manager.capabilityManifest().definitionDigest;
       store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
       for (const harnessId of ["codex-app-server", "claude-agent-sdk", "cursor-acp", "kimi-acp", "opencode-sdk"] as const) {
         const bridge = manager.bridgeFor({ conversation: source, turn: { ...sourceTurn, harnessId } });
-        const result = await bridge!.invoke(call("inertia_browser_snapshot", {}));
+        expect(bridge.definitions.map(({ name }) => name).filter((name) => name.startsWith("inertia_browser_")))
+          .toEqual([]);
+        expect(bridge.definitions.map(({ name }) => name)).toEqual(expect.arrayContaining([
+          "inertia_list_conversations",
+          "inertia_request_context",
+          "inertia_render_html",
+        ]));
+        expect(bridge.instructions?.map(({ label }) => label)).toEqual(["inertia-orchestration"]);
+        // A Codex thread that registered Browser tools before the setting
+        // changed still reaches a truthful refusal instead of a protocol error.
+        expect(bridge.retiredToolNames?.has("inertia_browser_snapshot")).toBe(true);
+        const result = await bridge.invoke(call("inertia_browser_snapshot", {}));
         expect(result.success).toBe(false);
         expect(result.text).toContain("browser_disabled");
       }
+      expect(manager.capabilityInstructions(source).map(({ label }) => label)).toEqual([
+        "inertia-orchestration",
+      ]);
+      expect(manager.capabilityManifest().definitionDigest).toBe(digest);
+      expect(manager.capabilityManifest().packs.map(({ id }) => id)).toContain("inertia.frontend-workbench");
+      expect(browser.perform).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
+  it("refuses browser calls when Browser access is turned off after the turn's tools were offered", async () => {
+    const browser = { perform: vi.fn() };
+    const { manager, project, source, sourceTurn, store } = await runtime(browser);
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      expect(bridge.definitions.map(({ name }) => name)).toContain("inertia_browser_snapshot");
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
+      const result = await bridge.invoke(call("inertia_browser_snapshot", {}));
+      expect(result).toEqual({
+        success: false,
+        text: JSON.stringify({
+          error: {
+            code: "browser_disabled",
+            message: "Agent browser access is disabled in this project's settings.",
+          },
+        }),
+      });
       expect(browser.perform).not.toHaveBeenCalled();
     } finally { store.close(); }
   });
@@ -345,7 +383,7 @@ describe("AgentThreadManager", () => {
           expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
         ],
       });
-      expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
+      expect(manager.capabilityInstructions(source).map(({ label }) => label)).toEqual([
         "inertia-frontend-workbench",
         "inertia-orchestration",
       ]);

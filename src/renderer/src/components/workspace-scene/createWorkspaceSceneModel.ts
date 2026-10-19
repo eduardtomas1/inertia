@@ -57,6 +57,11 @@ import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
 import { latestPlanDocument } from "../../utils/terminalTurnProjection";
+import {
+  reportedPlanStepCount,
+  textPlanGate,
+  visiblePlanSteps,
+} from "../../utils/planFromText";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
@@ -442,6 +447,14 @@ export function createWorkspaceSceneModel({
     usageQuotaSource,
   });
   const canUpdatePlan = planActionsAvailable(conversation);
+  const panelPlanSteps = visiblePlanSteps(
+    planSteps,
+    textPlanGate(
+      projection.messages,
+      projection.turns,
+      conversation?.interactionMode ?? null,
+    ),
+  );
   const latestPlan = projection.plans.at(-1) ?? null;
   const visibleDetailState = detailState?.conversationId === conversation?.id
     ? detailState
@@ -768,7 +781,7 @@ export function createWorkspaceSceneModel({
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: currentWorkflow?.goals.some(({ status }) =>
             status !== "complete") ? 1 : 0,
-          plan: planSteps.length,
+          plan: reportedPlanStepCount(panelPlanSteps),
           attachments: environmentSummary.attachments.length,
         },
         onActivateSurface: openPanelSurface,
@@ -984,7 +997,7 @@ export function createWorkspaceSceneModel({
         onStopSubagent: stopSubagent,
       },
       plan: {
-        steps: planSteps,
+        steps: panelPlanSteps,
         document: latestPlanDocument(projection.plans, projection.turns, projection.detail?.plans ?? []),
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,
@@ -1008,7 +1021,7 @@ export function createWorkspaceSceneModel({
               ));
           },
         } : {}),
-        ...(canUpdatePlan && planSteps.length > 0 ? {
+        ...(canUpdatePlan && panelPlanSteps.length > 0 ? {
           onImplement: () => {
             void actions.updateConversation({ interactionMode: "build" })
               .then(() => actions.sendMessage(

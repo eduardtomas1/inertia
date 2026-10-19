@@ -426,8 +426,9 @@ export const configurationCommandSchemas = [
             "new-chat": z.enum(APP_SHORTCUT_KEYS),
             "toggle-sidebar": z.enum(APP_SHORTCUT_KEYS),
             "toggle-terminal": z.enum(APP_SHORTCUT_KEYS),
+            "open-surface": z.enum(APP_SHORTCUT_KEYS),
           }).strict().refine(
-            (bindings) => new Set(Object.values(bindings)).size === 4,
+            (bindings) => new Set(Object.values(bindings)).size === Object.keys(bindings).length,
             "App shortcuts must use unique keys.",
           ).optional(),
           defaultReasoningEffort: z.string().trim().max(40).optional(),

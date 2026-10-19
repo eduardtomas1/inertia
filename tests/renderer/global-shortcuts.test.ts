@@ -42,6 +42,7 @@ function actions(createConversation: () => void): GlobalShortcutActions {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -154,6 +155,7 @@ describe("global shortcuts", () => {
         "new-chat": "y",
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
+        "open-surface": "b",
       } as const,
     } };
     const dispose = installGlobalShortcuts(

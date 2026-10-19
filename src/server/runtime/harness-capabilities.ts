@@ -23,6 +23,7 @@ const CAPABILITY_ID = /^[a-z][a-z0-9.-]{0,63}$/u;
 const INSTRUCTION_LABEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const TOOL_NAME = /^inertia_[a-z0-9_]{1,119}$/u;
 const SAFE_METADATA = /^[^\u0000-\u001f\u007f]+$/u;
+const WITHHOLDING_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const EVIDENCE_KINDS = new Set<HarnessCapabilityEvaluation["evidenceKinds"][number]>([
   "browser-evidence",
   "git-artifact",
@@ -65,6 +66,25 @@ export interface HarnessCapabilityPack {
   retiredTools?: readonly HarnessCapabilityTool[];
   evaluation: HarnessCapabilityEvaluation;
 }
+
+/** Why one turn does not get a compiled pack, returned to calls of its tools. */
+export interface HarnessCapabilityWithholding {
+  code: string;
+  message: string;
+}
+
+/**
+ * One turn's view of the compiled registry. A withheld pack is neither
+ * advertised nor instructed for that turn. The compiled registry, its manifest,
+ * and its definition digest stay the same for every turn and project.
+ */
+export interface HarnessCapabilityTurnOffer {
+  withheldPacks: ReadonlyMap<string, HarnessCapabilityWithholding>;
+}
+
+export const FULL_HARNESS_CAPABILITY_OFFER: HarnessCapabilityTurnOffer = Object.freeze({
+  withheldPacks: new Map<string, HarnessCapabilityWithholding>(),
+});
 
 export interface HarnessCapabilityManifest {
   schemaVersion: 1;
@@ -380,19 +400,52 @@ export class HarnessCapabilityRegistry {
     });
   }
 
-  instructions(): readonly HiddenProviderInstruction[] {
-    return this.#instructions;
+  /** Private provider instructions for the packs this turn is offered. */
+  instructions(
+    offer: HarnessCapabilityTurnOffer = FULL_HARNESS_CAPABILITY_OFFER,
+  ): readonly HiddenProviderInstruction[] {
+    if (!this.#withholdsAny(offer)) return this.#instructions;
+    return Object.freeze(this.#packs
+      .filter(({ id }) => !offer.withheldPacks.has(id))
+      .flatMap((pack) => pack.instructions));
   }
 
   manifest(): HarnessCapabilityManifest {
     return this.#manifest;
   }
 
-  bridgeFor(context: HarnessCapabilityContext): ProviderHostToolBridge {
+  /**
+   * The exact-turn bridge for the packs this turn is offered. A withheld pack's
+   * tools are not advertised. They stay accepted like retired tools, because a
+   * Codex thread keeps the tools it registered when it started, and a call to
+   * one returns the pack's withholding reason without running its handler.
+   */
+  bridgeFor(
+    context: HarnessCapabilityContext,
+    offer: HarnessCapabilityTurnOffer = FULL_HARNESS_CAPABILITY_OFFER,
+  ): ProviderHostToolBridge {
+    const withheldTools = new Map<string, ProviderHostToolResult>();
+    for (const pack of this.#packs) {
+      const reason = offer.withheldPacks.get(pack.id);
+      if (!reason) continue;
+      const result = withheldFailure(reason);
+      for (const { definition } of [...pack.tools, ...(pack.retiredTools ?? [])]) {
+        withheldTools.set(definition.name, result);
+      }
+    }
+    const definitions = withheldTools.size === 0
+      ? this.#definitions
+      : Object.freeze(this.#definitions.filter(({ name }) => !withheldTools.has(name)));
+    const retiredToolNames = withheldTools.size === 0
+      ? this.#retiredToolNames
+      : new Set([...this.#retiredToolNames, ...withheldTools.keys()]);
     return {
-      definitions: this.#definitions,
-      retiredToolNames: this.#retiredToolNames,
+      definitions,
+      retiredToolNames,
+      instructions: this.instructions(offer),
       invoke: async (call) => {
+        const withheld = withheldTools.get(call.tool);
+        if (withheld) return withheld;
         const tool = this.#tools.get(call.tool);
         if (!tool) return failure("That Inertia capability tool is unavailable.");
         try {
@@ -403,4 +456,23 @@ export class HarnessCapabilityRegistry {
       },
     };
   }
+
+  #withholdsAny(offer: HarnessCapabilityTurnOffer): boolean {
+    return this.#packs.some(({ id }) => offer.withheldPacks.has(id));
+  }
+}
+
+function withheldFailure(reason: HarnessCapabilityWithholding): ProviderHostToolResult {
+  const message = reason.message.trim();
+  return {
+    success: false,
+    text: JSON.stringify({
+      error: {
+        code: WITHHOLDING_CODE.test(reason.code) ? reason.code : "capability_withheld",
+        message: message.length > 0 && message.length <= 500 && SAFE_METADATA.test(message)
+          ? message
+          : "That Inertia capability is withheld from this turn.",
+      },
+    }),
+  };
 }

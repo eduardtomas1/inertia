@@ -70,6 +70,7 @@ import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
 import { draftWorkspaceToolsUnavailableReason } from "./utils/draftWorkspaceAvailability";
 import { forgetWorkspaceBoundLastTool } from "./utils/workspaceStartup";
+import { openPanelSurfaceChooser } from "./utils/globalShortcuts";
 import type { SplitDropZone } from "./utils/splitConversation";
 import { applySplitDrop, planSplitDrop, type SplitDropPlan, type SplitPaneOwner } from "./utils/splitLayout";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
@@ -668,6 +669,14 @@ export default function App(): React.JSX.Element {
     createConversation: () => createConversation(),
     mobileNavigation, suspended: multiSpawn.open || dailyWorkOpen,
     toggleTerminal: primarySceneLayout.toggleTerminal,
+    openSurfaceChooser: () => {
+      if (view !== "workspace" || !composerProject || globalChatActive) return;
+      openPanelSurfaceChooser(document, document.activeElement, () => {
+        if (primarySceneLayout.panel.isOpen) return false;
+        primarySceneLayout.toggleWorkspaceTools();
+        return true;
+      });
+    },
     toggleSettings: settingsMode.toggleSettings,
     setPaletteOpen,
     setSidebarCollapsed,

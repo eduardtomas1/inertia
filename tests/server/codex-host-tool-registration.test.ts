@@ -7,7 +7,12 @@ import {
 import type { CodexRunPhase } from "../../src/server/codex/app-server-config";
 import type { JsonObject } from "../../src/server/codex/protocol";
 import type { CodexAppServerOptions } from "../../src/server/codex/types";
+import type { AgentTurn, Conversation } from "../../src/shared/contracts";
 import { AGENT_BROWSER_TOOL_DEFINITIONS } from "../../src/server/runtime/agent-browser-host-tools";
+import {
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "../../src/server/runtime/inertia-harness-capabilities";
 
 const THREAD_ID = "thread-host-tools";
 const TURN_ID = "turn-host-tools";
@@ -91,6 +96,31 @@ describe("Codex host-tool registration", () => {
     expect(started?.params.dynamicTools).toEqual(AGENT_BROWSER_TOOL_DEFINITIONS.map(
       ({ name, description, inputSchema }) => ({ name, description, inputSchema }),
     ));
+  });
+
+  it.each([
+    { browserAccess: false, browserTools: 0 },
+    { browserAccess: null, browserTools: AGENT_BROWSER_TOOL_DEFINITIONS.length },
+  ])("registers Browser tools on a new thread only when the project allows Browser access ($browserAccess)", async ({
+    browserAccess,
+    browserTools,
+  }) => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: async () => ({ success: true, text: "{}" }),
+    });
+    const bridge = registry.bridgeFor(
+      { conversation: {} as Conversation, turn: {} as AgentTurn },
+      inertiaCapabilityOfferForProject({ browserAccess }),
+    );
+    const harness = turnHarness(undefined, bridge);
+    await harness.run();
+    const started = harness.calls.find(({ method }) => method === "thread/start");
+    expect(started).toBeDefined();
+    const names = (started!.params.dynamicTools as Array<{ name: string }>).map(({ name }) => name);
+    expect(names.filter((name) => name.startsWith("inertia_browser_"))).toHaveLength(browserTools);
+    expect(names).toContain("inertia_render_html");
   });
 
   it("advertises exact dynamic tools when opening a new provider thread", async () => {

@@ -36,6 +36,8 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { SplitDropZone } from "../utils/splitConversation";
 import type { SplitDropPlan, SplitPaneOwner } from "../utils/splitLayout";
 import { rootGitMutationScope } from "../utils/workspaceGit";
+import { paletteWorkspaceCommands } from "../utils/paletteWorkspaceCommands";
+import { requestHeaderBranchMenu } from "../utils/checkoutBranchMenu";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
@@ -586,6 +588,36 @@ export const AppLayout = memo(function AppLayout({
       }
     : null;
 
+  const workspaceCommands = paletteOpen && view === "workspace" && project && headerConversation
+    ? paletteWorkspaceCommands({
+        surfaces: headerTools ? {
+          unavailable: headerTools.panel.unavailable ?? {},
+          open: headerTools.panel.onOpenSurface,
+        } : null,
+        git: {
+          status: gitStatus,
+          busy: Boolean(busyAction),
+          commit: () => setCommitDialogOpen(true),
+          fetch: () => { void actions.mutateRemote("git.fetch").catch(() => undefined); },
+          pull: () => { void actions.mutateRemote("git.pull").catch(() => undefined); },
+          push: () => { void actions.mutateRemote("git.push").catch(() => undefined); },
+          createPullRequest: openPullRequest,
+          switchBranch: () => { requestHeaderBranchMenu(); },
+        },
+        terminal: headerTools ? {
+          unavailableReason: workspaceToolsUnavailableReason,
+          shortcut: formatAppShortcutLabel(platform, settings.keybindings["toggle-terminal"]),
+          toggle: scenePanel.toggleTerminal,
+        } : null,
+        window: isServerConversation && conversation ? {
+          conversation,
+          isDetached: detachedConversationIds.has(conversation.id),
+          detachedChatLimitReached,
+          openInWindow: sidebarActions.openConversationInWindow,
+        } : null,
+      })
+    : undefined;
+
   const [appBooted, setAppBooted] = useState(false);
   useEffect(() => {
     const frame = requestAnimationFrame(() => setAppBooted(true));
@@ -971,6 +1003,7 @@ export const AppLayout = memo(function AppLayout({
         importProject={actions.importProject}
         openSettings={actions.openSettings}
         openTasks={() => setView("tasks")}
+        {...(workspaceCommands ? { workspaceCommands } : {})}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}

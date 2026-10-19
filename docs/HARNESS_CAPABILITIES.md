@@ -49,6 +49,35 @@ delegation, inspection of the terminal result, and deference to Inertia for
 approval. Starting a child chat is explicitly not treated as evidence that its
 work completed.
 
+### Reading chat context
+
+`inertia.orchestration` also carries `inertia_request_context`, which lets an
+agent read turns of Inertia chats. With the `conversationId` of its own chat,
+or of a chat the user referenced in the message that started the turn, it
+works without asking: it lists that chat's turns newest first (turn id, first
+line of the request, status, and date; 20 by default, at most 50), and with a
+`turnId` it reads one turn in full: the request and its images, the agent's
+messages, commands with their outcomes and exit codes when recorded, tool
+calls, changed files, provider, model, status, and times. Each result carries
+at most 30 KiB; a longer list or turn returns `nextCursor`, which the agent
+passes back as `cursor`. A turn of the agent's own chat that ran on another
+model endpoint is withheld from that chat's history and returns
+`turn_withheld`.
+
+Any other chat, or a call without `conversationId`, opens a chooser card in
+which the user picks a chat to share, with an extra confirmation for a chat in
+another workspace. The result is a bounded excerpt of that chat, and its turns
+can then be listed and read for the rest of the turn. A turn may open the
+chooser at most four times (`budget_exceeded` afterwards); a chooser expires
+after five minutes, and a dismissed or expired chooser returns
+`user_cancelled` or `call_cancelled`. Request images are returned only to
+native Claude and Codex routes whose model accepts image input; other routes
+get a note that the image is not available there. Agent-written text in a
+result is quoted data, never instructions, and Inertia records each read on
+the reading turn.
+
+### Frontend workbench
+
 `inertia.frontend-workbench` composes the Browser tools described in
 `docs/AGENT_BROWSER.md`. Its guidance tells every provider that the chat has
 its own Browser whether or not the panel is showing, to navigate before
@@ -84,6 +113,8 @@ The local screenshot remains useful evidence for the user, but its pixels are
 not currently visible to the provider model. The pack tells the model this
 directly so it cannot quietly convert “capture succeeded” into a visual claim.
 The current Browser also has no agent-owned viewport-resize command.
+
+### Visual replies
 
 `inertia.visual-replies` adds one tool, `inertia_render_html`, for every
 provider that has Inertia host tools. The agent passes one self-contained HTML
@@ -123,7 +154,6 @@ only for a click the frame's bootstrap saw on a link, at most once per second,
 while the frame has focus and a user gesture; the bootstrap runs before any
 page script and proves itself with a token the page cannot read. A page
 that no longer exists is served as a themed "no longer available" notice (404).
-that no longer exists is served as a themed "no longer available" notice (404).
 When the runtime is not running or does not answer in time, the page is served
 as a themed "temporarily unavailable" notice (503), and the chat reloads that
 frame the next time it reconnects to the runtime. The
@@ -146,6 +176,42 @@ has no capability epoch that would restart an existing thread for a new tool.
 Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
+
+## What each turn is offered
+
+The registry is compiled once, so its manifest and definition digest are the
+same for every project. Each turn then gets an offer from that registry: the
+tools it advertises and the private instructions injected into its prompt.
+Both follow the chat's project settings: the instructions as they are when
+the turn is prepared, and the tools as they are when the turn starts.
+
+When a project turns Browser access off, its turns are not offered
+`inertia.frontend-workbench`: none of the twelve Browser tools is advertised
+and the frontend instructions are not injected. The other packs are
+unchanged. Claude, Cursor, Kimi, and OpenCode attach tools for each turn, so
+the change applies from their next turn. A Codex thread keeps the tools it
+registered when it started: a thread started with Browser access on still
+holds the Browser tools after the setting is turned off, and a call to one
+returns `browser_disabled` without reaching the Browser; a thread started
+with Browser access off gets the Browser tools only when its chat starts a
+new thread. The same `browser_disabled` check also runs on every Browser call,
+so turning the setting off during a turn stops that turn's Browser calls too.
+
+Cursor and Kimi attach the host tools as an MCP server in the ACP session:
+over HTTP when the agent advertises HTTP MCP support, and otherwise through a
+small stdio proxy run by Node.js. In the packaged desktop app, that proxy
+needs a separate Node.js on `PATH`. When neither is available, no server is
+attached and the turn's prompt is sent without the host-tool instructions,
+so the agent is not told about tools it cannot call. This is decided after
+the ACP `initialize` response, so the turn's stored execution record still
+counts the withheld instructions. The provider capability contract does not
+change, because HTTP support is known only after `initialize`.
+
+The MCP server keeps the identifier `inertia-chat-manager`, because provider
+tool names and permission rules are derived from it. Its instructions say
+that it offers chat coordination, context reads, the Browser when its tools
+are listed, and visual replies, and that only the tools listed for the turn
+are available.
 
 ## Antigravity headless contract
 

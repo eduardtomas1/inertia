@@ -6407,6 +6407,7 @@ button.turn-agents-line:hover {
 .plan-document-toggle svg { transition: transform var(--dur-fast) var(--ease); }
 .plan-document-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .plan-steps { margin: 0; padding: 8px; list-style: none; }
+.plan-source-note { margin: 0; padding: 12px 16px 0; color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-chrome); }
 .plan-step { border-radius: var(--radius-xs); }
 .plan-step + .plan-step { margin-top: 2px; }
 .plan-step-button, .plan-step-content { display: flex; width: 100%; min-height: 36px; align-items: flex-start; gap: 8px; padding: 8px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; text-align: left; }

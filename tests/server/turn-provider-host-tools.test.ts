@@ -7,6 +7,12 @@ import {
   createKimiClaudeModelSelection,
 } from "../../src/shared/claude-backend-profiles";
 import { continuationIdentityForSelection } from "../../src/shared/model-routing";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
+import type { RuntimeStore } from "../../src/server/database";
+import {
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "../../src/server/runtime/inertia-harness-capabilities";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { routeUsesTrustedHostBridge } from "../../src/server/runtime/turns/turn-provider-host-tools";
 import {
@@ -88,6 +94,57 @@ describe("turn provider host-tool route authority", () => {
     expect(harnessInstructionsForTurn).toHaveBeenCalledTimes(1);
     expect(hostToolsForTurn).toHaveBeenCalledTimes(1);
     expect(runtime.provider.callbacks?.hostTools).toBe(hostTools);
+
+    runtime.provider.resolve();
+    await flushTurnControllerTestPromises();
+    runtime.store.close();
+  });
+
+  it.each([
+    { browserAccess: false, frontend: false },
+    { browserAccess: null, frontend: true },
+  ])("offers the frontend pack's instructions and tools per project (browserAccess=$browserAccess)", async ({
+    browserAccess,
+    frontend,
+  }) => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: async () => ({ success: true, text: "{}" }),
+    });
+    let store: RuntimeStore | undefined;
+    const offerFor = (projectId: string) => inertiaCapabilityOfferForProject(
+      store!.project(projectId).preferences,
+    );
+    const runtime = await createTurnControllerTestRuntime({
+      harnessInstructionsForTurn: ({ conversation }) =>
+        registry.instructions(offerFor(conversation.projectId)),
+      hostToolsForTurn: ({ conversation, turn }) =>
+        registry.bridgeFor({ conversation, turn }, offerFor(conversation.projectId)),
+    });
+    store = runtime.store;
+    const { projectId } = runtime.store.conversation(runtime.conversationId);
+    runtime.store.updateProject(projectId, {
+      preferences: { ...defaultProjectPreferences(), browserAccess },
+    });
+    const digest = registry.manifest().definitionDigest;
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Check the page.",
+    });
+
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    const prompt = runtime.provider.input?.prompt ?? "";
+    expect(prompt).toContain("[inertia-orchestration]");
+    expect(prompt.includes("[inertia-frontend-workbench]")).toBe(frontend);
+    const offered = runtime.provider.callbacks?.hostTools;
+    const browserTools = offered?.definitions
+      .filter(({ name }) => name.startsWith("inertia_browser_")) ?? [];
+    expect(browserTools.length > 0).toBe(frontend);
+    expect(offered?.instructions?.map(({ label }) => label)).toEqual(frontend
+      ? ["inertia-frontend-workbench", "inertia-orchestration"]
+      : ["inertia-orchestration"]);
+    expect(registry.manifest().definitionDigest).toBe(digest);
 
     runtime.provider.resolve();
     await flushTurnControllerTestPromises();

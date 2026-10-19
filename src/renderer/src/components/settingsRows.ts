@@ -89,6 +89,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["shortcut-new-chat", "New chat", ["keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["shortcut-toggle-sidebar", "Toggle project navigation", ["sidebar", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["shortcut-toggle-terminal", "Toggle terminal", ["terminal", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
+      ["shortcut-open-surface", "Open a surface", ["surface chooser", "right panel", "panel", "keyboard shortcuts", "shortcut", "hotkey", "keybindings"]],
       ["open-settings", "Open settings", ["preferences", "comma", "shortcut", "hotkey", "keybindings"]],
       ["reset-shortcuts", "Reset shortcuts", ["default shortcuts", "keyboard defaults", "keyboard shortcuts", "hotkey", "keybindings"]],
     ],

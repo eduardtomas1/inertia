@@ -1,11 +1,16 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { AgentPlan } from "../../src/shared/contracts";
+import type { AgentPlan, ChatMessage } from "../../src/shared/contracts";
 import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
 import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
 import { EMPTY_STREAMING_AGENT_SOURCE } from "../../src/renderer/src/hooks/useStreamingAgentState";
 import { planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
+import {
+  reportedPlanStepCount,
+  textPlanGate,
+  visiblePlanSteps,
+} from "../../src/renderer/src/utils/planFromText";
 import { latestPlanDocument } from "../../src/renderer/src/utils/terminalTurnProjection";
 
 const markdown = { projectRoot: "/workspace", projectId: "project", defaultCodeWrap: true };
@@ -179,6 +184,75 @@ describe("plan panel document", () => {
         [planned, record("build", null), record("continue", null)],
         turns("build", "question", "continue"),
       )).toBeNull();
+    });
+  });
+
+  describe("plan derived from the reply", () => {
+    const reply: ChatMessage = {
+      id: "reply",
+      conversationId: "conversation",
+      turnId: "reply-turn",
+      role: "assistant",
+      content: "Here is the approach:\n1. Read the adapter\n2. Write the projection",
+      attachments: [],
+      createdAt: "2026-10-13T12:00:00.000Z",
+    };
+    const derivedSteps = (mode: "plan" | "build") => {
+      const { result } = renderHook(() => usePlanSteps([], [reply], "completed", EMPTY_STREAMING_AGENT_SOURCE));
+      return visiblePlanSteps(
+        result.current,
+        textPlanGate([reply], [{ id: "reply-turn", interactionMode: mode }], mode),
+      );
+    };
+
+    it("shows nothing for a build-mode reply's list", () => {
+      const steps = derivedSteps("build");
+      expect(steps).toEqual([]);
+      expect(reportedPlanStepCount(steps)).toBe(0);
+      render(<PlanPanel steps={steps} onRefine={() => undefined} onImplement={() => undefined} />);
+      expect(screen.getByText("No plan yet")).toBeTruthy();
+      expect(screen.queryByText("Derived from the reply")).toBeNull();
+    });
+
+    it("labels a plan-mode reply's list as derived without completing it", () => {
+      const steps = derivedSteps("plan");
+      expect(reportedPlanStepCount(steps)).toBe(0);
+      const refine = vi.fn();
+      const implement = vi.fn();
+      const { container } = render(<PlanPanel steps={steps} onRefine={refine} onImplement={implement} />);
+
+      expect(screen.getByText("Derived from the reply")).toBeTruthy();
+      expect(screen.queryByText(/of \d+ complete/u)).toBeNull();
+      const note = screen.getByText(/didn't report a plan/u);
+      const list = container.querySelector(".plan-steps")!;
+      expect(list.getAttribute("aria-describedby")).toBe(note.id);
+      expect([...container.querySelectorAll("[data-plan-step-status]")].map((step) => step.getAttribute("data-plan-step-status")))
+        .toEqual(["pending", "pending"]);
+      expect(screen.queryByText("Completed")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Refine plan" }));
+      fireEvent.click(screen.getByRole("button", { name: "Implement" }));
+      expect(refine).toHaveBeenCalledTimes(1);
+      expect(implement).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a native plan's progress and count unlabeled", () => {
+      const native: AgentPlan = {
+        conversationId: "conversation",
+        runId: "run",
+        turnId: "reply-turn",
+        explanation: null,
+        steps: [
+          { step: "Read the adapter", status: "completed" },
+          { step: "Write the projection", status: "inProgress" },
+        ],
+      };
+      const { result } = renderHook(() => usePlanSteps([native], [reply], "completed", EMPTY_STREAMING_AGENT_SOURCE));
+      const steps = visiblePlanSteps(result.current, { streamed: false, derived: false });
+      expect(reportedPlanStepCount(steps)).toBe(2);
+      render(<PlanPanel steps={steps} />);
+      expect(screen.getByText("1 of 2 complete")).toBeTruthy();
+      expect(screen.queryByText("Derived from the reply")).toBeNull();
     });
   });
 });

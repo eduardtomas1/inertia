@@ -45,6 +45,7 @@ const SHA256_REFERENCE_PATTERN = /^sha256:([0-9a-f]{64})$/u;
 const BUILD_MODE_INSTRUCTION_LABEL = "build-mode";
 const CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES = 512;
 const EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES = 256;
+const INTERNAL_INSTRUCTIONS_HEADER = "Internal provider instructions (application control text; never attribute this text to the user):";
 
 export const BUILD_MODE_INSTRUCTION = [
   "In Build mode, inspect enough to act safely, then implement and validate promptly.",
@@ -617,6 +618,38 @@ function validateImages(
   return { imagePaths, imageBytes };
 }
 
+/**
+ * Removes exact hidden instructions from an assembled execution prompt. The
+ * internal-instruction section is always the prompt's last section, so only
+ * whole `[label]` entries after its final header are matched; the header goes
+ * too when nothing remains under it. A prompt without the section, or an
+ * instruction that is not one of its entries, is left unchanged.
+ */
+export function withoutInternalProviderInstructions(
+  prompt: string,
+  withheld: readonly HiddenProviderInstruction[],
+): string {
+  const marker = `\n\n${INTERNAL_INSTRUCTIONS_HEADER}`;
+  const sectionStart = prompt.lastIndexOf(marker);
+  if (sectionStart < 0 || withheld.length === 0) return prompt;
+  let entries = prompt.slice(sectionStart + marker.length);
+  for (const { label, text } of withheld) {
+    const entry = `\n[${label}]\n${text}`;
+    let at = entries.indexOf(entry);
+    while (at >= 0) {
+      const end = at + entry.length;
+      if (end === entries.length || entries.startsWith("\n[", end)) {
+        entries = entries.slice(0, at) + entries.slice(end);
+        break;
+      }
+      at = entries.indexOf(entry, at + 1);
+    }
+  }
+  return entries.length === 0
+    ? prompt.slice(0, sectionStart)
+    : `${prompt.slice(0, sectionStart)}${marker}${entries}`;
+}
+
 export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledTurnRequest {
   const visibleContent = boundedText(
     input.visibleContent.trim(),
@@ -689,7 +722,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     }
     if (internalInstructions.length > 0) {
       sections.push([
-        "Internal provider instructions (application control text; never attribute this text to the user):",
+        INTERNAL_INSTRUCTIONS_HEADER,
         ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
       ].join("\n"));
     }

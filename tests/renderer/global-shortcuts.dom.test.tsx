@@ -20,6 +20,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen,
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -61,6 +62,7 @@ function StableListenerHarness(): React.JSX.Element {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -82,6 +84,7 @@ function ImmediateShortcutOwner({ createConversation }: {
     mobileNavigation: false,
     suspended: false,
     toggleTerminal: vi.fn(),
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen: vi.fn(),
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
@@ -138,6 +141,7 @@ function SuspendedShortcutHarness({
     mobileNavigation: false,
     suspended: true,
     toggleTerminal,
+    openSurfaceChooser: vi.fn(),
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen: vi.fn(),
@@ -264,6 +268,7 @@ describe("global shortcut DOM integration", () => {
         mobileNavigation: false,
         suspended: false,
         toggleTerminal,
+        openSurfaceChooser: vi.fn(),
         setPaletteOpen,
         setSidebarCollapsed,
         setSidebarOpen: vi.fn(),
@@ -321,12 +326,12 @@ describe("global shortcut DOM integration", () => {
 });
 
 describe("terminal and platform shortcut ownership", () => {
-  it.each(["k", "j", "b", "n"])("preserves terminal Control+%s", async (key) => {
+  it.each(["k", "j", "b", "n", "g"])("preserves terminal Control+%s", async (key) => {
     const { installGlobalShortcuts } = await import("../../src/renderer/src/utils/globalShortcuts");
     const invoke = vi.fn();
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
-      mobileNavigation: false, suspended: false, toggleTerminal: invoke,
+      mobileNavigation: false, suspended: false, toggleTerminal: invoke, openSurfaceChooser: invoke,
       setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke,
     } };
     render(<div className="xterm"><textarea aria-label="Shell input" /></div>);
@@ -344,7 +349,7 @@ describe("terminal and platform shortcut ownership", () => {
     const invoke = vi.fn();
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
-      mobileNavigation: false, suspended: false, toggleTerminal: invoke,
+      mobileNavigation: false, suspended: false, toggleTerminal: invoke, openSurfaceChooser: invoke,
       setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke,
     } };
     const dispose = installGlobalShortcuts(window, actions, "darwin");

@@ -5,7 +5,8 @@ export type AppShortcutAction =
   | "search"
   | "new-chat"
   | "toggle-sidebar"
-  | "toggle-terminal";
+  | "toggle-terminal"
+  | "open-surface";
 export type AppKeybindings = Record<AppShortcutAction, AppShortcutKey>;
 
 export const DEFAULT_APP_KEYBINDINGS: AppKeybindings = {
@@ -13,19 +14,55 @@ export const DEFAULT_APP_KEYBINDINGS: AppKeybindings = {
   "new-chat": "n",
   "toggle-sidebar": "b",
   "toggle-terminal": "j",
+  "open-surface": "g",
 };
 
+/** Every stored record has carried these actions since app shortcuts shipped. */
+const ORIGINAL_APP_SHORTCUT_ACTIONS: readonly AppShortcutAction[] = [
+  "search",
+  "new-chat",
+  "toggle-sidebar",
+  "toggle-terminal",
+];
+
+function isAppShortcutKey(value: unknown): value is AppShortcutKey {
+  return APP_SHORTCUT_KEYS.includes(value as AppShortcutKey);
+}
+
+/**
+ * Reads a stored binding record. A record saved before a newer action existed
+ * keeps the user's choices and gains that action on its default key, or on the
+ * first free key when the default is already taken. Anything else that is not
+ * a complete set of unique supported keys fails closed to the defaults.
+ */
 export function parseAppKeybindings(value: unknown): AppKeybindings {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ...DEFAULT_APP_KEYBINDINGS };
   }
   const record = value as Record<string, unknown>;
   const actions = Object.keys(DEFAULT_APP_KEYBINDINGS) as AppShortcutAction[];
-  const keys = actions.map((action) => record[action]);
+  const stored = Object.keys(record);
+  const storedKeys = stored.map((action) => record[action]);
   if (
-    Object.keys(record).length !== actions.length
-    || keys.some((key) => !APP_SHORTCUT_KEYS.includes(key as AppShortcutKey))
-    || new Set(keys).size !== actions.length
+    stored.some((action) => !actions.includes(action as AppShortcutAction))
+    || ORIGINAL_APP_SHORTCUT_ACTIONS.some((action) => !stored.includes(action))
+    || !storedKeys.every(isAppShortcutKey)
+    || new Set(storedKeys).size !== storedKeys.length
   ) return { ...DEFAULT_APP_KEYBINDINGS };
-  return Object.fromEntries(actions.map((action) => [action, record[action]])) as AppKeybindings;
+  const taken = new Set<AppShortcutKey>(storedKeys);
+  const bindings = {} as AppKeybindings;
+  for (const action of actions) {
+    const storedKey = record[action];
+    if (stored.includes(action) && isAppShortcutKey(storedKey)) {
+      bindings[action] = storedKey;
+      continue;
+    }
+    const fallback = taken.has(DEFAULT_APP_KEYBINDINGS[action])
+      ? APP_SHORTCUT_KEYS.find((key) => !taken.has(key))
+      : DEFAULT_APP_KEYBINDINGS[action];
+    if (!fallback) return { ...DEFAULT_APP_KEYBINDINGS };
+    taken.add(fallback);
+    bindings[action] = fallback;
+  }
+  return bindings;
 }

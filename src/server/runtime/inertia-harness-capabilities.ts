@@ -6,12 +6,40 @@ import {
   RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "./agent-browser-host-tools";
 import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
+import type { ProjectPreferences } from "../../shared/project-preferences";
 import {
+  FULL_HARNESS_CAPABILITY_OFFER,
   HarnessCapabilityRegistry,
   type HarnessCapabilityTool,
   type HarnessCapabilityPack,
+  type HarnessCapabilityTurnOffer,
+  type HarnessCapabilityWithholding,
 } from "./harness-capabilities";
 import type { HiddenProviderInstruction } from "./turns/request-context";
+
+export const INERTIA_FRONTEND_WORKBENCH_PACK_ID = "inertia.frontend-workbench";
+
+export const BROWSER_ACCESS_DISABLED: HarnessCapabilityWithholding = Object.freeze({
+  code: "browser_disabled",
+  message: "Agent browser access is disabled in this project's settings.",
+});
+
+const BROWSER_DISABLED_OFFER: HarnessCapabilityTurnOffer = Object.freeze({
+  withheldPacks: new Map([[INERTIA_FRONTEND_WORKBENCH_PACK_ID, BROWSER_ACCESS_DISABLED]]),
+});
+
+/**
+ * The packs one turn is offered under its project's preferences. Turning
+ * Browser access off withholds the frontend workbench: its tools are not
+ * advertised and its instructions are not injected.
+ */
+export function inertiaCapabilityOfferForProject(
+  preferences: Pick<ProjectPreferences, "browserAccess"> | null | undefined,
+): HarnessCapabilityTurnOffer {
+  return preferences?.browserAccess === false
+    ? BROWSER_DISABLED_OFFER
+    : FULL_HARNESS_CAPABILITY_OFFER;
+}
 
 const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
   label: "inertia-orchestration",
@@ -67,7 +95,7 @@ export function createInertiaHarnessCapabilities(
     },
   }];
   if (input.browserEnabled) packs.push({
-    id: "inertia.frontend-workbench",
+    id: INERTIA_FRONTEND_WORKBENCH_PACK_ID,
     revision: 3,
     title: "Inertia frontend workbench",
     summary: "Visible local-page interaction with bounded semantic inspection and deterministic frontend audit evidence.",

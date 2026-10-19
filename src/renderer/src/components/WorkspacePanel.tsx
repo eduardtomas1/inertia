@@ -15,6 +15,7 @@ import { prefetchWorkspaceTool } from "./lazySurfaceLoaders";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import {
   CLOSE_ACTIVE_PANEL_SURFACE_EVENT,
+  OPEN_PANEL_SURFACE_CHOOSER_EVENT,
   RIGHT_PANEL_SURFACE_META,
   RIGHT_PANEL_SURFACES,
   surfaceShortcutActionForKey,
@@ -143,22 +144,56 @@ export function WorkspacePanel({
   }, [selected, visible]);
 
   const closeActiveRef = useRef<() => boolean>(() => false);
+  const openChooserRef = useRef<() => boolean>(() => false);
   useLayoutEffect(() => {
     closeActiveRef.current = () => {
       if (!visible || !selected) return false;
       closeSurface(selected, Boolean(panelRef.current?.contains(document.activeElement)));
       return true;
     };
+    openChooserRef.current = () => {
+      if (!visible) return false;
+      if (selected) {
+        // Focus the trigger first so the menu moves focus to its first item.
+        panelRef.current?.querySelector<HTMLElement>(".workspace-panel-add")?.focus();
+        if (menu !== "add") toggleMenu("add");
+        return true;
+      }
+      focusLauncher();
+      return true;
+    };
   });
   useEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
-    const handle = (event: Event): void => {
+    const handleClose = (event: Event): void => {
       if (closeActiveRef.current()) event.preventDefault();
     };
-    panel.addEventListener(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, handle);
-    return () => panel.removeEventListener(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, handle);
+    const handleChooser = (event: Event): void => {
+      if (openChooserRef.current()) event.preventDefault();
+    };
+    panel.addEventListener(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, handleClose);
+    panel.addEventListener(OPEN_PANEL_SURFACE_CHOOSER_EVENT, handleChooser);
+    return () => {
+      panel.removeEventListener(CLOSE_ACTIVE_PANEL_SURFACE_EVENT, handleClose);
+      panel.removeEventListener(OPEN_PANEL_SURFACE_CHOOSER_EVENT, handleChooser);
+    };
   }, []);
+
+  const focusLauncher = (): void => {
+    let attempts = 0;
+    const focus = (): void => {
+      // The lazy launcher replaces a non-focusable placeholder once it loads.
+      const launcher = panelRef.current?.querySelector<HTMLElement>(".workspace-panel-launcher[tabindex]");
+      if (launcher) {
+        launcher.focus({ preventScroll: true });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 30) window.requestAnimationFrame(focus);
+    };
+    focus();
+  };
 
   const focusTab = (surface: WorkspacePanelTab): void => {
     window.requestAnimationFrame(() => {

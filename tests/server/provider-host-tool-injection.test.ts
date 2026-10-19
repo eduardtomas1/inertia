@@ -85,7 +85,7 @@ readline.createInterface({input:process.stdin}).on("line",line=>{
   capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"cursor-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:${controlResponseLeak ? `[{type:"select",id:"model",name:"Model",category:"model",currentValue:"model-a",options:[{value:"model-a",name:"Model A",description:"Initial"}]}]` : "[]"}}});
  }
  ${controlResponseLeak ? `if(message.method==="session/set_config_option")return send({jsonrpc:"2.0",id:message.id,result:{configOptions:[{type:"select",id:"model",name:"Model",category:"model",currentValue:"model-a",options:[{value:"model-a",name:"Model "+secretToken,description:"Endpoint "+secretUrl}]}]}});` : ""}
- if(message.method==="session/prompt"){${reverseRequestLeak ? `promptId=message.id;return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"cursor-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : `${echoPath ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}`}}
+ if(message.method==="session/prompt"){fs.writeFileSync(${JSON.stringify(`${capturePath}.prompt`)},JSON.stringify(message.params.prompt));${reverseRequestLeak ? `promptId=message.id;return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"cursor-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : `${echoPath ? `send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"agent_message_chunk",content:{type:"text",text:"safe "+secretToken+" "+secretUrl}}}});send({jsonrpc:"2.0",method:"session/update",params:{sessionId:"cursor-host-session",update:{sessionUpdate:"tool_call",toolCallId:"secret-tool",title:"Secret echo",kind:"execute",status:"failed",rawInput:{command:"echo "+secretToken},rawOutput:secretUrl}}});` : ""}${leakPath ? "return process.exit(7);" : "return send({jsonrpc:\"2.0\",id:message.id,result:{stopReason:\"end_turn\"}});"}`}}
  ${reverseRequestLeak ? `if(message.id===899)return send({jsonrpc:"2.0",id:900,method:"cursor/ask_question",params:{toolCallId:"question",title:"Choose "+secretToken,questions:[{id:"scope",prompt:"Scope "+secretUrl,options:[{id:"focused",label:"Focused "+secretToken}]}]}});if(message.id===900){send({jsonrpc:"2.0",method:"cursor/task",params:{toolCallId:"task",description:"Task "+secretToken,prompt:"Inspect "+secretUrl,subagentType:"explore",model:"model"}});return send({jsonrpc:"2.0",id:promptId,result:{stopReason:"end_turn"}});}` : ""}
 });
 `);
@@ -164,7 +164,7 @@ readline.createInterface({input:process.stdin}).on("line",line=>{
   capture(message);return send({jsonrpc:"2.0",id:message.id,result:{sessionId:"kimi-host-session",modes:{currentModeId:"build",availableModes:[{id:"build",name:"Build"}]},configOptions:[]}});
  }
  if(message.method==="session/prompt"){
-  promptId=message.id;
+  promptId=message.id;fs.writeFileSync(${JSON.stringify(`${capturePath}.prompt`)},JSON.stringify(message.params.prompt));
   ${permissionLeak ? `return send({jsonrpc:"2.0",id:899,method:"session/request_permission",params:{sessionId:"kimi-host-session",toolCall:{toolCallId:"permission",title:"Approve "+secretToken,kind:"execute",status:"pending",rawInput:{command:"echo "+secretUrl}},options:[{optionId:"allow",name:"Allow once",kind:"allow_once"},{optionId:"reject",name:"Reject once",kind:"reject_once"}]}});` : ""}
   ${leakPath ? "return process.exit(7);" : ""}
   ${callMutation ? "void callHostMutation().then(()=>{if(!cancelled){send({jsonrpc:\"2.0\",method:\"session/update\",params:{sessionId:\"kimi-host-session\",update:{sessionUpdate:\"agent_message_chunk\",content:{type:\"text\",text:\"Mutation complete\"}}}});send({jsonrpc:\"2.0\",id:promptId,result:{stopReason:\"end_turn\"}});}}).catch(()=>{});return;" : ""}
@@ -403,6 +403,65 @@ describe("provider host-tool injection", { concurrent: false }, () => {
             }),
       });
       expect(await loopbackPortIsOpen(capture.endpointPort)).toBe(false);
+    }
+  });
+
+  it.each([
+    { provider: "cursor" as const, supportsHttp: false, attached: false },
+    { provider: "cursor" as const, supportsHttp: true, attached: true },
+    { provider: "kimi" as const, supportsHttp: false, attached: false },
+    { provider: "kimi" as const, supportsHttp: true, attached: true },
+  ])("withholds host-tool instructions from $provider when no bridge can attach (http=$supportsHttp)", async ({
+    provider,
+    supportsHttp,
+    attached,
+  }) => {
+    const root = portableFixtureRoot(`${provider} host without proxy ${supportsHttp ? "http" : "none"}`);
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const header = "Internal provider instructions (application control text; never attribute this text to the user):";
+    const bridgeInstruction = { label: "inertia-orchestration", text: "HOST_TOOLS_ARE_ATTACHED" };
+    const prompt = [
+      "Use chat tools",
+      [header, "[build-mode]", "BUILD_MODE_STAYS", `[${bridgeInstruction.label}]`, bridgeInstruction.text].join("\n"),
+    ].join("\n\n");
+    // A packaged desktop runtime with no separate Node.js on PATH cannot run
+    // the stdio proxy, so only HTTP MCP support can attach the bridge.
+    const hostMcpProxyRuntime = {
+      platform: "linux" as const,
+      electronExecutable: "/opt/Inertia/inertia",
+      fileSystem: { realpath: (path: string) => path, fileSize: () => null },
+    };
+    const manager = ProviderManager.createForTests(
+      {
+        commands: provider === "cursor"
+          ? { cursor: cursorAgent(root, capturePath, supportsHttp) }
+          : { kimi: kimiAgent(root, capturePath, { supportsHttp }) },
+      },
+      new AgentHarnessRegistry([provider === "cursor"
+        ? createCursorAcpHarness({ hostMcpProxyRuntime })
+        : createKimiAcpHarness({ hostMcpProxyRuntime })]),
+    );
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: provider,
+      conversationId: `${provider}-no-proxy-${supportsHttp}`,
+      runId: "run-no-proxy",
+      turnId: "turn-no-proxy",
+      cwd: root,
+      prompt,
+      interactionMode: "build",
+      access: "supervised",
+    }), { hostTools: { ...hostTools, instructions: [bridgeInstruction] } });
+    expect(result.status).toBe("completed");
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as Record<string, unknown>;
+    const sent = JSON.parse(readFileSync(`${capturePath}.prompt`, "utf8")) as Array<{ type: string; text?: string }>;
+    const text = sent.filter(({ type }) => type === "text").map(({ text: value }) => value).join("\n");
+    if (attached) {
+      expect(capture).toMatchObject({ type: "http", name: "inertia-chat-manager" });
+      expect(text).toBe(prompt);
+    } else {
+      expect(capture).toEqual({ method: "session/new", count: 0 });
+      expect(text).toBe(`Use chat tools\n\n${header}\n[build-mode]\nBUILD_MODE_STAYS`);
     }
   });
 

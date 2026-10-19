@@ -6,7 +6,10 @@ import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
-import { providerMcpTools } from "./host-tool-mcp-protocol";
+import {
+  INERTIA_HOST_MCP_INSTRUCTIONS,
+  providerMcpTools,
+} from "./host-tool-mcp-protocol";
 
 interface McpRequestExtra {
   requestId?: unknown;
@@ -43,7 +46,7 @@ export function createClaudeHostTools(
   const config = createSdkMcpServer({
     name: INERTIA_HOST_MCP_NAME,
     version: "1.0.0",
-    instructions: "Manage bounded top-level Inertia chats in the current project. Inertia itself asks for approval before mutations.",
+    instructions: INERTIA_HOST_MCP_INSTRUCTIONS,
   });
   const providerToolNames = new Set<string>();
   for (const definition of runtime.definitions()) {

@@ -51,7 +51,11 @@ import {
   type HarnessCapabilityManifest,
   type HarnessCapabilityRegistry,
 } from "./harness-capabilities";
-import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
+import {
+  BROWSER_ACCESS_DISABLED,
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "./inertia-harness-capabilities";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
@@ -357,8 +361,11 @@ export class AgentThreadManager {
     });
   }
 
-  capabilityInstructions(): readonly HiddenProviderInstruction[] {
-    return this.capabilities.instructions();
+  /** Instructions for the packs this conversation's project offers its next turn. */
+  capabilityInstructions(
+    conversation: Pick<Conversation, "projectId">,
+  ): readonly HiddenProviderInstruction[] {
+    return this.capabilities.instructions(this.capabilityOffer(conversation));
   }
 
   capabilityManifest(): HarnessCapabilityManifest {
@@ -366,7 +373,16 @@ export class AgentThreadManager {
   }
 
   bridgeFor(source: AgentThreadSource): ProviderHostToolBridge {
-    return this.capabilities.bridgeFor(source);
+    return this.capabilities.bridgeFor(
+      source,
+      this.capabilityOffer(source.conversation),
+    );
+  }
+
+  private capabilityOffer(conversation: Pick<Conversation, "projectId">) {
+    return inertiaCapabilityOfferForProject(
+      this.dependencies.store.project(conversation.projectId).preferences,
+    );
   }
 
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {
@@ -406,8 +422,10 @@ export class AgentThreadManager {
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
+        // The turn's offer already withholds these tools when Browser access
+        // was off at turn start; this covers a setting changed mid-turn.
         if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
-          return failure("browser_disabled", "Agent browser access is disabled in this project's settings.");
+          return failure(BROWSER_ACCESS_DISABLED.code, BROWSER_ACCESS_DISABLED.message);
         }
         return await this.agentBrowser.invoke(current, call, {
           conversationId: current.id,

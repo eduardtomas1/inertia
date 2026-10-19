@@ -29,8 +29,8 @@ runtime-issued authority. Opening the menus does not start a network scan.
   another remote.
   Fork workflows fetch the upstream independently of the push remote. Fetch is
   also available for a dirty checkout and from a nested repository's Changes
-  controls. Stop an active fetch from **Environment**; the activity stays live
-  until owned process cleanup settles.
+  controls. Stop an active fetch from the chat's **Background tasks** surface;
+  the activity stays live until owned process cleanup settles.
 - **Pull:** requires an upstream and a complete, clean checkout. Only a
   fast-forward is permitted; Inertia does not auto-stash, rebase, resolve
   conflicts, or recurse into submodules. Fetch first to update the incoming

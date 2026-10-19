@@ -23,7 +23,9 @@ afterEach(async () => { for (const service of services.splice(0)) await service.
 function fixture() {
   const send = vi.fn();
   const webContents = Object.assign(new EventEmitter(), { send, isDestroyed: () => false, mainFrame: { processId: 1, routingId: 2, frameToken: "frame" } });
-  const owner = { window: { webContents, isVisible: () => false, hide: vi.fn(), show: vi.fn(), showInactive: vi.fn(), focus: vi.fn(), isDestroyed: () => false } as unknown as BrowserWindow,
+  const owner = { window: { webContents, isVisible: () => false, hide: vi.fn(), show: vi.fn(), showInactive: vi.fn(), focus: vi.fn(), isDestroyed: () => false,
+    getBounds: () => ({ x: 40, y: 30, width: 1200, height: 800 }), isMaximized: () => false, isFullScreen: () => false,
+    maximize: vi.fn(), setFullScreen: vi.fn(), setBounds: vi.fn(), on: vi.fn(), removeListener: vi.fn() } as unknown as BrowserWindow,
     document: { owner: webContents, processId: 1, frameId: 2, frameToken: "frame" } as AttachmentImportDocument,
     conversationId: "11111111-1111-4111-8111-111111111111" };
   const imports = { begin: vi.fn(() => "batch"), importSelection: vi.fn(async (_doc, _id, run) => await run(new AbortController().signal)), cancel: vi.fn(async () => undefined) };
@@ -107,6 +109,51 @@ describe("reviewed screenshot ownership", () => {
     expect(f.owner.window.showInactive).toHaveBeenCalledOnce(); expect(f.owner.window.focus).not.toHaveBeenCalled();
     await expect(f.start()).rejects.toThrow("current system screenshot picker");
     finish([]); await Promise.resolve();
+  });
+
+  it.each([
+    ["maximized", "maximize"],
+    ["full screen", "setFullScreen"],
+    ["placed", "setBounds"],
+  ] as const)("puts a %s window back where it was after hiding it for a screen capture", async (state, restore) => {
+    vi.useFakeTimers();
+    native.displays.mockReturnValue([]);
+    native.sources.mockResolvedValueOnce([source("screen:1:0", image(), "1")]).mockResolvedValueOnce([source("screen:1:0", image(), "1")]);
+    const f = fixture(); await f.start();
+    vi.spyOn(f.owner.window, "isVisible").mockReturnValue(true);
+    vi.spyOn(f.owner.window, "isMaximized").mockReturnValue(state === "maximized");
+    vi.spyOn(f.owner.window, "isFullScreen").mockReturnValue(state === "full screen");
+    const selecting = f.select(); expect(f.owner.window.hide).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(150); await selecting;
+    expect(f.owner.window.show).toHaveBeenCalledOnce();
+    const window = f.owner.window as unknown as Record<"maximize" | "setFullScreen" | "setBounds", ReturnType<typeof vi.fn>>;
+    for (const name of ["maximize", "setFullScreen", "setBounds"] as const) {
+      expect(window[name]).toHaveBeenCalledTimes(name === restore ? 1 : 0);
+    }
+    if (restore === "setFullScreen") expect(window.setFullScreen).toHaveBeenCalledWith(true);
+    if (restore === "setBounds") expect(window.setBounds).toHaveBeenCalledWith({ x: 40, y: 30, width: 1200, height: 800 });
+    expect(window.maximize.mock.invocationCallOrder[0] ?? Infinity).toBeGreaterThan((f.owner.window.show as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!);
+    expect(f.last()).toMatchObject({ stage: "image" });
+  });
+
+  it("maximizes again when the window manager drops the state right after showing, then lets go", async () => {
+    vi.useFakeTimers();
+    native.displays.mockReturnValue([]);
+    native.sources.mockResolvedValueOnce([source("screen:1:0", image(), "1")]).mockResolvedValueOnce([source("screen:1:0", image(), "1")]);
+    const f = fixture(); await f.start();
+    const window = f.owner.window as unknown as EventEmitter & { maximize: ReturnType<typeof vi.fn> };
+    const events = new EventEmitter();
+    Object.assign(window, { on: events.on.bind(events), removeListener: events.removeListener.bind(events) });
+    vi.spyOn(f.owner.window, "isVisible").mockReturnValue(true);
+    vi.spyOn(f.owner.window, "isMaximized").mockReturnValue(true);
+    const selecting = f.select(); await vi.advanceTimersByTimeAsync(150); await selecting;
+    expect(window.maximize).toHaveBeenCalledOnce();
+    events.emit("unmaximize");
+    expect(window.maximize).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1000);
+    events.emit("unmaximize");
+    expect(window.maximize).toHaveBeenCalledTimes(2);
+    expect(events.listenerCount("unmaximize")).toBe(0);
   });
 
   it("keeps the user selection deadline separate from review expiry", async () => {

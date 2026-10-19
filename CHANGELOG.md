@@ -2,6 +2,56 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.73 — 2026-10-19
+
+Open a chat for any folder straight from a terminal, send a queued message
+while the agent is still working, and see the turn index and side panel tabs
+again.
+
+### Chats
+
+- The turn index beside a conversation shows its markers all the time again,
+  instead of only while the pointer is over it.
+- **Send now** on a queued message works while the agent is working. For
+  agents that take messages mid-turn (Codex, Claude and OpenCode) it hands the
+  message and its images to the running turn, the same as pressing Enter. If
+  the agent does not take it, the message stays queued for the next turn; if
+  Inertia cannot tell whether the agent received it, it is held for you
+  instead of being sent twice. For other agents the button now looks
+  disabled while they work.
+- The **More tools** tray stays open or closed in every chat, split pane and
+  window at once, and its icons no longer slide under the context ring when
+  the composer is narrow. In the narrowest composer an open tray takes the
+  place of the model and settings buttons until you close it.
+
+### Side panel
+
+- The tab you are looking at always shows its label. When the tabs do not
+  fit, scrolling the row no longer hides the active tab, a tab that is
+  hidden at the edge can no longer be clicked by mistake, and the active tab
+  comes back into view when its count badge appears.
+
+### Terminal
+
+- Run Inertia with `--new-chat` to open a new chat for the current folder, or
+  `--new-chat` followed by a path for another one. A folder inside a project
+  opens that project; a new folder is added as a project first. This also
+  works when Inertia is already open.
+- Started from a terminal on Linux or macOS, Inertia gives the terminal back
+  straight away and keeps running on its own. Add `--foreground` to keep it
+  attached.
+
+### Linux
+
+- Taking a reviewed screenshot of a whole screen no longer leaves a maximized
+  Inertia window at its smaller size.
+
+### Dependencies
+
+- React 19.3.1, lucide-react 1.57.0, @tanstack/react-virtual 3.14.20,
+  morphicons 2.0.0, the Claude Agent SDK 0.3.301, the OpenCode SDK 1.19.2, the
+  Anthropic SDK 0.135.0, Playwright 1.64.1, Vitest 5.0.5 and happy-dom 21.0.3.
+
 ## 0.0.72 — 2026-10-18
 
 Keep a to-do list and hand any task to an agent, watch plan steps complete as

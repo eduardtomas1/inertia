@@ -64,6 +64,7 @@ import {
 import { providerProcessInvocation } from "../../provider/process";
 import { restrictedCliEnvironment } from "../../restricted-cli-runner";
 import { TailTextBuffer } from "../../tail-text-buffer";
+import { abortion, queueTurn, settledWithin } from "./waits";
 import { AppUnderTestError } from "./errors";
 import { AppEvidenceLedger, type AppEvidenceLabelKey } from "./evidence-ledger";
 import {
@@ -186,12 +187,15 @@ interface Session {
   readonly evidence: AppEvidenceLedger;
   /** Larger is more recent; orders idle sessions for eviction. */
   lastActivity: number;
+  /** Set by clear() until every launch is proved stopped. */
+  clearPending: boolean;
 }
 
 const DEFAULT_LAUNCH_SETTLE_MS = 1_000;
 const DEFAULT_STOP_EXIT_WAIT_MS = 5_000;
 const ACTION_QUEUE_WAIT_MS = 30_000;
 const PROFILE_DIRECTORY = "app-under-test";
+const UNCONFIRMED_STOP = "Inertia could not confirm that the app stopped.";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 // Display and session variables a desktop app needs to open a window. Nothing
 // here carries a credential; provider, cloud and agent tokens stay excluded.
@@ -227,47 +231,14 @@ function safeLabel(value: string): string {
   return label || "Project action";
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms).unref();
-  });
-}
-
-function settledWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
-  return Promise.race([promise.then(() => true, () => true), delay(ms).then(() => false)]);
-}
-
-/** Waits for the queued action ahead; its timer and abort listener never outlive the wait. */
-function queueTurn(previous: Promise<void>, ms: number, signal: AbortSignal | undefined): Promise<"ready" | "timeout" | "aborted"> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve("aborted");
-      return;
-    }
-    const finish = (value: "ready" | "timeout" | "aborted"): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      resolve(value);
-    };
-    const onAbort = (): void => finish("aborted");
-    const timer = setTimeout(() => finish("timeout"), ms);
-    timer.unref();
-    signal?.addEventListener("abort", onAbort, { once: true });
-    previous.then(() => finish("ready"), () => finish("ready"));
-  });
-}
-
-function abortion(signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    if (!signal) return;
-    if (signal.aborted) resolve();
-    else signal.addEventListener("abort", () => resolve(), { once: true });
-  });
-}
-
 /** Re-reads state that another callback may have changed across an await. */
 function hasExited(record: { state: AppUnderTestLaunchState }): boolean {
   return record.state === "exited";
+}
+
+/** Exited with its whole process tree proved gone. */
+function provedStopped(record: { state: AppUnderTestLaunchState; cleanupConfirmed: boolean | null }): boolean {
+  return hasExited(record) && record.cleanupConfirmed === true;
 }
 
 function publicFailure(error: unknown): AppUnderTestError {
@@ -348,6 +319,7 @@ export class AppUnderTestLaunchManager {
     if (input.signal?.aborted) throw new AppUnderTestError("cancelled", "The launch was cancelled.");
     const label = this.describeTarget(input.conversationId, input.kind, input.actionId);
     const session = this.session(input.conversationId);
+    session.clearPending = false;
     const liveInChat = [...session.launches.values()].filter((record) => record.state !== "exited").length;
     if (liveInChat >= MAX_APP_LAUNCHES_PER_CONVERSATION) {
       throw new AppUnderTestError(
@@ -359,6 +331,14 @@ export class AppUnderTestLaunchManager {
       throw new AppUnderTestError(
         "too-large",
         `Inertia already runs ${MAX_APP_LAUNCHES_PER_RUNTIME} launches across all chats. Stop one first.`,
+      );
+    }
+    // Only launches proved stopped make room: one that may still run stays listed.
+    const unproved = [...session.launches.values()].filter((record) => !provedStopped(record)).length;
+    if (unproved >= MAX_APP_RETAINED_LAUNCHES_PER_CONVERSATION) {
+      throw new AppUnderTestError(
+        "too-large",
+        `This chat has ${unproved} launches running or not confirmed stopped. Stop or confirm them with inertia_app_stop first.`,
       );
     }
     const record = this.createRecord(input, label);
@@ -570,24 +550,21 @@ export class AppUnderTestLaunchManager {
   async stop(conversationId: string, launchId: string): Promise<AppUnderTestLaunch> {
     const record = this.record(conversationId, launchId);
     await this.stopRecord(record);
+    this.completeClear(conversationId);
     return this.view(record);
   }
 
   /**
-   * Stops every launch of the chat and forgets its App session. Resolves
-   * false while any launch of the chat, including one cleared earlier, has
-   * not been proved stopped.
+   * Stops every launch of the chat and forgets its App session once all are
+   * proved stopped. Resolves false, keeping the session for a later clear or
+   * stop, while any launch of the chat has not been proved stopped.
    */
   async clear(conversationId: string): Promise<boolean> {
     const session = this.sessions.get(conversationId);
     if (session) {
-      this.sessions.delete(conversationId);
-      await Promise.all([...session.launches.values()].map(async (record) => {
-        await this.stopRecord(record);
-        this.stopTimers(record);
-      }));
-      session.evidence.clear();
-      this.emit({ type: "app-under-test.session.cleared", conversationId });
+      session.clearPending = true;
+      await Promise.all([...session.launches.values()].map((record) => this.stopRecord(record)));
+      if (!this.completeClear(conversationId)) return false;
     }
     return ![...this.live].some((record) => record.conversationId === conversationId);
   }
@@ -596,14 +573,22 @@ export class AppUnderTestLaunchManager {
   async dispose(): Promise<boolean> {
     this.closed = true;
     const results = await Promise.all([...this.sessions.keys()].map((conversationId) => this.clear(conversationId)));
-    const orphans = await Promise.all([...this.live].map((record) => this.stopRecord(record)));
-    return results.every(Boolean) && orphans.every(Boolean);
+    return results.every(Boolean) && this.live.size === 0;
+  }
+
+  /** Forgets a session being cleared once every launch is proved stopped; true once it is gone. */
+  private completeClear(conversationId: string): boolean {
+    const session = this.sessions.get(conversationId);
+    if (!session?.clearPending) return !session;
+    if (![...session.launches.values()].every(provedStopped)) return false;
+    this.evict(conversationId, session);
+    return true;
   }
 
   private session(conversationId: string): Session {
     let session = this.sessions.get(conversationId);
     if (!session) {
-      session = { launches: new Map(), evidence: new AppEvidenceLedger(this.now), lastActivity: 0 };
+      session = { launches: new Map(), evidence: new AppEvidenceLedger(this.now), lastActivity: 0, clearPending: false };
       this.sessions.set(conversationId, session);
     }
     this.touch(session);
@@ -616,15 +601,16 @@ export class AppUnderTestLaunchManager {
   }
 
   private sessionLive(session: Session): boolean {
-    return [...session.launches.values()].some((record) => record.state !== "exited" || this.live.has(record));
+    return [...session.launches.values()].some((record) =>
+      record.state !== "exited" || this.live.has(record) || record.cleanupConfirmed === false);
   }
 
   /**
    * Keeps at most MAX_APP_IDLE_SESSIONS sessions without a live launch and
    * MAX_APP_RUNTIME_THUMBNAIL_BYTES of thumbnails across all chats, evicting
-   * the least recently used idle sessions. Sessions with a live launch are
-   * never evicted; at most eight launches run, each chat keeps at most 2 MiB
-   * of thumbnails, so they alone stay within the thumbnail bound.
+   * the least recently used idle sessions. Sessions with a live or
+   * unconfirmed launch are never evicted; at most eight launches run and each
+   * chat keeps at most 2 MiB of thumbnails, but unconfirmed ones can exceed it.
    */
   private enforceSessionBounds(): void {
     const idle = [...this.sessions]
@@ -641,7 +627,7 @@ export class AppUnderTestLaunchManager {
     }
   }
 
-  /** Forgets an idle session: its exited launches, logs and evidence. */
+  /** Forgets an idle or cleared session: its exited launches, logs and evidence. */
   private evict(conversationId: string, session: Session): void {
     this.sessions.delete(conversationId);
     for (const record of session.launches.values()) this.stopTimers(record);
@@ -982,6 +968,7 @@ export class AppUnderTestLaunchManager {
         }
       }
       record.cleanupConfirmed = confirmed;
+      if (confirmed && record.failure === UNCONFIRMED_STOP) record.failure = null;
       if (!confirmed) this.options.onCleanupUnconfirmed?.();
       if (confirmed) await this.removeProfile(record);
       this.emitLaunch(record);
@@ -1006,11 +993,12 @@ export class AppUnderTestLaunchManager {
         }
       }
       if (!hasExited(record)) {
-        // The process never reported exit: keep it counted as live.
+        // The process never reported exit: keep it counted as live; a later stop retries.
         record.cleanupConfirmed = false;
-        record.failure = "Inertia could not confirm that the app stopped.";
+        record.failure = UNCONFIRMED_STOP;
         this.options.onCleanupUnconfirmed?.();
         this.emitLaunch(record);
+        record.stopping = null;
         return false;
       }
       await this.settle(record);
@@ -1022,9 +1010,9 @@ export class AppUnderTestLaunchManager {
   private pruneRetained(session: Session): void {
     for (const [launchId, record] of session.launches) {
       if (session.launches.size <= MAX_APP_RETAINED_LAUNCHES_PER_CONVERSATION) break;
-      // Live launches never exceed the per-chat limit, so dropping the oldest
-      // exited ones always restores the bound; their cleanup still completes.
-      if (record.state === "exited") {
+      // launch() refuses while every kept launch is unproved, so dropping
+      // the oldest proved-stopped ones always restores the bound.
+      if (provedStopped(record)) {
         this.stopTimers(record);
         session.launches.delete(launchId);
       }

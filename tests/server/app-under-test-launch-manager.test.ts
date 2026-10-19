@@ -359,6 +359,39 @@ describe("AppUnderTestLaunchManager", () => {
     await manager.dispose();
   });
 
+  it("never drops a launch not proved stopped, and refuses a ninth while all eight are unproved", async () => {
+    const paths = await workspace();
+    const unproved = new Set<number>();
+    const { manager, spawned } = harness(paths, {
+      terminateProcessTree: async (child) => {
+        await new Promise((resolve) => setImmediate(resolve));
+        return !unproved.has(child.pid!);
+      },
+    });
+    const launchAndExit = async (keepUnproved: boolean): Promise<string> => {
+      const launch = await manager.launch({ conversationId, kind: "action", actionId, startedBy: "agent" });
+      if (keepUnproved) unproved.add(launch.pid!);
+      spawned.at(-1)!.child.exit(0);
+      await vi.waitFor(() => expect(manager.status(conversationId, launch.launchId)[0]!.cleanupConfirmed).toBe(!keepUnproved));
+      return launch.launchId;
+    };
+    const ids = [await launchAndExit(true)];
+    for (let index = 0; index < 9; index += 1) ids.push(await launchAndExit(false));
+    // The oldest launch may still run, so only proved-stopped launches made room.
+    expect(manager.status(conversationId).map(({ launchId }) => launchId)).toEqual([ids[0], ...ids.slice(-7)]);
+    for (let index = 0; index < 7; index += 1) ids.push(await launchAndExit(true));
+    // Seven more unproved launches pushed out every proved-stopped one.
+    expect(manager.status(conversationId).map(({ launchId }) => launchId)).toEqual([ids[0], ...ids.slice(-7)]);
+    const count = spawned.length;
+    await expect(manager.launch({ conversationId, kind: "action", actionId, startedBy: "agent" })).rejects.toMatchObject({
+      code: "too-large",
+      message: "This chat has 8 launches running or not confirmed stopped. Stop or confirm them with inertia_app_stop first.",
+    });
+    expect(spawned).toHaveLength(count);
+    expect(manager.status(conversationId).every(({ cleanupConfirmed }) => cleanupConfirmed === false)).toBe(true);
+    await expect(manager.dispose()).resolves.toBe(false);
+  });
+
   it("stops the whole tree with confirmation and reports unconfirmed cleanup truthfully", async () => {
     const paths = await workspace();
     const { manager, terminations } = harness(paths);
@@ -631,6 +664,69 @@ describe("AppUnderTestLaunchManager", () => {
     // Retrying does not pretend the tree is gone.
     await expect(manager.clear(conversationId)).resolves.toBe(false);
     await expect(manager.clear(otherConversationId)).resolves.toBe(true);
+  });
+
+  it("keeps an unconfirmed clear's session reachable until a later clear or stop proves its launch stopped", async () => {
+    const paths = await workspace();
+    const { manager, spawned, events } = harness(paths, { exitOnTerminate: false });
+    const cleared = (): unknown[] => events.filter((event) => event.type === "app-under-test.session.cleared");
+    const electron = await manager.launch({ conversationId, kind: "electron", startedBy: "agent" });
+    const action = await manager.launch({ conversationId: otherConversationId, kind: "action", actionId, startedBy: "agent" });
+    await expect(manager.clear(conversationId)).resolves.toBe(false);
+    await expect(manager.clear(otherConversationId)).resolves.toBe(false);
+    for (const [chat, launch] of [[conversationId, electron], [otherConversationId, action]] as const) {
+      expect(manager.status(chat)).toEqual([expect.objectContaining({
+        launchId: launch.launchId, state: "stopping", cleanupConfirmed: false,
+        failure: "Inertia could not confirm that the app stopped.",
+      })]);
+      expect(manager.logs(chat, launch.launchId).lines.length).toBeGreaterThan(0);
+      expect(manager.listEvidence(chat).length).toBeGreaterThan(0);
+    }
+    expect(cleared()).toEqual([]);
+    expect(manager.liveLaunchCount).toBe(2);
+    // The process trees exit late; a later clear or stop proves it and completes the removal.
+    for (const { child } of spawned) child.exit(null, "SIGTERM");
+    await vi.waitFor(() => expect(manager.liveLaunchCount).toBe(0));
+    await expect(manager.clear(conversationId)).resolves.toBe(true);
+    expect(cleared()).toEqual([{ type: "app-under-test.session.cleared", conversationId }]);
+    expect(manager.status(conversationId)).toEqual([]);
+    await expect(lstat(join(paths.data, "app-under-test", electron.launchId))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(manager.stop(otherConversationId, action.launchId)).resolves.toMatchObject({
+      state: "exited", cleanupConfirmed: true, failure: null,
+    });
+    expect(cleared().at(-1)).toEqual({ type: "app-under-test.session.cleared", conversationId: otherConversationId });
+    expect(manager.status(otherConversationId)).toEqual([]);
+    await expect(manager.dispose()).resolves.toBe(true);
+  });
+
+  it("never evicts an idle session whose launch exited without proof that its tree is gone", async () => {
+    const paths = await workspace();
+    const chats = Array.from({ length: 17 }, (_, index) => `${String(index).padStart(8, "0")}-1111-4111-8111-111111111111`);
+    const { manager, spawned, events } = harness(paths, {
+      workspace: () => ({ root: paths.project, actions: [{ id: actionId, name: "Dev", executable: "node", args: [] }] }),
+      // Only the first launch's tree cannot be proved gone after it exits.
+      terminateProcessTree: async (child, force) => {
+        await new Promise((resolve) => setImmediate(resolve));
+        (child as unknown as FakeChild).exit(null, force ? "SIGKILL" : "SIGTERM");
+        await new Promise((resolve) => setImmediate(resolve));
+        return child.pid !== 4_000;
+      },
+    });
+    const stuck = await manager.launch({ conversationId, kind: "action", actionId, startedBy: "agent" });
+    await expect(manager.clear(conversationId)).resolves.toBe(false);
+    expect(manager.status(conversationId)).toEqual([expect.objectContaining({
+      launchId: stuck.launchId, state: "exited", cleanupConfirmed: false,
+    })]);
+    expect(manager.liveLaunchCount).toBe(0);
+    for (const chat of chats) {
+      await manager.launch({ conversationId: chat, kind: "action", actionId, startedBy: "agent" });
+      spawned.at(-1)!.child.exit(0);
+      await vi.waitFor(() => expect(manager.status(chat)[0]).toMatchObject({ state: "exited" }));
+    }
+    const cleared = events.filter((event) => event.type === "app-under-test.session.cleared");
+    expect(cleared).toEqual([{ type: "app-under-test.session.cleared", conversationId: chats[0] }]);
+    expect(manager.status(conversationId)).toEqual([expect.objectContaining({ launchId: stuck.launchId, cleanupConfirmed: false })]);
+    await expect(manager.dispose()).resolves.toBe(false);
   });
 
   it("runs one window action at a time per launch and times out a queued one with nothing sent", async () => {

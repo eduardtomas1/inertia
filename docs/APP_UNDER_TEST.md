@@ -27,12 +27,18 @@ user approves bringing it to the front (see
   the chat's terminals. A chat runs at most two live launches and the runtime
   at most eight across all chats. A launch that exits stays listed with its
   exit status and the newest lines of its log; a chat keeps at most eight
-  launches and drops the oldest exited ones first.
+  launches and drops only the oldest launches proved stopped. A launch
+  whose process tree was not proved gone is never dropped: when all eight
+  are running or unconfirmed, a new launch is refused (`too-large`) until
+  one is stopped or confirmed.
 - The runtime keeps at most 16 App sessions whose chats have no live launch,
   and at most 16 MiB of screenshot thumbnails across all chats. Beyond either
   bound it forgets the least recently used of those idle sessions, with its
   logs and evidence, and the App surface hears `session.cleared`. A session
-  with a live launch is never forgotten this way.
+  with a live launch, or with a launch whose cleanup is unconfirmed, is never
+  forgotten this way; the thumbnails of those unconfirmed sessions are not
+  bounded by the eight live launches, so they can push the total past 16 MiB
+  until their cleanup is confirmed.
 - There are two launch kinds, and neither takes a command line from the agent
   or the renderer:
   - **Electron app** (`electron`) starts the project's own Electron binary
@@ -68,10 +74,13 @@ user approves bringing it to the front (see
   never written to the application database, attachments, diagnostics or the
   repository. Archiving or deleting the chat, removing its project, and
   quitting Inertia stop every launch of the chat and clear its session.
-  Deleting a chat or removing a project waits until every launch is proved
-  stopped before it removes a worktree or the chat; when that cannot be
-  confirmed, it is refused like a delete with an active run, and the chat and
-  its checkout stay. Switching chats, closing the App surface or closing the
+  Archiving or deleting a chat or removing a project waits until every launch
+  is proved stopped before it archives the chat or removes a worktree or the
+  chat; when that cannot be confirmed, it is refused like a delete with an
+  active run, and the chat and its checkout stay. The session then also
+  stays, with its launches, logs and evidence, so the launch can still be
+  inspected and stopped; it is cleared once a later stop or clear proves
+  every launch gone. Switching chats, closing the App surface or closing the
   panel does not stop anything.
 - App tools are injected into the existing exact-turn host bridge for Codex,
   Claude, Cursor, Kimi Code and OpenCode on their native routes, as the
@@ -889,7 +898,8 @@ runs use: on Linux and macOS a process guardian and a process group, on
 Windows a job object, all recorded in the ownership journal. Stop, chat
 archive or delete, project removal, a cancelled launch call and runtime
 shutdown terminate the whole tree and wait for proof that it is gone; chat
-delete and project removal wait for that proof before they touch a worktree.
+archive waits for that proof before it archives the chat, and chat delete and
+project removal wait for it before they touch a worktree.
 `cleanupConfirmed` reports that proof. When it is false, Inertia reports
 unconfirmed cleanup the way it does for other owned processes, and a launch
 whose process never reported its exit stays counted against the launch
@@ -958,9 +968,10 @@ per access mode, approval binding (including the focused control of a press
 and dialog-only approvals), one-use tokens and expiry, Private Connect
 refusal, the project setting and cancelled calls with the full failure shape,
 launch limits, contained Electron resolution, process-tree stop and
-unconfirmed cleanup, chat delete and project removal waiting for confirmed
-cleanup, session eviction and the runtime thumbnail bound, profile sweep, the
-log ring and its line redaction, the console rate limit, live coalesced
+unconfirmed cleanup, chat archive, delete and project removal waiting for
+confirmed cleanup, the session kept after an unconfirmed clear, session
+eviction and the runtime thumbnail bound, profile sweep, the log ring and its
+line redaction, the console rate limit, live coalesced
 window events, the debugging-pipe client (framing, bounds, deadlines,
 backpressure, close), and the window transport against a fake protocol peer
 (windows and internal pages, snapshots, waits, screenshots, input, mouse

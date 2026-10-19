@@ -171,6 +171,37 @@ describe("App under test routing", () => {
     } finally { store.close(); }
   });
 
+  it("archives a managed chat only after its App session is proved stopped", async () => {
+    const { store, project, source, turn, manager, appUnderTest } = await fixture();
+    try {
+      const child = store.createConversation(project.id, "Managed app chat", { activate: false });
+      store.agentThreadManagement.attachManaged({
+        childConversationId: child.id,
+        sourceConversationId: source.id,
+        sourceTurnId: turn.id,
+        sourceRunId: turn.runId,
+        sourceHarnessId: turn.harnessId,
+        now: new Date().toISOString(),
+      });
+      const archivedWhenCleared: Array<string | null> = [];
+      appUnderTest.clear.mockImplementation(async () => {
+        archivedWhenCleared.push(store.conversation(child.id).archivedAt);
+        return archivedWhenCleared.length > 1;
+      });
+      const bridge = manager.bridgeFor({ conversation: source, turn });
+      const refused = await bridge.invoke(call("inertia_archive_conversation", { conversationId: child.id, archived: true }));
+      expect(refused.success).toBe(false);
+      expect(refused.text).toContain("Stop the chat's app before archiving it; its process could not be confirmed stopped.");
+      expect(store.conversation(child.id).archivedAt).toBeNull();
+
+      const archived = await bridge.invoke(call("inertia_archive_conversation", { conversationId: child.id, archived: true }));
+      expect(archived.success).toBe(true);
+      expect(store.conversation(child.id).archivedAt).not.toBeNull();
+      expect(archivedWhenCleared).toEqual([null, null]);
+      expect(appUnderTest.clear.mock.calls).toEqual([[child.id], [child.id]]);
+    } finally { store.close(); }
+  });
+
   it("honours the project's appUnderTestAccess preference before reaching the manager", async () => {
     const { store, project, source, turn, manager, appUnderTest } = await fixture();
     try {

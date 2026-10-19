@@ -15,6 +15,7 @@ import {
   modelSelectionForBackendProfile,
 } from "../../shared/backend-profile-settings";
 import type { RuntimeStore } from "../database";
+import { RuntimeRequestError } from "../runtime-errors";
 import {
   AGENT_THREAD_MAX_DEPTH,
   type AgentThreadMutationTool,
@@ -1122,8 +1123,11 @@ export class AgentThreadManager {
     ) {
       throw new Error("Stop the managed chat before changing its archive state.");
     }
+    // The chat's app must be proved stopped before the chat is archived.
+    if (input.archived && this.dependencies.appUnderTest && !await this.dependencies.appUnderTest.clear(target.id)) {
+      throw new RuntimeRequestError("Stop the chat's app before archiving it; its process could not be confirmed stopped.");
+    }
     this.dependencies.store.archiveConversation(target.id, input.archived);
-    if (input.archived) await this.dependencies.appUnderTest?.clear(target.id);
     this.dependencies.broadcastConversationShell(target.id);
     this.dependencies.broadcastSnapshot();
     return json({ conversationId: target.id, archived: input.archived });

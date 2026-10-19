@@ -56,6 +56,12 @@ const conversationDelete: ClientCommand = {
   payload: { conversationId },
 };
 
+const conversationArchive: ClientCommand = {
+  type: "conversation.archive",
+  requestId: "66666666-6666-4666-8666-666666666666",
+  payload: { conversationId },
+};
+
 const projectRemove: ClientCommand = {
   type: "project.remove",
   requestId: "55555555-5555-4555-8555-555555555555",
@@ -76,6 +82,8 @@ function deleteDependencies(clear: (id: string) => Promise<boolean>): Conversati
         hasDraftForTargetWithoutMessages: vi.fn(() => false),
       },
       hasRecordedActiveWorkspaceRunForConversation: vi.fn(() => false),
+      hasActiveWorkspaceRunForConversation: vi.fn(() => false),
+      archiveConversation: vi.fn(),
       assertConversationDeletionAllowed: vi.fn(),
       conversationWorktrees: { get: vi.fn(() => ownedWorktree) },
       shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as AppSnapshot),
@@ -136,7 +144,7 @@ function removeDependencies(clear: (id: string) => Promise<boolean>): ProjectWor
   };
 }
 
-describe("App under test cleanup before chat delete and project removal", () => {
+describe("App under test cleanup before chat archive, delete and project removal", () => {
   beforeEach(() => {
     sideEffects.deleteCheckpoints.mockClear();
     sideEffects.removeOwnedWorktree.mockClear();
@@ -164,6 +172,20 @@ describe("App under test cleanup before chat delete and project removal", () => 
     expect(dependencies.store.deleteConversation).not.toHaveBeenCalled();
     expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
     expect(dependencies.providerTerminalResumes.release).toHaveBeenCalledWith(conversationId);
+  });
+
+  it("archives a chat only after its App session is proved stopped", async () => {
+    const confirmed = deleteDependencies(async () => true);
+    await expect(createConversationCommandHandler(confirmed)({} as never, conversationArchive)).resolves.toBe("mutation");
+    expect(confirmed.clearAppUnderTestSession).toHaveBeenCalledWith(conversationId);
+    expect(confirmed.clearAppUnderTestSession).toHaveBeenCalledBefore(vi.mocked(confirmed.store.archiveConversation));
+    expect(confirmed.store.archiveConversation).toHaveBeenCalledWith(conversationId, true);
+
+    const stuck = deleteDependencies(async () => false);
+    await expect(createConversationCommandHandler(stuck)({} as never, conversationArchive))
+      .rejects.toThrow("Stop the chat's app before archiving it; its process could not be confirmed stopped.");
+    expect(stuck.store.archiveConversation).not.toHaveBeenCalled();
+    expect(stuck.forgetRemoteTranscript).not.toHaveBeenCalled();
   });
 
   it("clears every chat's App session before removing a project, and refuses when one is unconfirmed", async () => {

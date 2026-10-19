@@ -549,6 +549,16 @@ export function createConversationCommandHandler(
             "Stop the active run or review before archiving this thread.",
           );
         }
+        // The app under test runs from this chat's checkout: it must be
+        // proved stopped before the chat is archived.
+        if (
+          dependencies.clearAppUnderTestSession
+          && !await dependencies.clearAppUnderTestSession(command.payload.conversationId)
+        ) {
+          throw new RuntimeRequestError(
+            "Stop the chat's app before archiving it; its process could not be confirmed stopped.",
+          );
+        }
         dependencies.store.archiveConversation(
           command.payload.conversationId,
           true,

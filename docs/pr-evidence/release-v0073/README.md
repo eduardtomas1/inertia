@@ -17,6 +17,7 @@ database migration.
 | `4081d661` | Send now on a queued message during a turn | `queued-message-runtime.test.ts`, `runtime-composer-queue.dom.test.tsx`, `composer-shell.dom.test.tsx`; `image-follow-up-regression.spec.ts` steers a queued message with two images into a running fake Codex turn |
 | `32e4d879` | `--new-chat` and detached terminal launch | `launch-request.test.ts`, `launch-requests.dom.test.tsx`, `app-update-startup.test.ts`; the packaged app's AppRun under a pseudo-terminal returned the terminal in 0.3 s, added the folder as a project, and a second launch from a subfolder opened a chat in the running instance |
 | `9e849ac7` | Dependabot #621 to #628 | full check, budgets measured per package, E2E below |
+| `f68de5eb` | Send now errors stay visible; Send now E2E waits for the model catalog | `runtime-composer-queue.dom.test.tsx`; the first CI run failed the new spec on Linux, Windows and macOS because a turn started before the fake model list loaded records no follow-up image support. Locally it failed 2 of 6 runs; with the wait it passed 8 of 8 |
 
 ## Dependencies
 

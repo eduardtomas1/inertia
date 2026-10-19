@@ -856,6 +856,12 @@ textarea {
   visibility: hidden;
 }
 
+/* Explanations that keep their own line breaks, one fact per line. */
+.tooltip.is-multiline {
+  max-width: min(480px, calc(100vw - 16px));
+  white-space: pre-line;
+}
+
 .tooltip[data-positioned="true"] {
   visibility: visible;
   animation: tooltip-in var(--dur-fast) var(--ease-fade) both;

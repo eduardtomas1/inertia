@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ClientCommand } from "../../src/shared/contracts";
+import { defaultSettings } from "../../src/shared/contracts/app";
 import {
   modelSelectionSchema,
   providerNativeModelSelection,
@@ -156,6 +157,7 @@ describe("conversation isolated-worktree source identity", () => {
     const createConversation = vi.fn(() => ({ id: conversationId }));
     const dependencies = {
       store: {
+        settings: { current: vi.fn(() => defaultSettings) },
         shellSnapshot: vi.fn(() => ({
           settings: {
             defaultProvider: "codex",
@@ -237,6 +239,7 @@ describe("conversation isolated-worktree source identity", () => {
     const broadcastSnapshot = vi.fn();
     const dependencies = {
       store: {
+        settings: { current: vi.fn(() => defaultSettings) },
         shellSnapshot: vi.fn(() => ({
           settings: {
             defaultProvider: "codex",

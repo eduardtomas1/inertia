@@ -1,3 +1,4 @@
+import { newChatRoutingMode } from "@shared/routing/routing-policy";
 import {
   useCallback,
   useEffect,
@@ -56,7 +57,26 @@ type ConversationUpdate = Partial<Pick<
   | "reasoningEffort"
   | "interactionMode"
   | "accessMode"
+  | "routingMode"
 >>;
+
+/**
+ * The runtime's override rule for saved chats, applied to drafts: choosing a
+ * model, reasoning effort or Fast mode in an Auto draft turns Auto off unless
+ * the change names a routing mode itself.
+ */
+function draftRoutingOverride(
+  conversation: Pick<Conversation, "routingMode">,
+  change: ConversationUpdate,
+): Pick<ConversationUpdate, "routingMode"> {
+  const changesSelection = change.modelSelection !== undefined
+    || change.reasoningEffort !== undefined
+    || change.providerId !== undefined
+    || change.model !== undefined;
+  return conversation.routingMode === "auto" && change.routingMode === undefined && changesSelection
+    ? { routingMode: "manual" }
+    : {};
+}
 
 const REFERENCE_DRAFT_CHANGED = "The new chat changed before its reference could be added.";
 
@@ -150,9 +170,13 @@ export function useDraftConversation({
     explicitModelRef.current = false;
     explicitAccessRef.current = false;
     selectionWhenDraftOpenedRef.current = persistedConversationId;
-    const payload = snapshot
+    const defaults = snapshot
       ? defaultConversationPayloadForProject(snapshot, settings, projectId)
       : buildNewConversationPayload(projectId, settings);
+    // The draft shows the same routing mode the runtime will give the new chat.
+    const payload = settings.routing && newChatRoutingMode(settings.routing) === "auto"
+      ? { ...defaults, routingMode: "auto" as const }
+      : defaults;
     replaceDraft({
       conversation: buildDraftConversation(payload),
       payload,
@@ -171,6 +195,7 @@ export function useDraftConversation({
         : defaults),
       interactionMode: current.conversation.interactionMode,
       accessMode: explicitAccessRef.current ? current.conversation.accessMode : defaults.accessMode,
+      ...(current.payload.routingMode ? { routingMode: current.payload.routingMode } : {}),
     };
     // Keep the composer identity (prompt and attachments), but rebuild the
     // project-owned checkout and defaults. Selecting a project is not navigation.
@@ -383,7 +408,7 @@ export function useDraftConversation({
       explicitAccessRef.current = true;
     }
     const payload = withNewConversationModelSelection(
-      { ...draft.payload, ...configuration },
+      { ...draft.payload, ...configuration, ...draftRoutingOverride(draft.conversation, { modelSelection: selection }) },
       selection,
     );
     replaceDraft({
@@ -397,9 +422,10 @@ export function useDraftConversation({
     return true;
   };
 
-  const updateDraft = (change: ConversationUpdate): void => {
+  const updateDraft = (requested: ConversationUpdate): void => {
     const current = draftRef.current;
     if (!current || current.materialized) return;
+    const change = { ...requested, ...draftRoutingOverride(current.conversation, requested) };
     if (change.modelSelection || change.reasoningEffort !== undefined || change.providerId) {
       explicitModelRef.current = true;
     }
@@ -444,6 +470,7 @@ export function useDraftConversation({
           ...withNewConversationModelSelection(current.payload, selection),
           interactionMode: conversation.interactionMode,
           accessMode: conversation.accessMode,
+          ...(conversation.routingMode ? { routingMode: conversation.routingMode } : {}),
         },
       };
     })();

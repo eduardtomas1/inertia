@@ -26,6 +26,8 @@ export interface SelectedModelChipProps {
     AriaAttributes["aria-haspopup"],
     "dialog" | "listbox"
   >;
+  /** Auto routing shows its own label and decision while keeping the route glyph. */
+  override?: { label: string; tooltip: string; accessibleName: string };
 }
 
 export const SelectedModelChip = forwardRef<
@@ -39,6 +41,7 @@ export const SelectedModelChip = forwardRef<
   disabled = false,
   showSourceGlyph = true,
   ariaHasPopup = "dialog",
+  override,
 }, ref): JSX.Element {
   const identity = selectedModelChipIdentity(route);
 
@@ -47,15 +50,17 @@ export const SelectedModelChip = forwardRef<
       ref={ref}
       type="button"
       className={`selected-model-chip${expanded ? " is-open" : ""}`}
-      tooltip={identity.title}
+      tooltip={override?.tooltip ?? identity.title}
       describeTooltip={false}
-      aria-label={identity.accessibleName}
+      multilineTooltip={override !== undefined}
+      aria-label={override?.accessibleName ?? identity.accessibleName}
       aria-haspopup={ariaHasPopup}
       aria-controls={controlsId}
       aria-expanded={expanded}
       disabled={disabled}
       data-model-route-key={identity.routeKey}
       data-model-source={identity.source}
+      data-routing-mode={override ? "auto" : undefined}
       onClick={onOpen}
     >
       {showSourceGlyph && (
@@ -65,7 +70,7 @@ export const SelectedModelChip = forwardRef<
             : <ProviderBrandIcon providerId={identity.glyph} size={14} decorative />}
         </span>
       )}
-      <span className="selected-model-chip-label">{identity.label}</span>
+      <span className="selected-model-chip-label">{override?.label ?? identity.label}</span>
       <ChevronDown
         className="selected-model-chip-chevron"
         size={14}

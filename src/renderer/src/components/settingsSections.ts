@@ -9,6 +9,7 @@ import {
   MonitorSmartphone,
   Palette,
   Plug,
+  Route,
   type LucideIcon,
 } from "lucide-react";
 
@@ -175,6 +176,19 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       onDeleteBackendProfile: context.onDeleteBackendProfile,
     }),
     instanceKey: (context) => context.target?.section === "agents" ? context.target.profileId ?? "all" : "all",
+  }),
+  defineSection({
+    ...settingsSectionRows("routing"),
+    icon: Route,
+    load: lazySection(async () => (await import("./settings/sections/RoutingSettings")).RoutingSettings),
+    prefetch: [],
+    select: (context) => ({
+      settings: context.settings,
+      disabled: context.disabled,
+      providers: context.providers,
+      backendProfiles: context.backendProfiles,
+      onUpdate: context.onUpdate,
+    }),
   }),
   defineSection({
     ...settingsSectionRows("devices"),

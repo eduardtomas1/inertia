@@ -186,6 +186,8 @@ export interface AgentTurn {
   createdAt: string;
   updatedAt: string;
   usageLimited?: true;
+  /** Auto routing evidence; absent for manually routed turns. */
+  routing?: import("../routing/routing-policy").RoutingDecisionSummary;
 }
 
 /**

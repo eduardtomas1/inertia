@@ -121,6 +121,25 @@ describe("useDraftConversation", () => {
     });
   });
 
+  it("turns Auto off in a draft when a model or effort is chosen, like a saved chat", async () => {
+    const settings = { ...defaultSettings, routing: { ...defaultSettings.routing, enabled: true, autoForNewChats: true } };
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: { ...snapshot, settings }, settings, run: vi.fn(), sendMessage: vi.fn(),
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    expect(hook.result.current.conversation?.routingMode).toBe("auto");
+    await act(async () => { await hook.result.current.updateConversation({ accessMode: "auto-edit" }); });
+    expect(hook.result.current.conversation?.routingMode).toBe("auto");
+    await act(async () => { await hook.result.current.updateConversation({ reasoningEffort: "high" }); });
+    expect(hook.result.current.conversation?.routingMode).toBe("manual");
+    await act(async () => { await hook.result.current.updateConversation({ routingMode: "auto" }); });
+    expect(hook.result.current.conversation?.routingMode).toBe("auto");
+    const selection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5.6" });
+    act(() => { hook.result.current.chooseModel(selection); });
+    expect(hook.result.current.conversation?.routingMode).toBe("manual");
+  });
+
   it("persists a reference target with its composer identity before selecting and sharing, without a turn", async () => {
     const commands: CommandWithoutId[] = [];
     const run = vi.fn(async (_key: string, command: CommandWithoutId): Promise<ServerEvent> => {

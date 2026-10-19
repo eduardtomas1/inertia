@@ -20,6 +20,7 @@ import {
   isCompletionSoundLibrary,
 } from "../../completion-sound";
 import { RUNTIME_DETAIL_SUBSCRIPTION_OWNERS } from "../../runtime-detail-subscriptions";
+import { routingModeSchema, routingSettingsUpdateSchema } from "../../routing/routing-policy";
 
 import {
   modelBackendProfileIdSchema,
@@ -53,7 +54,8 @@ import {
   MAX_CONVERSATION_CONTEXT_NOTE_BYTES,
 } from "../../conversation-context";
 
-const duoSideSchema = conversationCreatePayloadSchema.extend({
+// Duo is explicit by design: comparison sides never use Auto routing.
+const duoSideSchema = conversationCreatePayloadSchema.omit({ routingMode: true }).extend({
   activate: z.literal(false).optional(),
 }).strict();
 
@@ -61,6 +63,7 @@ const duoComparisonSchema = conversationCreatePayloadSchema.omit({
   branch: true,
   useWorktree: true,
   worktreePath: true,
+  routingMode: true,
 }).extend({
   activate: z.literal(false).optional(),
 }).strict();
@@ -343,6 +346,7 @@ export const appCommandSchemas = [
           reasoningEffort: z.string().trim().max(40).optional(),
           interactionMode: interactionModeSchema.optional(),
           accessMode: accessModeSchema.optional(),
+          routingMode: routingModeSchema.optional(),
           pinned: z.boolean().optional(),
           snoozedUntil: z.string().datetime({ offset: true }).nullable().optional(),
         })
@@ -410,6 +414,7 @@ export const configurationCommandSchemas = [
           confirmDestructiveActions: z.boolean().optional(),
           desktopNotifications: z.boolean().optional(),
           notifyOnlyInBackground: z.boolean().optional(),
+          routing: routingSettingsUpdateSchema.optional(),
           quotaWarnings: z.object({
             enabled: z.boolean().optional(),
             firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),

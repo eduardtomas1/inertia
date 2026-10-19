@@ -138,6 +138,22 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["model-backends", "Custom backends", ["model backends", "backends", "api key", "token", "openai compatible", "profiles", "endpoint", "model"]],
     ],
   }),
+  section("routing", "Routing", {
+    "Auto routing": [
+      ["routing-enabled", "Enable Auto routing", ["auto", "router", "smart model", "model chooser", "automatic model", "routing"]],
+      ["routing-new-chats", "Use Auto for new chats", ["auto", "default", "new chat", "routing"]],
+      ["routing-picker", "Picker", ["rules", "classifier", "auto", "routing"]],
+    ],
+    Decisions: [
+      ["routing-confidence", "Confidence threshold", ["auto", "confidence", "fallback", "routing"]],
+      ["routing-fallback-tier", "Fallback tier", ["auto", "tier", "standard", "routing"]],
+      ["routing-stickiness", "Provider switching", ["sticky", "rebalance", "provider", "session", "routing"]],
+      ["routing-quota-reserve", "Quota reserve", ["usage", "limit", "quota", "reserve", "routing"]],
+    ],
+    "Tier presets": [
+      ["routing-tier-presets", "Tier presets", ["light", "standard", "heavy", "max", "presets", "weights", "models", "routing"]],
+    ],
+  }),
   section("devices", "Devices & integrations", {
     "Private Connect": [
       ["private-connect", "Private Connect", ["phone", "remote", "tailscale", "pairing", "connections", "mobile"]],

@@ -17,6 +17,7 @@ export const RESTORE_DEFAULTS_RESETS = [
     label: "the new-chat defaults, including a custom backend chosen for new chats",
     keys: ["defaultProvider", "defaultModel", "defaultReasoningEffort", "defaultInteractionMode", "defaultAccessMode", "newThreadMode"],
   },
+  { label: "Auto routing and its tier presets", keys: ["routing"] },
   { label: "provider display names", keys: ["providerIdentityLabels"] },
   { label: "the Codex executable", keys: ["codexBinaryPath"] },
   { label: "the Discord repository URL", keys: ["discordReleaseRepositoryUrl"] },

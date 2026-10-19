@@ -54,6 +54,9 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "updated_at",
   ]],
   [98, "conversation_title_locks", ["conversation_id"]],
+  [99, "app_state", ["routing_settings_json"]],
+  [99, "conversations", ["routing_mode"]],
+  [99, "agent_turns", ["routing_json"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

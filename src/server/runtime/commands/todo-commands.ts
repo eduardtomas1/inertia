@@ -1,16 +1,18 @@
 import type WebSocket from "ws";
 
-import type { ClientCommand, ProviderInfo, ServerEvent } from "../../../shared/contracts";
+import type { ClientCommand, Conversation, ProviderInfo, ServerEvent } from "../../../shared/contracts";
 import { todoPromptContent, type Todo } from "../../../shared/todos";
+import { newChatRoutingMode, type RoutingDecisionSummary } from "../../../shared/routing/routing-policy";
 import type { RuntimeStore } from "../../database";
 import { TodoRepositoryError } from "../../persistence/todo-repository";
-import { RuntimeRequestError } from "../../runtime-errors";
+import { publicRuntimeError, RuntimeRequestError } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type {
   ConversationCreatePayload,
   ConversationCreationService,
 } from "../conversation-creation-service";
 import type { TurnController } from "../turns/turn-controller";
+import type { RouteAdvisor } from "../routing/route-advisor";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
 import {
   defineRuntimeCommandHandler,
@@ -27,6 +29,8 @@ export interface TodoCommandDependencies {
   turns: Pick<TurnController, "queue" | "start" | "failBeforeStart">;
   backendProfileController: Pick<BackendProfileController, "readiness">;
   enableProviders: boolean;
+  /** Shared with message.send so a task started in Auto routes its first turn the same way. */
+  routeAdvisor?: Pick<RouteAdvisor, "routeBeforeTurn" | "restorePreviousRoute">;
   verifyProviderInstallation?(providerId: ProviderInfo["id"]): Promise<void>;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
@@ -48,6 +52,14 @@ async function assertRouteReady(
 ): Promise<void> {
   if (!dependencies.enableProviders) return;
   const { providerId, selection } = dependencies.creation.canonicalSelection(payload);
+  await assertSelectionReady(dependencies, providerId, selection);
+}
+
+async function assertSelectionReady(
+  dependencies: TodoCommandDependencies,
+  providerId: ProviderInfo["id"],
+  selection: Conversation["modelSelection"],
+): Promise<void> {
   await dependencies.verifyProviderInstallation?.(providerId);
   const provider = dependencies.providerInfo().find(({ id }) => id === providerId);
   const readiness = await dependencies.backendProfileController.readiness(selection, provider);
@@ -58,6 +70,31 @@ async function assertRouteReady(
     throw new RuntimeRequestError(
       provider?.statusMessage ?? "This agent is not ready. Open Settings to finish setup.",
     );
+  }
+}
+
+/**
+ * Routes a task's first turn like message.send. The task's original route was
+ * checked before the chat existed; a routed route must pass the same check,
+ * or the original route is restored (outcome `kept`) and checked again.
+ */
+async function routeFirstTurn(
+  dependencies: TodoCommandDependencies,
+  conversationId: string,
+  content: string,
+): Promise<RoutingDecisionSummary | null> {
+  const advisor = dependencies.routeAdvisor;
+  const decision = await advisor?.routeBeforeTurn({ conversationId, content, attachments: [] }) ?? null;
+  if (!advisor || !decision?.restore) return decision?.summary ?? null;
+  const ready = (conversation: Conversation) =>
+    assertSelectionReady(dependencies, conversation.providerId, conversation.modelSelection);
+  try {
+    await ready(dependencies.store.conversation(conversationId));
+    return decision.summary;
+  } catch (error) {
+    const restored = advisor.restorePreviousRoute(decision, publicRuntimeError(error));
+    await ready(dependencies.store.conversation(conversationId));
+    return restored;
   }
 }
 
@@ -75,6 +112,8 @@ export function createTodoCommandHandler(
     }
     const payload = {
       ...command.payload.conversation,
+      routingMode: command.payload.conversation.routingMode
+        ?? newChatRoutingMode(dependencies.store.settings.current().routing),
       title: conversationTitle(todo.title),
       activate: false,
     };
@@ -101,6 +140,16 @@ export function createTodoCommandHandler(
       const content = todoPromptContent(linked);
       if (dependencies.enableProviders) {
         let queued: ReturnType<TodoCommandDependencies["turns"]["queue"]>;
+        let routing: RoutingDecisionSummary | null;
+        try {
+          routing = await routeFirstTurn(dependencies, conversation.id, content);
+        } catch (error) {
+          // Neither the routed nor the original route can run any more; keep the prompt.
+          dependencies.store.createMessage(conversation.id, content, "user", [], null, undefined, {
+            activateConversation: false,
+          });
+          throw new RuntimeRequestError(`The chat was created, but its first turn could not start: ${publicRuntimeError(error)}`);
+        }
         try {
           queued = dependencies.turns.queue({
             conversationId: conversation.id,
@@ -109,6 +158,7 @@ export function createTodoCommandHandler(
             contextRequestId: command.requestId,
             turnCheckpoint: true,
             skills: [],
+            ...(routing ? { routing } : {}),
           });
         } catch {
           if (!dependencies.store.latestAgentTurnForConversation(conversation.id)) {

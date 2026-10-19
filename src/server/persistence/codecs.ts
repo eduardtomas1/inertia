@@ -47,6 +47,7 @@ import {
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorJson } from "../../shared/working-indicator";
+import { parseRoutingDecisionJson, parseRoutingSettingsJson } from "../../shared/routing/routing-policy";
 import { parseCompletionSoundJson } from "../../shared/completion-sound";
 import { DEFAULT_QUOTA_WARNINGS, isQuotaWarningThreshold } from "../../shared/quota-warnings";
 import {
@@ -246,6 +247,7 @@ export function conversationFromRow(row: ConversationRow): Conversation {
         modelSelection,
       )
       : null,
+    routingMode: row.routing_mode === "auto" ? "auto" : "manual",
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     interactionMode: row.interaction_mode,
@@ -357,6 +359,7 @@ function conversationTurnSummary(
     terminalReason: turn.terminalReason,
     updatedAt: turn.updatedAt,
     ...(usageLimited ? { usageLimited: true } : {}),
+    ...(turn.routing ? { routing: turn.routing } : {}),
   };
 }
 
@@ -382,6 +385,7 @@ export function conversationShellFromRow(
     providerId: conversation.providerId,
     modelSelection: conversation.modelSelection,
     continuationIdentity: conversation.continuationIdentity,
+    routingMode: conversation.routingMode,
     model: conversation.model,
     reasoningEffort: conversation.reasoningEffort,
     interactionMode: conversation.interactionMode,
@@ -471,6 +475,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
     workingIndicator: parseWorkingIndicatorJson(state.working_indicator_json),
+    routing: parseRoutingSettingsJson(state.routing_settings_json),
     completionSound: parseCompletionSoundJson(state.completion_sound_json),
   };
 }
@@ -616,7 +621,13 @@ export function agentTurnFromRow(row: AgentTurnRow & { usage_limited?: number })
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.usage_limited === 1 ? { usageLimited: true as const } : {}),
+    ...routingFromRow(row.routing_json),
   };
+}
+
+function routingFromRow(value: string | null | undefined): Pick<AgentTurn, "routing"> {
+  const routing = parseRoutingDecisionJson(value);
+  return routing ? { routing } : {};
 }
 
 function isPersistedChatAttachment(

@@ -100,6 +100,7 @@ export function detachedChatCommandRejection(
           "modelSelection",
           "interactionMode",
           "accessMode",
+          "routingMode",
         ])
         && Object.keys(command.payload).length > 1
         ? null

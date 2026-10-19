@@ -141,11 +141,13 @@ export function Tooltip({
   layer,
   label,
   shortcut,
+  multiline = false,
 }: {
   anchor: RefObject<HTMLElement | null>;
   layer: HTMLElement;
   label: string;
   shortcut?: string;
+  multiline?: boolean;
 }): React.JSX.Element | null {
   const tooltip = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<TooltipPosition | null>(null);
@@ -173,7 +175,7 @@ export function Tooltip({
   return createPortal(
     <div
       ref={tooltip}
-      className="tooltip"
+      className={multiline ? "tooltip is-multiline" : "tooltip"}
       role="tooltip"
       aria-hidden="true"
       data-positioned={position ? "true" : undefined}

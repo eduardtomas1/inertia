@@ -6,6 +6,7 @@ export function TooltipButton({
   tooltip: label,
   shortcut,
   describeTooltip = true,
+  multilineTooltip = false,
   ref,
   children,
   onPointerEnter,
@@ -20,6 +21,8 @@ export function TooltipButton({
   tooltip: string;
   shortcut?: string;
   describeTooltip?: boolean;
+  /** Render each "\n"-separated line of the tooltip on its own line. */
+  multilineTooltip?: boolean;
 }): React.JSX.Element {
   const button = useRef<HTMLButtonElement | null>(null);
   const descriptionId = useId();
@@ -55,7 +58,7 @@ export function TooltipButton({
         {named !== undefined && description}
       </button>
       {named === undefined && description}
-      {tooltip.layer && label !== "" && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} />}
+      {tooltip.layer && label !== "" && <Tooltip anchor={button} layer={tooltip.layer} label={label} shortcut={shortcut} multiline={multilineTooltip} />}
     </>
   );
 }

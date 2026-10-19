@@ -22,6 +22,7 @@ import { conversationContextTransportV3Migration } from "./conversation-context-
 import { todosMigration } from "./todos";
 import { restartContinuationPlansMigration } from "./restart-continuation-plans";
 import { conversationTitleLocksMigration } from "./conversation-title-locks";
+import { modelRoutingCoreMigration } from "./model-routing-core";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -47,4 +48,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   todosMigration,
   restartContinuationPlansMigration,
   conversationTitleLocksMigration,
+  modelRoutingCoreMigration,
 ];

@@ -155,6 +155,8 @@ describe("todo command handler", () => {
     expect(creation.create).toHaveBeenCalledOnce();
     expect(creation.create.mock.calls[0]).toEqual([{
       ...startPayload(id).conversation,
+      // Auto routing is off, so the task's chat starts in manual mode.
+      routingMode: "manual",
       title: "x".repeat(119),
       activate: false,
     }, command.requestId]);

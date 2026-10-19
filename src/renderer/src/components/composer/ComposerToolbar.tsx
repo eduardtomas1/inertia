@@ -38,7 +38,7 @@ import {
 } from "../../utils/usageDisplay";
 import { CheckoutBranchControlContext, CheckoutBranchSlot } from "../CheckoutBranchControl";
 import { layoutStorage } from "../../utils/layoutStorage";
-import { ModelChooser } from "../ModelChooser";
+import { ModelChooser, type ModelChooserProps } from "../ModelChooser";
 import { IconButton, LoadingMark } from "../ui";
 import { UsageIndicator } from "../UsageIndicator";
 import { menuId } from "./config";
@@ -144,6 +144,8 @@ export interface ComposerToolbarProps {
   ) => void;
   modelRoutes: ComposerModelRoute[];
   selectedModelRoute: ModelSearchRoute;
+  modelChooserAuto?: ModelChooserProps["auto"];
+  modelChipOverride?: ModelChooserProps["chipOverride"];
   onChooseModelRoute: (route: ComposerModelRoute) => Promise<void>;
   selectedModel: ComposerSettingsModel | undefined;
   selectedReasoning: string;
@@ -221,6 +223,8 @@ export function ComposerToolbar({
   onSetPromptRecurrence,
   modelRoutes,
   selectedModelRoute,
+  modelChooserAuto,
+  modelChipOverride,
   onChooseModelRoute,
   selectedModel,
   selectedReasoning,
@@ -334,6 +338,8 @@ export function ComposerToolbar({
               if (open) dismissMenu("context-change");
             }}
             onSelect={onChooseModelRoute}
+            auto={modelChooserAuto}
+            chipOverride={modelChipOverride}
           />
           {conversationUpdateError ? (
             <p

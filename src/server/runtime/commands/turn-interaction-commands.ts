@@ -9,6 +9,7 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type ChatAttachment,
+  type Conversation,
   type ProviderInfo,
   type RuntimeMutationEvent,
   type ServerEvent,
@@ -48,6 +49,7 @@ import { ConversationContextService } from "../conversation-context-service";
 import { isUntitledConversationTitle, quickConversationTitle } from "../conversation-title";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
+import type { RouteAdvisor } from "../routing/route-advisor";
 
 type MessageSendStage =
   | "conversation-state"
@@ -120,6 +122,8 @@ export interface TurnInteractionCommandDependencies {
   };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
+  /** Auto routing for fresh user messages; queued and scheduled dispatches keep their route. */
+  routeAdvisor?: Pick<RouteAdvisor, "routeBeforeTurn" | "restorePreviousRoute">;
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
@@ -573,69 +577,100 @@ export function createTurnInteractionCommandHandler(
             ? new RuntimeRequestError(error.message)
             : classifiedMessageSendError(error, "documents");
         }
+        // Auto routing sees the prepared inputs (scanned PDF pages need image
+        // input too) and runs before readiness, which then checks the routed
+        // route. Turn admission is held, so no other turn starts meanwhile.
+        let routing = dependencies.enableProviders && !dependencies.queuedMessage && !scheduledDispatch
+          ? await dependencies.routeAdvisor?.routeBeforeTurn({
+              conversationId: conversation.id,
+              content: command.payload.content,
+              attachments: sourceAttachments,
+              requiresVision: documentPreparation.generatedImagePaths.length > 0,
+              imageLimitRefusal: (providerId) => providerImageRequestLimitError(providerId, sourceAttachments),
+              context: resolvedTurnContext,
+            }) ?? null
+          : null;
+        if (routing?.restore) conversation = dependencies.store.conversation(conversation.id);
         messageSendStage = "backend-readiness";
-        if (dependencies.enableProviders) {
+        const assertConversationReady = async (target: Conversation): Promise<void> => {
           try {
             await awaitMessageSendPreparation(
-              dependencies.verifyProviderInstallation?.(conversation.providerId)
+              dependencies.verifyProviderInstallation?.(target.providerId)
                 ?? Promise.resolve(),
               preparationDeadlineAt,
             );
           } catch (error) {
-            await relinquishAttachments();
             throw classifiedMessageSendError(error, "backend-readiness");
           }
           const selectedProvider = dependencies.providerInfo().find(
-            ({ id }) => id === conversation.providerId,
+            ({ id }) => id === target.providerId,
           );
+          const validatedSelection = dependencies.backendProfileController
+            .validateSelection(target.modelSelection);
+          const selectedModel = validatedSelection.modelId === "provider-default"
+            ? selectedProvider?.models.find(({ isDefault }) => isDefault)
+              ?? selectedProvider?.models[0]
+            : selectedProvider?.models.find(
+                ({ id }) => id === validatedSelection.modelId,
+              );
+          const externalImageCapability = validatedSelection.capabilities.find(
+            ({ id }) => id === "images",
+          );
+          const supportsScannedPdfImages = dependencies.backendProfileController
+            .isExternalSelection(validatedSelection)
+            ? externalImageCapability !== undefined
+              && externalImageCapability.state !== "unknown"
+              && externalImageCapability.state !== "unavailable"
+            : selectedModel?.inputModalities.includes("image") === true;
+          if (
+            documentPreparation.generatedImagePaths.length > 0
+            && !supportsScannedPdfImages
+          ) {
+            throw new RuntimeRequestError(
+              "The selected model cannot inspect scanned PDF page images.",
+            );
+          }
+          const backendReadiness = await awaitMessageSendPreparation(
+            dependencies.backendProfileController.readiness(
+              validatedSelection,
+              selectedProvider,
+            ),
+            preparationDeadlineAt,
+          );
+          if (backendReadiness && !backendReadiness.ready) {
+            throw new RuntimeRequestError(
+              backendReadiness.message
+                ?? "The selected model backend is unavailable.",
+            );
+          }
+          if (!backendReadiness && !selectedProvider?.canRun) {
+            throw new RuntimeRequestError(
+              selectedProvider?.statusMessage
+                ?? "This agent is not ready. Open Settings to finish setup.",
+            );
+          }
+          // The authoritative selection validator owns native model and
+          // reasoning admission; the legacy conversation model fields must
+          // never substitute another route here.
+        };
+        if (dependencies.enableProviders) {
           try {
-            const validatedSelection = dependencies.backendProfileController
-              .validateSelection(conversation.modelSelection);
-            const selectedModel = validatedSelection.modelId === "provider-default"
-              ? selectedProvider?.models.find(({ isDefault }) => isDefault)
-                ?? selectedProvider?.models[0]
-              : selectedProvider?.models.find(
-                  ({ id }) => id === validatedSelection.modelId,
-                );
-            const externalImageCapability = validatedSelection.capabilities.find(
-              ({ id }) => id === "images",
-            );
-            const supportsScannedPdfImages = dependencies.backendProfileController
-              .isExternalSelection(validatedSelection)
-              ? externalImageCapability !== undefined
-                && externalImageCapability.state !== "unknown"
-                && externalImageCapability.state !== "unavailable"
-              : selectedModel?.inputModalities.includes("image") === true;
-            if (
-              documentPreparation.generatedImagePaths.length > 0
-              && !supportsScannedPdfImages
-            ) {
-              throw new RuntimeRequestError(
-                "The selected model cannot inspect scanned PDF page images.",
-              );
+            try {
+              await assertConversationReady(conversation);
+            } catch (error) {
+              if (!routing?.restore || !dependencies.routeAdvisor) throw error;
+              // The routed route cannot run: put the previous route back
+              // through the validated update and check it as usual.
+              let restored: ReturnType<RouteAdvisor["restorePreviousRoute"]>;
+              try {
+                restored = dependencies.routeAdvisor.restorePreviousRoute(routing, publicRuntimeError(error));
+              } catch {
+                throw error;
+              }
+              routing = { summary: restored, restore: null };
+              conversation = dependencies.store.conversation(conversation.id);
+              await assertConversationReady(conversation);
             }
-            const backendReadiness = await awaitMessageSendPreparation(
-              dependencies.backendProfileController.readiness(
-                validatedSelection,
-                selectedProvider,
-              ),
-              preparationDeadlineAt,
-            );
-            if (backendReadiness && !backendReadiness.ready) {
-              throw new RuntimeRequestError(
-                backendReadiness.message
-                  ?? "The selected model backend is unavailable.",
-              );
-            }
-            if (!backendReadiness && !selectedProvider?.canRun) {
-              throw new RuntimeRequestError(
-                selectedProvider?.statusMessage
-                  ?? "This agent is not ready. Open Settings to finish setup.",
-              );
-            }
-            // The authoritative selection validator owns native model and
-            // reasoning admission; the legacy conversation model fields must
-            // never substitute another route here.
           } catch (error) {
             await relinquishAttachments();
             throw error;
@@ -782,6 +817,7 @@ export function createTurnInteractionCommandHandler(
                 contextRequestId: command.requestId,
                 turnCheckpoint: true,
                 skills: resolvedSkills.inputs,
+                ...(routing?.summary ? { routing: routing.summary } : {}),
               }, () => {
                 durableTurnPersisted = true;
                 acceptRetainedAttachments();

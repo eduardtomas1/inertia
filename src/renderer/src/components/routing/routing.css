@@ -1,0 +1,156 @@
+.model-chooser-palette.has-auto-route {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+/*
+ * "Auto · " leads the model label, so the Auto chip gets the manual chip's
+ * width plus room for that prefix. Narrow composers keep the glyph-only chip.
+ */
+@container not (max-width: 480px) {
+  .model-chooser-anchor.is-auto-routing {
+    max-width: clamp(160px, calc(20cqw + 64px), 232px);
+  }
+}
+
+.model-chooser-auto {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.model-chooser-auto-option {
+  display: grid;
+  width: 100%;
+  min-height: var(--model-row-height, 40px);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-chooser-auto-option:hover,
+.model-chooser-auto-option:focus-visible,
+.model-chooser-auto-option.is-active {
+  background: var(--fill-strong);
+}
+
+.model-chooser-auto-option:focus-visible {
+  outline: 2px solid var(--focus-ring, Highlight);
+  outline-offset: -2px;
+}
+
+.model-chooser-auto-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.model-chooser-auto-copy > strong {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.model-chooser-auto-copy > small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-chooser-auto-glyph,
+.model-chooser-auto-check {
+  color: var(--text-muted);
+}
+
+.routing-tier-presets {
+  display: grid;
+  gap: 12px;
+}
+
+.routing-tier {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm, 8px);
+}
+
+.routing-tier-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.routing-tier-heading > h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.routing-tier-heading small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Rows share the list's columns so every weight select lines up. */
+.routing-preset-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.routing-preset {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 30px;
+}
+
+/*
+ * The settings select's 50% cap would halve the weight select inside its
+ * auto-sized column and clip the label and chevron. Like the Picker and
+ * Fallback tier selects it takes its content width, shared across the rows.
+ */
+.routing-preset .setting-select {
+  width: 100%;
+  max-width: none;
+}
+
+.routing-preset-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-preset-label small {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.routing-preset-actions,
+.routing-tier-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.routing-tier-actions {
+  flex-wrap: wrap;
+}
+
+.routing-tier-empty {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}

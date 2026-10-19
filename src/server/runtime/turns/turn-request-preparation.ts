@@ -457,6 +457,7 @@ export function resolveTurnRequest(
       : null,
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: "authoritative",
+    ...(request.routing ? { routing: request.routing } : {}),
   };
   return {
     input,

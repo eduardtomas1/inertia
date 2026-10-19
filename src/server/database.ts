@@ -82,6 +82,7 @@ import { RecoveryRepository } from "./persistence/recovery-repository";
 import { ReviewRepository } from "./persistence/review-repository";
 import { UsageLimitsRepository } from "./persistence/usage-limits-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
+import { RuntimeSettingsStore } from "./persistence/runtime-settings-store";
 import { SnapshotRepository, type RecentConversationLimits } from "./persistence/snapshot-repository";
 import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
@@ -136,6 +137,7 @@ export class RuntimeStore {
   private readonly reviewRepository: ReviewRepository;
   readonly usageLimits: UsageLimitsRepository;
   private readonly settingsRepository: SettingsRepository;
+  readonly settings: RuntimeSettingsStore;
   private readonly snapshotRepository: SnapshotRepository;
   readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
@@ -199,6 +201,11 @@ export class RuntimeStore {
     });
     this.usageLimits = new UsageLimitsRepository(this.database);
     this.settingsRepository = new SettingsRepository({ database: this.database });
+    this.settings = new RuntimeSettingsStore({
+      database: this.database,
+      repository: this.settingsRepository,
+      clearGlobalBackendDefault: () => this.backendProfileRepository.clearDefault(null),
+    });
     this.conversationRepository = new ConversationRepository({
       database: this.database,
       requireConversation: (conversationId) => this.requireConversation(conversationId),
@@ -464,7 +471,7 @@ export class RuntimeStore {
     return this.conversationRepository.hasTurns(conversationId);
   }
 
-  updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>): Conversation {
+  updateConversation(conversationId: string, update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "routingMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>): Conversation {
     return this.conversationRepository.update(conversationId, update);
   }
 
@@ -1208,14 +1215,8 @@ export class RuntimeStore {
   clearModelBackendDefault(projectId: string | null): void {
     this.backendProfileRepository.clearDefault(projectId);
   }
-  updateSettingsClearingGlobalDefault(update: AppSettingsUpdate): void {
-    this.database.transaction(() => {
-      this.settingsRepository.update(update);
-      this.backendProfileRepository.clearDefault(null);
-    })();
-  }
   updateSettings(update: AppSettingsUpdate): void {
-    this.settingsRepository.update(update);
+    this.settings.update(update);
   }
 
   project(projectId: string): Project {

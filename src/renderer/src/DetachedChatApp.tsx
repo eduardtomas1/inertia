@@ -612,6 +612,7 @@ export default function DetachedChatApp({
             contextPackets={projection.detail?.contextPackets ?? NO_CONTEXT_PACKETS}
             previewContextUrl={null}
             providerIdentityLabels={settings.providerIdentityLabels}
+            routingEnabled={Boolean(settings.routing?.enabled)}
             loading={false}
             detailLoading={detailLoading}
             history={projection.history}

@@ -5,6 +5,7 @@ export const SETTINGS_SECTION_IDS = [
   "keyboard",
   "projects",
   "agents",
+  "routing",
   "devices",
   "data",
   "help",

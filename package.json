@@ -317,7 +317,7 @@
     "electron": "^44.7.1",
     "electron-builder": "26.17.0",
     "electron-vite": "^5.0.0",
-    "happy-dom": "20.14.6",
+    "happy-dom": "21.0.3",
     "oxlint": "^1.88.0",
     "oxlint-tsgolint": "7.0.2004",
     "tailwindcss": "^4.3.3",

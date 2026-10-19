@@ -36,6 +36,8 @@ export const todoDraftSchema = z.object({
   note: todoNoteSchema.default(""),
   priority: todoPrioritySchema.nullable().default(null),
   dueDate: todoDueDateSchema.nullable().default(null),
+  /** Links the new task to an existing chat, the same link `todo.start` writes. */
+  conversationId: z.string().uuid().optional(),
 }).strict();
 
 export const todoPatchSchema = z.object({
@@ -83,4 +85,61 @@ export function todoPromptContent(todo: Pick<Todo, "title" | "note">): string {
 
 export function todosSerializedBytes(todos: readonly Todo[]): number {
   return new TextEncoder().encode(JSON.stringify(todos)).byteLength;
+}
+
+const TRUNCATION_MARK = "…";
+
+/** Bounds text to `limit` UTF-16 units without splitting a surrogate pair, marking the cut with "…". */
+export function boundTodoText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  let result = "";
+  for (const character of value) {
+    if (result.length + character.length > limit - TRUNCATION_MARK.length) break;
+    result += character;
+  }
+  return `${result.trimEnd()}${TRUNCATION_MARK}`;
+}
+
+function withoutNul(value: string): string {
+  return value.replaceAll("\0", "");
+}
+
+/** A one-line task title from free text, or null when the text has nothing to name the task by. */
+function todoTitleFrom(line: string): string | null {
+  const title = withoutNul(line).replace(/\s+/gu, " ").trim();
+  return title ? boundTodoText(title, MAX_TODO_TITLE_CHARS) : null;
+}
+
+function todoNoteFrom(text: string): string {
+  return boundTodoText(withoutNul(text).trim(), MAX_TODO_NOTE_CHARS);
+}
+
+export interface TodoTextDraft {
+  title: string;
+  note: string;
+}
+
+/**
+ * Turns a chat message's plain text into a task: the first non-empty line
+ * names it and the whole text becomes its note. A one-line message keeps an
+ * empty note instead of repeating its title.
+ */
+export function todoDraftFromMessage(text: string): TodoTextDraft | null {
+  const firstLine = text.split(/\r\n|\r|\n/u).find((line) => line.trim() !== "");
+  const title = firstLine === undefined ? null : todoTitleFrom(firstLine);
+  if (!title) return null;
+  const note = todoNoteFrom(text);
+  return { title, note: note === title ? "" : note };
+}
+
+/** Turns a plan step into a task whose note says which chat's plan it came from. */
+export function todoDraftFromPlanStep(
+  step: { title: string; detail?: string | null },
+  chatTitle: string,
+): TodoTextDraft | null {
+  const title = todoTitleFrom(step.title);
+  if (!title) return null;
+  const source = `From the plan in ${withoutNul(chatTitle).replace(/\s+/gu, " ").trim() || "this chat"}`;
+  const detail = step.detail?.trim();
+  return { title, note: todoNoteFrom(detail ? `${source}\n\n${detail}` : source) };
 }

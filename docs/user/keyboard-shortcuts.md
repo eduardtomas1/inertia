@@ -59,6 +59,7 @@ Turn on Window snapshots in **Settings → Devices & integrations**, and choose 
 | Close a focused surface tab | Delete or Backspace |
 | Move between surface tabs | ← →, Home, End |
 | Move a focused surface tab left or right | ⌘⇧← / ⌘⇧→, Ctrl+Shift+← / Ctrl+Shift+→ |
+| Find in a workspace terminal | ⌘F / Ctrl+F while the terminal has focus; Enter, Shift+Enter for next and previous; Esc closes |
 
 Changes, Files, Browser and Terminal are available after the chat's first message creates its workspace.
 

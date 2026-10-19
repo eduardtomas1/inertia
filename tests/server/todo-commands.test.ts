@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -113,7 +113,7 @@ function fixture(options: {
       accessMode: "auto-edit",
     },
   });
-  return { store, project, creation, turns, dependencies, handler, run, startPayload };
+  return { root, store, project, creation, turns, dependencies, handler, run, startPayload };
 }
 
 describe("todo command handler", () => {
@@ -140,6 +140,51 @@ describe("todo command handler", () => {
 
     const missing = await run("todo.delete", { id });
     expect(missing.events).toEqual([expect.objectContaining({ type: "request.error", message: "That task no longer exists." })]);
+  });
+
+  it("creates a task linked to an existing chat in the same project", async () => {
+    const { store, project, run, startPayload } = fixture();
+    const chat = store.createConversation(project.id, "Release prep", { activate: false });
+    const id = randomUUID();
+
+    const created = await run("todo.create", {
+      id, title: "Fix the build", note: "From the chat.", conversationId: chat.id, projectId: project.id,
+    });
+
+    expect(created.order).toEqual(["snapshot", "request.ok"]);
+    expect(store.todos.get(id)).toMatchObject({
+      title: "Fix the build", note: "From the chat.", conversationId: chat.id, completedAt: null,
+    });
+    expect(store.snapshot().todos).toEqual([expect.objectContaining({ id, conversationId: chat.id })]);
+    const restarted = await run("todo.start", startPayload(id));
+    expect(restarted.events).toEqual([expect.objectContaining({
+      type: "request.error", message: "That task is already handed to an agent.",
+    })]);
+
+    store.deleteConversation(chat.id);
+    expect(store.todos.get(id)).toMatchObject({ conversationId: null });
+  });
+
+  it("refuses to link a task to a chat from another project or to a chat that does not exist", async () => {
+    const { root, store, project, run } = fixture();
+    mkdirSync(join(root, "other"));
+    const other = store.createProject("Other", join(root, "other"));
+    const foreign = store.createConversation(other.id, "Elsewhere", { activate: false });
+
+    const wrongProject = await run("todo.create", {
+      id: randomUUID(), title: "Task", conversationId: foreign.id, projectId: project.id,
+    });
+    expect(wrongProject.events).toEqual([expect.objectContaining({
+      type: "request.error", message: "The chat does not belong to this project.",
+    })]);
+
+    const unknown = await run("todo.create", {
+      id: randomUUID(), title: "Task", conversationId: randomUUID(), projectId: project.id,
+    });
+    expect(unknown.events).toEqual([expect.objectContaining({
+      type: "request.error", message: "That chat no longer exists.",
+    })]);
+    expect(store.snapshot().todos).toEqual([]);
   });
 
   it("starts a chat for the task, links it and dispatches the task as the first turn", async () => {

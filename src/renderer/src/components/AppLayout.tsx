@@ -47,6 +47,8 @@ import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { SplitDropLayer } from "./SplitDropLayer";
 import { LoadingMark } from "./ui";
+import { TaskCreatedNotice } from "./tasks/TaskCreatedNotice";
+import { TaskCreationContext, useTaskCreationController } from "./tasks/taskCreation";
 import { WelcomeGuideHost } from "./WelcomeGuideHost";
 import { HelpGuideHost } from "./HelpGuideHost";
 import { useHelpGuideOpen } from "../hooks/useHelpGuideOpen";
@@ -311,6 +313,11 @@ export const AppLayout = memo(function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const taskCreation = useTaskCreationController({
+    snapshot: connection.snapshot,
+    request: (command, options) => actions.run(command.type, command, options),
+    onError: setActionError,
+  });
   const UsageView = useLoadedSurface(loadUsageView, view === "usage");
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
@@ -347,6 +354,7 @@ export const AppLayout = memo(function AppLayout({
   useNativePreviewSuspension(
     Boolean(visibleError)
       || providerQuotaNotices.notices.length > 0
+      || taskCreation.notice !== null
       || commitDialogOpen
       || dailyWorkOpen
       || pullRequestDialogOpen
@@ -867,7 +875,9 @@ export const AppLayout = memo(function AppLayout({
                 </div>
               )
             ) : (
-              <WorkspaceScene {...scene} />
+              <TaskCreationContext.Provider value={taskCreation.creator}>
+                <WorkspaceScene {...scene} />
+              </TaskCreationContext.Provider>
             )}
           </div>
           {view === "workspace" && (
@@ -881,6 +891,14 @@ export const AppLayout = memo(function AppLayout({
             />
           )}
           <StatusToastStack
+            confirmation={taskCreation.notice && (
+              <TaskCreatedNotice
+                key={taskCreation.notice.id}
+                notice={taskCreation.notice}
+                onOpenTasks={() => setView("tasks")}
+                onDismiss={taskCreation.dismissNotice}
+              />
+            )}
             appUpdate={appUpdate}
             providerQuotaNotices={providerQuotaNotices}
             error={visibleError}

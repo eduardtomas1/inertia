@@ -26,6 +26,8 @@ import {
   X,
 } from "lucide-react";
 import type {
+  WorkspaceContentMatch,
+  WorkspaceContentSearchPage,
   WorkspaceEntry,
   WorkspaceFilePreview,
 } from "@shared/contracts";
@@ -55,6 +57,9 @@ import { TooltipButton } from "./TooltipButton";
 import { FileEditorDialog } from "./FileEditorDialog";
 import { FileGitBadge } from "./FileGitBadge";
 import { FileTree } from "./FileTree";
+import { FilesPanelContentResults, FilesSearchModeToggle, useFilesContentSearch, type FileSearchMode } from "./FilesPanelContentResults";
+import { FilesPanelLineSelection, PreviewLineNumber, useFilePreviewLineSelection } from "./FilesPanelLineSelection";
+import type { FileSelectionPromptMode } from "../utils/filePreviewSelection";
 import { projectPathContextMenu } from "../utils/contextMenu";
 import { rememberedExpandedFolders, rememberExpandedFolders } from "../utils/filesPanelExpandedFolders";
 import { useStableActions } from "../hooks/useStableController";
@@ -171,6 +176,10 @@ export type FilesPanelProps = {
     directory?: string;
     query?: string;
   }) => Promise<WorkspaceEntriesPage>;
+  /** Bounded literal content search; enables the Names | Contents toggle. */
+  onSearchContent?: (query: string) => Promise<WorkspaceContentSearchPage>;
+  /** Called after a preview selection was sent to the chat composer. */
+  onComposerPrefill?: (mode: FileSelectionPromptMode) => void;
   onRefresh?: () => void;
   onOpenFile?: (path: string) => void;
   onSaveFile?: (
@@ -196,6 +205,7 @@ const EMPTY_SEARCH: SearchState = {
   truncated: false,
   error: null,
 };
+const NO_ROWS: WorkspaceTreeRow[] = [];
 
 const MAX_RENDERED_PREVIEW_LINES = 2_000;
 export const MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS = 100_000;
@@ -231,6 +241,8 @@ export function FilesPanel({
   onSelectFile,
   onOpenWorkspaceEntry,
   onLoadEntries,
+  onSearchContent,
+  onComposerPrefill,
   onRefresh,
   onOpenFile,
   onSaveFile,
@@ -255,6 +267,7 @@ export function FilesPanel({
   const [directoryErrors, setDirectoryErrors] = useState<Map<string, string>>(() => new Map());
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
+  const [searchMode, setSearchMode] = useState<FileSearchMode>("names");
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const [editingFile, setEditingFile] =
     useState<WorkspaceFilePreview | null>(null);
@@ -291,6 +304,9 @@ export function FilesPanel({
     () => preview?.content.split("\n") ?? [],
     [preview],
   );
+  const contentMode = searchMode === "contents" && onSearchContent !== undefined;
+  const { state: contentSearch, reset: resetContentSearch } =
+    useFilesContentSearch(contentMode, query, onSearchContent);
   const markdownPreview = previewLanguage?.id === "markdown";
   const markdownPreviewBlockedReason = markdownPreview && preview
     ? preview.truncated
@@ -357,6 +373,20 @@ export function FilesPanel({
     [preview, previewLanguage, renderedMarkdownPreview],
   );
   const previewPath = preview?.path ?? null;
+  const lineSelection = useFilePreviewLineSelection({
+    preview,
+    previewLines,
+    conversationId,
+    enabled: !renderedMarkdownPreview && editingFile === null,
+    renderedLineNumbers: renderedPreviewLines.map(({ lineNumber }) => lineNumber),
+    preferredLine: selectedLocation?.startLine ?? null,
+    codeRef: previewCodeRef,
+    scrollToLine: (line) => {
+      if (virtualizedSourcePreview) sourceVirtualizer.scrollToIndex(line - 1, { align: "auto" });
+    },
+    onComposerPrefill,
+  });
+  const activeLineSelection = lineSelection.selection;
   const selectedMarkdownHeadingIdentity = selectedMarkdownHeading
     ? [
         selectedMarkdownHeading.requestId,
@@ -651,11 +681,19 @@ export function FilesPanel({
     previousSelectedPathRef.current = selectedPath;
     setQuery(value);
     setSearch(EMPTY_SEARCH);
-  }, [conversationId, projectId, selectedPath]);
+    resetContentSearch();
+  }, [conversationId, projectId, resetContentSearch, selectedPath]);
+
+  const chooseSearchMode = useCallback((mode: FileSearchMode): void => {
+    ++searchGeneration.current;
+    setSearch(EMPTY_SEARCH);
+    resetContentSearch();
+    setSearchMode(mode);
+  }, [resetContentSearch]);
 
   useEffect(() => {
     const normalized = query.trim();
-    if (!normalized) return;
+    if (!normalized || contentMode) return;
     const generation = ++searchGeneration.current;
     setSearch({ entries: null, truncated: false, error: null });
     const timer = window.setTimeout(() => {
@@ -678,7 +716,7 @@ export function FilesPanel({
         });
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [onLoadEntries, query]);
+  }, [contentMode, onLoadEntries, query]);
 
   const treeRows = useMemo(() => {
     return flattenWorkspaceTree(
@@ -696,7 +734,8 @@ export function FilesPanel({
     }))
   ), [search.entries]);
   const searchActive = Boolean(query.trim());
-  const rows = searchActive ? searchRows : treeRows;
+  const contentSearchActive = searchActive && contentMode;
+  const rows = contentSearchActive ? NO_ROWS : searchActive ? searchRows : treeRows;
   const visiblePaths = useMemo(
     () => new Set(rows.map(({ entry }) => entry.path)),
     [rows],
@@ -807,12 +846,13 @@ export function FilesPanel({
       previousSelectedPathRef.current = selectedPath;
       return;
     }
-    if (searchActive && selectedPath && isSafeWorkspaceEntryPath(selectedPath)) {
+    if (searchActive && !contentMode && selectedPath && isSafeWorkspaceEntryPath(selectedPath)) {
       if (search.entries === null) return;
       if (!visiblePaths.has(selectedPath)) updateQuery("");
     }
     previousSelectedPathRef.current = selectedPath;
   }, [
+    contentMode,
     conversationId,
     projectId,
     preview?.path,
@@ -846,17 +886,28 @@ export function FilesPanel({
     return () => observer.disconnect();
   }, [selectedPath, visiblePaths]);
 
+  const searchPending = contentSearchActive ? contentSearch.matches === null : searchActive && search.entries === null;
+  const searchError = contentSearchActive ? contentSearch.error : search.error;
+  const searchTruncated = contentSearchActive ? contentSearch.truncated : search.truncated;
   const treeBusy = loading
-    || (searchActive && search.entries === null)
+    || searchPending
     || loadingDirectories.size > 0;
   const hasRootFailure = !searchActive && Boolean(error) && treeRows.length === 0;
-  const hasSearchFailure = searchActive && Boolean(search.error);
+  const hasSearchFailure = searchActive && Boolean(searchError);
   const showTreeLoading = searchActive
-    ? search.entries === null
+    ? searchPending
     : loading && treeRows.length === 0;
-  const countLabel = searchActive
-    ? `${search.entries?.length ?? 0} results`
-    : `${treeRows.length} visible`;
+  const resultCount = contentSearchActive ? contentSearch.matches?.length ?? 0 : rows.length;
+  const countLabel = contentSearchActive
+    ? `${resultCount} matches`
+    : searchActive
+      ? `${search.entries?.length ?? 0} results`
+      : `${treeRows.length} visible`;
+
+  const openContentMatch = (match: WorkspaceContentMatch): void => {
+    setPendingMarkdownHeading(null);
+    onSelectFile(match.projectPath, { startLine: match.line, endLine: match.line, startColumn: match.column }, true);
+  };
 
   return (
     <section className="files-panel" aria-label="Project files" aria-busy={treeBusy}>
@@ -870,8 +921,8 @@ export function FilesPanel({
             type="search"
             ref={searchInputRef}
             value={query}
-            aria-label="Search files"
-            placeholder="Search"
+            aria-label={contentMode ? "Search file contents" : "Search files"}
+            placeholder={contentMode ? "Search in files" : "Search"}
             onChange={(event) => updateQuery(event.currentTarget.value)}
           />
           {query && (
@@ -899,6 +950,9 @@ export function FilesPanel({
           hidden={!fileExplorerOpen}
         >
           {git && <p className="file-git-status" role="status">{gitIndex.notice}</p>}
+          {onSearchContent && (
+            <FilesSearchModeToggle contentMode={contentMode} onChoose={chooseSearchMode} />
+          )}
           {showTreeLoading ? (
             <div className={PANEL_LOADING_CLASS} role="status">
               <LoadingMark label={searchActive ? "Searching" : "Loading"} />
@@ -907,14 +961,17 @@ export function FilesPanel({
           ) : hasRootFailure || hasSearchFailure ? (
             <div className={`${PANEL_EMPTY_CLASS} compact ${FILE_PANEL_ERROR_CLASS}`} role="alert">
               <CircleAlert size={16} aria-hidden="true" />
-              <p>{searchActive ? search.error : error}</p>
+              <p>{searchActive ? searchError : error}</p>
             </div>
-          ) : rows.length === 0 ? (
+          ) : resultCount === 0 ? (
             <div className={`${PANEL_EMPTY_CLASS} compact`}>
               <p>{searchActive ? "No matches" : "Empty project"}</p>
             </div>
           ) : null}
-          <FileTree
+          {contentSearchActive ? (
+            <FilesPanelContentResults query={query} matches={contentSearch.matches ?? []} busy={searchPending}
+              selectedPath={selectedPath} selectedLine={selectedLocation?.startLine ?? null} onOpen={openContentMatch} />
+          ) : <FileTree
             label={searchActive ? "Search results" : "Files"}
             busy={treeBusy}
             rows={rows}
@@ -930,7 +987,7 @@ export function FilesPanel({
             onActivate={treeActions.activate}
             onKeyDown={treeActions.keyDown}
             contextMenuFor={treeContextMenu}
-          />
+          />}
           {!searchActive && error && treeRows.length > 0 && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_PANEL_ERROR_CLASS}`} role="alert">{error}</p>
           )}
@@ -939,9 +996,9 @@ export function FilesPanel({
               More files.
             </p>
           )}
-          {searchActive && search.truncated && (
+          {searchActive && searchTruncated && (
             <p className={`${PANEL_NOTICE_CLASS} ${FILE_LIST_TRUNCATED_CLASS}`}>
-              Refine for more.
+              {contentSearchActive ? "Partial results. Refine for more." : "Refine for more."}
             </p>
           )}
         </div>
@@ -1082,7 +1139,7 @@ export function FilesPanel({
                   />
                 </div>
               ) : (
-                <pre ref={previewCodeRef} className={`${FILE_PREVIEW_CLASS}-code`} tabIndex={0} aria-label={`Contents of ${preview.path}`}>
+                <pre ref={previewCodeRef} className={`${FILE_PREVIEW_CLASS}-code`} tabIndex={0} aria-label={`Contents of ${preview.path}`} onKeyDown={lineSelection.onCodeKeyDown}>
                   <code
                     className={clsx(
                       highlightedPreviewLines && "hljs",
@@ -1098,11 +1155,13 @@ export function FilesPanel({
                         && lineNumber <= selectedLocation.endLine;
                       const referenceStart = selectedLocation?.startLine === lineNumber;
                       const highlightedLine = highlightedPreviewLines?.[lineNumber - 1];
+                      const lineSelected = activeLineSelection !== null && lineNumber >= activeLineSelection.start && lineNumber <= activeLineSelection.end;
                       return (
                         <span
                           className={clsx(
                             `${FILE_PREVIEW_CLASS}-line`,
                             referenced && "is-referenced",
+                            lineSelected && "is-selected",
                           )}
                           data-source-line={lineNumber}
                           data-index={virtual?.index}
@@ -1118,7 +1177,7 @@ export function FilesPanel({
                               } as CSSProperties
                             : undefined}
                         >
-                          <span className={`${FILE_PREVIEW_CLASS}-line-number`} aria-hidden="true">{lineNumber}</span>
+                          <PreviewLineNumber line={lineNumber} className={`${FILE_PREVIEW_CLASS}-line-number`} selected={lineSelected} controller={lineSelection} />
                           {highlightedLine !== undefined
                             ? (
                                 <span
@@ -1133,6 +1192,9 @@ export function FilesPanel({
                     })}
                   </code>
                 </pre>
+              )}
+              {activeLineSelection && (
+                <FilesPanelLineSelection path={preview.path} start={activeLineSelection.start} end={activeLineSelection.end} onSend={lineSelection.send} onClear={lineSelection.clear} />
               )}
               {markdownPreviewBlockedReason && (
                 <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`} role="status">

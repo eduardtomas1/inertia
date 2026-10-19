@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentProps } from "react";
+import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
 import { CircleAlert, ShieldAlert, X } from "lucide-react";
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 
@@ -69,10 +69,13 @@ export function StatusToastStack({
   onDismissDatabaseRecoveryNotice,
   onImportRecovery,
   onCopyRecoveryReport,
+  confirmation,
 }: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error"> & DatabaseRecoveryNoticeProps & {
   onDismissError: () => void;
+  /** A quiet confirmation, such as a created task, kept in the same stack as the warnings. */
+  confirmation?: ReactNode;
 }): React.JSX.Element | null {
-  if (!databaseRecoveryNotice && !appUpdate.error && providerQuotaNotices.notices.length === 0 && !error) return null;
+  if (!databaseRecoveryNotice && !appUpdate.error && providerQuotaNotices.notices.length === 0 && !error && !confirmation) return null;
   const diagnosticError = error ? diagnosticErrorReference(error) : null;
   return (
     <div className="status-overlay-stack">
@@ -104,6 +107,7 @@ export function StatusToastStack({
         notices={providerQuotaNotices.notices}
         onDismiss={providerQuotaNotices.dismiss}
       />
+      {confirmation}
       {appUpdate.error && (
         <div className="error-toast" role="alert">
           <CircleAlert size={14} aria-hidden="true" />

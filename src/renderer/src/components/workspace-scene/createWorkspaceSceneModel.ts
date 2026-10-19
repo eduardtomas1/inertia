@@ -797,7 +797,7 @@ export function createWorkspaceSceneModel({
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
-      attachments: { attachments: environmentSummary.attachments },
+      attachments: { attachments: environmentSummary.attachments, conversationId: conversation?.id ?? null },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,
@@ -913,6 +913,11 @@ export function createWorkspaceSceneModel({
         onSelectFile: workspaceTools.selectWorkspaceFile,
         onOpenWorkspaceEntry: workspaceTools.openWorkspaceFile,
         onLoadEntries: workspaceTools.requestWorkspaceEntries,
+        onSearchContent: workspaceTools.requestWorkspaceContentSearch,
+        onComposerPrefill: (mode) => {
+          // Reveal the composer so the user can type the question.
+          if (mode === "ask" && sheetPanel) setActiveTool(null);
+        },
         onRefresh: () => {
           void workspaceTools.loadGit({ scope: "workspace-status", authoritative: true }).catch(() => undefined);
           void workspaceTools.loadFiles().catch((error) => setActionError(
@@ -954,6 +959,7 @@ export function createWorkspaceSceneModel({
         resumeRequestConversationId: activityActions.pendingResumeConversationId,
         onResumeRequestHandled: activityActions.clearPendingResume,
         onClose: closeTerminal,
+        onOpenWorkspaceFile: workspaceTools.openWorkspaceFile,
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {

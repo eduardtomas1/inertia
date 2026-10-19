@@ -11604,3 +11604,72 @@ html[data-chat-drag] * {
     forced-color-adjust: auto;
   }
 }
+
+/* Terminal find: floats over the output so opening it never resizes the shell. */
+.terminal-find-bar {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 4;
+  display: flex;
+  max-width: calc(100% - 20px);
+  align-items: center;
+  gap: 2px;
+  padding: 3px 3px 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+.terminal-find-input {
+  width: 180px;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.terminal-find-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.terminal-find-status { color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
+.terminal-find-status:empty { display: none; }
+.terminal-find-bar .icon-button { width: var(--control-height-small); height: var(--control-height-small); }
+
+/* Files: line selection and content search */
+.file-preview-line > button.file-preview-line-number {
+  min-width: 0;
+  padding: 0 8px 0 0;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+.file-preview-line > button.file-preview-line-number:hover { color: var(--text); }
+.file-preview-line > button.file-preview-line-number:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.file-preview-line.is-selected,
+.file-preview-line.is-selected .file-preview-line-number { color: var(--text); background: var(--accent-soft); }
+.file-line-selection-popover { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 8px 8px; padding: 4px 4px 4px 8px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-raised); box-shadow: var(--shadow-float); font-family: var(--font-sans); }
+.file-line-selection-range { color: var(--text-muted); font-size: var(--text-sm); white-space: nowrap; }
+.file-line-selection-popover .diff-selection-actions { flex: 1 1 auto; }
+.file-search-mode { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.file-search-mode > button { flex: 1 1 0; min-height: var(--control-height-small); padding: 0 8px; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; font-size: var(--text-xs); }
+.file-search-mode > button:hover { color: var(--text); background: var(--fill); }
+.file-search-mode > button[aria-pressed="true"] { color: var(--text); background: var(--fill-strong); font-weight: 500; }
+.file-search-mode > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.file-entry-list > .file-content-results { flex: 1 1 auto; min-height: 0; margin: 0; padding: 4px 0; overflow-y: auto; list-style: none; }
+.file-content-result { display: grid; width: 100%; gap: 2px; padding: 5px 10px; border-radius: 0; color: var(--text-muted); background: transparent; text-align: left; }
+.file-content-result:hover, .file-content-result.is-selected { color: var(--text); background: var(--fill); }
+.file-content-result:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.file-content-result-location { display: flex; min-width: 0; align-items: baseline; gap: 0; font-size: var(--text-sm); }
+.file-content-result-location strong { overflow: hidden; color: var(--text); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.file-content-result-location small { overflow: hidden; margin-left: 8px; color: var(--text-muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.file-content-result-snippet { overflow: hidden; font-family: var(--font-mono); font-size: var(--text-xs); text-overflow: ellipsis; white-space: pre; }
+.file-content-result-snippet mark { border-radius: 2px; color: var(--text); background: var(--accent-soft); }
+@media (forced-colors: active) {
+  .file-preview-line.is-selected { outline: 2px solid Highlight; outline-offset: -2px; forced-color-adjust: auto; }
+  .file-search-mode > button[aria-pressed="true"],
+  .file-content-result.is-selected { outline: 1px solid Highlight; }
+  .file-content-result-snippet mark { forced-color-adjust: auto; }
+}

@@ -37,6 +37,7 @@ import type {
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
 import type { MessageSearchResult, MessageSearchTarget } from "../message-search";
+import type { TerminalPathResolveResult } from "./terminal-links";
 import type {
   DuoPendingResult,
   DuoPreparedResult,
@@ -57,6 +58,7 @@ import type {
 import type {
   GitBranchInfo,
   ProjectAction,
+  WorkspaceContentSearchPage,
   WorkspaceEntriesPage,
   WorkspaceFilePreview,
 } from "./workspace";
@@ -197,6 +199,7 @@ export type ServerEvent =
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "git.pr.confidence"; confidence: GitPreMergeConfidence }
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
+        | ({ kind: "workspace.search.content" } & WorkspaceContentSearchPage)
         | {
             kind: "workspace.file";
             file: WorkspaceFilePreview;
@@ -240,7 +243,8 @@ export type ServerEvent =
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
-        | MessageSearchResult;
+        | MessageSearchResult
+        | TerminalPathResolveResult;
     }
   | RuntimeMutationEvent
   | ({

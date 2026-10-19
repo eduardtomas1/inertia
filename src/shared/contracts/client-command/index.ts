@@ -9,6 +9,7 @@ import {
 } from "./app";
 import { gitCommandSchemas } from "./git";
 import { workspaceCommandSchemas } from "./workspace";
+import { terminalLinkCommandSchemas } from "./terminal-links";
 import { promptPresetCommandSchema } from "./prompt-presets";
 import { todoCommandSchemas } from "./todos";
 import { updatesCommandSchemas } from "./updates";
@@ -24,6 +25,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...updatesCommandSchemas,
   ...gitCommandSchemas,
   ...workspaceCommandSchemas,
+  ...terminalLinkCommandSchemas,
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

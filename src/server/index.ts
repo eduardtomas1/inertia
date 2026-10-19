@@ -92,6 +92,7 @@ import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
+import { createTerminalLinkCommandHandler } from "./runtime/commands/terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
@@ -827,6 +828,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         },
         send,
       }),
+      createTerminalLinkCommandHandler({ workspacePath, send }),
     ],
     send,
     broadcastSnapshot: flushSnapshot,

@@ -272,7 +272,9 @@ export const RUNTIME_COMMAND_POLICIES = {
   "usage.reset.confirm": { timeoutMs: 60000, timeoutDelivery: "ambiguous" },
   "usage.dashboard.get": shortRetrySafe,
   "workspace.entries": workspaceEntryRead,
+  "workspace.search.content": workspaceEntryRead,
   "workspace.file.read": workspaceFileRead,
+  "workspace.path.resolve": shortRetrySafe,
   "workspace.file.write": {
     timeoutMs: WORKSPACE_FILE_MUTATION_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",

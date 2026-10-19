@@ -10,6 +10,7 @@ import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
+import { isTerminalPathResolveResult } from "./terminal-links";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
@@ -28,6 +29,7 @@ import { validNotificationSettings } from "./notification-settings-schema";
 import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
+import { workspaceContentSearchPage } from "./workspace-content-search-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -1098,6 +1100,7 @@ type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
+  "workspace.path": isTerminalPathResolveResult,
   "attachment.storage": isAttachmentStorageResult,
   "support.report": issueReportResult,
   "message.accepted": (value) =>
@@ -1126,6 +1129,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "git.branches": (value) => arrayOf(value.branches, gitBranch),
   "git.pr.confidence": (value) => validatePreMergeConfidence(value.confidence),
   "workspace.entries": (value) => workspaceEntriesPage(value),
+  "workspace.search.content": (value) => workspaceContentSearchPage(value),
   "workspace.file": (value) => workspaceFile(value.file) && booleanField(value, "usedFallback"),
   "project.actions": (value) => arrayOf(value.actions, projectAction)
     && uniqueRecordField(value.actions as unknown[], "id"),

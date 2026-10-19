@@ -8,6 +8,7 @@ import type {
   ThemePreference,
 } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 
 export type TerminalPanelProps = {
@@ -30,6 +31,12 @@ export type TerminalPanelProps = {
   onResumeRequestHandled?: () => void;
   onClose: () => void;
   visible?: boolean;
+  /** Opens a resolved workspace file from a terminal path link in Files. */
+  onOpenWorkspaceFile?: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+  ) => void;
 };
 
 export type TerminalReplacement = {

@@ -61,6 +61,7 @@ function pathEntries(platform: NodeJS.Platform, openable: boolean): ContextMenuE
 export function contextMenuEntries(
   request: ContextMenuRequest,
   platform: NodeJS.Platform,
+  context: Pick<DesktopWindowContext, "role">,
 ): ContextMenuEntry[] {
   switch (request.kind) {
     case "message":
@@ -69,6 +70,10 @@ export function contextMenuEntries(
         { label: "Copy message", action: "copy-message" },
         ...(request.role === "assistant"
           ? [{ label: "Copy as Markdown", action: "copy-markdown" } as const]
+          : []),
+        // Tasks live in the main window; detached chats cannot write them.
+        ...(context.role === "main"
+          ? [SEPARATOR, { label: "Create task from message", action: "create-task" } as const]
           : []),
       ];
     case "code":
@@ -86,6 +91,9 @@ export function contextMenuEntries(
         { label: "Copy", action: "terminal-copy", enabled: request.hasSelection, ...terminalShortcut(platform, "C") },
         { role: "paste", label: "Paste", ...terminalShortcut(platform, "V") },
         { label: "Select all", action: "terminal-select-all" },
+        ...(request.promptable
+          ? [SEPARATOR, { label: "Add selection to prompt", action: "terminal-add-to-prompt", enabled: request.hasSelection } as const]
+          : []),
         ...(request.clearable
           ? [SEPARATOR, { label: "Clear", action: "terminal-clear" } as const]
           : []),
@@ -104,6 +112,7 @@ function ownedByDetachedChat(
 function showMenu(
   window: BrowserWindow,
   request: ContextMenuRequest,
+  context: DesktopWindowContext,
   options: ContextMenuIpcOptions,
 ): Promise<ContextMenuAction | null> {
   return new Promise((resolve) => {
@@ -119,6 +128,7 @@ function showMenu(
     const template: MenuItemConstructorOptions[] = contextMenuEntries(
       request,
       options.platform ?? process.platform,
+      context,
     ).map((entry) => {
       if ("separator" in entry) return { type: "separator" };
       const shortcut = entry.accelerator
@@ -158,6 +168,6 @@ export function registerContextMenuIpc(options: ContextMenuIpcOptions): void {
       throw new Error("Detached chats can show menus only for their owned conversation");
     }
     const window = options.windowFor(event, args.length, 1);
-    return await showMenu(window, request, options);
+    return await showMenu(window, request, context, options);
   });
 }

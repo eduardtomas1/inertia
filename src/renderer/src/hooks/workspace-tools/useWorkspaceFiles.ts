@@ -23,6 +23,10 @@ type WorkspaceEntriesResult = Extract<
   Extract<ServerEvent, { type: "request.result" }>["result"],
   { kind: "workspace.entries" }
 >;
+type WorkspaceContentSearchResult = Extract<
+  Extract<ServerEvent, { type: "request.result" }>["result"],
+  { kind: "workspace.search.content" }
+>;
 
 interface WorkspaceFilesOptions {
   enabled: boolean;
@@ -92,6 +96,26 @@ export function useWorkspaceFiles({
     }));
     if (event.result.kind !== "workspace.entries") {
       throw new Error("Unexpected file response.");
+    }
+    return event.result;
+  }, [conversation?.id, project?.id, request]);
+
+  const requestWorkspaceContentSearch = useCallback(async (
+    query: string,
+  ): Promise<WorkspaceContentSearchResult> => {
+    if (!project?.id) {
+      throw new Error("Select a project before searching files.");
+    }
+    const event = resultEvent(await request({
+      type: "workspace.search.content",
+      payload: {
+        projectId: project.id,
+        conversationId: conversation?.id,
+        query,
+      },
+    }));
+    if (event.result.kind !== "workspace.search.content") {
+      throw new Error("Unexpected search response.");
     }
     return event.result;
   }, [conversation?.id, project?.id, request]);
@@ -326,6 +350,7 @@ export function useWorkspaceFiles({
     filePreviewError,
     projectActions,
     requestWorkspaceEntries,
+    requestWorkspaceContentSearch,
     loadFiles,
     selectWorkspaceFile,
     canSaveWorkspaceFile,

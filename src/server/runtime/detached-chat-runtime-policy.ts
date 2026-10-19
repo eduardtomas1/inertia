@@ -91,6 +91,9 @@ export function detachedChatCommandRejection(
     case "conversation.context.create":
     case "conversation.context.load":
     case "conversation.context.remove":
+    // Detached chats expose @-mention name search only; reading project
+    // file contents stays a main-window Files capability.
+    case "workspace.search.content":
       return REJECTION;
     case "conversation.update":
       return ownsExistingConversation(command.payload.conversationId)

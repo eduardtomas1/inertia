@@ -14,6 +14,7 @@ const valid = {
   diffFile: { kind: "diff-file", projectId, relativePath: "docs/a b.md", anchor },
   file: { kind: "file", projectId, conversationId, relativePath: "src", directory: true, anchor },
   terminal: { kind: "terminal", hasSelection: false, clearable: true, anchor },
+  chatTerminal: { kind: "terminal", hasSelection: true, clearable: true, promptable: true, anchor },
 };
 
 describe("context menu requests", () => {
@@ -40,6 +41,8 @@ describe("context menu requests", () => {
     ["a system message", { ...valid.message, role: "system" }],
     ["a malformed conversation id", { ...valid.code, conversationId: "../other" }],
     ["a conversation on a terminal", { ...valid.terminal, conversationId }],
+    ["a string prompt flag", { ...valid.terminal, promptable: "true" }],
+    ["a prompt flag outside a terminal", { ...valid.code, promptable: true }],
     ["a malformed project id", { ...valid.diffFile, projectId: "project" }],
     ["an absolute path", { ...valid.diffFile, relativePath: "/etc/passwd" }],
     ["a Windows drive path", { ...valid.diffFile, relativePath: "C:\\Windows" }],

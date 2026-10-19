@@ -38,12 +38,15 @@ export type ContextMenuRequest =
       kind: "terminal";
       hasSelection: boolean;
       clearable: boolean;
+      /** A chat terminal whose selection can be added to that chat's prompt. */
+      promptable?: boolean;
       anchor: ContextMenuAnchor;
     };
 
 export type ContextMenuAction =
   | "copy-message"
   | "copy-markdown"
+  | "create-task"
   | "copy-code"
   | "open"
   | "reveal"
@@ -51,6 +54,7 @@ export type ContextMenuAction =
   | "copy-relative-path"
   | "terminal-copy"
   | "terminal-select-all"
+  | "terminal-add-to-prompt"
   | "terminal-clear";
 
 const MAX_ANCHOR_COORDINATE = 100_000;
@@ -97,6 +101,7 @@ function exactKeys(value: Record<string, unknown>, kind: ContextMenuRequest["kin
   if (OPTIONAL_CONVERSATION.has(kind) && Object.hasOwn(value, "conversationId")) {
     allowed.add("conversationId");
   }
+  if (kind === "terminal" && Object.hasOwn(value, "promptable")) allowed.add("promptable");
   const keys = Object.keys(value);
   return keys.length === allowed.size && keys.every((key) => allowed.has(key));
 }
@@ -146,7 +151,17 @@ export function parseContextMenuRequest(value: unknown): ContextMenuRequest | nu
         anchor,
       };
     case "terminal":
-      if (typeof value.hasSelection !== "boolean" || typeof value.clearable !== "boolean") return null;
-      return { kind, hasSelection: value.hasSelection, clearable: value.clearable, anchor };
+      if (
+        typeof value.hasSelection !== "boolean"
+        || typeof value.clearable !== "boolean"
+        || (Object.hasOwn(value, "promptable") && typeof value.promptable !== "boolean")
+      ) return null;
+      return {
+        kind,
+        hasSelection: value.hasSelection,
+        clearable: value.clearable,
+        ...(value.promptable === true ? { promptable: true } : {}),
+        anchor,
+      };
   }
 }

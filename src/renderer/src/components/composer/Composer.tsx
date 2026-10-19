@@ -43,6 +43,7 @@ import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
+import { useComposerAttachmentReattach } from "./useComposerAttachmentReattach";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions, DOCUMENT_FOLLOW_UP_UNSUPPORTED } from "./composerAttachmentActions";
 import { useComposerStopAction } from "./useComposerStopAction";
@@ -147,6 +148,7 @@ export const Composer = memo(function Composer({
   const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, latestTurnCompletedAt: latestKnownTurn?.completedAt ?? null, paused: running || submitting || sending, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
+  const reattachedSourcesRef = useRef(new Map<string, string>());
   const shownAttachmentsRef = useRef(attachments);
   shownAttachmentsRef.current = attachments;
   const submittingRef = useRef(false);
@@ -592,7 +594,7 @@ export const Composer = memo(function Composer({
   };
 
   const imageInputUnavailableReason = harnessImageInputUnavailableReason(conversation.modelSelection.harnessId);
-  const { adoptAttachments, chooseAttachments, importAttachments, removeAttachment } =
+  const { adoptAttachments, chooseAttachments, importAttachments, reattachAttachment, removeAttachment } =
     composerAttachmentActions({
       attachmentAuthorityRef,
       attachmentAuthorityKey,
@@ -611,6 +613,7 @@ export const Composer = memo(function Composer({
       setAttachmentImporting, setPendingAttachmentIds,
       setAttachmentError,
       submittingRef,
+      reattachedSourcesRef,
     });
 
   const routeState = useMemo(() => resolveComposerRouteState({
@@ -638,6 +641,7 @@ export const Composer = memo(function Composer({
       ? `${providerIdentityLabels?.[selectedProvider.id] ?? selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
       : conversation.modelSelection.backendProfileDisplayName;
   useComposerSnapshots(conversation.id, adoptAttachments, textareaRef);
+  useComposerAttachmentReattach(conversation.id, reattachAttachment);
   const attachmentFallback = running
     ? "Please inspect the attached image."
     : "Please inspect the attached file.";

@@ -24,6 +24,8 @@ again.
   the composer is narrow. In the narrowest composer an open tray takes the
   place of the model and settings buttons until you close it.
 
+- A new chat no longer offers **Load earlier messages** from the chat you
+  were in before.
 - The brain icon is back to the left of **Thinking**, inside the same shimmer,
   and beside the finished **Thought for** label.
 - Settings › Appearance explains why **Muted colours** is unavailable until a

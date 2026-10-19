@@ -8,6 +8,9 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
 }): React.JSX.Element {
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
+  const focusFirstItem = (): void => {
+    requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
+  };
   useLayoutEffect(() => {
     if (!open || !popup.current || !trigger.current) return;
     const menu = popup.current;
@@ -37,10 +40,13 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
     onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
     <button type="button" role="menuitem" tabIndex={-1} ref={trigger} disabled={disabled}
       aria-haspopup="menu" aria-expanded={open}
-      onClick={() => setOpen(!open)} onKeyDown={(event) => {
+      onClick={(event) => {
+        setOpen(true);
+        if (event.detail === 0) focusFirstItem();
+      }} onKeyDown={(event) => {
         if (event.key !== "ArrowRight") return;
         event.preventDefault(); event.stopPropagation(); setOpen(true);
-        requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
+        focusFirstItem();
       }}>{icon}<span>{label}</span><ChevronRight size={14} className="thread-submenu-chevron" /></button>
     {open && <div ref={popup} role="menu" aria-label={label} className="thread-submenu"
       onKeyDown={(event) => {

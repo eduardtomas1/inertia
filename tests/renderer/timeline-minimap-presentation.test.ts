@@ -8,6 +8,12 @@ const css = readFileSync(
 ).replace(/\r\n?/gu, "\n");
 
 describe("timeline minimap presentation", () => {
+  it("shows the turn markers without waiting for hover or focus", () => {
+    const track = css.slice(css.indexOf(".timeline-minimap-track {"), css.indexOf("}", css.indexOf(".timeline-minimap-track {")));
+    expect(track).not.toMatch(/opacity/u);
+    expect(css).not.toMatch(/\.timeline-minimap:is\(:hover, :focus-within\) \.timeline-minimap-track/u);
+  });
+
   it("retains visible keyboard focus in forced colors", () => {
     expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*?\.timeline-minimap button:focus-visible\s*\{[^}]*outline:\s*1px solid Highlight;/u);
   });

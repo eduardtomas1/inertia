@@ -58,7 +58,7 @@ describe("TurnFollowUpCoordinator", () => {
     try {
       await coordinator.steer(lease, { content: "Inspect this window", imagePaths: [attachments[0]!.path] }, attachments);
       expect(steer).toHaveBeenCalledWith("conversation-1", expect.objectContaining({ content: expect.stringContaining("untrusted captured application content") }), { runId: "run-1", turnId: "turn-1" });
-      expect(persist).toHaveBeenCalledWith("conversation-1", "turn-1", "Inspect this window", lease.submittedAt, "2026-09-08T09:00:00.000Z", attachments);
+      expect(persist).toHaveBeenCalledWith("conversation-1", "turn-1", "Inspect this window", lease.submittedAt, "2026-09-08T09:00:00.000Z", attachments, undefined);
     } finally { lease.release(); }
   });
 
@@ -288,7 +288,7 @@ describe("TurnFollowUpCoordinator", () => {
     await expect(pending).resolves.toMatchObject({ kind });
     expect(acknowledged).toHaveBeenCalledTimes(accepted ? 1 : 0);
     if (kind === "accepted") {
-      expect(persist).toHaveBeenCalledExactlyOnceWith("conversation-1", "turn-1", "Sent while the turn ended", admission.submittedAt, "2026-08-21T10:00:00.000Z", []);
+      expect(persist).toHaveBeenCalledExactlyOnceWith("conversation-1", "turn-1", "Sent while the turn ended", admission.submittedAt, "2026-08-21T10:00:00.000Z", [], undefined);
     } else {
       expect(persist).not.toHaveBeenCalled();
     }

@@ -107,7 +107,7 @@ process.stdin.once("end", () => { process.stderr.write("Fetching available model
     expect(selected).toMatchObject({ selectable: true, providerReady: true, reasoningOptions: [] });
     expect(selected.selection).toMatchObject({ harnessId: "antigravity-cli", backendProfileId: "builtin:antigravity", contextWindowOverride: null, capabilities: [], reasoningEffort: null });
     expect(antigravityArguments({ modelSelection: selected.selection, interactionMode: "build", access: "supervised" }))
-      .toEqual(["--input-format", "stream-json", "--output-format", "stream-json", "--model", "gemini-test-high"]);
+      .toEqual(["--input-format", "stream-json", "--output-format", "stream-json", "--model", "gemini-test-high", "--mode", "accept-edits"]);
   });
 
   it.each([

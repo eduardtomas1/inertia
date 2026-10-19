@@ -1,7 +1,7 @@
 import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentHarnessEmitter } from "./agent-harness";
-import { parseClaudeRateLimitEvent } from "./claude-usage";
+import { parseClaudeRateLimitEvents } from "./claude-usage";
 import { markdownPlanSteps } from "./markdown-plan-steps";
 
 export const MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -322,12 +322,12 @@ export function projectClaudeRateLimitEvent(
   emitter: AgentHarnessEmitter,
   message: unknown,
 ): void {
-  const rateLimit = parseClaudeRateLimitEvent(message);
-  if (!rateLimit) return;
+  const rateLimits = parseClaudeRateLimitEvents(message);
+  if (rateLimits.length === 0) return;
   emitter.capability("rate-limits", true);
   emitter.rich({
     type: "metadata",
-    metadata: { rateLimits: [rateLimit] },
+    metadata: { rateLimits },
     source: "session",
     complete: false,
   });

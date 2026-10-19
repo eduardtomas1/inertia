@@ -56,6 +56,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         shortcut: "new-chat",
       },
       {
+        name: "Start a chat from a terminal",
+        detail: "Run Inertia with --new-chat to open a new chat for the current folder, or --new-chat followed by a path for another folder. The chat opens in the deepest existing project that contains the folder; any other folder is added as a project first. It works on a first launch and when Inertia is already running. Started from a terminal on Linux or macOS, the installed app relaunches itself in the background so the terminal is free at once; add --foreground to keep it attached. Extracted AppImages, development builds and app update candidates stay attached to the terminal.",
+      },
+      {
         name: "Chats without a project",
         detail: "Choose No project from the composer's Project button, or Start without a project in the command palette. The chat works in its own chat folder, appears under No project in the sidebar and keeps that folder when it is deleted.",
       },
@@ -67,7 +71,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Access modes",
-        detail: "Supervised keeps provider approvals, Auto-accept edits allows supported file edits, and Full access lets the agent act without asking. Choose Full access only for a workspace and task you trust.",
+        detail: "Supervised keeps provider approvals, Auto-accept edits allows supported file edits, and Full access lets the agent act without asking. Choose Full access only for a workspace and task you trust. Antigravity can't pause for approval, so Supervised runs there as Auto-accept edits, which edits files and refuses commands.",
       },
       {
         name: "Welcome guide",

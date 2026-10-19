@@ -332,14 +332,15 @@ describe("agent loading and trace DOM", () => {
       if (!summary) throw new Error("Expected a live thinking strip.");
       const entering = (): Element | null =>
         summary.querySelector(".turn-thinking-line > .is-entering");
-      expect(summary.querySelector(".lucide-brain")).toBeNull();
       expect(summary.querySelector(".turn-thinking-label")).toHaveTextContent("Thinking");
       expect(summary.querySelector(".turn-thinking-line")).toHaveAttribute("aria-hidden", "true");
       expect(summary.querySelector(".agent-pixel-loader")).toBeNull();
       expect(container.querySelectorAll(".agent-pixel-loader")).toHaveLength(1);
       const pulse = summary.querySelector(".turn-thinking-pulse");
-      expect(pulse?.querySelector("svg")).toBeNull();
-      expect(pulse?.querySelector(".turn-thinking-label")).toBeInTheDocument();
+      const brain = pulse?.firstElementChild;
+      expect(brain).toHaveClass("lucide-brain", "turn-thinking-icon");
+      expect(brain).toHaveAttribute("aria-hidden", "true");
+      expect(brain?.nextElementSibling).toHaveClass("turn-thinking-label");
       const elapsed = pulse?.querySelector(".turn-thinking-elapsed");
       expect(elapsed).toHaveTextContent(/^·\s*\d+\.\ds$/u);
       expect(

@@ -316,19 +316,13 @@ const rateLimitLabels: Readonly<Record<string, { label: string; minutes: number 
   overage: { label: "Claude extra usage", minutes: null },
 };
 
-/** Sparse account-limit update emitted by native Claude Code sessions. */
-export function parseClaudeRateLimitEvent(value: unknown): ProviderRateLimit | null {
-  const message = objectValue(value);
-  const info = objectValue(message?.rate_limit_info);
-  const type = typeof info?.rateLimitType === "string"
-    ? info.rateLimitType
-    : null;
-  const fraction = info?.utilization;
+function liveRateLimit(type: unknown, fraction: unknown, resetsAt: unknown): ProviderRateLimit | null {
+  if (typeof type !== "string" || !type) return null;
   const utilization = typeof fraction === "number"
     && Number.isFinite(fraction) && fraction >= 0
     ? Math.min(fraction, 1) * 100
     : null;
-  if (!type || utilization === null) return null;
+  if (utilization === null) return null;
   const presentation = rateLimitLabels[type] ?? {
     label: `Claude · ${type.replaceAll("_", " ")}`,
     minutes: null,
@@ -339,6 +333,28 @@ export function parseClaudeRateLimitEvent(value: unknown): ProviderRateLimit | n
     usedPercent: utilization,
     remainingPercent: 100 - utilization,
     windowMinutes: presentation.minutes,
-    resetsAt: providerTimestamp(info?.resetsAt),
+    resetsAt: providerTimestamp(resetsAt),
   };
+}
+
+/** Sparse account-limit update emitted by native Claude Code sessions. */
+export function parseClaudeRateLimitEvent(value: unknown): ProviderRateLimit | null {
+  const info = objectValue(objectValue(value)?.rate_limit_info);
+  return liveRateLimit(info?.rateLimitType, info?.utilization, info?.resetsAt);
+}
+
+/** Every window in a native rate-limit event, including Claude Code's unified windows. */
+export function parseClaudeRateLimitEvents(value: unknown): ProviderRateLimit[] {
+  const info = objectValue(objectValue(value)?.rate_limit_info);
+  const windows = objectValue(info?.unifiedWindows);
+  const unified = windows
+    ? Object.entries(windows).flatMap(([type, window]) => {
+      const entry = objectValue(window);
+      const limit = liveRateLimit(type, entry?.utilization, entry?.resetsAt);
+      return limit ? [limit] : [];
+    })
+    : [];
+  if (unified.length > 0) return unified;
+  const single = parseClaudeRateLimitEvent(value);
+  return single ? [single] : [];
 }

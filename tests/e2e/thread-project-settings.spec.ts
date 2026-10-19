@@ -96,7 +96,11 @@ test("right-click, inline actions, delayed preview, and nested keyboard menus", 
   await page.keyboard.press("Escape");
   await expect(row).toBeFocused();
   await row.press("Shift+F10");
-  await menu.getByRole("menuitem", { name: "Copy", exact: true }).hover();
+  await menu.getByRole("menuitem", { name: "Snooze", exact: true }).click();
+  await expect(page.getByRole("menu", { name: "Snooze", exact: true })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Copy", exact: true }).click();
+  await expect(copyMenu).toBeVisible();
+  await expect(page.getByRole("menu", { name: "Snooze", exact: true })).toHaveCount(0);
   await page.getByRole("menuitem", { name: "Thread ID", exact: true }).click();
   await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(threadId);
   await row.press("Shift+F10");

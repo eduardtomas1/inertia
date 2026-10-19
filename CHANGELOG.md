@@ -24,6 +24,26 @@ again.
   the composer is narrow. In the narrowest composer an open tray takes the
   place of the model and settings buttons until you close it.
 
+- Clicking **Copy** or **Snooze** in a chat's actions menu opens its submenu
+  again; the click used to close the submenu that hovering had just opened.
+
+### Usage
+
+- Claude's 5-hour and 7-day usage updates as soon as a turn starts. Current
+  Claude Code reports usage per window, and Inertia ignored that report, so
+  the usage panel only caught up after the turn ended or while Claude was idle.
+
+### Access modes
+
+- Codex's **Auto-accept edits** now asks before running commands, like Claude,
+  Cursor, Kimi Code and OpenCode: file changes inside the project are approved
+  for you, and commands, wider write access and network use still ask. Choose
+  **Full access** to let Codex run commands without asking.
+- Antigravity cannot pause for approval, so **Supervised** is unavailable for
+  it and runs as **Auto-accept edits**, which edits files and refuses
+  commands. The access menu shows this instead of a Supervised mode that would
+  have let Antigravity edit files without asking.
+
 ### Side panel
 
 - The tab you are looking at always shows its label. When the tabs do not

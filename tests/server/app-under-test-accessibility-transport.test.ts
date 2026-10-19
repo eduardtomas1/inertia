@@ -7,7 +7,7 @@ import type {
   AppControlResult,
 } from "../../src/node/runtime-app-control-protocol";
 import { AccessibilityWindowTransport } from "../../src/server/runtime/app-under-test/accessibility-window-transport";
-import { clickAction, keyAction } from "../../src/server/runtime/app-under-test/accessibility-window-support";
+import { clickAction, keyAction, nativeInputRoute } from "../../src/server/runtime/app-under-test/accessibility-window-support";
 import type { RuntimeAppControlBroker } from "../../src/server/runtime/app-under-test/app-control-broker-client";
 import type { AppUnderTestEvidenceInput } from "../../src/server/runtime/app-under-test/window-transport";
 
@@ -25,7 +25,7 @@ function control(token: string, overrides: Partial<AppControlElementInfo> = {}):
   };
 }
 
-function fakeApp(options: { watched?: () => boolean; pollMs?: number } = {}) {
+function fakeApp(options: { watched?: () => boolean; pollMs?: number; platform?: NodeJS.Platform } = {}) {
   const state = {
     windows: [{ token: WINDOW, pid: 101, title: "Main\u0007 window", active: true, denied: false, bounds: { x: 0, y: 0, width: 640, height: 480 } }] as Array<Record<string, unknown>>,
     rootKey: ROOT,
@@ -41,6 +41,17 @@ function fakeApp(options: { watched?: () => boolean; pollMs?: number } = {}) {
     sensitiveFilled: false,
     failure: null as AppControlResult | null,
     windowClosed: false,
+    /** What main reports for synthesized input on this desktop. */
+    input: "available" as "available" | "required" | "unavailable",
+    /** The answer to the next synthesized input, if not a success. */
+    inputFailure: null as AppControlResult | null,
+    agentImage: { png, width: 1_280, height: 960 } as { png: Uint8Array; width: number; height: number } | null,
+    /** A region capture (Windows, X11) rather than exactly the window (macOS). */
+    overlapping: true,
+    /** The answer to the next activation, if not a success. */
+    activateFailure: null as AppControlResult | null,
+    /** Holds the activation's answer until released, to race other calls against it. */
+    activateGate: null as Promise<void> | null,
   };
   const calls: Array<{ identity: AppControlIdentity; command: AppControlCommand }> = [];
   let inFlight = 0;
@@ -67,9 +78,20 @@ function fakeApp(options: { watched?: () => boolean; pollMs?: number } = {}) {
             element: command.element === null ? state.focused : state.elements.find(({ token }) => token === command.element) ?? null,
           } };
         case "perform":
+          if (command.action === "activate") {
+            if (state.activateGate) await state.activateGate;
+            if (state.activateFailure) return state.activateFailure;
+          }
           return { ok: true, value: { kind: "perform", rootKey: state.windowClosed ? null : state.rootKey, windowClosed: state.windowClosed } };
+        case "input":
+          return state.inputFailure ?? { ok: true, value: { kind: "perform", rootKey: state.rootKey, windowClosed: false } };
+        case "permissions":
+          return { ok: true, value: { kind: "permissions", accessibility: "unverified", screenRecording: "unverified", screenshots: "available", input: state.input } };
         case "screenshot":
-          return { ok: true, value: { kind: "screenshot", png, width: 320, height: 240, mayIncludeOverlappingWindows: true } };
+          return { ok: true, value: {
+            kind: "screenshot", png, width: 320, height: 240, mayIncludeOverlappingWindows: state.overlapping,
+            agentImage: command.agentImage ? state.agentImage : null,
+          } };
         default:
           return { ok: false, code: "invalid", reason: null, dispatched: false };
       }
@@ -83,10 +105,11 @@ function fakeApp(options: { watched?: () => boolean; pollMs?: number } = {}) {
       ...(options.watched ? { watched: options.watched } : {}),
     },
     broker,
-    { pollMs: options.pollMs ?? 60_000, waitPollMs: 5, platform: "linux" },
+    { pollMs: options.pollMs ?? 60_000, waitPollMs: 5, platform: options.platform ?? "linux" },
   );
   const performs = () => calls.filter(({ command }) => command.command === "perform").map(({ command }) => command);
-  return { state, calls, broker, transport, evidence, windowsChanged, performs, maxInFlight: () => maxInFlight };
+  const inputs = () => calls.filter(({ command }) => command.command === "input").map(({ command }) => command);
+  return { state, calls, broker, transport, evidence, windowsChanged, performs, inputs, maxInFlight: () => maxInFlight };
 }
 
 const signal = () => new AbortController().signal;
@@ -335,23 +358,246 @@ describe("accessibility window transport", () => {
     app.transport.close();
   });
 
-  it("refuses keys and pixel scrolling the accessibility API cannot express", async () => {
+  it("refuses synthesized keys and pixel scrolling until the window is brought to the front in this turn", async () => {
     const app = fakeApp();
     const windowId = await ready(app);
     for (const key of ["Escape", "Tab", "ArrowDown", "Control+Enter"] as const) {
-      await expect(app.transport.perform({ action: "press", windowId, key }, { signal: signal(), turn })).resolves.toMatchObject({ ok: false, code: "invalid", dispatched: false });
+      await expect(app.transport.perform({ action: "press", windowId, key }, { signal: signal(), turn })).resolves.toMatchObject({
+        ok: false, code: "unavailable", dispatched: false, message: expect.stringContaining("The app is not in front; call inertia_app_activate"),
+      });
+      // Refused before any approval card: the inspection fails the same way.
+      await expect(app.transport.inspect({ action: "press", windowId, key }, signal(), turn)).resolves.toMatchObject({ ok: false, code: "unavailable" });
     }
     await expect(app.transport.perform({ action: "scroll", windowId, deltaY: 200 }, { signal: signal(), turn }))
-      .resolves.toMatchObject({ ok: false, code: "invalid", message: expect.stringContaining("by pixels is not supported") });
+      .resolves.toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("inertia_app_activate") });
     app.state.focused = null;
     await expect(app.transport.perform({ action: "press", windowId, key: "Space" }, { signal: signal(), turn })).resolves.toMatchObject({ ok: false, code: "invalid" });
     expect(app.performs()).toEqual([]);
+    expect(app.inputs()).toEqual([]);
+    expect(nativeInputRoute({ action: "press", key: "Enter" }, false)).toBe("accessibility");
+    expect(nativeInputRoute({ action: "press", key: "Enter" }, true)).toBe("synthesized");
+    expect(nativeInputRoute({ action: "press", key: "Tab" }, false)).toBe("synthesized");
+    expect(nativeInputRoute({ action: "scroll", deltaY: 10 }, false)).toBe("synthesized");
+    expect(nativeInputRoute({ action: "scroll", ref: "e1" }, true)).toBe("accessibility");
+    expect(nativeInputRoute({ action: "click", ref: "e1" }, true)).toBe("accessibility");
+    expect(nativeInputRoute({ action: "activate" }, false)).toBe("accessibility");
     expect(keyAction("Enter")).toBe("press");
     expect(keyAction("Escape")).toBeNull();
     expect(clickAction({ role: "list_item", checked: null, expanded: null, actions: [] })).toBe("select");
     expect(clickAction({ role: "tree_item", checked: null, expanded: false, actions: ["press"] })).toBe("press");
     expect(clickAction({ role: "disclosure", checked: null, expanded: false, actions: ["expand"] })).toBe("expand");
     app.transport.close();
+  });
+
+  it("activates a window for this turn only, then sends keys and wheel steps as synthesized input", async () => {
+    const app = fakeApp();
+    const windowId = await ready(app);
+    await app.transport.perform({ action: "snapshot", windowId }, { signal: signal(), turn });
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, turn)).toBe("accessibility");
+    const inspected = await app.transport.inspect({ action: "activate", windowId }, signal(), turn);
+    expect(inspected).toMatchObject({ ok: true, inspection: { windowNumber: 1, documentSequence: 1, target: null, dialog: null } });
+    if (!inspected.ok) throw new Error("inspection failed");
+    expect(inspected.inspection.synthesized).toBeUndefined();
+    // Activation without a turn grants nothing.
+    await expect(app.transport.perform({ action: "activate", windowId }, { signal: signal() })).resolves.toMatchObject({ ok: false, code: "invalid" });
+    const expected = { documentSequence: 1, target: null, dialog: null };
+    await expect(app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn, expected })).resolves.toMatchObject({
+      ok: true, value: { activated: true, nextStep: expect.stringContaining("every listed key") },
+    });
+    expect(app.performs()).toEqual([{ command: "perform", window: WINDOW, element: null, action: "activate", text: null, expect: { rootKey: ROOT, role: "", name: "" } }]);
+    // Now every key, Enter included, is synthesized for this window in this turn.
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, turn)).toBe("synthesized");
+    app.state.focused = app.state.elements[1]!;
+    const press = await app.transport.inspect({ action: "press", windowId, key: "Tab" }, signal(), turn);
+    expect(press).toMatchObject({ ok: true, inspection: { synthesized: true, target: { role: "text_field", label: "Notes" } } });
+    if (!press.ok) throw new Error("inspection failed");
+    // The approved key carries the inspected root and focused control for main to check again.
+    await expect(app.transport.perform({ action: "press", windowId, key: "Tab" }, {
+      signal: signal(), turn,
+      expected: { documentSequence: 1, target: press.inspection.target, dialog: null, synthesized: true },
+    })).resolves.toMatchObject({ ok: true, value: { pressed: "Tab", origin: null } });
+    await app.transport.perform({ action: "press", windowId, key: "Enter" }, { signal: signal(), turn });
+    // The result names the pixels asked for and the wheel notches sent for them.
+    await expect(app.transport.perform({ action: "scroll", windowId, deltaY: -300 }, { signal: signal(), turn }))
+      .resolves.toMatchObject({ ok: true, value: { scrolled: -300, wheelNotches: -3 } });
+    expect(app.inputs()).toEqual([
+      { command: "input", window: WINDOW, key: "Tab", deltaY: null, expect: { rootKey: ROOT, focus: { role: "text_field", name: "Notes" } } },
+      { command: "input", window: WINDOW, key: "Enter", deltaY: null, expect: null },
+      { command: "input", window: WINDOW, key: null, deltaY: -300, expect: null },
+    ]);
+    // An approval for the accessibility route does not cover a synthesized one.
+    await expect(app.transport.perform({ action: "press", windowId, key: "Tab" }, {
+      signal: signal(), turn, expected: { documentSequence: 1, target: press.inspection.target, dialog: null },
+    })).resolves.toMatchObject({ ok: false, code: "not-found", dispatched: false });
+    // Another turn holds no grant, and a settled turn loses it.
+    const next = { runId: turn.runId, turnId: "66666666-6666-4666-8666-666666666666" };
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, next)).toBe("accessibility");
+    await expect(app.transport.perform({ action: "press", windowId, key: "Tab" }, { signal: signal(), turn: next }))
+      .resolves.toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("inertia_app_activate") });
+    app.transport.turnSettled(next.turnId);
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, turn)).toBe("synthesized");
+    app.transport.turnSettled(turn.turnId);
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, turn)).toBe("accessibility");
+    expect(app.inputs()).toHaveLength(3);
+    app.transport.close();
+  });
+
+  it("names inertia_app_activate when another app is in front and refuses synthesized input on Wayland before any approval", async () => {
+    const app = fakeApp();
+    const windowId = await ready(app);
+    await app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn });
+    app.state.inputFailure = { ok: false, code: "unavailable", reason: "not-foreground", dispatched: false };
+    await expect(app.transport.perform({ action: "press", windowId, key: "Escape" }, { signal: signal(), turn })).resolves.toMatchObject({
+      ok: false, code: "unavailable", dispatched: false, message: expect.stringContaining("The app is not in front; call inertia_app_activate"),
+    });
+    app.state.inputFailure = { ok: false, code: "unsupported", reason: "input-wayland", dispatched: false };
+    await expect(app.transport.perform({ action: "press", windowId, key: "Escape" }, { signal: signal(), turn }))
+      .resolves.toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("Synthesized input is not available on Wayland") });
+    // Wayland blocks input only: it is not a gate for the launch.
+    expect(app.transport.status()).toMatchObject({ access: null, unavailable: null });
+    app.state.inputFailure = null;
+    const sent = app.inputs().length;
+    app.state.input = "unavailable";
+    await expect(app.transport.inspect({ action: "scroll", windowId, deltaY: 100 }, signal(), turn))
+      .resolves.toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("Synthesized input is not available on Wayland") });
+    await expect(app.transport.perform({ action: "press", windowId, key: "Tab" }, { signal: signal(), turn })).resolves.toMatchObject({ ok: false, code: "unavailable" });
+    app.state.input = "required";
+    await expect(app.transport.inspect({ action: "press", windowId, key: "Tab" }, signal(), turn))
+      .resolves.toMatchObject({ ok: false, code: "unavailable", message: expect.stringContaining("denied accessibility access") });
+    expect(app.inputs()).toHaveLength(sent);
+    app.transport.close();
+  });
+
+  it("returns the reduced model-visible image only of an exact-window capture, leaving its evidence to the host tool", async () => {
+    const app = fakeApp();
+    const windowId = await ready(app);
+    app.state.overlapping = false;
+    const shot = await app.transport.perform({ action: "screenshot", windowId, agentImage: true }, { signal: signal(), turn });
+    expect(shot).toEqual({
+      ok: true,
+      value: { captured: true, width: 640, height: 480, mayIncludeOverlappingWindows: false },
+      image: { png, width: 1_280, height: 960 },
+      thumbnail: { png, width: 320, height: 240 },
+    });
+    expect(app.calls.at(-1)!.command).toEqual({ command: "screenshot", window: WINDOW, agentImage: true });
+    // The host tool labels the evidence once it attached (or did not attach) the image.
+    expect(app.evidence).not.toHaveBeenCalled();
+    // Main could not reduce it: local evidence only.
+    app.state.agentImage = null;
+    await expect(app.transport.perform({ action: "screenshot", windowId, agentImage: true }, { signal: signal(), turn }))
+      .resolves.toMatchObject({ ok: true, image: null, thumbnail: { png, width: 320, height: 240 } });
+    // A region capture (Windows, X11) can show other windows: whatever main returned, it is not sent.
+    app.state.agentImage = { png, width: 1_280, height: 960 };
+    app.state.overlapping = true;
+    await expect(app.transport.perform({ action: "screenshot", windowId, agentImage: true }, { signal: signal(), turn }))
+      .resolves.toMatchObject({ ok: true, image: null, value: { mayIncludeOverlappingWindows: true } });
+    expect(app.evidence).not.toHaveBeenCalled();
+    // A remembered secret withholds both images before anything is captured.
+    await app.transport.perform({ action: "snapshot", windowId }, { signal: signal(), turn });
+    await app.transport.perform({ action: "type", windowId, ref: "e3", text: "hunter22", replace: true }, { signal: signal(), turn });
+    const captures = app.calls.filter(({ command }) => command.command === "screenshot").length;
+    await expect(app.transport.perform({ action: "screenshot", windowId, agentImage: true }, { signal: signal(), turn }))
+      .resolves.toMatchObject({ ok: false, code: "sensitive" });
+    expect(app.calls.filter(({ command }) => command.command === "screenshot")).toHaveLength(captures);
+    app.transport.close();
+  });
+
+  it("pins the planned route: a key planned as accessibility input is refused once a grant arrived, with nothing sent", async () => {
+    const app = fakeApp();
+    const windowId = await ready(app);
+    await app.transport.perform({ action: "snapshot", windowId }, { signal: signal(), turn });
+    app.state.focused = app.state.elements[0]!;
+    // Enter is planned while the window holds no grant: an accessibility press.
+    const enter = { action: "press" as const, windowId, key: "Enter" as const };
+    const planned = app.transport.inputRoute(enter, turn);
+    expect(planned).toBe("accessibility");
+    // An activation and the Enter run in parallel; the activation holds the window until it answers.
+    let release!: () => void;
+    app.state.activateGate = new Promise((resolve) => { release = resolve; });
+    const activation = app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn });
+    const press = app.transport.perform(enter, { signal: signal(), turn, route: planned });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release();
+    await expect(activation).resolves.toMatchObject({ ok: true, value: { activated: true } });
+    // By the time the Enter runs it would be a synthesized key: refused as changed, nothing sent.
+    await expect(press).resolves.toMatchObject({ ok: false, code: "not-found", dispatched: false });
+    expect(app.performs().filter((command) => command.command === "perform" && command.action === "press")).toEqual([]);
+    expect(app.inputs()).toEqual([]);
+    // Without an approval the route is pinned all the same, in either direction.
+    await expect(app.transport.perform({ action: "scroll", windowId, deltaY: 100 }, { signal: signal(), turn, route: "accessibility" }))
+      .resolves.toMatchObject({ ok: false, code: "not-found", dispatched: false });
+    app.transport.turnSettled(turn.turnId);
+    await expect(app.transport.perform(enter, { signal: signal(), turn, route: "synthesized" }))
+      .resolves.toMatchObject({ ok: false, code: "not-found", dispatched: false });
+    expect(app.inputs()).toEqual([]);
+    // The planned route still matching: sent.
+    await expect(app.transport.perform(enter, { signal: signal(), turn, route: "accessibility" })).resolves.toMatchObject({ ok: true, value: { pressed: "Enter" } });
+    app.transport.close();
+  });
+
+  it("grants nothing when the operating system kept the app behind, or when the activation finished after its turn settled", async () => {
+    const app = fakeApp();
+    const windowId = await ready(app);
+    app.state.activateFailure = { ok: false, code: "unavailable", reason: "not-foreground", dispatched: true };
+    await expect(app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn })).resolves.toMatchObject({
+      ok: true, value: { activated: false, nextStep: expect.stringContaining("kept the app behind") },
+    });
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, turn)).toBe("accessibility");
+    app.state.activateFailure = null;
+    let release!: () => void;
+    app.state.activateGate = new Promise((resolve) => { release = resolve; });
+    const late = app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    app.transport.turnSettled(turn.turnId);
+    release();
+    await expect(late).resolves.toMatchObject({ ok: true, value: { activated: false } });
+    expect(app.transport.inputRoute({ action: "press", windowId, key: "Enter" }, turn)).toBe("accessibility");
+    app.transport.close();
+  });
+
+  it("refuses activation before any card where synthesized input is unavailable, and words a non-Linux desktop without Wayland", async () => {
+    for (const platform of ["linux", "darwin", "win32"] as const) {
+      const app = fakeApp({ platform });
+      const windowId = await ready(app);
+      app.state.input = "unavailable";
+      const inspected = await app.transport.inspect({ action: "activate", windowId }, signal(), turn);
+      expect(inspected, platform).toMatchObject({ ok: false, code: "unavailable" });
+      if (inspected.ok) throw new Error("activation inspected");
+      expect(inspected.message.includes("Wayland"), platform).toBe(platform === "linux");
+      if (platform !== "linux") expect(inspected.message).toContain("not available on this platform or desktop session");
+      await expect(app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn })).resolves.toMatchObject({ ok: false, code: "unavailable" });
+      expect(app.performs()).toEqual([]);
+      app.transport.close();
+    }
+    const windows = fakeApp({ platform: "win32" });
+    const windowId = await ready(windows);
+    await windows.transport.perform({ action: "activate", windowId }, { signal: signal(), turn });
+    windows.state.inputFailure = { ok: false, code: "unsupported", reason: "input-unavailable", dispatched: false };
+    await expect(windows.transport.perform({ action: "press", windowId, key: "Tab" }, { signal: signal(), turn })).resolves.toMatchObject({
+      ok: false, code: "unavailable", message: expect.stringContaining("not available on this platform or desktop session"),
+    });
+    expect(windows.transport.status()).toMatchObject({ access: null, unavailable: null });
+    windows.transport.close();
+  });
+
+  it("sends Meta+Enter as synthesized input on macOS only and refuses it elsewhere before any card", async () => {
+    for (const platform of ["linux", "win32", "darwin"] as const) {
+      const app = fakeApp({ platform });
+      const windowId = await ready(app);
+      await app.transport.perform({ action: "activate", windowId }, { signal: signal(), turn });
+      const inspected = await app.transport.inspect({ action: "press", windowId, key: "Meta+Enter" }, signal(), turn);
+      const performed = await app.transport.perform({ action: "press", windowId, key: "Meta+Enter" }, { signal: signal(), turn });
+      if (platform === "darwin") {
+        expect(inspected).toMatchObject({ ok: true, inspection: { synthesized: true } });
+        expect(performed).toMatchObject({ ok: true, value: { pressed: "Meta+Enter" } });
+        expect(app.inputs()).toHaveLength(1);
+      } else {
+        expect(inspected, platform).toMatchObject({ ok: false, code: "invalid", message: expect.stringContaining("only on macOS") });
+        expect(performed, platform).toMatchObject({ ok: false, code: "invalid", dispatched: false });
+        expect(app.inputs()).toEqual([]);
+      }
+      app.transport.close();
+    }
   });
 
   it("remembers text typed into a sensitive control and redacts it from later text, names, titles and logs", async () => {
@@ -384,6 +630,7 @@ describe("accessibility window transport", () => {
       value: { captured: true, evidenceId: "55555555-5555-4555-8555-555555555555", width: 640, height: 480, mayIncludeOverlappingWindows: true },
     });
     expect(app.evidence).toHaveBeenCalledWith({ kind: "screenshot", png, width: 320, height: 240 });
+    expect(app.calls.at(-1)!.command).toEqual({ command: "screenshot", window: WINDOW, agentImage: false });
     app.state.failure = { ok: false, code: "sensitive", reason: null, dispatched: false };
     await expect(app.transport.perform({ action: "screenshot", windowId }, { signal: signal(), turn })).resolves.toMatchObject({ ok: false, code: "sensitive" });
     app.transport.close();

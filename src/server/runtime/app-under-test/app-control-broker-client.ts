@@ -61,7 +61,7 @@ export class RuntimeAppControlBrokerClient implements RuntimeAppControlBroker {
     if (signal?.aborted) return Promise.resolve(appControlFailure("cancelled"));
     if (this.pending.size >= APP_CONTROL_MAX_PENDING_REQUESTS) return Promise.resolve(appControlFailure("busy"));
     const requestId = randomUUID();
-    const mayDispatch = command.command === "perform";
+    const mayDispatch = command.command === "perform" || command.command === "input";
     return new Promise<AppControlResult>((resolve) => {
       const settle = (result: AppControlResult): void => {
         const pending = this.pending.get(requestId);

@@ -134,6 +134,23 @@ describe("project settings", () => {
     await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
       expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), appUnderTestAccess: null } } }));
   });
+  it("offers model-visible app screenshots as an off-by-default switch under agent app access", async () => {
+    const { request, container } = setup();
+    const toggle = screen.getByRole("switch", { name: "Send app screenshots to the agent" });
+    expect(toggle).not.toBeChecked();
+    const appRow = container.querySelector('[data-setting-id="project-app-under-test-access"]')!;
+    expect(appRow.nextElementSibling).toBe(container.querySelector('[data-setting-id="project-app-visual-evidence"]'));
+    expect(screen.getByText("Images are reduced and masked, and fields that hold secrets block them.")).toBeInTheDocument();
+    toggle.focus();
+    expect(toggle).toHaveFocus();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(request).toHaveBeenCalledWith({ type: "project.update", payload: { projectId: project.id,
+      expectedUpdatedAt: project.updatedAt, preferences: { ...defaultProjectPreferences(), appUnderTestVisualEvidence: true } } }));
+  });
+  it("shows a saved screenshot choice", () => {
+    setup({ projects: [{ ...project, preferences: { ...defaultProjectPreferences(), appUnderTestVisualEvidence: true } }] });
+    expect(screen.getByRole("switch", { name: "Send app screenshots to the agent" })).toBeChecked();
+  });
   it("shows a saved app access choice and keeps browser access independent", () => {
     setup({ projects: [{ ...project, preferences: { ...defaultProjectPreferences(), appUnderTestAccess: true, browserAccess: false } }] });
     expect(screen.getByRole("combobox", { name: "Agent app access" })).toHaveValue("true");

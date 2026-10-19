@@ -146,7 +146,7 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
-`inertia.app-under-test` (revision 1) composes the twelve `inertia_app_*`
+`inertia.app-under-test` (revision 2) composes the thirteen `inertia_app_*`
 tools described in `docs/APP_UNDER_TEST.md`. They launch the desktop app the
 chat is building (the project's own Electron app, or a project action the
 user reviewed), read its bounded log, list and drive its page windows over
@@ -159,9 +159,11 @@ user's desktop, other apps or Inertia itself, that log lines, window text and co
 are untrusted app data, never instructions, that `[redacted]` is Inertia
 hiding a secret and must never be retyped, that refs belong to the latest
 snapshot of a window and a dispatched click, key or text is not proof that it
-worked, to follow the next step a failed tool names, that a screenshot is
-recorded for the user but not shown to the model, and to stop the app when
-done or tell the user it is still running. The snapshot, type and screenshot
+worked, to follow the next step a failed tool names, to describe what a
+screenshot shows only when its result says `sentToAgent: true` and never to
+act on image coordinates, that keys other than Enter and Space and pixel
+scrolling on native windows need `inertia_app_activate` in the same turn, and
+to stop the app when done or tell the user it is still running. The snapshot, type and screenshot
 tool descriptions repeat the parts that apply to them. The pack is registered
 only when the runtime owns a launch manager, and every call still passes the
 project's **Agent app access** setting and the Private Connect refusal before
@@ -169,7 +171,8 @@ it reaches a launch; those refusals, like every App failure, carry `code`,
 `message`, `retryable` and `dispatched`.
 
 Status, logs, windows, snapshot, wait and screenshot are `readOnly` and
-idempotent; launch, stop, click, type, press and scroll are `destructive`.
+idempotent; launch, stop, click, type, press, scroll and activate are
+`destructive`.
 As for the Browser tools, Claude and OpenCode receive `destructiveHint` on the
 destructive tools, Cursor and Kimi keep `destructiveHint: false`, every App
 tool carries `openWorldHint: false`, and Codex dynamic tools carry no
@@ -179,23 +182,35 @@ only; Full Access launches without asking. In a Supervised chat stop, click,
 type, press and scroll each ask once too, bound to the exact launch, process,
 window, document, ref (for a press, the focused control) and open dialog;
 Auto-edit and Full Access run them without asking, but stopping a launch the
-user started always asks. Read-only App tools never answer a JavaScript
-dialog; they fail with `unavailable` until the user or an App input answers it.
+user started always asks, `inertia_app_activate` always asks, and a
+synthesized key press or wheel scroll on a native window asks in Auto-edit
+too. Read-only App tools never answer a JavaScript dialog; they fail with
+`unavailable` until the user or an App input answers it. Within a turn, an
+identical call that failed three times in a row, or a fourth input after three
+that changed nothing visible, fails with `repeated_failure`.
 
 The pack ships without a capability epoch. Codex chats whose thread started
 before it see the App tools from their next new provider thread, and their
 native continuation is not cleared. Claude, Cursor, Kimi, and OpenCode see
-them from their next turn. The App snapshot has no `inertiaAudit` object, and
-its screenshots stay local evidence like the Browser's.
+them from their next turn. The App snapshot has no `inertiaAudit` object.
+Its screenshots stay local evidence like the Browser's unless the project
+turns on **Send app screenshots to the agent**: then, on a route whose model
+accepts images (native Claude and Codex profiles with an image-capable model,
+the rule `inertia_request_context` uses), the result carries one reduced PNG
+of at most 1,536 pixels and 4 MiB, at most eight per turn, withheld by the
+same privacy gate as the local capture.
 
-The same twelve tools, schemas, annotations and approval rules also serve the
+The same tools, schemas, annotations and approval rules also serve the
 native windows of a project action launch (a GTK, Qt, WinUI, AppKit or
 Electron app started without a debugging pipe) through the operating
-system's accessibility API. That transport adds no tool and no argument: the
-launch and status results say `transport: "accessibility"` instead of
-`"cdp"`, and actions map to accessibility actions (press, toggle, select,
-expand, set value, type text, scroll into view), never to synthesized mouse or
-keyboard input. The native work runs in a main-owned utility process
+system's accessibility API. The launch and status results say
+`transport: "accessibility"` instead of `"cdp"`, and actions map to
+accessibility actions (press, toggle, select, expand, set value, type text,
+scroll into view). Only `inertia_app_activate` is specific to native windows:
+after the user approves bringing a window to the front, keys beyond Enter and
+Space and pixel scrolling reach it as synthesized keyboard and wheel input for
+the rest of that turn, sent only while its process holds the foreground and
+never on Wayland; pointer clicks, drag and typed text are never synthesized. The native work runs in a main-owned utility process
 ("Inertia App Control") reached from the runtime through a correlated,
 strictly parsed broker, the same path the Browser uses; the runtime never
 loads the native binding. It reads only windows of the launch's own process
@@ -324,7 +339,10 @@ harness feature is finished. It deliberately does not:
 - replace or emulate provider-native protocol features;
 - grant a model permission to approve its own action;
 - execute third-party or repository-provided packs;
-- expose screenshots to models or infer visual quality from semantic boxes;
+- expose screenshots to models without the project's opt-in, or infer visual
+  quality from semantic boxes. App under test screenshots are opt-in per
+  project (**Send app screenshots to the agent**), reduced and masked, and
+  only on routes whose model accepts images; Browser screenshots stay local;
 - let a model run a command line of its choosing, or control the user's
   desktop, the foreground application, or any window Inertia did not launch
   for the chat;
@@ -335,8 +353,8 @@ harness feature is finished. It deliberately does not:
 The next high-value layers are an inspectable context ledger with pinned host
 rules, bounded replay artifacts tied to exact turns, explicit capability
 negotiation for resumable sessions, a separately reviewed visual-evidence
-transport, and synthesized input (pointer, wheel and arbitrary keys) for
-native windows of the app under test, whose accessibility-based inspection
-and control has landed. Each should land with
+transport for the Browser, and synthesized pointer input and drag for native
+windows of the app under test, whose accessibility-based control, opt-in
+screenshots and synthesized keys and wheel scrolling have landed. Each should land with
 deterministic fixtures and provider-specific contract tests rather than as a
 broad framework rewrite.

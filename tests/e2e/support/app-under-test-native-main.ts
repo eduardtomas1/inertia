@@ -187,6 +187,41 @@ async function run(): Promise<void> {
       `thumbnail ${thumbnail.width}x${thumbnail.height}`);
     evidence("x11-screenshot");
 
+    // Even with the project's opt-in on an image-accepting route, an X11 region capture can show
+    // other windows over the app: it stays local evidence and is never sent to the model.
+    const visual = await tools.invoke(conversation, call("inertia_app_screenshot", { windowId }), { ...identity, visualEvidence: true, imagesAccepted: true });
+    assert.equal(visual.success, true, visual.text);
+    assert.equal(visual.images, undefined);
+    const kept = JSON.parse(visual.text) as Record<string, unknown>;
+    assert.equal(kept.sentToAgent, false, visual.text);
+    assert.equal(kept.mayIncludeOverlappingWindows, true);
+    assert.equal(kept.note, "local evidence only: on this platform the capture may include other windows, so it stays on this device.");
+    const keptEntry = launches.listEvidence(conversationId).find((entry) => entry.evidenceId === kept.evidenceId);
+    assert.equal(keptEntry?.label, "Screenshot", JSON.stringify(keptEntry && { ...keptEntry, thumbnail: null }));
+    assert(keptEntry.hasThumbnail);
+    evidence("x11-agent-image");
+
+    // Synthesized input: refused until the window is brought to the front in this turn.
+    const early = await failing("inertia_app_press", { windowId, key: "Escape" });
+    assert.equal(early.code, "unavailable", JSON.stringify(early));
+    assert.equal(early.dispatched, false);
+    assert.match(early.message, /The app is not in front; call inertia_app_activate/u);
+    const activated = await tool("inertia_app_activate", { windowId });
+    assert.equal(activated.activated, true, JSON.stringify(activated));
+    // XTest under Xvfb with Openbox: the key reaches the fixture's keydown handler.
+    const pressed = await tool("inertia_app_press", { windowId, key: "Escape" });
+    assert.equal(pressed.pressed, "Escape", JSON.stringify(pressed));
+    assert.equal((await tool("inertia_app_wait_for", { windowId, text: "Escape pressed", timeoutMs: 5_000 })).matched, true);
+    const scrolled = await tool("inertia_app_scroll", { windowId, deltaY: 300 });
+    assert.equal(scrolled.scrolled, 300, JSON.stringify(scrolled));
+    assert.equal(scrolled.wheelNotches, 3, JSON.stringify(scrolled));
+    assert.equal((await tool("inertia_app_wait_for", { windowId, text: "Wheel scrolled down", timeoutMs: 5_000 })).matched, true);
+    // The grant ends with the turn.
+    tools.turnSettled(identity.turnId);
+    const settled = await failing("inertia_app_press", { windowId, key: "Escape" });
+    assert.match(settled.message, /inertia_app_activate/u);
+    evidence("synthesized-input");
+
     // A secret is remembered before it is sent, so it stays hidden even though the app refuses it.
     const passwordRef = (afterRecycle.elements as Element[]).find((element) => element.name === "Password")!.ref!;
     const secretTyped = await failing("inertia_app_type", { windowId, ref: passwordRef, text: "hunter2-native" });
@@ -201,7 +236,7 @@ async function run(): Promise<void> {
     const stopped = await tool("inertia_app_stop", { launchId });
     assert.equal(stopped.cleanupConfirmed, true, JSON.stringify(stopped));
     launchId = null;
-    assert.deepEqual(approvals, ["Launch the app", "Click", "Type", "Type", "Type", "Stop the app"]);
+    assert.deepEqual(approvals, ["Launch the app", "Click", "Type", "Type", "Bring the app window to the front", "Press", "Scroll", "Type", "Stop the app"]);
     assert.equal(launches.liveLaunchCount, 0);
     evidence("stopped-confirmed");
   } finally {

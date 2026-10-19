@@ -470,6 +470,11 @@ export class AppUnderTestLaunchManager {
     }
   }
 
+  /** Per-turn transport state (foreground grants, which also name their turn) ends with the turn. */
+  turnSettled(turnId: string): void {
+    for (const record of this.live) record.transport?.turnSettled?.(turnId);
+  }
+
   /** The first window of this chat's live launches that shows an unanswered JavaScript dialog. */
   pendingDialog(conversationId: string): AppUnderTestPendingDialog | null {
     for (const record of this.sessions.get(conversationId)?.launches.values() ?? []) {
@@ -552,7 +557,7 @@ export class AppUnderTestLaunchManager {
   ): AppUnderTestEvidence | null {
     const record = this.record(conversationId, launchId);
     return input.kind === "screenshot"
-      ? this.evidence(record, "screenshot", "screenshot", undefined, input)
+      ? this.evidence(record, "screenshot", input.sentToAgent ? "screenshot-sent" : "screenshot", undefined, input)
       : this.evidence(record, "action", input.action);
   }
 
@@ -888,7 +893,7 @@ export class AppUnderTestLaunchManager {
 
   private appendEvidenceFor(record: LaunchRecord, entry: AppUnderTestEvidenceInput): string | null {
     const appended = entry.kind === "screenshot"
-      ? this.evidence(record, "screenshot", "screenshot", undefined, entry)
+      ? this.evidence(record, "screenshot", entry.sentToAgent ? "screenshot-sent" : "screenshot", undefined, entry)
       : this.evidence(record, "action", entry.action);
     return appended?.evidenceId ?? null;
   }

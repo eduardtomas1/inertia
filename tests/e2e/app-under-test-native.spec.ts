@@ -67,7 +67,7 @@ test("Linux AT-SPI: an action launch is listed, read, driven, captured and stopp
     test.skip(noBus, "The session has no AT-SPI bus.");
     expect(child.exitCode, output).toBe(0);
     for (const step of [
-      "window-listed", "snapshot-refs", "button-pressed", "value-refused", "x11-screenshot",
+      "window-listed", "snapshot-refs", "button-pressed", "value-refused", "x11-screenshot", "x11-agent-image", "synthesized-input",
       "password-redacted", "stopped-confirmed", "worker-stopped",
     ]) expect(output, output).toContain(`NATIVE_APP_EVIDENCE ${step}`);
   } finally {

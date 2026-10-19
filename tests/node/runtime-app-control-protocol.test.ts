@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { AGENT_BROWSER_KEYS } from "../../src/shared/agent-browser";
 import {
+  APP_CONTROL_INPUT_KEYS,
+  APP_CONTROL_MAX_AGENT_PNG_BYTES,
   APP_CONTROL_MAX_ELEMENTS,
   APP_CONTROL_MAX_PAYLOAD_BYTES,
+  APP_CONTROL_RESULT_KIND,
   parseAppControlCommand,
   parseAppControlResult,
   parseRuntimeAppControlEvent,
@@ -33,7 +37,13 @@ describe("runtime App control protocol", () => {
       { command: "windows" },
       { command: "permissions" },
       { command: "snapshot", window: token },
-      { command: "screenshot", window: token },
+      { command: "screenshot", window: token, agentImage: false },
+      { command: "screenshot", window: token, agentImage: true },
+      { command: "input", window: token, key: "Tab", deltaY: null, expect: null },
+      { command: "input", window: token, key: "Shift+Tab", deltaY: null, expect: { rootKey: token, focus: { role: "text_field", name: "Name" } } },
+      { command: "input", window: token, key: "Escape", deltaY: null, expect: { rootKey: token, focus: null } },
+      { command: "input", window: token, key: null, deltaY: -300, expect: { rootKey: token, focus: null } },
+      { command: "input", window: token, key: null, deltaY: 20_000, expect: null },
       { command: "inspect", window: token, element: null },
       { command: "inspect", window: token, element: token },
       { command: "perform", window: token, element: token, action: "press", text: null, expect: null },
@@ -65,6 +75,20 @@ describe("runtime App control protocol", () => {
     [{ command: "perform", window: token, element: token, action: "press", text: null, expect: { rootKey: token, role: "button" } }],
     [{ command: "perform", window: token, element: token, action: "press", text: null }],
     [{ command: "type", text: "x" }],
+    [{ command: "screenshot", window: token }],
+    [{ command: "screenshot", window: token, agentImage: "yes" }],
+    [{ command: "input", window: token, key: "F5", deltaY: null, expect: null }],
+    [{ command: "input", window: token, key: "a", deltaY: null, expect: null }],
+    [{ command: "input", window: token, key: null, deltaY: null, expect: null }],
+    [{ command: "input", window: token, key: "Tab", deltaY: 10, expect: null }],
+    [{ command: "input", window: token, key: null, deltaY: 0, expect: null }],
+    [{ command: "input", window: token, key: null, deltaY: 20_001, expect: null }],
+    [{ command: "input", window: token, key: null, deltaY: 1.5, expect: null }],
+    [{ command: "input", window: token, key: null, deltaY: 10, expect: { rootKey: token, focus: { role: "button", name: "Save" } } }],
+    [{ command: "input", window: token, key: "Tab", deltaY: null, expect: { rootKey: token } }],
+    [{ command: "input", window: token, key: "Tab", deltaY: null, expect: { rootKey: token, focus: { role: "button" } } }],
+    [{ command: "input", window: token, key: "Tab", deltaY: null }],
+    [{ command: "input", window: token, text: "typed", key: null, deltaY: null, expect: null }],
     [null],
     [[{ command: "windows" }]],
   ])("refuses the malformed command %j", (command) => {
@@ -83,6 +107,10 @@ describe("runtime App control protocol", () => {
       .toEqual({ ...request, identity, command: { command: "windows" } });
     // Without a turn only window listing and permission reads are accepted.
     expect(parseRuntimeAppControlEvent({ ...request, identity: background })).toMatchObject({ command: null });
+    // Synthesized input always names its turn.
+    expect(parseRuntimeAppControlEvent({
+      ...request, identity: background, command: { command: "input", window: token, key: "Tab", deltaY: null, expect: null },
+    })).toMatchObject({ command: null });
     for (const broken of [
       { ...identity, runId: null },
       { ...identity, pid: 1 },
@@ -146,8 +174,51 @@ describe("runtime App control protocol", () => {
     expect(parseAppControlResult({ ...failure, message: "native text" })).toBeNull();
     expect(parseAppControlResult({ ...failure, code: "crashed" })).toBeNull();
     expect(parseAppControlResult({ ok: true, value: { kind: "perform", rootKey: null, windowClosed: true } }, "perform")).not.toBeNull();
-    expect(parseAppControlResult({ ok: true, value: { kind: "screenshot", width: 10, height: 10, png, mayIncludeOverlappingWindows: true } }, "screenshot")).not.toBeNull();
-    expect(parseAppControlResult({ ok: true, value: { kind: "screenshot", width: 10, height: 10, png: new Uint8Array(40), mayIncludeOverlappingWindows: true } })).toBeNull();
+    expect(parseAppControlResult({ ok: true, value: { kind: "screenshot", width: 10, height: 10, png, mayIncludeOverlappingWindows: true, agentImage: null } }, "screenshot")).not.toBeNull();
+    expect(parseAppControlResult({ ok: true, value: { kind: "screenshot", width: 10, height: 10, png, mayIncludeOverlappingWindows: true } }, "screenshot")).toBeNull();
+    expect(parseAppControlResult({ ok: true, value: { kind: "screenshot", width: 10, height: 10, png: new Uint8Array(40), mayIncludeOverlappingWindows: true, agentImage: null } })).toBeNull();
+    // Synthesized input answers like an accessibility action.
+    expect(APP_CONTROL_RESULT_KIND.input).toBe("perform");
+    expect(parseAppControlResult({ ok: true, value: { kind: "perform", rootKey: token, windowClosed: false } }, "input")).not.toBeNull();
+    const permissions = { kind: "permissions", accessibility: "granted", screenRecording: "granted", screenshots: "available", input: "available" };
+    expect(parseAppControlResult({ ok: true, value: permissions }, "permissions")).toEqual({ ok: true, value: permissions });
+    expect(parseAppControlResult({ ok: true, value: { ...permissions, input: "maybe" } })).toBeNull();
+    const { input: _input, ...older } = permissions;
+    expect(parseAppControlResult({ ok: true, value: older })).toBeNull();
+    for (const reason of ["not-foreground", "input-wayland", "input-unavailable", "key-unsupported"]) {
+      const code = reason === "not-foreground" ? "unavailable" : reason === "key-unsupported" ? "invalid" : "unsupported";
+      const refused = { ok: false, code, reason, dispatched: false };
+      expect(parseAppControlResult(refused)).toEqual(refused);
+    }
+  });
+
+  it("bounds the model-visible image: PNG, long edge at most 1,536 pixels, at most 720,000 pixels and 3.75 MB", () => {
+    const value = (agentImage: unknown) => ({
+      ok: true, value: { kind: "screenshot", width: 10, height: 10, png, mayIncludeOverlappingWindows: false, agentImage },
+    });
+    expect(parseAppControlResult(value({ png, width: 1_536, height: 468 }), "screenshot"))
+      .toMatchObject({ ok: true, value: { agentImage: { width: 1_536, height: 468 } } });
+    expect(APP_CONTROL_MAX_AGENT_PNG_BYTES).toBe(3_750_000);
+    const big = new Uint8Array(APP_CONTROL_MAX_AGENT_PNG_BYTES);
+    big.set(png);
+    expect(parseAppControlResult(value({ png: big, width: 100, height: 100 }))).not.toBeNull();
+    const over = new Uint8Array(APP_CONTROL_MAX_AGENT_PNG_BYTES + 1);
+    over.set(png);
+    for (const broken of [
+      { png: over, width: 100, height: 100 },
+      { png, width: 1_537, height: 100 },
+      { png, width: 100, height: 1_537 },
+      { png, width: 1_536, height: 864 },
+      { png, width: 1_201, height: 600 },
+      { png, width: 0, height: 100 },
+      { png: new Uint8Array(40), width: 10, height: 10 },
+      { png, width: 10, height: 10, extra: true },
+      { png, width: 10 },
+    ]) expect(parseAppControlResult(value(broken)), JSON.stringify({ ...broken, png: broken.png.byteLength })).toBeNull();
+  });
+
+  it("allows exactly the Browser's keys as synthesized input", () => {
+    expect([...APP_CONTROL_INPUT_KEYS]).toEqual([...AGENT_BROWSER_KEYS]);
   });
 
   it("bounds every payload at 24 KiB, apart from the bounded thumbnail bytes", () => {
@@ -159,7 +230,7 @@ describe("runtime App control protocol", () => {
     } };
     expect(JSON.stringify(large).length).toBeGreaterThan(APP_CONTROL_MAX_PAYLOAD_BYTES);
     expect(parseAppControlResult(large)).toBeNull();
-    const shot = { ok: true, value: { kind: "screenshot", width: 10, height: 10, png: new Uint8Array([...png, ...new Uint8Array(200_000)]), mayIncludeOverlappingWindows: false } };
+    const shot = { ok: true, value: { kind: "screenshot", width: 10, height: 10, png: new Uint8Array([...png, ...new Uint8Array(200_000)]), mayIncludeOverlappingWindows: false, agentImage: null } };
     expect(parseAppControlResult(shot)).not.toBeNull();
     expect(parseAppControlResult({ ok: true, value: { ...shot.value, png: new Uint8Array([...png, ...new Uint8Array(300_000)]) } })).toBeNull();
   });

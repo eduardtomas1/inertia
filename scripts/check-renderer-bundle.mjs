@@ -73,8 +73,10 @@ const budgets = {
   // See docs/pr-evidence/visual-replies/renderer-bundle.json.
   // App under test adds the fixed work-log wording for its twelve tools, the
   // App surface entry and its loader: 1,794 / 1,166 bytes measured on Linux
-  // x64. The surface itself is deferred and capped separately below.
-  mainWorkbenchFirstLoadJavaScript: 1_794 + 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421,
+  // x64. The surface itself is deferred and capped separately below. Phase 3
+  // adds the fixed work-log wording of inertia_app_activate: 23 bytes
+  // (881,035 measured on Linux x64), counted at the end.
+  mainWorkbenchFirstLoadJavaScript: 1_794 + 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 23,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -99,8 +101,9 @@ const budgets = {
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,
   deferredSnapshotControlJavaScript: 7.2 * kibibyte,
   // The App control card and its state hook load only in Devices &
-  // integrations (6,013 bytes measured on Linux x64).
-  deferredAppControlSettingsJavaScript: 6.25 * kibibyte,
+  // integrations (6,013 bytes measured on Linux x64). The Keyboard and mouse
+  // input row and its fixed wording add 695 bytes (7,095 measured).
+  deferredAppControlSettingsJavaScript: 6.25 * kibibyte + 695,
   // Global disk usage, quota selection and deletion confirmation load only in Archive & data.
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
@@ -118,7 +121,8 @@ const budgets = {
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 532,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   deferredThreadActionsJavaScript: 8 * kibibyte + 75,
-  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
+  // The screenshot opt-in's default preference adds 73 bytes (12,234 measured).
+  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406 + 73,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
@@ -199,7 +203,9 @@ const budgets = {
   // the shared launch schema, the App control desktop bridge contract, its
   // two searchable settings rows and the App surface's settings link: 1,328
   // bytes (2,309,736 measured on Linux x64); the card itself is deferred.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 3_479 + 2_459 + 256 + 1_328,
+  // Phase 3 adds the screenshot preference, the settings state's input field
+  // and two searchable settings rows: 152 bytes (2,310,144 measured).
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 3_479 + 2_459 + 256 + 1_328 + 152,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

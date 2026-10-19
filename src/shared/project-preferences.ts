@@ -41,6 +41,10 @@ const recoverableFields = {
   // exactly like browserAccess. Preferences saved before this key existed
   // omit it, so it defaults instead of failing the strict parse.
   appUnderTestAccess: z.boolean().nullable().default(null),
+  // Opt-in: App under test screenshots also reach the model (reduced and
+  // masked, on image-capable routes only). Off unless the user turns it on;
+  // an older or corrupt saved value falls back to off.
+  appUnderTestVisualEvidence: z.boolean().default(false),
 };
 export const projectAppearancePatchSchema = z.strictObject({
   icon: projectIconSchema.nullable(),
@@ -55,6 +59,7 @@ export const projectPreferencesSchema = z.strictObject({
   autoPull: z.boolean(),
   browserAccess: z.boolean().nullable(),
   appUnderTestAccess: recoverableFields.appUnderTestAccess,
+  appUnderTestVisualEvidence: recoverableFields.appUnderTestVisualEvidence,
   icon: projectIconSchema.nullable(),
   actions: z.array(z.strictObject({
     id: z.string().uuid(),
@@ -74,7 +79,7 @@ export const projectPreferencesSchema = z.strictObject({
 export type ProjectPreferences = z.infer<typeof projectPreferencesSchema>;
 
 export function defaultProjectPreferences(): ProjectPreferences {
-  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, appUnderTestAccess: null, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
+  return { workspace: null, defaultAccessMode: null, autoPull: false, browserAccess: null, appUnderTestAccess: null, appUnderTestVisualEvidence: false, icon: null, actions: [], claudeMaxBudgetUsd: null, color: null, colorEmphasis: "icon", pinned: false };
 }
 
 export function applyProjectAppearance(preferences: ProjectPreferences | undefined, appearance: ProjectAppearancePatch): ProjectPreferences {

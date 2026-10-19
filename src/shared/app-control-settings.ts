@@ -19,6 +19,14 @@ export type AppControlAccessibilityState = (typeof APP_CONTROL_ACCESSIBILITY_STA
 export const APP_CONTROL_SCREEN_RECORDING_STATES = ["granted", "required", "not-needed"] as const;
 export type AppControlScreenRecordingState = (typeof APP_CONTROL_SCREEN_RECORDING_STATES)[number];
 
+/**
+ * Synthesized keyboard and wheel input to an activated native window:
+ * macOS needs Accessibility (`required` until it is granted), Windows and
+ * X11 have it, Wayland and an unsupported platform do not.
+ */
+export const APP_CONTROL_INPUT_STATES = ["available", "required", "unavailable"] as const;
+export type AppControlInputState = (typeof APP_CONTROL_INPUT_STATES)[number];
+
 export interface AppControlSettingsState {
   platform: AppControlSettingsPlatform;
   /** False after a helper's exit could not be confirmed, until Inertia restarts. */
@@ -29,6 +37,7 @@ export interface AppControlSettingsState {
   screenshots: "available" | "unavailable";
   /** Linux only: the desktop session type; null elsewhere. */
   session: "x11" | "wayland" | null;
+  input: AppControlInputState;
 }
 
 /** Opening a macOS privacy pane happens only on an explicit click in the card. */
@@ -36,7 +45,7 @@ export type AppControlSettingsRequest =
   | { type: "state" }
   | { type: "open-settings"; pane: "accessibility" | "screen-recording" };
 
-const KEYS = ["platform", "available", "accessibility", "screenRecording", "screenshots", "session"] as const;
+const KEYS = ["platform", "available", "accessibility", "screenRecording", "screenshots", "session", "input"] as const;
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -47,13 +56,14 @@ export function parseAppControlSettingsState(value: unknown): AppControlSettings
   if (!plainObject(value)) return null;
   const keys = Object.keys(value);
   if (keys.length !== KEYS.length || !KEYS.every((key) => keys.includes(key))) return null;
-  const { platform, available, accessibility, screenRecording, screenshots, session } = value;
+  const { platform, available, accessibility, screenRecording, screenshots, session, input } = value;
   if (!APP_CONTROL_SETTINGS_PLATFORMS.includes(platform as AppControlSettingsPlatform)
     || typeof available !== "boolean"
     || !APP_CONTROL_ACCESSIBILITY_STATES.includes(accessibility as AppControlAccessibilityState)
     || !APP_CONTROL_SCREEN_RECORDING_STATES.includes(screenRecording as AppControlScreenRecordingState)
     || (screenshots !== "available" && screenshots !== "unavailable")
-    || (session !== null && session !== "x11" && session !== "wayland")) return null;
+    || (session !== null && session !== "x11" && session !== "wayland")
+    || !APP_CONTROL_INPUT_STATES.includes(input as AppControlInputState)) return null;
   return {
     platform: platform as AppControlSettingsPlatform,
     available,
@@ -61,5 +71,6 @@ export function parseAppControlSettingsState(value: unknown): AppControlSettings
     screenRecording: screenRecording as AppControlScreenRecordingState,
     screenshots,
     session,
+    input: input as AppControlInputState,
   };
 }

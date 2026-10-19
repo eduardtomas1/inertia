@@ -40,6 +40,36 @@ The useful changes in each Inertia release, in plain language.
   Linux AT-SPI state, and shows the macOS prompt or opens macOS settings only
   when you click. Window lists are polled only while the chat is open or a
   turn runs.
+- New **Settings → Projects → Send app screenshots to the agent** (off by
+  default): on Claude and Codex with an image-capable model, the agent's App
+  screenshots also reach the model as a reduced PNG (at most 1,536 pixels on
+  its long edge, 720,000 pixels and 3.75 MB, eight per turn), masked like the
+  local copy and never taken while a password field holds a value or a secret
+  was typed; an Electron app that revealed a secret in any window sends none.
+  Native windows send screenshots only on macOS, which captures exactly the
+  window: Windows and Linux X11 captures can include other windows and stay
+  on this computer. An **Evidence** entry says "Screenshot sent to the agent"
+  only once the image was checked and attached, a failed copy for the model
+  never costs the local screenshot, and no App tool accepts image
+  coordinates.
+- On native windows the agent can now press every key the Browser allows and
+  scroll with the mouse wheel, after you approve **Bring the app window to
+  the front** (asked in every mode; refused at once where input is
+  unavailable, and nothing is granted when the system keeps the app behind).
+  During that turn Inertia brings the window forward again before each key or
+  wheel step and sends it only while the app's process is in front: a key
+  reaches the app's focused window, and a wheel step whatever lies under the
+  window's centre, which can be a window covering it. Scrolls report the
+  wheel notches sent. Supervised and Auto-edit chats ask before each one, and
+  an approval covers only the route it was asked for. Meta+Enter is
+  macOS-only. Not available on Wayland. The App control card gains a
+  **Keyboard and mouse input** line.
+- The agent is stopped from repeating an App action that failed three times
+  in a row, or from a fourth click, type, key press or scroll after three that
+  changed nothing visible (text, viewport or controls), and is told to take a
+  new snapshot or ask you instead. Waits that run out of time and the "not in
+  front" refusal do not count, and a changed snapshot or a successful
+  activation lets a blocked action run again.
 
 ## 0.0.72 — 2026-10-18
 

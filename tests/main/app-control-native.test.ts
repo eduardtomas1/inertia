@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { AGENT_BROWSER_KEYS } from "../../src/shared/agent-browser";
 import {
+  APP_CONTROL_KEY_INPUT,
   AppControlNative,
   AppControlNativeFailure,
+  appControlWheelNotches,
   fitSnapshot,
   isSensitiveElement,
   sensitiveControlName,
@@ -61,8 +64,8 @@ function form() {
 }
 
 function fixture(apps: NativeApp[], options: ConstructorParameters<typeof AppControlNative>[1] = {}) {
-  const native: NativeModule = { App: { list: vi.fn(async () => apps) }, errors };
-  return { native, control: new AppControlNative(native, options) };
+  const native: NativeModule = { App: { list: vi.fn(async () => apps) }, errors, foregroundPid: vi.fn(async () => 10) };
+  return { native, control: new AppControlNative(native, { sleep: async () => undefined, ...options }) };
 }
 
 const scope = { pids: new Set([10, 11, 12]), deniedPids: new Set<number>() };
@@ -171,6 +174,27 @@ describe("App control worker logic", () => {
     await expect(control.perform(scope, listed!.token!, null, "press", null, null)).rejects.toMatchObject({ code: "invalid", reason: "no-focus" });
     await control.perform(scope, listed!.token!, null, "activate", null, null);
     expect(parts.window.calls).toEqual(["activate"]);
+  });
+
+  it("reports an activation the operating system did not honour, and activates nothing without a foreground query", async () => {
+    const parts = form();
+    const { native, control } = fixture([app("Fixture", 10, [parts.window])]);
+    const [listed] = (await control.windows(scope)).windows;
+    const sleeps: number[] = [];
+    const slow = new AppControlNative(native, { sleep: async (ms) => { sleeps.push(ms); } });
+    // The window comes forward a moment after the activation: that counts.
+    const foreground = native.foregroundPid as ReturnType<typeof vi.fn>;
+    foreground.mockResolvedValueOnce(99).mockResolvedValueOnce(99);
+    await expect(slow.perform(scope, listed!.token!, null, "activate", null, null)).resolves.toMatchObject({ kind: "perform", windowClosed: false });
+    expect(sleeps).toEqual([50, 50]);
+    // Focus-stealing prevention keeps another app in front: not foreground, after the action ran.
+    foreground.mockResolvedValue(99);
+    await expect(control.perform(scope, listed!.token!, null, "activate", null, null))
+      .rejects.toMatchObject({ code: "unavailable", reason: "not-foreground", dispatched: true });
+    expect(parts.window.calls).toEqual(["activate", "activate"]);
+    const blind = new AppControlNative({ App: native.App, errors });
+    await expect(blind.perform(scope, listed!.token!, null, "activate", null, null)).rejects.toMatchObject({ code: "unsupported", reason: "input-unavailable" });
+    expect(parts.window.calls).toHaveLength(2);
   });
 
   it("refuses an approved action when the root or the target changed", async () => {
@@ -302,6 +326,118 @@ describe("App control worker logic", () => {
     await control.windows({ pids: new Set(Array.from({ length: 17 }, (_, index) => 10 + index)), deniedPids: new Set() });
     await control.windows({ pids: new Set(), deniedPids: new Set() });
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("synthesizes keys and wheel steps only while the target process holds the foreground, checked right before posting", async () => {
+    const parts = form();
+    const focusedUser = element({ ...parts.user, focused: true } as Partial<NativeElement>);
+    const panel = element({ role: "panel", stableId: "panel", kids: [parts.save, focusedUser] });
+    const window = element({ ...parts.window, children: async () => [panel] } as Partial<NativeElement>);
+    const posted: string[] = [];
+    let foreground: number | null = 99;
+    const input = {
+      press: vi.fn(async (key: string) => { posted.push(`press:${key}`); }),
+      chord: vi.fn(async (key: string, held: string[]) => { posted.push(`chord:${held.join("+")}+${key}`); }),
+      scroll: vi.fn(async (target: [number, number], dx: number, dy: number) => { posted.push(`scroll:${target.join(",")}:${dx},${dy}`); }),
+    };
+    const foregroundPid = vi.fn(async () => foreground);
+    const native: NativeModule = { App: { list: vi.fn(async () => [app("Fixture", 10, [window])]) }, errors, foregroundPid, input: () => input };
+    const control = new AppControlNative(native, { platform: "darwin", sleep: async () => undefined });
+    const [listed] = (await control.windows(scope)).windows;
+    const token = listed!.token!;
+    const { rootKey } = await control.snapshot(scope, token);
+    // Another app in front even after the window was raised again: nothing is posted.
+    await expect(control.input(scope, token, "Tab", null, null)).rejects.toMatchObject({ code: "unavailable", reason: "not-foreground", dispatched: false });
+    expect((window as FakeElement).calls).toEqual(["activate"]);
+    foreground = null;
+    await expect(control.input(scope, token, "Tab", null, null)).rejects.toMatchObject({ reason: "not-foreground" });
+    foregroundPid.mockRejectedValueOnce(new errors.SelectorNotMatchedError());
+    await expect(control.input(scope, token, "Tab", null, null)).rejects.toMatchObject({ reason: "not-foreground" });
+    foregroundPid.mockRejectedValueOnce(new errors.PermissionDeniedError());
+    await expect(control.input(scope, token, "Tab", null, null)).rejects.toMatchObject({ code: "permission-denied" });
+    expect(posted).toEqual([]);
+
+    foreground = 10;
+    await expect(control.input(scope, token, "Tab", null, null)).resolves.toEqual({ kind: "perform", rootKey, windowClosed: false });
+    await control.input(scope, token, "Space", null, null);
+    await control.input(scope, token, "Shift+Tab", null, null);
+    await control.input(scope, token, "Control+Enter", null, null);
+    await control.input(scope, token, "Meta+Enter", null, null);
+    // A wheel step lands on the window's centre: about one notch per 100 pixels, at least one, at most fifty.
+    await control.input(scope, token, null, 250, null);
+    await control.input(scope, token, null, -40, null);
+    await control.input(scope, token, null, 20_000, null);
+    expect(posted).toEqual([
+      "press:Tab", "press: ", "chord:Shift+Tab", "chord:Ctrl+Enter", "chord:Meta+Enter",
+      "scroll:300,250:0,3", "scroll:300,250:0,-1", "scroll:300,250:0,50",
+    ]);
+    expect(appControlWheelNotches(149)).toBe(1);
+    expect(appControlWheelNotches(-151)).toBe(-2);
+
+    // An approval's expectation: the root and the focused control.
+    posted.length = 0;
+    const focus = { role: "text_field", name: "User name" };
+    await expect(control.input(scope, token, "Escape", null, { rootKey: "d".repeat(32), focus })).rejects.toMatchObject({ code: "not-found", reason: "changed" });
+    await expect(control.input(scope, token, "Escape", null, { rootKey, focus: { ...focus, name: "Password" } })).rejects.toMatchObject({ reason: "changed" });
+    await expect(control.input(scope, token, null, 100, { rootKey: "d".repeat(32), focus: null })).rejects.toMatchObject({ reason: "changed" });
+    expect(posted).toEqual([]);
+    await control.input(scope, token, "Escape", null, { rootKey, focus });
+    expect(posted).toEqual(["press:Escape"]);
+
+    // A failed post may have reached the app; a window outside the tree is never a target.
+    input.press.mockRejectedValueOnce(new Error("XTest gone with native text"));
+    await expect(control.input(scope, token, "Tab", null, null)).rejects.toMatchObject({ code: "native-failure", dispatched: true });
+    await expect(control.input(scope, "f".repeat(32), "Tab", null, null)).rejects.toMatchObject({ code: "not-found", reason: "window-gone" });
+    const withoutInput = new AppControlNative({ App: native.App, errors });
+    await expect(withoutInput.input(scope, token, "Tab", null, null)).rejects.toMatchObject({ code: "unsupported", reason: "input-unavailable" });
+    // Meta+Enter is a macOS chord; elsewhere it is refused before anything is read or posted.
+    const linux = new AppControlNative(native, { platform: "linux", sleep: async () => undefined });
+    posted.length = 0;
+    await expect(linux.input(scope, token, "Meta+Enter", null, null)).rejects.toMatchObject({ code: "invalid", reason: "key-unsupported", dispatched: false });
+    await linux.input(scope, token, "Control+Enter", null, null);
+    expect(posted).toEqual(["chord:Ctrl+Enter"]);
+    // Every allowlisted key has a mapping.
+    expect(Object.keys(APP_CONTROL_KEY_INPUT).sort()).toEqual([...AGENT_BROWSER_KEYS].sort());
+  });
+
+  it("raises the granted window again inside the input command when the approval card brought Inertia to the front", async () => {
+    const parts = form();
+    const focusedUser = element({ ...parts.user, focused: true } as Partial<NativeElement>);
+    const panel = element({ role: "panel", stableId: "panel", kids: [focusedUser] });
+    const order: string[] = [];
+    const inertia = 7;
+    let foreground = inertia;
+    const window = element({
+      ...parts.window,
+      children: async () => [panel],
+      // The re-raise brings the app forward; the window manager answers a moment later.
+      activate: vi.fn(async () => { order.push("raise"); setTimeout(() => { foreground = 10; }, 0); }),
+    } as Partial<NativeElement>);
+    const input = {
+      press: vi.fn(async (key: string) => { order.push(`press:${key}`); }),
+      chord: vi.fn(async () => undefined),
+      scroll: vi.fn(async () => { order.push("scroll"); }),
+    };
+    const foregroundPid = vi.fn(async () => { order.push(`foreground:${foreground}`); return foreground; });
+    const native: NativeModule = { App: { list: vi.fn(async () => [app("Fixture", 10, [window])]) }, errors, foregroundPid, input: () => input };
+    const control = new AppControlNative(native, { platform: "linux", sleep: async (ms) => await new Promise((resolve) => setTimeout(resolve, ms / 10)) });
+    const [listed] = (await control.windows(scope)).windows;
+    const { rootKey } = await control.snapshot(scope, listed!.token!);
+    // Before the command Inertia (the approval card) holds the foreground.
+    expect(await foregroundPid()).toBe(inertia);
+    order.length = 0;
+    await expect(control.input(scope, listed!.token!, "Escape", null, { rootKey, focus: { role: "text_field", name: "User name" } }))
+      .resolves.toEqual({ kind: "perform", rootKey, windowClosed: false });
+    // Raised first, the foreground checked until the app is in front, then checked once more and posted.
+    expect(order[0]).toBe("raise");
+    expect(order.slice(-3)).toEqual(["foreground:10", "foreground:10", "press:Escape"]);
+    expect(order.filter((entry) => entry === `foreground:${inertia}`).length).toBeGreaterThan(0);
+    // Still behind after the raise: refused as before, nothing posted.
+    order.length = 0;
+    foreground = inertia;
+    (window.activate as ReturnType<typeof vi.fn<() => Promise<void>>>).mockImplementation(async () => { order.push("raise"); });
+    await expect(control.input(scope, listed!.token!, null, 300, null)).rejects.toMatchObject({ code: "unavailable", reason: "not-foreground", dispatched: false });
+    expect(order).not.toContain("scroll");
   });
 
   it("classifies sensitive controls with the Browser's credential words", () => {

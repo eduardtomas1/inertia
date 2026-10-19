@@ -7,6 +7,7 @@ import { AppControlSettings } from "../../src/renderer/src/components/AppControl
 const original = window.inertia;
 const mac: AppControlSettingsState = {
   platform: "darwin", available: true, accessibility: "required", screenRecording: "required", screenshots: "available", session: null,
+  input: "required",
 };
 afterEach(() => { window.inertia = original; vi.restoreAllMocks(); });
 
@@ -21,6 +22,9 @@ it("explains what the agent may reach and opens macOS settings only on an explic
   expect(screen.getByRole("region", { name: "App control" })).toHaveTextContent(/inspect and drive the native windows of apps launched from a chat's App surface/u);
   expect(screen.getByRole("region", { name: "App control" })).toHaveTextContent("Agent app access");
   expect(await screen.findByText(/Allow Inertia in System Settings → Privacy & Security → Accessibility/u)).toBeVisible();
+  expect(screen.getByRole("region", { name: "App control" })).toHaveTextContent(/keyboard and wheel input only to a launched window you let it bring to the front/u);
+  expect(screen.getByText("Keyboard and mouse input")).toBeVisible();
+  expect(screen.getByText(/Needs Accessibility: allow Inertia/u)).toBeVisible();
   // Reading the state never opens anything.
   expect(appControl).toHaveBeenCalledTimes(1);
   expect(appControl).toHaveBeenCalledWith({ type: "state" });
@@ -36,7 +40,7 @@ it("explains what the agent may reach and opens macOS settings only on an explic
 it("refreshes on focus and words a helper denial and a granted Mac", async () => {
   const appControl = vi.fn()
     .mockResolvedValueOnce({ ...mac, accessibility: "helper-denied", screenRecording: "granted" })
-    .mockResolvedValueOnce({ ...mac, accessibility: "granted", screenRecording: "granted" });
+    .mockResolvedValueOnce({ ...mac, accessibility: "granted", screenRecording: "granted", input: "available" });
   install(appControl);
   render(<AppControlSettings />);
   expect(await screen.findByText(/denied access to its App control helper/u)).toBeVisible();
@@ -44,19 +48,21 @@ it("refreshes on focus and words a helper denial and a granted Mac", async () =>
   expect(screen.queryByRole("button", { name: "Screen Recording settings" })).not.toBeInTheDocument();
   await act(async () => { fireEvent.focus(window); });
   expect(await screen.findByText(/macOS allows Inertia to read and control/u)).toBeVisible();
+  expect(screen.getByText(/only after you approve bringing it to the front/u)).toBeVisible();
   expect(screen.queryByRole("button", { name: /settings$/u })).not.toBeInTheDocument();
 });
 
 it.each([
-  [{ platform: "win32", accessibility: "available", screenRecording: "not-needed", session: null }, /runs as administrator/u, /can include windows overlapping it/u],
-  [{ platform: "linux", accessibility: "available", screenRecording: "not-needed", session: "x11" }, /AT-SPI is available/u, /can include windows overlapping it/u],
-  [{ platform: "linux", accessibility: "unavailable", screenRecording: "not-needed", session: "x11" }, /AT-SPI accessibility bus did not answer/u, /can include windows overlapping it/u],
-  [{ platform: "linux", accessibility: "available", screenRecording: "not-needed", screenshots: "unavailable", session: "wayland" }, /AT-SPI is available/u, /Unavailable on Wayland/u],
-] as const)("shows the %o state without any settings button", async (overrides, access, screenshots) => {
+  [{ platform: "win32", accessibility: "available", screenRecording: "not-needed", session: null, input: "available" }, /runs as administrator/u, /can include windows overlapping it/u, /^Available\. Keys other than Enter and Space/u],
+  [{ platform: "linux", accessibility: "available", screenRecording: "not-needed", session: "x11", input: "available" }, /AT-SPI is available/u, /can include windows overlapping it/u, /^Available\. Keys other than Enter and Space/u],
+  [{ platform: "linux", accessibility: "unavailable", screenRecording: "not-needed", session: "x11", input: "unavailable" }, /AT-SPI accessibility bus did not answer/u, /can include windows overlapping it/u, /^Unavailable on this desktop/u],
+  [{ platform: "linux", accessibility: "available", screenRecording: "not-needed", screenshots: "unavailable", session: "wayland", input: "unavailable" }, /AT-SPI is available/u, /Unavailable on Wayland: the desktop does not let Inertia read window pixels/u, /Unavailable on Wayland: the desktop does not let Inertia send keys/u],
+] as const)("shows the %o state without any settings button", async (overrides, access, screenshots, input) => {
   install(vi.fn().mockResolvedValue({ ...mac, ...overrides }));
   render(<AppControlSettings />);
   expect(await screen.findByText(access)).toBeVisible();
   expect(screen.getByText(screenshots)).toBeVisible();
+  expect(screen.getByText(input)).toBeVisible();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
 

@@ -18,8 +18,12 @@ export const ACCESSIBILITY_MESSAGES = Object.freeze({
   unsupportedAction: "That control does not support this action through the accessibility API. Take a new inertia_app_snapshot and try another control.",
   refused: "The app refused that accessibility action. Take a new inertia_app_snapshot, then try again.",
   noFocus: "No control in this window has keyboard focus. Click or type into a control first, then press the key.",
-  key: "That key is not supported for native windows: only Enter and Space can be pressed, and they activate the focused control through the accessibility API. Click or type into a control instead.",
-  scrollPixels: "Scrolling by pixels is not supported for native windows. Scroll a control into view with inertia_app_scroll and its ref instead.",
+  notInFront: "The app is not in front; call inertia_app_activate with this windowId, then try again. Keys other than Enter and Space and scrolling by deltaY reach a native window as keyboard and wheel input, which needs the window in front.",
+  inputWayland: "Synthesized input is not available on Wayland: the desktop does not let Inertia send keys or wheel input to another app. Use Enter or Space on a focused control, inertia_app_click, inertia_app_type, or inertia_app_scroll with a ref instead.",
+  inputUnavailable: "Synthesized keyboard and wheel input is not available on this platform or desktop session. Use Enter or Space on a focused control, inertia_app_click, inertia_app_type, or inertia_app_scroll with a ref instead.",
+  activated: "The window was brought to the front. For the rest of this turn inertia_app_press accepts every listed key and inertia_app_scroll accepts deltaY for it, while it stays in front.",
+  keptBehind: "The operating system kept the app behind another window, so it is not in front and no keys or wheel input were allowed. Ask the user to bring the app to the front, then call inertia_app_activate again, or use Enter or Space on a focused control, inertia_app_click, inertia_app_type, or inertia_app_scroll with a ref.",
+  metaEnter: "Meta+Enter is sent only on macOS. Use Control+Enter or another listed key on this platform.",
   busy: "Too many App control requests are running at once, so nothing was sent. Try again when one finishes.",
   unavailable: "Native window control is unavailable right now, so nothing was sent. Call inertia_app_status, then try again.",
   wayland: "Screenshots are unavailable on Wayland: the desktop does not let Inertia read window pixels. Use inertia_app_snapshot to inspect the window instead.",
@@ -83,9 +87,15 @@ export function accessibilityFailure(
           ? ACCESSIBILITY_MESSAGES.notEditable
           : failure.reason === "action-unsupported"
             ? ACCESSIBILITY_MESSAGES.unsupportedAction
-            : failure.reason === "no-focus" ? ACCESSIBILITY_MESSAGES.noFocus : ACCESSIBILITY_MESSAGES.refused);
+            : failure.reason === "no-focus"
+              ? ACCESSIBILITY_MESSAGES.noFocus
+              : failure.reason === "key-unsupported" ? ACCESSIBILITY_MESSAGES.metaEnter : ACCESSIBILITY_MESSAGES.refused);
     case "unsupported":
-      return result("unavailable", failure.reason === "wayland" ? ACCESSIBILITY_MESSAGES.wayland : ACCESSIBILITY_MESSAGES.platform);
+      return result("unavailable", failure.reason === "wayland"
+        ? ACCESSIBILITY_MESSAGES.wayland
+        : failure.reason === "input-wayland"
+          ? ACCESSIBILITY_MESSAGES.inputWayland
+          : failure.reason === "input-unavailable" ? ACCESSIBILITY_MESSAGES.inputUnavailable : ACCESSIBILITY_MESSAGES.platform);
     case "elevated":
       return result("unavailable", ACCESSIBILITY_MESSAGES.elevated);
     case "cancelled":
@@ -95,7 +105,9 @@ export function accessibilityFailure(
     case "busy":
       return result("too-large", ACCESSIBILITY_MESSAGES.busy);
     case "unavailable":
-      return result("unavailable", failure.reason === "tree-too-large" ? ACCESSIBILITY_MESSAGES.treeTooLarge : ACCESSIBILITY_MESSAGES.unavailable);
+      return result("unavailable", failure.reason === "tree-too-large"
+        ? ACCESSIBILITY_MESSAGES.treeTooLarge
+        : failure.reason === "not-foreground" ? ACCESSIBILITY_MESSAGES.notInFront : ACCESSIBILITY_MESSAGES.unavailable);
   }
 }
 
@@ -109,7 +121,10 @@ export function gateCategory(failure: AppControlFailure): AppUnderTestWindowAcce
     // The worker failed to load three times: polling backs off until the user acts.
     case "native-failure": return failure.reason === "start-failed" ? "start-failed" : null;
     case "elevated": return "elevated";
-    case "unsupported": return failure.reason === "wayland" ? null : "unsupported";
+    // Wayland blocks screenshots and synthesized input only; windows stay readable.
+    case "unsupported": return failure.reason === "wayland" || failure.reason === "input-wayland" || failure.reason === "input-unavailable"
+      ? null
+      : "unsupported";
     default: return null;
   }
 }
@@ -133,4 +148,20 @@ export function clickAction(target: Pick<AppControlElementInfo, "role" | "checke
 /** Only Enter and Space have an accessibility equivalent: activating the focused control. */
 export function keyAction(key: AgentBrowserKey): "press" | null {
   return key === "Enter" || key === "Space" ? "press" : null;
+}
+
+/**
+ * How a native window receives a destructive command in this turn. Clicks,
+ * text and scrolling a ref into view are accessibility actions; so are Enter
+ * and Space until the window is brought to the front. Every other key, any
+ * key once the window holds this turn's foreground grant, and a pixel scroll
+ * are synthesized input.
+ */
+export function nativeInputRoute(
+  command: { action: string; key?: AgentBrowserKey; ref?: string; deltaY?: number },
+  granted: boolean,
+): "accessibility" | "synthesized" {
+  if (command.action === "press") return granted || keyAction(command.key!) === null ? "synthesized" : "accessibility";
+  if (command.action === "scroll") return command.ref === undefined ? "synthesized" : "accessibility";
+  return "accessibility";
 }

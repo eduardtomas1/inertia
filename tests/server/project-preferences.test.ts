@@ -157,7 +157,7 @@ describe("durable project and thread organization", () => {
     // Exact shape written by builds that predate claudeMaxBudgetUsd.
     const legacy = { workspace: "worktree", autoPull: true, browserAccess: false, icon: { kind: "symbol", name: "code" },
       actions: [{ id: "11111111-1111-4111-8111-111111111111", name: "Check", executable: "node", args: ["--version"] }] };
-    const laterDefaults = { defaultAccessMode: null, appUnderTestAccess: null, color: null, colorEmphasis: "icon", pinned: false };
+    const laterDefaults = { defaultAccessMode: null, appUnderTestAccess: null, appUnderTestVisualEvidence: false, color: null, colorEmphasis: "icon", pinned: false };
     expect(parseProjectPreferences(JSON.stringify(legacy))).toEqual({ ...legacy, claudeMaxBudgetUsd: null, ...laterDefaults });
     store.close(); stores.splice(stores.indexOf(store), 1);
     const database = new Database(path);
@@ -184,6 +184,25 @@ describe("durable project and thread organization", () => {
     expect(parseProjectPreferences(JSON.stringify({ ...defaults, autoPull: true, appUnderTestAccess: "yes" })))
       .toEqual({ ...defaults, autoPull: true, appUnderTestAccess: null });
     expect(parseProjectPreferences(JSON.stringify({ ...defaults, appUnderTestAccess: false })).appUnderTestAccess).toBe(false);
+  });
+
+  it("keeps model-visible app screenshots off by default and tolerates older or corrupt saved values", () => {
+    const defaults = defaultProjectPreferences();
+    expect(defaults.appUnderTestVisualEvidence).toBe(false);
+    for (const value of [true, false]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, appUnderTestVisualEvidence: value }))
+        .toMatchObject({ success: true, data: { appUnderTestVisualEvidence: value } });
+    }
+    for (const value of [null, "true", 1, {}]) {
+      expect(projectPreferencesSchema.safeParse({ ...defaults, appUnderTestVisualEvidence: value }).success).toBe(false);
+    }
+    // Saved before the key existed: off, with everything else kept.
+    const { appUnderTestVisualEvidence: _visual, ...older } = { ...defaults, autoPull: true, appUnderTestAccess: true };
+    expect(parseProjectPreferences(JSON.stringify(older))).toEqual({ ...older, appUnderTestVisualEvidence: false });
+    // A corrupt value falls back to off without losing the other preferences.
+    expect(parseProjectPreferences(JSON.stringify({ ...defaults, autoPull: true, appUnderTestVisualEvidence: "yes" })))
+      .toEqual({ ...defaults, autoPull: true, appUnderTestVisualEvidence: false });
+    expect(parseProjectPreferences(JSON.stringify({ ...defaults, appUnderTestVisualEvidence: true })).appUnderTestVisualEvidence).toBe(true);
   });
 
   it("accepts only the known access modes as the project's default access, inheriting by default", () => {

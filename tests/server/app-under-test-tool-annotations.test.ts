@@ -13,7 +13,7 @@ import { APP_UNDER_TEST_TOOL_DEFINITIONS } from "../../src/server/runtime/app-un
 
 const DESTRUCTIVE = new Set([
   "inertia_app_launch", "inertia_app_stop", "inertia_app_click",
-  "inertia_app_type", "inertia_app_press", "inertia_app_scroll",
+  "inertia_app_type", "inertia_app_press", "inertia_app_scroll", "inertia_app_activate",
 ]);
 const READ_ONLY = new Set([
   "inertia_app_status", "inertia_app_logs", "inertia_app_windows",

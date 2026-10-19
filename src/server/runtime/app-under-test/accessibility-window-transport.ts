@@ -6,6 +6,7 @@ import {
   type AppControlElementInfo,
   type AppControlExpectation,
   type AppControlFailure,
+  type AppControlInputExpectation,
   type AppControlRect,
   type AppControlResult,
   type AppControlValue,
@@ -15,6 +16,7 @@ import { serializeAgentPageSnapshot } from "../../../shared/agent-page-scripts";
 import {
   APP_INPUT_BUDGET_MS,
   APP_INSPECT_BUDGET_MS,
+  appWheelNotches,
   MAX_APP_WINDOW_TITLE_CHARS,
   MAX_APP_WINDOWS,
   type AppUnderTestWindow,
@@ -26,7 +28,8 @@ import {
   accessibilityFailure,
   clickAction,
   gateCategory,
-  keyAction,
+  nativeInputRoute,
+  permissionMessage,
 } from "./accessibility-window-support";
 import type { RuntimeAppControlBroker } from "./app-control-broker-client";
 import {
@@ -45,7 +48,9 @@ import {
 import type {
   AccessibilityTransportFactory,
   AppUnderTestAccessibilityTransportContext,
+  AppUnderTestAgentImage,
   AppUnderTestDestructiveWindowCommand,
+  AppUnderTestInputRoute,
   AppUnderTestPendingDialog,
   AppUnderTestTransportStatus,
   AppUnderTestTurn,
@@ -70,6 +75,10 @@ import type {
  * control of another document. One native command runs at a time per
  * launch. Window text is untrusted data: bounded, redacted, and never used as
  * an instruction or an approval label beyond the sanitized control role and name.
+ * Keys beyond Enter and Space and pixel scrolling are synthesized OS input,
+ * allowed only for a window brought to the front with an approved
+ * inertia_app_activate in the same turn; main checks the foreground process
+ * immediately before it posts anything.
  */
 
 export interface AccessibilityWindowTransportOptions {
@@ -97,6 +106,11 @@ interface NativeWindowState {
   /** Values the agent typed into sensitive controls of this window. */
   memory: PageMemory;
   lastUsed: number;
+  /**
+   * The turn whose approved inertia_app_activate brought this window to the
+   * front; synthesized keys and wheel input are allowed only in that turn.
+   */
+  foregroundGrant: { turnId: string; grantedAt: number } | null;
 }
 
 const POLL_MS = 2_000;
@@ -105,6 +119,8 @@ const WAIT_POLL_MS = 500;
 const QUEUE_WAIT_MS = 30_000;
 const MAX_QUEUED = 16;
 const MAX_REFS_PER_WINDOW = 4_096;
+/** Settled turns remembered so a late activation grants nothing. */
+const MAX_SETTLED_TURNS = 64;
 
 class Refused extends Error {
   constructor(readonly failure: AppUnderTestWindowFailure) {
@@ -135,6 +151,8 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
   private gateKind: AppUnderTestWindowAccessGate | null = null;
   /** Apps of the launch's tree that Inertia never reads; the worker lists each once. */
   private protectedApps = 0;
+  /** Recently settled turns: an activation that finishes after its turn settled grants nothing. */
+  private readonly settledTurns = new Set<string>();
 
   constructor(
     private readonly context: AppUnderTestAccessibilityTransportContext,
@@ -192,6 +210,24 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
     return redactSecrets(this.launchMemory, text, MAX_APP_LOG_LINE_CHARS, cut);
   }
 
+  documentSequence(windowId: string): number | null {
+    return this.windowById(windowId)?.documentSequence ?? null;
+  }
+
+  inputRoute(command: AppUnderTestDestructiveWindowCommand, turn?: AppUnderTestTurn): AppUnderTestInputRoute {
+    const window = this.windowById(command.windowId);
+    return nativeInputRoute(command, window !== null && this.granted(window, turn));
+  }
+
+  turnSettled(turnId: string): void {
+    this.settledTurns.delete(turnId);
+    this.settledTurns.add(turnId);
+    while (this.settledTurns.size > MAX_SETTLED_TURNS) this.settledTurns.delete(this.settledTurns.values().next().value as string);
+    for (const window of this.byToken.values()) {
+      if (window.foregroundGrant?.turnId === turnId) window.foregroundGrant = null;
+    }
+  }
+
   /** Re-reads the window list; `turn` is the agent turn asking, absent for background polling. */
   async refreshWindows(signal: AbortSignal, turn?: AppUnderTestTurn): Promise<void> {
     await this.exclusive(signal, async () => { await this.readWindows(signal, turn); }).catch(() => undefined);
@@ -226,8 +262,17 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
     switch (command.action) {
       case "snapshot":
         return await this.run(command.windowId, APP_INSPECT_BUDGET_MS, signal, (window, scoped) => this.snapshot(window, scoped, turn));
-      case "screenshot":
-        return await this.run(command.windowId, APP_INSPECT_BUDGET_MS, signal, (window, scoped) => this.screenshot(window, scoped, turn));
+      case "screenshot": {
+        let image: AppUnderTestAgentImage | null = null;
+        let thumbnail: { png: Uint8Array; width: number; height: number } | undefined;
+        const shot = await this.run(command.windowId, APP_INSPECT_BUDGET_MS, signal, async (window, scoped) => {
+          const captured = await this.screenshot(window, scoped, command.agentImage === true, turn);
+          image = captured.image;
+          thumbnail = captured.thumbnail;
+          return captured.value;
+        });
+        return shot.ok && command.agentImage ? { ...shot, image, ...(thumbnail ? { thumbnail } : {}) } : shot;
+      }
       case "wait":
         return await this.run(command.windowId, command.timeoutMs + WAIT_BUDGET_EXTRA_MS, signal, (window, scoped) => this.wait(window, command, scoped, turn));
       default:
@@ -445,6 +490,7 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
         nextRef: 1,
         memory: emptyPageMemory(),
         lastUsed: 0,
+        foregroundGrant: null,
       });
       changed = true;
     }
@@ -589,22 +635,38 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
     }
   }
 
-  private async screenshot(window: NativeWindowState, signal: AbortSignal, turn?: AppUnderTestTurn): Promise<Record<string, unknown>> {
+  private async screenshot(
+    window: NativeWindowState,
+    signal: AbortSignal,
+    agentImage: boolean,
+    turn?: AppUnderTestTurn,
+  ): Promise<{
+    value: Record<string, unknown>;
+    image: AppUnderTestAgentImage | null;
+    thumbnail?: { png: Uint8Array; width: number; height: number };
+  }> {
     // A secret typed into any window of the launch withholds every window's screenshots.
     if (this.launchMemory.passwordValues.size > 0 || this.launchMemory.evidenceWithheld
       || window.memory.passwordValues.size > 0 || window.memory.evidenceWithheld) {
       throw refused("sensitive", ACCESSIBILITY_MESSAGES.sensitiveField);
     }
-    const shot = await this.ask({ command: "screenshot", window: window.token }, "screenshot", signal, turn);
-    const evidenceId = this.context.evidence({ kind: "screenshot", png: shot.png, width: shot.width, height: shot.height });
-    if (!evidenceId) throw refused("unavailable", "Inertia could not keep the screenshot as local evidence.");
-    return {
-      captured: true,
-      evidenceId,
+    // Main applies the same gate and masks to both images before either leaves the worker.
+    const shot = await this.ask({ command: "screenshot", window: window.token, agentImage }, "screenshot", signal, turn);
+    // A region capture (Windows, X11) can show other windows over the app: it never reaches the model.
+    const image = agentImage && !shot.mayIncludeOverlappingWindows ? shot.agentImage : null;
+    const value = {
       width: Math.round(window.bounds?.width ?? shot.width),
       height: Math.round(window.bounds?.height ?? shot.height),
       mayIncludeOverlappingWindows: shot.mayIncludeOverlappingWindows,
     };
+    const thumbnail = { png: shot.png, width: shot.width, height: shot.height };
+    // The host tool records a model-visible request's evidence once it knows whether the image was sent.
+    if (agentImage) {
+      return { value: { captured: true, ...value }, image: image ? { png: image.png, width: image.width, height: image.height } : null, thumbnail };
+    }
+    const evidenceId = this.context.evidence({ kind: "screenshot", ...thumbnail });
+    if (!evidenceId) throw refused("unavailable", "Inertia could not keep the screenshot as local evidence.");
+    return { value: { captured: true, evidenceId, ...value }, image: null };
   }
 
   // Inspection and input ---------------------------------------------------------------------
@@ -626,11 +688,18 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
     turn?: AppUnderTestTurn,
   ): Promise<{ inspection: AppUnderTestWindowInspection; element: AppControlElementInfo | null }> {
     let token: string | null = null;
-    if (command.action === "press") {
-      if (keyAction(command.key) === null) throw refused("invalid", ACCESSIBILITY_MESSAGES.key);
-    } else if (command.action === "scroll" && !("ref" in command)) {
-      throw refused("invalid", ACCESSIBILITY_MESSAGES.scrollPixels);
-    } else {
+    const synthesized = nativeInputRoute(command, this.granted(window, turn)) === "synthesized";
+    if (synthesized) {
+      // Refused before any approval: a key this platform never sends, the grant, then the platform.
+      if (command.action === "press" && command.key === "Meta+Enter" && this.platform !== "darwin") {
+        throw refused("invalid", ACCESSIBILITY_MESSAGES.metaEnter);
+      }
+      if (!this.granted(window, turn)) throw refused("unavailable", ACCESSIBILITY_MESSAGES.notInFront);
+      await this.requireInput(signal, turn);
+    } else if (command.action === "activate") {
+      // Bringing a window forward is only for synthesized input: refused before the card where there is none.
+      await this.requireInput(signal, turn);
+    } else if (command.action !== "press" && "ref" in command) {
       token = window.refs.get(command.ref) ?? null;
       if (token === null) throw refused("not-found", ACCESSIBILITY_MESSAGES.stale);
     }
@@ -656,11 +725,28 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
         windowId: window.windowId,
         windowNumber: window.windowNumber,
         documentSequence: window.documentSequence,
-        target: command.action === "scroll" && !("ref" in command) ? null : this.target(window, element),
+        target: command.action === "activate" || (command.action === "scroll" && !("ref" in command))
+          ? null
+          : this.target(window, element),
         dialog: null,
+        ...(synthesized ? { synthesized: true } : {}),
       },
       element,
     };
+  }
+
+  /** A foreground grant from an approved inertia_app_activate in this very turn. */
+  private granted(window: NativeWindowState, turn: AppUnderTestTurn | undefined): boolean {
+    return turn !== undefined && window.foregroundGrant?.turnId === turn.turnId;
+  }
+
+  /** Main's answer on synthesized input for this desktop; Wayland and a missing permission refuse. */
+  private async requireInput(signal: AbortSignal, turn?: AppUnderTestTurn): Promise<void> {
+    const permissions = await this.ask({ command: "permissions" }, "permissions", signal, turn);
+    if (permissions.input === "available") return;
+    throw refused("unavailable", permissions.input === "required"
+      ? permissionMessage(this.platform, false)
+      : this.platform === "linux" ? ACCESSIBILITY_MESSAGES.inputWayland : ACCESSIBILITY_MESSAGES.inputUnavailable);
   }
 
   private async act(
@@ -669,15 +755,25 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
     options: AppUnderTestWindowPerformOptions,
     signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
-    if (command.action !== "click" && command.action !== "type" && command.action !== "press" && command.action !== "scroll") {
+    if (command.action !== "click" && command.action !== "type" && command.action !== "press" && command.action !== "scroll"
+      && command.action !== "activate") {
       throw refused("invalid", ACCESSIBILITY_MESSAGES.refused);
     }
     if (options.dialogOnly) throw refused("not-found", ACCESSIBILITY_MESSAGES.changed);
     const { expected, turn } = options;
+    // The route the host tool planned (and an approval named) must still be the route now.
+    if (options.route !== undefined && options.route !== nativeInputRoute(command, this.granted(window, turn))) {
+      throw refused("not-found", ACCESSIBILITY_MESSAGES.changed);
+    }
     const { inspection, element } = await this.inspectIn(window, command, signal, turn);
     if (expected && (expected.documentSequence !== inspection.documentSequence || expected.dialog !== null
-      || !sameTarget(expected.target, inspection.target))) {
+      || !sameTarget(expected.target, inspection.target)
+      || (expected.synthesized === true) !== (inspection.synthesized === true))) {
       throw refused("not-found", ACCESSIBILITY_MESSAGES.changed);
+    }
+    if (command.action === "activate") return await this.activate(window, expected !== undefined, signal, turn);
+    if (inspection.synthesized && (command.action === "press" || command.action === "scroll")) {
+      return await this.synthesize(window, command, expected !== undefined ? element : undefined, signal, turn);
     }
     if (command.action === "press" && !element) throw refused("invalid", ACCESSIBILITY_MESSAGES.noFocus);
     const expect: AppControlExpectation | null = expected && element && window.rootKey
@@ -715,6 +811,76 @@ export class AccessibilityWindowTransport implements AppUnderTestWindowTransport
     if (performed.windowClosed) {
       this.forget(window);
       return { ...outcome, windowClosed: true, nextStep: "The window closed after the action. Call inertia_app_windows for current windows." };
+    }
+    const replaced = this.observeRoot(window, performed.rootKey);
+    return {
+      ...outcome,
+      title: this.title(window),
+      origin: null,
+      loading: false,
+      ...(replaced ? { navigated: true, nextStep: ACCESSIBILITY_MESSAGES.contentChanged } : {}),
+    };
+  }
+
+  /** Brings the window to the front through the accessibility API and grants this turn synthesized input to it. */
+  private async activate(
+    window: NativeWindowState,
+    approved: boolean,
+    signal: AbortSignal,
+    turn: AppUnderTestTurn | undefined,
+  ): Promise<Record<string, unknown>> {
+    if (!turn) throw refused("invalid", ACCESSIBILITY_MESSAGES.refused);
+    const expect: AppControlExpectation | null = approved && window.rootKey ? { rootKey: window.rootKey, role: "", name: "" } : null;
+    const result = await this.request({
+      command: "perform", window: window.token, element: null, action: "activate", text: null, expect,
+    }, signal, turn);
+    // Main found another app still in front after the activation: nothing is granted.
+    if (!result.ok && result.code === "unavailable" && result.reason === "not-foreground") {
+      return { activated: false, title: this.title(window), origin: null, loading: false, nextStep: ACCESSIBILITY_MESSAGES.keptBehind };
+    }
+    if (!result.ok) {
+      this.setGate(result);
+      throw new Refused(accessibilityFailure(result, this.platform));
+    }
+    if (result.value.kind !== "perform") throw new Refused(accessibilityFailure(appControlFailure("native-failure"), this.platform));
+    const performed = result.value;
+    if (performed.windowClosed) {
+      this.forget(window);
+      return { activated: false, windowClosed: true, nextStep: "The window closed. Call inertia_app_windows for current windows." };
+    }
+    this.observeRoot(window, performed.rootKey);
+    // An activation that finished after its turn settled grants nothing.
+    if (this.settledTurns.has(turn.turnId) || this.closed) {
+      return { activated: false, title: this.title(window), origin: null, loading: false, nextStep: ACCESSIBILITY_MESSAGES.notInFront };
+    }
+    window.foregroundGrant = { turnId: turn.turnId, grantedAt: Date.now() };
+    return { activated: true, title: this.title(window), origin: null, loading: false, nextStep: ACCESSIBILITY_MESSAGES.activated };
+  }
+
+  /**
+   * Synthesized key or wheel input. `focus` is the inspected focused control
+   * when an approval bound it (undefined without an approval); main checks
+   * it, the root and the foreground process again before it posts.
+   */
+  private async synthesize(
+    window: NativeWindowState,
+    command: Extract<AppUnderTestDestructiveWindowCommand, { action: "press" | "scroll" }>,
+    focus: AppControlElementInfo | null | undefined,
+    signal: AbortSignal,
+    turn: AppUnderTestTurn | undefined,
+  ): Promise<Record<string, unknown>> {
+    if (!this.granted(window, turn)) throw refused("unavailable", ACCESSIBILITY_MESSAGES.notInFront);
+    const key = command.action === "press" ? command.key : null;
+    const deltaY = command.action === "scroll" && "deltaY" in command ? command.deltaY : null;
+    const expect: AppControlInputExpectation | null = focus !== undefined && window.rootKey
+      ? { rootKey: window.rootKey, focus: key !== null && focus ? { role: focus.role, name: focus.name } : null }
+      : null;
+    const performed = await this.ask({ command: "input", window: window.token, key, deltaY, expect }, "perform", signal, turn);
+    // The pixels asked for, and the wheel notches sent for them (the app decides how far a notch scrolls).
+    const outcome = key !== null ? { pressed: key } : { scrolled: deltaY, wheelNotches: appWheelNotches(deltaY!) };
+    if (performed.windowClosed) {
+      this.forget(window);
+      return { ...outcome, windowClosed: true, nextStep: "The window closed after the input. Call inertia_app_windows for current windows." };
     }
     const replaced = this.observeRoot(window, performed.rootKey);
     return {

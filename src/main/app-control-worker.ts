@@ -6,13 +6,17 @@ import { appControlFailure, type AppControlResult } from "../node/runtime-app-co
 import { captureMaskedWindow } from "./app-control-capture.js";
 import {
   AppControlNative,
+  AppControlNativeFailure,
   nativeFailure,
   type AppControlScope,
+  type NativeInput,
   type NativeModule,
 } from "./app-control-native.js";
 import { AppControlTreeTooLargeError, type AppControlProcessEntry } from "./app-control-process-tree.js";
 import { MacProcessFacts } from "./app-control-macos-process.js";
 import { uipiBlocks, WindowsProcessFacts } from "./app-control-windows.js";
+import { appControlInputUnavailableReason } from "./app-control-platform.js";
+import { X11ForegroundWindow, x11ForegroundPid } from "./app-control-x11.js";
 import { macWindowPixels, stopMacWindowCaptures } from "./snapshot-macos-window.js";
 import type { AppControlWorkerRequest, AppControlWorkerResponse } from "./app-control-worker-protocol.js";
 
@@ -23,6 +27,8 @@ import type { AppControlWorkerRequest, AppControlWorkerResponse } from "./app-co
  */
 
 const { App, screenshot, setDefaultTimeout } = xa11y;
+let inputSim: NativeInput | null = null;
+const x11 = process.platform === "linux" ? new X11ForegroundWindow(ffi) : null;
 const native: NativeModule = {
   App: {
     list: async () => await App.list(),
@@ -36,6 +42,27 @@ const native: NativeModule = {
         return null;
       }
     },
+  },
+  // One direct query, never a wait: nothing in front is not the app. On X11
+  // the window manager's active window names the process (Chromium reports no
+  // AT-SPI active state) and its answer is final; elsewhere, and without
+  // libX11 or an EWMH window manager, xa11y asks.
+  foregroundPid: async () => await x11ForegroundPid(x11, process.env.DISPLAY, async () => (await App.foreground({ timeout: 0 })).pid),
+  input: () => {
+    if (inputSim) return inputSim;
+    try {
+      const created = xa11y.inputSim();
+      inputSim = {
+        press: async (key) => await created.press(key),
+        chord: async (key, held) => await created.chord(key, held),
+        scroll: async (target, dx, dy) => await created.scroll(target, dx, dy),
+      };
+      return inputSim;
+    } catch (error) {
+      // A Wayland-only session has no XTest; a typed denial keeps its category.
+      if (error instanceof xa11y.PermissionDeniedError) throw error;
+      throw new AppControlNativeFailure("unsupported", appControlInputUnavailableReason(process.platform, process.env));
+    }
   },
   errors: {
     PermissionDeniedError: xa11y.PermissionDeniedError,
@@ -79,6 +106,10 @@ async function run(request: AppControlWorkerRequest): Promise<AppControlWorkerRe
       ok: true,
       value: await control.perform(scope, command.window, command.element, command.action, command.text, command.expect),
     };
+    case "input": return {
+      ok: true,
+      value: await control.input(scope, command.window, command.key, command.deltaY, command.expect),
+    };
     case "screenshot": {
       const resolved = await control.resolve(scope, command.window);
       const plan = await control.screenshotPlan(resolved);
@@ -92,6 +123,8 @@ async function run(request: AppControlWorkerRequest): Promise<AppControlWorkerRe
           regionScreenshot: async (region) => await screenshot({ region }),
           ...(process.platform === "darwin" && directory && isAbsolute(directory) ? { macPixels: macWindowPixels(directory) } : {}),
         },
+        // Only a capture of exactly that window (macOS) may reach the model; main reduces it.
+        command.agentImage,
       );
       // A field that filled in while the pixels were taken withholds them.
       await control.screenshotPlan(resolved);
@@ -103,6 +136,8 @@ async function run(request: AppControlWorkerRequest): Promise<AppControlWorkerRe
           width: capture.width,
           height: capture.height,
           mayIncludeOverlappingWindows: capture.mayIncludeOverlappingWindows,
+          // Main reduces the model-visible image from this capture.
+          agentImage: null,
         },
       };
     }

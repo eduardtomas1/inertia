@@ -10,7 +10,8 @@ vi.mock("electron", () => ({
 }));
 
 import { AppControlTreeTooLargeError } from "../../src/main/app-control-process-tree";
-import { AppControlService, type AppControlServiceDependencies } from "../../src/main/app-control-service";
+import { appControlInputAvailable, appControlLinuxSession, appControlScreenshotAvailable } from "../../src/main/app-control-platform";
+import { AppControlService, appControlReductionScale, type AppControlServiceDependencies } from "../../src/main/app-control-service";
 import type { AppControlWorkerRequest } from "../../src/main/app-control-worker-protocol";
 import type { AppControlCommand } from "../../src/node/runtime-app-control-protocol";
 
@@ -77,6 +78,7 @@ function harness(overrides: Partial<AppControlServiceDependencies> = {}) {
     ]),
     ownPids: () => [5, 6],
     reduceThumbnail: vi.fn(() => ({ png, width: 512, height: 320 })),
+    reduceAgentImage: vi.fn(() => ({ png, width: 1_200, height: 600 })),
     idleMs: 60_000,
     ...overrides,
   };
@@ -122,7 +124,9 @@ describe("App control service", () => {
     const denied = harness({ platform: "darwin", accessibilityTrusted: vi.fn(() => false) });
     await expect(denied.service.perform(identity, snapshot, signal(), owner)).resolves.toEqual({ ok: false, code: "permission-denied", reason: null, dispatched: false });
     expect(denied.children).toHaveLength(0);
-    expect(denied.service.permissions()).toEqual({ kind: "permissions", accessibility: "required", screenRecording: "granted", screenshots: "available" });
+    expect(denied.service.permissions()).toEqual({
+      kind: "permissions", accessibility: "required", screenRecording: "granted", screenshots: "available", input: "required",
+    });
     await expect(denied.service.perform(identity, { command: "permissions" }, signal(), owner)).resolves.toMatchObject({ ok: true, value: { kind: "permissions" } });
 
     const helper = harness({ platform: "darwin" });
@@ -134,8 +138,13 @@ describe("App control service", () => {
     await expect(linux.service.perform(identity, snapshot, signal(), owner)).resolves.toMatchObject({ code: "permission-denied" });
 
     const recording = harness({ platform: "darwin", screenRecordingGranted: vi.fn(() => false) });
-    await expect(recording.service.perform(identity, { command: "screenshot", window }, signal(), owner))
+    await expect(recording.service.perform(identity, { command: "screenshot", window, agentImage: false }, signal(), owner))
       .resolves.toEqual({ ok: false, code: "permission-denied", reason: "screen-recording", dispatched: false });
+    // Synthesized input needs the same Accessibility grant on macOS; nothing reaches the worker without it.
+    await expect(denied.service.perform(identity, { command: "input", window, key: "Tab", deltaY: null, expect: null }, signal(), owner))
+      .resolves.toEqual({ ok: false, code: "permission-denied", reason: null, dispatched: false });
+    expect(denied.children).toHaveLength(0);
+    expect(harness({ platform: "darwin" }).service.permissions().input).toBe("available");
   });
 
   it("reports the App control card's state per platform, probing the helper with an empty scope and never prompting", async () => {
@@ -144,6 +153,7 @@ describe("App control service", () => {
     linux.respond(() => windowsValue);
     await expect(linux.service.settingsState()).resolves.toEqual({
       platform: "linux", available: true, accessibility: "available", screenRecording: "not-needed", screenshots: "available", session: "x11",
+      input: "available",
     });
     // The probe lists no launch's windows: its scope is empty.
     expect(linux.children[0]!.requests[0]).toMatchObject({ scope: { pids: [], deniedPids: [] }, command: { command: "windows" } });
@@ -152,54 +162,152 @@ describe("App control service", () => {
 
     const wayland = harness({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" } });
     wayland.respond(() => windowsValue);
-    await expect(wayland.service.settingsState()).resolves.toMatchObject({ accessibility: "available", screenshots: "unavailable", session: "wayland" });
+    await expect(wayland.service.settingsState()).resolves.toMatchObject({
+      accessibility: "available", screenshots: "unavailable", session: "wayland", input: "unavailable",
+    });
 
     const windows = harness({ platform: "win32", env: {} });
     await expect(windows.service.settingsState()).resolves.toEqual({
       platform: "win32", available: true, accessibility: "available", screenRecording: "not-needed", screenshots: "available", session: null,
+      input: "available",
     });
     expect(windows.children).toHaveLength(0);
 
     const required = harness({ platform: "darwin", accessibilityTrusted: vi.fn(() => false), screenRecordingGranted: vi.fn(() => false) });
     await expect(required.service.settingsState()).resolves.toEqual({
       platform: "darwin", available: true, accessibility: "required", screenRecording: "required", screenshots: "available", session: null,
+      input: "required",
     });
     // Without the grant the helper is never started, so nothing can prompt.
     expect(required.children).toHaveLength(0);
 
     const granted = harness({ platform: "darwin" });
     granted.respond(() => windowsValue);
-    await expect(granted.service.settingsState()).resolves.toMatchObject({ accessibility: "granted", screenRecording: "granted" });
+    await expect(granted.service.settingsState()).resolves.toMatchObject({ accessibility: "granted", screenRecording: "granted", input: "available" });
     granted.respond(() => ({ ok: false, code: "permission-denied", reason: null, dispatched: false }));
     await expect(granted.service.settingsState()).resolves.toMatchObject({ accessibility: "helper-denied" });
     granted.respond(() => ({ ok: false, code: "timeout", reason: null, dispatched: false }));
     await expect(granted.service.settingsState()).resolves.toMatchObject({ accessibility: "granted" });
 
     const other = harness({ platform: "freebsd" });
-    await expect(other.service.settingsState()).resolves.toMatchObject({ platform: "unsupported", available: false });
+    await expect(other.service.settingsState()).resolves.toMatchObject({ platform: "unsupported", available: false, input: "unavailable" });
     expect(other.children).toHaveLength(0);
     const disposed = harness();
     await disposed.service.dispose();
-    await expect(disposed.service.settingsState()).resolves.toMatchObject({ available: false, accessibility: "unavailable" });
+    await expect(disposed.service.settingsState()).resolves.toMatchObject({ available: false, accessibility: "unavailable", input: "unavailable" });
   });
 
   it("gates screenshots on Wayland and reduces every capture to a bounded thumbnail in main", async () => {
     const wayland = harness({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" } });
-    await expect(wayland.service.perform(identity, { command: "screenshot", window }, signal(), owner))
+    await expect(wayland.service.perform(identity, { command: "screenshot", window, agentImage: false }, signal(), owner))
       .resolves.toEqual({ ok: false, code: "unsupported", reason: "wayland", dispatched: false });
     expect(wayland.service.permissions().screenshots).toBe("unavailable");
 
     const x11 = harness();
     const large = new Uint8Array([...png, ...new Uint8Array(400_000)]);
-    x11.respond(() => ({ ok: true, value: { kind: "screenshot", png: large, width: 1024, height: 640, mayIncludeOverlappingWindows: true } }));
-    await expect(x11.service.perform(identity, { command: "screenshot", window }, signal(), owner)).resolves.toEqual({
-      ok: true, value: { kind: "screenshot", png, width: 512, height: 320, mayIncludeOverlappingWindows: true },
+    x11.respond(() => ({ ok: true, value: { kind: "screenshot", png: large, width: 1024, height: 640, mayIncludeOverlappingWindows: true, agentImage: null } }));
+    await expect(x11.service.perform(identity, { command: "screenshot", window, agentImage: false }, signal(), owner)).resolves.toEqual({
+      ok: true, value: { kind: "screenshot", png, width: 512, height: 320, mayIncludeOverlappingWindows: true, agentImage: null },
     });
     expect(x11.dependencies.reduceThumbnail).toHaveBeenCalledWith(large);
+    expect(x11.dependencies.reduceAgentImage).not.toHaveBeenCalled();
     (x11.dependencies.reduceThumbnail as ReturnType<typeof vi.fn>).mockReturnValueOnce({ png: large, width: 512, height: 320 });
-    await expect(x11.service.perform(identity, { command: "screenshot", window }, signal(), owner)).resolves.toMatchObject({ code: "native-failure" });
+    await expect(x11.service.perform(identity, { command: "screenshot", window, agentImage: false }, signal(), owner)).resolves.toMatchObject({ code: "native-failure" });
     (x11.dependencies.reduceThumbnail as ReturnType<typeof vi.fn>).mockReturnValueOnce({ png, width: 1024, height: 640 });
-    await expect(x11.service.perform(identity, { command: "screenshot", window }, signal(), owner)).resolves.toMatchObject({ code: "native-failure" });
+    await expect(x11.service.perform(identity, { command: "screenshot", window, agentImage: false }, signal(), owner)).resolves.toMatchObject({ code: "native-failure" });
+  });
+
+  it("reduces a model-visible copy only of an exact-window capture, only when asked, within 1,536 pixels, 720,000 pixels and 3.75 MB", async () => {
+    const mac = harness({ platform: "darwin", env: {} });
+    const capture = new Uint8Array([...png, ...new Uint8Array(1_000_000)]);
+    let overlapping = false;
+    mac.respond((request) => request.command.command === "tree"
+      ? { ok: true, value: { kind: "tree", entries: [{ pid: 100, parentPid: 1, startedAtMs: started + 10, executable: "/Applications/App" }] } }
+      : { ok: true, value: { kind: "screenshot", png: capture, width: 1_536, height: 960, mayIncludeOverlappingWindows: overlapping, agentImage: null } });
+    await expect(mac.service.perform(identity, { command: "screenshot", window, agentImage: true }, signal(), owner)).resolves.toEqual({
+      ok: true,
+      value: {
+        kind: "screenshot", png, width: 512, height: 320, mayIncludeOverlappingWindows: false,
+        agentImage: { png, width: 1_200, height: 600 },
+      },
+    });
+    expect(mac.children[0]!.requests.at(-1)!.command).toEqual({ command: "screenshot", window, agentImage: true });
+    expect(mac.dependencies.reduceAgentImage).toHaveBeenCalledWith(capture);
+    // An image beyond the bounds is never handed on: the screenshot stays local evidence.
+    const reduce = mac.dependencies.reduceAgentImage as ReturnType<typeof vi.fn>;
+    for (const oversized of [
+      { png, width: 1_537, height: 400 },
+      { png, width: 1_201, height: 600 },
+      { png: new Uint8Array(3_750_001), width: 800, height: 600 },
+      null,
+    ]) {
+      reduce.mockReturnValueOnce(oversized);
+      await expect(mac.service.perform(identity, { command: "screenshot", window, agentImage: true }, signal(), owner))
+        .resolves.toMatchObject({ ok: true, value: { agentImage: null } });
+    }
+    reduce.mockImplementationOnce(() => { throw new Error("codec"); });
+    await expect(mac.service.perform(identity, { command: "screenshot", window, agentImage: true }, signal(), owner))
+      .resolves.toMatchObject({ ok: true, value: { agentImage: null, width: 512 } });
+    // A region capture (Windows, X11) can show other windows over the app: never reduced for the model.
+    overlapping = true;
+    reduce.mockClear();
+    await expect(mac.service.perform(identity, { command: "screenshot", window, agentImage: true }, signal(), owner))
+      .resolves.toMatchObject({ ok: true, value: { agentImage: null, mayIncludeOverlappingWindows: true, width: 512 } });
+    const x11 = harness();
+    x11.respond(() => ({ ok: true, value: { kind: "screenshot", png: capture, width: 1_024, height: 640, mayIncludeOverlappingWindows: true, agentImage: null } }));
+    await expect(x11.service.perform(identity, { command: "screenshot", window, agentImage: true }, signal(), owner))
+      .resolves.toMatchObject({ ok: true, value: { agentImage: null, width: 512 } });
+    expect(reduce).not.toHaveBeenCalled();
+    expect(x11.dependencies.reduceAgentImage).not.toHaveBeenCalled();
+    // Main's first reduction keeps both edges and the pixel count within their bounds.
+    const scale = appControlReductionScale({ width: 3_000, height: 2_000 }, 1_536, 1_536, 720_000);
+    expect(Math.floor(3_000 * scale) * Math.floor(2_000 * scale)).toBeLessThanOrEqual(720_000);
+    expect(appControlReductionScale({ width: 400, height: 300 }, 1_536, 1_536, 720_000)).toBe(1);
+    expect(appControlReductionScale({ width: 3_072, height: 100 }, 1_536, 1_536, 720_000)).toBe(0.5);
+  });
+
+  it("refuses synthesized input on Wayland before the worker and gives it the action watchdog", async () => {
+    const input: AppControlCommand = { command: "input", window, key: "Tab", deltaY: null, expect: null };
+    const wayland = harness({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" } });
+    await expect(wayland.service.perform(identity, input, signal(), owner))
+      .resolves.toEqual({ ok: false, code: "unsupported", reason: "input-wayland", dispatched: false });
+    expect(wayland.service.permissions().input).toBe("unavailable");
+    expect(wayland.children).toHaveLength(0);
+    // A Linux session without an X11 display is not Wayland, and says so.
+    const headless = harness({ env: {} });
+    await expect(headless.service.perform(identity, input, signal(), owner)).resolves.toMatchObject({ code: "unsupported", reason: "input-unavailable" });
+    // XWayland beside a Wayland display is still Wayland, unless the session says X11.
+    const xwayland = harness({ env: { DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" } });
+    await expect(xwayland.service.perform(identity, input, signal(), owner)).resolves.toMatchObject({ code: "unsupported", reason: "input-wayland" });
+    await expect(xwayland.service.settingsState()).resolves.toMatchObject({ session: "wayland", input: "unavailable", screenshots: "unavailable" });
+    expect(appControlLinuxSession({ DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "x11" })).toBe("x11");
+    expect(appControlLinuxSession({ WAYLAND_DISPLAY: "wayland-0" })).toBe("wayland");
+    expect(appControlLinuxSession({ XDG_SESSION_TYPE: "wayland", DISPLAY: ":0" })).toBe("wayland");
+    expect(appControlInputAvailable("linux", { DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "x11" })).toBe(true);
+    expect(appControlScreenshotAvailable("linux", { DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" })).toBe(false);
+    expect(appControlInputAvailable("freebsd", { DISPLAY: ":0" })).toBe(false);
+
+    const x11 = harness();
+    x11.respond(() => ({ ok: true, value: { kind: "perform", rootKey: window, windowClosed: false } }));
+    await expect(x11.service.perform(identity, input, signal(), owner)).resolves.toEqual({ ok: true, value: { kind: "perform", rootKey: window, windowClosed: false } });
+    expect(x11.children[0]!.requests[0]).toMatchObject({ scope: { pids: [100, 101, 102], deniedPids: [102, 5, 6] }, command: input });
+    // A typed native denial on macOS is the helper's own while macOS lists Inertia as allowed.
+    const mac = harness({ platform: "darwin", env: {} });
+    mac.respond((request) => request.command.command === "tree"
+      ? { ok: true, value: { kind: "tree", entries: [{ pid: 100, parentPid: 1, startedAtMs: started + 10, executable: "/Applications/App" }] } }
+      : { ok: false, code: "permission-denied", reason: null, dispatched: true });
+    await expect(mac.service.perform(identity, input, signal(), owner)).resolves.toEqual({ ok: false, code: "helper-permission-denied", reason: null, dispatched: true });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const hung = harness();
+    hung.respond(() => undefined);
+    const pending = hung.service.perform(identity, { command: "input", window, key: null, deltaY: 300, expect: null }, signal(), owner);
+    await flush();
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(hung.children[0]!.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toEqual({ ok: false, code: "timeout", reason: null, dispatched: true });
+    expect(hung.children[0]!.kill).toHaveBeenCalledOnce();
   });
 
   it("times out a hung inspection after 10 seconds, kills the worker and starts a fresh one", async () => {
@@ -392,7 +500,7 @@ describe("App control service", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { service, children, respond } = harness();
     respond(() => undefined);
-    const pending = service.perform(identity, { command: "screenshot", window }, signal(), owner);
+    const pending = service.perform(identity, { command: "screenshot", window, agentImage: false }, signal(), owner);
     await flush();
     await vi.advanceTimersByTimeAsync(19_999);
     expect(children[0]!.kill).not.toHaveBeenCalled();

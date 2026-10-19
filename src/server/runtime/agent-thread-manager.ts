@@ -37,6 +37,7 @@ import {
   AGENT_CONTEXT_TOOL_DEFINITION,
   AGENT_CONTEXT_TOOL_NAME,
   AgentContextTool,
+  hostToolImagesAccepted,
 } from "./agent-context-tool";
 import { hostToolDigest as digest } from "./host-tool-digest";
 import type { TurnController } from "./turns/turn-controller";
@@ -383,6 +384,8 @@ export class AgentThreadManager {
 
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {
     this.dependencies.contextRequests.cancelForTurn(turn.conversationId, turn.id);
+    // App progress state, the screenshot allowance and foreground grants end with the turn.
+    this.appUnderTest?.turnSettled(turn.id);
     if (turn.status === "completed") return;
     const targets = this.dependencies.store.agentThreadManagement
       .runsDispatchedByTurn(turn.conversationId, turn.id);
@@ -434,7 +437,8 @@ export class AgentThreadManager {
         });
       }
       if (appTool && this.appUnderTest) {
-        if (this.dependencies.store.project(current.projectId).preferences?.appUnderTestAccess === false) {
+        const preferences = this.dependencies.store.project(current.projectId).preferences;
+        if (preferences?.appUnderTestAccess === false) {
           return appUnderTestFailure(
             "unavailable",
             "App under test access is disabled in this project's settings. Ask the user to turn on Agent app access in Project settings.",
@@ -450,6 +454,9 @@ export class AgentThreadManager {
           runId: source.turn.runId,
           turnId: source.turn.id,
           remoteDevice,
+          // Screenshots reach the model only when the project opted in and the exact route accepts images.
+          visualEvidence: preferences?.appUnderTestVisualEvidence === true,
+          imagesAccepted: hostToolImagesAccepted(turn, this.dependencies.providerInfo()),
         });
       }
       switch (call.tool) {

@@ -233,6 +233,7 @@ describe("hostToolActivityTitle", () => {
       inertia_app_scroll: ["Scrolling the app", "Scrolled the app", "Could not scroll the app"],
       inertia_app_wait_for: ["Waiting in the app", "Waited in the app", "Could not wait in the app"],
       inertia_app_screenshot: ["Capturing app evidence", "Captured app evidence", "Could not capture app evidence"],
+      inertia_app_activate: ["Bringing the app to the front", "Brought the app to the front", "Could not bring the app to the front"],
     };
     expect(Object.keys(expected).sort()).toEqual([...APP_UNDER_TEST_TOOL_NAMES].sort());
     for (const [name, [running, done, failed]] of Object.entries(expected)) {

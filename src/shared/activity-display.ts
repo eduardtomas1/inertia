@@ -23,6 +23,7 @@ const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done:
   inertia_app_scroll: ["Scrolling the app", "Scrolled the app", "Could not scroll the app"],
   inertia_app_wait_for: ["Waiting in the app", "Waited in the app", "Could not wait in the app"],
   inertia_app_screenshot: ["Capturing app evidence", "Captured app evidence", "Could not capture app evidence"],
+  inertia_app_activate: ["Bringing the app to the front", "Brought the app to the front", "Could not bring the app to the front"],
 };
 
 export function unwrapShellCommand(command: string): string {

@@ -9,7 +9,7 @@ import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "./provider-host-tools";
  */
 
 export const APP_UNDER_TEST_PACK_ID = "inertia.app-under-test";
-export const APP_UNDER_TEST_PACK_REVISION = 1;
+export const APP_UNDER_TEST_PACK_REVISION = 2;
 
 export const APP_UNDER_TEST_LAUNCH_KINDS = ["electron", "action"] as const;
 export type AppUnderTestLaunchKind = (typeof APP_UNDER_TEST_LAUNCH_KINDS)[number];
@@ -58,6 +58,7 @@ export const APP_UNDER_TEST_TOOL_NAMES = [
   "inertia_app_scroll",
   "inertia_app_wait_for",
   "inertia_app_screenshot",
+  "inertia_app_activate",
 ] as const;
 export type AppUnderTestToolName = (typeof APP_UNDER_TEST_TOOL_NAMES)[number];
 
@@ -74,6 +75,8 @@ export const APP_UNDER_TEST_ERROR_CODES = [
   "call_cancelled",
   "unknown_tool",
   "invalid_owner",
+  "screenshot_limit_reached",
+  "repeated_failure",
 ] as const;
 export type AppUnderTestErrorCode = (typeof APP_UNDER_TEST_ERROR_CODES)[number];
 export const APP_UNDER_TEST_RETRYABLE_ERROR_CODES: ReadonlySet<AppUnderTestErrorCode> = new Set([
@@ -131,6 +134,27 @@ export const MAX_APP_RUNTIME_THUMBNAIL_BYTES = 16 * 1024 * 1024;
 export const MAX_APP_IDLE_SESSIONS = 16;
 export const MAX_APP_TOOL_RESULT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
 export const MAX_APP_LABEL_CHARS = 120;
+/**
+ * Screenshots sent to the model (project opt-in, image-capable routes only):
+ * long edge, pixels, PNG bytes and per turn. 3.75 MB of PNG is 5 MB in base64,
+ * the provider's image bound.
+ */
+export const MAX_APP_AGENT_IMAGE_EDGE = 1_536;
+export const MAX_APP_AGENT_IMAGE_PIXELS = 720_000;
+export const MAX_APP_AGENT_IMAGE_BYTES = 3_750_000;
+export const MAX_APP_AGENT_SCREENSHOTS_PER_TURN = 8;
+/** The fixed note on every screenshot result whose image reached the model. */
+export const APP_AGENT_IMAGE_NOTE = "Coordinates from this image are not accepted by any tool; use refs from a snapshot.";
+/** A region capture (Windows, X11) can show other windows over the app, so it is never sent to the model. */
+export const APP_AGENT_IMAGE_OVERLAP_NOTE = "local evidence only: on this platform the capture may include other windows, so it stays on this device.";
+
+/** Synthesized wheel input on native windows: one notch per 100 pixels, rounded, at least one and at most fifty. */
+export const APP_WHEEL_PIXELS_PER_NOTCH = 100;
+export const APP_MAX_WHEEL_NOTCHES = 50;
+export function appWheelNotches(deltaY: number): number {
+  const notches = Math.min(APP_MAX_WHEEL_NOTCHES, Math.max(1, Math.round(Math.abs(deltaY) / APP_WHEEL_PIXELS_PER_NOTCH)));
+  return deltaY < 0 ? -notches : notches;
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SINGLE_LINE = /^[^\u0000-\u001f\u007f]*$/u;

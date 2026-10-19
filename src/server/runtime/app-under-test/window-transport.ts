@@ -37,18 +37,34 @@ export interface AppUnderTestTransportStatus {
 
 export type AppUnderTestWindowCommand =
   | { action: "snapshot"; windowId: string }
-  | { action: "screenshot"; windowId: string }
+  /** `agentImage`: also return a reduced image for the model (the project opted in and the route accepts images). */
+  | { action: "screenshot"; windowId: string; agentImage?: true }
   | { action: "wait"; windowId: string; text?: string; state: "visible" | "hidden" | "loaded"; timeoutMs: number }
   | { action: "click"; windowId: string; ref: string; dialog?: "accept" }
   | { action: "type"; windowId: string; ref: string; text: string; replace: boolean; dialog?: "accept" }
   | { action: "press"; windowId: string; key: AgentBrowserKey; dialog?: "accept" }
   | { action: "scroll"; windowId: string; deltaY: number }
-  | { action: "scroll"; windowId: string; ref: string };
+  | { action: "scroll"; windowId: string; ref: string }
+  /** Native windows only: bring the window to the foreground for synthesized input this turn. */
+  | { action: "activate"; windowId: string };
 
 export type AppUnderTestDestructiveWindowCommand = Extract<
   AppUnderTestWindowCommand,
-  { action: "click" | "type" | "press" | "scroll" }
+  { action: "click" | "type" | "press" | "scroll" | "activate" }
 >;
+
+/**
+ * How a destructive command reaches a native window: an accessibility action,
+ * or synthesized OS input (xa11y `InputSim`) to a window brought to the front.
+ */
+export type AppUnderTestInputRoute = "accessibility" | "synthesized";
+
+/** A screenshot reduced for the model: PNG, long edge at most 1,536 pixels, at most 720,000 pixels and 3.75 MB. */
+export interface AppUnderTestAgentImage {
+  png: Uint8Array;
+  width: number;
+  height: number;
+}
 
 /** What an approval card may name about a control; produced by the transport. */
 export interface AppUnderTestWindowTarget {
@@ -74,6 +90,8 @@ export interface AppUnderTestWindowInspection {
   target: AppUnderTestWindowTarget | null;
   /** The JavaScript dialog the window shows now, which the input answers first. */
   dialog: PreviewAgentDialogKind | null;
+  /** The input will be synthesized OS input to the window in front (native windows only). */
+  synthesized?: boolean;
 }
 
 /** A JavaScript dialog left open in a window, which blocks reading it. */
@@ -101,7 +119,19 @@ export interface AppUnderTestWindowFailure {
 }
 
 export type AppUnderTestWindowResult =
-  | { ok: true; value: Record<string, unknown> }
+  | {
+      ok: true;
+      value: Record<string, unknown>;
+      /** A screenshot that asked for `agentImage` and passed the privacy gate; null when it could not be reduced. */
+      image?: AppUnderTestAgentImage | null;
+      /**
+       * A screenshot that asked for `agentImage`: its local thumbnail, not yet
+       * recorded. The host tool records it once it knows whether the image
+       * reached the model, so only an image it validated and attached is
+       * labelled as sent. `value` then carries no `evidenceId`.
+       */
+      thumbnail?: { png: Uint8Array; width: number; height: number };
+    }
   | AppUnderTestWindowFailure;
 
 export type AppUnderTestWindowInspectionResult =
@@ -115,7 +145,7 @@ export interface AppUnderTestWindowPerformOptions {
    * `not-found` and `dispatched: false` unless the window still shows this
    * document and the ref still resolves to an equal target.
    */
-  expected?: Pick<AppUnderTestWindowInspection, "documentSequence" | "target" | "dialog">;
+  expected?: Pick<AppUnderTestWindowInspection, "documentSequence" | "target" | "dialog" | "synthesized">;
   /**
    * Answer only the window's open dialog (it must still be `expected.dialog`)
    * and send nothing else: a Supervised approval whose control could not be
@@ -123,6 +153,12 @@ export interface AppUnderTestWindowPerformOptions {
    */
   dialogOnly?: boolean;
   turn?: AppUnderTestTurn;
+  /**
+   * Native windows: the route the host tool planned (and an approval named).
+   * The transport refuses with `not-found`, sending nothing, when the route
+   * at perform time differs, for example after a grant arrived or ended.
+   */
+  route?: AppUnderTestInputRoute;
 }
 
 export interface AppUnderTestWindowTransport {
@@ -157,11 +193,21 @@ export interface AppUnderTestWindowTransport {
   status?(): AppUnderTestTransportStatus;
   /** Polling transports: re-checks whether anyone watches the launch, starting or stopping background reads. */
   watchChanged?(): void;
+  /** The window's current document sequence, or null when the window is unknown. */
+  documentSequence?(windowId: string): number | null;
+  /**
+   * Native windows: how a destructive command would reach the window in this
+   * turn. Absent (Electron) means every input goes over the debugging pipe.
+   */
+  inputRoute?(command: AppUnderTestDestructiveWindowCommand, turn?: AppUnderTestTurn): AppUnderTestInputRoute;
+  /** Forgets per-turn state such as foreground grants once the turn settled. */
+  turnSettled?(turnId: string): void;
 }
 
 export type AppUnderTestEvidenceInput =
-  | { kind: "action"; action: "click" | "type" | "press" | "scroll" }
-  | { kind: "screenshot"; png: Uint8Array; width: number; height: number };
+  | { kind: "action"; action: "click" | "type" | "press" | "scroll" | "activate" }
+  /** `sentToAgent`: the model received a reduced copy of this screenshot. */
+  | { kind: "screenshot"; png: Uint8Array; width: number; height: number; sentToAgent?: boolean };
 
 export interface AppUnderTestCdpTransportContext {
   launchId: string;

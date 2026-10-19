@@ -167,6 +167,10 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
           options={{ inherit: "Default (On)", true: "On", false: "Off" }}
           onChange={(value) => void setPreference("project-app-under-test-access", "appUnderTestAccess", value === "inherit" ? null : value === "true")} />
       </SettingRow>
+      <SettingRow id="project-app-visual-evidence" title="Send app screenshots to the agent" description="Images are reduced and masked, and fields that hold secrets block them." notice={notice("project-app-visual-evidence")}>
+        <Switch label="Send app screenshots to the agent" checked={preferences.appUnderTestVisualEvidence} disabled={unavailable} inactive={saving}
+          onChange={(value) => void setPreference("project-app-visual-evidence", "appUnderTestVisualEvidence", value)} />
+      </SettingRow>
       <SettingTextField id="project-spend-limit" title="Claude spend limit per turn" label="Claude spend limit per turn (USD)"
         description="Caps estimated API cost for Claude on Anthropic; subagents count toward it."
         value={preferences.claudeMaxBudgetUsd === null ? "" : String(preferences.claudeMaxBudgetUsd)}

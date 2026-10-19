@@ -8,6 +8,9 @@ import {
   APP_CONTROL_ACTION_WATCHDOG_MS,
   APP_CONTROL_INSPECT_WATCHDOG_MS,
   APP_CONTROL_KILL_CONFIRM_MS,
+  APP_CONTROL_MAX_AGENT_IMAGE_EDGE,
+  APP_CONTROL_MAX_AGENT_IMAGE_PIXELS,
+  APP_CONTROL_MAX_AGENT_PNG_BYTES,
   APP_CONTROL_MAX_PENDING_REQUESTS,
   APP_CONTROL_MAX_PNG_BYTES,
   appControlFailure,
@@ -18,7 +21,12 @@ import {
   type AppControlValue,
 } from "../node/runtime-app-control-protocol.js";
 import type { AppControlSettingsState } from "../shared/app-control-settings.js";
-import { appControlScreenshotAvailable } from "./app-control-platform.js";
+import {
+  appControlInputAvailable,
+  appControlInputUnavailableReason,
+  appControlLinuxSession,
+  appControlScreenshotAvailable,
+} from "./app-control-platform.js";
 import {
   appControlOwnedTree,
   AppControlTreeTooLargeError,
@@ -70,6 +78,8 @@ export interface AppControlServiceDependencies {
   /** Inertia's own processes, always denied. */
   ownPids(): number[];
   reduceThumbnail(png: Uint8Array): AppControlThumbnail | null;
+  /** The model-visible image: long edge at most 1,536 pixels, at most 720,000 pixels, PNG of at most 3.75 MB. */
+  reduceAgentImage(png: Uint8Array): AppControlThumbnail | null;
   /** macOS: a fresh private folder for one worker's window captures, removed by `release`. */
   captureFolder?(): { path: string; release(): void } | null;
   /** Forced kill of a worker that ignored the graceful one; defaults to SIGKILL. */
@@ -109,8 +119,14 @@ const FORCE_KILL_CONFIRM_MS = 2_000;
 const TREE_CACHE_MS = 1_000;
 const MAX_CACHED_TREES = 32;
 
+/** Commands that may reach the app: accessibility actions and synthesized input. */
+function mayReachApp(command: AppControlWorkerCommand): boolean {
+  return command.command === "perform" || command.command === "input";
+}
+
 function watchdogFor(command: AppControlWorkerCommand): number {
-  return command.command === "perform" || command.command === "screenshot"
+  // Actions, synthesized input and screenshots (which plan, capture and plan again) get the longer watchdog.
+  return mayReachApp(command) || command.command === "screenshot"
     ? APP_CONTROL_ACTION_WATCHDOG_MS
     : APP_CONTROL_INSPECT_WATCHDOG_MS;
 }
@@ -154,7 +170,17 @@ export class AppControlService implements RuntimeAppControlMainBroker {
       accessibility: mac ? (this.dependencies.accessibilityTrusted() ? "granted" : "required") : "unverified",
       screenRecording: mac ? (this.dependencies.screenRecordingGranted() ? "granted" : "required") : "unverified",
       screenshots: appControlScreenshotAvailable(platform, this.dependencies.env) ? "available" : "unavailable",
+      input: this.inputState(),
     };
+  }
+
+  /** Synthesized key and wheel input: macOS needs Accessibility; Wayland and unknown platforms have none. */
+  private inputState(): "available" | "required" | "unavailable" {
+    const { platform, env } = this.dependencies;
+    if (!this.available || !["darwin", "win32", "linux"].includes(platform) || !appControlInputAvailable(platform, env)) {
+      return "unavailable";
+    }
+    return platform === "darwin" && !this.dependencies.accessibilityTrusted() ? "required" : "available";
   }
 
   /**
@@ -173,7 +199,8 @@ export class AppControlService implements RuntimeAppControlMainBroker {
       accessibility: platform === "darwin" ? "required" : "unavailable",
       screenRecording: platform === "darwin" ? (this.dependencies.screenRecordingGranted() ? "granted" : "required") : "not-needed",
       screenshots: appControlScreenshotAvailable(platform, env) ? "available" : "unavailable",
-      session: linux ? (env.XDG_SESSION_TYPE === "wayland" || (!env.DISPLAY && Boolean(env.WAYLAND_DISPLAY)) ? "wayland" : "x11") : null,
+      session: linux ? appControlLinuxSession(env) : null,
+      input: this.inputState(),
     };
     if (!state.available) return state;
     if (platform === "win32") return { ...state, accessibility: "available" };
@@ -220,6 +247,9 @@ export class AppControlService implements RuntimeAppControlMainBroker {
         return appControlFailure("permission-denied", "screen-recording");
       }
     }
+    if (command.command === "input" && !appControlInputAvailable(platform, this.dependencies.env)) {
+      return appControlFailure("unsupported", appControlInputUnavailableReason(platform, this.dependencies.env));
+    }
     if (this.admitted >= APP_CONTROL_MAX_PENDING_REQUESTS) return appControlFailure("busy");
     this.admitted += 1;
     try {
@@ -247,9 +277,15 @@ export class AppControlService implements RuntimeAppControlMainBroker {
     if (result.value.kind !== "screenshot") return result as AppControlResult;
     const thumbnail = this.reduce(result.value.png);
     if (!thumbnail) return appControlFailure("native-failure");
+    // The model-visible image is reduced from the same masked capture, and only
+    // from a capture of exactly that window (macOS): a region capture can show
+    // other windows over it. When it cannot be, the screenshot stays local evidence only.
+    const agentImage = command.command === "screenshot" && command.agentImage && !result.value.mayIncludeOverlappingWindows
+      ? this.reduceForAgent(result.value.png)
+      : null;
     return {
       ok: true,
-      value: { ...result.value, png: thumbnail.png, width: thumbnail.width, height: thumbnail.height },
+      value: { ...result.value, png: thumbnail.png, width: thumbnail.width, height: thumbnail.height, agentImage },
     };
   }
 
@@ -316,6 +352,18 @@ export class AppControlService implements RuntimeAppControlMainBroker {
     }
   }
 
+  private reduceForAgent(png: Uint8Array): AppControlThumbnail | null {
+    try {
+      const image = this.dependencies.reduceAgentImage(png);
+      return image && image.png.byteLength <= APP_CONTROL_MAX_AGENT_PNG_BYTES
+        && Math.max(image.width, image.height) <= APP_CONTROL_MAX_AGENT_IMAGE_EDGE
+        && image.width * image.height <= APP_CONTROL_MAX_AGENT_IMAGE_PIXELS
+        && image.width > 0 && image.height > 0 ? image : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async processTableFromWorker(rootPid: number, signal: AbortSignal): Promise<AppControlProcessEntry[]> {
     const result = await this.run({ scope: { pids: [], deniedPids: [] }, command: { command: "tree", rootPid } }, signal);
     if (!result.ok) throw new TreeFailure(this.categorize(result));
@@ -372,7 +420,7 @@ export class AppControlService implements RuntimeAppControlMainBroker {
     }
     this.startFailures = 0;
     const id = this.nextId++;
-    const mayDispatch = request.command.command === "perform";
+    const mayDispatch = mayReachApp(request.command);
     const full: AppControlWorkerRequest = {
       ...request,
       id,
@@ -506,27 +554,59 @@ export class AppControlService implements RuntimeAppControlMainBroker {
   }
 }
 
+/** The first reduction: within both edges and the pixel count, never enlarging; floors keep it inside. */
+export function appControlReductionScale(
+  size: { width: number; height: number },
+  maxWidth: number,
+  maxHeight: number,
+  maxPixels = Number.POSITIVE_INFINITY,
+): number {
+  return Math.min(1, maxWidth / size.width, maxHeight / size.height, Math.sqrt(maxPixels / (size.width * size.height)));
+}
+
 class TreeFailure extends Error {
   constructor(readonly result: AppControlFailure) {
     super("tree");
   }
 }
 
-/** Reduces a masked capture to the Evidence thumbnail bound with Electron's image codec. */
-export function reduceAppControlThumbnail(png: Uint8Array): AppControlThumbnail | null {
+/** Reduces a masked capture within a size, pixel and byte bound with Electron's image codec. */
+function reduceAppControlImage(
+  png: Uint8Array,
+  maxWidth: number,
+  maxHeight: number,
+  maxBytes: number,
+  maxPixels = Number.POSITIVE_INFINITY,
+): AppControlThumbnail | null {
   const image = nativeImage.createFromBuffer(Buffer.from(png));
   if (image.isEmpty()) return null;
   const size = image.getSize();
   if (size.width <= 0 || size.height <= 0) return null;
-  let scale = Math.min(1, THUMBNAIL_WIDTH / size.width, THUMBNAIL_HEIGHT / size.height);
+  let scale = appControlReductionScale(size, maxWidth, maxHeight, maxPixels);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const width = Math.max(1, Math.floor(size.width * scale));
     const height = Math.max(1, Math.floor(size.height * scale));
     const output = image.resize({ width, height, quality: "good" }).toPNG();
-    if (output.byteLength <= APP_CONTROL_MAX_PNG_BYTES) return { png: new Uint8Array(output), width, height };
+    if (output.byteLength <= maxBytes) return { png: new Uint8Array(output), width, height };
     scale *= 0.72;
   }
   return null;
+}
+
+/** The Evidence thumbnail: at most 512 by 320 pixels and 256 KiB. */
+export function reduceAppControlThumbnail(png: Uint8Array): AppControlThumbnail | null {
+  return reduceAppControlImage(png, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, APP_CONTROL_MAX_PNG_BYTES);
+}
+
+/** The model-visible screenshot: long edge at most 1,536 pixels, at most 720,000 pixels and 3.75 MB. */
+export function reduceAppControlAgentImage(png: Uint8Array): AppControlThumbnail | null {
+  return reduceAppControlImage(
+    png,
+    APP_CONTROL_MAX_AGENT_IMAGE_EDGE,
+    APP_CONTROL_MAX_AGENT_IMAGE_EDGE,
+    APP_CONTROL_MAX_AGENT_PNG_BYTES,
+    APP_CONTROL_MAX_AGENT_IMAGE_PIXELS,
+  );
 }
 
 function captureRoot(): string {
@@ -551,6 +631,7 @@ export function createAppControlService(): AppControlService {
     processTable: (rootPid) => readLinuxProcessTable(rootPid),
     ownPids: () => [process.pid, ...app.getAppMetrics().map(({ pid }) => pid)],
     reduceThumbnail: reduceAppControlThumbnail,
+    reduceAgentImage: reduceAppControlAgentImage,
     captureFolder: platform !== "darwin" ? undefined : () => {
       const root = captureRoot();
       if (!swept) {

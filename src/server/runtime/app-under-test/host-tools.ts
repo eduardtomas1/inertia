@@ -8,6 +8,8 @@ import {
   agentBrowserTextLength,
 } from "../../../shared/agent-browser";
 import {
+  APP_AGENT_IMAGE_NOTE,
+  APP_AGENT_IMAGE_OVERLAP_NOTE,
   APP_APPROVAL_EXPIRY_MS,
   APP_LAUNCH_LOG_TAIL_LINES,
   APP_LAUNCH_READY_MS,
@@ -17,6 +19,10 @@ import {
   DEFAULT_APP_LOG_READ_LINES,
   DEFAULT_APP_WAIT_MS,
   MAX_APP_LOG_GREP_CHARS,
+  MAX_APP_AGENT_IMAGE_BYTES,
+  MAX_APP_AGENT_IMAGE_EDGE,
+  MAX_APP_AGENT_IMAGE_PIXELS,
+  MAX_APP_AGENT_SCREENSHOTS_PER_TURN,
   MAX_APP_LOG_READ_LINES,
   MAX_APP_SCROLL_DELTA,
   MAX_APP_TOOL_RESULT_BYTES,
@@ -24,6 +30,7 @@ import {
   MAX_APP_WAIT_MS,
   MAX_APP_WAIT_TEXT_CHARS,
   MIN_APP_WAIT_MS,
+  appWheelNotches,
   type AppUnderTestErrorCode,
   type AppUnderTestLaunch,
 } from "../../../shared/app-under-test";
@@ -33,14 +40,26 @@ import { isSafeApprovalDisplayText } from "../../provider/approval-display";
 import type {
   ProviderHostToolCall,
   ProviderHostToolDefinition,
+  ProviderHostToolImage,
   ProviderHostToolResult,
 } from "../../provider/contracts";
 import type { HiddenProviderInstruction } from "../turns/request-context";
+import { ACCESSIBILITY_MESSAGES } from "./accessibility-window-support";
 import { dialogPendingMessage } from "./cdp-window-support";
 import { AppUnderTestError } from "./errors";
 import type { AppUnderTestLaunchManager } from "./launch-manager";
+import {
+  APP_NO_VISIBLE_CHANGE_MESSAGE,
+  APP_REPEATED_FAILURE_MESSAGE,
+  APP_VISIBLE_CHANGE_TOOLS,
+  AppProgressGuard,
+  appCallKey,
+  appSnapshotFingerprint,
+} from "./progress-guard";
 import type {
+  AppUnderTestAgentImage,
   AppUnderTestDestructiveWindowCommand,
+  AppUnderTestInputRoute,
   AppUnderTestPendingDialog,
   AppUnderTestTurn,
   AppUnderTestWindowCommand,
@@ -202,7 +221,7 @@ export const APP_UNDER_TEST_TOOL_DEFINITIONS: readonly ProviderHostToolDefinitio
   },
   {
     name: "inertia_app_press",
-    description: "Press one key in an app window. The key goes to the focused control, so click or type into it first.",
+    description: "Press one key in an app window. The key goes to the focused control, so click or type into it first. On a native window (a project action launch) Enter and Space press the focused control through accessibility; every other key is sent as keyboard input and needs the window brought to the front with inertia_app_activate in this turn.",
     inputSchema: objectSchema({
       windowId: windowIdProperty,
       key: { type: "string", enum: [...AGENT_BROWSER_KEYS] },
@@ -214,7 +233,7 @@ export const APP_UNDER_TEST_TOOL_DEFINITIONS: readonly ProviderHostToolDefinitio
   },
   {
     name: "inertia_app_scroll",
-    description: "Scroll an app window vertically by deltaY pixels (positive scrolls down), or scroll the control with ref to the centre of the view. Give windowId and exactly one of deltaY or ref.",
+    description: "Scroll an app window vertically by deltaY pixels (positive scrolls down), or scroll the control with ref to the centre of the view. Give windowId and exactly one of deltaY or ref. On a native window deltaY is sent as mouse-wheel input at the window's centre and needs the window brought to the front with inertia_app_activate in this turn.",
     inputSchema: {
       ...objectSchema({
         windowId: windowIdProperty,
@@ -243,11 +262,19 @@ export const APP_UNDER_TEST_TOOL_DEFINITIONS: readonly ProviderHostToolDefinitio
   },
   {
     name: "inertia_app_screenshot",
-    description: "Capture one app window into the user's local Evidence timeline. The pixels stay on the user's device and are not shown to you, so never claim a visual result from it; use inertia_app_snapshot to inspect the window.",
+    description: `Capture one app window into the user's local Evidence timeline. You see the image only when the result says sentToAgent: true (the project allows it and this model accepts images; reduced, with fields masked, at most ${MAX_APP_AGENT_SCREENSHOTS_PER_TURN} per turn); otherwise the pixels stay on the user's device, so never claim a visual result. Coordinates in the image are never accepted; act through refs from inertia_app_snapshot.`,
     inputSchema: objectSchema({ windowId: windowIdProperty }, ["windowId"]),
     inputValidator: windowSchema,
     readOnly: true,
     idempotent: true,
+  },
+  {
+    name: "inertia_app_activate",
+    description: "Bring one native app window (a project action launch) to the front so it receives keyboard and wheel input for the rest of this turn: inertia_app_press with keys other than Enter and Space, and inertia_app_scroll with deltaY. Always asks the user. Electron windows never need it.",
+    inputSchema: objectSchema({ windowId: windowIdProperty }, ["windowId"]),
+    inputValidator: windowSchema,
+    readOnly: false,
+    destructive: true,
   },
 ] as const;
 
@@ -261,7 +288,8 @@ export const APP_UNDER_TEST_INSTRUCTION: HiddenProviderInstruction = {
     "\"[redacted]\" is Inertia hiding a secret, not app content; never retype a secret to check it.",
     "Element refs belong to the latest inertia_app_snapshot of that window, so take a new snapshot after the window changes. A dispatched click, key or text is not proof that it worked: take a snapshot to check.",
     "When an App tool fails, its message says what to do next; follow it before giving up.",
-    "inertia_app_screenshot records pixels for the user but does not show them to you, so never claim a visual result from it.",
+    "inertia_app_screenshot records pixels for the user; describe what it shows only when its result says sentToAgent: true, never claim a visual result otherwise, and never act on image coordinates: use snapshot refs.",
+    "On native windows, keys other than Enter and Space and scrolling by deltaY need the window brought to the front with inertia_app_activate in the same turn, which asks the user.",
     "Stop the app with inertia_app_stop when you are done, or tell the user that it is still running.",
   ].join(" "),
 };
@@ -273,6 +301,7 @@ const CARD_TITLES = Object.freeze({
   type: "Type",
   press: "Press",
   scroll: "Scroll",
+  activate: "Bring the app window to the front",
 } as const);
 const APPROVAL_REASON = "This approval applies only to the inspected launch, window and document.";
 const MAX_PENDING_APPROVALS = 64;
@@ -333,7 +362,61 @@ export interface AppUnderTestToolIdentity {
   turnId: string;
   /** The turn's source message came from a Private Connect device. */
   remoteDevice: boolean;
+  /** The project turned on "Send app screenshots to the agent". */
+  visualEvidence?: boolean;
+  /** The turn's provider route accepts images in host-tool results (native Claude or Codex with an image model). */
+  imagesAccepted?: boolean;
 }
+
+/** Codes that are refusals or cancellations, not a failed attempt of the action. */
+const NOT_ATTEMPTS: ReadonlySet<string> = new Set([
+  "cancelled", "call_cancelled", "approval_expired", "user_denied", "invalid_owner", "unknown_tool",
+  "screenshot_limit_reached", "repeated_failure",
+]);
+
+function failureOf(result: ProviderHostToolResult): { code: string | null; message: string | null } | null {
+  if (result.success) return null;
+  try {
+    const parsed = JSON.parse(result.text) as { error?: { code?: unknown; message?: unknown } };
+    return {
+      code: typeof parsed.error?.code === "string" ? parsed.error.code : null,
+      message: typeof parsed.error?.message === "string" ? parsed.error.message : null,
+    };
+  } catch {
+    return { code: null, message: null };
+  }
+}
+
+/**
+ * Failures that are not a failed attempt of the action: refusals and
+ * cancellations, a wait that ran out of time (the app may still be busy),
+ * and the not-in-front refusal, which names its own next step.
+ */
+function countsAsFailure(tool: string, failure: { code: string | null; message: string | null }): boolean {
+  if (failure.code !== null && NOT_ATTEMPTS.has(failure.code)) return false;
+  if (tool === "inertia_app_wait_for" && failure.code === "timeout") return false;
+  return failure.message !== ACCESSIBILITY_MESSAGES.notInFront;
+}
+
+/** The window a call names, for the progress guard. */
+function calledWindow(args: unknown): string | undefined {
+  const windowId = typeof args === "object" && args !== null ? (args as { windowId?: unknown }).windowId : undefined;
+  return typeof windowId === "string" ? windowId.trim() : undefined;
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/** The transport's image again at the boundary: PNG, long edge, pixels and bytes. */
+function agentImageWithinBounds(image: AppUnderTestAgentImage): boolean {
+  return image.png.byteLength > PNG_SIGNATURE.length && image.png.byteLength <= MAX_APP_AGENT_IMAGE_BYTES
+    && PNG_SIGNATURE.every((byte, index) => image.png[index] === byte)
+    && Number.isSafeInteger(image.width) && Number.isSafeInteger(image.height) && image.width > 0 && image.height > 0
+    && Math.max(image.width, image.height) <= MAX_APP_AGENT_IMAGE_EDGE
+    && image.width * image.height <= MAX_APP_AGENT_IMAGE_PIXELS;
+}
+
+/** Stands in for an evidence id while the result's size is checked: the same length as a UUID. */
+const EVIDENCE_ID_PLACEHOLDER = "00000000-0000-4000-8000-000000000000";
 
 export interface AppUnderTestHostToolOptions {
   /** Test seams; production callers omit them. */
@@ -355,10 +438,10 @@ export function appUnderTestFailure(code: AppUnderTestErrorCode, message: string
 const failure = appUnderTestFailure;
 
 /** `dispatched` says whether the call changed the app, for a result too large to return. */
-function success(value: unknown, dispatched: boolean): ProviderHostToolResult {
+function success(value: unknown, dispatched: boolean, images?: readonly ProviderHostToolImage[]): ProviderHostToolResult {
   const text = JSON.stringify(value);
   return Buffer.byteLength(text, "utf8") <= MAX_APP_TOOL_RESULT_BYTES
-    ? { success: true, text }
+    ? { success: true, text, ...(images && images.length > 0 ? { images } : {}) }
     : failure("too-large", "The App result was larger than Inertia can return. Narrow the request and try again.", dispatched);
 }
 
@@ -402,7 +485,10 @@ function launchSummary(launch: AppUnderTestLaunch, nowMs: number): Record<string
 type WindowArguments =
   | { tool: "inertia_app_snapshot" | "inertia_app_screenshot"; command: AppUnderTestWindowCommand }
   | { tool: "inertia_app_wait_for"; command: AppUnderTestWindowCommand }
-  | { tool: "inertia_app_click" | "inertia_app_type" | "inertia_app_press" | "inertia_app_scroll"; command: AppUnderTestDestructiveWindowCommand };
+  | {
+      tool: "inertia_app_click" | "inertia_app_type" | "inertia_app_press" | "inertia_app_scroll" | "inertia_app_activate";
+      command: AppUnderTestDestructiveWindowCommand;
+    };
 
 function windowCommand(call: ProviderHostToolCall): WindowArguments | null {
   switch (call.tool) {
@@ -413,6 +499,10 @@ function windowCommand(call: ProviderHostToolCall): WindowArguments | null {
     case "inertia_app_screenshot": {
       const { windowId } = windowSchema.parse(call.arguments);
       return { tool: call.tool, command: { action: "screenshot", windowId } };
+    }
+    case "inertia_app_activate": {
+      const { windowId } = windowSchema.parse(call.arguments);
+      return { tool: call.tool, command: { action: "activate", windowId } };
     }
     case "inertia_app_wait_for": {
       const args = waitSchema.parse(call.arguments);
@@ -454,6 +544,11 @@ function windowCommand(call: ProviderHostToolCall): WindowArguments | null {
   }
 }
 
+function wheelNotchText(deltaY: number): string {
+  const notches = Math.abs(appWheelNotches(deltaY));
+  return `${notches} wheel ${notches === 1 ? "notch" : "notches"}`;
+}
+
 function acceptsDialog(command: AppUnderTestDestructiveWindowCommand): string {
   return "dialog" in command && command.dialog === "accept" ? " and accept the app's confirmation dialog" : "";
 }
@@ -479,6 +574,11 @@ export function appActionApprovalDetail(
   inspection: AppUnderTestWindowInspection,
 ): string {
   const window = `App window ${Math.max(1, Math.trunc(inspection.windowNumber))}`;
+  if (command.action === "activate") {
+    return `${window}\nBring this window to the front and give it keyboard focus. For the rest of this turn the agent may send it keys and mouse-wheel scrolling, each asked for separately unless the chat has Full Access.`;
+  }
+  // Synthesized OS input goes to the window in front, not through accessibility.
+  const synthesized = inspection.synthesized === true;
   const target = inspection.target;
   const control = target
     ? `${safeText(target.role || "control", "control", 300)}: ${target.sensitive ? "Sensitive field" : safeText(target.label, "app control", 300)}`
@@ -496,11 +596,13 @@ export function appActionApprovalDetail(
       return `${window}\n${command.replace ? "Replace text in" : "Append text to"} ${control}${acceptsDialog(command)}\n${extent}: ${JSON.stringify(preview)}`;
     }
     case "press":
-      return `${window}\nPress: ${command.key} on ${control}${acceptsDialog(command)}`;
+      return `${window}\nPress: ${command.key} on ${control}${acceptsDialog(command)}${synthesized ? "\nThis sends keyboard input to the app window." : ""}`;
     case "scroll":
       return "ref" in command
         ? `${window}\nScroll ${control} into view`
-        : `${window}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
+        : synthesized
+          ? `${window}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels as ${wheelNotchText(command.deltaY)}\nThis scrolls the app window with the mouse wheel at its centre.`
+          : `${window}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
   }
 }
 
@@ -513,6 +615,7 @@ export class AppUnderTestHostTools {
   private readonly now: () => number;
   private readonly expiryMs: number;
   private readonly tokens: AppApprovalTokens;
+  private readonly progress = new AppProgressGuard();
 
   constructor(
     private readonly launches: AppUnderTestLaunchManager,
@@ -525,6 +628,12 @@ export class AppUnderTestHostTools {
 
   get pendingApprovals(): number {
     return this.tokens.size;
+  }
+
+  /** Forgets the turn's progress state, screenshot allowance and foreground grants. */
+  turnSettled(turnId: string): void {
+    this.progress.settle(turnId);
+    this.launches.turnSettled(turnId);
   }
 
   async invoke(
@@ -542,16 +651,30 @@ export class AppUnderTestHostTools {
       return failure("unavailable", "App tools are unavailable for turns sent from another device.");
     }
     if (call.signal.aborted) return failure("call_cancelled", "The App action was cancelled.");
+    // The same call that failed three times in a row this turn is not repeated.
+    const key = appCallKey(call.tool, call.arguments);
+    if (this.progress.repeated(identity.turnId, key)) return failure("repeated_failure", APP_REPEATED_FAILURE_MESSAGE);
+    let result: ProviderHostToolResult;
     try {
-      return await this.dispatch(conversation, call, { runId: identity.runId, turnId: identity.turnId });
+      result = await this.dispatch(conversation, call, { runId: identity.runId, turnId: identity.turnId }, identity);
     } catch (error) {
-      if (error instanceof z.ZodError) return invalidArguments(error);
-      if (error instanceof AppUnderTestError) return failure(error.code, error.message, error.dispatched);
-      return failure("unavailable", "The App tool failed safely. Call inertia_app_status, then try again.");
+      if (error instanceof z.ZodError) result = invalidArguments(error);
+      else if (error instanceof AppUnderTestError) result = failure(error.code, error.message, error.dispatched);
+      else result = failure("unavailable", "The App tool failed safely. Call inertia_app_status, then try again.");
     }
+    const failed = failureOf(result);
+    if (failed === null || countsAsFailure(call.tool, failed)) {
+      this.progress.recordOutcome(identity.turnId, key, failed !== null, calledWindow(call.arguments));
+    }
+    return result;
   }
 
-  private async dispatch(conversation: Conversation, call: ProviderHostToolCall, turn: AppUnderTestTurn): Promise<ProviderHostToolResult> {
+  private async dispatch(
+    conversation: Conversation,
+    call: ProviderHostToolCall,
+    turn: AppUnderTestTurn,
+    identity: AppUnderTestToolIdentity,
+  ): Promise<ProviderHostToolResult> {
     const conversationId = conversation.id;
     switch (call.tool) {
       case "inertia_app_status": {
@@ -606,7 +729,7 @@ export class AppUnderTestHostTools {
       case "inertia_app_stop":
         return await this.stop(conversation, call);
       default:
-        return await this.window(conversation, call, turn);
+        return await this.window(conversation, call, turn, identity);
     }
   }
 
@@ -703,18 +826,83 @@ export class AppUnderTestHostTools {
     }, true);
   }
 
-  private async window(conversation: Conversation, call: ProviderHostToolCall, turn: AppUnderTestTurn): Promise<ProviderHostToolResult> {
+  private async window(
+    conversation: Conversation,
+    call: ProviderHostToolCall,
+    turn: AppUnderTestTurn,
+    identity: AppUnderTestToolIdentity,
+  ): Promise<ProviderHostToolResult> {
     const parsed = windowCommand(call);
     if (!parsed) return failure("unknown_tool", "That Inertia App tool is unavailable.");
-    const { command } = parsed;
+    let { command } = parsed;
     const owner = this.resolveWindow(conversation.id, command.windowId);
     const { launch, transport } = owner;
     const destructive = parsed.tool === "inertia_app_click" || parsed.tool === "inertia_app_type"
-      || parsed.tool === "inertia_app_press" || parsed.tool === "inertia_app_scroll";
-    let expected: Pick<AppUnderTestWindowInspection, "documentSequence" | "target" | "dialog"> | undefined;
+      || parsed.tool === "inertia_app_press" || parsed.tool === "inertia_app_scroll" || parsed.tool === "inertia_app_activate";
+    if (APP_VISIBLE_CHANGE_TOOLS.has(parsed.tool) && this.progress.noVisibleChange(turn.turnId, command.windowId)) {
+      return failure("repeated_failure", APP_NO_VISIBLE_CHANGE_MESSAGE);
+    }
+    // Activation always asks. Synthesized OS input asks in Supervised and
+    // Auto-edit, because it reaches whatever holds the focus; accessibility
+    // actions and debugging-pipe input ask in Supervised only. The planned
+    // route travels with the call: the transport refuses if it changed.
+    const route = destructive ? transport.inputRoute?.(command as AppUnderTestDestructiveWindowCommand, turn) : undefined;
+    const synthesized = route === "synthesized";
+    const asks = destructive && (
+      command.action === "activate"
+      || conversation.accessMode === "supervised"
+      || (synthesized && conversation.accessMode !== "full")
+    );
+    // A model-visible screenshot: the project opted in, the route accepts images, and the turn has allowance left.
+    let imageReserved = false;
+    let notSent: string | null = null;
+    if (command.action === "screenshot") {
+      if (!identity.visualEvidence) notSent = "local evidence only";
+      else if (!identity.imagesAccepted) {
+        notSent = "local evidence only: this chat's model does not accept images in tool results, so the screenshot was not sent to you.";
+      } else if (!this.progress.reserveScreenshot(turn.turnId)) {
+        return failure(
+          "screenshot_limit_reached",
+          `This turn already sent ${MAX_APP_AGENT_SCREENSHOTS_PER_TURN} screenshots to you. Use inertia_app_snapshot to inspect the window instead.`,
+        );
+      } else {
+        imageReserved = true;
+        command = { action: "screenshot", windowId: command.windowId, agentImage: true };
+      }
+    }
+    try {
+      return await this.windowAction(conversation, call, turn, { launch, transport }, command, {
+        destructive, asks, notSent, route, imageSent: () => { imageReserved = false; },
+      });
+    } finally {
+      if (imageReserved) this.progress.releaseScreenshot(turn.turnId);
+    }
+  }
+
+  private async windowAction(
+    conversation: Conversation,
+    call: ProviderHostToolCall,
+    turn: AppUnderTestTurn,
+    owner: { launch: AppUnderTestLaunch; transport: AppUnderTestWindowTransport },
+    command: AppUnderTestWindowCommand,
+    plan: {
+      destructive: boolean;
+      /** This call needs the user's approval first. */
+      asks: boolean;
+      /** Why a screenshot is not sent to the model, or null when it may be. */
+      notSent: string | null;
+      /** Native windows: the input route this call was planned (and approved) for. */
+      route: AppUnderTestInputRoute | undefined;
+      /** Keeps the turn's screenshot reservation once the image is in the result. */
+      imageSent(): void;
+    },
+  ): Promise<ProviderHostToolResult> {
+    const { launch, transport } = owner;
+    const { destructive, notSent } = plan;
+    let expected: Pick<AppUnderTestWindowInspection, "documentSequence" | "target" | "dialog" | "synthesized"> | undefined;
     let dialogOnly = false;
-    if (destructive && conversation.accessMode === "supervised") {
-      const action = parsed.command as AppUnderTestDestructiveWindowCommand;
+    if (plan.asks) {
+      const action = command as AppUnderTestDestructiveWindowCommand;
       const inspected = await this.launches.withAction(
         conversation.id,
         launch.launchId,
@@ -737,7 +925,12 @@ export class AppUnderTestHostTools {
         const { inspection } = inspected;
         binding.documentSequence = inspection.documentSequence;
         detail = appActionApprovalDetail(action, inspection);
-        expected = { documentSequence: inspection.documentSequence, target: inspection.target, dialog: inspection.dialog };
+        expected = {
+          documentSequence: inspection.documentSequence,
+          target: inspection.target,
+          dialog: inspection.dialog,
+          ...(inspection.synthesized ? { synthesized: true } : {}),
+        };
       } else if (inspected.pendingDialog && inspected.pendingDialog.windowId === action.windowId) {
         const pending = inspected.pendingDialog;
         binding.documentSequence = pending.documentSequence;
@@ -756,20 +949,85 @@ export class AppUnderTestHostTools {
       turn,
       ...(expected ? { expected } : {}),
       ...(dialogOnly ? { dialogOnly } : {}),
+      ...(plan.route ? { route: plan.route } : {}),
     }), call.signal);
     if (!result.ok) return failure(result.code, result.message, result.dispatched);
     if (destructive && !dialogOnly) {
-      this.launches.appendEvidence(conversation.id, launch.launchId, {
-        kind: "action",
-        action: (command as AppUnderTestDestructiveWindowCommand).action,
-      });
+      const action = (command as AppUnderTestDestructiveWindowCommand).action;
+      // An activation the operating system did not honour brought nothing to the front.
+      if (action !== "activate" || result.value.activated === true) {
+        this.launches.appendEvidence(conversation.id, launch.launchId, { kind: "action", action });
+      }
+      if (action === "activate") {
+        if (result.value.activated === true) this.progress.clearWindow(turn.turnId, command.windowId);
+      } else {
+        this.progress.recordAction(turn.turnId, command.windowId);
+      }
     }
-    return success({
+    if (command.action === "snapshot" && Array.isArray(result.value.elements)) {
+      this.progress.recordSnapshot(
+        turn.turnId,
+        command.windowId,
+        appSnapshotFingerprint(transport.documentSequence?.(command.windowId) ?? null, result.value),
+      );
+    }
+    if (command.action !== "screenshot") {
+      return success({ ...result.value, windowId: command.windowId, launchId: launch.launchId }, destructive);
+    }
+    const local = {
       ...result.value,
       windowId: command.windowId,
       launchId: launch.launchId,
-      ...(parsed.tool === "inertia_app_screenshot" ? { note: "local evidence only" } : {}),
-    }, destructive);
+      sentToAgent: false,
+      note: notSent ?? (result.value.mayIncludeOverlappingWindows === true
+        ? APP_AGENT_IMAGE_OVERLAP_NOTE
+        : "local evidence only: Inertia could not reduce this screenshot for you; it is kept on the user's device."),
+    };
+    // A region capture can show other windows over the app: it is never sent, whatever the transport returned.
+    const image = command.agentImage && result.value.mayIncludeOverlappingWindows !== true && result.image
+      && agentImageWithinBounds(result.image) ? result.image : null;
+    const sentValue = image ? {
+      ...result.value,
+      windowId: command.windowId,
+      launchId: launch.launchId,
+      sentToAgent: true,
+      imageWidth: image.width,
+      imageHeight: image.height,
+      note: APP_AGENT_IMAGE_NOTE,
+    } : null;
+    const images: ProviderHostToolImage[] | undefined = image
+      ? [{ mimeType: "image/png", data: Buffer.from(image.png).toString("base64") }]
+      : undefined;
+    if (!result.thumbnail) {
+      // Evidence the transport already recorded (no model-visible copy was asked for).
+      if (!sentValue) return success(local, false);
+      const sent = success(sentValue, false, images);
+      if (sent.success) plan.imageSent();
+      return sent;
+    }
+    // The evidence is labelled as sent only for an image validated here and attached to a result that fits.
+    const attach = sentValue !== null && success({ ...sentValue, evidenceId: EVIDENCE_ID_PLACEHOLDER }, false, images).success;
+    const evidence = this.recordScreenshot(conversation.id, launch.launchId, result.thumbnail, attach);
+    if (!evidence) return failure("unavailable", "Inertia could not keep the screenshot as local evidence.");
+    if (!attach) return success({ ...local, evidenceId: evidence }, false);
+    const sent = success({ ...sentValue, evidenceId: evidence }, false, images);
+    if (sent.success) plan.imageSent();
+    return sent;
+  }
+
+  private recordScreenshot(
+    conversationId: string,
+    launchId: string,
+    thumbnail: { png: Uint8Array; width: number; height: number },
+    sentToAgent: boolean,
+  ): string | null {
+    try {
+      return this.launches.appendEvidence(conversationId, launchId, {
+        kind: "screenshot", ...thumbnail, ...(sentToAgent ? { sentToAgent: true } : {}),
+      })?.evidenceId ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private resolveWindow(

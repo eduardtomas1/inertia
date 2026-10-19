@@ -6,8 +6,17 @@
  * Every field is validated with exact keys and bounded sizes.
  */
 
+import { AGENT_BROWSER_KEYS, type AgentBrowserKey } from "../shared/agent-browser.js";
+import { MAX_APP_AGENT_IMAGE_BYTES, MAX_APP_AGENT_IMAGE_EDGE, MAX_APP_AGENT_IMAGE_PIXELS } from "../shared/app-under-test.js";
+
 export const APP_CONTROL_MAX_PAYLOAD_BYTES = 24 * 1024;
 export const APP_CONTROL_MAX_PNG_BYTES = 256 * 1024;
+/** A screenshot the project lets the model see: PNG bytes, long edge and pixels, as the App pack sends it. */
+export const APP_CONTROL_MAX_AGENT_PNG_BYTES = MAX_APP_AGENT_IMAGE_BYTES;
+export const APP_CONTROL_MAX_AGENT_IMAGE_EDGE = MAX_APP_AGENT_IMAGE_EDGE;
+export const APP_CONTROL_MAX_AGENT_IMAGE_PIXELS = MAX_APP_AGENT_IMAGE_PIXELS;
+/** Synthesized wheel input: pixels requested by the agent, as in `inertia_app_scroll`. */
+export const APP_CONTROL_MAX_WHEEL_DELTA = 20_000;
 export const APP_CONTROL_MAX_PENDING_REQUESTS = 16;
 export const APP_CONTROL_RUNTIME_BACKSTOP_MS = 90_000;
 export const APP_CONTROL_INSPECT_WATCHDOG_MS = 10_000;
@@ -58,6 +67,7 @@ export type AppControlFailureCode = (typeof APP_CONTROL_FAILURE_CODES)[number];
 export const APP_CONTROL_FAILURE_REASONS = [
   "disabled", "not-editable", "action-unsupported", "stale", "changed", "window-gone", "launch-gone",
   "incomplete", "screen-recording", "wayland", "no-focus", "tree-too-large", "start-failed", "empty-tree",
+  "not-foreground", "input-wayland", "input-unavailable", "key-unsupported",
 ] as const;
 export type AppControlFailureReason = (typeof APP_CONTROL_FAILURE_REASONS)[number];
 
@@ -79,11 +89,20 @@ export interface AppControlExpectation {
   name: string;
 }
 
+/** What an approved synthesized input expects: the window root and, for a key, the focused control. */
+export interface AppControlInputExpectation {
+  rootKey: string;
+  focus: { role: string; name: string } | null;
+}
+
+/** The Browser's key allowlist; synthesized only, never arbitrary text. */
+export const APP_CONTROL_INPUT_KEYS: readonly AgentBrowserKey[] = AGENT_BROWSER_KEYS;
+
 export type AppControlCommand =
   | { command: "windows" }
   | { command: "permissions" }
   | { command: "snapshot"; window: string }
-  | { command: "screenshot"; window: string }
+  | { command: "screenshot"; window: string; agentImage: boolean }
   | { command: "inspect"; window: string; element: string | null }
   | {
       command: "perform";
@@ -92,6 +111,14 @@ export type AppControlCommand =
       action: AppControlAction;
       text: string | null;
       expect: AppControlExpectation | null;
+    }
+  | {
+      /** Synthesized input (xa11y `InputSim`) to a window in front: exactly one of `key` or `deltaY`. */
+      command: "input";
+      window: string;
+      key: AgentBrowserKey | null;
+      deltaY: number | null;
+      expect: AppControlInputExpectation | null;
     };
 export type AppControlCommandName = AppControlCommand["command"];
 
@@ -133,6 +160,8 @@ export type AppControlValue =
       accessibility: "granted" | "required" | "unverified";
       screenRecording: "granted" | "required" | "unverified";
       screenshots: "available" | "unavailable";
+      /** Synthesized keyboard and wheel input; macOS needs Accessibility, Wayland has none. */
+      input: "available" | "required" | "unavailable";
     }
   | {
       kind: "snapshot";
@@ -150,7 +179,17 @@ export type AppControlValue =
     }
   | { kind: "inspect"; rootKey: string; element: AppControlElementInfo | null }
   | { kind: "perform"; rootKey: string | null; windowClosed: boolean }
-  | { kind: "screenshot"; width: number; height: number; png: Uint8Array; mayIncludeOverlappingWindows: boolean };
+  | {
+      kind: "screenshot";
+      width: number;
+      height: number;
+      png: Uint8Array;
+      mayIncludeOverlappingWindows: boolean;
+      /** Present only when the command asked for it: the masked capture reduced for the model. */
+      agentImage: AppControlAgentImage | null;
+    };
+
+export interface AppControlAgentImage { png: Uint8Array; width: number; height: number }
 
 export interface AppControlFailure {
   ok: false;
@@ -232,6 +271,16 @@ export function parseAppControlIdentity(value: unknown): AppControlIdentity | nu
   return { conversationId, runId: runId as string | null, turnId: turnId as string | null, launchId, pid, processStartedAt };
 }
 
+function parseInputExpectation(value: unknown): AppControlInputExpectation | null | undefined {
+  if (value === null) return null;
+  if (!plainObject(value) || !exactKeys(value, ["rootKey", "focus"]) || !token(value.rootKey)) return undefined;
+  if (value.focus === null) return { rootKey: value.rootKey, focus: null };
+  const focus = value.focus;
+  if (!plainObject(focus) || !exactKeys(focus, ["role", "name"]) || !boundedString(focus.role, APP_CONTROL_MAX_ROLE_CHARS)
+    || !boundedString(focus.name, APP_CONTROL_MAX_NAME_CHARS)) return undefined;
+  return { rootKey: value.rootKey, focus: { role: focus.role, name: focus.name } };
+}
+
 function parseExpectation(value: unknown): AppControlExpectation | null | undefined {
   if (value === null) return null;
   if (!plainObject(value) || !exactKeys(value, ["rootKey", "role", "name"])) return undefined;
@@ -249,10 +298,26 @@ export function parseAppControlCommand(value: unknown): AppControlCommand | null
     case "permissions":
       return exactKeys(value, ["command"]) ? { command: value.command } : null;
     case "snapshot":
-    case "screenshot":
       return exactKeys(value, ["command", "window"]) && token(value.window)
         ? { command: value.command, window: value.window }
         : null;
+    case "screenshot":
+      return exactKeys(value, ["command", "window", "agentImage"]) && token(value.window) && typeof value.agentImage === "boolean"
+        ? { command: "screenshot", window: value.window, agentImage: value.agentImage }
+        : null;
+    case "input": {
+      if (!exactKeys(value, ["command", "window", "key", "deltaY", "expect"]) || !token(value.window)) return null;
+      const key = value.key === null ? null : APP_CONTROL_INPUT_KEYS.find((candidate) => candidate === value.key);
+      const deltaY = value.deltaY;
+      if (key === undefined) return null;
+      if (deltaY !== null && !(typeof deltaY === "number" && Number.isSafeInteger(deltaY) && deltaY !== 0
+        && Math.abs(deltaY) <= APP_CONTROL_MAX_WHEEL_DELTA)) return null;
+      if ((key === null) === (deltaY === null)) return null;
+      const expect = parseInputExpectation(value.expect);
+      // A wheel expectation names no focused control.
+      if (expect === undefined || (deltaY !== null && expect !== null && expect.focus !== null)) return null;
+      return { command: "input", window: value.window, key, deltaY: deltaY as number | null, expect };
+    }
     case "inspect":
       return exactKeys(value, ["command", "window", "element"]) && token(value.window)
         && (value.element === null || token(value.element))
@@ -368,6 +433,17 @@ function isPng(value: Uint8Array): boolean {
   return value.byteLength > 24 && PNG_SIGNATURE.every((byte, index) => value[index] === byte);
 }
 
+/** A model-visible image: PNG, long edge at most 1,536 pixels, at most 720,000 pixels and 3.75 MB. */
+export function parseAgentImage(value: unknown): AppControlAgentImage | null | undefined {
+  if (value === null) return null;
+  if (!plainObject(value) || !exactKeys(value, ["png", "width", "height"])) return undefined;
+  const { png, width, height } = value;
+  if (!(png instanceof Uint8Array) || png.byteLength > APP_CONTROL_MAX_AGENT_PNG_BYTES || !isPng(png)
+    || !count(width, APP_CONTROL_MAX_AGENT_IMAGE_EDGE) || !count(height, APP_CONTROL_MAX_AGENT_IMAGE_EDGE)
+    || width === 0 || height === 0 || width * height > APP_CONTROL_MAX_AGENT_IMAGE_PIXELS) return undefined;
+  return { png: new Uint8Array(png), width, height };
+}
+
 function parseValue(value: unknown): AppControlValue | null {
   if (!plainObject(value) || typeof value.kind !== "string") return null;
   switch (value.kind) {
@@ -381,9 +457,10 @@ function parseValue(value: unknown): AppControlValue | null {
     }
     case "permissions": {
       const states = ["granted", "required", "unverified"];
-      return exactKeys(value, ["kind", "accessibility", "screenRecording", "screenshots"])
+      return exactKeys(value, ["kind", "accessibility", "screenRecording", "screenshots", "input"])
         && states.includes(value.accessibility as string) && states.includes(value.screenRecording as string)
         && (value.screenshots === "available" || value.screenshots === "unavailable")
+        && (value.input === "available" || value.input === "required" || value.input === "unavailable")
         ? value as AppControlValue
         : null;
     }
@@ -425,16 +502,19 @@ function parseValue(value: unknown): AppControlValue | null {
         ? { kind: "perform", rootKey: value.rootKey as string | null, windowClosed: value.windowClosed }
         : null;
     case "screenshot": {
-      if (!exactKeys(value, ["kind", "width", "height", "png", "mayIncludeOverlappingWindows"])
+      if (!exactKeys(value, ["kind", "width", "height", "png", "mayIncludeOverlappingWindows", "agentImage"])
         || !count(value.width, 16_384) || !count(value.height, 16_384) || value.width === 0 || value.height === 0
         || !(value.png instanceof Uint8Array) || value.png.byteLength > APP_CONTROL_MAX_PNG_BYTES || !isPng(value.png)
         || typeof value.mayIncludeOverlappingWindows !== "boolean") return null;
+      const agentImage = parseAgentImage(value.agentImage);
+      if (agentImage === undefined) return null;
       return {
         kind: "screenshot",
         width: value.width,
         height: value.height,
         png: new Uint8Array(value.png),
         mayIncludeOverlappingWindows: value.mayIncludeOverlappingWindows,
+        agentImage,
       };
     }
     default:
@@ -450,6 +530,7 @@ export const APP_CONTROL_RESULT_KIND: Readonly<Record<AppControlCommandName, App
   screenshot: "screenshot",
   inspect: "inspect",
   perform: "perform",
+  input: "perform",
 });
 
 /** Validates a result, optionally requiring the value kind of the command it answers. */

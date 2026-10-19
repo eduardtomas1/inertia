@@ -68,6 +68,9 @@ async function tool(name: string, args: Record<string, unknown> = {}): Promise<R
   return parsed;
 }
 
+/** The project sends app screenshots to the agent, on a route whose model accepts images. */
+const visualIdentity = { ...identity, visualEvidence: true, imagesAccepted: true };
+
 interface Element {
   ref?: string;
   role: string;
@@ -152,10 +155,35 @@ test.describe("App under test with a real Electron app", () => {
     expect(evidence!.width).toBeLessThanOrEqual(512);
     expect(evidence!.height).toBeLessThanOrEqual(320);
 
+    // With the project's opt-in on an image-accepting route, one reduced PNG reaches the model.
+    const visual = await tools.invoke(conversation, call("inertia_app_screenshot", { windowId }), visualIdentity);
+    expect(visual.success, visual.text).toBe(true);
+    const visualResult = JSON.parse(visual.text) as Record<string, unknown>;
+    expect(visualResult).toMatchObject({
+      captured: true, sentToAgent: true, note: "Coordinates from this image are not accepted by any tool; use refs from a snapshot.",
+    });
+    expect(visual.images).toHaveLength(1);
+    const image = Buffer.from(visual.images![0]!.data, "base64");
+    expect(visual.images![0]!.mimeType).toBe("image/png");
+    expect(image.subarray(1, 4).toString("latin1")).toBe("PNG");
+    const [imageWidth, imageHeight] = [image.readUInt32BE(16), image.readUInt32BE(20)];
+    expect(visualResult).toMatchObject({ imageWidth, imageHeight });
+    expect(Math.max(imageWidth, imageHeight)).toBeLessThanOrEqual(1_536);
+    expect(imageWidth).toBeGreaterThan(512);
+    expect(imageWidth * imageHeight).toBeLessThanOrEqual(720_000);
+    expect(image.byteLength).toBeLessThanOrEqual(3_750_000);
+    const sentEntry = launches.listEvidence(conversationId).find((entry) => entry.evidenceId === visualResult.evidenceId);
+    expect(sentEntry).toMatchObject({ kind: "screenshot", label: "Screenshot sent to the agent", hasThumbnail: true });
+
     await tool("inertia_app_type", { windowId, ref: ref(snapshot, "input", "Password"), text: "hunter2-fixture" });
     const secret = await tool("inertia_app_snapshot", { windowId });
     expect(JSON.stringify(secret)).not.toContain("hunter2-fixture");
     expect((secret.elements as Element[]).find((element) => element.name === "Password")).toMatchObject({ value: "[redacted]" });
+    // A filled password field withholds the model-visible copy with the local one.
+    const withheld = await tools.invoke(conversation, call("inertia_app_screenshot", { windowId }), visualIdentity);
+    expect(withheld.success).toBe(false);
+    expect(withheld.images).toBeUndefined();
+    expect(JSON.parse(withheld.text)).toMatchObject({ error: { code: "sensitive", retryable: false, dispatched: false } });
 
     const logs = await tool("inertia_app_logs", { launchId, grep: "fixture" });
     const lines = logs.lines as Array<{ stream: string; text: string }>;

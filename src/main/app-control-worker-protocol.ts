@@ -52,8 +52,9 @@ function parseTreeEntry(value: unknown): AppControlProcessEntry | null {
 
 /**
  * Validates a worker response for the command it answers. A screenshot may
- * carry an image of up to 8 MiB (main reduces it to a thumbnail); every other
- * value must fit the 24 KiB payload bound.
+ * carry an image of up to 8 MiB (main reduces it to a thumbnail and, when the
+ * command asked for one, to the model-visible image); every other value must
+ * fit the 24 KiB payload bound. The worker never produces `agentImage` itself.
  */
 export function parseAppControlWorkerResponse(
   value: unknown,
@@ -75,7 +76,8 @@ export function parseAppControlWorkerResponse(
       || !PNG_SIGNATURE.every((byte, index) => (shot.png as Uint8Array)[index] === byte)
       || appControlPayloadBytes(result) > APP_CONTROL_MAX_PAYLOAD_BYTES) return null;
     const keys = Object.keys(shot).sort().join(",");
-    if (keys !== "height,kind,mayIncludeOverlappingWindows,png,width" || typeof shot.mayIncludeOverlappingWindows !== "boolean"
+    if (keys !== "agentImage,height,kind,mayIncludeOverlappingWindows,png,width" || shot.agentImage !== null
+      || typeof shot.mayIncludeOverlappingWindows !== "boolean"
       || !Number.isSafeInteger(shot.width) || !Number.isSafeInteger(shot.height)
       || (shot.width as number) <= 0 || (shot.height as number) <= 0) return null;
     return {
@@ -86,6 +88,7 @@ export function parseAppControlWorkerResponse(
         width: shot.width as number,
         height: shot.height as number,
         mayIncludeOverlappingWindows: shot.mayIncludeOverlappingWindows,
+        agentImage: null,
       },
     };
   }

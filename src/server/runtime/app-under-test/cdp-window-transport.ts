@@ -8,15 +8,13 @@ import {
 import {
   APP_INPUT_BUDGET_MS,
   APP_INSPECT_BUDGET_MS,
-  MAX_APP_EVIDENCE_THUMBNAIL_BYTES,
-  MAX_APP_EVIDENCE_THUMBNAIL_HEIGHT,
-  MAX_APP_EVIDENCE_THUMBNAIL_WIDTH,
   MAX_APP_WINDOW_TITLE_CHARS,
   MAX_APP_WINDOWS,
   type AppUnderTestWindow,
 } from "../../../shared/app-under-test";
 import { sanitizeBrowserEvidenceText } from "../../../shared/browser-evidence";
 import { CdpPipeClient, CdpPipeError, cdpFailureCode, type CdpEvent } from "./cdp-pipe-client";
+import { activateRefused, captureCdpWindow } from "./cdp-window-capture";
 import { AppWindowDialogs } from "./cdp-window-dialogs";
 import {
   activationMessage,
@@ -33,7 +31,6 @@ import {
   MAX_APP_LOG_LINE_CHARS,
   MAX_REPORTED_SECRETS,
   MAX_QUEUED_COMMANDS,
-  MAX_SCREENSHOT_ATTEMPTS,
   MAX_TARGET_TEXT_CHARS,
   MAX_WAITING_TARGETS,
   MESSAGES,
@@ -41,7 +38,6 @@ import {
   NAVIGATION_GRACE_MS,
   NAVIGATION_SETTLE_MS,
   PHASE_TIMEOUT_MS,
-  pngDimensions,
   QUEUE_WAIT_MS,
   record,
   redactSecrets,
@@ -83,6 +79,7 @@ import {
   appScrollRefExpression,
 } from "./snapshot-script";
 import type {
+  AppUnderTestAgentImage,
   AppUnderTestCdpTransportContext,
   AppUnderTestDestructiveWindowCommand,
   AppUnderTestPendingDialog,
@@ -215,10 +212,15 @@ export class CdpWindowTransport implements AppUnderTestWindowTransport {
     });
   }
 
+  documentSequence(windowId: string): number | null {
+    return this.windowById(windowId)?.documentSequence ?? null;
+  }
+
   async inspect(
     command: AppUnderTestDestructiveWindowCommand,
     signal: AbortSignal,
   ): Promise<AppUnderTestWindowInspectionResult> {
+    if (command.action === "activate") return activateRefused();
     const result = await this.run(command.windowId, "inspect", this.inspectBudgetMs, signal, async (scope) => {
       const inspection = await this.inspectIn(scope, command);
       return { inspection };
@@ -234,8 +236,19 @@ export class CdpWindowTransport implements AppUnderTestWindowTransport {
     switch (command.action) {
       case "snapshot":
         return await this.run(command.windowId, "inspect", this.inspectBudgetMs, signal, (scope) => this.snapshot(scope));
-      case "screenshot":
-        return await this.run(command.windowId, "inspect", this.inspectBudgetMs, signal, (scope) => this.screenshot(scope));
+      case "screenshot": {
+        let image: AppUnderTestAgentImage | null = null;
+        let thumbnail: { png: Uint8Array; width: number; height: number } | undefined;
+        const shot = await this.run(command.windowId, "inspect", this.inspectBudgetMs, signal, async (scope) => {
+          const captured = await this.screenshot(scope, command.agentImage === true);
+          image = captured.image;
+          thumbnail = captured.thumbnail;
+          return captured.value;
+        });
+        return shot.ok && command.agentImage ? { ...shot, image, ...(thumbnail ? { thumbnail } : {}) } : shot;
+      }
+      case "activate":
+        return activateRefused();
       case "wait":
         return await this.run(
           command.windowId, "wait", command.timeoutMs + WAIT_BUDGET_EXTRA_MS, signal,
@@ -605,9 +618,20 @@ export class CdpWindowTransport implements AppUnderTestWindowTransport {
     }
   }
 
-  private async screenshot(scope: Scope): Promise<Record<string, unknown>> {
+  private async screenshot(
+    scope: Scope,
+    agentImage: boolean,
+  ): Promise<{
+    value: Record<string, unknown>;
+    image: AppUnderTestAgentImage | null;
+    thumbnail?: { png: Uint8Array; width: number; height: number };
+  }> {
     this.requirePage(scope);
     const check = async (): Promise<void> => {
+      // The model never sees a launch whose windows revealed a secret, in this window or another.
+      if (agentImage && (this.launchMemory.passwordValues.size > 0 || this.launchMemory.evidenceWithheld)) {
+        throw refusal("sensitive", "Screenshots are not sent to you while this app holds a secret value Inertia hid. Restart the app to send one again, or use inertia_app_snapshot.");
+      }
       const page = await this.readPage(scope);
       if (page.withheld) throw refusal("sensitive", withheldMessage(page.withheld, "Screenshots are"));
       if (page.remembered > 0 || scope.window.memory.passwordValues.size > 0) {
@@ -618,40 +642,16 @@ export class CdpWindowTransport implements AppUnderTestWindowTransport {
       }
     };
     await check();
-    const metrics = record((await this.send(scope, "Page.getLayoutMetrics")).cssVisualViewport);
-    const width = Math.floor(finiteNumber(metrics?.clientWidth) ?? 0);
-    const height = Math.floor(finiteNumber(metrics?.clientHeight) ?? 0);
-    if (width <= 0 || height <= 0 || width > 16_384 || height > 16_384) {
-      throw refusal("unavailable", "This window has nothing drawable to capture.");
-    }
-    // Chromium renders the reduced thumbnail itself (clip.scale), so the
-    // full-size bitmap never reaches the runtime.
-    let scale = Math.min(1, MAX_APP_EVIDENCE_THUMBNAIL_WIDTH / width, MAX_APP_EVIDENCE_THUMBNAIL_HEIGHT / height);
-    let thumbnail: { png: Uint8Array; width: number; height: number } | null = null;
-    for (let attempt = 0; attempt < MAX_SCREENSHOT_ATTEMPTS && thumbnail === null; attempt += 1) {
-      const shot = await this.send(scope, "Page.captureScreenshot", {
-        format: "png",
-        clip: { x: finiteNumber(metrics?.pageX) ?? 0, y: finiteNumber(metrics?.pageY) ?? 0, width, height, scale },
-        captureBeyondViewport: false,
-        fromSurface: true,
-      });
-      const data = typeof shot.data === "string" ? shot.data : "";
-      const png = Buffer.from(data, "base64");
-      const size = pngDimensions(png);
-      if (!size) throw refusal("unavailable", "The window returned an unreadable screenshot.");
-      if (size.width > MAX_APP_EVIDENCE_THUMBNAIL_WIDTH || size.height > MAX_APP_EVIDENCE_THUMBNAIL_HEIGHT) {
-        scale *= Math.min(MAX_APP_EVIDENCE_THUMBNAIL_WIDTH / size.width, MAX_APP_EVIDENCE_THUMBNAIL_HEIGHT / size.height) * 0.98;
-      } else if (png.byteLength > MAX_APP_EVIDENCE_THUMBNAIL_BYTES) {
-        scale *= 0.72;
-      } else {
-        thumbnail = { png: new Uint8Array(png), ...size };
-      }
-    }
-    if (!thumbnail) throw refusal("too-large", "The window could not be reduced to a local thumbnail.");
+    const captured = await captureCdpWindow(async (method, params) => await this.send(scope, method, params), agentImage);
+    // The gate is checked again after the last capture: a field that filled
+    // in meanwhile withholds both images.
     await check();
+    const { thumbnail, image, width, height } = captured;
+    // The host tool records a model-visible request's evidence once it knows whether the image was sent.
+    if (agentImage) return { value: { captured: true, width, height }, image, thumbnail };
     const evidenceId = this.context.evidence({ kind: "screenshot", ...thumbnail });
     if (!evidenceId) throw refusal("unavailable", "Inertia could not keep the screenshot as local evidence.");
-    return { captured: true, evidenceId, width, height };
+    return { value: { captured: true, evidenceId, width, height }, image: null };
   }
 
   // Inspection and input --------------------------------------------------------

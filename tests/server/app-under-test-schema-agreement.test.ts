@@ -115,7 +115,8 @@ function fakeManager(reached: string[]) {
     windows: () => [],
     pendingDialog: () => null,
     redactLog: (text: string) => text,
-    inspect: vi.fn(),
+    // Activation asks in every access mode, so its inspection prepares the card.
+    inspect: vi.fn(async () => ({ ok: true as const, inspection: { windowId: "", windowNumber: 1, documentSequence: 1, target: null, dialog: null } })),
     perform: vi.fn(async (command: { action: string }) => {
       reached.push(command.action);
       return { ok: true as const, value: {} };
@@ -179,7 +180,7 @@ describe("every schema-valid App input is accepted by the runtime validator", ()
         const reached: string[] = [];
         const result = await new AppUnderTestHostTools(fakeManager(reached) as never).invoke(conversation, {
           providerThreadId: "thread", providerTurnId: "turn", toolCallId: "call", tool: definition.name,
-          arguments: input, signal: new AbortController().signal, requestApproval: vi.fn(),
+          arguments: input, signal: new AbortController().signal, requestApproval: vi.fn(async () => "approve" as const),
         }, identity);
         if (definition.name !== "inertia_app_status" && reached.length !== 1) unreached.push(`${definition.name} ${JSON.stringify(input)}`);
         if (!result.success) unreached.push(`${definition.name} ${JSON.stringify(input)} ${result.text}`);

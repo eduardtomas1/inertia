@@ -16,6 +16,13 @@ import { appControlScreenshotAvailable } from "./app-control-platform.js";
 
 export const APP_CONTROL_CAPTURE_MAX_WIDTH = 1_024;
 export const APP_CONTROL_CAPTURE_MAX_HEIGHT = 640;
+/**
+ * A capture the project lets the model see: main reduces it again, to at most
+ * 1,536 pixels on the long edge, 720,000 pixels and 3.75 MB. Only a capture of
+ * exactly that window (macOS) is made larger: a region capture can show other
+ * windows and never reaches the model.
+ */
+export const APP_CONTROL_AGENT_CAPTURE_MAX_EDGE = 1_536;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface AppControlCaptureDependencies {
@@ -26,6 +33,8 @@ export interface AppControlCaptureDependencies {
     locate(target: MacWindowTarget): { id: number; frame: NativeRect } | null;
     capture(id: number): Promise<Buffer>;
   };
+  /** Test seam: the encoded capture bound (8 MiB). */
+  maxBytes?: number;
 }
 
 export interface AppControlCapture {
@@ -45,6 +54,8 @@ export async function captureMaskedWindow(
   target: { pid: number; title: string | null; bounds: NativeRect },
   masks: readonly NativeRect[],
   dependencies: AppControlCaptureDependencies,
+  /** Larger output for a model-visible screenshot; the local thumbnail is reduced from it in main. */
+  agentImage = false,
 ): Promise<AppControlCapture> {
   const { platform } = dependencies;
   if (!appControlScreenshotAvailable(platform, dependencies.env)) {
@@ -81,10 +92,20 @@ export async function captureMaskedWindow(
     const mask = snapshotMaskRect(rect, frame, scale);
     context.fillRect(mask.x, mask.y, mask.width, mask.height);
   }
-  const reduce = Math.min(1, APP_CONTROL_CAPTURE_MAX_WIDTH / source.width, APP_CONTROL_CAPTURE_MAX_HEIGHT / source.height);
-  const output = createCanvas(Math.max(1, Math.round(source.width * reduce)), Math.max(1, Math.round(source.height * reduce)));
-  output.getContext("2d").drawImage(canvas, 0, 0, output.width, output.height);
-  const png = output.toBuffer("image/png");
-  if (png.length > APP_CONTROL_CAPTURE_MAX_BYTES) throw new AppControlNativeFailure("native-failure");
-  return { png, width: output.width, height: output.height, mayIncludeOverlappingWindows: overlapping };
+  const encode = (reduce: number): { png: Buffer; width: number; height: number } => {
+    const output = createCanvas(Math.max(1, Math.round(source.width * reduce)), Math.max(1, Math.round(source.height * reduce)));
+    output.getContext("2d").drawImage(canvas, 0, 0, output.width, output.height);
+    return { png: output.toBuffer("image/png"), width: output.width, height: output.height };
+  };
+  const local = Math.min(1, APP_CONTROL_CAPTURE_MAX_WIDTH / source.width, APP_CONTROL_CAPTURE_MAX_HEIGHT / source.height);
+  const maxBytes = dependencies.maxBytes ?? APP_CONTROL_CAPTURE_MAX_BYTES;
+  let encoded: { png: Buffer; width: number; height: number } | null = null;
+  if (agentImage && !overlapping) {
+    encoded = encode(Math.min(1, APP_CONTROL_AGENT_CAPTURE_MAX_EDGE / Math.max(source.width, source.height)));
+    // The larger copy never costs the local thumbnail: past the bound, the local size is used.
+    if (encoded.png.length > maxBytes) encoded = null;
+  }
+  encoded ??= encode(local);
+  if (encoded.png.length > maxBytes) throw new AppControlNativeFailure("native-failure");
+  return { ...encoded, mayIncludeOverlappingWindows: overlapping };
 }

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import type { ProviderHostToolCall } from "../../src/server/provider/contracts";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
+import { AppUnderTestHostTools } from "../../src/server/runtime/app-under-test/host-tools";
 import {
   ConversationContextRequestCoordinator,
 } from "../../src/server/runtime/conversation-context-request-coordinator";
@@ -19,7 +20,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(options: { privateConnectDeviceId?: string } = {}) {
+async function fixture(options: { privateConnectDeviceId?: string; imageModel?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "inertia-app-routing-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -50,6 +51,7 @@ async function fixture(options: { privateConnectDeviceId?: string } = {}) {
   const appUnderTest = {
     status: vi.fn(() => []),
     clear: vi.fn(async () => true),
+    turnSettled: vi.fn(),
   };
   const manager = new AgentThreadManager({
     store,
@@ -62,7 +64,10 @@ async function fixture(options: { privateConnectDeviceId?: string } = {}) {
       pendingInputs: new Map(), broadcast: vi.fn(), broadcastConversationShell: vi.fn(),
     }),
     appUnderTest: appUnderTest as never,
-    providerInfo: () => [],
+    providerInfo: () => (options.imageModel === undefined ? [] : [{
+      id: "codex",
+      models: [{ id: source.modelSelection.modelId, isDefault: true, inputModalities: options.imageModel ? ["text", "image"] : ["text"] }],
+    }] as never),
     broadcastSnapshot: vi.fn(),
     broadcastConversationShell: vi.fn(),
     broadcast: vi.fn(),
@@ -129,6 +134,40 @@ describe("App under test routing", () => {
         });
       }
       expect(appUnderTest.status).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
+  it("hands the App tools the project's screenshot opt-in and whether this exact route accepts images", async () => {
+    const seen: Array<{ visualEvidence?: boolean; imagesAccepted?: boolean }> = [];
+    const spy = vi.spyOn(AppUnderTestHostTools.prototype, "invoke").mockImplementation(async (_conversation, _call, identity) => {
+      seen.push({ visualEvidence: identity.visualEvidence, imagesAccepted: identity.imagesAccepted });
+      return { success: true, text: "{}" };
+    });
+    try {
+      for (const imageModel of [true, false]) {
+        const { store, project, source, turn, manager } = await fixture({ imageModel });
+        try {
+          const bridge = manager.bridgeFor({ conversation: source, turn });
+          await bridge.invoke(call("inertia_app_status"));
+          store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), appUnderTestVisualEvidence: true } });
+          await bridge.invoke(call("inertia_app_status"));
+        } finally { store.close(); }
+      }
+      expect(seen).toEqual([
+        { visualEvidence: false, imagesAccepted: true },
+        { visualEvidence: true, imagesAccepted: true },
+        { visualEvidence: false, imagesAccepted: false },
+        { visualEvidence: true, imagesAccepted: false },
+      ]);
+    } finally { spy.mockRestore(); }
+  });
+
+  it("ends the App pack's per-turn state when the source turn settles, whatever its outcome", async () => {
+    const { store, turn, manager, appUnderTest } = await fixture();
+    try {
+      await manager.onSourceTurnSettled({ ...turn, status: "completed" });
+      await manager.onSourceTurnSettled({ ...turn, status: "cancelled" });
+      expect(appUnderTest.turnSettled.mock.calls).toEqual([[turn.id], [turn.id]]);
     } finally { store.close(); }
   });
 

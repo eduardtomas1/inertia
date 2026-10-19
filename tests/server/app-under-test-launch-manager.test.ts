@@ -213,6 +213,7 @@ describe("AppUnderTestLaunchManager", () => {
       refreshWindows,
       status: () => status,
       watchChanged: vi.fn(),
+      turnSettled: vi.fn(),
     };
     let status: { unavailable: string | null; protectedApps: number; access: AppUnderTestWindowAccessGate | null } = {
       unavailable: "Allow accessibility.", protectedApps: 2, access: "permission",
@@ -253,6 +254,15 @@ describe("AppUnderTestLaunchManager", () => {
     expect(waitForWindow).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal), 1_000, turn);
     expect(manager.transportStatus(conversationId)).toEqual({ unavailable: "Allow accessibility.", protectedApps: 2, access: "permission" });
     expect(manager.windowOwner(conversationId, window.windowId)?.transport).toBe(transport);
+    // Per-turn transport state (foreground grants) ends with the turn.
+    manager.turnSettled("66666666-6666-4666-8666-666666666666");
+    expect(transport.turnSettled).toHaveBeenCalledWith("66666666-6666-4666-8666-666666666666");
+    // A screenshot the model received, and an activation, keep their own fixed evidence labels.
+    const thumbnail = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Uint8Array(30)]);
+    expect(contexts[0]!.evidence({ kind: "screenshot", png: thumbnail, width: 10, height: 10, sentToAgent: true })).toEqual(expect.any(String));
+    expect(contexts[0]!.evidence({ kind: "action", action: "activate" })).toEqual(expect.any(String));
+    expect(manager.listEvidence(conversationId).slice(-2).map(({ label }) => label))
+      .toEqual(["Screenshot sent to the agent", "Agent brought a window to the front"]);
     // An Electron launch never uses it.
     const electron = await manager.launch({ conversationId, kind: "electron", startedBy: "agent" });
     expect(electron).toMatchObject({ transport: null, cdp: false });
@@ -693,7 +703,7 @@ describe("AppUnderTestLaunchManager", () => {
   });
 
   it("keeps the agent from naming anything but a kind and a reviewed action", () => {
-    expect(APP_UNDER_TEST_TOOL_NAMES).toHaveLength(12);
+    expect(APP_UNDER_TEST_TOOL_NAMES).toHaveLength(13);
     const source = { PATH: "/bin", AWS_SECRET_ACCESS_KEY: "x", XAUTHORITY: "/run/x" };
     expect(appUnderTestEnvironment(source, "action", "linux")).toEqual({
       NO_COLOR: "1", PATH: "/bin", XAUTHORITY: "/run/x", ELECTRON_ENABLE_LOGGING: "1", ACCESSIBILITY_ENABLED: "1",

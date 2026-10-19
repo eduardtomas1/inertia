@@ -26,7 +26,9 @@ export const APP_EVIDENCE_LABELS = Object.freeze({
   type: "Agent typed into a control",
   press: "Agent pressed a key",
   scroll: "Agent scrolled a window",
+  activate: "Agent brought a window to the front",
   screenshot: "Screenshot",
+  "screenshot-sent": "Screenshot sent to the agent",
 } as const);
 
 export type AppEvidenceLabelKey = keyof typeof APP_EVIDENCE_LABELS;

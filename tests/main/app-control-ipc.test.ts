@@ -6,6 +6,7 @@ import { parseAppControlSettingsState, type AppControlSettingsState } from "../.
 
 const state: AppControlSettingsState = {
   platform: "darwin", available: true, accessibility: "required", screenRecording: "required", screenshots: "available", session: null,
+  input: "required",
 };
 
 function setup(platform: NodeJS.Platform = "darwin") {
@@ -62,10 +63,16 @@ describe("App control IPC", () => {
     expect(parseAppControlSettingsState({ ...state, session: "x11", platform: "linux", accessibility: "unavailable", screenRecording: "not-needed" }))
       .toMatchObject({ platform: "linux" });
     for (const bad of [null, [], { ...state, extra: 1 }, { ...state, accessibility: "maybe" }, { ...state, available: "yes" },
-      { ...state, session: "mir" }, { ...state, screenshots: true }, { ...state, platform: "aix" }]) {
+      { ...state, session: "mir" }, { ...state, screenshots: true }, { ...state, platform: "aix" }, { ...state, input: "granted" }]) {
       expect(parseAppControlSettingsState(bad)).toBeNull();
     }
     const { session: _session, ...missing } = state;
     expect(parseAppControlSettingsState(missing)).toBeNull();
+    // A state from before the input line existed is malformed, not silently available.
+    const { input: _input, ...older } = state;
+    expect(parseAppControlSettingsState(older)).toBeNull();
+    for (const input of ["available", "required", "unavailable"] as const) {
+      expect(parseAppControlSettingsState({ ...state, input })).toMatchObject({ input });
+    }
   });
 });

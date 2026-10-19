@@ -559,6 +559,89 @@ describe("App under test CDP window transport: reading", () => {
     expect(ctx.evidence).not.toHaveBeenCalled();
     expect(peer.callsOf("Page.captureScreenshot")).toHaveLength(0);
   });
+
+  it("renders a model-visible copy within 1,536 pixels and a pixel budget that fits one debugging frame", async () => {
+    const { peer, ctx, transport, windowId } = await start();
+    // A Retina-like window: two image pixels per CSS pixel.
+    peer.on("Page.getLayoutMetrics", () => ({ cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 1_600, clientHeight: 1_000 } }));
+    peer.on("Page.captureScreenshot", (params) => {
+      const clip = params.clip as { width: number; height: number; scale: number };
+      return { data: fakePng(Math.round(clip.width * clip.scale * 2), Math.round(clip.height * clip.scale * 2)) };
+    });
+    const shot = await transport.perform({ action: "screenshot", windowId, agentImage: true }, { signal: new AbortController().signal });
+    if (!shot.ok) throw new Error(shot.message);
+    // The host tool records the evidence once it knows whether the image was sent.
+    expect(shot.value).toEqual({ captured: true, width: 1_600, height: 1_000 });
+    expect(shot.thumbnail).toMatchObject({ width: expect.any(Number), height: expect.any(Number) });
+    expect(shot.thumbnail!.width).toBeLessThanOrEqual(512);
+    const image = shot.image!;
+    expect(Math.max(image.width, image.height)).toBeLessThanOrEqual(1_536);
+    // Even an incompressible PNG of this many pixels stays below the 4 MiB frame bound in base64.
+    expect(image.width * image.height).toBeLessThanOrEqual(720_000);
+    expect(image.width * image.height).toBeGreaterThan(600_000);
+    expect(image.png.byteLength).toBeLessThanOrEqual(3_750_000);
+    expect([...image.png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    // The thumbnail needs a second, smaller render on a two-pixel display; the model's copy,
+    // sized from what the thumbnail showed, needs one.
+    expect(peer.callsOf("Page.captureScreenshot")).toHaveLength(3);
+    expect(ctx.evidence).not.toHaveBeenCalled();
+    // Without the opt-in only the thumbnail is rendered, and recorded here.
+    const local = await transport.perform({ action: "screenshot", windowId }, { signal: new AbortController().signal });
+    expect(local).toMatchObject({ ok: true, value: { evidenceId: "55555555-5555-4555-8555-555555555555" } });
+    expect(local).not.toHaveProperty("image");
+    expect(local).not.toHaveProperty("thumbnail");
+    expect(peer.callsOf("Page.captureScreenshot")).toHaveLength(5);
+    expect(ctx.evidence.mock.calls[0]![0]).not.toHaveProperty("sentToAgent");
+  });
+
+  it("keeps the local thumbnail when the model-visible capture fails", async () => {
+    const { peer, transport, windowId } = await start();
+    let captures = 0;
+    peer.on("Page.captureScreenshot", (params) => {
+      captures += 1;
+      if (captures === 2) return { failWith: "Unable to capture screenshot" };
+      const clip = params.clip as { width: number; height: number; scale: number };
+      return { data: fakePng(Math.round(clip.width * clip.scale), Math.round(clip.height * clip.scale)) };
+    });
+    const shot = await transport.perform({ action: "screenshot", windowId, agentImage: true }, { signal: new AbortController().signal });
+    expect(shot).toMatchObject({ ok: true, image: null, value: { captured: true }, thumbnail: { width: 512, height: 320 } });
+  });
+
+  it("never renders a model-visible copy while the launch holds a secret another document revealed", async () => {
+    const { peer, ctx, transport, windowId } = await start();
+    peer.model.remember = ["s3cret-from-page"];
+    value(await perform(transport, { action: "snapshot", windowId }));
+    // A new document: the window's own memory is empty, the launch's is not.
+    peer.emit("Page.frameNavigated", { frame: { id: "F-T1", url: "http://localhost:5173/next" } }, "S-T1");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = peer.callsOf("Page.captureScreenshot").length;
+    expect(failed(await perform(transport, { action: "screenshot", windowId, agentImage: true }))).toMatchObject({
+      code: "sensitive", message: expect.stringContaining("not sent to you while this app holds a secret"),
+    });
+    expect(peer.callsOf("Page.captureScreenshot")).toHaveLength(before);
+    // The local thumbnail of the new document stays available.
+    expect(value(await perform(transport, { action: "screenshot", windowId }))).toMatchObject({ captured: true });
+    expect(ctx.evidence).toHaveBeenCalledOnce();
+  });
+
+  it("withholds the model-visible copy with the local one while the document holds a secret", async () => {
+    const { peer, ctx, transport, windowId } = await start();
+    peer.model.remembered = 1;
+    expect(failed(await perform(transport, { action: "screenshot", windowId, agentImage: true }))).toMatchObject({ code: "sensitive" });
+    expect(peer.callsOf("Page.captureScreenshot")).toHaveLength(0);
+    expect(ctx.evidence).not.toHaveBeenCalled();
+  });
+
+  it("refuses inertia_app_activate: Electron windows never need the foreground", async () => {
+    const { peer, transport, windowId } = await start();
+    const before = peer.callsOf("Runtime.evaluate").length;
+    expect(await transport.inspect({ action: "activate", windowId }, new AbortController().signal))
+      .toMatchObject({ ok: false, code: "invalid", dispatched: false, message: expect.stringContaining("only for native windows") });
+    expect(failed(await perform(transport, { action: "activate", windowId }))).toMatchObject({ code: "invalid", dispatched: false });
+    expect(peer.callsOf("Runtime.evaluate")).toHaveLength(before);
+    expect(transport.documentSequence(windowId)).toBe(1);
+    expect(transport.documentSequence("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
 });
 
 describe("App under test CDP window transport: input", () => {

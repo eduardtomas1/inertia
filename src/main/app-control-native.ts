@@ -18,12 +18,15 @@ import {
   type AppControlElementInfo,
   type AppControlExpectation,
   type AppControlFailureCode,
+  type AppControlInputExpectation,
   type AppControlFailureReason,
   type AppControlRect,
   type AppControlValue,
   type AppControlWindowInfo,
 } from "../node/runtime-app-control-protocol.js";
+import type { AgentBrowserKey } from "../shared/agent-browser.js";
 import { appControlNameDenied } from "../shared/app-control-denylist.js";
+import { appWheelNotches } from "../shared/app-under-test.js";
 import {
   PREVIEW_AGENT_NAME_WORD_SOURCE,
   PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
@@ -33,8 +36,12 @@ import {
  * The App control worker's logic over an injected accessibility module (the
  * real one is `@crowecawcaw/xa11y`; tests pass a fake). It reads and acts only
  * on windows of the processes main named as the launch's owned tree, never on
- * a denied app, and only through accessibility actions: no synthesized mouse
- * or keyboard input. Every walk is bounded by node visits, depth and time.
+ * a denied app, through accessibility actions. The one exception is `input`:
+ * an allowlisted key or a wheel step synthesized with the platform's input
+ * path, sent only while the target's process holds the foreground. Within
+ * the one command the worker first raises the window again (an approval card
+ * may have brought Inertia forward), then checks the foreground immediately
+ * before posting. Every walk is bounded by node visits, depth and time.
  * Window text is untrusted data: it is bounded and stripped of control
  * characters here and sanitized again by the runtime.
  */
@@ -84,11 +91,46 @@ export interface NativeErrors {
   InvalidActionDataError: abstract new (...args: never[]) => Error;
 }
 
+/** xa11y `InputSim`: OS-level key and wheel events, delivered to whatever holds focus or lies under the point. */
+export interface NativeInput {
+  press(key: string): Promise<void>;
+  chord(key: string, held: string[]): Promise<void>;
+  scroll(target: [number, number], dx: number, dy: number): Promise<void>;
+}
+
 export interface NativeModule {
   /** `byPid` answers null when no accessibility application has that pid. */
   App: { list(): Promise<NativeApp[]>; byPid?(pid: number): Promise<NativeApp | null> };
   errors: NativeErrors;
+  /** The process id of the application holding the system foreground, or null when none or unknown. */
+  foregroundPid?(): Promise<number | null>;
+  /** Synthesized input; throws an `AppControlNativeFailure` where the platform has none. */
+  input?(): NativeInput;
 }
+
+/** One allowlisted key as xa11y names it: a named key, a literal space, or a chord with held modifiers. */
+export const APP_CONTROL_KEY_INPUT: Readonly<Record<AgentBrowserKey, { key: string; held: string[] }>> = Object.freeze({
+  Enter: { key: "Enter", held: [] },
+  Tab: { key: "Tab", held: [] },
+  Escape: { key: "Escape", held: [] },
+  Backspace: { key: "Backspace", held: [] },
+  ArrowUp: { key: "ArrowUp", held: [] },
+  ArrowDown: { key: "ArrowDown", held: [] },
+  ArrowLeft: { key: "ArrowLeft", held: [] },
+  ArrowRight: { key: "ArrowRight", held: [] },
+  Home: { key: "Home", held: [] },
+  End: { key: "End", held: [] },
+  PageUp: { key: "PageUp", held: [] },
+  PageDown: { key: "PageDown", held: [] },
+  Space: { key: " ", held: [] },
+  "Shift+Tab": { key: "Tab", held: ["Shift"] },
+  "Shift+Enter": { key: "Enter", held: ["Shift"] },
+  "Control+Enter": { key: "Enter", held: ["Ctrl"] },
+  "Meta+Enter": { key: "Enter", held: ["Meta"] },
+});
+
+/** Wheel steps for a pixel delta: one notch per 100 pixels, rounded, at least one and at most fifty. */
+export const appControlWheelNotches = appWheelNotches;
 
 /** Processes the launch owns; only their windows are visible, denied ones never addressable. */
 export interface AppControlScope {
@@ -227,8 +269,18 @@ export interface AppControlNativeOptions {
   now?(): number;
   /** UIPI pre-flight (Windows): true when the window's process is more privileged than Inertia. */
   elevated?(pid: number): boolean;
-  /** Linux reports a window without accessible content as the app not exposing its tree. */
+  /** Linux reports a window without accessible content as the app not exposing its tree; Meta+Enter is macOS only. */
   platform?: NodeJS.Platform;
+  /** Waits between foreground checks while a raised window comes forward (test seam). */
+  sleep?(ms: number): Promise<void>;
+}
+
+/** How long a raised window gets to come forward, and how often the foreground is read meanwhile. */
+const FOREGROUND_SETTLE_MS = 600;
+const FOREGROUND_POLL_MS = 50;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class AppControlNative {
@@ -487,7 +539,11 @@ export class AppControlNative {
     const resolved = await this.resolve(scope, token);
     if (expect && await this.rootKey(resolved) !== expect.rootKey) throw new AppControlNativeFailure("not-found", "changed");
     if (element === null && action === "activate") {
+      // Without a foreground query the window cannot be shown to have come forward.
+      if (!this.native.foregroundPid) throw new AppControlNativeFailure("unsupported", "input-unavailable");
       await this.dispatch(() => resolved.window.activate());
+      // The operating system may keep the app behind (focus-stealing prevention): nothing is granted then.
+      if (!await this.cameForward(resolved.pid)) throw new AppControlNativeFailure("unavailable", "not-foreground", true);
       return await this.after(scope, resolved);
     }
     const node = await this.find(resolved, element);
@@ -521,6 +577,79 @@ export class AppControlNative {
       }
     });
     return await this.after(scope, resolved);
+  }
+
+  /**
+   * Synthesized input to one window: the root (and, for a key, the focused
+   * control) must still match an approval's expectation. The window is raised
+   * again, and its process must hold the foreground immediately before
+   * anything is posted. A key goes to the focused control of the app in
+   * front; a wheel step to whatever lies under the window's centre.
+   */
+  async input(
+    scope: AppControlScope,
+    token: string,
+    key: AgentBrowserKey | null,
+    deltaY: number | null,
+    expect: AppControlInputExpectation | null,
+  ): Promise<Extract<AppControlValue, { kind: "perform" }>> {
+    if (key === "Meta+Enter" && this.options.platform !== "darwin") throw new AppControlNativeFailure("invalid", "key-unsupported");
+    const resolved = await this.resolve(scope, token);
+    if (expect && await this.rootKey(resolved) !== expect.rootKey) throw new AppControlNativeFailure("not-found", "changed");
+    const bounds = finiteRect(resolved.window.bounds);
+    if (deltaY !== null && (!bounds || bounds.width <= 0 || bounds.height <= 0)) throw new AppControlNativeFailure("unavailable");
+    if (!this.native.input || !this.native.foregroundPid) throw new AppControlNativeFailure("unsupported", "input-unavailable");
+    const input = this.native.input();
+    // The approval card took the foreground: raise the granted window again
+    // (the grant covers it) before anything is checked or posted.
+    try {
+      await resolved.window.activate();
+    } catch (error) {
+      const failure = nativeFailure(error, this.native.errors);
+      if (failure.code === "permission-denied" || failure.code === "accessibility-unavailable") throw failure;
+    }
+    // The event goes to whatever is in front: still another app after the raise, nothing is posted.
+    if (!await this.cameForward(resolved.pid)) throw new AppControlNativeFailure("unavailable", "not-foreground");
+    if (key !== null && expect?.focus) {
+      const focused = await this.find(resolved, null);
+      const info = focused ? this.elementInfo(focused, finiteRect(resolved.window.bounds)) : null;
+      if (!info || info.role !== expect.focus.role || info.name !== expect.focus.name) {
+        throw new AppControlNativeFailure("not-found", "changed");
+      }
+    }
+    // The focus check read the tree; the foreground is checked once more right before the post.
+    if (!await this.inFront(resolved.pid)) throw new AppControlNativeFailure("unavailable", "not-foreground");
+    await this.dispatch(async () => {
+      if (key !== null) {
+        const mapped = APP_CONTROL_KEY_INPUT[key];
+        await (mapped.held.length > 0 ? input.chord(mapped.key, [...mapped.held]) : input.press(mapped.key));
+        return;
+      }
+      const centre: [number, number] = [Math.round(bounds!.x + bounds!.width / 2), Math.round(bounds!.y + bounds!.height / 2)];
+      await input.scroll(centre, 0, appControlWheelNotches(deltaY!));
+    });
+    return await this.after(scope, resolved);
+  }
+
+  /** One foreground read: true when `pid` holds it. A typed denial keeps its category; other failures read as nothing in front. */
+  private async inFront(pid: number): Promise<boolean> {
+    try {
+      return await this.native.foregroundPid!() === pid;
+    } catch (error) {
+      const failure = nativeFailure(error, this.native.errors);
+      if (failure.code === "permission-denied" || failure.code === "accessibility-unavailable") throw failure;
+      return false;
+    }
+  }
+
+  /** Whether `pid` holds the foreground within the settle time after a raise. */
+  private async cameForward(pid: number): Promise<boolean> {
+    const sleep = this.options.sleep ?? defaultSleep;
+    for (let waited = 0; ; waited += FOREGROUND_POLL_MS) {
+      if (await this.inFront(pid)) return true;
+      if (waited >= FOREGROUND_SETTLE_MS) return false;
+      await sleep(FOREGROUND_POLL_MS);
+    }
   }
 
   private async dispatch(operation: () => Promise<void>): Promise<void> {

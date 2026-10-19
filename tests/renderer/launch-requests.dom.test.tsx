@@ -36,6 +36,29 @@ describe("launch request project matching", () => {
   });
 });
 
+describe("launch request project matching across aliases and platforms", () => {
+  it("prefers the nested project reached through the real path over an outer project reached through a long alias", () => {
+    const projects = [
+      project("outer", "/very/long/alias/for/the/workspace", { normalizedPath: "/real" }),
+      project("nested", "/real/sub"),
+    ];
+    expect(launchRequestProject(projects, { path: "/very/long/alias/for/the/workspace/sub/file", realPath: "/real/sub/file" })?.id)
+      .toBe("nested");
+  });
+
+  it("matches Windows paths regardless of drive letter case and separators", () => {
+    const projects = [project("app", "c:/work/app"), project("site", "D:\\Sites\\Main\\")];
+    expect(launchRequestProject(projects, { path: "C:\\Work\\App\\src", realPath: null })?.id).toBe("app");
+    expect(launchRequestProject(projects, { path: "d:\\sites\\main", realPath: null })?.id).toBe("site");
+    expect(launchRequestProject(projects, { path: "C:\\Work\\Application", realPath: null })).toBeNull();
+    expect(launchRequestProject([project("drive", "C:\\")], { path: "c:\\repo", realPath: null })?.id).toBe("drive");
+  });
+
+  it("keeps POSIX paths case-sensitive", () => {
+    expect(launchRequestProject([project("app", "/Work/App")], { path: "/work/app", realPath: null })).toBeNull();
+  });
+});
+
 describe("useLaunchRequests", () => {
   it("takes pending requests once ready, opens known projects, adds new folders and listens for more", async () => {
     const pending: LaunchProjectRequest[][] = [

@@ -287,6 +287,24 @@ describe("Send now while the agent works", () => {
     } finally { await f.close(); }
   });
 
+  it("holds a queued message the agent accepted when recording it fails, instead of sending it again", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id); await f.drain();
+      vi.spyOn(f.store, "createAcknowledgedFollowUpMessage").mockImplementation(() => { throw new Error("SQLITE_BUSY"); });
+      await expect(f.command("message.queue.send", id)).rejects.toThrow("SQLITE_BUSY");
+      expect(f.provider.steerCalls).toEqual(["Do the next task."]);
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({
+        state: "blocked",
+        error: "The agent received this message, but Inertia could not record it. Check the chat before sending it again.",
+      });
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
   it("sends a queued message's images with the follow-up and keeps them referenced by its message", async () => {
     const f = await fixture();
     try {

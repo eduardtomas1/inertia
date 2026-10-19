@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { CheckoutBranchControlProvider } from "../../src/renderer/src/components/CheckoutBranchControl";
@@ -157,6 +157,25 @@ describe("composer shell", () => {
     });
     expect(toggle("First pane")).toHaveAttribute("aria-expanded", "false");
     expect(toggle("Second pane")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("still opens and closes More tools when the preference cannot be saved", () => {
+    window.localStorage.setItem("inertia:composer-tools:v1", "closed");
+    const write = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage is read-only", "SecurityError");
+    });
+    render(<Composer {...composerProps(conversation("tools-unsaved"))} />);
+    const toggle = screen.getByRole("button", { name: "More tools" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    write.mockRestore();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(window.localStorage.getItem("inertia:composer-tools:v1")).toBe("closed");
   });
 
   it("keeps the open tray at its full width and lets it take the options' place only when both cannot fit", () => {

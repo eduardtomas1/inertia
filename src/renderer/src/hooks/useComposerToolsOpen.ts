@@ -1,22 +1,33 @@
 import { useSyncExternalStore } from "react";
 
-import { layoutStorage } from "../utils/layoutStorage";
-
 const COMPOSER_TOOLS_STORAGE_KEY = "inertia:composer-tools:v1";
 const listeners = new Set<() => void>();
-let unstoredOpen = false;
+let unstoredOpen: boolean | null = null;
 
 function composerToolsOpen(): boolean {
+  if (unstoredOpen !== null) return unstoredOpen;
   try {
     return window.localStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === "open";
   } catch {
-    return unstoredOpen;
+    return false;
+  }
+}
+
+function storeComposerToolsOpen(open: boolean): boolean {
+  const value = open ? "open" : "closed";
+  try {
+    window.localStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, value);
+    return window.localStorage.getItem(COMPOSER_TOOLS_STORAGE_KEY) === value;
+  } catch {
+    return false;
   }
 }
 
 function subscribeComposerTools(listener: () => void): () => void {
   const onStorage = (event: StorageEvent): void => {
-    if (event.key === null || event.key === COMPOSER_TOOLS_STORAGE_KEY) listener();
+    if (event.key !== null && event.key !== COMPOSER_TOOLS_STORAGE_KEY) return;
+    unstoredOpen = null;
+    listener();
   };
   listeners.add(listener);
   window.addEventListener("storage", onStorage);
@@ -27,8 +38,7 @@ function subscribeComposerTools(listener: () => void): () => void {
 }
 
 export function setComposerToolsOpen(open: boolean): void {
-  unstoredOpen = open;
-  layoutStorage.setItem(COMPOSER_TOOLS_STORAGE_KEY, open ? "open" : "closed");
+  unstoredOpen = storeComposerToolsOpen(open) ? null : open;
   for (const listener of listeners) listener();
 }
 

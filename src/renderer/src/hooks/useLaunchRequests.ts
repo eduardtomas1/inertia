@@ -3,10 +3,19 @@ import { useEffect, useRef } from "react";
 import type { Project } from "@shared/contracts";
 import type { LaunchProjectRequest } from "@shared/desktop";
 
-function containsPath(root: string, target: string): boolean {
-  if (target === root) return true;
-  const base = root.replace(/[\\/]+$/u, "");
-  return target.startsWith(`${base}/`) || target.startsWith(`${base}\\`);
+function comparablePath(path: string): string {
+  const windows = /^[a-zA-Z]:[\\/]/u.test(path) || path.startsWith("\\\\");
+  const unified = path.replace(/\\/gu, "/").replace(/\/+$/u, "") || "/";
+  return windows ? unified.toLowerCase() : unified;
+}
+
+function depthBelow(root: string, target: string): number | null {
+  const base = comparablePath(root);
+  const path = comparablePath(target);
+  if (path === base) return 0;
+  const prefix = base.endsWith("/") ? base : `${base}/`;
+  if (!path.startsWith(prefix)) return null;
+  return path.slice(prefix.length).split("/").filter(Boolean).length;
 }
 
 export function launchRequestProject(
@@ -15,14 +24,17 @@ export function launchRequestProject(
 ): Project | null {
   const targets = [request.path, request.realPath].filter((target): target is string => Boolean(target));
   let match: Project | null = null;
-  let matchLength = -1;
+  let matchDepth = Number.POSITIVE_INFINITY;
   for (const project of projects) {
     if (project.workspaceKind === "scratch") continue;
     for (const root of new Set([project.path, project.normalizedPath])) {
-      if (!root || root.length <= matchLength) continue;
-      if (targets.some((target) => containsPath(root, target))) {
-        match = project;
-        matchLength = root.length;
+      if (!root) continue;
+      for (const target of targets) {
+        const depth = depthBelow(root, target);
+        if (depth !== null && depth < matchDepth) {
+          match = project;
+          matchDepth = depth;
+        }
       }
     }
   }

@@ -240,6 +240,7 @@ export function createQueuedMessageRuntime(
     const admission = turns.acquireFollowUpAdmission(conversationId);
     if (!admission) throw new RuntimeRequestError("This agent cannot take a message while it works. It will send when the turn ends.");
     let claimed = false;
+    let acknowledged = false;
     try {
       if (first.attachments.length > 0 && !admission.supportsImages) {
         throw new RuntimeRequestError("The active model cannot inspect follow-up images. It will send when the turn ends.");
@@ -258,7 +259,7 @@ export function createQueuedMessageRuntime(
         admission,
         { content: first.content, imagePaths: attachments.map(({ path }) => path) },
         attachments,
-        undefined,
+        () => { acknowledged = true; },
         AbortSignal.timeout(Math.max(0, deadline - Date.now())),
         first.id,
       );
@@ -279,7 +280,9 @@ export function createQueuedMessageRuntime(
       else throw new RuntimeRequestError("The agent did not take this message now. It will send when the turn ends.");
     } catch (error) {
       if (claimed) {
-        if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") {
+        if (acknowledged) {
+          store.queuedMessages.block(conversationId, first.id, "The agent received this message, but Inertia could not record it. Check the chat before sending it again.");
+        } else if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") {
           store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
         } else {
           store.queuedMessages.release(conversationId, first.id);

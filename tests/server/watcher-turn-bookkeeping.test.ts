@@ -109,6 +109,37 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
     }
   });
 
+  it("keeps each pending final pass's coverage when two finals wait through two more turns", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const first = await f.startWatchedTurn("First task.");
+      watchedActivity(f, "Read src/first-covered.ts");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+      await watcherRunning(f, watcherId);
+      await f.finishTurn(watcherId, "SILENT");
+      await f.command("watcher.pause", { linkId: link.id });
+
+      watchedActivity(f, "Read src/first-late.ts");
+      await f.finishTurn(f.watched.id, "Done with the first task.");
+      await f.startWatchedTurn("Second task.");
+      watchedActivity(f, "Read src/second.ts");
+      await f.finishTurn(f.watched.id, "Done with the second task.");
+      await f.startWatchedTurn("Third task.");
+
+      await f.command("watcher.resume", { linkId: link.id });
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await watcherRunning(f, watcherId);
+      const final = f.provider.input(watcherId);
+      expect(f.store.watcherLinks.wakeForTurn(final.turnId)).toMatchObject({ trigger: "turn-end", watchedTurnId: first.id });
+      expect(digestOf(final.prompt)).toContain("Read src/first-late.ts");
+      expect(digestOf(final.prompt)).not.toContain("Read src/first-covered.ts");
+    } finally {
+      await f.close();
+    }
+  });
+
   it("takes the pending-event count from the scheduler after checks, failures and retries", async () => {
     let ready = true;
     const f = await createWatcherFixture({ readiness: async () => ready ? null : { ready: false, message: "Sign in to continue." } });

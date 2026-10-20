@@ -75,7 +75,7 @@ type RequestTrigger = Extract<WatcherWakeTrigger, "manual" | "initial">;
 const TRIGGER_RANK: Readonly<Record<ActivityTrigger, number>> = { plan: 1, activity: 2, error: 3 };
 const SETTLED_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
 /** Final passes kept per link: the ended turn's and the one after it. */
-const MAX_PENDING_FINALS = 2;
+export const WATCHER_MAX_PENDING_FINALS = 2;
 const MAX_DONE_FINALS = 4;
 const OUTPUT_EVENTS: ReadonlySet<RuntimeMutationEvent["type"]> = new Set([
   "agent.started", "agent.text", "agent.text.replaced", "agent.reasoning", "agent.commentary.persisted",
@@ -214,7 +214,9 @@ export class WatcherWakeScheduler {
     }
     if (state.finalDoneTurnIds.includes(turnId) || state.finals.some((final) => final.turnId === turnId)) return;
     state.finals.push({ turnId, requestedAt: this.#deps.clock() });
-    if (state.finals.length > MAX_PENDING_FINALS) state.finals.splice(0, state.finals.length - MAX_PENDING_FINALS);
+    if (state.finals.length > WATCHER_MAX_PENDING_FINALS) {
+      state.finals.splice(0, state.finals.length - WATCHER_MAX_PENDING_FINALS);
+    }
     this.#schedule(linkId, state);
   }
 

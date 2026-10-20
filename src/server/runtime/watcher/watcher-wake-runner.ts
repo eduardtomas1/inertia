@@ -17,7 +17,12 @@ import { watcherInstruction } from "./watcher-instructions";
 import type { WatcherLiveProjection } from "./watcher-live-projection";
 import { classifyWatcherReply, findingPreview } from "./watcher-outcome";
 import type { WatcherRouteReadiness } from "./watcher-route";
-import type { WatcherWakeAttempt, WatcherWakeContext, WatcherWakeScheduler } from "./watcher-wake-scheduler";
+import {
+  WATCHER_MAX_PENDING_FINALS,
+  type WatcherWakeAttempt,
+  type WatcherWakeContext,
+  type WatcherWakeScheduler,
+} from "./watcher-wake-scheduler";
 
 export const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit. It can resume once its route is ready again.";
 export const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit files twice during one turn of the main chat.";
@@ -88,6 +93,34 @@ export function conversationOrNull(
   }
 }
 
+class TurnMemory<T> {
+  readonly #links = new Map<string, Array<{ turnId: string; value: T }>>();
+
+  get(linkId: string, turnId: string | null): T | undefined {
+    return this.#links.get(linkId)?.find((entry) => entry.turnId === turnId)?.value;
+  }
+
+  set(linkId: string, turnId: string, value: T): void {
+    const kept = (this.#links.get(linkId) ?? []).filter((entry) => entry.turnId !== turnId);
+    kept.push({ turnId, value });
+    this.#links.set(linkId, kept.slice(-WATCHER_MAX_PENDING_FINALS));
+  }
+
+  delete(linkId: string, turnId: string): void {
+    const kept = this.#links.get(linkId)?.filter((entry) => entry.turnId !== turnId) ?? [];
+    if (kept.length > 0) this.#links.set(linkId, kept);
+    else this.#links.delete(linkId);
+  }
+
+  forget(linkId: string): void {
+    this.#links.delete(linkId);
+  }
+
+  clear(): void {
+    this.#links.clear();
+  }
+}
+
 /** The check read past where it started; a continuation that did not would read the same page again. */
 function advanced({ start, digest }: Pick<RunningWake, "start" | "digest">): boolean {
   return digest.cursor.turnId !== start.turnId
@@ -116,9 +149,9 @@ export class WatcherWakeRunner {
   readonly #routeFailures = new Map<string, number>();
   readonly #dispatchFailures = new Map<string, number>();
   /** Coverage of a watched turn whose final pass is still due after the next turn began. */
-  readonly #priorCursors = new Map<string, WatcherCursor>();
+  readonly #priorCursors = new TurnMemory<WatcherCursor>();
   /** The possibly still streaming reply the link's last check quoted, and its watched turn. */
-  readonly #openReplies = new Map<string, WatcherOpenReply & { turnId: string }>();
+  readonly #openReplies = new TurnMemory<WatcherOpenReply>();
   readonly #finalPages = new Map<string, { turnId: string; pages: number }>();
 
   constructor(dependencies: WatcherWakeRunnerDependencies) {
@@ -135,8 +168,8 @@ export class WatcherWakeRunner {
     this.#planKeys.delete(linkId);
     this.#routeFailures.delete(linkId);
     this.#dispatchFailures.delete(linkId);
-    this.#priorCursors.delete(linkId);
-    this.#openReplies.delete(linkId);
+    this.#priorCursors.forget(linkId);
+    this.#openReplies.forget(linkId);
     this.#finalPages.delete(linkId);
   }
 
@@ -154,7 +187,7 @@ export class WatcherWakeRunner {
   watchedTurnChanging(link: Pick<WatcherLinkRecord, "id" | "cursor" | "finalPassTurnId">, nextTurnId: string): void {
     const { cursor } = link;
     if (cursor.turnId === null || cursor.turnId === nextTurnId || link.finalPassTurnId === cursor.turnId) return;
-    this.#priorCursors.set(link.id, cursor);
+    this.#priorCursors.set(link.id, cursor.turnId, cursor);
   }
 
   async run(linkId: string, trigger: WatcherWakeTrigger, context: WatcherWakeContext): Promise<WatcherWakeAttempt> {
@@ -195,12 +228,10 @@ export class WatcherWakeRunner {
       // The final pass reviews its own turn, even when the next one already began.
       const finalTurnId = context.final ? context.watchedTurnId : null;
       const staleTurn = finalTurnId !== null && claimed.cursor.turnId !== null && claimed.cursor.turnId !== finalTurnId;
-      const prior = this.#priorCursors.get(linkId);
       const cursor: WatcherCursor = !staleTurn
         ? claimed.cursor
-        : prior?.turnId === finalTurnId
-          ? prior
-          : { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
+        : this.#priorCursors.get(linkId, finalTurnId)
+          ?? { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
       const previousPlanKey = !staleTurn && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
       const remaining = claimed.counters.wakeAllowance - claimed.counters.wakesThisTurn;
       const consumesAllowance = trigger !== "manual" && trigger !== "initial" && remaining > 0;
@@ -216,7 +247,7 @@ export class WatcherWakeRunner {
         sequence: claimed.counters.wakesTotal + 1,
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),
-        openReply: this.#openReplies.get(linkId) ?? null,
+        openReply: this.#openReplies.get(linkId, cursor.turnId) ?? null,
         lastFinalPage,
       });
       if (!digest) return release("skipped");
@@ -335,7 +366,8 @@ export class WatcherWakeRunner {
 
   #finalPassDone(linkId: string, turnId: string): void {
     this.#deps.store.watcherLinks.markFinalPass(linkId, turnId, this.#deps.now());
-    if (this.#priorCursors.get(linkId)?.turnId === turnId) this.#priorCursors.delete(linkId);
+    this.#priorCursors.delete(linkId, turnId);
+    this.#openReplies.delete(linkId, turnId);
     if (this.#finalPages.get(linkId)?.turnId === turnId) this.#finalPages.delete(linkId);
   }
 
@@ -512,12 +544,10 @@ export class WatcherWakeRunner {
     if (!link) return false;
     if (link.cursor.turnId !== digest.turnId) {
       if (link.finalPassTurnId === digest.turnId) return false;
-      const prior = this.#priorCursors.get(linkId);
-      if (prior && prior.turnId !== digest.turnId) return false;
-      this.#priorCursors.set(linkId, digest.cursor);
+      this.#priorCursors.set(linkId, digest.turnId, digest.cursor);
     }
-    if (digest.openReply) this.#openReplies.set(linkId, { ...digest.openReply, turnId: digest.turnId });
-    else if (this.#openReplies.get(linkId)?.turnId === digest.turnId) this.#openReplies.delete(linkId);
+    if (digest.openReply) this.#openReplies.set(linkId, digest.turnId, digest.openReply);
+    else this.#openReplies.delete(linkId, digest.turnId);
     return true;
   }
 

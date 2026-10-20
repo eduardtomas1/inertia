@@ -8,6 +8,7 @@ import {
   MAX_WATCHER_GUARD_PATHS,
   MAX_WATCHER_PAUSE_DETAIL_CHARS,
   MAX_WATCHER_PENDING_RUNNING_IDS,
+  WATCHER_WAKE_RETENTION,
   watcherBudgetsSchema,
   watcherHarnessAllowed,
   watcherInstructionsSchema,
@@ -143,6 +144,7 @@ export interface WatcherLinkRepositoryContext {
 }
 
 const TERMINAL_TURN_STATUSES_SQL = "('completed', 'failed', 'cancelled', 'interrupted')";
+const MAX_RETIRED_WAKES_PER_CHECK = 4;
 const ACTIVE_WAKE_STATES_SQL = "('dispatching', 'running')";
 const DELIVERY_TRANSITIONS: Readonly<Record<WatcherDeliveryState | "none", readonly WatcherDeliveryState[]>> = {
   none: ["queued", "sent", "dismissed", "failed"],
@@ -485,6 +487,7 @@ export class WatcherLinkRepository {
       const { sequence } = this.database.prepare(`
         SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM watcher_wakes WHERE link_id = ?
       `).get(draft.linkId) as { sequence: number };
+      this.retireWakes(draft.linkId, sequence - WATCHER_WAKE_RETENTION);
       this.database.prepare(`
         INSERT INTO watcher_wakes (
           id, link_id, watched_turn_id, sequence, trigger, state,
@@ -702,6 +705,36 @@ export class WatcherLinkRepository {
       `).run(at).changes;
       return { wakes: recovered.length, links };
     })();
+  }
+
+  /**
+   * Deletes up to `MAX_RETIRED_WAKES_PER_CHECK` checks at or below `through`,
+   * oldest first, each with its own settled watcher turn and that turn's
+   * messages, activities, reasonings and plans. A turn outside the watcher
+   * chat, still unfinished, or still owned by a provider run is left alone.
+   * The retention trigger stays as the backstop for the check rows.
+   */
+  private retireWakes(linkId: string, through: number): void {
+    if (through < 1) return;
+    const retired = this.database.prepare(`
+      SELECT wake.id, turn.id AS turn_id, turn.conversation_id
+      FROM watcher_wakes AS wake
+      JOIN watcher_links AS link ON link.id = wake.link_id
+      LEFT JOIN agent_turns AS turn ON turn.id = wake.watcher_turn_id
+        AND turn.conversation_id = link.watcher_conversation_id
+        AND turn.status IN ${TERMINAL_TURN_STATUSES_SQL}
+        AND NOT EXISTS (SELECT 1 FROM provider_run_ownership AS owner WHERE owner.turn_id = turn.id)
+      WHERE wake.link_id = ? AND wake.sequence <= ?
+      ORDER BY wake.sequence ASC LIMIT ?
+    `).all(linkId, through, MAX_RETIRED_WAKES_PER_CHECK) as { id: string; turn_id: string | null; conversation_id: string | null }[];
+    for (const wake of retired) {
+      this.database.prepare("DELETE FROM watcher_wakes WHERE id = ?").run(wake.id);
+      if (wake.turn_id === null) continue;
+      for (const table of ["messages", "activities", "agent_reasonings", "agent_plans"]) {
+        this.database.prepare(`DELETE FROM ${table} WHERE conversation_id = ? AND turn_id = ?`).run(wake.conversation_id, wake.turn_id);
+      }
+      this.database.prepare("DELETE FROM agent_turns WHERE id = ? AND conversation_id = ?").run(wake.turn_id, wake.conversation_id);
+    }
   }
 
   private require(linkId: string): WatcherLinkRecord {

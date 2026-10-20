@@ -466,6 +466,74 @@ describe("watcher link repository", () => {
     });
   });
 
+  it("removes a retired check's watcher turn and its transcript with the check, and nothing else", () => {
+    const watched = chat();
+    const { link, conversation } = attach(watched);
+    const typed = beginTurn(conversation, "What did you see so far?");
+    settleTurn(typed.id);
+    const watchedTurn = beginTurn(watched, "Fix the parser.");
+    settleTurn(watchedTurn.id);
+    const turns: string[] = [];
+    for (let index = 0; index < 502; index += 1) {
+      expect(store.watcherLinks.transition(link.id, ["watching"], { status: "waking" }, tick())).not.toBeNull();
+      const wake = store.watcherLinks.createWake({
+        id: randomUUID(), linkId: link.id, watchedTurnId: null, trigger: "activity",
+        eventsCovered: 1, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 512,
+      }, tick());
+      const turn = beginTurn(conversation, `Check ${index + 1}`);
+      turns.push(turn.id);
+      expect(store.watcherLinks.attachWakeTurn(wake!.wakeId, turn.id, tick())).toBe(true);
+      store.createMessage(conversation.id, "SILENT", "assistant", [], turn.id);
+      store.addActivity({ conversationId: conversation.id, runId: turn.runId, turnId: turn.id, kind: "command", title: "rg parser", detail: "x", status: "completed" });
+      store.createReasoning(conversation.id, turn.runId, turn.id);
+      settleTurn(turn.id);
+      store.watcherLinks.settleWake(wake!.wakeId, "silent", null, null, null, tick());
+      expect(store.watcherLinks.transition(link.id, ["waking"], { status: "watching" }, tick())).not.toBeNull();
+    }
+    const running = beginTurn(conversation, "Still running");
+    raw((database) => {
+      const count = (table: string) => (database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE conversation_id = ?`)
+        .get(conversation.id) as { count: number }).count;
+      const remaining = (database.prepare("SELECT id FROM agent_turns WHERE conversation_id = ?").all(conversation.id) as { id: string }[])
+        .map(({ id }) => id);
+      expect(new Set(remaining)).toEqual(new Set([typed.id, running.id, ...turns.slice(2)]));
+      expect(count("messages")).toBe(2 + 500 * 2);
+      expect(count("activities")).toBe(500);
+      expect(count("agent_reasonings")).toBe(500);
+      expect(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND turn_id IS NULL").get(conversation.id))
+        .toEqual({ count: 0 });
+      expect(database.prepare("SELECT COUNT(*) AS count FROM agent_turns WHERE id = ?").get(watchedTurn.id)).toEqual({ count: 1 });
+    });
+    const summaries = store.watcherLinks.wakeSummaries(conversation.id);
+    expect(new Set(summaries.map(({ turnId }) => turnId))).toEqual(new Set(turns.slice(2)));
+  });
+
+  it("keeps a retired check's watcher turn that a provider run still owns", () => {
+    const { link, conversation } = attach(chat());
+    const first = beginTurn(conversation, "Check 1");
+    settleTurn(first.id);
+    raw((database) => {
+      database.prepare(`
+        INSERT INTO provider_run_ownership (turn_id, conversation_id, run_id, runtime_generation_id, system_boot_id, created_at)
+        VALUES (?, ?, ?, ?, 'boot-0001', '2030-01-01T00:00:00.000Z')
+      `).run(first.id, conversation.id, first.runId, randomUUID() + "-generation");
+      database.prepare(`
+        INSERT INTO watcher_wakes (id, link_id, watcher_turn_id, sequence, trigger, state, outcome, created_at, settled_at)
+        VALUES (?, ?, ?, 1, 'activity', 'settled', 'silent', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
+      `).run(randomUUID(), link.id, first.id);
+      database.prepare(`
+        INSERT INTO watcher_wakes (id, link_id, sequence, trigger, state, outcome, created_at, settled_at)
+        VALUES (?, ?, 500, 'activity', 'settled', 'silent', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
+      `).run(randomUUID(), link.id);
+    });
+    expect(store.watcherLinks.transition(link.id, ["watching"], { status: "waking" }, tick())).not.toBeNull();
+    expect(store.watcherLinks.createWake({
+      id: randomUUID(), linkId: link.id, watchedTurnId: null, trigger: "activity",
+      eventsCovered: 1, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 512,
+    }, tick())?.sequence).toBe(501);
+    expect(store.agentTurn(first.id).id).toBe(first.id);
+  });
+
   it("detaches links when the watched chat is deleted and keeps their history", () => {
     const watched = chat();
     const { link, conversation } = attach(watched);

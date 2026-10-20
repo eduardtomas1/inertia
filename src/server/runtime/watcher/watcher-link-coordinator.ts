@@ -363,13 +363,15 @@ export class WatcherLinkCoordinator {
   }
 
   /**
-   * After startup: tracks every attached link and schedules, at most once, the
-   * final pass of a watched turn that ended while Inertia was closed.
+   * After startup: tracks every attached link, clears the waiting count the
+   * new scheduler does not hold, and schedules, at most once, the final pass of
+   * a watched turn that ended while Inertia was closed.
    */
   reconcileAfterReady(): void {
     const { store } = this.#deps;
     for (const link of store.watcherLinks.active()) {
       this.#deps.index.track(link);
+      if (store.watcherLinks.notePendingEvents(link.id, 0, this.#deps.now())) this.publish(link.id);
       const watchedId = link.watchedConversationId;
       const running = watchedId !== null && this.#deps.turns.isActive(watchedId);
       this.#deps.scheduler.track(link.id, { watchedTurnId: link.cursor.turnId, watchedRunning: running });

@@ -12,7 +12,7 @@ import {
 } from "../../src/server/runtime/commands/conversation-commands";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import { WATCHER_CHAT_ARCHIVED_DETAIL } from "../../src/server/runtime/watcher/watcher-link-coordinator";
-import { WATCHER_DELETE_REFUSAL } from "../../src/server/runtime/watcher/watcher-runtime";
+import { WATCHER_DELETE_REFUSAL, WATCHER_PENDING_PUBLISH_MS } from "../../src/server/runtime/watcher/watcher-runtime";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
@@ -449,6 +449,25 @@ describe("watcher link coordinator", () => {
       f.store.archiveConversation(f.watched.id, true);
       f.watchers.observe({ type: "conversation.shell.updated", conversation: f.store.conversationShell(f.watched.id)!, runs: [] } as never);
       expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("clears a stored waiting count on restart, since the new scheduler starts with none", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read a.ts", activityId: `a-${++sequence}` });
+      await f.advance(WATCHER_PENDING_PUBLISH_MS);
+      expect(f.linkView(link.id).counters.eventsPending).toBeGreaterThan(0);
+      f.restartRuntime().resume();
+      expect(f.linkView(link.id).counters.eventsPending).toBe(0);
+      expect(f.watcherEvents().at(-1)).toMatchObject({
+        type: "watcher.link.updated",
+        link: { id: link.id, counters: expect.objectContaining({ eventsPending: 0 }) },
+      });
     } finally {
       await f.close();
     }

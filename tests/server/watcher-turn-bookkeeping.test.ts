@@ -237,6 +237,7 @@ async function check(f: WatcherFixture, watcherId: string, count: number) {
 }
 
 const MORE_FOLLOWS = "More activity followed; the next check covers it.";
+const FINAL_PAGE_LIMIT = "use inertia_request_context to read the rest";
 
 describe("watcher checks past the per-check activity cap", () => {
   it("drains 450 settled activities in three checks without new watched events, after the cooldown", async () => {
@@ -348,6 +349,41 @@ describe("watcher checks past the per-check activity cap", () => {
       });
       await f.advance(30 * 60_000);
       expect(watcherInputs(f, watcherId)).toHaveLength(3);
+    } finally {
+      await f.close();
+    }
+  });
+});
+
+describe("watcher final pass page limit", () => {
+  it("stops a final pass past the exhausted budget after four pages and never spends more checks than allowed", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ budgets: { wakesPerWatchedTurn: 2, cooldownSeconds: 15, digestKiB: 24, contextReadsPerWake: 4 } });
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      watchedActivities(f, 1_200);
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      expect((await check(f, watcherId, 1)).digest).toContain(MORE_FOLLOWS);
+      await f.finishTurn(watcherId, "SILENT");
+      await f.advance(10 * 60_000);
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "wake-budget" });
+
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      for (const [index, more] of [[2, true], [3, true], [4, true], [5, false]] as const) {
+        const page = await check(f, watcherId, index);
+        expect(page.wake.trigger).toBe("turn-end");
+        expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
+        expect(page.digest.includes(FINAL_PAGE_LIMIT)).toBe(!more);
+        await f.finishTurn(watcherId, "SILENT");
+        const { counters } = f.linkView(link.id);
+        expect(counters.wakesThisTurn).toBeLessThanOrEqual(counters.wakeAllowance);
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      }
+      await f.advance(30 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(5);
+      expect(f.linkView(link.id)).toMatchObject({ finalPassTurnId: expect.any(String), counters: { wakesThisTurn: 2, wakeAllowance: 2 } });
     } finally {
       await f.close();
     }

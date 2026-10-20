@@ -169,6 +169,28 @@ describe("WatcherFeed", () => {
     expect(card).not.toHaveTextContent(/^Finding/u);
   });
 
+  it("marks a resolved finding and lists it below the open ones, still sendable and dismissible", async () => {
+    renderFeed([
+      feedItem(7),
+      finding(6, "Resolved later.", { resolvedBySequence: 7 }),
+      feedItem(5),
+      finding(4, "Still open."),
+      feedItem(3),
+    ]);
+    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const entries = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
+    expect(entries.map((entry) => entry.dataset.kind)).toEqual(["receipts", "finding", "finding", "receipts"]);
+    expect(within(entries[0]!).getByText(/^Checked 2 times/u)).toBeInTheDocument();
+    const open = within(entries[1]!).getByRole("article", { name: "Still open." });
+    const resolved = within(entries[2]!).getByRole("article", { name: "Resolved later." });
+    expect(open).not.toHaveTextContent(/Resolved/u);
+    expect(resolved.querySelector(".watcher-finding-resolved")).toHaveTextContent(/^Resolved in check 7$/u);
+    expect(within(resolved).getByRole("button", { name: "Send" })).toBeEnabled();
+    expect(within(resolved).getByRole("button", { name: "Dismiss" })).toBeEnabled();
+    fireEvent.click(within(open).getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(resolved).toHaveFocus());
+  });
+
   it("shows a one-line finding as its title alone", async () => {
     renderFeed([finding(4, "A risk.")]);
     const card = await screen.findByRole("article", { name: "A risk." });

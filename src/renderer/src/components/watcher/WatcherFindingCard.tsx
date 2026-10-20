@@ -132,6 +132,9 @@ export function WatcherFindingCard({
         Check {item.sequence}
         {time && <> · <time dateTime={item.settledAt ?? undefined}>{time}</time></>}
       </p>
+      {item.resolvedBySequence !== null && (
+        <p className="watcher-finding-resolved">Resolved in check {item.resolvedBySequence}</p>
+      )}
       {deliverable && (
         <div className="watcher-finding-actions">
           <WatcherDeliverButton

@@ -28,6 +28,25 @@ function failureText(error: unknown): string {
   return error instanceof Error ? error.message : "The note could not be sent.";
 }
 
+function isFinding(item: WatcherFeedItem): boolean {
+  return item.outcome === "finding" && item.finding !== null;
+}
+
+/**
+ * Newest first, except that a resolved finding moves below the oldest open
+ * one; the quiet checks around it then fold into one receipt.
+ */
+function openFindingsFirst(items: readonly WatcherFeedItem[]): WatcherFeedItem[] {
+  let lastOpen = -1;
+  items.forEach((item, index) => {
+    if (isFinding(item) && item.resolvedBySequence === null) lastOpen = index;
+  });
+  const head = items.slice(0, lastOpen + 1);
+  const resolved = head.filter((item) => isFinding(item) && item.resolvedBySequence !== null);
+  if (resolved.length === 0) return [...items];
+  return [...head.filter((item) => !resolved.includes(item)), ...resolved, ...items.slice(lastOpen + 1)];
+}
+
 /**
  * Feed entries whose entrance already played, across remounts and collapses:
  * a card or receipt animates in once, never again when the dock reopens or
@@ -71,12 +90,12 @@ export function WatcherFeed({
   const cardNodes = useRef(new Map<string, HTMLElement>());
   const pendingFocus = useRef<FocusTarget | null>(null);
   const visible = useMemo(
-    () => feed.items.filter((item) => item.delivery?.state !== "dismissed"),
+    () => openFindingsFirst(feed.items.filter((item) => item.delivery?.state !== "dismissed")),
     [feed.items],
   );
   const groups = useMemo(() => groupWatcherFeed(visible), [visible]);
   const findingIds = useMemo(
-    () => visible.filter((item) => item.finding !== null && item.outcome === "finding").map(({ wakeId }) => wakeId),
+    () => visible.filter(isFinding).map(({ wakeId }) => wakeId),
     [visible],
   );
 
@@ -200,7 +219,7 @@ export function WatcherFeed({
             <li key={group.key} className="watcher-feed-entry" data-kind={group.kind === "receipts" ? "receipts" : group.item.outcome === "finding" ? "finding" : "notice"}>
               {group.kind === "receipts" ? (
                 <WatcherReceiptGroup group={group} motionIndex={index} enter={enter} onEntered={onEntered} />
-              ) : group.item.outcome === "finding" && group.item.finding !== null ? (
+              ) : isFinding(group.item) ? (
                 <WatcherFindingCard
                   item={group.item}
                   motionIndex={index}

@@ -2,6 +2,12 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.74 — 2026-10-20
+
+- **Copy** and **Snooze** in a chat's actions menu open right beside their
+  row again and stay open while you move into them. Since 0.0.72 they opened
+  far down and to the right and closed as soon as the pointer left the row.
+
 ## 0.0.73 — 2026-10-19
 
 Open a chat for any folder straight from a terminal, send a queued message

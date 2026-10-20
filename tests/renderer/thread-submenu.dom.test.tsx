@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadSubmenu } from "../../src/renderer/src/components/sidebar/ThreadSubmenu";
 
@@ -17,6 +17,34 @@ function Host() {
 }
 
 describe("thread submenu", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("opens beside its row even when its menu becomes the containing block for fixed elements", () => {
+    const frame = { left: 131, top: 232 };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("thread-submenu")) {
+        const left = Number.parseFloat(this.style.left || "0") + frame.left;
+        const top = Number.parseFloat(this.style.top || "0") + frame.top;
+        return new DOMRect(left, top, 180, 64);
+      }
+      if (this.getAttribute("role") === "menuitem" && this.textContent === "Copy") return new DOMRect(133, 415, 219, 27);
+      return new DOMRect(0, 0, 0, 0);
+    });
+    render(<Host />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy" }), { detail: 1 });
+    const submenu = screen.getByRole("menu", { name: "Copy" });
+    const placed = submenu.getBoundingClientRect();
+    expect(placed.left).toBe(356);
+    expect(placed.top).toBe(415);
+
+    frame.left = 0;
+    frame.top = 0;
+    act(() => { window.dispatchEvent(new Event("animationend")); });
+    const settled = submenu.getBoundingClientRect();
+    expect(settled.left).toBe(356);
+    expect(settled.top).toBe(415);
+  });
+
   it("stays open when the pointer that opened it on hover then clicks the item", () => {
     render(<Host />);
     const trigger = screen.getByRole("menuitem", { name: "Copy" });

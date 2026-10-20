@@ -28,7 +28,7 @@ The bar at the top of the dock shows:
 
 - the agent's icon and model, and **Watching *chat title***;
 - what the watcher is doing now, such as reading a file, and how long the current check has run;
-- how many checks this turn has used, and how many events the watcher has seen and how many are still waiting for the next check;
+- how many checks are left for the current turn, how many events the watcher has seen and how many are still waiting for the next check, for example **11 of 12 checks left this turn · 3 events seen · 0 waiting**;
 - **Main chat quiet since…** when the main chat has produced no output for 10 minutes.
 
 Its buttons:
@@ -45,7 +45,9 @@ Drag the dock's edge to resize it, or focus the edge and use the arrow keys. In 
 
 The watcher doesn't read every word as it streams. Inertia wakes it when something in the main chat settles: a tool call, command or file change finishes, the plan changes, an error occurs, or a turn starts or ends. Events that arrive close together are gathered into one check, and a new check waits for the cooldown after the previous one. Events that arrive while the watcher is checking wait for the next check. If you are typing to the watcher in its own chat, your turn goes first.
 
-When a turn in the main chat ends, the watcher makes a final check that includes the files the turn changed.
+When a turn in the main chat ends, the watcher makes a final check that includes the files the turn changed. If the next turn has already started, for example from a queued message, the final check still reviews the turn that ended, and the next turn is reviewed on its own.
+
+Each card and each row in the watcher chat carries the watcher's lifetime check number, **Check *N***. That number counts every check, including **Check now** and the first review, so it can be higher than the checks used this turn.
 
 When the watcher has nothing to report, it answers with exactly `SILENT`. The dock groups these quiet checks into one receipt, such as **Checked 3 times since 10:42 · nothing to report**. Open a receipt to see each check. A receipt also says when a check ran read-only commands.
 
@@ -69,7 +71,9 @@ A finding appears in the dock as a card with **Send** and **Dismiss**.
 - When the main chat is running on an agent that can take a message mid-turn (Claude Code, Codex or OpenCode), the menu next to **Send** also offers **Steer now**, which delivers the note into the running turn. If the turn ends or the agent refuses the note before it arrives, it is queued instead and the card says so.
 - **Dismiss** removes the card without sending anything.
 
-After **Send**, the card shows its status, such as **Queued · sends after the current turn**. A card can be sent only once.
+After **Send**, the card shows its status, such as **Queued · sends after the current turn** or **Sent · after the turn ended**. When **Steer now** fell back to the queue, the status says why, for example that the turn ended before the note arrived. A card can be sent only once.
+
+If a queued note leaves the main chat's queue without being sent, because you removed it there or a change to the chat's model, access or workspace blocked it, the card says **Not sent** with the reason, and you can send or dismiss it again. Sending it again withdraws a blocked copy from the queue first.
 
 Your own queued messages always go before watcher notes. The main chat can hold three queued messages; when it is full, the card says so, and you can send the note once the queue has room. In the main chat's queue, notes are labelled **From watcher**.
 
@@ -99,9 +103,9 @@ Each check is a turn on the watcher's own account and uses that account's quota,
 | Digest size | 24 KiB | 4 to 48 KiB |
 | Context reads per check | 4 | 0 to 8 |
 
-- **Checks per turn** counts checks during one turn of the main chat, including the final check. When the checks are used up, the watcher pauses and says why, and it still makes its final check when the turn ends. **Resume** tops the checks back up to the full allowance, whatever the reason for the pause.
+- **Checks per turn** counts the checks the watcher starts on its own during one turn of the main chat, including the final check. **Check now** and **Review the last turn now** don't use this allowance. When the checks are used up, the watcher pauses and says why, and it still makes its final check when the turn ends. The next turn of the main chat starts with a full allowance and the watcher resumes by itself. **Resume** also tops the checks back up to the full allowance, whatever the reason for the pause.
 - **Digest size** caps what one check sends: newer activity is kept in full, older activity is shortened and the oldest is left out, and the check says what was left out.
-- **Context reads per check** limits how often the watcher may read more of the watched chat on its own during one check.
+- **Context reads per check** limits how often the watcher may read more of the watched chat on its own during one check. Those reads follow **What the watcher sees**: with a choice turned off, the watcher can't read that part of the chat this way either.
 
 If the watcher reaches its own account's usage limit, it pauses with the same explanation as **Limits**, and it can resume once its route is ready again. A watcher paused because its route is unavailable likewise resumes only when the route is ready. Neither stops or slows the main chat.
 
@@ -124,6 +128,7 @@ On a device paired with [Private Connect](../PRIVATE_CONNECT.md), a watcher is v
 - **Pause** stops new checks and keeps the watcher attached. **Resume** continues.
 - **Stop watching** asks you to confirm, stops any running check and detaches the watcher. It becomes an ordinary chat in the **Work** tab, and its mode is no longer locked.
 - **Archiving the watched chat** pauses the watcher, and **Resume** is refused until you unarchive the chat. Unarchiving the chat offers to resume it.
+- **Archiving the watcher chat** pauses the watcher too, and **Resume** is refused until you unarchive the watcher chat.
 - **Deleting the watched chat** detaches its watcher.
 - **Deleting the watcher** removes it. The shared checkout and worktree stay.
 
@@ -153,12 +158,13 @@ Only ready routes on Claude Code, Codex and OpenCode can be watchers. Open **Set
 The dock says why:
 
 - you paused it;
-- it used its checks for this turn: choose **Resume**;
+- it used its checks for this turn: it resumes by itself when the next turn starts, or choose **Resume**;
 - it reached its account's usage limit: it can resume once its route is ready;
-- its route stayed unavailable through three retries: check **Settings → Agents**; it can resume once the route is ready;
+- its route stayed unavailable through three retries, or three checks in a row could not start: check **Settings → Agents**; it can resume once the route is ready;
 - it tried to edit a file twice during one turn;
 - files changed that no running agent accounts for (see below);
-- the watched chat was archived: unarchive it, then resume.
+- the watched chat was archived: unarchive it, then resume;
+- the watcher chat itself was archived: unarchive it, then resume.
 
 ### A banner lists changed files
 

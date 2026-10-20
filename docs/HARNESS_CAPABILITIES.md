@@ -303,6 +303,10 @@ instructions are not sent and the orchestration and Browser tools are not
 offered. The watcher's only host tool is the context tool, with a fourth access
 kind, `"watched"`, that reads the watched chat without a route filter and
 without the approval chooser, bounded by `contextReadsPerWake` (default 4).
+The link's sharing choices bound those reads as they bound each check: with
+`brief` off the tool returns no user requests (and no request images), with
+`activities` off no commands, tool calls or errors, with `partialReplies` off
+no agent messages or pages, and with `changedFiles` off no file lists.
 
 ### Hidden instructions and the digest
 
@@ -316,7 +320,10 @@ without the approval chooser, bounded by `contextReadsPerWake` (default 4).
 
 Both labels are part of the `INERTIA_SECTION_LABEL` alternation in
 `untrusted-agent-text.ts`, so text from the watched chat or the provider that
-imitates them is neutralized. The digest for each check is the watcher turn's
+imitates them is neutralized. NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR
+(U+0085, U+2028, U+2029) become newlines before any quoting and spaces in
+single-line labels, so quoted text cannot step outside its `> ` quote. The
+digest for each check is the watcher turn's
 visible content (64 KiB turn cap, `digestKiB` default 24), not a hidden
 instruction, and every quoted string passes through
 `boundedUntrustedAgentText`. It honours the link's sharing choices; the
@@ -330,13 +337,30 @@ runnable provider) retries as transient with the scheduler's backoff at most
 `WATCHER_ROUTE_RETRY_LIMIT` (3) times; the next failure pauses the link with
 `route-unavailable`, a detail that names the route and the readiness message,
 and a `watcher.link.updated` broadcast. A check that starts resets the count.
+A check whose watcher turn fails to queue (for example when path authority
+refuses the shared checkout) is recorded as `failed`; the
+`WATCHER_DISPATCH_FAILURE_LIMIT`-th (3rd) consecutive failure pauses the link
+with `route-unavailable` instead of retrying with backoff forever. A
+`wake-budget` pause belongs to one watched turn: the next watched turn ends it
+and grants a fresh allowance. A final pass always digests the turn that ended
+(`turnId` on the digest), even when the next turn already began, and never
+spends the next turn's allowance; the cursor update is a compare-and-set on
+the turn the digest was built from, so a late check never rewinds coverage.
 `usage-limit` and `route-unavailable`
 resume only once `watcherRouteReadiness` reports the watcher's route ready,
 and `watched-archived` refuses to resume until the watched chat is
 unarchived. Every resume tops the turn's check allowance back up to
 `wakesPerWatchedTurn`. Deleting the watched chat detaches the link in SQL and
 deleting the watcher chat removes it; the delete command then broadcasts
-`watcher.link.removed` for each link the chat took part in.
+`watcher.link.removed` for each link the chat took part in. A delete of a
+watched chat whose watcher is mid-check is refused with a request error before
+any side effect (no checkpoint, worktree or ownership change); the
+`BEFORE DELETE` trigger stays as the backstop. Archiving the watcher chat
+itself pauses its link, and resume waits until it is unarchived.
+
+The Git fingerprint backstop compares changed paths with other turns'
+activities in NFC, and folds case on Windows and macOS, whose file systems are
+case-insensitive by default.
 
 ### Fixtures
 
@@ -365,7 +389,13 @@ before and after the turn.
   then session rules, last match wins). Under the supervised plan ruleset
   alone, read, glob, grep, list and bash all prompt. A watcher turn sends the
   profile ruleset, reads complete without a prompt, edit and bash are denied
-  and not offered, and the server process exits on shutdown.
+  and not offered, and the server process exits on shutdown. A second case
+  gives the agent its own rules that allow everything, edits, shell and
+  `external_directory`; the session profile still wins, because OpenCode
+  merges the agent's ruleset first and the session's after it and takes the
+  last match. The profile depends on that order. If OpenCode ever evaluated
+  agent rules after session rules, its allows would win, so the scheduled
+  canary and this fixture are what must catch such a change.
 
 Run it with `npm run test:portable`. Integration coverage
 lives in `tests/server/watcher-read-only-guard.test.ts` and

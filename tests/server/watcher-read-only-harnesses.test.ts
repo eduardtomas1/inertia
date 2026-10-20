@@ -574,7 +574,7 @@ interface OpenCodeCapture {
  * OpenCode does (agent rules, then session rules, last match wins), prompts
  * for `ask`, and writes only when an edit or shell call is allowed.
  */
-function openCodeServer(root: string, repo: string) {
+function openCodeServer(root: string, repo: string, agentRules: PermissionRuleset = OPENCODE_PLAN_AGENT_RULES) {
   const command = portableNodeExecutable(root, "opencode");
   const capturePath = join(root, "opencode-capture.json");
   const pidPath = join(root, "opencode.pid");
@@ -585,7 +585,7 @@ const path = require("node:path");
 fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
 const capture = { calls: [] };
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(capture));
-const agentRules = ${JSON.stringify(OPENCODE_PLAN_AGENT_RULES)};
+const agentRules = ${JSON.stringify(agentRules)};
 const nativeTools = ${JSON.stringify(OPENCODE_NATIVE_TOOLS)};
 const calls = ${JSON.stringify(OPENCODE_SCRIPTED_CALLS)};
 const target = path.join(process.cwd(), "src", "parser.ts");
@@ -770,6 +770,53 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     ].sort(byActivity));
     expect(runtime.violations).toEqual([]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
+    expect(turn).toMatchObject({ status: "completed" });
+    expect(await checkoutState(repo)).toEqual(before);
+    await opencode.manager.disposeAll();
+    await expectProcessGone(opencode.pid());
+  });
+
+  it("keeps the watcher profile winning over an agent whose own rules allow edits, shell and outside reads", async () => {
+    // OpenCode evaluates the agent's ruleset first and the session's after it,
+    // and the last matching rule wins. The watcher profile relies on that
+    // order: its deny-by-default session rules must override any allow the
+    // agent configuration carries.
+    const permissiveAgent: PermissionRuleset = [
+      { permission: "*", pattern: "*", action: "allow" },
+      { permission: "edit", pattern: "*", action: "allow" },
+      { permission: "bash", pattern: "*", action: "allow" },
+      { permission: "external_directory", pattern: "*", action: "allow" },
+    ];
+    const profile = openCodePermissions("supervised", "plan", "watcher");
+    const wildcard = (value: string, pattern: string): boolean => new RegExp(
+      `^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/gu, "\\$&")).join(".*")}$`, "u",
+    ).test(value);
+    const evaluate = (rules: PermissionRuleset, permission: string, pattern: string) =>
+      rules.findLast((rule) => wildcard(permission, rule.permission) && wildcard(pattern, rule.pattern))?.action ?? "ask";
+    const merged = [...permissiveAgent, ...profile];
+    for (const tool of ["edit", "write", "patch", "bash", "webfetch", "task", "todowrite", "question", "plan_exit"]) {
+      expect(evaluate(merged, tool, "src/parser.ts")).toBe("deny");
+    }
+    expect(evaluate(merged, "external_directory", "/etc/*")).toBe("deny");
+    for (const tool of ["read", "glob", "grep", "list", `${INERTIA_HOST_MCP_NAME}_inertia_request_context`]) {
+      expect(evaluate(merged, tool, "src/parser.ts")).toBe("allow");
+    }
+
+    const root = portableFixtureRoot("watcher opencode permissive agent");
+    roots.push(root);
+    const repo = repository(root, ["serve"]);
+    const opencode = openCodeServer(root, repo, permissiveAgent);
+    const runtime = watcherHarnessRuntime(root, repo, opencode.manager, providerNativeModelSelection({ providerId: "opencode", modelId: "fake/model-a" }));
+    const before = await checkoutState(repo);
+    const turn = await runtime.settled(runtime.startCheck().id);
+    const capture = opencode.capture();
+    expect(capture.sessionPermission).toEqual(profile);
+    expect(capture.offeredTools).toEqual(["read", "glob", "grep", "list"]);
+    expect(capture.calls.filter(({ tool }) => tool === "edit" || tool === "bash")).toEqual([
+      { tool: "edit", action: "deny" },
+      { tool: "bash", action: "deny" },
+    ]);
+    expect(runtime.violations).toEqual([]);
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
     await opencode.manager.disposeAll();

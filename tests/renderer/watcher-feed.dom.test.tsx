@@ -92,6 +92,23 @@ describe("WatcherFeed", () => {
     expect(receipt).toHaveTextContent("ran 1 read-only command");
   });
 
+  it("says how many command requests the watcher declined after the commands it ran", async () => {
+    renderFeed([
+      feedItem(3, { commandsRun: 2, commandsDeclined: 1 }),
+      feedItem(2, { commandsDeclined: 2 }),
+      feedItem(1, { commandsDeclined: 1 }),
+    ]);
+    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
+    expect(within(receipt!).getByText(/^Checked 3 times/u)).toHaveTextContent(
+      /^Checked 3 times · .* · nothing to report · ran 2 read-only commands · 4 declined$/u,
+    );
+    const checks = receipt!.querySelectorAll(".watcher-check-notes");
+    expect(checks[0]).toHaveTextContent(/ · ran 2 read-only commands · 1 declined$/u);
+    expect(checks[1]).toHaveTextContent(/ · 2 commands declined$/u);
+    expect(checks[2]).toHaveTextContent(/ · 1 command declined$/u);
+  });
+
   it("moves focus to the card's own status after Send and reports the queued note", async () => {
     const runtime = renderFeed([finding(4, "Risky rename.")], { running: true });
     const card = await screen.findByRole("article");

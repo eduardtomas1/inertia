@@ -28,12 +28,23 @@ function commandsNote(count: number | null | undefined): string | null {
   return `ran ${count} read-only ${count === 1 ? "command" : "commands"}`;
 }
 
+function declinedNote(declined: number, ran: string | null): string | null {
+  if (declined <= 0) return null;
+  if (ran) return `${declined} declined`;
+  return `${declined} ${declined === 1 ? "command" : "commands"} declined`;
+}
+
+function commandNotes(ran: number | null | undefined, declined: number): string[] {
+  const commands = commandsNote(ran);
+  return [commands, declinedNote(declined, commands)].filter((note): note is string => Boolean(note));
+}
+
 /** One check, as listed inside a receipt or on its own for a notice. */
 export function WatcherCheckLine({ item }: { item: WatcherFeedEntry }): React.JSX.Element {
   const notes = [
     watcherTriggerText(item.trigger),
     watcherEventsText(item.eventsCovered),
-    commandsNote(item.commandsRun),
+    ...commandNotes(item.commandsRun, item.commandsDeclined),
     digestNote(item),
     guardNote(item),
   ].filter((note): note is string => Boolean(note));
@@ -61,8 +72,8 @@ function receiptTimes(group: ReceiptGroup): string {
 
 function receiptSummary(group: ReceiptGroup): string {
   const times = group.count === 1 ? "once" : `${group.count} times`;
-  const commands = commandsNote(group.commandsRun);
-  return [`Checked ${times}`, receiptTimes(group), "nothing to report", commands].filter(Boolean).join(" · ");
+  const declined = group.items.reduce((sum, { commandsDeclined }) => sum + commandsDeclined, 0);
+  return [`Checked ${times}`, receiptTimes(group), "nothing to report", ...commandNotes(group.commandsRun, declined)].join(" · ");
 }
 
 function enterProps(enter: boolean, onEntered: () => void) {

@@ -462,8 +462,7 @@ export class WatcherWakeRunner {
       }
       try {
         if (pause) {
-          store.watcherLinks.transition(linkId, ["waking"], pause, now);
-          scheduler.pause(linkId);
+          if (store.watcherLinks.transition(linkId, ["waking", "watching", "idle"], pause, now)) scheduler.pause(linkId);
         } else {
           this.#release(linkId, running?.restore ?? { status: "watching" }, running?.digest.turnId ?? wake.watchedTurnId);
         }

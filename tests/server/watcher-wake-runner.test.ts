@@ -127,6 +127,27 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("keeps a check's usage-limit pause when the user paused and resumed during the check", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      await f.command("watcher.pause", { linkId: link.id });
+      await f.command("watcher.resume", { linkId: link.id });
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
+      await f.finishTurn(watcherId, null, "failed", { reason: "provider-error", message: "Usage limit reached.", usageLimited: true });
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "usage-limited" });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "usage-limit" });
+
+      await f.command("watcher.resume", { linkId: link.id });
+      await wakeOnce(f, link.id);
+      expect(f.provider.inputs.filter((input) => input.conversationId === watcherId)).toHaveLength(2);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("runs beside the watched turn without lifting one-run-per-conversation, and merges events while busy", async () => {
     const f = await createWatcherFixture();
     try {

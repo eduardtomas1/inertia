@@ -36,6 +36,20 @@ The useful changes in each Inertia release, in plain language.
   show who wrote them; agents cannot write notes yet, and the
   review strip for their future proposals is already in place. A chat's
   composer names its initiative and opens it in one click.
+- **Tools & defaults** on the Initiatives page set what every chat in an
+  initiative shares, each falling back to the chat's project and then
+  Settings, with a hint saying where an inherited value comes from: a default
+  model and access for new chats, a default project picked for you, an
+  **Access limit** no chat in the initiative can exceed (lowering it lowers its
+  chats and their queued messages at once, and the composer, also in a chat's
+  own window, explains the options above it), blocking the
+  agent browser tools, a Claude spend limit per turn (the lower of the
+  initiative's and the project's applies), and a **Skills folder** whose skills
+  Claude chats in the initiative can invoke with `$`. Codex chats don't use the
+  folder yet. A reply already running when you lower the access limit keeps
+  its access until it ends (stop it to apply the limit now), a chat waiting to
+  resume after a usage limit may then need resuming by hand, and Antigravity
+  can't run under a Supervised limit.
 
 ## 0.0.73 — 2026-10-19
 

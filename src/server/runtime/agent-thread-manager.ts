@@ -57,6 +57,7 @@ import {
 } from "./harness-capabilities";
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
+import { effectiveBrowserAccess } from "../../shared/initiatives";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
@@ -410,8 +411,14 @@ export class AgentThreadManager {
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
-        if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
-          return failure("browser_disabled", "Agent browser access is disabled in this project's settings.");
+        const browser = effectiveBrowserAccess(
+          this.dependencies.store.initiativePreferencesFor(current),
+          this.dependencies.store.project(current.projectId).preferences,
+        );
+        if (!browser.allowed) {
+          return failure("browser_disabled", browser.source === "initiative"
+            ? "Agent browser access is disabled in this chat's initiative settings."
+            : "Agent browser access is disabled in this project's settings.");
         }
         return await this.agentBrowser.invoke(current, call, {
           conversationId: current.id,
@@ -712,6 +719,8 @@ export class AgentThreadManager {
       if (accessRank(accessMode) > accessRank(current.accessMode)) {
         throw new Error("A managed chat cannot exceed its parent chat's access mode.");
       }
+      // Refuses before approval when the parent's access limit cannot follow.
+      this.inheritedInitiativeId(current);
       const workspace = input.workspace ?? { kind: "project" as const };
       if (workspace.kind === "reuse-current" && this.dependencies.store.project(current.projectId).workspaceKind === "scratch") {
         throw new Error("A chat without a project cannot share its folder with another chat.");
@@ -858,20 +867,33 @@ export class AgentThreadManager {
 
   /**
    * A managed child joins its source chat's initiative while that initiative
-   * still takes chats; otherwise it is created without one rather than failing.
+   * still takes chats. Otherwise it is created without one rather than failing,
+   * unless the initiative sets an access limit: outside it the child could
+   * later be raised above its parent's limit, so creation is refused instead.
    * Membership is derived here from the source chat, never from agent input.
    */
   private inheritedInitiativeId(source: Conversation): string | undefined {
-    return source.initiativeId && this.dependencies.store.initiatives.acceptsChats(source.initiativeId)
-      ? source.initiativeId
-      : undefined;
+    if (!source.initiativeId) return undefined;
+    if (this.dependencies.store.initiatives.acceptsChats(source.initiativeId)) return source.initiativeId;
+    this.assertNoAccessLimitToCarry(source.initiativeId);
+    return undefined;
+  }
+
+  private assertNoAccessLimitToCarry(initiativeId: string): void {
+    const initiative = this.dependencies.store.initiatives.get(initiativeId);
+    if (initiative?.preferences.accessCeiling) {
+      throw new Error(
+        `“${initiative.name}” no longer accepts chats; its access limit cannot be carried to a new chat.`,
+      );
+    }
   }
 
   /**
    * The initiative can stop taking chats between the inheritance read and the
    * insert, whose atomic re-check then refuses it. Membership is optional for a
-   * managed child, so it is created once more without one. Nothing else has
-   * happened before the insert, so the retry cannot duplicate work.
+   * managed child without an access limit to carry, so it is created once more
+   * without one. Nothing else has happened before the insert, so the retry
+   * cannot duplicate work.
    */
   private async createManagedChild(
     payload: ConversationCreatePayload,
@@ -881,6 +903,7 @@ export class AgentThreadManager {
       return await this.dependencies.creation.create(payload, requestId);
     } catch (error) {
       if (!payload.initiativeId || !(error instanceof InitiativeRepositoryError)) throw error;
+      this.assertNoAccessLimitToCarry(payload.initiativeId);
       return await this.dependencies.creation.create({ ...payload, initiativeId: undefined }, requestId);
     }
   }
@@ -918,6 +941,7 @@ export class AgentThreadManager {
     if (workspace.kind === "reuse-current" && !current.worktreePath) {
       throw new Error("The parent chat does not own an attached worktree to reuse.");
     }
+    const initiativeId = this.inheritedInitiativeId(current);
     if (signal.aborted) throw new Error("The parent turn ended before chat creation.");
     this.dependencies.store.agentThreadManagement.transition(
       operationId,
@@ -945,7 +969,7 @@ export class AgentThreadManager {
       worktreePath: workspace.kind === "reuse-current"
         ? current.worktreePath
         : undefined,
-      initiativeId: this.inheritedInitiativeId(current),
+      initiativeId,
     }, `agent-thread:${operationId}`);
     this.dependencies.store.agentThreadManagement.attachManaged({
       childConversationId: child.id,

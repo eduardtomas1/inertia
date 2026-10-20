@@ -343,7 +343,11 @@ function startClaudeRun(
         selectedClaudeSkills,
         options.input.cwd,
         options.environment,
-        { ...skillFilesystem, signal: skillDeadline.signal },
+        {
+          ...skillFilesystem,
+          signal: skillDeadline.signal,
+          initiativeSkillsRoot: options.input.initiativeSkillsRoot ?? null,
+        },
       );
       try {
         stagedSkillPlugin = await raceClaudeSkillStaging(

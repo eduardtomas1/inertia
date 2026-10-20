@@ -25,6 +25,8 @@ export type {
   InitiativeNoteProvenance,
   InitiativeNoteState,
   InitiativePatch,
+  InitiativePreferences,
+  InitiativePreferencesPatch,
   InitiativeStatus,
 } from "./initiatives";
 export * from "./contracts/agent";

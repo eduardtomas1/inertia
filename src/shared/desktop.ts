@@ -431,6 +431,33 @@ export function parseDetachedChatDraftAcknowledgement(
   };
 }
 
+/** The one argument of `openInitiativeSkillsFolder`: an initiative id. */
+export function parseInitiativeSkillsFolderRequest(value: unknown): string | null {
+  return typeof value === "string" && UUID_PATTERN.test(value) ? value : null;
+}
+
+/** An initiative's skills folder, which the runtime creates and contains. */
+export interface InitiativeSkillsFolderRequest {
+  initiativeId: string;
+}
+
+/**
+ * A path the runtime resolves for the main process to open: a scoped project
+ * path, or an initiative's skills folder. Main never composes these paths.
+ */
+export type RuntimePathRequest = OpenProjectPathRequest | InitiativeSkillsFolderRequest;
+
+export function parseRuntimePathRequest(value: unknown): RuntimePathRequest | null {
+  if (
+    typeof value === "object" && value !== null && !Array.isArray(value)
+    && Object.keys(value).length === 1 && "initiativeId" in value
+  ) {
+    const initiativeId = parseInitiativeSkillsFolderRequest(value.initiativeId);
+    return initiativeId ? { initiativeId } : null;
+  }
+  return parseOpenProjectPathRequest(value);
+}
+
 export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequest | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const candidate = value as Partial<Record<keyof OpenProjectPathRequest, unknown>>;
@@ -683,6 +710,12 @@ export interface DesktopBridge {
   openAttachmentExternally: (id: string) => Promise<void>;
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
+  /**
+   * Opens an initiative's skills folder in the file manager, creating it when
+   * needed. Only the initiative id crosses the bridge; the runtime resolves
+   * and contains the path, which never reaches the renderer.
+   */
+  openInitiativeSkillsFolder: (initiativeId: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
   showContextMenu: (request: ContextMenuRequest) => Promise<ContextMenuAction | null>;
   /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */

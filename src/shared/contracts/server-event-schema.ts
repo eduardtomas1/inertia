@@ -533,7 +533,7 @@ function agentSkill(value: unknown): boolean {
   )
     && nullableStringField(value, "shortDescription")
     && booleanField(value, "enabled")
-    && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider"])
+    && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider", "initiative"])
     && oneOf(value, "source", ["codex-native", "claude-native"]);
 }
 

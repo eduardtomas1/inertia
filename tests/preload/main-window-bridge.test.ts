@@ -86,6 +86,7 @@ describe("main window preload", () => {
       "openCanaryRollback",
       "openDetachedChat",
       "openExternal",
+      "openInitiativeSkillsFolder",
       "openProjectPath",
       "prepareAttachmentHandoff",
       "prepareCanaryRollback",
@@ -131,6 +132,12 @@ describe("main window preload", () => {
       expect(bridge).not.toHaveProperty(detachedOnly);
     }
     expect(electron.sendSync).not.toHaveBeenCalled();
+  });
+
+  it("sends only the initiative id to open its skills folder", async () => {
+    const initiativeId = "11111111-1111-4111-8111-111111111111";
+    await bridge.openInitiativeSkillsFolder(initiativeId);
+    expect(electron.invoke.mock.calls.at(-1)).toEqual(["inertia:open-initiative-skills-folder", initiativeId]);
   });
 
   it("forwards only a boolean capture choice and no arguments when clearing diagnostics", async () => {

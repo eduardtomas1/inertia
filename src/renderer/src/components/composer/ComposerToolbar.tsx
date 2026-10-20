@@ -52,6 +52,7 @@ import { loadInitiativePicker } from "../chatSurfaceLoaders";
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type {
+  ComposerAccessCeiling,
   ComposerInitiativeChip,
   NewChatInitiativePicker,
   NewChatProjectPicker,
@@ -193,6 +194,8 @@ export interface ComposerToolbarProps {
   newChatProjectPicker?: NewChatProjectPicker;
   newChatInitiativePicker?: NewChatInitiativePicker;
   initiativeChip?: ComposerInitiativeChip;
+  accessCeiling?: ComposerAccessCeiling;
+  modelSourceLabel?: string;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -272,6 +275,8 @@ export function ComposerToolbar({
   newChatProjectPicker,
   newChatInitiativePicker,
   initiativeChip,
+  accessCeiling,
+  modelSourceLabel,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -399,6 +404,7 @@ export function ComposerToolbar({
             onUpdateFastMode={onUpdateFastMode}
             onUpdateConversation={onUpdateConversation}
             conversationUpdatePending={conversationUpdatePending}
+            accessCeiling={accessCeiling}
           />
           <Suspense fallback={null}>
             <ComposerMoreMenu
@@ -416,6 +422,7 @@ export function ComposerToolbar({
               onUpdateFastMode={onUpdateFastMode}
               onUpdateConversation={onUpdateConversation}
               conversationUpdatePending={conversationUpdatePending}
+              accessCeiling={accessCeiling}
             />
           </Suspense>
         </div>
@@ -620,6 +627,7 @@ export function ComposerToolbar({
             <div className="composer-new-chat-pickers">
               <ProjectPicker picker={newChatProjectPicker} />
               {newChatInitiativePicker && InitiativePicker && <InitiativePicker picker={newChatInitiativePicker} />}
+              {modelSourceLabel && <span className="composer-new-chat-source">{modelSourceLabel}</span>}
             </div>
           ) : chip ? (
             <span className="composer-checkout-context">

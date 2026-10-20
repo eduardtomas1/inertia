@@ -14,7 +14,13 @@ import {
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { assertConversationProvider } from "./conversation-provider-policy";
-import { requireInitiativeAcceptingChats } from "./initiative-repository";
+import {
+  clampAccessMode,
+  exceedsAccessCeiling,
+  initiativeAccessCeilingMessage,
+} from "../../shared/initiatives";
+import { initiativeAccessCeiling, requireInitiativeAcceptingChats } from "./initiative-repository";
+import { InitiativeRepositoryError } from "./initiative-repository-error";
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
@@ -88,6 +94,11 @@ export class ConversationRepository {
     this.context.database.transaction(() => {
       if (conversation.initiativeId) {
         requireInitiativeAcceptingChats(this.context.database, conversation.initiativeId);
+        // A chat starts at most at its initiative's access ceiling.
+        conversation.accessMode = clampAccessMode(
+          conversation.accessMode,
+          initiativeAccessCeiling(this.context.database, conversation.initiativeId)?.ceiling,
+        );
       }
       this.context.database.prepare(`
         INSERT INTO conversations (
@@ -213,6 +224,14 @@ export class ConversationRepository {
     update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
   ): Conversation {
     const current = conversationFromRow(this.context.requireConversation(conversationId));
+    if (update.accessMode !== undefined) {
+      // The command layer refuses first with the same message; this keeps the
+      // ceiling authoritative for every caller that changes a chat's access.
+      const limit = initiativeAccessCeiling(this.context.database, current.initiativeId);
+      if (limit && exceedsAccessCeiling(update.accessMode, limit.ceiling)) {
+        throw new InitiativeRepositoryError(initiativeAccessCeilingMessage(limit.name, limit.ceiling));
+      }
+    }
     const requestedProviderId = update.providerId ?? current.providerId;
     const legacySelectionChanged = update.providerId !== undefined
       || update.model !== undefined

@@ -7,6 +7,7 @@ import type {
   Conversation,
   Initiative,
   InitiativeNote,
+  InitiativePreferencesPatch,
   InitiativeStatus,
   ServerEvent,
 } from "@shared/contracts";
@@ -16,12 +17,14 @@ import {
   INITIATIVE_STATUS_LABELS,
   INITIATIVE_STATUSES,
   initiativeMembers,
+  initiativePreferencesPatchSchema,
   isInitiativeName,
   MAX_INITIATIVE_NAME_CHARS,
   type InitiativeColor,
 } from "@shared/initiatives";
 
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import { ELECTRON_IPC_ERROR_PREFIX } from "../hooks/useDesktopTools";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { requestNewInitiative } from "../utils/initiativeDialog";
 import {
@@ -37,6 +40,7 @@ import {
   type BriefSaveOutcome,
   type InitiativeNoteCommand,
 } from "./initiatives/InitiativeMemory";
+import { InitiativeTools, type InitiativeToolsSettings } from "./initiatives/InitiativeTools";
 import { PaletteColorPicker } from "./ProjectAppearanceControls";
 import { ProjectIcon } from "./ProjectIcon";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
@@ -45,7 +49,7 @@ import "./InitiativesView.css";
 
 export interface InitiativesViewProps {
   snapshot: AppSnapshot | null;
-  settings: Pick<AppSettings, "confirmDestructiveActions">;
+  settings: Pick<AppSettings, "confirmDestructiveActions"> & InitiativeToolsSettings;
   status: ConnectionStatus;
   selectedInitiativeId: string | null;
   onSelectInitiative(initiativeId: string | null): void;
@@ -85,7 +89,20 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-type InitiativeUpdate = { name?: string; color?: InitiativeColor; status?: InitiativeStatus };
+type InitiativeUpdate = {
+  name?: string;
+  color?: InitiativeColor;
+  status?: InitiativeStatus;
+  preferences?: InitiativePreferencesPatch;
+};
+
+/** Later changes win; settings changes merge field by field. */
+function mergeUpdates(into: InitiativeUpdate, patch: InitiativeUpdate): void {
+  const preferences = into.preferences || patch.preferences
+    ? { ...into.preferences, ...patch.preferences }
+    : undefined;
+  Object.assign(into, patch, preferences ? { preferences } : {});
+}
 
 /**
  * Sends this page's initiative commands one at a time. An update reads the
@@ -138,17 +155,24 @@ function useInitiativeCommandQueue(
   const update = (initiative: Initiative, patch: InitiativeUpdate): Promise<number | null> => {
     const queued = waiting.current.get(initiative.id);
     if (queued) {
-      Object.assign(queued.patch, patch);
+      mergeUpdates(queued.patch, patch);
       return queued.sent;
     }
-    const merged = { ...patch };
+    const merged: InitiativeUpdate = {};
+    mergeUpdates(merged, patch);
     const sent = enqueue(async () => {
       waiting.current.delete(initiative.id);
       const revision = expectedRevision(initiative);
       try {
+        const { preferences, ...fields } = merged;
         await callbacks.current.request({
           type: "initiative.update",
-          payload: { id: initiative.id, expectedRevision: revision, ...merged },
+          payload: {
+            id: initiative.id,
+            expectedRevision: revision,
+            ...fields,
+            ...(preferences ? { preferences: initiativePreferencesPatchSchema.parse(preferences) } : {}),
+          },
         }, { passive: true });
       } catch (error) {
         confirmedRevisions.current.delete(initiative.id);
@@ -278,9 +302,11 @@ function InitiativeDetail({
   initiative,
   members,
   snapshot,
+  settings,
   offline,
   confirmDestructiveActions,
   onUpdate,
+  onOpenSkillsFolder,
   onSaveBrief,
   onNoteCommand,
   loadNotes,
@@ -290,9 +316,11 @@ function InitiativeDetail({
   initiative: Initiative;
   members: readonly SidebarThreadView[];
   snapshot: AppSnapshot;
+  settings: InitiativeToolsSettings;
   offline: boolean;
   confirmDestructiveActions: boolean;
   onUpdate(patch: InitiativeUpdate): Promise<number | null>;
+  onOpenSkillsFolder(): Promise<void>;
   onSaveBrief(brief: string, expectedBriefRevision: number): Promise<BriefSaveOutcome>;
   onNoteCommand(command: InitiativeNoteCommand): Promise<boolean>;
   loadNotes(initiativeId: string): Promise<InitiativeNote[] | null>;
@@ -421,6 +449,14 @@ function InitiativeDetail({
           </section>
         ))}
       </section>
+      <InitiativeTools
+        initiative={initiative}
+        snapshot={snapshot}
+        settings={settings}
+        offline={offline}
+        onChange={async (preferences) => await onUpdate({ preferences }) !== null}
+        onOpenSkillsFolder={onOpenSkillsFolder}
+      />
     </article>
   );
 }
@@ -539,9 +575,21 @@ export function InitiativesView({
             initiative={selected}
             members={membersByInitiative.get(selected.id) ?? []}
             snapshot={snapshot}
+            settings={settings}
             offline={offline}
             confirmDestructiveActions={settings.confirmDestructiveActions}
             onUpdate={(patch) => commands.update(selected, patch)}
+            onOpenSkillsFolder={async () => {
+              try {
+                await window.inertia.openInitiativeSkillsFolder(selected.id);
+              } catch (error) {
+                // Runtime refusals are readable; strip Electron's IPC wrapper.
+                const detail = error instanceof Error
+                  ? error.message.replace(ELECTRON_IPC_ERROR_PREFIX, "").trim()
+                  : "";
+                onError(detail || "The skills folder could not be opened.");
+              }
+            }}
             onSaveBrief={(brief, expectedBriefRevision) => commands.updateBrief(selected, brief, expectedBriefRevision)}
             onNoteCommand={commands.note}
             loadNotes={loadNotes}

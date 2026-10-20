@@ -7,6 +7,7 @@ import {
 } from "../../src/shared/model-routing";
 import { conversationHasHistory } from "../../src/shared/continuation-policy";
 import { defaultSettings } from "../../src/shared/contracts/app";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 const selection = providerNativeModelSelection({
   providerId: "codex",
@@ -1975,6 +1976,7 @@ describe("server event remaining discriminant and identity boundary", () => {
       color: "teal",
       status: "active",
       brief: "",
+      preferences: defaultInitiativePreferences(),
       briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
       revision: 1,
       createdAt: checkedAt,

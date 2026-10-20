@@ -61,7 +61,16 @@ export const CLAUDE_ISOLATED_SKILL_SETTINGS = {
 export interface ClaudeFilesystemSkill extends SlashCommand {
   /** Privileged capability data. Never serialize this field to the renderer. */
   path: string;
-  scope: "repo" | "user";
+  scope: "repo" | "user" | "initiative";
+}
+
+/**
+ * Skill roots beyond the chat's project and the user's Claude folder. The
+ * initiative root is Inertia's own contained folder for the chat's initiative;
+ * its skills live in `<root>/.claude/skills`, like a project's.
+ */
+export interface ClaudeSkillRootOptions {
+  initiativeSkillsRoot?: string | null;
 }
 
 type ClaudeSkillInput = Extract<
@@ -239,14 +248,31 @@ async function userSkillRoot(
   };
 }
 
+async function initiativeSkillRoot(
+  requested: string | null | undefined,
+  control: ClaudeSkillOperationControl,
+): Promise<SkillRoot | null> {
+  if (!requested || !isAbsolute(requested)) return null;
+  // The runtime resolved this root already; a link in its place now is refused.
+  const container = await canonicalDirectory(requested, control);
+  if (!container || container !== requested) return null;
+  return {
+    container,
+    skillsDirectory: join(container, ".claude", "skills"),
+    scope: "initiative",
+  };
+}
+
 async function claudeSkillRoots(
   cwd: string,
   environment: NodeJS.ProcessEnv,
   control: ClaudeSkillOperationControl,
+  extra: ClaudeSkillRootOptions = {},
 ): Promise<SkillRoot[]> {
   const project = await projectSkillRoots(cwd, control);
+  const initiative = await initiativeSkillRoot(extra.initiativeSkillsRoot, control);
   const user = await userSkillRoot(environment, control);
-  return user ? [...project, user] : project;
+  return [...project, ...(initiative ? [initiative] : []), ...(user ? [user] : [])];
 }
 
 function exactSkillName(value: string): string | null {
@@ -589,8 +615,9 @@ export async function discoverClaudeFilesystemSkills(
   cwd: string,
   environment: NodeJS.ProcessEnv,
   control: ClaudeSkillOperationControl = {},
+  extra: ClaudeSkillRootOptions = {},
 ): Promise<ClaudeFilesystemSkill[]> {
-  const roots = await claudeSkillRoots(cwd, environment, control);
+  const roots = await claudeSkillRoots(cwd, environment, control, extra);
   const state = { bytes: 0, entries: 0, skills: 0 };
   const skills: ClaudeFilesystemSkill[] = [];
   for (const root of roots) {
@@ -758,14 +785,14 @@ export async function stageClaudeSkillPlugin(
   skills: readonly ClaudeSkillInput[],
   cwd: string,
   environment: NodeJS.ProcessEnv,
-  options: ClaudeSkillOperationControl & { metadataOnly?: boolean } = {},
+  options: ClaudeSkillOperationControl & ClaudeSkillRootOptions & { metadataOnly?: boolean } = {},
 ): Promise<StagedClaudeSkillPlugin | null> {
   checkClaudeSkillOperation(options);
   if (skills.length === 0) return null;
   if (skills.length > MAX_DISCOVERED_SKILLS) {
     throw new Error("Claude skill staging exceeds the bounded skill limit.");
   }
-  const roots = await claudeSkillRoots(cwd, environment, options);
+  const roots = await claudeSkillRoots(cwd, environment, options, options);
   const uniqueNames = new Set<string>();
   const selected: Array<{
     input: ClaudeSkillInput;

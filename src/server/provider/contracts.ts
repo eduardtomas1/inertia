@@ -107,6 +107,13 @@ interface ProviderRunRequest {
   attachmentReadRoots?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   /**
+   * Privileged, realpath-contained skills root of the chat's initiative. Only
+   * native Claude skill staging reads it, to revalidate selected skills from
+   * its `.claude/skills` folder. Present only when the turn selects Claude
+   * skills and the initiative offers its folder.
+   */
+  initiativeSkillsRoot?: string;
+  /**
    * Privileged Codex-only launch mode for a user-authored native goal. The
    * App Server owns the automatic turns started by this mutation; `prompt`
    * remains the durable visible request label and is not sent as a turn.

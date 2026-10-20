@@ -2,8 +2,9 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import type { Conversation, ClientCommand, ProviderInfo } from "../../shared/contracts";
-import { effectiveDefaultProviderId } from "../../shared/default-provider";
+import { effectiveDefaultProviderId, providerMayRun } from "../../shared/default-provider";
 import {
+  providerIdForHarness,
   providerNativeModelSelection,
   type ModelSelection,
 } from "../../shared/model-routing";
@@ -71,6 +72,7 @@ export class ConversationCreationService {
     const defaultModel = inherited ? settings.defaultModel : "";
     const requestedModel = inherited ? payload.model : undefined;
     const requestedSelection = payload.modelSelection
+      ?? this.layeredDefaultSelection(payload)
       ?? providerNativeModelSelection({
         providerId: defaultProviderId,
         modelId: requestedModel
@@ -94,6 +96,48 @@ export class ConversationCreationService {
     return { providerId, selection };
   }
 
+  /**
+   * The default model for a request that names no provider, model or model
+   * selection, in the order new-chat drafts show: the chat's initiative, then
+   * its project, and otherwise the Settings default the caller builds. Each
+   * layer is validated against the live catalog, so a removed model, a
+   * disabled backend or a provider that cannot run falls through to the next.
+   * A request that names only a reasoning level gets it on the layer's model
+   * when that model offers it, and the layer's own level otherwise.
+   */
+  private layeredDefaultSelection(payload: ConversationCreatePayload): ModelSelection | null {
+    if (payload.providerId !== undefined || payload.model) return null;
+    const initiative = this.dependencies.store.initiativePreferencesFor(payload);
+    const layers = [
+      initiative?.defaultModel
+        ? { ...initiative.defaultModel, reasoningEffort: initiative.defaultReasoningEffort }
+        : null,
+      this.dependencies.store.listModelBackendDefaults().find(({ scope, projectId }) =>
+        scope === "project" && projectId === payload.projectId)?.selection ?? null,
+    ];
+    for (const layer of layers) {
+      const selection = layer && this.usableDefault(layer, payload.reasoningEffort || null);
+      if (selection) return selection;
+    }
+    return null;
+  }
+
+  private usableDefault(layer: ModelSelection, reasoningEffort: string | null): ModelSelection | null {
+    const nativeProviderId = providerIdForHarness(layer.harnessId);
+    if (layer.backendProfileId.startsWith("builtin:") && nativeProviderId) {
+      const provider = this.dependencies.providerInfo?.().find(({ id }) => id === nativeProviderId);
+      if (provider && !providerMayRun(provider)) return null;
+    }
+    const validated = (selection: ModelSelection): ModelSelection | null => {
+      try {
+        return this.dependencies.backendProfileController.validateDefault(selection);
+      } catch {
+        return null;
+      }
+    };
+    return (reasoningEffort ? validated({ ...layer, reasoningEffort }) : null) ?? validated(layer);
+  }
+
   private insert(
     projectId: string,
     title: string,
@@ -111,7 +155,10 @@ export class ConversationCreationService {
       this.dependencies.store.initiatives.acceptsChats(payload.initiativeId, { require: true });
     }
     if (payload.accessMode === undefined) {
-      const accessMode = this.dependencies.store.project(payload.projectId).preferences?.defaultAccessMode;
+      // Initiative, then project; the insert falls back to Settings and lowers
+      // the result to the initiative's access ceiling.
+      const accessMode = this.dependencies.store.initiativePreferencesFor(payload)?.defaultAccessMode
+        ?? this.dependencies.store.project(payload.projectId).preferences?.defaultAccessMode;
       if (accessMode) payload = { ...payload, accessMode };
     }
     if (this.dependencies.store.project(payload.projectId).workspaceKind === "scratch") {

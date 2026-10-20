@@ -6,6 +6,7 @@ import {
   initiativeNameInputSchema,
   initiativeNoteBodySchema,
   initiativeNoteTitleInputSchema,
+  initiativePreferencesPatchSchema,
   initiativeStatusSchema,
 } from "../../initiatives";
 import { requestBase } from "./common";
@@ -32,8 +33,11 @@ export const initiativeCommandSchemas = [
       name: initiativeNameInputSchema.optional(),
       color: initiativeColorSchema.optional(),
       status: initiativeStatusSchema.optional(),
+      /** Shared tool settings to change; omitted settings keep their value. */
+      preferences: initiativePreferencesPatchSchema.optional(),
     }).strict().refine(
-      ({ name, color, status }) => name !== undefined || color !== undefined || status !== undefined,
+      ({ name, color, status, preferences }) => name !== undefined || color !== undefined
+        || status !== undefined || preferences !== undefined,
       "An initiative update must change at least one field.",
     ),
   }).strict(),

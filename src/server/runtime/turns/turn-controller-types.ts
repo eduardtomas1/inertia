@@ -190,6 +190,8 @@ export interface TurnControllerHooks {
   /** Optional metadata; failure cannot change a committed provider outcome. */
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
   validateModelSelection?(selection: ModelSelection): ModelSelection;
+  /** The contained skills folder of the chat's initiative, when it offers one. */
+  initiativeSkillsRoot?(conversation: Conversation): string | null;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
   attachmentReadRoots?(input: {
     conversationId: string;

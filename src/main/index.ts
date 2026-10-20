@@ -111,6 +111,7 @@ import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import { finishPrivilegedExit, RetryablePrivilegedCleanup } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
+import { registerInitiativeSkillsFolderIpc } from "./initiative-skills-folder-ipc.js";
 import { registerContextMenuIpc } from "./context-menu-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
 import { runtimeCredentialBroker } from "./runtime-credential-broker.js";
@@ -606,6 +607,14 @@ function registerIpcHandlers(): void {
     if (!runtimeSupervisor) throw new Error("The local runtime is not available");
     const path = await runtimeSupervisor.resolveProjectPath(request);
     return openAuthorizedProjectPath(path, request.action, shell);
+  });
+
+  registerInitiativeSkillsFolderIpc({
+    ipcMain,
+    channel: IPC.openInitiativeSkillsFolder,
+    assertTrusted: assertTrustedIpc,
+    runtime: () => runtimeSupervisor,
+    openPath: async (path) => await shell.openPath(path),
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {

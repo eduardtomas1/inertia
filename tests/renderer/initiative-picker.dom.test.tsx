@@ -12,6 +12,7 @@ import {
   useNewInitiativeRequest,
 } from "../../src/renderer/src/utils/initiativeDialog";
 import type { Initiative } from "../../src/shared/contracts";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 
 const checkout: Initiative = {
   id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -19,7 +20,7 @@ const checkout: Initiative = {
   color: "teal",
   status: "active",
   brief: "",
-  briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
+  preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
   revision: 1,
   createdAt: "2026-10-19T08:00:00.000Z",
   updatedAt: "2026-10-19T08:00:00.000Z",

@@ -1,7 +1,8 @@
 import type WebSocket from "ws";
 
 import type { RuntimeStore } from "../../database";
-import type { ServerEvent } from "../../../shared/contracts";
+import type { ModelSelection, ServerEvent } from "../../../shared/contracts";
+import type { Initiative, InitiativePreferencesPatch } from "../../../shared/initiatives";
 import { InitiativeRepositoryError } from "../../persistence/initiative-repository";
 import {
   defineRuntimeCommandHandler,
@@ -11,6 +12,34 @@ import {
 export interface InitiativeCommandDependencies {
   store: Pick<RuntimeStore, "initiatives">;
   send(socket: WebSocket, event: ServerEvent): void;
+  /** The canonical selection when it can be a new-chat default; throws a readable refusal otherwise. */
+  validateDefaultModel(selection: ModelSelection): ModelSelection;
+  /** Creates the initiative's contained skills folder; throws a readable refusal. */
+  ensureSkillsFolder(initiativeId: string): void;
+}
+
+/**
+ * Canonicalises a default-model change. The model is validated with its
+ * reasoning level, like a project default; a new model without a level starts
+ * at the model's default, and clearing the model clears the level.
+ */
+function canonicalModelPreferences(
+  dependencies: InitiativeCommandDependencies,
+  current: Initiative,
+  patch: InitiativePreferencesPatch,
+): InitiativePreferencesPatch {
+  if (patch.defaultModel === undefined && patch.defaultReasoningEffort === undefined) return patch;
+  const model = patch.defaultModel === undefined ? current.preferences.defaultModel : patch.defaultModel;
+  if (model === null) return { ...patch, defaultModel: null, defaultReasoningEffort: null };
+  const reasoningEffort = patch.defaultReasoningEffort !== undefined
+    ? patch.defaultReasoningEffort
+    : patch.defaultModel === undefined ? current.preferences.defaultReasoningEffort : null;
+  const canonical = dependencies.validateDefaultModel({ ...model, reasoningEffort });
+  return {
+    ...patch,
+    defaultModel: { ...canonical, reasoningEffort: null },
+    defaultReasoningEffort: canonical.reasoningEffort,
+  };
 }
 
 /**
@@ -41,8 +70,21 @@ export function createInitiativeCommandHandler(
         return "mutation";
       }
       case "initiative.update": {
-        const { id, expectedRevision, ...patch } = command.payload;
-        dependencies.store.initiatives.update(id, expectedRevision, patch);
+        const { id, expectedRevision, preferences, ...patch } = command.payload;
+        let canonical: InitiativePreferencesPatch | undefined;
+        if (preferences) {
+          // Read once: settings changes are checked against the stored settings,
+          // and the update itself re-checks the revision atomically.
+          const current = dependencies.store.initiatives.get(id);
+          if (!current) throw new InitiativeRepositoryError("That initiative no longer exists.");
+          canonical = canonicalModelPreferences(dependencies, current, preferences);
+          // The folder exists before any chat is told it may use it.
+          if (canonical.skillsFolder === true) dependencies.ensureSkillsFolder(id);
+        }
+        dependencies.store.initiatives.update(id, expectedRevision, {
+          ...patch,
+          ...(canonical ? { preferences: canonical } : {}),
+        });
         return "mutation";
       }
       case "initiative.delete":

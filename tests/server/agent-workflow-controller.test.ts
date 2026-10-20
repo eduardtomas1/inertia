@@ -110,7 +110,7 @@ function harness(options: {
     description: string;
     argumentHint: string;
     path?: string;
-    scope?: "repo" | "user";
+    scope?: "repo" | "user" | "initiative";
   }>;
   claudeSkillsImplementation?: (
     forceReload: boolean,
@@ -119,8 +119,11 @@ function harness(options: {
     description: string;
     argumentHint: string;
     path?: string;
-    scope?: "repo" | "user";
+    scope?: "repo" | "user" | "initiative";
   }>>;
+  initiativeSkillsRoot?: (conversation: Conversation) => string | null;
+  /** Whether the chat's initiative offers its skills folder, by initiative id. */
+  skillsFolderOffered?: (initiativeId: string) => boolean;
 } = {}): {
   controller: AgentWorkflowController;
   goals: AgentGoal[];
@@ -183,6 +186,13 @@ function harness(options: {
       return { goal, changed: true };
     }),
     clearAgentGoal: clear,
+    initiatives: {
+      get: vi.fn((id: string) => ({
+        id,
+        status: "active",
+        preferences: { skillsFolder: options.skillsFolderOffered?.(id) ?? false },
+      })),
+    },
   } as unknown as RuntimeStore;
   const providers = {
     codexControlContext: vi.fn(async () => ({
@@ -207,6 +217,7 @@ function harness(options: {
       store,
       providers,
       () => options.now ?? new Date("2030-01-01T00:00:00.000Z"),
+      options.initiativeSkillsRoot ? { initiativeSkillsRoot: options.initiativeSkillsRoot } : {},
     ),
     goals,
     clear,
@@ -1636,7 +1647,91 @@ describe("AgentWorkflowController", () => {
     expect(runtime.providers.claudeSkills).toHaveBeenCalledWith(
       "/workspace/project",
       false,
+      {},
+      null,
     );
+  });
+
+  it("lists skills from the initiative's folder for Claude chats and rediscovers when that folder changes", async () => {
+    const claudeChat = conversation({
+      providerId: "claude",
+      providerSessionId: "claude-session",
+      initiativeId: "initiative-1",
+      modelSelection: { ...conversation().modelSelection, harnessId: "claude-agent-sdk" },
+    });
+    let root: string | null = "/data/initiatives/one/skills";
+    const runtime = harness({
+      current: claudeChat,
+      skillsFolderOffered: () => root !== null,
+      initiativeSkillsRoot: () => root,
+      claudeSkillsImplementation: async () => [
+        { name: "security-review", description: "Review security.", argumentHint: "" },
+        ...(root ? [{
+          name: "release-notes",
+          description: "Draft release notes.",
+          argumentHint: "",
+          path: `${root}/.claude/skills/release-notes/SKILL.md`,
+          scope: "initiative" as const,
+        }] : []),
+      ],
+    });
+
+    await expect(runtime.controller.resolveSkills("conversation-1", "$release-notes for 1.2")).resolves.toEqual([{
+      source: "claude-native",
+      name: "release-notes",
+      path: "/data/initiatives/one/skills/.claude/skills/release-notes/SKILL.md",
+    }]);
+    expect(runtime.providers.claudeSkills).toHaveBeenLastCalledWith("/workspace/project", false, {}, root);
+    expect(runtime.controller.state("conversation-1").skills.map(({ name, scope }) => [name, scope])).toEqual([
+      ["release-notes", "initiative"],
+      ["security-review", "repo"],
+    ]);
+
+    // Turning the initiative's folder off (or leaving the initiative) changes
+    // the route, so the cached capability is not offered and discovery runs again.
+    root = null;
+    expect(runtime.controller.state("conversation-1").skills).toEqual([]);
+    await expect(runtime.controller.resolveSkills("conversation-1", "$release-notes for 1.2")).resolves.toEqual([]);
+    expect(runtime.providers.claudeSkills).toHaveBeenCalledTimes(2);
+    expect(runtime.providers.claudeSkills).toHaveBeenLastCalledWith("/workspace/project", false, {}, null);
+  });
+
+  it("reads workflow state without touching the initiative's skills folder on disk", async () => {
+    const claudeChat = conversation({
+      providerId: "claude",
+      providerSessionId: "claude-session",
+      initiativeId: "initiative-1",
+      modelSelection: { ...conversation().modelSelection, harnessId: "claude-agent-sdk" },
+    });
+    // The folder callback is the controller's only filesystem access: it
+    // walks and realpaths the folder on every call.
+    const initiativeSkillsRoot = vi.fn(() => "/data/initiatives/one/skills");
+    const runtime = harness({
+      current: claudeChat,
+      skillsFolderOffered: () => true,
+      initiativeSkillsRoot,
+      claudeSkills: [{ name: "release-notes", description: "Draft release notes.", argumentHint: "", scope: "initiative" }],
+    });
+    for (let read = 0; read < 3; read += 1) runtime.controller.state("conversation-1");
+    expect(initiativeSkillsRoot).not.toHaveBeenCalled();
+
+    // Discovery reads the folder once; later state reads still do not.
+    await runtime.controller.listSkills("conversation-1", false);
+    expect(initiativeSkillsRoot).toHaveBeenCalledTimes(1);
+    expect(runtime.controller.state("conversation-1").skills.map(({ name }) => name)).toEqual(["release-notes"]);
+    expect(initiativeSkillsRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer initiative skills to Codex, which cannot load them for a turn", async () => {
+    controlRequest.mockResolvedValue(codexSkillResponse());
+    const initiativeSkillsRoot = vi.fn(() => "/data/initiatives/one/skills");
+    const runtime = harness({ initiativeSkillsRoot });
+    await runtime.controller.listSkills("conversation-1", false);
+    expect(controlRequest).toHaveBeenLastCalledWith("skills/list", {
+      cwds: ["/workspace/project"],
+      forceReload: false,
+    });
+    expect(initiativeSkillsRoot).not.toHaveBeenCalled();
   });
 
   it("coalesces equivalent skill discovery and serializes a stronger reload", async () => {

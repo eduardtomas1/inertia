@@ -3,7 +3,7 @@ import type { BackendCredentialStatus } from "../shared/backend-credentials.js";
 import type { IncidentSink } from "../node/application-incidents.js";
 import type { ClaudeCompatibleBackendProfile } from "../shared/claude-backend-profiles.js";
 import type { AgentTurn } from "../shared/contracts.js";
-import type { OpenProjectPathRequest } from "../shared/desktop.js";
+import type { RuntimePathRequest } from "../shared/desktop.js";
 import type { RuntimeHtmlRenderReader } from "./runtime-html-render-reads.js";
 import type {
   PrivateConnectRuntimeAuthorization,
@@ -113,7 +113,8 @@ export interface RunningRuntime extends RuntimeHtmlRenderReader {
   prepareForUpdate: (operationId: string) => Promise<RuntimeUpdatePreparationResult>;
   /** Reopens admission only when operationId owns the held update gate. */
   releaseUpdatePreparation: (operationId: string) => boolean;
-  resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
+  /** A scoped project path, or an initiative's skills folder (created on demand). */
+  resolveProjectPath: (request: RuntimePathRequest) => Promise<string>;
   privateConnectRequest: (
     subject: PrivateConnectRuntimeAuthorization,
     request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,

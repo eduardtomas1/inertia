@@ -776,6 +776,23 @@ describe("runtime process protocol", () => {
     })).toBeNull();
   });
 
+  it("accepts an initiative skills folder request only by initiative id", () => {
+    const command = {
+      type: "runtime.resolve-project-path",
+      requestId: crypto.randomUUID(),
+      request: { initiativeId: crypto.randomUUID() },
+    };
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    for (const request of [
+      { initiativeId: "../initiatives" },
+      { initiativeId: command.request.initiativeId, path: "/tmp" },
+      { initiativeId: command.request.initiativeId, relativePath: "." },
+      { initiativeId: 7 },
+    ]) {
+      expect(parseRuntimeWorkerCommand({ ...command, request })).toBeNull();
+    }
+  });
+
   it("accepts only scoped relative project-path requests and absolute resolutions", () => {
     const requestId = crypto.randomUUID();
     const command = {

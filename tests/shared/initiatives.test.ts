@@ -4,6 +4,7 @@ import { PROJECT_COLOR_NAMES } from "../../src/shared/project-colors";
 import {
   compareInitiatives,
   defaultInitiativeColor,
+  defaultInitiativePreferences,
   INITIATIVE_COLORS,
   INITIATIVE_STATUSES,
   INITIATIVE_STATUS_LABELS,
@@ -45,7 +46,7 @@ function initiative(overrides: Partial<Initiative> = {}): Initiative {
     color: "teal",
     status: "active",
     brief: "",
-    briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
+    preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
     revision: 1,
     createdAt: "2026-10-19T10:00:00.000Z",
     updatedAt: "2026-10-19T10:00:00.000Z",
@@ -116,7 +117,7 @@ describe("initiative contracts", () => {
       initiative({ briefRevision: -1 }),
       initiative({ revision: -1 }),
       initiative({ createdAt: "yesterday" }),
-      { ...initiative(), preferences: {} },
+      { ...initiative(), preferences: { ...defaultInitiativePreferences(), skillsFolder: "yes" } },
     ]) {
       expect(initiativeSchema.safeParse(invalid).success).toBe(false);
     }

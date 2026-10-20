@@ -17,11 +17,12 @@ import { createInitiativeCommandHandler } from "../../src/server/runtime/command
 import { ConversationCreationService } from "../../src/server/runtime/conversation-creation-service";
 import { detachedChatCommandRejection } from "../../src/server/runtime/detached-chat-runtime-policy";
 import { projectDetachedChatSnapshot } from "../../src/server/runtime/detached-chat-runtime-projection";
-import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import { ensureInitiativeSkillsFolder } from "../../src/server/runtime/initiative-skills-folder";
+import type { ClientCommand, ModelSelection, ServerEvent } from "../../src/shared/contracts";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { providerIdForHarness } from "../../src/shared/model-routing";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
-import { INITIATIVE_BRIEF_CONFLICT_MESSAGE } from "../../src/shared/initiatives";
+import { defaultInitiativePreferences, INITIATIVE_BRIEF_CONFLICT_MESSAGE } from "../../src/shared/initiatives";
 
 const roots: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -46,7 +47,9 @@ function fixture() {
     order.push(event.type);
     events.push(event);
   });
-  const handler = createInitiativeCommandHandler({ store, send });
+  const validateDefaultModel = vi.fn((selection: ModelSelection) => selection);
+  const ensureSkillsFolder = vi.fn((initiativeId: string) => { ensureInitiativeSkillsFolder(root, initiativeId); });
+  const handler = createInitiativeCommandHandler({ store, send, validateDefaultModel, ensureSkillsFolder });
   const execute = createRuntimeCommandExecutor({
     handlers: [
       handler,
@@ -76,7 +79,7 @@ function fixture() {
     dataDirectory: root,
     broadcastSnapshot: () => undefined,
   });
-  return { root, store, project, handler, run, creation };
+  return { root, store, project, handler, run, creation, validateDefaultModel, ensureSkillsFolder };
 }
 
 function parses(type: ClientCommand["type"], payload: unknown): boolean {
@@ -289,6 +292,13 @@ describe("initiative command handler", () => {
     expect(JSON.stringify(projected)).not.toContain(theirs.name);
     expect(projectDetachedChatSnapshot(store.shellSnapshot(), store.createConversation(project.id, "Free").id).initiatives)
       .toEqual([]);
+
+    // Of the shared settings, only the access ceiling reaches the window.
+    store.initiatives.update(mine.id, mine.revision, {
+      preferences: { accessCeiling: "auto-edit", defaultProjectId: project.id, browserAccess: false, skillsFolder: false },
+    });
+    expect(projectDetachedChatSnapshot(store.shellSnapshot(), member.id).initiatives?.[0]?.preferences)
+      .toEqual({ ...defaultInitiativePreferences(), accessCeiling: "auto-edit" });
   });
 });
 

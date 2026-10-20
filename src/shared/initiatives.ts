@@ -1,6 +1,9 @@
 import { z } from "zod";
 
+import { ACCESS_MODES } from "./access-modes";
+import { modelSelectionSchema, type ModelSelection } from "./model-routing";
 import { PROJECT_COLOR_NAMES, type ProjectColorName } from "./project-colors";
+import { isValidClaudeTurnBudgetUsd } from "./claude-turn-budget";
 
 /**
  * An Initiative is a named group of chats across any projects, including chats
@@ -97,11 +100,189 @@ export const initiativeBriefSchema = z.string()
     `Initiative briefs are limited to ${MAX_INITIATIVE_BRIEF_BYTES} bytes.`,
   );
 
+/*
+ * Shared tool settings. Every member chat inherits them through the chain
+ * initiative → project → Settings; `null` (and `false` for the skills folder)
+ * defers to the next layer. Restrictions (the access ceiling, blocking browser
+ * tools and the Claude spend limit) apply to every member chat whatever the
+ * initiative's status; defaults only matter when a chat is created, which only
+ * active initiatives allow.
+ */
+
+/** The SQL CHECK on `initiatives.preferences_json`. */
+export const MAX_INITIATIVE_PREFERENCES_JSON_CHARS = 65_536;
+
+const accessModeSchema = z.enum(ACCESS_MODES);
+const reasoningEffortSchema = z.string().min(1).max(100)
+  .refine((value) => value === value.trim() && !/[\0-\u001f\u007f]/u.test(value), "Choose a listed reasoning level.");
+const budgetSchema = z.number()
+  .refine(isValidClaudeTurnBudgetUsd, "Use an amount from 0.01 to 10,000 USD with at most two decimals.");
+
+const preferenceFields = {
+  /**
+   * The model for new chats started in this initiative, stored as the
+   * canonical selection without its reasoning level. It is validated against
+   * the live catalog whenever it is used, so a removed model or a disabled
+   * backend falls through to the project and Settings defaults.
+   */
+  defaultModel: modelSelectionSchema,
+  /** The reasoning level for `defaultModel`; ignored without one. */
+  defaultReasoningEffort: reasoningEffortSchema,
+  defaultAccessMode: accessModeSchema,
+  /** No member chat may run with more access than this. */
+  accessCeiling: accessModeSchema,
+  /** `false` blocks the agent browser tools even where the project allows them. */
+  browserAccess: z.boolean(),
+  /** Native Claude spend limit per turn; the lower of this and the project's applies. */
+  claudeMaxBudgetUsd: budgetSchema,
+  /** Pre-fills the project of a chat started from this initiative, while that project exists. */
+  defaultProjectId: z.string().uuid(),
+} as const;
+
+const storedFields = {
+  defaultModel: preferenceFields.defaultModel.nullable().default(null),
+  defaultReasoningEffort: preferenceFields.defaultReasoningEffort.nullable().default(null),
+  defaultAccessMode: preferenceFields.defaultAccessMode.nullable().default(null),
+  accessCeiling: preferenceFields.accessCeiling.nullable().default(null),
+  browserAccess: preferenceFields.browserAccess.nullable().default(null),
+  claudeMaxBudgetUsd: preferenceFields.claudeMaxBudgetUsd.nullable().default(null),
+  defaultProjectId: preferenceFields.defaultProjectId.nullable().default(null),
+  /** When on, Inertia keeps a folder of skills that member chats can invoke. */
+  skillsFolder: z.boolean().default(false),
+};
+
+const fitsPreferencesColumn = (value: unknown): boolean =>
+  JSON.stringify(value).length <= MAX_INITIATIVE_PREFERENCES_JSON_CHARS;
+
+/** Stored preferences: every field has a default, so `{}` is the empty preference set. */
+export const initiativePreferencesSchema = z.strictObject(storedFields)
+  .refine(fitsPreferencesColumn, "Initiative settings are too large.");
+
+/** A change to some preferences; omitted fields keep their value. */
+export const initiativePreferencesPatchSchema = z.strictObject({
+  defaultModel: preferenceFields.defaultModel.nullable().optional(),
+  defaultReasoningEffort: preferenceFields.defaultReasoningEffort.nullable().optional(),
+  defaultAccessMode: preferenceFields.defaultAccessMode.nullable().optional(),
+  accessCeiling: preferenceFields.accessCeiling.nullable().optional(),
+  browserAccess: preferenceFields.browserAccess.nullable().optional(),
+  claudeMaxBudgetUsd: preferenceFields.claudeMaxBudgetUsd.nullable().optional(),
+  defaultProjectId: preferenceFields.defaultProjectId.nullable().optional(),
+  skillsFolder: z.boolean().optional(),
+}).refine(
+  (patch) => Object.values(patch).some((value) => value !== undefined),
+  "Change at least one initiative setting.",
+);
+
+// The default model keeps the shared, readonly `ModelSelection` shape.
+export type InitiativePreferences = Omit<z.infer<typeof initiativePreferencesSchema>, "defaultModel"> & {
+  defaultModel: ModelSelection | null;
+};
+export type InitiativePreferencesPatch = Omit<z.infer<typeof initiativePreferencesPatchSchema>, "defaultModel"> & {
+  defaultModel?: ModelSelection | null;
+};
+
+export function defaultInitiativePreferences(): InitiativePreferences {
+  return {
+    defaultModel: null,
+    defaultReasoningEffort: null,
+    defaultAccessMode: null,
+    accessCeiling: null,
+    browserAccess: null,
+    claudeMaxBudgetUsd: null,
+    defaultProjectId: null,
+    skillsFolder: false,
+  };
+}
+
+/**
+ * Never throws. Valid fields of a damaged or newer record are kept, unknown
+ * keys are dropped, and anything unreadable yields the defaults, so a bad row
+ * can never block opening an initiative or starting a member chat's turn.
+ */
+export function parseInitiativePreferences(value: unknown): InitiativePreferences {
+  try {
+    if (typeof value === "string" && value.length > MAX_INITIATIVE_PREFERENCES_JSON_CHARS) {
+      return defaultInitiativePreferences();
+    }
+    const input: unknown = typeof value === "string" ? JSON.parse(value) : value;
+    const parsed = initiativePreferencesSchema.safeParse(input);
+    if (parsed.success) return parsed.data;
+    if (!input || typeof input !== "object" || Array.isArray(input)) return defaultInitiativePreferences();
+    const fieldSchemas: Record<string, z.ZodType> = storedFields;
+    const salvaged = initiativePreferencesSchema.safeParse(Object.fromEntries(
+      Object.entries(input as Record<string, unknown>)
+        .filter(([key, field]) => Object.hasOwn(fieldSchemas, key) && fieldSchemas[key]!.safeParse(field).success),
+    ));
+    return salvaged.success ? salvaged.data : defaultInitiativePreferences();
+  } catch {
+    return defaultInitiativePreferences();
+  }
+}
+
+/** Applies a patch; `defaultReasoningEffort` never outlives `defaultModel`. */
+export function applyInitiativePreferencesPatch(
+  current: InitiativePreferences,
+  patch: InitiativePreferencesPatch,
+): InitiativePreferences {
+  const next = { ...current };
+  for (const [key, value] of Object.entries(patch) as [keyof InitiativePreferences, unknown][]) {
+    if (value !== undefined) (next as Record<string, unknown>)[key] = value;
+  }
+  if (next.defaultModel === null) next.defaultReasoningEffort = null;
+  return next;
+}
+
+// The access ceiling helpers live with the access modes, which every chat
+// surface already loads; initiatives re-export them.
+export {
+  accessModesAboveCeiling,
+  clampAccessMode,
+  exceedsAccessCeiling,
+  initiativeAccessCeilingMessage,
+} from "./access-modes";
+
+export type InitiativeSettingSource = "initiative" | "project" | "default";
+
+/**
+ * Whether the agent browser tools may run. A `false` at either layer blocks
+ * them (the initiative cannot reopen what a project blocks, nor the reverse);
+ * otherwise they are allowed. `source` names the layer that decided.
+ */
+export function effectiveBrowserAccess(
+  initiative: Pick<InitiativePreferences, "browserAccess"> | null | undefined,
+  project: { browserAccess: boolean | null } | null | undefined,
+): { allowed: boolean; source: InitiativeSettingSource } {
+  if (initiative?.browserAccess === false) return { allowed: false, source: "initiative" };
+  if (project?.browserAccess === false) return { allowed: false, source: "project" };
+  if (initiative?.browserAccess === true) return { allowed: true, source: "initiative" };
+  if (project?.browserAccess === true) return { allowed: true, source: "project" };
+  return { allowed: true, source: "default" };
+}
+
+/**
+ * The Claude spend limit per turn: the lower of the initiative's and the
+ * project's when both are set, either one alone, or none.
+ */
+export function effectiveClaudeBudget(
+  initiative: Pick<InitiativePreferences, "claudeMaxBudgetUsd"> | null | undefined,
+  project: { claudeMaxBudgetUsd: number | null } | null | undefined,
+): { usd: number | null; source: InitiativeSettingSource } {
+  const fromInitiative = initiative?.claudeMaxBudgetUsd ?? null;
+  const fromProject = project?.claudeMaxBudgetUsd ?? null;
+  if (fromInitiative !== null && (fromProject === null || fromInitiative <= fromProject)) {
+    return { usd: fromInitiative, source: "initiative" };
+  }
+  if (fromProject !== null) return { usd: fromProject, source: "project" };
+  return { usd: null, source: "default" };
+}
+
 export const initiativeSchema = z.object({
   id: z.string().uuid(),
   name: initiativeNameSchema,
   color: initiativeColorSchema,
   status: initiativeStatusSchema,
+  /** Shared tool settings; see `InitiativePreferences`. */
+  preferences: initiativePreferencesSchema,
   brief: initiativeBriefSchema,
   briefRevision: z.number().int().min(0),
   /** When the brief last changed; null until it is first edited. */
@@ -120,13 +301,18 @@ export const initiativePatchSchema = z.object({
   name: initiativeNameInputSchema.optional(),
   color: initiativeColorSchema.optional(),
   status: initiativeStatusSchema.optional(),
+  preferences: initiativePreferencesPatchSchema.optional(),
 }).strict().refine(
   (patch) => Object.values(patch).some((value) => value !== undefined),
   "An initiative update must change at least one field.",
 );
 
-export type Initiative = z.infer<typeof initiativeSchema>;
-export type InitiativePatch = z.infer<typeof initiativePatchSchema>;
+export type Initiative = Omit<z.infer<typeof initiativeSchema>, "preferences"> & {
+  preferences: InitiativePreferences;
+};
+export type InitiativePatch = Omit<z.infer<typeof initiativePatchSchema>, "preferences"> & {
+  preferences?: InitiativePreferencesPatch;
+};
 
 /** True for a name that is ready to submit: valid as stored and already trimmed. */
 export function isInitiativeName(value: unknown): value is string {

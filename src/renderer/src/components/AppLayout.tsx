@@ -71,6 +71,8 @@ import {
 } from "./lazySurfaceLoaders";
 import { InitiativeCreateHost } from "./initiatives/InitiativeCreateHost";
 import { requestNewInitiative } from "../utils/initiativeDialog";
+import { composerAccessCeiling, initiativeById } from "../utils/initiativeAccess";
+import { initiativeModelSourceLabel } from "../utils/initiativeSettings";
 
 const RootCommitDialog = lazy(async () => ({
   default: (await loadCommitDialog()).RootCommitDialog,
@@ -513,11 +515,18 @@ export const AppLayout = memo(function AppLayout({
   });
   // An existing chat in an initiative names it beside its checkout context.
   const chatInitiativeId = scene.chat.conversation?.initiativeId ?? null;
+  const initiatives = connection.snapshot?.initiatives;
   const chatInitiative = useMemo(
-    () => chatInitiativeId
-      ? connection.snapshot?.initiatives?.find(({ id }) => id === chatInitiativeId) ?? null
-      : null,
-    [chatInitiativeId, connection.snapshot?.initiatives],
+    () => initiativeById({ initiatives }, chatInitiativeId),
+    [chatInitiativeId, initiatives],
+  );
+  const chatConversation = scene.chat.conversation;
+  const newChatDraft = Boolean(scene.chat.newChatProjectPicker);
+  const modelSourceLabel = useMemo(
+    () => newChatDraft && chatConversation && connection.snapshot
+      ? initiativeModelSourceLabel(connection.snapshot, settings, chatConversation, chatInitiative)
+      : undefined,
+    [chatConversation, chatInitiative, connection.snapshot, newChatDraft, settings],
   );
   const workspaceScene = useMemo((): WorkspaceSceneProps => chatInitiative
     ? {
@@ -529,9 +538,11 @@ export const AppLayout = memo(function AppLayout({
             color: chatInitiative.color,
             onOpen: () => sidebarActions.openInitiative(chatInitiative.id),
           },
+          accessCeiling: composerAccessCeiling(chatInitiative),
+          modelSourceLabel,
         },
       }
-    : scene, [chatInitiative, scene, sidebarActions]);
+    : scene, [chatInitiative, modelSourceLabel, scene, sidebarActions]);
   const tasksActions = useStableActions({
     request: (command: CommandWithoutId, options?: { passive?: boolean }) => actions.run(command.type, command, options),
     openConversation: (thread: Conversation) => {

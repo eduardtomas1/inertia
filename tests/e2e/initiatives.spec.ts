@@ -289,3 +289,46 @@ test("groups chats under an initiative from the sidebar, the page and the new-ch
   await expect(page.getByRole("main", { name: "Initiatives" }).getByRole("heading", { level: 2, name: INITIATIVE })).toBeVisible();
   expect(app.rendererErrors).toEqual([]);
 });
+
+test("keeps member chats at or below the initiative's access limit", async () => {
+  const page = app.page;
+  const sidebar = page.locator(".sidebar");
+  const accessTrigger = (composer: Locator) => composer.getByRole("button", { name: /^Choose project access\./u });
+
+  // A chat outside the initiative may use Full access.
+  await sidebar.getByRole("button", { name: /^Unrelated chat,/u }).click();
+  const composer = page.getByRole("region", { name: "Message composer" });
+  await accessTrigger(composer).click();
+  await page.getByRole("menu", { name: "Project access" }).getByRole("menuitemradio", { name: /^Full access/u }).click();
+  await expect(accessTrigger(composer)).toHaveAccessibleName("Choose project access. Current access: Full access.");
+
+  // Set the limit on the Initiative page, in Tools & defaults.
+  await sidebar.getByRole("button", { name: `Open ${INITIATIVE}` }).click();
+  const detail = page.getByRole("main", { name: "Initiatives" }).getByRole("article", { name: INITIATIVE });
+  const tools = detail.getByRole("region", { name: "Tools & defaults" });
+  await expect(tools.getByText("Inherited from each chat's project or Settings").first()).toBeVisible();
+  await tools.getByRole("combobox", { name: "Access limit for chats in this initiative" }).selectOption("auto-edit");
+  await expect(tools.getByRole("combobox", { name: "Default access for this initiative" })
+    .getByRole("option", { name: "Full access — above the limit" })).toBeDisabled();
+  await app.expectNoViewportOverflow();
+  await tools.scrollIntoViewIfNeeded();
+  await evidence("initiative-tools", tools);
+
+  // Moving the Full access chat in lowers it to the limit.
+  const submenu = await openRowActions("Unrelated chat");
+  await submenu.getByRole("menuitem", { name: INITIATIVE }).click();
+  await sidebar.getByRole("button", { name: /^Unrelated chat,/u }).click();
+  await expect(accessTrigger(composer)).toHaveAccessibleName("Choose project access. Current access: Auto-accept edits.");
+
+  // A member chat cannot pick Full access, and the menu says why.
+  await sidebar.getByRole("button", { name: new RegExp(`^${FIXTURE_CHAT},`, "u") }).click();
+  await accessTrigger(composer).click();
+  const access = page.getByRole("menu", { name: "Project access" });
+  const full = access.getByRole("menuitemradio", { name: /^Full access/u });
+  await expect(full).toBeDisabled();
+  await expect(full).toContainText(`“${INITIATIVE}” limits chats to Auto-accept edits.`);
+  await expect(access.getByRole("menuitemradio", { name: /^Auto-accept edits/u })).toBeEnabled();
+  await evidence("composer-access-limit");
+  await page.keyboard.press("Escape");
+  expect(app.rendererErrors).toEqual([]);
+});

@@ -238,3 +238,21 @@
 .initiative-member.status-failed .initiative-member-status { color: var(--status-failed); }
 .initiative-member.status-limited .initiative-member-status { color: var(--warning); }
 .initiative-member.status-completed .initiative-member-status { color: var(--status-completed); }
+
+/* Tools & defaults reuse the Settings rows; the source hint is one quiet line. */
+.initiative-tools-rows {
+  display: grid;
+  min-width: 0;
+}
+
+.initiative-setting-source {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-faint);
+}
+
+.initiative-skills-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}

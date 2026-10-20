@@ -178,6 +178,11 @@ export interface BegunAgentTurn {
   message: ChatMessage;
   turn: AgentTurn;
   initiativeContextReceipt?: ChatMessage;
+  /**
+   * The chat's stored access was above its initiative's limit and was lowered
+   * to it with this turn; the caller publishes the changed chat.
+   */
+  accessLowered?: true;
 }
 
 /** What one turn's request shared of the chat's initiative, and what its session holds afterwards. */

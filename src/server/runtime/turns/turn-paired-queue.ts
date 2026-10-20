@@ -1,5 +1,6 @@
 import type { RuntimeStore } from "../../database";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { broadcastConversationShell } from "./turn-controller-support";
 import {
   resolveTurnRequest,
   type PrepareTurnRequestDependencies,
@@ -62,15 +63,16 @@ export function queuePairedTurns(
     options.now(),
   );
   try {
-    // Each side's receipt for shared initiative context shows live, as it
-    // does for a single turn.
-    for (const { initiativeContextReceipt } of durable) {
+    // Each side's receipt for shared initiative context, and a chat lowered
+    // to its initiative's access limit, show live, as for a single turn.
+    for (const { initiativeContextReceipt, accessLowered, turn } of durable) {
       if (initiativeContextReceipt) {
         options.hooks.broadcast({
           type: "conversation.message.persisted",
           message: initiativeContextReceipt,
         });
       }
+      if (accessLowered) broadcastConversationShell(options.hooks, turn.conversationId);
     }
     const prepared: [PreparedTurnRequest, PreparedTurnRequest] = [
       resolved[0].adopt(durable[0]),

@@ -34,6 +34,7 @@ import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import { composerAccessCeiling, initiativeById } from "./utils/initiativeAccess";
 import { installWindowCloseShortcut } from "./utils/globalShortcuts";
 import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
@@ -494,6 +495,15 @@ export default function DetachedChatApp({
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,
   );
   const visibleConversation = projection.detail?.conversation ?? conversation;
+  // The chat's initiative access limit, which the projected snapshot carries
+  // for this chat alone; memoized on its values so snapshot frames that do
+  // not change it leave the composer still.
+  const chatInitiative = initiativeById(connection.snapshot, visibleConversation?.initiativeId);
+  const limitName = chatInitiative?.name ?? null;
+  const limitMode = chatInitiative?.preferences.accessCeiling ?? null;
+  const accessCeiling = useMemo(() => composerAccessCeiling(
+    limitName && limitMode ? { name: limitName, preferences: { accessCeiling: limitMode } } : null,
+  ), [limitMode, limitName]);
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
@@ -561,6 +571,7 @@ export default function DetachedChatApp({
             project={project}
             conversation={visibleConversation}
             showCheckoutContext={false}
+            accessCeiling={accessCeiling}
             latestTurnSummary={projection.latestTurnSummary}
             turns={projection.turns}
             messages={projection.messages}

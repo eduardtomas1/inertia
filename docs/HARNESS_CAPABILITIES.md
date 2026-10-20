@@ -217,6 +217,80 @@ left an initiative carries the same label with a short note that the earlier
 material no longer applies. Each delivery also leaves a receipt in the chat,
 described in `docs/SNAPSHOTS_AND_COMPACTION.md`.
 
+## Initiative tool settings and skills folder
+
+An initiative's tool settings live in `initiatives.preferences_json` and are
+enforced by the runtime, never by provider instructions. Restrictions hold for
+every member chat whatever the initiative's status; defaults apply only when a
+chat is created.
+
+- **Access ceiling.** Creating a chat in an initiative, moving a chat into it
+  and setting or lowering the ceiling lower the chat's access mode to the
+  ceiling in the same transaction (one statement for all members when the
+  ceiling changes), together with the access recorded on the chat's pending
+  queued messages, so they still match the chat and are not blocked as a
+  changed route. Raising a member chat above it is refused by the store with
+  `"<name>" limits chats to <mode>.`, whichever caller asks.
+- **Running turns.** A provider receives its access when a turn starts and
+  keeps it for the whole turn. A turn already running when the ceiling is
+  lowered therefore keeps the access it started with until it ends; stopping
+  it applies the ceiling at once. Every turn start clamps the access sent to
+  the provider to the ceiling, and a chat whose stored access is still above
+  it (restored data, or a write that raced the change) is lowered in the
+  transaction that persists the turn and published again. The comparison
+  uses the access the provider actually runs with: Antigravity runs
+  Supervised as Auto-accept edits, so under a Supervised ceiling its turns
+  are refused with the ceiling's message and
+  `Antigravity cannot run supervised.`, and the composer shows the same
+  reason instead of sending.
+- **Automatic resume.** An automatic resume after a usage limit, and a
+  continuation after a runtime restart, re-check the chat's route, access
+  included, before sending. A plan made before the ceiling lowered the chat
+  no longer matches, so that chat needs a manual resume.
+- **Managed chats.** A chat an agent starts joins its parent's initiative
+  while that initiative takes chats. When it no longer does and it sets an
+  access ceiling, the tool call fails with
+  `"<name>" no longer accepts chats; its access limit cannot be carried to a
+  new chat.` rather than creating the chat outside the ceiling; without a
+  ceiling the chat is created outside the initiative as before.
+- **Agent browser tools.** A host browser tool call is refused with
+  `browser_disabled` when either the chat's initiative or its project blocks
+  browser access; allowing it at one layer cannot reopen a block at the other.
+- **Claude spend limit.** Native Claude turns on the built-in Anthropic backend
+  receive `maxBudgetUsd` as the lower of the initiative's and the project's
+  limits.
+- **Defaults.** For a request that names no model, the initiative's default
+  model resolves first, then the project's, then Settings, each validated
+  against the live catalog at use, so a removed model or a disabled or
+  reconfigured backend falls through; a request that names only a reasoning
+  level gets it on that model when the model offers it. The default access
+  mode resolves before the project's and is then lowered to the ceiling.
+
+The skills folder is `<data>/initiatives/<initiative id>/skills/`, created
+owner-only when the user turns it on, with skills in its `.claude/skills/`
+folder (`<skill>/SKILL.md`, the layout Claude uses under a project). Every
+component from the real data folder down is checked to be a directory and not
+a link, and the result must resolve to exactly that place; anything else is
+refused and the folder is not offered. The path never reaches the renderer:
+**Open folder** sends only the initiative id, and the runtime resolves and
+creates the folder through the same request the main process uses for project
+paths. Native Claude chats in an initiative that is not archived get the
+folder as one more skill root, between the project's roots and the user's
+`~/.claude/skills`; discovery reports those skills with scope `initiative`, and
+selected skills are revalidated against the same contained root when the
+harness stages them (`ProviderRunRequest.initiativeSkillsRoot`, present only
+when the turn selects Claude skills). The skill route key includes the
+initiative whose folder the chat may read, from the database only, so reading
+a chat's workflow state never touches the disk, and moving a chat or turning
+the folder off rediscovers. Turning the folder off or deleting the initiative
+leaves the user's files in place.
+
+Codex skill roots outside the chat folder are not offered until the
+app-server contract for extra skill roots is verified. Whether a skill listed
+through a second `skills/list` cwd is honoured when a turn invokes it has not
+been checked against Codex, so Codex chats list only their own folder's
+skills.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider

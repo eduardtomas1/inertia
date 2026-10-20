@@ -288,6 +288,8 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.openAttachmentExternally, id) as Promise<void>,
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
+  openInitiativeSkillsFolder: (initiativeId: string) =>
+    ipcRenderer.invoke(IPC.openInitiativeSkillsFolder, initiativeId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
   showContextMenu: (request: Parameters<DesktopBridge["showContextMenu"]>[0]) =>
     ipcRenderer.invoke(IPC.showContextMenu, request) as ReturnType<DesktopBridge["showContextMenu"]>,

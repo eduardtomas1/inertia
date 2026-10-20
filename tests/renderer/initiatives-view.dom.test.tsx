@@ -14,11 +14,15 @@ import type {
   ConversationShell,
   Initiative,
   InitiativeNote,
+  ModelBackendProfileView,
+  ModelSelection,
   Project,
   ServerEvent,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { defaultProjectPreferences } from "../../src/shared/project-preferences";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 
 const AT = "2026-10-19T08:00:00.000Z";
 const project: Project = {
@@ -40,7 +44,7 @@ const scratch: Project = { ...project, id: "project-scratch", name: "No project"
 
 function initiative(id: string, name: string, overrides: Partial<Initiative> = {}): Initiative {
   return {
-    id, name, color: "teal", status: "active", brief: "", briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 3,
+    id, name, color: "teal", status: "active", brief: "", preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 3,
     createdAt: AT, updatedAt: AT, ...overrides,
   };
 }
@@ -127,7 +131,7 @@ function renderView(
 ) {
   const props = {
     snapshot: snapshot(),
-    settings: { confirmDestructiveActions: true },
+    settings: { ...defaultSettings, confirmDestructiveActions: true },
     status: "online" as const,
     selectedInitiativeId: null,
     onSelectInitiative: vi.fn(),
@@ -797,5 +801,178 @@ describe("Initiative notes", () => {
     });
     expect(screen.getByRole("button", { name: "Add note" })).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Initiative brief" })).toBeDisabled();
+  });
+});
+
+describe("Initiative tools and defaults", () => {
+  const gateway: ModelBackendProfileView = {
+    id: "custom:team", displayName: "Team gateway", protocol: "openai-responses",
+    authenticationMode: "api-key", source: "custom", enabled: true, configurationRevision: 4,
+    endpointIdentity: "opaque-team-route-4", harnessId: "codex-app-server", preset: "custom",
+    allowInsecureLocalhost: false, credentialGeneration: null,
+    models: [{ id: "team-alpha", displayName: "Team Alpha", contextWindowTokens: 120_000,
+      reasoningOptions: [{ value: "medium", label: "Medium", description: "Balanced" },
+        { value: "high", label: "High", description: "Thorough" }], capabilities: [] }],
+    routing: { mode: "simple", primaryModelId: "team-alpha" }, capabilityHints: [],
+    createdAt: AT, updatedAt: AT,
+    endpointHost: "example.invalid", authState: "configured", connectionState: "limited",
+    compatibility: { harnessId: "codex-app-server", backendProfileId: "custom:team",
+      backendProtocol: "openai-responses", state: "partially-compatible", provenance: "probe",
+      allowsModelSwitchWithinSession: false, reasonCode: "responses-probe-verified", reason: "Verified exact route." },
+    latestProbe: null, canDelete: true, canDisable: true,
+  };
+  const teamAlpha: ModelSelection = {
+    harnessId: gateway.harnessId, backendProfileId: gateway.id, backendProfileDisplayName: gateway.displayName,
+    modelId: "team-alpha", alias: "Team Alpha", reasoningEffort: null, contextWindowOverride: 120_000,
+    providerOptions: {}, capabilities: [], backendConfigurationRevision: 4,
+  };
+  // Project identities are UUIDs in the runtime, and the settings contract checks them.
+  const studio: Project = { ...project, id: "77777777-7777-4777-8777-777777777777" };
+  const noProject: Project = { ...scratch, id: "88888888-8888-4888-8888-888888888888" };
+  const withPreferences = (preferences: Partial<Initiative["preferences"]>, projectPreferences?: Project["preferences"]) => snapshot({
+    initiatives: [{ ...checkout, preferences: { ...checkout.preferences, ...preferences } }, docs],
+    projects: [{ ...studio, ...(projectPreferences ? { preferences: projectPreferences } : {}) }, noProject],
+    backendProfiles: [gateway],
+  });
+  const tools = () => within(screen.getByRole("region", { name: "Tools & defaults" }));
+  const row = (id: string) => document.querySelector(`[data-setting-id="${id}"]`) as HTMLElement;
+  const preferencesSent = (props: Pick<ViewProps, "request">) => vi.mocked(props.request).mock.calls
+    .map(([command]) => (command as { payload: { preferences?: unknown } }).payload.preferences);
+
+  it("says where unset values come from and saves each change as a settings change", async () => {
+    const { props, rerender } = renderView({ snapshot: withPreferences({}) });
+    const section = tools();
+    expect(section.getByRole("combobox", { name: "Default access for this initiative" })).toHaveDisplayValue("Default (Supervised)");
+    expect(row("initiative-default-access")).toHaveTextContent("Inherited from each chat's project or Settings");
+    expect(row("initiative-access-ceiling")).not.toHaveTextContent("Inherited");
+    // Settings has no browser setting, so the browser row never names it.
+    expect(row("initiative-browser-access")).toHaveTextContent("Inherited from each chat's project");
+    expect(row("initiative-browser-access")).not.toHaveTextContent("Settings");
+
+    fireEvent.change(section.getByRole("combobox", { name: "Default project for this initiative" }), { target: { value: studio.id } });
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.update",
+      payload: { id: checkout.id, expectedRevision: 3, preferences: { defaultProjectId: studio.id } },
+    }, { passive: true }));
+
+    // With a default project, the hints name the exact layer.
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id }, {
+      ...defaultProjectPreferences(), defaultAccessMode: "full", browserAccess: null,
+    }) });
+    expect(row("initiative-default-access")).toHaveTextContent("Inherited from project");
+    expect(tools().getByRole("combobox", { name: "Default access for this initiative" })).toHaveDisplayValue("Default (Full access)");
+    expect(row("initiative-browser-access")).toHaveTextContent("Allowed by default");
+    expect(row("initiative-browser-access")).not.toHaveTextContent("Settings");
+    expect(row("initiative-model")).toHaveTextContent("Inherited from Settings");
+
+    fireEvent.change(tools().getByRole("combobox", { name: "Access limit for chats in this initiative" }), { target: { value: "auto-edit" } });
+    fireEvent.change(tools().getByRole("combobox", { name: "Agent browser access for this initiative" }), { target: { value: "block" } });
+    // Both changes reach the runtime; ones made before the first is sent merge.
+    await waitFor(() => expect(Object.assign({}, ...preferencesSent(props).slice(1)))
+      .toEqual({ accessCeiling: "auto-edit", browserAccess: false }));
+
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id, accessCeiling: "auto-edit", browserAccess: false }) });
+    expect(row("initiative-browser-access")).not.toHaveTextContent("Inherited");
+    const full = within(tools().getByRole("combobox", { name: "Default access for this initiative" }))
+      .getByRole("option", { name: "Full access — above the limit" });
+    expect(full).toBeDisabled();
+
+    // The inherited default shows the access chats actually start with.
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id, accessCeiling: "auto-edit" }, {
+      ...defaultProjectPreferences(), defaultAccessMode: "full",
+    }) });
+    expect(tools().getByRole("combobox", { name: "Default access for this initiative" }))
+      .toHaveDisplayValue("Default (Auto-accept edits)");
+    // A saved default above a later limit says it is lowered.
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id, accessCeiling: "auto-edit", defaultAccessMode: "full" }) });
+    expect(row("initiative-default-access")).toHaveTextContent("Lowered to Auto-accept edits by the access limit");
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id, accessCeiling: "auto-edit", browserAccess: false }) });
+
+    fireEvent.change(tools().getByRole("combobox", { name: "Agent browser access for this initiative" }), { target: { value: "inherit" } });
+    await waitFor(() => expect(preferencesSent(props).at(-1)).toEqual({ browserAccess: null }));
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it("merges settings changes made while an earlier one is still being sent", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const request = vi.fn(async (command: { type: string }) => {
+      if (command.type === "initiative.update" && request.mock.calls.length === 1) await gate;
+      return ok;
+    });
+    renderView({ request: request as never, snapshot: withPreferences({}) });
+    fireEvent.change(tools().getByRole("combobox", { name: "Access limit for chats in this initiative" }), { target: { value: "supervised" } });
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    fireEvent.change(tools().getByRole("combobox", { name: "Agent browser access for this initiative" }), { target: { value: "block" } });
+    fireEvent.change(tools().getByRole("combobox", { name: "Default project for this initiative" }), { target: { value: noProject.id } });
+    release();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]![0]).toEqual({
+      type: "initiative.update",
+      payload: { id: checkout.id, expectedRevision: 4, preferences: { browserAccess: false, defaultProjectId: noProject.id } },
+    });
+  });
+
+  it("saves the default model with its reasoning separately and clears both together", async () => {
+    const { props } = renderView({
+      snapshot: withPreferences({ defaultModel: teamAlpha, defaultReasoningEffort: "medium" }),
+    });
+    expect(row("initiative-model")).not.toHaveTextContent("Inherited");
+    fireEvent.change(tools().getByRole("combobox", { name: "Default reasoning for this initiative" }), { target: { value: "high" } });
+    await waitFor(() => expect(preferencesSent(props).at(-1)).toEqual({ defaultModel: teamAlpha, defaultReasoningEffort: "high" }));
+    fireEvent.change(tools().getByRole("combobox", { name: "Default model for this initiative" }), { target: { value: "" } });
+    await waitFor(() => expect(preferencesSent(props).at(-1)).toEqual({ defaultModel: null, defaultReasoningEffort: null }));
+  });
+
+  it("validates the Claude spend limit before saving it", async () => {
+    const { props } = renderView({ snapshot: withPreferences({}) });
+    const field = tools().getByRole("textbox", { name: "Claude spend limit per turn for this initiative (USD)" });
+    // Without a default project, each chat's project decides.
+    expect(row("initiative-spend-limit")).toHaveTextContent("Inherited from each chat's project");
+    fireEvent.change(field, { target: { value: "1.234" } });
+    fireEvent.blur(field);
+    expect(await tools().findByText("Use 0.01 to 10,000 with up to two decimals, or empty for no limit.")).toBeInTheDocument();
+    expect(props.request).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: "2.50" } });
+    fireEvent.blur(field);
+    await waitFor(() => expect(preferencesSent(props).at(-1)).toEqual({ claudeMaxBudgetUsd: 2.5 }));
+  });
+
+  it("says whether the default project actually sets a Claude spend limit", () => {
+    const { rerender } = renderView({ snapshot: withPreferences({ defaultProjectId: studio.id }) });
+    expect(row("initiative-spend-limit")).toHaveTextContent("No limit by default");
+    expect(row("initiative-spend-limit")).not.toHaveTextContent("Inherited from project");
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id }, {
+      ...defaultProjectPreferences(), claudeMaxBudgetUsd: 3,
+    }) });
+    expect(row("initiative-spend-limit")).toHaveTextContent("Inherited from project");
+    rerender({ snapshot: withPreferences({ defaultProjectId: studio.id, claudeMaxBudgetUsd: 2 }, {
+      ...defaultProjectPreferences(), claudeMaxBudgetUsd: 3,
+    }) });
+    expect(row("initiative-spend-limit")).not.toHaveTextContent("Inherited");
+  });
+
+  it("turns the skills folder on and opens it through the desktop bridge, reporting a refusal", async () => {
+    const openInitiativeSkillsFolder = vi.fn(async () => undefined);
+    vi.stubGlobal("inertia", { ...window.inertia, openInitiativeSkillsFolder });
+    const { props, rerender } = renderView({ snapshot: withPreferences({}) });
+    expect(tools().queryByRole("button", { name: "Open folder" })).not.toBeInTheDocument();
+    fireEvent.click(tools().getByRole("switch", { name: "Skills folder for this initiative" }));
+    await waitFor(() => expect(preferencesSent(props).at(-1)).toEqual({ skillsFolder: true }));
+
+    rerender({ snapshot: withPreferences({ skillsFolder: true }) });
+    expect(row("initiative-skills-folder")).toHaveTextContent("Managed by Inertia");
+    fireEvent.click(tools().getByRole("button", { name: "Open folder" }));
+    await waitFor(() => expect(openInitiativeSkillsFolder).toHaveBeenCalledWith(checkout.id));
+
+    openInitiativeSkillsFolder.mockRejectedValueOnce(new Error(
+      "Error invoking remote method 'inertia:open-initiative-skills-folder': Error: The initiative's skills folder could not be verified.",
+    ));
+    fireEvent.click(tools().getByRole("button", { name: "Open folder" }));
+    await waitFor(() => expect(props.onError).toHaveBeenCalledWith("The initiative's skills folder could not be verified."));
+
+    rerender({ status: "offline", snapshot: withPreferences({ skillsFolder: true }) });
+    expect(tools().getByRole("button", { name: "Open folder" })).toBeDisabled();
+    expect(tools().getByRole("combobox", { name: "Access limit for chats in this initiative" })).toBeDisabled();
   });
 });

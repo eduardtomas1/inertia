@@ -86,19 +86,6 @@
   justify-content: flex-end;
 }
 
-.project-model-controls {
-  display: flex;
-  min-width: 0;
-  max-width: 50%;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.project-model-controls .setting-select {
-  max-width: 100%;
-}
-
 .project-actions-setting + .project-settings-advanced,
 .setting-row + .project-actions-setting {
   border-top: 1px solid var(--line-soft);

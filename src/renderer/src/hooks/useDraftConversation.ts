@@ -8,6 +8,7 @@ import {
 
 import type { ProjectImportInput } from "../../../shared/project-import";
 import type {
+  AccessMode,
   AppSettings,
   AppSnapshot,
   ChatAttachment,
@@ -18,7 +19,9 @@ import type {
   ServerEvent,
   TurnRequestContext,
 } from "@shared/contracts";
+import { clampAccessMode } from "../../../shared/access-modes";
 import { providerIdForHarness } from "../../../shared/model-routing";
+import { initiativeById } from "../utils/initiativeAccess";
 import {
   buildDraftConversation,
   buildNewConversationPayload,
@@ -160,19 +163,26 @@ export function useDraftConversation({
     });
   };
 
+  const accessCeilingOf = (initiativeId: string | null): AccessMode | null =>
+    initiativeById(snapshotRef.current, initiativeId)?.preferences.accessCeiling ?? null;
+
   const changeProject = (projectId: string): void => {
     const current = draftRef.current;
     if (!current || current.materialized || current.conversation.projectId === projectId
       || !snapshot?.projects.some(({ id }) => id === projectId)) return;
-    const defaults = defaultConversationPayloadForProject(snapshot, settings, projectId);
+    // Initiative membership is independent of the project choice, and its
+    // defaults still come first.
+    const initiativeId = current.payload.initiativeId ?? null;
+    const defaults = defaultConversationPayloadForProject(snapshot, settings, projectId, undefined, initiativeId);
     const payload = {
       ...(explicitModelRef.current
         ? withNewConversationModelSelection(defaults, current.conversation.modelSelection)
         : defaults),
       interactionMode: current.conversation.interactionMode,
-      accessMode: explicitAccessRef.current ? current.conversation.accessMode : defaults.accessMode,
-      // Initiative membership is independent of the project choice.
-      ...(current.payload.initiativeId ? { initiativeId: current.payload.initiativeId } : {}),
+      accessMode: explicitAccessRef.current
+        ? clampAccessMode(current.conversation.accessMode, accessCeilingOf(initiativeId))
+        : defaults.accessMode,
+      ...(initiativeId ? { initiativeId } : {}),
     };
     // Keep the composer identity (prompt and attachments), but rebuild the
     // project-owned checkout and defaults. Selecting a project is not navigation.
@@ -186,14 +196,38 @@ export function useDraftConversation({
     });
   };
 
+  /**
+   * Joins the draft to an initiative (or none). The initiative's default model
+   * and access mode replace the ones the draft inherited, while a model or
+   * access the user chose stays, lowered to the initiative's access ceiling.
+   * The checkout (project, branch, worktree) is untouched here; pre-filling
+   * the initiative's default project is the project picker's job.
+   */
   const changeInitiative = (initiativeId: string | null): void => {
     const current = draftRef.current;
     if (!current || current.materialized
       || (current.payload.initiativeId ?? null) === initiativeId) return;
     const { initiativeId: _previous, ...rest } = current.payload;
-    const payload = initiativeId ? { ...rest, initiativeId } : rest;
+    const latest = snapshotRef.current;
+    const defaults = latest
+      ? defaultConversationPayloadForProject(latest, settings, current.conversation.projectId, undefined, initiativeId)
+      : null;
+    const withModel = defaults && !explicitModelRef.current && defaults.modelSelection
+      ? withNewConversationModelSelection(rest, defaults.modelSelection)
+      : withNewConversationModelSelection(rest, current.conversation.modelSelection);
+    const payload = {
+      ...withModel,
+      interactionMode: current.conversation.interactionMode,
+      accessMode: explicitAccessRef.current || !defaults
+        ? clampAccessMode(current.conversation.accessMode, accessCeilingOf(initiativeId))
+        : defaults.accessMode,
+      ...(initiativeId ? { initiativeId } : {}),
+    };
     replaceDraft({
-      conversation: { ...current.conversation, initiativeId },
+      conversation: buildDraftConversation(payload, {
+        id: current.conversation.id,
+        now: current.conversation.createdAt,
+      }),
       payload,
       materialized: null,
     });
@@ -397,8 +431,13 @@ export function useDraftConversation({
     if (configuration && configuration.accessMode !== draft.conversation.accessMode) {
       explicitAccessRef.current = true;
     }
+    const ceiling = accessCeilingOf(draft.payload.initiativeId ?? null);
     const payload = withNewConversationModelSelection(
-      { ...draft.payload, ...configuration },
+      {
+        ...draft.payload,
+        ...configuration,
+        ...(configuration ? { accessMode: clampAccessMode(configuration.accessMode, ceiling) } : {}),
+      },
       selection,
     );
     replaceDraft({
@@ -412,9 +451,14 @@ export function useDraftConversation({
     return true;
   };
 
-  const updateDraft = (change: ConversationUpdate): void => {
+  const updateDraft = (requested: ConversationUpdate): void => {
     const current = draftRef.current;
     if (!current || current.materialized) return;
+    // A draft in an initiative never asks for more access than its ceiling.
+    const change = requested.accessMode === undefined ? requested : {
+      ...requested,
+      accessMode: clampAccessMode(requested.accessMode, accessCeilingOf(current.payload.initiativeId ?? null)),
+    };
     if (change.modelSelection || change.reasoningEffort !== undefined || change.providerId) {
       explicitModelRef.current = true;
     }

@@ -32,6 +32,7 @@ import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 import type { Todo } from "../todos";
 import type { Initiative } from "../initiatives";
+import type { AccessMode } from "../access-modes";
 
 export type { ProviderId } from "../provider";
 
@@ -43,7 +44,7 @@ export type MessageRole = "user" | "assistant" | "system";
 export type ProviderInstallState = "checking" | "installed" | "not-installed" | "unresponsive" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 export type InteractionMode = "build" | "plan";
-export type AccessMode = "supervised" | "auto-edit" | "full";
+export type { AccessMode };
 export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
 export type AgentApprovalDecision = "approve" | "deny" | "cancel";
 export type ResponseDensity = "compact" | "default" | "comfortable";

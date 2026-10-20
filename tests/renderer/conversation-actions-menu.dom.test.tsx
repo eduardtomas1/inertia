@@ -5,10 +5,11 @@ import { ConversationActionsMenu } from "../../src/renderer/src/components/Conve
 import { sidebarThreadView } from "../../src/renderer/src/utils/sidebarModel";
 import type { Conversation, Initiative } from "../../src/shared/contracts";
 import { conversation } from "./composer-fixtures";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 
 function initiative(id: string, name: string, status: Initiative["status"] = "active"): Initiative {
   return {
-    id, name, color: "blue", status, brief: "", briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 1,
+    id, name, color: "blue", status, brief: "", preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 1,
     createdAt: "2026-10-19T08:00:00.000Z", updatedAt: "2026-10-19T08:00:00.000Z",
   };
 }

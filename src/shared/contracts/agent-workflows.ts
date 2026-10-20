@@ -35,7 +35,9 @@ export type AgentSkillScope =
   | "repo"
   | "system"
   | "admin"
-  | "provider";
+  | "provider"
+  /** From the skills folder of the chat's initiative. */
+  | "initiative";
 
 /**
  * Renderer-safe skill metadata. `id` is an ephemeral runtime capability; the

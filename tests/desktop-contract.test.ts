@@ -7,7 +7,9 @@ import {
   parseDetachedChatDraftHandoff,
   parseDetachedChatWindowOpenRequest,
   parseDetachedChatWindowRequest,
+  parseInitiativeSkillsFolderRequest,
   parseOpenProjectPathRequest,
+  parseRuntimePathRequest,
   parsePendingDetachedChatDraft,
   parsePrivateConnectDeviceUpdateRequest,
   parsePrivateConnectPairingApprovalRequest,
@@ -114,6 +116,20 @@ describe("desktop detached-chat contract", () => {
 });
 
 describe("desktop project-path contract", () => {
+  it("accepts only an initiative id for opening its skills folder", () => {
+    const initiativeId = "11111111-1111-4111-8111-111111111111";
+    expect(parseInitiativeSkillsFolderRequest(initiativeId)).toBe(initiativeId);
+    for (const invalid of ["../skills", "/tmp", "", null, { initiativeId }, 7]) {
+      expect(parseInitiativeSkillsFolderRequest(invalid)).toBeNull();
+    }
+    // Between processes, it travels as its own kind of runtime path request.
+    expect(parseRuntimePathRequest({ initiativeId })).toEqual({ initiativeId });
+    expect(parseRuntimePathRequest({ initiativeId: "../x" })).toBeNull();
+    expect(parseRuntimePathRequest({ initiativeId, projectId })).toBeNull();
+    expect(parseRuntimePathRequest({ projectId, relativePath: ".", action: "reveal" }))
+      .toEqual({ projectId, relativePath: ".", action: "reveal" });
+  });
+
   it("accepts only scoped relative paths and enumerated OS actions", () => {
     const request = {
       projectId,

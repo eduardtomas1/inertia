@@ -34,6 +34,7 @@ import {
 } from "../runtime/turns/turn-runtime-interruption-note";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { assertConversationProvider } from "./conversation-provider-policy";
+import { enforceInitiativeAccessLimitForTurn } from "./initiative-repository";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
@@ -266,6 +267,13 @@ export class TurnLedgerRepository {
   begin(input: BeginAgentTurnInput): BegunAgentTurn {
     return this.context.database.transaction(() => {
       assertConversationProvider(this.context, input.conversationId, input.providerId);
+      // The turn runs at or below its chat's initiative access limit; a chat
+      // stored above it is lowered here, atomically with the turn.
+      const accessLowered = enforceInitiativeAccessLimitForTurn(
+        this.context.database,
+        input.conversationId,
+        input.accessMode,
+      );
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
           throw new Error(
@@ -348,6 +356,7 @@ export class TurnLedgerRepository {
         message: { ...message, turnId: turn.id },
         turn,
         ...(initiativeContextReceipt ? { initiativeContextReceipt } : {}),
+        ...(accessLowered ? { accessLowered: true as const } : {}),
       };
     })();
   }

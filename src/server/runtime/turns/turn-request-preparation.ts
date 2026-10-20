@@ -13,6 +13,13 @@ import {
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
+import {
+  clampAccessMode,
+  initiativeAccessCeilingMessage,
+  providerExceedsAccessLimit,
+  UNSUPERVISED_PROVIDER_LIMIT_REASON,
+} from "../../../shared/access-modes";
+import { effectiveClaudeBudget } from "../../../shared/initiatives";
 import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
@@ -34,6 +41,7 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import { broadcastConversationShell } from "./turn-controller-support";
 import type {
   ActiveTurn,
   FreshSessionTurnRequest,
@@ -86,6 +94,7 @@ export function prepareTurnRequest(
         message: queued.initiativeContextReceipt,
       });
     }
+    if (queued.accessLowered) broadcastConversationShell(dependencies.hooks, queued.turn.conversationId);
     if (resolved.handoffFromTurnId) {
       retireUsageLimitSnooze(dependencies, queued.turn.conversationId, resolved.handoffFromTurnId);
     }
@@ -150,6 +159,23 @@ export function resolveTurnRequest(
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
   dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  // The provider's access is fixed for the whole turn, so the initiative's
+  // access limit is applied here: the turn never runs above it, even when the
+  // chat's stored access is (restored or racing data, which the turn's
+  // persistence then lowers). A provider that cannot stay within the limit,
+  // such as Antigravity under a Supervised limit, is refused.
+  const initiativePreferences = dependencies.store.initiativePreferencesFor(conversation);
+  const accessLimit = initiativePreferences?.accessCeiling ?? null;
+  const accessMode = clampAccessMode(conversation.accessMode, accessLimit);
+  if (accessLimit && providerExceedsAccessLimit(route.providerId, accessMode, accessLimit)) {
+    const name = dependencies.store.initiatives.get(conversation.initiativeId!)?.name ?? "This initiative";
+    throw new RuntimeRequestError(
+      `${initiativeAccessCeilingMessage(name, accessLimit)} ${UNSUPERVISED_PROVIDER_LIMIT_REASON}`,
+    );
+  }
+  const turnConversation = accessMode === conversation.accessMode
+    ? conversation
+    : { ...conversation, accessMode };
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const capabilityContract = exactProvider?.capabilityContract;
   const hostToolBridgeAttested = capabilityContract !== undefined
@@ -401,11 +427,20 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
+  // The lower of the initiative's and the project's limits; an initiative
+  // restriction holds whatever the initiative's status.
   const maxBudgetUsd = route.providerId === "claude"
     && route.harnessId === "claude-agent-sdk"
     && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
-    ? dependencies.store.project(conversation.projectId).preferences
-      ?.claudeMaxBudgetUsd ?? null
+    ? effectiveClaudeBudget(
+        initiativePreferences,
+        dependencies.store.project(conversation.projectId).preferences,
+      ).usd
+    : null;
+  // Selected Claude skills may come from the initiative's skills folder; the
+  // harness revalidates them against this contained root when staging.
+  const initiativeSkillsRoot = request.skills?.some(({ source }) => source === "claude-native")
+    ? dependencies.hooks.initiativeSkillsRoot?.(conversation) ?? null
     : null;
   const providerInput = {
     providerId: route.providerId,
@@ -426,7 +461,7 @@ export function resolveTurnRequest(
       : routeSelection.modelId,
     reasoningEffort: routeSelection.reasoningEffort || undefined,
     interactionMode: conversation.interactionMode,
-    access: conversation.accessMode,
+    access: accessMode,
     sessionId: canResume ? conversation.providerSessionId! : undefined,
     ...(supportedFastMode ? { supportedFastMode } : {}),
     ...(canResume
@@ -445,6 +480,7 @@ export function resolveTurnRequest(
       attachmentIds: attachments.map(({ id }) => id),
     }) ?? [],
     skills: request.skills,
+    ...(initiativeSkillsRoot ? { initiativeSkillsRoot } : {}),
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
@@ -492,7 +528,7 @@ export function resolveTurnRequest(
     modelAlias: modelSelection.alias,
     reasoningEffort: modelSelection.reasoningEffort ?? "",
     interactionMode: conversation.interactionMode,
-    accessMode: conversation.accessMode,
+    accessMode,
     providerSessionBefore: canResume ? conversation.providerSessionId : null,
     ...(providerSessionInvalidation ? { providerSessionInvalidation } : {}),
     requestedAt,
@@ -511,11 +547,11 @@ export function resolveTurnRequest(
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
       const activeConversation = providerSessionInvalidation
         ? {
-            ...conversation,
+            ...turnConversation,
             providerSessionId: null,
             continuationIdentity: null,
           }
-        : conversation;
+        : turnConversation;
       return {
         queued,
         active: {

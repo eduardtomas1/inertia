@@ -19,6 +19,7 @@ import type {
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -1774,7 +1775,7 @@ describe("initiative sections in Work", () => {
       color: "teal",
       status: "active",
       brief: "",
-      briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
+      preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
       revision: 1,
       createdAt: new Date(2026, 7, 1, 9).toISOString(),
       updatedAt: new Date(2026, 7, 1, 9).toISOString(),

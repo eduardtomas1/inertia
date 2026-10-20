@@ -99,6 +99,11 @@ import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import { createInitiativeCommandHandler } from "./runtime/commands/initiative-commands";
 import {
+  ensureInitiativeSkillsFolder,
+  initiativeSkillsFolderPath,
+  initiativeSkillsRootFor,
+} from "./runtime/initiative-skills-folder";
+import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
@@ -371,7 +376,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const enableProviders = !runtimeSafetyLock
     && providerMaintenanceRecovery.length === 0
     && (options.enableProviders ?? true);
-  const agentWorkflows = new AgentWorkflowController(store, providers);
+  const agentWorkflows = new AgentWorkflowController(store, providers, undefined, {
+    initiativeSkillsRoot: (conversation) => initiativeSkillsRootFor(store, dataDirectory, conversation),
+  });
   const attachmentResolver = options.attachmentRoot && options.attachments
     ? new TrustedAttachmentResolver(
         resolve(options.attachmentRoot),
@@ -668,6 +675,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       attachmentReadRoots: conversationAttachmentReadRoots(store, initializedConversationAttachments),
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
+      initiativeSkillsRoot: (conversation) => initiativeSkillsRootFor(store, dataDirectory, conversation),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
       onTurnSettled: (turn, settlement) => dispatchSettledTurnOwners(turn, [
         (settled) => queuedMessages?.onTurnSettled(settled),
@@ -727,7 +735,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
-      createInitiativeCommandHandler({ store, send }),
+      createInitiativeCommandHandler({
+        store,
+        send,
+        validateDefaultModel: (selection) => backendProfileController.validateDefault(selection),
+        ensureSkillsFolder: (initiativeId) => { ensureInitiativeSkillsFolder(dataDirectory, initiativeId); },
+      }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,
@@ -1001,6 +1014,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
       }
+      if ("initiativeId" in request) return initiativeSkillsFolderPath(store, dataDirectory, request.initiativeId);
       return (await resolveAuthoritativeProjectPath(
         store,
         request,

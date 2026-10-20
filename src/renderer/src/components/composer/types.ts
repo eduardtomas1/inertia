@@ -32,6 +32,9 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "../conversation-context/types";
+import type { ComposerAccessCeiling } from "../../utils/initiativeAccess";
+
+export type { ComposerAccessCeiling };
 
 export interface ComposerProps {
   conversation: Conversation;
@@ -41,6 +44,10 @@ export interface ComposerProps {
   newChatProjectPicker?: NewChatProjectPicker;
   newChatInitiativePicker?: NewChatInitiativePicker;
   initiativeChip?: ComposerInitiativeChip;
+  /** The chat's initiative access ceiling; options above it are disabled with its reason. */
+  accessCeiling?: ComposerAccessCeiling;
+  /** Names the initiative a new chat's model comes from, when it supplies it. */
+  modelSourceLabel?: string;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;

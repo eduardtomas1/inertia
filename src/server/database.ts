@@ -362,6 +362,7 @@ export class RuntimeStore {
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
   get initiatives() { return this.snapshotRepository.initiatives; }
+  initiativePreferencesFor(conversation: { initiativeId?: string | null }) { return this.initiatives.preferencesFor(conversation.initiativeId); }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {

@@ -1894,6 +1894,28 @@ describe("compact Work sidebar", () => {
     expect(row.querySelector(".thread-watcher-mark")).toHaveTextContent("Watcher");
   });
 
+  it("never gives a top-level watcher row the generic new-completion mark", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12, 30));
+    const watched = conversation(WATCHED_ID, "Refactor parser", new Date(2026, 7, 11, 11), {
+      archivedAt: new Date(2026, 7, 11, 12).toISOString(),
+    });
+    const watcher = conversation(WATCHER_ID, "Watcher · Reviewer · Refactor parser", new Date(2026, 7, 11, 12), {
+      completedAt: new Date(2026, 7, 11, 12, 10).toISOString(),
+      lastViewedAt: new Date(2026, 7, 11, 12).toISOString(),
+    });
+    const view = renderSidebar([watched, watcher]);
+    view.rerenderSnapshot({ ...snapshot([watched, watcher]), watchers: [link({
+      projectId: project.id,
+      status: "paused",
+      pauseReason: "watched-archived",
+    })] });
+    const row = screen.getByRole("button", { name: /^Watcher · Reviewer · Refactor parser, Watcher · Reviewer, watching Refactor parser,/u });
+    expect(row).not.toHaveAccessibleName(/New completion/u);
+    expect(row.closest(".activity-thread")).not.toHaveClass("is-unread");
+    expect(row.closest(".activity-thread")!.querySelector(".thread-unread-mark")).toBeNull();
+  });
+
   it("lists a watcher running its final check while its chat sits in a collapsed Done section", () => {
     vi.useFakeTimers();
     const now = new Date(2026, 7, 11, 12, 30);

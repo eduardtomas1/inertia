@@ -762,6 +762,7 @@ function SidebarView({
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
     const watcherLink = nestedWork.topLevelWatchers.get(conversation.id);
+    const unread = model.unread && (!watcherLink || Boolean(conversation.markedUnreadAt));
     const watcherParent = watcherLink?.watchedConversationId
       ? conversations.find(({ id }) => id === watcherLink.watchedConversationId)
       : undefined;
@@ -781,7 +782,7 @@ function SidebarView({
       conversation.pinnedAt ? "Pinned" : null,
       isDetached ? "Open in a separate chat window" : null,
       splitConversationIds.has(conversation.id) ? "Open in split view" : null,
-      model.unread ? conversation.markedUnreadAt ? "Unread" : "New completion" : null,
+      unread ? conversation.markedUnreadAt ? "Unread" : "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
     return (
       <div
@@ -791,7 +792,7 @@ function SidebarView({
           isActive && "is-active",
           isDetached && "is-detached",
           splitConversationIds.has(conversation.id) && "is-split",
-          model.unread && "is-unread",
+          unread && "is-unread",
           conversationMenu === conversation.id && "has-open-menu",
           canOrganize && "has-thread-inline-actions",
         )}
@@ -843,7 +844,7 @@ function SidebarView({
               <span className="activity-thread-provider" aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
               <span className="activity-thread-title">{conversation.title}</span>
               {watcherLink && <span className="thread-watcher-mark" aria-hidden="true">Watcher</span>}
-              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
+              {unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue

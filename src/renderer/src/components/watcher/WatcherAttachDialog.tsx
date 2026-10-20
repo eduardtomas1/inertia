@@ -453,6 +453,30 @@ export function WatcherAttachDialog({
         <p id="watcher-attach-auto-send-detail">{WATCHER_AUTO_SEND_DETAIL}</p>
       </section>
 
+      <section className="watcher-attach-section watcher-attach-toggle">
+        <Switch
+          id="watcher-attach-initial-review"
+          checked={initialReview && hasCompletedTurn}
+          disabled={submitting || !hasCompletedTurn}
+          onChange={setInitialReview}
+        />
+        <label htmlFor="watcher-attach-initial-review">Review the last turn now</label>
+      </section>
+
+      {privateConnectConfigured && (
+        <fieldset className="watcher-attach-section watcher-attach-visibility" disabled={submitting}>
+          <legend>On paired devices</legend>
+          <label className="watcher-attach-check">
+            <input type="radio" name="watcher-attach-visibility" checked={privateConnect === "inherit"} onChange={() => setPrivateConnect("inherit")} />
+            <span>Follow this chat's visibility</span>
+          </label>
+          <label className="watcher-attach-check">
+            <input type="radio" name="watcher-attach-visibility" checked={privateConnect === "hidden"} onChange={() => setPrivateConnect("hidden")} />
+            <span>Hidden</span>
+          </label>
+        </fieldset>
+      )}
+
       <details className="watcher-attach-section watcher-attach-disclosure">
         <summary>
           Budgets
@@ -486,30 +510,6 @@ export function WatcherAttachDialog({
           })}
         </div>
       </details>
-
-      {privateConnectConfigured && (
-        <fieldset className="watcher-attach-section watcher-attach-visibility" disabled={submitting}>
-          <legend>On paired devices</legend>
-          <label className="watcher-attach-check">
-            <input type="radio" name="watcher-attach-visibility" checked={privateConnect === "inherit"} onChange={() => setPrivateConnect("inherit")} />
-            <span>Follow this chat's visibility</span>
-          </label>
-          <label className="watcher-attach-check">
-            <input type="radio" name="watcher-attach-visibility" checked={privateConnect === "hidden"} onChange={() => setPrivateConnect("hidden")} />
-            <span>Hidden</span>
-          </label>
-        </fieldset>
-      )}
-
-      <section className="watcher-attach-section watcher-attach-toggle">
-        <Switch
-          id="watcher-attach-initial-review"
-          checked={initialReview && hasCompletedTurn}
-          disabled={submitting || !hasCompletedTurn}
-          onChange={setInitialReview}
-        />
-        <label htmlFor="watcher-attach-initial-review">Review the last turn now</label>
-      </section>
 
       {error && <p className="watcher-attach-error" role="alert">{error}</p>}
     </DialogShell>

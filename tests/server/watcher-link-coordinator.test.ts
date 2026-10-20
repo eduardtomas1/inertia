@@ -486,6 +486,24 @@ describe("watcher link coordinator", () => {
     }
   });
 
+  it("cancels a running check when the watched chat is archived", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      await wake(f, link.watcherConversationId);
+      expect(f.linkView(link.id).status).toBe("waking");
+      f.store.archiveConversation(f.watched.id, true);
+      f.watchers.onConversationArchived(f.watched.id);
+      expect(f.provider.cancelled).toContain(link.watcherConversationId);
+      await f.flush();
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
+      expect(f.store.watcherLinks.feed(link.id)?.items[0]).toMatchObject({ state: "settled", outcome: "cancelled" });
+    } finally {
+      await f.close();
+    }
+  });
+
   it("records the archive of a watched chat over an earlier pause and refuses to resume until it is unarchived", async () => {
     const f = await createWatcherFixture();
     try {

@@ -21,6 +21,11 @@ let lastNavigationKeyAt = Number.NEGATIVE_INFINITY;
 const NAVIGATION_KEY_WINDOW_MS = 500;
 const NAVIGATION_KEYS = new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 const trackedDocuments = new WeakSet<Document>();
+const tooltipEscapes = new WeakSet<Event>();
+
+export function escapeClosedTooltip(event: Event): boolean {
+  return tooltipEscapes.has(event);
+}
 
 function trackNavigationKeys(document: Document): void {
   if (trackedDocuments.has(document)) return;
@@ -130,9 +135,7 @@ export function useTooltip<T extends HTMLElement>(
       onKeyDown: (event) => {
         handlers.onKeyDown?.(event);
         if (event.key !== "Escape" || !openRef.current) return;
-        // The first Escape only closes the tooltip; surfaces that collapse on
-        // Escape (the watcher dock) skip a handled event.
-        event.preventDefault();
+        tooltipEscapes.add(event.nativeEvent);
         close();
       },
     },

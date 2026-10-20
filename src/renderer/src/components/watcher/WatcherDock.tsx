@@ -31,6 +31,7 @@ import { useWatcherFeed } from "../../hooks/useWatcherFeed";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
 import { watcherAgentLabel } from "@shared/watcher-agent-label";
 import { PaneResizeHandle } from "../PaneResizeHandle";
+import { escapeClosedTooltip } from "../Tooltip";
 import { WatcherBar } from "./WatcherBar";
 import {
   watcherDockHeadingId,
@@ -341,6 +342,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (escapeClosedTooltip(event.nativeEvent)) return;
     event.preventDefault();
     collapse();
   };

@@ -157,7 +157,7 @@ function tokenize(command: string, windows: boolean, powershell: boolean): Word[
     if (UNQUOTED_REJECTED.has(character)) return SHELL_SYNTAX;
     if (!word && WORD_START_REJECTED.has(character)) return SHELL_SYNTAX;
     if (character === "~" && /[=:]$/u.test(word?.value ?? "")) return SHELL_SYNTAX;
-    if (powershell && character === ",") return SHELL_SYNTAX;
+    if (powershell && (character === "," || (!word && character === "@"))) return SHELL_SYNTAX;
     word ??= { value: "", glob: [] };
     if (character === "'" || character === "\"") quote = character;
     else append(word, character, GLOB.has(character));

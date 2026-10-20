@@ -370,6 +370,15 @@ describe("classifyReadOnlyCommand", () => {
     }
   });
 
+  it("refuses PowerShell splatting where the provider's shell may be PowerShell", () => {
+    expect(allowed("git diff @~1")).toEqual({ allowed: true, program: "git" });
+    expect(allowed("cat '@PROFILE'", POWERSHELL)).toEqual({ allowed: true, program: "cat" });
+    for (const command of ["cat @PROFILE", "git log @args", "git diff @~1"]) {
+      expect(allowed(command, POWERSHELL)).toMatchObject({ allowed: false });
+      expect(allowed(command, WINDOWS)).toMatchObject({ allowed: false });
+    }
+  });
+
   it("names the reason for a refused command", () => {
     expect(allowed("git diff; rm -rf .")).toEqual({ allowed: false, reason: "The command uses shell syntax that watchers cannot run." });
     expect(allowed("npm test")).toEqual({ allowed: false, reason: "npm is not a read-only command watchers can run." });

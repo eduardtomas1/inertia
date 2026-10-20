@@ -7,6 +7,7 @@ import { WatcherAttachHost } from "../../src/renderer/src/components/watcher/Wat
 import { WatcherDockHost } from "../../src/renderer/src/components/watcher/WatcherDockHost";
 import { WatcherFindingCard } from "../../src/renderer/src/components/watcher/WatcherFindingCard";
 import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
+import { WatcherErrorBoundary } from "../../src/renderer/src/components/watcher/WatcherErrorBoundary";
 import { resetWatcherDockStore } from "../../src/renderer/src/hooks/useWatcherDock";
 import { WATCHED_ID, finding, surfaceModel } from "./watcher-fixtures";
 
@@ -103,5 +104,20 @@ describe("watcher chunks that fail to load", () => {
     await settle();
     expect(screen.queryByText("Window failed")).not.toBeInTheDocument();
     expect(screen.getByText("The parser drops trailing commas.")).toBeInTheDocument();
+  });
+
+  it("tries again when the boundary's reset key moves", () => {
+    let broken = true;
+    function Surface() {
+      if (broken) throw new Error("chunk failed");
+      return <p>Loaded</p>;
+    }
+    const view = render(<WatcherErrorBoundary fallback={null} resetKey={1}><Surface /></WatcherErrorBoundary>);
+    expect(screen.queryByText("Loaded")).not.toBeInTheDocument();
+    broken = false;
+    view.rerender(<WatcherErrorBoundary fallback={null} resetKey={1}><Surface /></WatcherErrorBoundary>);
+    expect(screen.queryByText("Loaded")).not.toBeInTheDocument();
+    view.rerender(<WatcherErrorBoundary fallback={null} resetKey={2}><Surface /></WatcherErrorBoundary>);
+    expect(screen.getByText("Loaded")).toBeInTheDocument();
   });
 });

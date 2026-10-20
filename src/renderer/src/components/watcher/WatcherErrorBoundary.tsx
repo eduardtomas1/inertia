@@ -1,17 +1,26 @@
 import { Component, type ReactNode } from "react";
 
+interface WatcherErrorBoundaryProps {
+  children: ReactNode;
+  fallback: ReactNode;
+  resetKey?: unknown;
+}
+
 export class WatcherErrorBoundary extends Component<
-  { children: ReactNode; fallback: ReactNode; resetKey?: unknown },
-  { failed: boolean }
+  WatcherErrorBoundaryProps,
+  { failed: boolean; resetKey: unknown }
 > {
-  state = { failed: false };
+  state = { failed: false, resetKey: this.props.resetKey };
 
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
   }
 
-  componentDidUpdate(previous: Readonly<{ resetKey?: unknown }>): void {
-    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false });
+  static getDerivedStateFromProps(
+    props: WatcherErrorBoundaryProps,
+    state: { failed: boolean; resetKey: unknown },
+  ): { failed: boolean; resetKey: unknown } | null {
+    return props.resetKey === state.resetKey ? null : { failed: false, resetKey: props.resetKey };
   }
 
   render(): ReactNode {

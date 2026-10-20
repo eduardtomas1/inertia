@@ -182,6 +182,15 @@ describe("watcher link repository", () => {
     expect(store.shellSnapshot().watchers).toHaveLength(MAX_ACTIVE_WATCHERS);
   });
 
+  it("refuses to watch a chat archived before the link was written, and rolls the watcher chat back", () => {
+    const watched = chat("Archived meanwhile");
+    store.archiveConversation(watched.id, true);
+    const before = conversationCount();
+    expect(() => attach(watched)).toThrow(new WatcherPolicyError("Unarchive this chat before adding a watcher."));
+    expect(conversationCount()).toBe(before);
+    expect(store.watcherLinks.findActiveByWatched(watched.id)).toBeNull();
+  });
+
   it("replays a repeated link id for the same chat and refuses it for another, inside the transaction", () => {
     const watched = chat();
     const first = attach(watched);

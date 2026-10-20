@@ -223,9 +223,10 @@ export class WatcherLinkRepository {
         }
         return { link: existing, conversation: this.context.conversations.get(existing.watcherConversationId), created: false };
       }
-      const watched = this.database.prepare("SELECT id, project_id FROM conversations WHERE id = ?")
-        .get(input.link.watchedConversationId) as { id: string; project_id: string } | undefined;
+      const watched = this.database.prepare("SELECT id, project_id, archived_at FROM conversations WHERE id = ?")
+        .get(input.link.watchedConversationId) as { id: string; project_id: string; archived_at: string | null } | undefined;
       if (!watched) throw new WatcherPolicyError("The chat to watch no longer exists.");
+      if (watched.archived_at !== null) throw new WatcherPolicyError("Unarchive this chat before adding a watcher.");
       if (watched.project_id !== input.conversation.projectId) {
         throw new WatcherPolicyError("A watcher must belong to the watched chat's project.");
       }

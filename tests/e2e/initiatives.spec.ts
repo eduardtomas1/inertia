@@ -1,7 +1,10 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+
+import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
@@ -14,9 +17,13 @@ const INITIATIVE = "Checkout redesign";
 const ANSWER = "Started on the checkout form.";
 const EVIDENCE = process.env.INERTIA_E2E_EVIDENCE === "1";
 const EVIDENCE_DIRECTORY = join(process.cwd(), "test-results", "initiatives-evidence");
+const BRIEF = "Ship the one-page checkout. Keep guest checkout.";
+const TURN_LOG = "initiatives-turns.jsonl";
 
 const initiativesAppServer = `
 const readline = require("node:readline");
+const fs = require("node:fs");
+const path = require("node:path");
 const args = process.argv.slice(2);
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 if (args[0] === "--help") {
@@ -57,6 +64,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.method !== "turn/start") return;
+  // What the provider received, for the assertions about shared context.
+  fs.appendFileSync(path.join(__dirname, ${JSON.stringify(TURN_LOG)}), JSON.stringify(message.params) + "\\n");
   turnSequence += 1;
   const turnId = "initiatives-turn-" + turnSequence;
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
@@ -214,5 +223,69 @@ test("groups chats under an initiative from the sidebar, the page and the new-ch
   await composer.getByRole("textbox").first().press("Enter");
   await expect(page.getByText(ANSWER)).toBeVisible();
   await expect(sidebar.getByRole("button", { name: new RegExp(`^${INITIATIVE} initiative, 3 chats`, "u") })).toBeVisible();
+
+  // An agent proposal waits for review; agents cannot write notes yet, so the
+  // fixture writes one the way the later host tool will.
+  const database = new Database(join(app.testDirectory, "data", "inertia.sqlite"), { timeout: 5_000 });
+  try {
+    const { id: initiativeId } = database.prepare("SELECT id FROM initiatives WHERE name = ?").get(INITIATIVE) as { id: string };
+    const at = new Date(FIXED_NOW).toISOString();
+    database.prepare(`
+      INSERT INTO initiative_notes (id, initiative_id, title, body, provenance, state, revision, created_at, updated_at)
+      VALUES (?, ?, 'Cache order totals', 'Totals are recomputed on every step.', 'agent', 'proposed', 1, ?, ?)
+    `).run(randomUUID(), initiativeId, at, at);
+  } finally {
+    database.close();
+  }
+
+  // Write the brief and a note on the Initiative page.
+  await sidebar.getByRole("button", { name: `Open ${INITIATIVE}` }).click();
+  const detail = page.getByRole("main", { name: "Initiatives" }).getByRole("article", { name: INITIATIVE });
+  const brief = detail.getByRole("textbox", { name: "Initiative brief" });
+  await expect(brief).toBeVisible();
+  await brief.fill(`## Objective\n\n${BRIEF}`);
+  await expect(detail.getByText(/^\d+ \/ 8,192 bytes$/u)).toBeVisible();
+  await brief.press("Control+Enter");
+  await expect(detail.getByText(/^Revision 1 · updated/u)).toBeVisible();
+  const notes = detail.getByRole("region", { name: "Notes" });
+  await notes.getByRole("button", { name: "Add note" }).click();
+  await notes.getByRole("textbox", { name: "Note title" }).fill("Payments");
+  await notes.getByRole("textbox", { name: "Note text" }).fill("Stripe only, no saved cards.");
+  await notes.getByRole("form", { name: "Add note" }).getByRole("button", { name: "Add note" }).click();
+  await expect(notes.getByRole("list", { name: "Shared notes" }).getByText("Payments")).toBeVisible();
+  const review = notes.getByRole("region", { name: "Needs review" });
+  await expect(review.getByText("Cache order totals")).toBeVisible();
+  await expect(review.getByRole("button", { name: "Accept", exact: true })).toBeEnabled();
+  await app.expectNoViewportOverflow();
+  await evidence("initiative-brief", detail.locator(".initiative-brief"));
+  await evidence("initiative-notes-review", notes);
+
+  // The next message in a member chat carries the brief and the accepted
+  // notes, and leaves a receipt in the chat.
+  await sidebar.getByRole("button", { name: new RegExp(`^${FIXTURE_CHAT},`, "u") }).click();
+  const memberComposer = page.getByRole("region", { name: "Message composer" });
+  await expect(memberComposer.getByRole("button", { name: `Open initiative ${INITIATIVE}` })).toBeVisible();
+  await memberComposer.getByRole("textbox").first().fill("Add the payment step");
+  await memberComposer.getByRole("textbox").first().press("Enter");
+  const receipt = page.getByRole("article", { name: "Your request" })
+    .filter({ hasText: "Add the payment step" })
+    .getByLabel("Shared initiative context");
+  await expect(receipt).toContainText("Shared the initiative brief (revision 1) and 1 note with the agent.");
+  await expect(page.getByText(ANSWER).last()).toBeVisible();
+  const turns = (await readFile(join(app.workspaceDirectory, TURN_LOG), "utf8")).trim().split("\n");
+  const received = turns.at(-1)!;
+  expect(received).toContain(BRIEF);
+  expect(received).toContain(String.raw`\"kind\":\"initiative\"`);
+  expect(received).toContain("Stripe only, no saved cards.");
+  expect(received).not.toContain("Cache order totals");
+  expect(received).toContain("[initiative-context]");
+  // The first message, sent before the brief existed, carried none.
+  expect(turns[0]).not.toContain(String.raw`\"kind\":\"initiative\"`);
+  await evidence("chat-initiative-receipt", page.getByRole("article", { name: "Your request" }).filter({ hasText: "Add the payment step" }));
+  await evidence("composer-initiative-chip", memberComposer);
+
+  // The composer chip opens the Initiative page.
+  await memberComposer.getByRole("button", { name: `Open initiative ${INITIATIVE}` }).click();
+  await expect(page.getByRole("main", { name: "Initiatives" }).getByRole("heading", { level: 2, name: INITIATIVE })).toBeVisible();
   expect(app.rendererErrors).toEqual([]);
 });

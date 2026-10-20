@@ -483,7 +483,7 @@ describe("CommandPalette initiatives", () => {
     color: "teal",
     status: "active",
     brief: "",
-    briefRevision: 0,
+    briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
     revision: 1,
     createdAt: "2026-07-28T08:00:00.000Z",
     updatedAt: "2026-07-28T08:00:00.000Z",

@@ -7,6 +7,11 @@ import type {
 
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";
+import {
+  acpCompactedContextTitle,
+  acpCompactingContextTitle,
+  type AcpCompactionProviderName,
+} from "./context-compaction-activity";
 
 const MAX_TRACKED_COMPACTIONS = 256;
 const MAX_ACTIVITY_ID_CHARS = 1_000;
@@ -65,7 +70,7 @@ export class AcpCompactionProjection {
   private readonly unknownStatusIds = new Set<string>();
 
   constructor(
-    private readonly providerName: string,
+    private readonly providerName: AcpCompactionProviderName,
     private readonly providerId: string,
     private readonly emitter: AgentHarnessEmitter,
   ) {}
@@ -116,7 +121,7 @@ export class AcpCompactionProjection {
         update.compactionId,
         state,
         "started",
-        `${this.providerName} is compacting session context`,
+        acpCompactingContextTitle(this.providerName),
       );
       return status;
     }
@@ -161,7 +166,7 @@ export class AcpCompactionProjection {
         compactionId,
         state,
         "completed",
-        `${this.providerName} compacted session context`,
+        acpCompactedContextTitle(this.providerName),
       );
     } else if (state.status === "failed") {
       this.emit(

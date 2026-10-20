@@ -3515,6 +3515,47 @@ button.header-breadcrumb-project:hover {
   white-space: nowrap;
 }
 
+.composer-checkout-context {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The chat's initiative, as quiet as the checkout location beside it. */
+.composer-initiative-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 220px;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.composer-initiative-chip > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-initiative-chip:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.composer-initiative-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
 .composer-route-control-error {
   position: absolute;
   right: 0;

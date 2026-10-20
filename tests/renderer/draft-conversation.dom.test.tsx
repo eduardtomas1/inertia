@@ -569,7 +569,7 @@ describe("useDraftConversation", () => {
     const secondProject = { ...project, id: "44444444-4444-4444-8444-444444444444", name: "Second" };
     const initiative = {
       id: initiativeId, name: "Checkout", color: "teal" as const, status: "active" as const, brief: "",
-      briefRevision: 0, revision: 1, createdAt: now, updatedAt: now,
+      briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 1, createdAt: now, updatedAt: now,
     };
     let currentSnapshot: AppSnapshot = { ...snapshot, projects: [project, secondProject], initiatives: [initiative] };
     const commands: CommandWithoutId[] = [];

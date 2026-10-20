@@ -45,6 +45,7 @@ import {
 } from "./provider-run-ownership-schema";
 import { systemSuspendTimingSchemaIsValid } from "./system-suspend-schema";
 import { countLimitTriggersAreValid } from "./count-limit-triggers-schema";
+import { executionContextKindsAreValid } from "./execution-context-refs-schema";
 import { validUsageDashboardIndex } from "./usage-dashboard-index-schema";
 import {
   DATABASE_BACKUP_INTERVAL_MS,
@@ -161,6 +162,7 @@ function validateOpenDatabase(
   suspendTimingSchemaIsValid: DatabaseSchemaValidator,
   countLimitSchemaIsValid: (database: Database.Database, version: number) => boolean,
   contextPacketTriggersAreValid: DatabaseSchemaValidator,
+  executionContextKindsAreValid: (database: Database.Database, version: number) => boolean,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -415,17 +417,14 @@ function validateOpenDatabase(
       || !/raise\s*\(\s*abort/u.test(normalizedPromptPresetTrigger)
     ) return "inconsistent";
   }
-  if (version >= 55 && !providerRunOwnershipSchemaIsValid(database)) {
-    return "inconsistent";
-  }
-  if (version >= 56 && !attachmentCapabilitiesAreValid(database)) {
-    return "inconsistent";
-  }
+  if (version >= 55 && !providerRunOwnershipSchemaIsValid(database)) return "inconsistent";
+  if (version >= 56 && !attachmentCapabilitiesAreValid(database)) return "inconsistent";
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "inconsistent";
   if (version >= 61 && !contextPacketTriggersAreValid(database)) return "inconsistent";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
   if (version >= 96 && !countLimitSchemaIsValid(database, version)) return "inconsistent";
+  if (!executionContextKindsAreValid(database, version)) return "inconsistent";
   for (const [introducedAt, index] of schemaRequirements.indexes) {
     if (version >= introducedAt && !database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
@@ -456,6 +455,7 @@ function validateDatabase(
       systemSuspendTimingSchemaIsValid,
       countLimitTriggersAreValid,
       contextPacketTriggersAreValid,
+      executionContextKindsAreValid,
     );
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -486,6 +486,7 @@ function validateDatabaseOffThread(
     const systemSuspendTimingSchemaIsValid = ${systemSuspendTimingSchemaIsValid.toString()};
     const countLimitTriggersAreValid = ${countLimitTriggersAreValid.toString()};
     const contextPacketTriggersAreValid = ${contextPacketTriggersAreValid.toString()};
+    const executionContextKindsAreValid = ${executionContextKindsAreValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -503,6 +504,7 @@ function validateDatabaseOffThread(
         systemSuspendTimingSchemaIsValid,
         countLimitTriggersAreValid,
         contextPacketTriggersAreValid,
+        executionContextKindsAreValid,
       );
     } catch {
       result = "corrupt";

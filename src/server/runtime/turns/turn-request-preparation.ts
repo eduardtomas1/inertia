@@ -25,6 +25,7 @@ import {
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
 } from "./request-context";
+import { initiativeTurnContext, type InitiativeTurnContext } from "./initiative-turn-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -35,6 +36,7 @@ import {
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
   ActiveTurn,
+  FreshSessionTurnRequest,
   QueuedTurn,
   QueueTurnRequest,
   TurnControllerHooks,
@@ -78,6 +80,12 @@ export function prepareTurnRequest(
   const resolved = resolveTurnRequest(dependencies, request);
   const queued = dependencies.store.beginAgentTurn(resolved.input);
   try {
+    if (queued.initiativeContextReceipt) {
+      dependencies.hooks.broadcast({
+        type: "conversation.message.persisted",
+        message: queued.initiativeContextReceipt,
+      });
+    }
     if (resolved.handoffFromTurnId) {
       retireUsageLimitSnooze(dependencies, queued.turn.conversationId, resolved.handoffFromTurnId);
     }
@@ -240,6 +248,13 @@ export function resolveTurnRequest(
   const interruptedTurnId = dependencies.store.turnLedgerRepository
     .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
+  const canResume = continuation.action === "resume-session";
+  // The initiative's brief and notes index: in full on a fresh provider
+  // session, and afterwards only when a part changed since this session last
+  // received it.
+  const initiativeContext = initiativeTurnContext(dependencies.store, conversation, {
+    freshSession: !canResume,
+  });
   let conversationContexts: ConversationContextMaterialization | undefined;
   const assemblyInput = {
     ...(contextPacketIds.length > 0
@@ -269,6 +284,27 @@ export function resolveTurnRequest(
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;
+  /**
+   * The one place a request is assembled with its initiative material. Both
+   * the turn's own request and a fresh-session fallback return the record of
+   * what they carried, which is what the ledger writes.
+   */
+  const assemble = (
+    initiative: InitiativeTurnContext | null,
+    extra: Pick<AssembleTurnRequestInput, "restoredHistory" | "carriedConversationContexts">,
+  ): FreshSessionTurnRequest => ({
+    ...assembleTurnRequest({
+      ...assemblyInput,
+      ...extra,
+      ...(initiative
+        ? {
+            initiativeContexts: initiative.contexts,
+            internalInstructions: [...assemblyInput.internalInstructions, initiative.instruction],
+          }
+        : {}),
+    }),
+    initiativeContext: initiative?.record ?? null,
+  });
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
   const unattributedHistoryOnRoute = () => {
@@ -323,19 +359,27 @@ export function resolveTurnRequest(
       },
     );
   };
-  const assembleOnFreshSession = (excludedMessageId?: string) => assembleTurnRequest({
-    ...assemblyInput,
-    restoredHistory: ownChatPacketId === null
-      ? (capacityBytes: number) => dependencies.store.continuationHistory(
-          conversation.id,
-          restoredCapacity(capacityBytes),
-          requestedAt,
-          excludedMessageId,
-          restoredHistoryRoute(),
-        )
-      : referencedHistory,
-  });
-  const canResume = continuation.action === "resume-session";
+  const assembleOnFreshSession = (initiative: InitiativeTurnContext | null, excludedMessageId?: string) =>
+    assemble(initiative, {
+      restoredHistory: ownChatPacketId === null
+        ? (capacityBytes: number) => dependencies.store.continuationHistory(
+            conversation.id,
+            restoredCapacity(capacityBytes),
+            requestedAt,
+            excludedMessageId,
+            restoredHistoryRoute(),
+          )
+        : referencedHistory,
+    });
+  // A resumed turn that falls back to a fresh session sends everything again,
+  // read from the chat as it is when the fallback happens: it may have moved
+  // to another initiative, or left one, since this request was prepared.
+  const assembleFallback = (excludedMessageId: string) => assembleOnFreshSession(
+    initiativeTurnContext(dependencies.store, dependencies.store.conversation(conversation.id), {
+      freshSession: true,
+    }),
+    excludedMessageId,
+  );
   const importNote = latestTurn?.origin === "cli-import"
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
     : null;
@@ -343,9 +387,8 @@ export function resolveTurnRequest(
     && continuation.reasonCode !== "first-turn"
     && request.goalStart === undefined;
   const assembled = startsFreshInEstablishedChat
-    ? assembleOnFreshSession()
-    : assembleTurnRequest({
-        ...assemblyInput,
+    ? assembleOnFreshSession(initiativeContext)
+    : assemble(initiativeContext, {
         carriedConversationContexts: dependencies.store.contextPackets
           .unreachedReferences(conversation.id)
           .flatMap((reference) => reference.sentBlocks() ?? []),
@@ -437,6 +480,7 @@ export function resolveTurnRequest(
           contextRequestId: request.contextRequestId,
         }
       : {}),
+    ...(assembled.initiativeContext ? { initiativeContext: assembled.initiativeContext } : {}),
     providerId: route.providerId,
     modelSelection,
     continuationIdentity: route.continuationIdentity,
@@ -493,6 +537,7 @@ export function resolveTurnRequest(
           runStartedAt: dependencies.clock().getTime(),
           workspaceRunCreated: false,
           providerRunStarted: false,
+          providerInvoked: false,
           providerStartAcknowledgement: null,
           nativeGoalStartAcknowledgement: null,
           attachmentsReleased: false,
@@ -510,7 +555,7 @@ export function resolveTurnRequest(
           providerStopStarted: false,
           sessionAfter: canResume ? conversation.providerSessionId : null,
           freshSessionRequest: canResume && request.goalStart === undefined
-            ? assembleOnFreshSession
+            ? assembleFallback
             : null,
           lastUsage: null,
           assistantText: "",

@@ -23,6 +23,19 @@ The useful changes in each Inertia release, in plain language.
   archive or delete it, and open its chats, grouped by Waiting on you,
   Working, Done and Idle. Deleting an initiative keeps its chats and their
   history.
+- Each initiative has a **Brief** (objective, constraints and decisions in
+  Markdown, up to 8 KiB) and **Notes** (a title and up to 2 KiB each), edited
+  on the Initiatives page. Every chat in an initiative that is not archived
+  (active or done) receives the brief and a list of its accepted notes as
+  shared reference material on the first message of a new session, again
+  after you change them and after its context is compacted, never on every
+  message. A chat that leaves its initiative tells its agent once that the
+  material no longer applies. A receipt under the message says what was
+  shared, for example "Shared the initiative brief (revision 3) and 5 notes
+  with the agent."; a message that never reached the agent leaves none. Notes
+  show who wrote them; agents cannot write notes yet, and the
+  review strip for their future proposals is already in place. A chat's
+  composer names its initiative and opens it in one click.
 
 ## 0.0.73 — 2026-10-19
 

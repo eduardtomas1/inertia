@@ -149,6 +149,16 @@ If the provider completes compaction but local receipt storage or timeline refre
 fails, the success notice explains that reporting failure without inviting a
 second compaction.
 
+A turn that shares its initiative's brief or notes with the agent leaves a
+similar persisted receipt under the request, for example **Shared the
+initiative brief (revision 3) and 5 notes with the agent.** It is a
+turn-scoped system message with bounded metadata (schema migration 100),
+written in the same transaction as the turn, replaced if the turn restarts on
+a fresh provider session, and withdrawn if the turn never reached its
+provider. A compaction receipt, or a compaction the provider records on its
+own, makes the next turn share the brief and notes again; see
+`docs/HARNESS_CAPABILITIES.md`.
+
 ## T3 Code reference and adaptation
 
 The supplied [SnapShots post](https://x.com/jullerino/status/2097144040076820983)

@@ -517,7 +517,9 @@ function estimateTurnRowSize(
     + requestActionsHeight
     + requestLines * 22
     + attachmentRows * 25
-    + (estimatedRequestContent === turn.userMessage.content ? 0 : 28);
+    + (estimatedRequestContent === turn.userMessage.content ? 0 : 28)
+    // One receipt row under the request for shared initiative context.
+    + (turn.initiativeContextReceipts.length > 0 ? 34 : 0);
 
   const transcriptActivities = turn.activities.filter(isTranscriptActivity);
   const activeActivityGroups = turn.isActive

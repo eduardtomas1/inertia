@@ -136,6 +136,12 @@ export interface AgentTurnLifecycleUpdate {
   startedAt?: string;
   completedAt?: string;
   updatedAt?: string;
+  /**
+   * Terminal updates only: false when the provider was never handed this
+   * request. Such a turn, like one that settles before it started or fails
+   * to start, withdraws its initiative delivery and receipt.
+   */
+  providerReached?: boolean;
 }
 
 export interface BeginAgentTurnInput
@@ -160,6 +166,27 @@ export interface BeginAgentTurnInput
   conversationContextDeliveries?: readonly ConversationContextDelivery[];
   contextRequestId?: string;
   requestedAt?: string;
+  /**
+   * The initiative brief and notes this turn carries. Its delivery record and
+   * timeline receipt are written in the same transaction as the turn.
+   */
+  initiativeContext?: TurnInitiativeContextRecord;
+}
+
+/** A persisted request and its queued turn, with the initiative receipt it wrote, if any. */
+export interface BegunAgentTurn {
+  message: ChatMessage;
+  turn: AgentTurn;
+  initiativeContextReceipt?: ChatMessage;
+}
+
+/** What one turn's request shared of the chat's initiative, and what its session holds afterwards. */
+export interface TurnInitiativeContextRecord {
+  receipt: import("../../shared/initiatives").InitiativeContextReceipt;
+  /** The timeline text, naming the initiatives as the agent was told them. */
+  receiptText: string;
+  /** Only what the session actually received: a part neither sent now nor before stays null. */
+  delivery: import("./initiative-context-delivery-repository").InitiativeContextDeliveryState;
 }
 
 export interface CreateMessageOptions {
@@ -167,6 +194,8 @@ export interface CreateMessageOptions {
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;
+  /** Turn-scoped system receipt for shared initiative context; written with its delivery. */
+  initiativeContext?: import("../../shared/initiatives").InitiativeContextReceipt;
   activateConversation?: boolean;
 }
 

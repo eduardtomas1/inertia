@@ -20,6 +20,10 @@ export type { Todo, TodoDraft, TodoPatch, TodoPriority } from "./todos";
 export type {
   Initiative,
   InitiativeColor,
+  InitiativeContextReceipt,
+  InitiativeNote,
+  InitiativeNoteProvenance,
+  InitiativeNoteState,
   InitiativePatch,
   InitiativeStatus,
 } from "./initiatives";

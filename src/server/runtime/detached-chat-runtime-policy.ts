@@ -98,6 +98,12 @@ export function detachedChatCommandRejection(
     case "initiative.update":
     case "initiative.delete":
     case "initiative.assign":
+    case "initiative.brief.update":
+    case "initiative.notes.list":
+    case "initiative.note.create":
+    case "initiative.note.update":
+    case "initiative.note.resolve":
+    case "initiative.note.delete":
       return REJECTION;
     case "conversation.update":
       return ownsExistingConversation(command.payload.conversationId)

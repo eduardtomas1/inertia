@@ -63,7 +63,7 @@
 }
 
 .initiatives-list-group > h2,
-.initiative-member-group > h3 {
+.initiative-member-group > h4 {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -186,6 +186,14 @@
 .initiative-detail-summary {
   margin-top: -10px;
   font-variant-numeric: tabular-nums;
+}
+
+.initiative-members-heading {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-heading);
 }
 
 .initiative-detail-controls {

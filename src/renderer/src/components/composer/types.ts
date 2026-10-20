@@ -40,6 +40,7 @@ export interface ComposerProps {
   scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   newChatInitiativePicker?: NewChatInitiativePicker;
+  initiativeChip?: ComposerInitiativeChip;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -126,6 +127,16 @@ export interface NewChatProjectPicker {
   selectedProject: Project;
   disabled: boolean;
   onChange: (project: Project | null) => void;
+}
+
+/**
+ * The initiative an existing chat belongs to, shown quietly with its checkout
+ * context. Choosing it opens the Initiative page.
+ */
+export interface ComposerInitiativeChip {
+  name: string;
+  color: Initiative["color"];
+  onOpen: () => void;
 }
 
 export interface NewChatInitiativePicker {

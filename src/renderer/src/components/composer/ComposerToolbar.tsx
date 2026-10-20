@@ -51,7 +51,13 @@ import { ProjectPicker } from "./ProjectPicker";
 import { loadInitiativePicker } from "../chatSurfaceLoaders";
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import type { ComposerMenuController } from "./useComposerMenus";
-import type { NewChatInitiativePicker, NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
+import type {
+  ComposerInitiativeChip,
+  NewChatInitiativePicker,
+  NewChatProjectPicker,
+  PromptPresetCommandRunner,
+} from "./types";
+import { InitiativeDot } from "../initiatives/InitiativeMark";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
@@ -83,18 +89,46 @@ export function composerCheckoutStrip({
   newChatProjectPicker,
   worktreePath,
   repository,
+  initiative = false,
 }: {
   showCheckoutContext: boolean;
   scratchWorkspace: boolean;
   newChatProjectPicker: boolean;
   worktreePath: string | null;
   repository: boolean;
-}): "hidden" | "branch" | "context" {
+  /** An existing chat in an initiative keeps a strip for its initiative chip. */
+  initiative?: boolean;
+}): "hidden" | "branch" | "context" | "initiative" {
   if (!showCheckoutContext) return "hidden";
   if (newChatProjectPicker) return "context";
-  if (scratchWorkspace) return "hidden";
+  if (scratchWorkspace) return initiative ? "initiative" : "hidden";
   if (worktreePath) return "context";
-  return repository ? "branch" : "hidden";
+  if (repository) return "branch";
+  return initiative ? "initiative" : "hidden";
+}
+
+function CheckoutLocation({ worktree }: { worktree: boolean }): React.JSX.Element {
+  return (
+    <span className="composer-checkout-location">
+      <FolderGit2 size={14} aria-hidden="true" />
+      <span>{worktree ? "Isolated worktree" : "Current checkout"}</span>
+    </span>
+  );
+}
+
+function InitiativeChip({ chip }: { chip: ComposerInitiativeChip }): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className="composer-initiative-chip"
+      aria-label={`Open initiative ${chip.name}`}
+      title={`Open initiative ${chip.name}`}
+      onClick={chip.onOpen}
+    >
+      <InitiativeDot color={chip.color} />
+      <span>{chip.name}</span>
+    </button>
+  );
 }
 
 export function composerCheckoutBranch(
@@ -158,6 +192,7 @@ export interface ComposerToolbarProps {
   scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
   newChatInitiativePicker?: NewChatInitiativePicker;
+  initiativeChip?: ComposerInitiativeChip;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -236,6 +271,7 @@ export function ComposerToolbar({
   scratchWorkspace = false,
   newChatProjectPicker,
   newChatInitiativePicker,
+  initiativeChip,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -285,7 +321,9 @@ export function ComposerToolbar({
     repository: checkoutGitStatus
       ? checkoutGitStatus.isRepository
       : Boolean(checkoutModel?.project.repositoryRoot),
+    initiative: Boolean(initiativeChip),
   });
+  const chip = initiativeChip && !newChatProjectPicker ? <InitiativeChip chip={initiativeChip} /> : null;
   const toolsId = useId();
   const toolsOpen = useComposerToolsOpen();
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
@@ -571,22 +609,27 @@ export function ComposerToolbar({
       </div>
       {checkoutStrip !== "hidden" && (
         <div
-          className={clsx("composer-checkout-strip", checkoutStrip === "branch" && "is-branch-only")}
+          className={clsx(
+            "composer-checkout-strip",
+            (checkoutStrip === "branch" || checkoutStrip === "initiative") && "is-branch-only",
+          )}
           role="group"
           aria-label="Chat checkout context"
         >
-          {checkoutStrip === "branch" ? null : newChatProjectPicker ? (
+          {checkoutStrip === "initiative" ? chip : checkoutStrip === "branch" ? chip : newChatProjectPicker ? (
             <div className="composer-new-chat-pickers">
               <ProjectPicker picker={newChatProjectPicker} />
               {newChatInitiativePicker && InitiativePicker && <InitiativePicker picker={newChatInitiativePicker} />}
             </div>
-          ) : (
-            <span className="composer-checkout-location">
-              <FolderGit2 size={14} aria-hidden="true" />
-              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+          ) : chip ? (
+            <span className="composer-checkout-context">
+              <CheckoutLocation worktree={Boolean(conversation.worktreePath)} />
+              {chip}
             </span>
+          ) : (
+            <CheckoutLocation worktree={Boolean(conversation.worktreePath)} />
           )}
-          {!scratchWorkspace && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
+          {!scratchWorkspace && checkoutStrip !== "initiative" && <CheckoutBranchSlot branch={visibleCheckoutBranch} />}
         </div>
       )}
     </div>

@@ -228,6 +228,8 @@ export interface ChatMessage {
   compaction?: import("../context-compaction").ContextCompaction;
   /** A visual reply the agent published in this turn; system role, always turn-scoped. */
   htmlRender?: import("../html-render").HtmlRenderReference;
+  /** What this turn shared of its initiative's brief and notes; system role, turn-scoped. */
+  initiativeContext?: import("../initiatives").InitiativeContextReceipt;
   id: string;
   conversationId: string;
   /** System messages may be conversation-scoped; user/assistant turn messages are explicit. */

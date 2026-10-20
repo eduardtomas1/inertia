@@ -20,6 +20,8 @@ import { projectDetachedChatSnapshot } from "../../src/server/runtime/detached-c
 import type { ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { providerIdForHarness } from "../../src/shared/model-routing";
+import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
+import { INITIATIVE_BRIEF_CONFLICT_MESSAGE } from "../../src/shared/initiatives";
 
 const roots: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -44,7 +46,7 @@ function fixture() {
     order.push(event.type);
     events.push(event);
   });
-  const handler = createInitiativeCommandHandler({ store });
+  const handler = createInitiativeCommandHandler({ store, send });
   const execute = createRuntimeCommandExecutor({
     handlers: [
       handler,
@@ -86,8 +88,14 @@ describe("initiative command handler", () => {
     const { handler } = fixture();
     expect([...(handler.commandTypes ?? [])].sort()).toEqual([
       "initiative.assign",
+      "initiative.brief.update",
       "initiative.create",
       "initiative.delete",
+      "initiative.note.create",
+      "initiative.note.delete",
+      "initiative.note.resolve",
+      "initiative.note.update",
+      "initiative.notes.list",
       "initiative.update",
     ]);
   });
@@ -256,6 +264,12 @@ describe("initiative command handler", () => {
       ["initiative.update", { id, expectedRevision: 1, name: "Renamed" }],
       ["initiative.delete", { id }],
       ["initiative.assign", { conversationId: conversation.id, initiativeId: id }],
+      ["initiative.brief.update", { id, expectedBriefRevision: 0, brief: "From a window" }],
+      ["initiative.notes.list", { initiativeId: id }],
+      ["initiative.note.create", { initiativeId: id, title: "From a window", body: "" }],
+      ["initiative.note.update", { id, expectedRevision: 1, title: "Renamed" }],
+      ["initiative.note.resolve", { id, expectedRevision: 1, decision: "accept" }],
+      ["initiative.note.delete", { id }],
     ] as const) {
       const command = clientCommandSchema.parse({ type, requestId: randomUUID(), payload });
       expect(detachedChatCommandRejection(authority, command, resources))
@@ -275,5 +289,93 @@ describe("initiative command handler", () => {
     expect(JSON.stringify(projected)).not.toContain(theirs.name);
     expect(projectDetachedChatSnapshot(store.shellSnapshot(), store.createConversation(project.id, "Free").id).initiatives)
       .toEqual([]);
+  });
+});
+
+describe("initiative brief and note commands", () => {
+  it("saves the brief as a snapshot mutation and reports a stale save as a conflict", async () => {
+    const { store, run } = fixture();
+    const id = randomUUID();
+    await run("initiative.create", { id, name: "Checkout" });
+    const saved = await run("initiative.brief.update", { id, expectedBriefRevision: 0, brief: "Ship it." });
+    expect(saved.order).toEqual(["snapshot", "request.ok"]);
+    expect(store.initiatives.get(id)).toMatchObject({ brief: "Ship it.", briefRevision: 1, revision: 2 });
+    const stale = await run("initiative.brief.update", { id, expectedBriefRevision: 0, brief: "Overwrite" });
+    expect(stale.events).toEqual([expect.objectContaining({ type: "request.error", message: INITIATIVE_BRIEF_CONFLICT_MESSAGE })]);
+    expect(store.initiatives.get(id)?.brief).toBe("Ship it.");
+  });
+
+  it("lists, creates, edits, reviews and deletes notes", async () => {
+    const { store, run } = fixture();
+    const id = randomUUID();
+    await run("initiative.create", { id, name: "Checkout" });
+    const created = await run("initiative.note.create", { initiativeId: id, title: "  Database  ", body: "Use Postgres." });
+    expect(created.order).toEqual(["snapshot", "request.ok"]);
+    const [note] = store.initiatives.notes.list(id);
+    // Notes written in Inertia are the user's and apply at once.
+    expect(note).toMatchObject({ title: "Database", provenance: "user", state: "accepted" });
+    expect(store.initiatives.get(id)?.notesRevision).toBe(1);
+
+    const proposal = store.initiatives.notes.create({ initiativeId: id, title: "Agent idea", body: "", provenance: "agent" });
+    const rejected = store.initiatives.notes.create({ initiativeId: id, title: "Rejected", body: "", provenance: "agent" });
+    store.initiatives.notes.resolve(rejected.id, 1, "reject");
+
+    const listed = await run("initiative.notes.list", { initiativeId: id });
+    // A read: no snapshot, one result with accepted notes and proposals only.
+    expect(listed.order).toEqual(["request.result"]);
+    expect(listed.events[0]).toEqual({
+      type: "request.result",
+      requestId: listed.command.requestId,
+      result: { kind: "initiative.notes", initiativeId: id, notes: store.initiatives.notes.list(id) },
+    });
+    expect(parseServerEvent(listed.events[0])).not.toBeNull();
+    expect((listed.events[0] as { result: { notes: unknown[] } }).result.notes).toHaveLength(2);
+
+    await run("initiative.note.update", { id: note!.id, expectedRevision: 1, body: "Use Postgres 16." });
+    expect(store.initiatives.notes.get(note!.id)).toMatchObject({ body: "Use Postgres 16.", revision: 2 });
+    expect(store.initiatives.get(id)?.notesRevision).toBe(2);
+    await run("initiative.note.resolve", { id: proposal.id, expectedRevision: 1, decision: "accept", title: "Cache totals" });
+    expect(store.initiatives.notes.get(proposal.id)).toMatchObject({ state: "accepted", title: "Cache totals", provenance: "agent" });
+    const stale = await run("initiative.note.update", { id: note!.id, expectedRevision: 1, title: "Stale" });
+    expect(stale.events).toEqual([expect.objectContaining({
+      type: "request.error", message: "The note changed elsewhere. Reload to see the latest.",
+    })]);
+    await run("initiative.note.delete", { id: note!.id });
+    expect(store.initiatives.notes.get(note!.id)).toBeNull();
+    const missing = await run("initiative.notes.list", { initiativeId: randomUUID() });
+    expect(missing.events).toEqual([expect.objectContaining({ type: "request.error", message: "That initiative no longer exists." })]);
+  });
+
+  it("rejects malformed brief and note payloads at the protocol boundary", () => {
+    const id = randomUUID();
+    expect(parses("initiative.brief.update", { id, expectedBriefRevision: 0, brief: "" })).toBe(true);
+    expect(parses("initiative.brief.update", { id, expectedBriefRevision: 0, brief: "😀".repeat(2_048) })).toBe(true);
+    for (const payload of [
+      { id, brief: "Missing revision" },
+      { id, expectedBriefRevision: -1, brief: "x" },
+      { id, expectedBriefRevision: 0, brief: `${"😀".repeat(2_048)}x` },
+      { id, expectedBriefRevision: 0, brief: "nul\0" },
+      { id, expectedBriefRevision: 0, brief: "x", name: "Extra" },
+    ]) {
+      expect(parses("initiative.brief.update", payload)).toBe(false);
+    }
+    expect(parses("initiative.note.create", { initiativeId: id, title: " Title ", body: "" })).toBe(true);
+    for (const payload of [
+      { initiativeId: id, title: "", body: "" },
+      { initiativeId: id, title: "Two\nlines", body: "" },
+      { initiativeId: id, title: "Body", body: `${"😀".repeat(512)}x` },
+      { initiativeId: id, title: "Agent", body: "", provenance: "agent" },
+      { initiativeId: "nope", title: "Id", body: "" },
+    ]) {
+      expect(parses("initiative.note.create", payload)).toBe(false);
+    }
+    expect(parses("initiative.note.update", { id, expectedRevision: 1, body: "" })).toBe(true);
+    expect(parses("initiative.note.update", { id, expectedRevision: 1 })).toBe(false);
+    expect(parses("initiative.note.resolve", { id, expectedRevision: 1, decision: "accept", title: "Edited" })).toBe(true);
+    expect(parses("initiative.note.resolve", { id, expectedRevision: 1, decision: "reject" })).toBe(true);
+    expect(parses("initiative.note.resolve", { id, expectedRevision: 1, decision: "reject", body: "Edited" })).toBe(false);
+    expect(parses("initiative.note.resolve", { id, expectedRevision: 1, decision: "maybe" })).toBe(false);
+    expect(parses("initiative.note.delete", { id: "nope" })).toBe(false);
+    expect(parses("initiative.notes.list", { initiativeId: id, state: "rejected" })).toBe(false);
   });
 });

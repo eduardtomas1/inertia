@@ -55,6 +55,7 @@ describe("RuntimeStore initiatives", () => {
         .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect((database.prepare("PRAGMA table_info(initiatives)").all() as Array<{ name: string }>).map(({ name }) => name)).toEqual([
         "id", "name", "color", "status", "brief", "brief_revision", "preferences_json", "revision", "created_at", "updated_at",
+        "notes_revision", "brief_updated_at",
       ]);
       expect((database.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>)
         .some(({ name }) => name === "initiative_id")).toBe(true);
@@ -73,7 +74,8 @@ describe("RuntimeStore initiatives", () => {
     expect(store.shellSnapshot().initiatives).toEqual([]);
     const first = store.initiatives.create({ id: randomUUID(), name: "  Checkout redesign  " });
     expect(first).toMatchObject({
-      name: "Checkout redesign", color: "red", status: "active", brief: "", briefRevision: 0, revision: 1,
+      name: "Checkout redesign", color: "red", status: "active", brief: "", briefRevision: 0,
+      briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 1,
     });
     expect(first.createdAt).toBe(first.updatedAt);
     const second = store.initiatives.create({ id: randomUUID(), name: "Release 0.1", color: "teal" });

@@ -67,6 +67,29 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "updated_at",
   ]],
   [99, "conversations", ["initiative_id"]],
+  [100, "initiatives", ["notes_revision", "brief_updated_at"]],
+  [100, "initiative_notes", [
+    "id",
+    "initiative_id",
+    "title",
+    "body",
+    "provenance",
+    "state",
+    "source_conversation_id",
+    "revision",
+    "created_at",
+    "updated_at",
+  ]],
+  [100, "initiative_context_deliveries", [
+    "id",
+    "conversation_id",
+    "initiative_id",
+    "turn_id",
+    "brief_revision",
+    "notes_revision",
+    "delivered_at",
+  ]],
+  [100, "messages", ["initiative_context_json"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -112,6 +135,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [97, ["restart_continuation_plans"]],
   [98, ["conversation_title_locks"]],
   [99, ["initiatives"]],
+  [100, ["initiative_notes", "initiative_context_deliveries"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -127,5 +151,7 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [94, "agent_context_reads_target_idx"],
     [96, "todos_conversation_idx"],
     [99, "conversations_initiative_idx"],
+    [100, "initiative_notes_state_idx"],
+    [100, "initiative_context_deliveries_conversation_idx"],
   ],
 };

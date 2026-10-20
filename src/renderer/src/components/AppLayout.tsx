@@ -3,7 +3,7 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   AppSettings,
   AppSnapshot,
@@ -511,6 +511,27 @@ export const AppLayout = memo(function AppLayout({
       });
     },
   });
+  // An existing chat in an initiative names it beside its checkout context.
+  const chatInitiativeId = scene.chat.conversation?.initiativeId ?? null;
+  const chatInitiative = useMemo(
+    () => chatInitiativeId
+      ? connection.snapshot?.initiatives?.find(({ id }) => id === chatInitiativeId) ?? null
+      : null,
+    [chatInitiativeId, connection.snapshot?.initiatives],
+  );
+  const workspaceScene = useMemo((): WorkspaceSceneProps => chatInitiative
+    ? {
+        ...scene,
+        chat: {
+          ...scene.chat,
+          initiativeChip: {
+            name: chatInitiative.name,
+            color: chatInitiative.color,
+            onOpen: () => sidebarActions.openInitiative(chatInitiative.id),
+          },
+        },
+      }
+    : scene, [chatInitiative, scene, sidebarActions]);
   const tasksActions = useStableActions({
     request: (command: CommandWithoutId, options?: { passive?: boolean }) => actions.run(command.type, command, options),
     openConversation: (thread: Conversation) => {
@@ -891,7 +912,7 @@ export const AppLayout = memo(function AppLayout({
                 </div>
               )
             ) : (
-              <WorkspaceScene {...scene} />
+              <WorkspaceScene {...workspaceScene} />
             )}
           </div>
           {view === "workspace" && (

@@ -67,3 +67,25 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
 }
+
+/* The initiative receipt is one sentence; let it wrap rather than hide its end. */
+.sent-context > [data-initiative-context] {
+  max-width: min(100%, 560px);
+  padding-block: 4px;
+  align-items: start;
+}
+
+.sent-context > [data-initiative-context] > svg {
+  margin-top: 2px;
+}
+
+.sent-context > [data-initiative-context] > span {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+.sent-context > [data-initiative-context] small {
+  flex: 1 1 auto;
+  overflow: visible;
+  white-space: normal;
+}

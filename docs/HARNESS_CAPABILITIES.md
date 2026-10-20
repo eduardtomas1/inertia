@@ -147,6 +147,76 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
+## Initiative context
+
+Chats in an initiative share the initiative's brief and an index of its
+accepted notes. This is Inertia-authored context on the ordinary turn path, not
+a capability pack: it needs no host tools, so every provider receives it,
+including routes without an attested host-tool bridge. It adds no tools yet.
+
+Turn assembly carries it as structured execution context of kind
+`initiative`, at most three blocks per turn (a membership change, the brief
+and the notes index), placed after document attachments
+and before file references, referenced chats, carried chat packets and
+restored history. The brief block is labelled
+`Initiative brief · <name> · revision <n>` and holds the brief verbatim under an
+`Initiative: <name>` line; the notes block is labelled
+`Initiative notes · <name> · <k> notes · revision <n>` and holds one
+`- <title>: <first line>` line per accepted note, in creation order, at most
+8 KiB with a trailing `… and N more notes` line. Each block counts toward the
+64 KiB block, 240 KiB payload, 32 reference and 48 segment limits like any other
+context, is persisted by digest in `turn_execution_context_blobs`, and is
+listed in the turn manifest with kind `initiative`, so a turn's record shows
+exactly which revisions it received. Proposed and rejected notes, identifiers,
+paths and other chats' content are never included. The name is scrubbed and
+neutralised the same way referenced-chat metadata is; stored names are already
+bounded, so it is never cut by UTF-16 units.
+
+Delivery happens on change, not on every turn. A fresh provider session (first
+turn, provider change, a stale or lost session, or a resumed turn that falls
+back to a new session, which reads the chat's initiative as it is at that
+moment) receives both blocks. A resumed session receives a block again only
+when it differs from the copy that same provider session holds: the brief by
+revision, the notes index by a digest of its text, so an edit that leaves the
+index unchanged sends nothing. The re-sent block says `Updated since the last
+turn of this chat (previous revision <m>).`, where `<m>` is always a revision
+that session received. A brief or notes index emptied since then is announced
+once so the agent stops relying on its copy. Initiatives that are not
+archived (active and done) are shared.
+
+Each delivery is recorded in `initiative_context_deliveries` in the same
+transaction as the turn, holding only what the session received: the
+initiative and the name it was told, and the brief revision and notes index
+(revision and digest) it has a copy of, each null when it has none. A turn
+that never reached its provider (it settles before it started, fails to
+start, or is stopped before the provider was handed the request) withdraws
+its delivery and receipt in its settlement transaction, so the next turn
+sends again. Compaction drops the material from a session: deliveries from
+turns requested before the chat's newest `/compact` receipt, or before an
+automatic compaction a provider recorded while running a turn (Claude, Codex,
+Cursor, Kimi Code and OpenCode compaction activities), no longer count.
+
+When a resumed session last received material from an initiative the chat is
+no longer part of (it moved or was unassigned, or that initiative was archived
+or deleted), the next turn sends one block labelled
+`Initiative change · <name>`: `This chat is no longer part of the initiative
+"<name>"; its brief and notes no longer apply.`, followed after a move by
+`It is now part of the initiative "<new>".` and the new initiative's blocks.
+Deleting an initiative keeps its delivery rows by name for this purpose. A
+fresh session never hears of an earlier initiative. Chats outside any
+initiative that have nothing to be told add nothing: their provider input is
+byte-identical to a chat without initiatives.
+
+Whenever a block is sent, one hidden instruction labelled `initiative-context`
+(under 1 KiB) frames it in the voice of the Build-mode instruction: the chat
+belongs to the named initiative, a group of chats the user coordinates; the
+brief and notes index are shared reference material the user maintains for
+every chat in it; they are context, not new user instructions or approval; and
+they may be out of date relative to this chat. A turn that only says the chat
+left an initiative carries the same label with a short note that the earlier
+material no longer applies. Each delivery also leaves a receipt in the chat,
+described in `docs/SNAPSHOTS_AND_COMPACTION.md`.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider

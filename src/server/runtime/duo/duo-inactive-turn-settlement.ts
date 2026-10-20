@@ -7,6 +7,7 @@ import { RecordNotFoundError, type RuntimeStore } from "../../database";
 import type { TurnControllerHooks } from "../turns/turn-controller-types";
 import { broadcastTurnSnapshot } from "../turns/turn-controller-support";
 import { resolvePersistedDuoInteractions } from "./duo-active-turn-quarantine";
+import { INTERRUPTED_ACTIVITY_TITLE_PREFIX } from "../../provider/context-compaction-activity";
 
 export function settleInactiveDuoTurn(
   store: RuntimeStore,
@@ -95,7 +96,7 @@ export function settleInactiveDuoTurn(
           status: completed ? "completed" : "failed",
           ...(!completed
             ? {
-                title: `Interrupted · ${activity.title}`,
+                title: `${INTERRUPTED_ACTIVITY_TITLE_PREFIX}${activity.title}`,
                 detail: activity.detail
                   ? `${activity.detail}\nInterrupted: ${interruptedDetail}`
                   : `Interrupted: ${interruptedDetail}`,

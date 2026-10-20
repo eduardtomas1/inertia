@@ -60,7 +60,7 @@ The Plan tab shows the agent's plan as a formatted document and marks each step 
 
 ![A plan document with live step progress in the Plan tab](docs/screenshots/inertia-plan.png)
 
-Group related chats into an **Initiative**, across projects and chats without a project. Each active initiative is its own section at the top of Work with a quiet count of chats that need you, while snoozed and settled chats keep their usual places, and the **Initiatives** page under Tasks lists its chats by what they need. Moving a chat into an initiative never changes its project, checkout or agent.
+Group related chats into an **Initiative**, across projects and chats without a project. Each active initiative is its own section at the top of Work with a quiet count of chats that need you, while snoozed and settled chats keep their usual places, and the **Initiatives** page under Tasks lists its chats by what they need. Moving a chat into an initiative never changes its project, checkout or agent. Write the initiative's brief and notes once, and each of its chats receives them as shared reference material when a session starts and after you change them, with a receipt in the chat.
 
 Keep a to-do list on the **Tasks** page with due dates and priorities. Open a task to hand it to an agent: choose a model and a project or folder, and **Start** opens a chat with the task as its first message.
 

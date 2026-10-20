@@ -1,5 +1,5 @@
 import { lazy, Suspense, useLayoutEffect, useMemo, useState } from "react";
-import { MessagesSquare, RotateCcw } from "lucide-react";
+import { Flag, MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
@@ -163,6 +163,19 @@ export function UserRequestLayer({
               <small title={sessionRecovery}>{sessionRecovery}</small>
             </span>
           </span>
+        </div>
+      )}
+      {turn.initiativeContextReceipts.length > 0 && (
+        <div className="sent-context" aria-label="Shared initiative context">
+          {turn.initiativeContextReceipts.map((receipt) => (
+            <span key={receipt.id} data-initiative-context="">
+              <Flag size={14} aria-hidden="true" />
+              <span>
+                <strong>Initiative context</strong>
+                <small title={receipt.content}>{receipt.content}</small>
+              </span>
+            </span>
+          ))}
         </div>
       )}
       {contextPackets.length > 0 && (

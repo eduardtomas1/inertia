@@ -80,6 +80,7 @@ export const Composer = memo(function Composer({
   scratchWorkspace = false,
   newChatProjectPicker,
   newChatInitiativePicker,
+  initiativeChip,
   providers,
   actions,
   disabled,
@@ -1120,6 +1121,7 @@ export const Composer = memo(function Composer({
           scratchWorkspace={scratchWorkspace}
           newChatProjectPicker={newChatProjectPicker}
           newChatInitiativePicker={newChatInitiativePicker}
+          initiativeChip={initiativeChip}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}

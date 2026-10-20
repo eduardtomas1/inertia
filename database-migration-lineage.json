@@ -752,6 +752,11 @@
       "version": 99,
       "name": "PersistInitiatives",
       "digest": "a7a251bbbed0e87110710c22edf766f3919e41a93e3ecfe848d68038c80e5536"
+    },
+    {
+      "version": 100,
+      "name": "PersistInitiativeNotes",
+      "digest": "74847bef97245ff91b8aacff26f8e60e131ca1e0f265d78046d27914c91133a7"
     }
   ]
 }

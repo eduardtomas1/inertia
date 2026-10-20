@@ -1090,6 +1090,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   }
 }
 import { issueReportResult } from "../issue-report";
+import { isInitiativeNotesResult } from "../initiatives";
 import { messageQueueResultSchema } from "../queued-messages";
 import { updatesRunResultSchema } from "../updates";
 
@@ -1115,6 +1116,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "todo.started": (value) => stringField(value, "conversationId"),
+  "initiative.notes": isInitiativeNotesResult,
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),

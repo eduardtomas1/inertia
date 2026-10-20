@@ -114,6 +114,20 @@ export class RecoveryRepository {
         AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
         AND id NOT IN (SELECT turn_id FROM provider_run_ownership)
     `);
+    // A turn still queued when the runtime stopped never reached its provider,
+    // so the initiative material it was to carry is sent again next time.
+    const forgetUnstartedInitiativeContext = [
+      this.database.prepare(`
+        DELETE FROM initiative_context_deliveries
+        WHERE turn_id = @turnId
+          AND EXISTS (SELECT 1 FROM agent_turns WHERE id = @turnId AND started_at IS NULL)
+      `),
+      this.database.prepare(`
+        DELETE FROM messages
+        WHERE turn_id = @turnId AND role = 'system' AND initiative_context_json IS NOT NULL
+          AND EXISTS (SELECT 1 FROM agent_turns WHERE id = @turnId AND started_at IS NULL)
+      `),
+    ];
     const addRecoveryActivity = this.database.prepare(`
       INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at)
       VALUES (?, ?, ?, ?, 'error', ?, NULL, 'failed', ?)
@@ -158,6 +172,7 @@ export class RecoveryRepository {
         if (turn) {
           markTurnActivities.run(id, turn.id);
           markTurnReasonings.run(id, turn.id);
+          for (const statement of forgetUnstartedInitiativeContext) statement.run({ turnId: turn.id });
           markInterruptedTurn.run(now, now, turn.id);
           compactMessageContentForTurn(this.database, turn.id, turn.conversation_id);
           compactReasoningContentForTurn(this.database, turn.id, turn.conversation_id);

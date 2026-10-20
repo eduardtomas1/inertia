@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InitiativesView } from "../../src/renderer/src/components/InitiativesView";
 import { InitiativeCreateHost } from "../../src/renderer/src/components/initiatives/InitiativeCreateHost";
+import { forgetInitiativeBriefDraft } from "../../src/renderer/src/components/initiatives/InitiativeMemory";
 import { loadInitiativeCreateDialog } from "../../src/renderer/src/components/lazySurfaceLoaders";
 import {
   closeNewInitiativeRequest,
@@ -12,6 +13,7 @@ import type {
   AppSnapshot,
   ConversationShell,
   Initiative,
+  InitiativeNote,
   Project,
   ServerEvent,
 } from "../../src/shared/contracts";
@@ -38,7 +40,7 @@ const scratch: Project = { ...project, id: "project-scratch", name: "No project"
 
 function initiative(id: string, name: string, overrides: Partial<Initiative> = {}): Initiative {
   return {
-    id, name, color: "teal", status: "active", brief: "", briefRevision: 0, revision: 3,
+    id, name, color: "teal", status: "active", brief: "", briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 3,
     createdAt: AT, updatedAt: AT, ...overrides,
   };
 }
@@ -105,7 +107,24 @@ function snapshot(overrides: Partial<AppSnapshot> = {}): AppSnapshot {
 
 const ok: ServerEvent = { type: "request.ok", requestId: "11111111-1111-4111-8111-111111111111" };
 
-function renderView(overrides: Partial<React.ComponentProps<typeof InitiativesView>> = {}) {
+type ViewProps = React.ComponentProps<typeof InitiativesView>;
+
+function notesEvent(initiativeId: string, notes: InitiativeNote[] = []): ServerEvent {
+  return {
+    type: "request.result",
+    requestId: "22222222-2222-4222-8222-222222222222",
+    result: { kind: "initiative.notes", initiativeId, notes },
+  };
+}
+
+/**
+ * `props.request` sees the page's changes; note reads go to `readNotes`, so
+ * the assertions about changes stay exact.
+ */
+function renderView(
+  overrides: Partial<ViewProps> = {},
+  readNotes: (initiativeId: string) => InitiativeNote[] = () => [],
+) {
   const props = {
     snapshot: snapshot(),
     settings: { confirmDestructiveActions: true },
@@ -117,14 +136,22 @@ function renderView(overrides: Partial<React.ComponentProps<typeof InitiativesVi
     onError: vi.fn(),
     ...overrides,
   };
-  const view = render(<InitiativesView {...props} />);
-  return { ...view, props };
+  const reads = vi.fn((initiativeId: string) => readNotes(initiativeId));
+  const request: ViewProps["request"] = async (command, options) => command.type === "initiative.notes.list"
+    ? notesEvent(command.payload.initiativeId, reads(command.payload.initiativeId))
+    : props.request(command, options);
+  const view = render(<InitiativesView {...props} request={request} />);
+  const rerender = (changes: Partial<ViewProps> = {}) => view.rerender(
+    <InitiativesView {...props} {...changes} request={request} />,
+  );
+  return { ...view, props, reads, rerender };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   act(() => closeNewInitiativeRequest());
+  forgetInitiativeBriefDraft();
 });
 
 describe("Initiatives page", () => {
@@ -146,7 +173,8 @@ describe("Initiatives page", () => {
   it("groups member chats by what they need and opens a chat on click", () => {
     const { props } = renderView();
     const members = screen.getByRole("region", { name: "Chats in this initiative" });
-    expect(within(members).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent))
+    expect(within(members).getByRole("heading", { level: 3, name: "Chats" })).toBeInTheDocument();
+    expect(within(members).getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent))
       .toEqual(["Waiting on you1", "Working1", "Done1", "Idle1"]);
     expect(within(members).queryByText("Old archived chat")).not.toBeInTheDocument();
     expect(within(members).queryByText("Loose chat")).not.toBeInTheDocument();
@@ -161,7 +189,7 @@ describe("Initiatives page", () => {
     const { props, rerender } = renderView();
     fireEvent.click(screen.getByRole("button", { name: "Docs, 1 chat" }));
     expect(props.onSelectInitiative).toHaveBeenCalledExactlyOnceWith(docs.id);
-    rerender(<InitiativesView {...props} selectedInitiativeId={docs.id} />);
+    rerender({ selectedInitiativeId: docs.id });
     expect(screen.getByRole("heading", { level: 2, name: "Docs" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Docs chat, Studio, Idle. Open chat" })).toBeInTheDocument();
   });
@@ -204,14 +232,14 @@ describe("Initiatives page", () => {
       payload: { id: checkout.id, expectedRevision: 5, status: "archived" },
     }), { passive: true }));
 
-    rerender(<InitiativesView {...props} selectedInitiativeId={shipped.id} />);
+    rerender({ selectedInitiativeId: shipped.id });
     expect(screen.queryByRole("button", { name: "Mark done" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
     await waitFor(() => expect(props.request).toHaveBeenLastCalledWith(expect.objectContaining({
       payload: { id: shipped.id, expectedRevision: 3, status: "active" },
     }), { passive: true }));
 
-    rerender(<InitiativesView {...props} selectedInitiativeId={shelved.id} />);
+    rerender({ selectedInitiativeId: shelved.id });
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Unarchive" }));
     await waitFor(() => expect(props.request).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -276,10 +304,10 @@ describe("Initiatives page", () => {
     const withCheckout = (overrides: Partial<Initiative>) => snapshot({
       initiatives: [docs, shipped, { ...checkout, ...overrides }, shelved],
     });
-    rerender(<InitiativesView {...props} snapshot={withCheckout({ color: "violet", revision: 4 })} />);
+    rerender({ snapshot: withCheckout({ color: "violet", revision: 4 }) });
     expect(screen.getByRole("radio", { name: "Violet" })).toHaveAttribute("aria-checked", "true");
     // A later change from elsewhere wins once the snapshot is past our save.
-    rerender(<InitiativesView {...props} snapshot={withCheckout({ color: "pink", revision: 5 })} />);
+    rerender({ snapshot: withCheckout({ color: "pink", revision: 5 }) });
     expect(screen.getByRole("radio", { name: "Pink" })).toHaveAttribute("aria-checked", "true");
 
     request.mockImplementationOnce(async () => { throw new Error("The initiative could not be updated."); });
@@ -306,10 +334,10 @@ describe("Initiatives page", () => {
     expect(props.onSelectInitiative).toHaveBeenCalledWith(null);
 
     confirm.mockReturnValueOnce(false);
-    rerender(<InitiativesView {...props} selectedInitiativeId={docs.id} />);
+    rerender({ selectedInitiativeId: docs.id });
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(confirm).toHaveBeenLastCalledWith("Delete “Docs”? Its 1 chat keeps its history and leaves the initiative.");
-    rerender(<InitiativesView {...props} selectedInitiativeId={shipped.id} />);
+    rerender({ selectedInitiativeId: shipped.id });
     confirm.mockReturnValueOnce(false);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(confirm).toHaveBeenLastCalledWith("Delete “Shipped”? It has no chats.");
@@ -323,7 +351,7 @@ describe("Initiatives page", () => {
     await waitFor(() => expect(props.onError).toHaveBeenCalledWith(
       "The initiative changed elsewhere. Review the latest version and try again.",
     ));
-    rerender(<InitiativesView {...props} status="offline" />);
+    rerender({ status: "offline" });
     expect(screen.getByRole("button", { name: "Mark done" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "New initiative" })).toBeDisabled();
   });
@@ -377,5 +405,397 @@ describe("New initiative dialog", () => {
     expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("One too many");
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});
+
+function noteFixture(index: number, overrides: Partial<InitiativeNote> = {}): InitiativeNote {
+  return {
+    id: `0000000${index}-0000-4000-8000-000000000000`,
+    initiativeId: checkout.id,
+    title: `Note ${index}`,
+    body: `First line ${index}\nSecond line`,
+    provenance: "user",
+    state: "accepted",
+    sourceConversationId: null,
+    revision: 1,
+    createdAt: AT,
+    updatedAt: AT,
+    ...overrides,
+  };
+}
+
+describe("Initiative brief", () => {
+  const withBrief = (overrides: Partial<Initiative>) => snapshot({
+    initiatives: [docs, shipped, { ...checkout, ...overrides }, shelved],
+  });
+
+  it("saves a changed brief with its revision, counts bytes and shows the saved text until the snapshot catches up", async () => {
+    const { props, rerender } = renderView({
+      snapshot: withBrief({ brief: "Old brief", briefRevision: 2, briefUpdatedAt: AT }),
+    });
+    expect(screen.getByRole("heading", { level: 3, name: "Brief" })).toBeInTheDocument();
+    expect(screen.getByText(/^Revision 2 · updated/u)).toBeInTheDocument();
+    const editor = screen.getByRole("textbox", { name: "Initiative brief" });
+    expect(editor).toHaveValue("Old brief");
+    const save = screen.getByRole("button", { name: "Save brief" });
+    const discard = screen.getByRole("button", { name: "Discard" });
+    expect(save).toBeDisabled();
+    expect(discard).toBeDisabled();
+    fireEvent.change(editor, { target: { value: "Ship it 🚀" } });
+    // UTF-8 bytes, not characters.
+    expect(screen.getByText("12 / 8,192 bytes")).toBeInTheDocument();
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(props.request).toHaveBeenCalledExactlyOnceWith({
+      type: "initiative.brief.update",
+      payload: { id: checkout.id, expectedBriefRevision: 2, brief: "Ship it 🚀" },
+    }, { passive: true }));
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(editor).toHaveValue("Ship it 🚀");
+    await waitFor(() => expect(editor).toHaveFocus());
+    rerender({ snapshot: withBrief({ brief: "Ship it 🚀", briefRevision: 3, briefUpdatedAt: AT, revision: 4 }) });
+    expect(editor).toHaveValue("Ship it 🚀");
+    // A later change from elsewhere then shows as usual.
+    rerender({ snapshot: withBrief({ brief: "Changed elsewhere", briefRevision: 4, briefUpdatedAt: AT, revision: 5 }) });
+    expect(editor).toHaveValue("Changed elsewhere");
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it("refuses an oversized brief and keeps typing back to the saved text clean", () => {
+    renderView();
+    const editor = screen.getByRole("textbox", { name: "Initiative brief" });
+    expect(screen.getByText("Not written yet")).toBeInTheDocument();
+    fireEvent.change(editor, { target: { value: "😀".repeat(2_049) } });
+    expect(screen.getByText("8,196 / 8,192 bytes · too long")).toBeInTheDocument();
+    expect(editor).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Save brief" })).toBeDisabled();
+    fireEvent.change(editor, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+  });
+
+  it("keeps the draft on a conflict and reloads the latest brief on request", async () => {
+    const request = vi.fn(async () => { throw new Error("The brief changed elsewhere. Reload to see the latest."); });
+    const { props, rerender } = renderView({ request, snapshot: withBrief({ brief: "Mine", briefRevision: 1 }) });
+    const editor = screen.getByRole("textbox", { name: "Initiative brief" });
+    fireEvent.change(editor, { target: { value: "My edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The brief changed elsewhere. Reload to see the latest.");
+    expect(editor).toHaveValue("My edit");
+    // A conflict is reported in place, not as a page error.
+    expect(props.onError).not.toHaveBeenCalled();
+    rerender({ snapshot: withBrief({ brief: "Theirs", briefRevision: 2, revision: 4 }) });
+    expect(editor).toHaveValue("My edit");
+    fireEvent.click(within(alert).getByRole("button", { name: "Reload" }));
+    expect(editor).toHaveValue("Theirs");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(editor).toHaveFocus();
+  });
+
+  it("saves with Ctrl+Enter or Cmd+Enter and discards with Escape only after confirming a changed draft", async () => {
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirm);
+    const { props } = renderView();
+    const editor = screen.getByRole("textbox", { name: "Initiative brief" });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(confirm).not.toHaveBeenCalled();
+    fireEvent.change(editor, { target: { value: "Draft" } });
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(editor).toHaveValue("Draft");
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(editor).toHaveValue("");
+
+    fireEvent.change(editor, { target: { value: "Saved by keyboard" } });
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "initiative.brief.update",
+      payload: expect.objectContaining({ brief: "Saved by keyboard", expectedBriefRevision: 0 }),
+    }), { passive: true }));
+    fireEvent.change(editor, { target: { value: "Saved with Cmd" } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+    // Based on the revision the previous save produced.
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ brief: "Saved with Cmd", expectedBriefRevision: 1 }),
+    }), { passive: true }));
+  });
+
+  it("keeps typing that continues while a save is in flight", async () => {
+    let release!: () => void;
+    const request = vi.fn(() => new Promise<ServerEvent>((resolve) => { release = () => resolve(ok); }));
+    renderView({ request });
+    const editor = screen.getByRole("textbox", { name: "Initiative brief" });
+    fireEvent.change(editor, { target: { value: "First" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    fireEvent.change(editor, { target: { value: "First and more" } });
+    await act(async () => release());
+    expect(editor).toHaveValue("First and more");
+    const save = screen.getByRole("button", { name: "Save brief" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(request).toHaveBeenLastCalledWith({
+      type: "initiative.brief.update",
+      payload: { id: checkout.id, expectedBriefRevision: 1, brief: "First and more" },
+    }, { passive: true }));
+  });
+
+  it("keeps an unsaved brief per initiative while another one is open, and forgets it once saved", async () => {
+    const { props, rerender } = renderView();
+    const editor = () => screen.getByRole("textbox", { name: "Initiative brief" });
+    fireEvent.change(editor(), { target: { value: "Checkout draft" } });
+    rerender({ selectedInitiativeId: docs.id });
+    expect(editor()).toHaveValue("");
+    fireEvent.change(editor(), { target: { value: "Docs draft" } });
+    rerender({ selectedInitiativeId: checkout.id });
+    expect(editor()).toHaveValue("Checkout draft");
+    expect(screen.getByRole("button", { name: "Discard" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    await waitFor(() => expect(props.request).toHaveBeenCalledExactlyOnceWith({
+      type: "initiative.brief.update",
+      payload: { id: checkout.id, expectedBriefRevision: 0, brief: "Checkout draft" },
+    }, { passive: true }));
+    const saved = snapshot({
+      initiatives: [docs, shipped, { ...checkout, brief: "Checkout draft", briefRevision: 1, briefUpdatedAt: AT, revision: 4 }, shelved],
+    });
+    rerender({ snapshot: saved, selectedInitiativeId: docs.id });
+    expect(editor()).toHaveValue("Docs draft");
+    rerender({ snapshot: saved, selectedInitiativeId: checkout.id });
+    expect(editor()).toHaveValue("Checkout draft");
+    expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+
+    // Discard forgets a kept draft as well.
+    rerender({ snapshot: saved, selectedInitiativeId: docs.id });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    rerender({ snapshot: saved, selectedInitiativeId: checkout.id });
+    rerender({ snapshot: saved, selectedInitiativeId: docs.id });
+    expect(editor()).toHaveValue("");
+  });
+
+  it("reports a kept draft whose brief changed elsewhere as a conflict when it is saved", async () => {
+    const request = vi.fn(async () => { throw new Error("The brief changed elsewhere. Reload to see the latest."); });
+    const { rerender } = renderView({ request });
+    fireEvent.change(screen.getByRole("textbox", { name: "Initiative brief" }), { target: { value: "Based on revision 0" } });
+    rerender({ selectedInitiativeId: docs.id });
+    const moved = snapshot({
+      initiatives: [docs, shipped, { ...checkout, brief: "Theirs", briefRevision: 2, briefUpdatedAt: AT, revision: 5 }, shelved],
+    });
+    rerender({ snapshot: moved, selectedInitiativeId: checkout.id });
+    const editor = screen.getByRole("textbox", { name: "Initiative brief" });
+    expect(editor).toHaveValue("Based on revision 0");
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      type: "initiative.brief.update",
+      payload: expect.objectContaining({ expectedBriefRevision: 0 }),
+    }), { passive: true }));
+    const alert = await screen.findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "Reload" }));
+    expect(editor).toHaveValue("Theirs");
+  });
+
+  it("orders a brief save and a rename by the revision the save produced", async () => {
+    const { props } = renderView();
+    fireEvent.change(screen.getByRole("textbox", { name: "Initiative brief" }), { target: { value: "Brief" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save brief" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Violet" }));
+    await waitFor(() => expect(props.request).toHaveBeenCalledTimes(2));
+    expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.update",
+      payload: { id: checkout.id, expectedRevision: checkout.revision + 1, color: "violet" },
+    }, { passive: true });
+  });
+});
+
+describe("Initiative notes", () => {
+  it("explains an empty list, adds a note from the form and returns focus to Add note", async () => {
+    const notes: InitiativeNote[] = [];
+    const { props, reads } = renderView({}, () => notes);
+    expect(await screen.findByText(/^No notes yet\./u)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Needs review" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    const form = screen.getByRole("form", { name: "Add note" });
+    const title = within(form).getByRole("textbox", { name: "Note title" });
+    await waitFor(() => expect(title).toHaveFocus());
+    const submit = within(form).getByRole("button", { name: "Add note" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(title, { target: { value: "  Database  " } });
+    fireEvent.change(within(form).getByRole("textbox", { name: "Note text" }), { target: { value: "Use Postgres." } });
+    notes.push(noteFixture(1, { title: "Database", body: "Use Postgres." }));
+    fireEvent.click(submit);
+    await waitFor(() => expect(props.request).toHaveBeenCalledExactlyOnceWith({
+      type: "initiative.note.create",
+      payload: { initiativeId: checkout.id, title: "Database", body: "Use Postgres." },
+    }, { passive: true }));
+    expect(await screen.findByText("Database")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add note" })).toHaveFocus());
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels the add form with Escape and submits with Ctrl+Enter", async () => {
+    const { props } = renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Add note" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Note title" }), { key: "Escape" });
+    expect(screen.queryByRole("form", { name: "Add note" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add note" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Note title" }), { target: { value: "Keyboard" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Note text" }), { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(props.request).toHaveBeenCalledWith(expect.objectContaining({
+      type: "initiative.note.create",
+      payload: { initiativeId: checkout.id, title: "Keyboard", body: "" },
+    }), { passive: true }));
+  });
+
+  it("asks before Escape discards a note form with changes", async () => {
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirm);
+    renderView({}, () => [noteFixture(1, { title: "Database" })]);
+    fireEvent.click(await screen.findByRole("button", { name: "Add note" }));
+    const title = screen.getByRole("textbox", { name: "Note title" });
+    fireEvent.change(title, { target: { value: "Half written" } });
+    fireEvent.keyDown(title, { key: "Escape" });
+    expect(confirm).toHaveBeenCalledExactlyOnceWith("Discard this note?");
+    expect(title).toHaveValue("Half written");
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Note text" }), { key: "Escape" });
+    expect(screen.queryByRole("form", { name: "Add note" })).not.toBeInTheDocument();
+
+    // Editing a note asks only once the text differs from the note.
+    fireEvent.click(screen.getByRole("button", { name: "Edit Database" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Note title" }), { key: "Escape" });
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("form", { name: "Edit Database" })).not.toBeInTheDocument();
+  });
+
+  it("measures note titles in characters and explains a title that is too long", async () => {
+    const { props } = renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Add note" }));
+    const form = screen.getByRole("form", { name: "Add note" });
+    const title = within(form).getByRole("textbox", { name: "Note title" });
+    expect(title).not.toHaveAttribute("maxLength");
+    // 120 emoji are 240 UTF-16 units but 120 characters: allowed.
+    fireEvent.change(title, { target: { value: "😀".repeat(120) } });
+    expect(title).not.toHaveAttribute("aria-invalid");
+    fireEvent.change(title, { target: { value: "😀".repeat(121) } });
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    fireEvent.click(within(form).getByRole("button", { name: "Add note" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Note titles are limited to 120 characters.");
+    expect(title).toHaveFocus();
+    expect(props.request).not.toHaveBeenCalled();
+    fireEvent.change(title, { target: { value: "😀".repeat(120) } });
+    expect(within(form).queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(within(form).getByRole("button", { name: "Add note" }));
+    await waitFor(() => expect(props.request).toHaveBeenCalledExactlyOnceWith({
+      type: "initiative.note.create",
+      payload: { initiativeId: checkout.id, title: "😀".repeat(120), body: "" },
+    }, { passive: true }));
+  });
+
+  it("sends one review decision per proposal however often it is clicked", async () => {
+    let release!: () => void;
+    const request = vi.fn(() => new Promise<ServerEvent>((resolve) => { release = () => resolve(ok); }));
+    const proposal = noteFixture(3, { title: "Cache totals", provenance: "agent", state: "proposed", revision: 2 });
+    const { props } = renderView({ request }, () => [proposal]);
+    const group = await screen.findByRole("group", { name: "Review Cache totals" });
+    const accept = within(group).getByRole("button", { name: "Accept" });
+    fireEvent.click(accept);
+    fireEvent.click(accept);
+    fireEvent.click(within(group).getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    expect(accept).toBeDisabled();
+    expect(within(group).getByRole("button", { name: "Reject" })).toBeDisabled();
+    expect(within(group).getByRole("button", { name: "Edit and accept" })).toBeDisabled();
+    await act(async () => release());
+    await waitFor(() => expect(accept).toBeEnabled());
+    expect(request).toHaveBeenCalledOnce();
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it("lists accepted notes with provenance, edits inline and deletes after confirmation", async () => {
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirm);
+    const { props } = renderView({}, () => [
+      noteFixture(1, { title: "Database" }),
+      noteFixture(2, { title: "Totals cache", provenance: "agent", revision: 3 }),
+    ]);
+    const list = await screen.findByRole("list", { name: "Shared notes" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items.map((item) => item.querySelector(".initiative-note-provenance")?.textContent)).toEqual(["You", "Agent"]);
+    expect(within(items[0]!).getByText("First line 1")).toBeInTheDocument();
+    expect(screen.getByText(/^2 shared/u)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Totals cache" }));
+    const form = screen.getByRole("form", { name: "Edit Totals cache" });
+    expect(within(form).getByRole("textbox", { name: "Note title" })).toHaveValue("Totals cache");
+    fireEvent.change(within(form).getByRole("textbox", { name: "Note text" }), { target: { value: "Cache order totals." } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save note" }));
+    await waitFor(() => expect(props.request).toHaveBeenCalledExactlyOnceWith({
+      type: "initiative.note.update",
+      payload: { id: noteFixture(2).id, expectedRevision: 3, body: "Cache order totals." },
+    }, { passive: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit Totals cache" })).toHaveFocus());
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Database" }));
+    expect(confirm).toHaveBeenLastCalledWith("Delete the note “Database”?");
+    expect(props.request).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Database" }));
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.note.delete", payload: { id: noteFixture(1).id },
+    }, { passive: true }));
+  });
+
+  it("reviews agent proposals: accept, edit and accept, and reject", async () => {
+    const proposals = [
+      noteFixture(3, { title: "Cache totals", provenance: "agent", state: "proposed", revision: 2 }),
+      noteFixture(4, { title: "Drop guest checkout", provenance: "agent", state: "proposed" }),
+      noteFixture(5, { title: "Rename the form", provenance: "agent", state: "proposed" }),
+    ];
+    const { props } = renderView({}, () => proposals);
+    const review = await screen.findByRole("region", { name: "Needs review" });
+    expect(within(review).getByRole("heading", { level: 4 })).toHaveTextContent(/^Needs review\s*3$/u);
+    expect(screen.getByText(/^No notes yet\./u)).toBeInTheDocument();
+
+    fireEvent.click(within(review).getByRole("group", { name: "Review Cache totals" }).querySelector("button")!);
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.note.resolve",
+      payload: { id: proposals[0]!.id, expectedRevision: 2, decision: "accept" },
+    }, { passive: true }));
+
+    const reject = within(within(review).getByRole("group", { name: "Review Drop guest checkout" }))
+      .getByRole("button", { name: "Reject" });
+    fireEvent.click(reject);
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.note.resolve",
+      payload: { id: proposals[1]!.id, expectedRevision: 1, decision: "reject" },
+    }, { passive: true }));
+
+    fireEvent.click(within(within(review).getByRole("group", { name: "Review Rename the form" }))
+      .getByRole("button", { name: "Edit and accept" }));
+    const form = screen.getByRole("form", { name: "Edit and accept Rename the form" });
+    fireEvent.change(within(form).getByRole("textbox", { name: "Note title" }), { target: { value: "Rename the payment form" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save and accept" }));
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.note.resolve",
+      payload: {
+        id: proposals[2]!.id, expectedRevision: 1, decision: "accept",
+        title: "Rename the payment form", body: proposals[2]!.body,
+      },
+    }, { passive: true }));
+    expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it("reads the notes again when the snapshot's note revisions move and disables changes while offline", async () => {
+    const { reads, rerender } = renderView({}, () => []);
+    await waitFor(() => expect(reads).toHaveBeenCalledTimes(1));
+    rerender({ snapshot: snapshot({ initiatives: [docs, shipped, { ...checkout, proposedNoteCount: 1 }, shelved] }) });
+    await waitFor(() => expect(reads).toHaveBeenCalledTimes(2));
+    rerender({ snapshot: snapshot({ initiatives: [docs, shipped, { ...checkout, proposedNoteCount: 1, notesRevision: 1 }, shelved] }) });
+    await waitFor(() => expect(reads).toHaveBeenCalledTimes(3));
+    rerender({
+      status: "offline",
+      snapshot: snapshot({ initiatives: [docs, shipped, { ...checkout, proposedNoteCount: 1, notesRevision: 1 }, shelved] }),
+    });
+    expect(screen.getByRole("button", { name: "Add note" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Initiative brief" })).toBeDisabled();
   });
 });

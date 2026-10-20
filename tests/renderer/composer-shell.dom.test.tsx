@@ -109,6 +109,61 @@ describe("composer shell", () => {
     expect(screen.queryByRole("group", { name: "Chat checkout context" })).toBeNull();
   });
 
+  it("names the chat's initiative beside its checkout context and opens it", async () => {
+    const base = {
+      showCheckoutContext: true,
+      scratchWorkspace: false,
+      newChatProjectPicker: false,
+      worktreePath: null,
+      repository: true,
+      initiative: true,
+    };
+    expect(composerCheckoutStrip(base)).toBe("branch");
+    expect(composerCheckoutStrip({ ...base, repository: false })).toBe("initiative");
+    expect(composerCheckoutStrip({ ...base, scratchWorkspace: true })).toBe("initiative");
+    expect(composerCheckoutStrip({ ...base, worktreePath: "/work/x" })).toBe("context");
+    expect(composerCheckoutStrip({ ...base, newChatProjectPicker: true })).toBe("context");
+    expect(composerCheckoutStrip({ ...base, showCheckoutContext: false })).toBe("hidden");
+
+    const onOpen = vi.fn();
+    const initiativeChip = { name: "Checkout redesign", color: "teal" as const, onOpen };
+    const current = conversation("initiative-chat");
+    const view = render(
+      <CheckoutBranchControlProvider value={checkoutModel("main")}>
+        <Composer {...composerProps(current)} initiativeChip={initiativeChip} />
+      </CheckoutBranchControlProvider>,
+    );
+    const strip = screen.getByRole("group", { name: "Chat checkout context" });
+    const chip = within(strip).getByRole("button", { name: "Open initiative Checkout redesign" });
+    expect(chip).toHaveTextContent("Checkout redesign");
+    expect(await within(strip).findByRole("button", { name: "Branch main" })).toBeInTheDocument();
+    fireEvent.click(chip);
+    expect(onOpen).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <CheckoutBranchControlProvider value={checkoutModel("main")}>
+        <Composer {...composerProps({ ...current, worktreePath: "/work/studio-worktree" })} initiativeChip={initiativeChip} />
+      </CheckoutBranchControlProvider>,
+    );
+    expect(screen.getByRole("group", { name: "Chat checkout context" })).toHaveTextContent(/^Isolated worktreeCheckout redesign/u);
+
+    // Outside a repository the strip stays for the initiative alone.
+    view.rerender(
+      <CheckoutBranchControlProvider value={{ ...checkoutModel("main"), gitStatus: { isRepository: false } as GitStatusSnapshot }}>
+        <Composer {...composerProps(current)} initiativeChip={initiativeChip} />
+      </CheckoutBranchControlProvider>,
+    );
+    const alone = screen.getByRole("group", { name: "Chat checkout context" });
+    expect(alone).toHaveClass("is-branch-only");
+    expect(alone).toHaveTextContent(/^Checkout redesign$/u);
+    view.rerender(
+      <CheckoutBranchControlProvider value={{ ...checkoutModel("main"), gitStatus: { isRepository: false } as GitStatusSnapshot }}>
+        <Composer {...composerProps(current)} />
+      </CheckoutBranchControlProvider>,
+    );
+    expect(screen.queryByRole("group", { name: "Chat checkout context" })).toBeNull();
+  });
+
   it("keeps attach, model, mode, usage, and send in view and puts the rest behind More tools", async () => {
     const view = render(<Composer {...composerProps(conversation("tools-chat"))} />);
     const controls = screen.getByRole("group", { name: "Composer controls" });

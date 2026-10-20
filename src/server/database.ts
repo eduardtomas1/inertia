@@ -102,6 +102,7 @@ import type {
   AgentTurnSettlementResult,
   AgentTurnSettlementUpdate,
   BeginAgentTurnInput,
+  BegunAgentTurn,
   CompleteTurnGitArtifactInput,
   CreateAgentTurnInput,
   CreateMessageOptions,
@@ -473,7 +474,7 @@ export class RuntimeStore {
     return this.turnLedgerRepository.create(input);
   }
 
-  beginAgentTurn(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
+  beginAgentTurn(input: BeginAgentTurnInput): BegunAgentTurn {
     return this.turnLedgerRepository.begin(input);
   }
 
@@ -481,14 +482,11 @@ export class RuntimeStore {
     launchId: string,
     inputs: readonly [BeginAgentTurnInput, BeginAgentTurnInput],
     now = new Date().toISOString(),
-  ): [
-    { message: ChatMessage; turn: AgentTurn },
-    { message: ChatMessage; turn: AgentTurn },
-  ] {
+  ): [BegunAgentTurn, BegunAgentTurn] {
     return this.database.transaction(() => {
       const queued = inputs.map((input) => this.turnLedgerRepository.begin(input)) as [
-        { message: ChatMessage; turn: AgentTurn },
-        { message: ChatMessage; turn: AgentTurn },
+        BegunAgentTurn,
+        BegunAgentTurn,
       ];
       this.pairedLaunchRepository.attachTurns(
         launchId,

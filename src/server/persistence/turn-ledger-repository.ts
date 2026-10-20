@@ -54,7 +54,9 @@ import type {
   AgentTurnSettlementResult,
   AgentTurnSettlementUpdate,
   BeginAgentTurnInput,
+  BegunAgentTurn,
   CreateAgentTurnInput,
+  TurnInitiativeContextRecord,
 } from "./types";
 import {
   UsageDashboardRepository,
@@ -67,6 +69,10 @@ import {
   compactReasoningContentForTurn,
 } from "./stream-text-storage";
 import { claimConversationContextPackets } from "./conversation-context-packet-repository";
+import {
+  clearInitiativeContextDelivery,
+  recordInitiativeContextDelivery,
+} from "./initiative-context-delivery-repository";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
 
 type TurnLedgerPersistenceContext = Pick<
@@ -257,7 +263,7 @@ export class TurnLedgerRepository {
    * transaction. A failed turn insert rolls the message and conversation touch
    * back, so a submitted request cannot survive as an unowned user message.
    */
-  begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
+  begin(input: BeginAgentTurnInput): BegunAgentTurn {
     return this.context.database.transaction(() => {
       assertConversationProvider(this.context, input.conversationId, input.providerId);
       if (input.providerSessionInvalidation) {
@@ -335,8 +341,52 @@ export class TurnLedgerRepository {
           consumedAt: message.createdAt,
         });
       }
-      return { message: { ...message, turnId: turn.id }, turn };
+      const initiativeContextReceipt = input.initiativeContext
+        ? this.recordInitiativeContext(turn, input.initiativeContext, message.createdAt)
+        : undefined;
+      return {
+        message: { ...message, turnId: turn.id },
+        turn,
+        ...(initiativeContextReceipt ? { initiativeContextReceipt } : {}),
+      };
     })();
+  }
+
+  /**
+   * Replaces the turn's initiative delivery and its timeline receipt. Runs in
+   * the caller's transaction so a turn never exists without the record of what
+   * it carried, and a receipt never outlives the request it describes. A null
+   * record withdraws both: the request carried nothing, or never reached the
+   * provider.
+   */
+  private recordInitiativeContext(
+    turn: Pick<AgentTurn, "id" | "conversationId">,
+    record: TurnInitiativeContextRecord | null,
+    at: string,
+  ): ChatMessage | undefined {
+    this.context.database.prepare(`
+      DELETE FROM messages
+      WHERE turn_id = ? AND role = 'system' AND initiative_context_json IS NOT NULL
+    `).run(turn.id);
+    if (!record) {
+      clearInitiativeContextDelivery(this.context.database, turn.id);
+      return undefined;
+    }
+    recordInitiativeContextDelivery(this.context.database, {
+      ...record.delivery,
+      conversationId: turn.conversationId,
+      turnId: turn.id,
+      deliveredAt: at,
+    });
+    return this.context.createMessage(
+      turn.conversationId,
+      record.receiptText,
+      "system",
+      [],
+      turn.id,
+      at,
+      { initiativeContext: record.receipt, activateConversation: false },
+    );
   }
 
   runtimeInterruptionSource(conversationId: string): string | null {
@@ -519,6 +569,8 @@ export class TurnLedgerRepository {
     executionContext: PersistedTurnExecutionContext;
     sessionRecovery: TurnSessionRecovery | null;
     restartedAt: string;
+    /** What the fresh request carries of the initiative; null replaces any earlier record. */
+    initiativeContext?: TurnInitiativeContextRecord | null;
   }): AgentTurn {
     if (input.sessionRecovery !== null && !isTurnSessionRecovery(input.sessionRecovery)) {
       throw new Error("The turn session recovery is invalid.");
@@ -561,6 +613,9 @@ export class TurnLedgerRepository {
         "DELETE FROM turn_execution_manifests WHERE turn_id = ?",
       ).run(turnId);
       this.persistExecutionContext(turnId, input.executionContext, input.restartedAt);
+      if (input.initiativeContext !== undefined) {
+        this.recordInitiativeContext(current, input.initiativeContext, input.restartedAt);
+      }
       return this.get(turnId);
     })();
   }
@@ -881,6 +936,9 @@ export class TurnLedgerRepository {
       if (terminal) {
         compactMessageContentForTurn(this.context.database, current.id, current.conversationId);
         compactReasoningContentForTurn(this.context.database, current.id, current.conversationId);
+        if (turnNeverReachedProvider(current, next, update.providerReached)) {
+          this.recordInitiativeContext(current, null, updatedAt);
+        }
       }
     })();
     return next;
@@ -959,6 +1017,26 @@ export class TurnLedgerRepository {
       );
     }
   }
+}
+
+/** Terminal reasons for turns that ended before their provider received the request. */
+const UNREACHED_TERMINAL_REASONS = ["turn-start-failed", "turn-adoption-failed"] as const;
+
+/**
+ * A turn that settles before it started, fails to start, or is stopped before
+ * its provider was handed the request delivered nothing. A completed turn
+ * always reached its provider.
+ */
+function turnNeverReachedProvider(
+  before: Pick<AgentTurn, "startedAt">,
+  after: Pick<AgentTurn, "status" | "terminalReason">,
+  providerReached: boolean | undefined,
+): boolean {
+  if (after.status === "completed") return false;
+  const reason = after.terminalReason ?? "";
+  return before.startedAt === null
+    || providerReached === false
+    || UNREACHED_TERMINAL_REASONS.some((unreached) => reason === unreached || reason.startsWith(`${unreached}:`));
 }
 
 export type { DailyWorkRange, UsageDashboardRange };

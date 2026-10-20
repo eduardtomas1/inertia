@@ -16,8 +16,29 @@ export const MAX_INITIATIVE_NAME_CHARS = 120;
  * (`length(CAST(brief AS BLOB))`), because later phases budget prompt bytes.
  */
 export const MAX_INITIATIVE_BRIEF_BYTES = 8_192;
+/** Accepted and proposed notes per initiative; rejected notes are not counted. */
+export const MAX_INITIATIVE_NOTES = 64;
+/** Rejected notes kept per initiative for their provenance; older ones are pruned. */
+export const MAX_REJECTED_INITIATIVE_NOTES = 64;
+/** Counted in code points, like initiative names. */
+export const MAX_INITIATIVE_NOTE_TITLE_CHARS = 120;
+/** Counted in UTF-8 bytes in both zod and the SQL CHECK. */
+export const MAX_INITIATIVE_NOTE_BODY_BYTES = 2_048;
+/** The notes index shared with agents, in UTF-8 bytes. */
+export const MAX_INITIATIVE_NOTES_INDEX_BYTES = 8_192;
+/** One index line shows at most this many code points of a note's first line. */
+export const MAX_INITIATIVE_NOTE_INDEX_EXCERPT_CHARS = 160;
+
+/** Who wrote a note. Agents can only propose; the user accepts. */
+export const NOTE_PROVENANCES = ["user", "agent"] as const;
+export const NOTE_STATES = ["proposed", "accepted", "rejected"] as const;
 
 export const INITIATIVE_STATUSES = ["active", "done", "archived"] as const;
+
+/** The refusal for a brief saved over a newer revision; the page recognises it. */
+export const INITIATIVE_BRIEF_CONFLICT_MESSAGE = "The brief changed elsewhere. Reload to see the latest.";
+/** The refusal for a note saved over a newer revision. */
+export const INITIATIVE_NOTE_CONFLICT_MESSAGE = "The note changed elsewhere. Reload to see the latest.";
 /** Initiative colours reuse the theme-aware project palette names. */
 export const INITIATIVE_COLORS = PROJECT_COLOR_NAMES;
 
@@ -36,22 +57,26 @@ export const INITIATIVE_STATUS_LABELS: Readonly<Record<InitiativeStatus, string>
 };
 
 /*
- * Stored names follow exactly the SQL CHECK on `initiatives.name`, so a row the
+ * Stored names and note titles follow exactly their SQL CHECKs, so a row the
  * database accepts always parses: 1..120 code points, no NUL, tab, CR or LF,
  * and no leading or trailing space (SQLite `trim()` strips only spaces).
  */
-const INITIATIVE_NAME_FORBIDDEN = /[\0\t\n\r]/u;
+const SINGLE_LINE_FORBIDDEN = /[\0\t\n\r]/u;
 
-function storedInitiativeName(value: string): boolean {
+function storedSingleLine(value: string, maximum: number): boolean {
   const length = [...value].length;
   return length >= 1
-    && length <= MAX_INITIATIVE_NAME_CHARS
-    && !INITIATIVE_NAME_FORBIDDEN.test(value)
+    && length <= maximum
+    && !SINGLE_LINE_FORBIDDEN.test(value)
     && !value.startsWith(" ")
     && !value.endsWith(" ");
 }
 
-function utf8ByteLength(value: string): number {
+function storedInitiativeName(value: string): boolean {
+  return storedSingleLine(value, MAX_INITIATIVE_NAME_CHARS);
+}
+
+export function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
@@ -79,6 +104,12 @@ export const initiativeSchema = z.object({
   status: initiativeStatusSchema,
   brief: initiativeBriefSchema,
   briefRevision: z.number().int().min(0),
+  /** When the brief last changed; null until it is first edited. */
+  briefUpdatedAt: timestampSchema.nullable(),
+  /** Moves whenever the set or content of accepted notes changes. */
+  notesRevision: z.number().int().min(0),
+  /** Agent proposals waiting for the user; they are never shared with agents. */
+  proposedNoteCount: z.number().int().min(0).max(MAX_INITIATIVE_NOTES),
   // The SQL column allows 0 (its default); new rows start at 1.
   revision: z.number().int().min(0),
   createdAt: timestampSchema,
@@ -146,4 +177,198 @@ export function initiativeMembers<T>(
     else members.set(initiativeId, [item]);
   }
   return members;
+}
+
+export type InitiativeNoteProvenance = typeof NOTE_PROVENANCES[number];
+export type InitiativeNoteState = typeof NOTE_STATES[number];
+
+export const initiativeNoteProvenanceSchema = z.enum(NOTE_PROVENANCES);
+export const initiativeNoteStateSchema = z.enum(NOTE_STATES);
+
+/** A note title as stored; mirrors the SQL CHECK and never transforms. */
+export const initiativeNoteTitleSchema = z.string().refine(
+  (value) => storedSingleLine(value, MAX_INITIATIVE_NOTE_TITLE_CHARS),
+  "Note titles need 1 to 120 characters on one line, without tabs.",
+);
+
+/** A title as typed: surrounding whitespace is dropped, then the stored rule applies. */
+export const initiativeNoteTitleInputSchema = z.string().trim().pipe(initiativeNoteTitleSchema);
+
+/** A note body as stored; mirrors the SQL CHECK, counting UTF-8 bytes. May be empty. */
+export const initiativeNoteBodySchema = z.string()
+  .refine((value) => !value.includes("\0"), "Notes cannot contain NUL bytes.")
+  .refine(
+    (value) => utf8ByteLength(value) <= MAX_INITIATIVE_NOTE_BODY_BYTES,
+    `Notes are limited to ${MAX_INITIATIVE_NOTE_BODY_BYTES} bytes.`,
+  );
+
+export const initiativeNoteSchema = z.object({
+  id: z.string().uuid(),
+  initiativeId: z.string().uuid(),
+  title: initiativeNoteTitleSchema,
+  body: initiativeNoteBodySchema,
+  provenance: initiativeNoteProvenanceSchema,
+  state: initiativeNoteStateSchema,
+  /** The chat an agent proposed it from; null for user notes or once that chat is deleted. */
+  sourceConversationId: z.string().min(1).max(200).nullable(),
+  revision: z.number().int().min(0),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+}).strict();
+
+export type InitiativeNote = z.infer<typeof initiativeNoteSchema>;
+
+/** A notes read result: one initiative's accepted notes and proposals, each unique. */
+export function isInitiativeNotesResult(value: Record<string, unknown>): boolean {
+  const { initiativeId, notes } = value;
+  if (typeof initiativeId !== "string" || !Array.isArray(notes) || notes.length > MAX_INITIATIVE_NOTES) return false;
+  const ids = new Set<string>();
+  for (const entry of notes as unknown[]) {
+    const parsed = initiativeNoteSchema.safeParse(entry);
+    if (!parsed.success || parsed.data.initiativeId !== initiativeId || parsed.data.state === "rejected") return false;
+    ids.add(parsed.data.id);
+  }
+  return ids.size === notes.length;
+}
+
+/** Stable note order: creation time, then identity. */
+export function compareInitiativeNotes(
+  left: Pick<InitiativeNote, "createdAt" | "id">,
+  right: Pick<InitiativeNote, "createdAt" | "id">,
+): number {
+  return compareInitiatives(left, right);
+}
+
+/** The first non-blank line of a note body, bounded for the notes index. */
+export function initiativeNoteExcerpt(
+  body: string,
+  maximum = MAX_INITIATIVE_NOTE_INDEX_EXCERPT_CHARS,
+): string {
+  const line = body.split(/\r\n?|\n/u).map((entry) => entry.trim()).find((entry) => entry !== "") ?? "";
+  const characters = [...line.replace(/\s+/gu, " ")];
+  return characters.length <= maximum
+    ? characters.join("")
+    : `${characters.slice(0, maximum - 1).join("").trimEnd()}…`;
+}
+
+/** "1 note", "2 notes": the one count wording shared by labels, receipts and the index. */
+export function pluralize(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+function moreNotesLine(count: number): string {
+  return `… and ${pluralize(count, "more note")}`;
+}
+
+/**
+ * The index of accepted notes shared with agents: one `- <title>: <first line>`
+ * line per note in creation order, at most 8 KiB. When the index would exceed
+ * that, the remaining notes are summarised in a trailing "… and N more notes"
+ * line. Returns an empty string when no note is accepted.
+ */
+export function initiativeNotesIndex(
+  notes: readonly Pick<InitiativeNote, "id" | "title" | "body" | "state" | "createdAt">[],
+  maximumBytes = MAX_INITIATIVE_NOTES_INDEX_BYTES,
+): string {
+  const accepted = notes.filter(({ state }) => state === "accepted").sort(compareInitiativeNotes);
+  const lines: string[] = [];
+  let bytes = 0;
+  for (const [index, note] of accepted.entries()) {
+    const excerpt = initiativeNoteExcerpt(note.body);
+    const line = excerpt ? `- ${note.title}: ${excerpt}` : `- ${note.title}`;
+    const lineBytes = utf8ByteLength(line) + (lines.length > 0 ? 1 : 0);
+    const remaining = accepted.length - index - 1;
+    // Keep room for the summary line whenever notes would still follow.
+    const reserve = remaining > 0 ? 1 + utf8ByteLength(moreNotesLine(remaining)) : 0;
+    if (bytes + lineBytes + reserve > maximumBytes) {
+      const omitted = accepted.length - index;
+      const summary = moreNotesLine(omitted);
+      if (lines.length === 0 || bytes + 1 + utf8ByteLength(summary) <= maximumBytes) lines.push(summary);
+      break;
+    }
+    lines.push(line);
+    bytes += lineBytes;
+  }
+  return lines.join("\n");
+}
+
+/**
+ * What one turn shared with its agent. `shared` is a full copy on a fresh
+ * session (or the first delivery to this session); `updated` re-sends a part
+ * that changed since the copy the session holds; `cleared` tells the agent
+ * that its copy of the brief or notes index no longer applies.
+ */
+export const INITIATIVE_CONTEXT_CHANGES = ["shared", "updated", "cleared"] as const;
+export type InitiativeContextChange = typeof INITIATIVE_CONTEXT_CHANGES[number];
+
+export interface InitiativeContextReceipt {
+  /** The initiative whose material the turn carried; null when it only announced leaving one. */
+  initiativeId: string | null;
+  brief: { revision: number; change: InitiativeContextChange } | null;
+  notes: { revision: number; count: number; change: InitiativeContextChange } | null;
+  /** Set when the turn told the agent that the chat left the initiative it last heard about. */
+  left?: true;
+}
+
+export const MAX_INITIATIVE_CONTEXT_RECEIPT_JSON_BYTES = 512;
+
+const revisionSchema = z.number().int().min(0).max(2_147_483_647);
+export const initiativeContextReceiptSchema = z.object({
+  initiativeId: z.string().uuid().nullable(),
+  brief: z.object({
+    revision: revisionSchema,
+    change: z.enum(INITIATIVE_CONTEXT_CHANGES),
+  }).strict().nullable(),
+  notes: z.object({
+    revision: revisionSchema,
+    count: z.number().int().min(0).max(MAX_INITIATIVE_NOTES),
+    change: z.enum(INITIATIVE_CONTEXT_CHANGES),
+  }).strict().nullable(),
+  left: z.literal(true).optional(),
+}).strict().refine(
+  ({ brief, notes, left }) => brief !== null || notes !== null || left === true,
+  "An initiative context receipt must describe a brief, notes or leaving an initiative.",
+).refine(
+  ({ initiativeId, brief, notes }) => initiativeId !== null || (brief === null && notes === null),
+  "Shared initiative material must name its initiative.",
+);
+
+export function isInitiativeContextReceipt(value: unknown): value is InitiativeContextReceipt {
+  return initiativeContextReceiptSchema.safeParse(value).success;
+}
+
+function sharedMaterialText(receipt: Pick<InitiativeContextReceipt, "brief" | "notes">): string | null {
+  const { brief, notes } = receipt;
+  const sharedBrief = brief && brief.change !== "cleared"
+    ? `${brief.change === "updated" ? "the updated" : "the"} initiative brief (revision ${brief.revision})`
+    : null;
+  const sharedNotes = notes && notes.change !== "cleared"
+    ? sharedBrief
+      ? pluralize(notes.count, "note")
+      : `${pluralize(notes.count, "initiative note")} (revision ${notes.revision})`
+    : null;
+  const cleared = [
+    brief?.change === "cleared" ? `that the initiative brief is now empty (revision ${brief.revision})` : null,
+    notes?.change === "cleared" ? `that the initiative has no notes (revision ${notes.revision})` : null,
+  ].filter((part): part is string => part !== null);
+  const shared = [sharedBrief, sharedNotes].filter((part): part is string => part !== null);
+  if (shared.length === 0) return cleared.length === 0 ? null : `Told the agent ${cleared.join(" and ")}.`;
+  return `Shared ${shared.join(" and ")} with the agent${cleared.length > 0 ? ` and told it ${cleared.join(" and ")}` : ""}.`;
+}
+
+/**
+ * The timeline receipt, for example "Shared the initiative brief (revision 3)
+ * and 5 notes with the agent." or "Told the agent this chat left the
+ * initiative “Checkout”." The same text is persisted as the message body, so
+ * the names are those the agent was told at the time.
+ */
+export function initiativeContextReceiptText(
+  receipt: InitiativeContextReceipt,
+  names: { left?: string; current?: string } = {},
+): string {
+  const left = receipt.left
+    ? `Told the agent this chat left the initiative “${names.left ?? "unnamed"}”${
+      receipt.initiativeId !== null && names.current ? ` and is now part of “${names.current}”` : ""}.`
+    : null;
+  return [left, sharedMaterialText(receipt)].filter((part): part is string => part !== null).join(" ");
 }

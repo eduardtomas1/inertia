@@ -6,11 +6,13 @@ import type {
   AppSnapshot,
   Conversation,
   Initiative,
+  InitiativeNote,
   InitiativeStatus,
   ServerEvent,
 } from "@shared/contracts";
 import {
   compareInitiatives,
+  INITIATIVE_BRIEF_CONFLICT_MESSAGE,
   INITIATIVE_STATUS_LABELS,
   INITIATIVE_STATUSES,
   initiativeMembers,
@@ -28,6 +30,13 @@ import {
   type SidebarThreadView,
 } from "../utils/sidebarModel";
 import { InitiativeDot } from "./initiatives/InitiativeMark";
+import {
+  forgetInitiativeBriefDraft,
+  InitiativeBrief,
+  InitiativeNotes,
+  type BriefSaveOutcome,
+  type InitiativeNoteCommand,
+} from "./initiatives/InitiativeMemory";
 import { PaletteColorPicker } from "./ProjectAppearanceControls";
 import { ProjectIcon } from "./ProjectIcon";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
@@ -81,10 +90,11 @@ type InitiativeUpdate = { name?: string; color?: InitiativeColor; status?: Initi
 /**
  * Sends this page's initiative commands one at a time. An update reads the
  * newest known revision when it is sent (the snapshot's, or one past this
- * page's last successful update), so a quick run of the user's own changes,
- * like arrowing through colours or Mark done then Archive, never conflicts
- * with itself. Updates still waiting to be sent merge into one. The runtime
- * keeps its revision check, so a change made elsewhere is still reported.
+ * page's last successful update or brief save), so a quick run of the user's
+ * own changes, like arrowing through colours, Mark done then Archive, or a
+ * brief save then a rename, never conflicts with itself. Updates still waiting
+ * to be sent merge into one. The runtime keeps its revision checks, so a
+ * change made elsewhere is still reported.
  */
 function useInitiativeCommandQueue(
   initiatives: readonly Initiative[],
@@ -93,6 +103,10 @@ function useInitiativeCommandQueue(
 ): {
   /** Resolves with the revision the update produced, or null when it failed. */
   update(initiative: Initiative, patch: InitiativeUpdate): Promise<number | null>;
+  /** Saves a changed brief; the caller never sends the text it started from. */
+  updateBrief(initiative: Initiative, brief: string, expectedBriefRevision: number): Promise<BriefSaveOutcome>;
+  /** Resolves true when the runtime applied the note change. */
+  note(command: InitiativeNoteCommand): Promise<boolean>;
   remove(initiative: Initiative): Promise<void>;
 } {
   const snapshotRevisions = useRef(new Map<string, number>());
@@ -104,14 +118,23 @@ function useInitiativeCommandQueue(
     callbacks.current = { request, onError };
     snapshotRevisions.current = new Map(initiatives.map(({ id, revision }) => [id, revision]));
   });
-  const enqueue = <T,>(send: () => Promise<T>, failure: string): Promise<T | null> => {
+  const enqueue = <T,>(
+    send: () => Promise<T>,
+    failure: string,
+    recover?: (error: unknown) => T | null,
+  ): Promise<T | null> => {
     const sent = tail.current.then(send).catch((error: unknown) => {
-      callbacks.current.onError(errorMessage(error, failure));
-      return null;
+      const recovered = recover?.(error) ?? null;
+      if (recovered === null) callbacks.current.onError(errorMessage(error, failure));
+      return recovered;
     });
     tail.current = sent;
     return sent;
   };
+  const expectedRevision = (initiative: Initiative): number => Math.max(
+    snapshotRevisions.current.get(initiative.id) ?? initiative.revision,
+    confirmedRevisions.current.get(initiative.id) ?? 0,
+  );
   const update = (initiative: Initiative, patch: InitiativeUpdate): Promise<number | null> => {
     const queued = waiting.current.get(initiative.id);
     if (queued) {
@@ -121,24 +144,52 @@ function useInitiativeCommandQueue(
     const merged = { ...patch };
     const sent = enqueue(async () => {
       waiting.current.delete(initiative.id);
-      const expectedRevision = Math.max(
-        snapshotRevisions.current.get(initiative.id) ?? initiative.revision,
-        confirmedRevisions.current.get(initiative.id) ?? 0,
-      );
+      const revision = expectedRevision(initiative);
       try {
         await callbacks.current.request({
           type: "initiative.update",
-          payload: { id: initiative.id, expectedRevision, ...merged },
+          payload: { id: initiative.id, expectedRevision: revision, ...merged },
         }, { passive: true });
       } catch (error) {
         confirmedRevisions.current.delete(initiative.id);
         throw error;
       }
-      confirmedRevisions.current.set(initiative.id, expectedRevision + 1);
-      return expectedRevision + 1;
+      confirmedRevisions.current.set(initiative.id, revision + 1);
+      return revision + 1;
     }, "The initiative could not be updated.");
     waiting.current.set(initiative.id, { patch: merged, sent });
     return sent;
+  };
+  const updateBrief = async (
+    initiative: Initiative,
+    brief: string,
+    expectedBriefRevision: number,
+  ): Promise<BriefSaveOutcome> => {
+    const outcome = await enqueue<BriefSaveOutcome>(async () => {
+      // A saved brief always changed, so the row revision moves by exactly one.
+      const revision = expectedRevision(initiative);
+      try {
+        await callbacks.current.request({
+          type: "initiative.brief.update",
+          payload: { id: initiative.id, expectedBriefRevision, brief },
+        }, { passive: true });
+      } catch (error) {
+        confirmedRevisions.current.delete(initiative.id);
+        throw error;
+      }
+      confirmedRevisions.current.set(initiative.id, revision + 1);
+      return "saved";
+    }, "The brief could not be saved.", (error) => (
+      error instanceof Error && error.message === INITIATIVE_BRIEF_CONFLICT_MESSAGE ? "conflict" : null
+    ));
+    return outcome ?? "failed";
+  };
+  const note = async (command: InitiativeNoteCommand): Promise<boolean> => {
+    const applied = await enqueue(async () => {
+      await callbacks.current.request(command, { passive: true });
+      return true;
+    }, "The note could not be saved.");
+    return applied === true;
   };
   const remove = async (initiative: Initiative): Promise<void> => {
     await enqueue(async () => {
@@ -146,17 +197,10 @@ function useInitiativeCommandQueue(
         { type: "initiative.delete", payload: { id: initiative.id } },
         { passive: true },
       );
+      forgetInitiativeBriefDraft(initiative.id);
     }, "The initiative could not be deleted.");
   };
-  return { update, remove };
-}
-
-/**
- * Later phases add the shared brief and curated notes here, above the member
- * chats. Kept as an explicit slot so the detail layout does not need to move.
- */
-function InitiativeMemoryRegions(_props: { initiative: Initiative }): null {
-  return null;
+  return { update, updateBrief, note, remove };
 }
 
 function InitiativeName({ initiative, disabled, onRename }: {
@@ -235,7 +279,11 @@ function InitiativeDetail({
   members,
   snapshot,
   offline,
+  confirmDestructiveActions,
   onUpdate,
+  onSaveBrief,
+  onNoteCommand,
+  loadNotes,
   onDelete,
   onOpenConversation,
 }: {
@@ -243,7 +291,11 @@ function InitiativeDetail({
   members: readonly SidebarThreadView[];
   snapshot: AppSnapshot;
   offline: boolean;
+  confirmDestructiveActions: boolean;
   onUpdate(patch: InitiativeUpdate): Promise<number | null>;
+  onSaveBrief(brief: string, expectedBriefRevision: number): Promise<BriefSaveOutcome>;
+  onNoteCommand(command: InitiativeNoteCommand): Promise<boolean>;
+  loadNotes(initiativeId: string): Promise<InitiativeNote[] | null>;
   onDelete(): void;
   onOpenConversation(conversation: Conversation): void;
 }): React.JSX.Element {
@@ -323,17 +375,25 @@ function InitiativeDetail({
           </button>
         </div>
       </div>
-      <InitiativeMemoryRegions initiative={initiative} />
+      <InitiativeBrief initiative={initiative} offline={offline} onSave={onSaveBrief} />
+      <InitiativeNotes
+        initiative={initiative}
+        offline={offline}
+        confirmDestructiveActions={confirmDestructiveActions}
+        loadNotes={loadNotes}
+        onCommand={onNoteCommand}
+      />
       <section className="initiative-members" aria-label="Chats in this initiative">
+        <h3 className="initiative-members-heading">Chats</h3>
         {groups.length === 0 ? (
           <p className="initiative-empty-note">
             Move a chat here from its actions menu, or pick this initiative when you start a new chat.
           </p>
         ) : groups.map((group) => (
           <section key={group.id} className="initiative-member-group" aria-labelledby={`initiative-members-${group.id}`}>
-            <h3 id={`initiative-members-${group.id}`}>
+            <h4 id={`initiative-members-${group.id}`}>
               <span>{group.label}</span><span>{group.threads.length}</span>
-            </h3>
+            </h4>
             <ul>
               {group.threads.map(({ conversation, status }) => {
                 const project = projects.get(conversation.projectId);
@@ -403,6 +463,18 @@ export function InitiativesView({
     ]));
   }, [snapshot?.conversations, threadViews]);
   const commands = useInitiativeCommandQueue(initiatives, request, onError);
+  const loadNotes = async (initiativeId: string): Promise<InitiativeNote[] | null> => {
+    try {
+      const event = await request({ type: "initiative.notes.list", payload: { initiativeId } }, { passive: true });
+      return event.type === "request.result" && event.result.kind === "initiative.notes"
+        && event.result.initiativeId === initiativeId
+        ? event.result.notes
+        : null;
+    } catch (error) {
+      onError(errorMessage(error, "The notes could not be loaded."));
+      return null;
+    }
+  };
   const createInitiative = (): void => {
     requestNewInitiative({ onCreated: (id) => onSelectInitiative(id) });
   };
@@ -468,7 +540,11 @@ export function InitiativesView({
             members={membersByInitiative.get(selected.id) ?? []}
             snapshot={snapshot}
             offline={offline}
+            confirmDestructiveActions={settings.confirmDestructiveActions}
             onUpdate={(patch) => commands.update(selected, patch)}
+            onSaveBrief={(brief, expectedBriefRevision) => commands.updateBrief(selected, brief, expectedBriefRevision)}
+            onNoteCommand={commands.note}
+            loadNotes={loadNotes}
             onDelete={() => {
               // Archived chats keep their membership too, so they are counted.
               const count = snapshot.conversations

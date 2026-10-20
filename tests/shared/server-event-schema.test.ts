@@ -1975,7 +1975,7 @@ describe("server event remaining discriminant and identity boundary", () => {
       color: "teal",
       status: "active",
       brief: "",
-      briefRevision: 0,
+      briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
       revision: 1,
       createdAt: checkedAt,
       updatedAt: checkedAt,
@@ -2009,6 +2009,54 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseServerEvent({ type: "conversation.shell.updated", conversation: member, runs: [] })).toBeTruthy();
     expect(() => parseServerEvent({ type: "conversation.shell.updated", conversation: { ...member, initiativeId: 7 }, runs: [] }))
       .toThrow("Malformed server event");
+  });
+  it("accepts one initiative's notes as a read result and a turn-scoped initiative receipt", () => {
+    const initiativeId = "44444444-4444-4444-8444-444444444444";
+    const note = {
+      id: "66666666-6666-4666-8666-666666666666",
+      initiativeId,
+      title: "Database",
+      body: "Use Postgres.",
+      provenance: "user",
+      state: "accepted",
+      sourceConversationId: null,
+      revision: 1,
+      createdAt: checkedAt,
+      updatedAt: checkedAt,
+    };
+    const notes = (value: unknown, id = initiativeId) => parseServerEvent(event({ kind: "initiative.notes", initiativeId: id, notes: value }));
+    expect(notes([note, { ...note, id: "77777777-7777-4777-8777-777777777777", provenance: "agent", state: "proposed" }])).toBeTruthy();
+    expect(notes([])).toBeTruthy();
+    for (const invalid of [
+      [note, { ...note }],
+      [{ ...note, state: "rejected" }],
+      [{ ...note, initiativeId: "55555555-5555-4555-8555-555555555555" }],
+      [{ ...note, title: "a\nb" }],
+      [{ ...note, body: "😀".repeat(513) }],
+      [{ ...note, provenance: "system" }],
+      Array.from({ length: 65 }, (_, index) => ({ ...note, id: `${String(index).padStart(8, "0")}-6666-4666-8666-666666666666` })),
+      { length: 0 },
+    ]) expect(() => notes(invalid)).toThrow("Malformed server event");
+
+    const receipt = {
+      ...conversationDetail.messages[0],
+      role: "system",
+      turnId: "turn-1",
+      attachments: [],
+      content: "Shared the initiative brief (revision 3) and 5 notes with the agent.",
+      initiativeContext: {
+        initiativeId,
+        brief: { revision: 3, change: "shared" },
+        notes: { revision: 2, count: 5, change: "shared" },
+      },
+    };
+    expect(parseServerEvent({ type: "conversation.message.persisted", message: receipt })).toBeTruthy();
+    for (const invalid of [
+      { ...receipt, role: "assistant" },
+      { ...receipt, turnId: null },
+      { ...receipt, initiativeContext: { ...receipt.initiativeContext, brief: null, notes: null } },
+      { ...receipt, initiativeContext: { ...receipt.initiativeContext, brief: { revision: 3, change: "rewritten" } } },
+    ]) expect(() => parseServerEvent({ type: "conversation.message.persisted", message: invalid })).toThrow("Malformed server event");
   });
   it("rejects mismatched and duplicate event-local identities", () => {
     const skill = workflow.skills[0]; const attachment = conversationDetail.messages[0].attachments[0];

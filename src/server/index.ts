@@ -727,7 +727,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
-      createInitiativeCommandHandler({ store }),
+      createInitiativeCommandHandler({ store, send }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,

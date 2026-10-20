@@ -1826,6 +1826,49 @@ describe("database backup and startup recovery", () => {
     primary.close();
   });
 
+  it("rejects a schema 100 database whose execution references still refuse initiative context", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "execution context kind validation");
+    store.close();
+    const primary = new Database(databasePath);
+    const rebuild = (kinds: string) => primary.exec(`
+      PRAGMA foreign_keys = OFF;
+      DROP TRIGGER turn_execution_context_refs_prune_blob;
+      CREATE TABLE refs_rebuilt (
+        turn_id TEXT NOT NULL REFERENCES agent_turns(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 31),
+        digest TEXT NOT NULL REFERENCES turn_execution_context_blobs(digest) ON DELETE RESTRICT,
+        kind TEXT NOT NULL CHECK (kind IN (${kinds})),
+        label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 4096),
+        byte_size INTEGER NOT NULL CHECK (byte_size BETWEEN 1 AND 65536),
+        truncated INTEGER NOT NULL CHECK (truncated IN (0, 1)),
+        PRIMARY KEY (turn_id, ordinal)
+      );
+      INSERT INTO refs_rebuilt SELECT * FROM turn_execution_context_refs;
+      DROP TABLE turn_execution_context_refs;
+      ALTER TABLE refs_rebuilt RENAME TO turn_execution_context_refs;
+      CREATE INDEX turn_execution_context_refs_digest_idx ON turn_execution_context_refs(digest);
+      CREATE TRIGGER turn_execution_context_refs_prune_blob AFTER DELETE ON turn_execution_context_refs
+      BEGIN
+        DELETE FROM turn_execution_context_blobs WHERE digest = OLD.digest
+          AND NOT EXISTS (SELECT 1 FROM turn_execution_context_refs WHERE digest = OLD.digest);
+      END;
+      PRAGMA foreign_keys = ON;
+    `);
+    const older = "'attachment', 'file', 'diff', 'terminal', 'preview', 'review-note'";
+    rebuild(older);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    rebuild(`${older}, 'initiative'`);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
   it("requires the initiative trigger from schema 99 by version, not by probing the table", () => {
     const database = new Database(":memory:");
     try {

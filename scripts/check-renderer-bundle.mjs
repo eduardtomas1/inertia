@@ -74,7 +74,13 @@ const budgets = {
   // Initiatives add the membership contract, the New initiative request host
   // and the new-chat picker loader to first load: 5,612 bytes over e165a0aa
   // (889,926 -> 895,538 on Linux x64). The page, dialog and picker stay deferred.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 5_612,
+  // Initiative brief and notes add the turn receipt row, its message contract,
+  // the notes read result guard and the composer initiative chip: 2,543 bytes
+  // over b4c53d4a (895,538 -> 898,081 on Linux x64). The Brief and Notes
+  // editors load with the deferred Initiatives page. Hiding the receipt of a
+  // request that never reached its provider and the leaving-an-initiative
+  // receipt contract add 87 bytes over 614c70dc (898,081 -> 898,168).
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 5_612 + 2_543 + 87,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -82,10 +88,15 @@ const budgets = {
   // The 5 KiB management UI is separately deferred and capped below.
   // Initiative membership on chat shells and the snapshot coherence check add
   // 766 bytes (681,993 -> 682,759); the picker never loads in detached chats.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 766,
+  // The initiative context receipt under a request and its message contract
+  // add 2,818 bytes over b4c53d4a (682,759 -> 685,577); hiding unreached
+  // receipts and the leaving receipt contract add 87 more (-> 685,664).
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 766 + 2_818 + 87,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
-  entryCss: 241_004 + 256,
+  // The composer initiative chip adds 593 bytes over b4c53d4a (240,972 ->
+  // 241,565 on Linux x64); the headroom is unchanged.
+  entryCss: 241_004 + 256 + 593,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -192,7 +203,12 @@ const budgets = {
   // the deferred Initiatives page, New initiative dialog and composer picker,
   // the sidebar sections, palette group and shared contracts. Existing
   // headroom is unchanged.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 30_023,
+  // Initiative brief and notes add 13,707 core bytes over b4c53d4a
+  // (2,345,877 -> 2,359,584 on Linux x64), mostly the deferred Brief and Notes
+  // editors on the Initiatives page. Per-initiative brief drafts, note title
+  // validation and the review in-flight guard add 1,236 more over 614c70dc
+  // (-> 2,360,820), all deferred with that page. Existing headroom is unchanged.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 30_023 + 13_707 + 1_236,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

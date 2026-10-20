@@ -62,6 +62,16 @@ export function queuePairedTurns(
     options.now(),
   );
   try {
+    // Each side's receipt for shared initiative context shows live, as it
+    // does for a single turn.
+    for (const { initiativeContextReceipt } of durable) {
+      if (initiativeContextReceipt) {
+        options.hooks.broadcast({
+          type: "conversation.message.persisted",
+          message: initiativeContextReceipt,
+        });
+      }
+    }
     const prepared: [PreparedTurnRequest, PreparedTurnRequest] = [
       resolved[0].adopt(durable[0]),
       resolved[1].adopt(durable[1]),

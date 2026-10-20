@@ -29,6 +29,7 @@ import {
 } from "../../hooks/useWatcherDock";
 import { useWatcherFeed } from "../../hooks/useWatcherFeed";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
+import { watcherPauseText } from "../../utils/watcherCopy";
 import { watcherAgentLabel } from "@shared/watcher-agent-label";
 import { PaneResizeHandle } from "../PaneResizeHandle";
 import { escapeClosedTooltip } from "../Tooltip";
@@ -168,9 +169,12 @@ function resumeBlockedReason(
   surface: WatcherSurfaceModel,
 ): string | null {
   if (link.status !== "paused") return null;
-  if (link.pauseReason === "watched-archived" && watched && watched.archivedAt !== null) {
-    return "Unarchive the watched chat to resume its watcher.";
+  if (watcher && watcher.archivedAt !== null) {
+    return link.pauseReason === "watcher-archived"
+      ? watcherPauseText(link.pauseReason, link.pauseDetail)
+      : "Unarchive the watcher chat to resume it.";
   }
+  if (watched && watched.archivedAt !== null) return "Unarchive the watched chat to resume its watcher.";
   if ((link.pauseReason === "usage-limit" || link.pauseReason === "route-unavailable") && watcher) {
     const readiness = composerRouteReadiness({
       provider: surface.providers.find(({ id }) => id === watcher.providerId),

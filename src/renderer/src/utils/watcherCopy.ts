@@ -16,11 +16,12 @@ export const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, stri
   "write-attempts": "It tried to edit a file twice during one turn.",
   "route-unavailable": "Its route is unavailable. Check Settings → Agents.",
   "watched-archived": "The watched chat was archived.",
+  "watcher-archived": "The watcher chat was archived.",
 };
 
 export function watcherPauseText(reason: WatcherPauseReason | null, detail: string | null): string {
   const base = reason ? WATCHER_PAUSE_REASON_TEXT[reason] : "Paused.";
-  return detail && reason !== "write-detected" ? `${base} ${detail}` : base;
+  return detail && reason !== "write-detected" ? detail : base;
 }
 
 export function watcherPauseAnnouncement(reason: WatcherPauseReason | null): string {

@@ -51,11 +51,12 @@ export function WatcherNotices({
   }, [confirmingResume]);
   // A pause the user chose needs no banner: the bar already says Paused and
   // offers Resume. Every other pause explains itself here.
-  const paused = link.status === "paused" && link.pauseReason !== "user";
+  const paused = link.status === "paused" && (link.pauseReason !== "user" || resumeBlocked !== null);
   const writeDetected = paused && link.pauseReason === "write-detected";
   if (!paused && !customBackend) return null;
+  const pauseText = watcherPauseText(link.pauseReason, link.pauseDetail);
   const resumeButton = (label: string) => resumeBlocked ? (
-    <p className="watcher-notice-blocked">{resumeBlocked}</p>
+    resumeBlocked === pauseText ? null : <p className="watcher-notice-blocked">{resumeBlocked}</p>
   ) : (
     <button
       ref={requestRef}
@@ -111,7 +112,7 @@ export function WatcherNotices({
       ) : paused ? (
         <div className="watcher-notice">
           <p className="watcher-notice-title">Paused</p>
-          <p>{watcherPauseText(link.pauseReason, link.pauseDetail)}</p>
+          <p>{pauseText}</p>
           {resumeButton("Resume")}
         </div>
       ) : null}

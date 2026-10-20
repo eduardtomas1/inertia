@@ -348,6 +348,47 @@ describe("WatcherDock", () => {
     expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
   });
 
+  it("explains an archived watcher chat once and keeps Resume unavailable", async () => {
+    const detail = "The watcher's own chat was archived. Unarchive it to resume the watcher.";
+    const watching = link();
+    const paused = link({ status: "paused", pauseReason: "watcher-archived", pauseDetail: detail });
+    const runtime = watcherRuntime({ link: () => paused });
+    const model = (current: WatcherLinkView) => surfaceModel({
+      watchers: [current],
+      request: runtime.request,
+      shells: [shell(WATCHED_ID, "Refactor parser"), shell(WATCHER_ID, "Watcher", { archivedAt: NOW })],
+    });
+    const view = render(<Dock model={model(watching)} />);
+    const aside = await dock();
+    view.rerender(<Dock model={model(paused)} />);
+    expect(within(aside).getAllByText(detail)).toHaveLength(1);
+    const resume = within(aside).getByRole("button", { name: "Resume" });
+    expect(resume).toHaveAttribute("aria-disabled", "true");
+    expect(resume).toHaveAttribute("title", detail);
+    fireEvent.click(resume);
+    expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
+    const announced = aside.querySelector('.watcher-bar [role="status"]')!.textContent ?? "";
+    expect(announced).toMatch(/^Paused: /u);
+    expect(announced).not.toContain("You paused it.");
+  });
+
+  it("keeps Resume unavailable while the watched chat is archived, whatever the pause reason", async () => {
+    const paused = link({ status: "paused", pauseReason: "user" });
+    const runtime = watcherRuntime({ link: () => paused });
+    render(<Dock model={surfaceModel({
+      watchers: [paused],
+      request: runtime.request,
+      shells: [shell(WATCHED_ID, "Refactor parser", { archivedAt: NOW }), shell(WATCHER_ID, "Watcher")],
+    })}
+    />);
+    const aside = await dock();
+    expect(within(aside).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
+    const resume = within(aside).getByRole("button", { name: "Resume" });
+    expect(resume).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(resume);
+    expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
+  });
+
   it("reads the feed by request and never takes a detail subscription", async () => {
     const { runtime, update } = setup();
     await dock();

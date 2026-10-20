@@ -221,13 +221,15 @@ export class WatcherWakeRunner {
       { status: "waking" },
       this.#deps.now(),
     );
-    if (!claimed) return "skipped";
+    if (!claimed) return this.#claimLost(linkId);
+    this.#deps.publish(linkId);
     const restore: WatcherTransition = budgetFinalPass
       ? { status: "paused", reason: "wake-budget", detail: link.pauseDetail }
       : { status: "watching" };
     const release = (attempt: WatcherWakeAttempt): WatcherWakeAttempt => {
       const checkTurnId = context.final ? context.watchedTurnId : claimed.cursor.turnId;
-      if (this.#release(linkId, restore, checkTurnId)) this.#deps.publish(linkId);
+      if (!this.#release(linkId, restore, checkTurnId)) return attempt === "skipped" ? this.#claimLost(linkId) : attempt;
+      this.#deps.publish(linkId);
       return attempt;
     };
     let window: WatcherGuardWindow | null = null;
@@ -329,6 +331,12 @@ export class WatcherWakeRunner {
       if (store.watcherLinks.get(linkId)?.status === "waking" && !this.isRunning(linkId)) release("transient");
       throw error;
     }
+  }
+
+  #claimLost(linkId: string): WatcherWakeAttempt {
+    const status = this.#deps.store.watcherLinks.get(linkId)?.status;
+    if (status === "paused") return "paused";
+    return status === "watching" || status === "idle" ? "transient" : "skipped";
   }
 
   /**

@@ -388,6 +388,46 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("keeps a final pass that the user paused, or paused and resumed, while it waited for the turn's diff", async () => {
+    for (const resumeAtOnce of [true, false]) {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const turnDiff = vi.fn(async () => {
+        await gate;
+        return { patchState: "available" as const, truncated: false, patch: "", files: [] };
+      });
+      const f = await createWatcherFixture({ turnDiff });
+      try {
+        const link = await f.attach();
+        const watcherId = link.watcherConversationId;
+        const watchedTurn = await f.startWatchedTurn();
+        await f.finishTurn(f.watched.id, "Done.");
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+        await vi.waitFor(() => { if (turnDiff.mock.calls.length === 0) throw new Error("no diff read"); });
+        expect(f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1)).toMatchObject({ link: { status: "waking" } });
+        await expect(f.command("watcher.wake", { linkId: link.id })).rejects.toThrow("The watcher is already checking.");
+        await f.command("watcher.pause", { linkId: link.id });
+        if (resumeAtOnce) await f.command("watcher.resume", { linkId: link.id });
+        release();
+        await f.flush();
+        await f.advance(10 * 60_000);
+        if (!resumeAtOnce) {
+          expect(f.provider.runs.has(watcherId)).toBe(false);
+          await f.command("watcher.resume", { linkId: link.id });
+          await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+        }
+        await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+        expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({
+          trigger: "turn-end", watchedTurnId: watchedTurn.id,
+        });
+        await f.finishTurn(watcherId, "SILENT");
+        expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", finalPassTurnId: watchedTurn.id });
+      } finally {
+        await f.close();
+      }
+    }
+  });
+
   it("quotes the turn's diff on the final pass and never reads it for a mid-turn check", async () => {
     const turnDiff = vi.fn(async (_turnId: string) => ({
       patchState: "available" as const,

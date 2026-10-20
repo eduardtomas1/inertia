@@ -1,3 +1,4 @@
+import { activityExecutionCategory } from "../../../shared/activity-display";
 import type { AgentActivity, RuntimeMutationEvent } from "../../../shared/contracts";
 import {
   MAX_WATCHER_GUARD_PATHS,
@@ -81,6 +82,16 @@ export function watcherAttributionForm(value: string, platform: NodeJS.Platform)
   return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
 }
 
+/**
+ * An activity of the watcher's own turn that could have written: any command,
+ * or a started edit, which Inertia stops before it runs.
+ */
+export function watcherActivityMayWrite(activity: Pick<AgentActivity, "kind" | "title">): boolean {
+  const title = activity.title.replace(/^Interrupted · /u, "");
+  return activity.kind === "command"
+    || activityExecutionCategory({ kind: activity.kind, title, status: "running" }) === "coding";
+}
+
 /** Activities that may have touched files: tool or file work, never reasoning or status lines. */
 function mayWrite(activity: Pick<AgentActivity, "kind">): boolean {
   return activity.kind === "file" || activity.kind === "tool";
@@ -101,7 +112,8 @@ function pauseDetail(paths: readonly string[], total: number, headChanged: boole
  * inspection, then attributes every changed path: a path that another turn on
  * the same checkout reported in its activities is explained; a command run by
  * another turn, a workspace or source-control run, or a terminal resume makes
- * the window inconclusive; anything left pauses the watcher. It never writes
+ * the window inconclusive, and so does a change while the watcher's own turn
+ * only read; anything left pauses the watcher. It never writes
  * to the repository and never reuses checkpoints or artifact capture.
  */
 export class WatcherCheckoutGuard {
@@ -283,7 +295,9 @@ export class WatcherCheckoutGuard {
       });
       if (!diff.headChanged && unexplained.length === 0) return { state: "clean", paths: [], pauseDetail: null };
       const paths = unexplained.slice(0, MAX_WATCHER_GUARD_PATHS);
-      if (window.commandSeen || window.busy) return { state: "inconclusive", paths, pauseDetail: null };
+      if (window.commandSeen || window.busy || !own.some(watcherActivityMayWrite)) {
+        return { state: "inconclusive", paths, pauseDetail: null };
+      }
       return { state: "changed", paths, pauseDetail: pauseDetail(paths, unexplained.length, diff.headChanged) };
     } finally {
       this.#open.delete(window);

@@ -35,7 +35,8 @@ async function check(
   f: WatcherFixture,
   linkId: string,
   during: (watcherId: string) => void,
-  watcherActivity = true,
+  watcherActivity: boolean | "command" | "edit" = true,
+  reply = "SILENT",
 ) {
   const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
   f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `r-${++sequence}` });
@@ -46,8 +47,15 @@ async function check(
   if (watcherActivity) {
     f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `w-${++sequence}` });
   }
+  if (watcherActivity === "command") {
+    f.provider.emit(watcherConversationId, { type: "activity", kind: "command", phase: "completed", label: "cat src/a.ts", activityId: `w-${++sequence}` });
+  }
+  if (watcherActivity === "edit") {
+    f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "started", label: "Edit", detail: "src/a.ts", activityId: `w-${++sequence}` });
+  }
   during(watcherConversationId);
-  await f.finishTurn(watcherConversationId, "SILENT");
+  if (f.provider.runs.has(watcherConversationId)) await f.finishTurn(watcherConversationId, reply);
+  else await f.flush();
   return f.watchers.coordinator.feed(linkId).items[0]!;
 }
 
@@ -84,7 +92,7 @@ describe("watcher checkout guard", () => {
       await f.startWatchedTurn();
       const item = await check(f, link.id, () => {
         f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Edit", detail: reported, activityId: `e-${++sequence}` });
-      });
+      }, "command");
       expect(item.guardState).toBe(state);
       expect(f.store.watcherLinks.get(link.id)!.status).toBe(state === "clean" ? "watching" : "paused");
     } finally {
@@ -124,13 +132,46 @@ describe("watcher checkout guard", () => {
     try {
       const link = await f.attach();
       await f.startWatchedTurn();
-      const item = await check(f, link.id, () => undefined);
+      const item = await check(f, link.id, () => undefined, "command");
       expect(item).toMatchObject({ outcome: "write-detected", guardState: "changed" });
       expect([...item.guardPaths].sort()).toEqual(["docs/x.md", "src/new.ts"]);
       const paused = f.store.watcherLinks.get(link.id)!;
       expect(paused).toMatchObject({ status: "paused", pauseReason: "write-detected" });
       expect(paused.pauseDetail).toContain("src/new.ts");
       expect(paused.pauseDetail).toContain("docs/x.md");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("keeps the finding and keeps watching when files change outside Inertia during a check that only read", async () => {
+    let root = "";
+    const f = await createWatcherFixture({
+      captureFingerprint: fingerprints(() => root, { "src/b.ts": "1" }, { "src/b.ts": "2", "src/new.ts": "3" }),
+    });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const item = await check(f, link.id, () => undefined, true, "The parser drops empty tokens.");
+      expect(item).toMatchObject({ outcome: "finding", finding: "The parser drops empty tokens.", guardState: "inconclusive" });
+      expect([...item.guardPaths].sort()).toEqual(["src/b.ts", "src/new.ts"]);
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", pauseReason: null });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses with write-detected when the watcher's own turn started an edit and files changed", async () => {
+    let root = "";
+    const f = await createWatcherFixture({ captureFingerprint: fingerprints(() => root, {}, { "src/b.ts": "1" }) });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const item = await check(f, link.id, () => undefined, "edit");
+      expect(item).toMatchObject({ outcome: "write-detected", guardState: "changed", guardPaths: ["src/b.ts"] });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "write-detected" });
     } finally {
       await f.close();
     }

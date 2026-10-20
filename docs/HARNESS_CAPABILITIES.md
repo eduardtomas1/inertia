@@ -288,9 +288,12 @@ Each layer works on its own; none relies on the model following instructions.
    marks the fingerprint truncated. A changed path is *explained* when another
    turn active on the same checkout reported it in a file activity during the
    window. The result is *inconclusive*, and does not pause, when another
-   active turn ran a command, a workspace or source-control run was active, or
-   a terminal resume was active. Unexplained paths in a conclusive window pause
-   the link with `write-detected` and list at most 20 paths. A non-repository,
+   active turn ran a command, a workspace or source-control run was active, a
+   terminal resume was active, or the watcher's own turn had no activity that
+   could write (no command and no started edit). An inconclusive check keeps
+   its finding and lists its unexplained paths on the feed item. Unexplained
+   paths in a conclusive window pause the link with `write-detected` and list
+   at most 20 paths. A non-repository,
    a timeout or a truncated fingerprint is *unavailable*; the other layers
    still apply.
 5. **Boundary instruction.** The `inertia-watcher` instruction states that the

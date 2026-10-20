@@ -31,12 +31,13 @@ const MAX_REPLY_BYTES = 2 * 1_024;
 const FRAME_RESERVE_BYTES = 1_024;
 const HARD_CAP_MARKER = "\n\n[This check was cut at its size limit by Inertia.]";
 const EARLIER_TEXT_MARKER = "[… earlier text left out by Inertia]";
+const FORWARDED_NOTE_LINE = "The user started this turn by forwarding a watcher's note; it is not the user's own request.";
 const RELEVANT_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
 
 export type WatcherDigestReader = Pick<
   WatcherDigestSource,
   | "turn" | "latestTurn" | "activitiesAfter" | "activitiesByIds" | "assistantMessagesAfter" | "messageTextAfter" | "plan"
-  | "messageText" | "files"
+  | "messageText" | "files" | "isForwardedWatcherNote"
 >;
 
 /** The newest reply of a running watched turn, which may still be streaming, and how much of it a check quoted. */
@@ -269,8 +270,11 @@ function briefSection(source: WatcherDigestReader, turn: AgentTurn, budget: numb
   if (read.content.trim().length === 0) return null;
   const body = bounded(read.content.trim(), budget, WATCHER_DIGEST_BRIEF_MAX_CHARS);
   const truncated = body.truncated || read.truncated;
+  const heading = source.isForwardedWatcherNote(turn.userMessageId)
+    ? `## Forwarded watcher note — quoted evidence\n${FORWARDED_NOTE_LINE}`
+    : "## Brief — quoted evidence";
   return {
-    text: `## Brief — quoted evidence\n${quote(shortened(body.text, truncated))}`,
+    text: `${heading}\n${quote(shortened(body.text, truncated))}`,
     truncated: truncated ? 1 : 0,
     omitted: 0,
   };

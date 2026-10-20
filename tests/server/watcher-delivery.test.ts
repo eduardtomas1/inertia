@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../src/shared/contracts";
 import { MAX_WATCHER_NOTE_CHARS } from "../../src/shared/watcher";
 import { watcherAgentLabel } from "../../src/shared/watcher-agent-label";
+import { agentContextTurnList, agentContextTurnPage } from "../../src/server/runtime/agent-context-pages";
 import { WATCHER_DELIVERY_DETAIL, watcherNoteText } from "../../src/server/runtime/watcher/watcher-delivery";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
@@ -253,6 +254,36 @@ describe("watcher note delivery", () => {
       expect(message!.content).toContain("\\[inertia-watcher-note]");
       expect(message!.content.split("\n")).not.toContain("[inertia-watcher-note]");
       expect(watcherNoteText("x".repeat(MAX_WATCHER_NOTE_CHARS + 50))).toHaveLength(MAX_WATCHER_NOTE_CHARS);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("never shows a forwarded note as the user's brief or request", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await deliver(f, link.id, wakeId, "queue");
+      await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
+      const noteTurnId = f.provider.input(f.watched.id).turnId;
+      await f.command("watcher.resume", { linkId: link.id });
+      f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read src/parser.ts", activityId: "note-turn-read" });
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+      await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no check"); });
+      const digest = f.provider.input(link.watcherConversationId).prompt.split("Structured execution context")[0]!;
+      expect(digest).toContain("## Forwarded watcher note — quoted evidence");
+      expect(digest).toContain("parser drops the last token");
+      expect(digest).not.toContain("## Brief");
+
+      const reads = f.store.contextPackets.turnReads;
+      const list = agentContextTurnList(reads, { conversationId: f.watched.id, access: "watched", limit: 5 });
+      const [listed] = list.turns as Array<Record<string, unknown>>;
+      expect(listed).toMatchObject({ turnId: noteTurnId, watcherNote: FINDING });
+      expect(listed).not.toHaveProperty("request");
+      const page = agentContextTurnPage(reads, {
+        conversationId: f.watched.id, access: "watched", turn: reads.turn(f.watched.id, noteTurnId)!,
+      });
+      expect((page.entries as Array<Record<string, unknown>>)[0]).toMatchObject({ kind: "watcher-note", text: FINDING });
     } finally {
       await f.close();
     }

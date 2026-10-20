@@ -56,6 +56,7 @@ class FakeSource implements WatcherDigestReader {
   turns: AgentTurn[] = [turn()];
   activities: AgentActivity[] = [];
   brief = "Add a login rate limiter and tests.";
+  briefIsWatcherNote = false;
   plans: AgentPlan | null = null;
   replies: Array<{ id: string; createdAt: string; content: string }> = [];
   changed: Array<{ path: string; status: string; insertions: number; deletions: number }> = [];
@@ -107,6 +108,9 @@ class FakeSource implements WatcherDigestReader {
   files(turnId: string) {
     this.calls.push(`files:${turnId}`);
     return this.changed;
+  }
+  isForwardedWatcherNote(messageId: string) {
+    return this.briefIsWatcherNote && messageId === "user-1";
   }
 }
 
@@ -188,6 +192,15 @@ describe("buildWatcherDigest", () => {
     expect(newTurn.content).toContain("## Brief — quoted evidence");
     expect(newTurn.cursor.turnId).toBe(TURN);
     expect(newTurn.stats.eventsCovered).toBe(2);
+  });
+
+  it("labels a turn started by a forwarded watcher note instead of quoting it as the brief", () => {
+    const source = new FakeSource();
+    source.brief = "- The parser drops the last token.";
+    source.briefIsWatcherNote = true;
+    const digest = buildWatcherDigest(source, link(), options())!;
+    expect(digest.content).toContain("## Forwarded watcher note — quoted evidence\nThe user started this turn by forwarding a watcher's note; it is not the user's own request.\n> - The parser drops the last token.");
+    expect(digest.content).not.toContain("## Brief");
   });
 
   it("produces a brief-only first check when a watched turn just started", () => {

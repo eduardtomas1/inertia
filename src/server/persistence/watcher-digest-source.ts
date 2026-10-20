@@ -205,4 +205,11 @@ export class WatcherDigestSource {
   files(turnId: string): ConversationContextTurnFile[] {
     return this.context.turnReads().files(turnId);
   }
+
+  /** The user message is a watcher note the user forwarded, not the user's own words. */
+  isForwardedWatcherNote(messageId: string): boolean {
+    return cachedStatement(this.context.database, `
+      SELECT 1 FROM messages WHERE id = ? AND role = 'user' AND watcher_note_json IS NOT NULL
+    `).get(messageId) !== undefined;
+  }
 }

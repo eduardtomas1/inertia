@@ -172,6 +172,53 @@ describe("Private Connect supervised runtime gateway", () => {
     expect(JSON.stringify(response)).not.toMatch(/private-model|Reading private files/u);
   });
 
+  it("labels a forwarded watcher note so it never reads as the user's own message", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-note-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const conversation = store.createConversation(project.id, "Allowed chat");
+    store.beginAgentTurn({ id: "turn-note", runId: "run-note",
+      conversationId: conversation.id, content: "The parser drops a token.", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative",
+      watcherNote: {
+        linkId: "55555555-5555-4555-8555-555555555555", wakeId: "66666666-6666-4666-8666-666666666666",
+        watcherConversationId: "77777777-7777-4777-8777-777777777777", preset: "reviewer",
+        watcherLabel: "codex · gpt-test", delivery: "queue",
+      } });
+    store.beginAgentTurn({ id: "turn-user", runId: "run-user",
+      conversationId: conversation.id, content: "Fix it.", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative" });
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => store.shellSnapshot(),
+      conversation: (conversationId) => store.conversationShell(conversationId),
+      detail: (conversationId) => store.conversationDetail(conversationId),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+    });
+    const subject: PrivateConnectRuntimeAuthorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const response = await gateway.request(subject, {
+      type: "conversation.get", requestId: "33333333-3333-4333-8333-333333333333", conversationId: conversation.id,
+    });
+    if (!response.ok || response.result.kind !== "conversation") throw new Error("Expected a conversation detail.");
+    expect(response.result.detail.messages.map(({ role, content }) => [role, content])).toEqual([
+      ["user", "[Forwarded watcher note]\n\nThe parser drops a token."],
+      ["user", "Fix it."],
+    ]);
+  });
+
   it("leaves the missing checkpoint notice out of remote activity rows", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-notice-"));
     directories.push(directory);

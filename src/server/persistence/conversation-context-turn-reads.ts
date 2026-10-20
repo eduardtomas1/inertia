@@ -49,6 +49,8 @@ export interface ConversationContextTurnRow {
 
 export interface ConversationContextTurnListRow extends ConversationContextTurnRow {
   requestHead: Buffer;
+  /** The turn's request is a watcher note the user forwarded. */
+  requestWatcherNote: boolean;
 }
 
 export type ConversationContextTurnEntryRow =
@@ -58,6 +60,8 @@ export type ConversationContextTurnEntryRow =
       role: "user" | "assistant";
       createdAt: string;
       attachments: ChatAttachment[];
+      /** A watcher note the user forwarded, not the user's own words. */
+      watcherNote: boolean;
     }
   | { kind: "page"; id: string; title: string | null; createdAt: string }
   | {
@@ -256,7 +260,11 @@ export class ConversationContextTurnReads {
         COALESCE((
           SELECT substr(CAST(message.content AS BLOB), 1, ?) FROM messages message
           WHERE message.id = turn.user_message_id
-        ), X'') AS request_head
+        ), X'') AS request_head,
+        EXISTS (
+          SELECT 1 FROM messages message
+          WHERE message.id = turn.user_message_id AND message.watcher_note_json IS NOT NULL
+        ) AS request_watcher_note
       FROM agent_turns turn
       WHERE turn.conversation_id = ?
         ${before ? "AND (turn.requested_at, turn.id) < (?, ?)" : ""}
@@ -269,8 +277,12 @@ export class ConversationContextTurnReads {
       ...(before ? [before.requestedAt, before.id] : []),
       ...routed.parameters,
       limit,
-    ) as Array<TurnRowRecord & { request_head: Buffer }>;
-    return rows.map((row) => ({ ...turnFromRecord(row), requestHead: row.request_head }));
+    ) as Array<TurnRowRecord & { request_head: Buffer; request_watcher_note: 0 | 1 }>;
+    return rows.map((row) => ({
+      ...turnFromRecord(row),
+      requestHead: row.request_head,
+      requestWatcherNote: row.request_watcher_note === 1,
+    }));
   }
 
   turn(
@@ -300,7 +312,8 @@ export class ConversationContextTurnReads {
   } {
     const messageRows = this.context.database.prepare(`
       SELECT id, role, created_at, attachments_json,
-        CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title
+        CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title,
+        watcher_note_json IS NOT NULL AS watcher_note
       FROM messages
       WHERE conversation_id = ? AND (turn_id = ? OR id = ?)
         AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
@@ -312,6 +325,7 @@ export class ConversationContextTurnReads {
       created_at: string;
       attachments_json: string;
       page_title: unknown;
+      watcher_note: 0 | 1;
     }>;
     const messages = messageRows.slice(0, MAX_TURN_MESSAGES).map((row): ConversationContextTurnEntryRow => row.role === "system"
       ? {
@@ -326,6 +340,7 @@ export class ConversationContextTurnReads {
           role: row.role,
           createdAt: row.created_at,
           attachments: parseStoredAttachments(row.attachments_json),
+          watcherNote: row.watcher_note === 1,
         });
     const activityRows = this.context.database.prepare(`
       SELECT id, kind, title, status, created_at,

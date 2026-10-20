@@ -207,7 +207,9 @@ function pathCandidates(value: string): string[] {
   if (equals >= 0) candidates.push(value.slice(equals + 1));
   const colon = value.indexOf(":");
   if (value.startsWith("-") && colon >= 0) candidates.push(value.slice(colon + 1));
-  if (/^-[^-]/u.test(value) && value.length > 2) candidates.push(value.slice(2));
+  if (/^-[^-]/u.test(value)) {
+    for (let index = 2; index < value.length; index += 1) candidates.push(value.slice(index));
+  }
   return candidates;
 }
 

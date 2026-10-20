@@ -158,4 +158,21 @@ describe("Claude permission broker", () => {
       await expect(decision).resolves.toMatchObject({ behavior: "deny" });
     }
   });
+
+  it.each([
+    ["Write", { file_path: "/workspace/src/parser.ts", content: "" }],
+    ["Edit", { file_path: "/workspace/src/parser.ts", old_string: "a", new_string: "b" }],
+    ["MultiEdit", { file_path: "/workspace/src/parser.ts", edits: [] }],
+    ["NotebookEdit", { notebook_path: "/workspace/notes.ipynb", new_source: "" }],
+  ])("keeps a watcher's %s on the approval path", async (toolName, input) => {
+    const events: AgentHarnessEvent[] = [];
+    const permissions = watcherBroker(events);
+    const decision = permissions.canUseTool(toolName, input, callbackOptions());
+    await expect.poll(() => approvalRequests(events).length).toBe(1);
+    const [request] = approvalRequests(events);
+    expect(request).toMatchObject({ kind: "file-change" });
+    expect(permissions.settleApproval(request!.requestId, "deny")).toBe(true);
+    await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+  });
 });
+

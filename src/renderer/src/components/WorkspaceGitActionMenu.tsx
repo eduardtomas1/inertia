@@ -5,6 +5,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitPullRequest,
+  History,
   RefreshCw,
 } from "lucide-react";
 
@@ -30,6 +31,7 @@ type WorkspaceGitActionMenuProps = {
   embedded?: boolean;
   onAction: (action: HeaderGitActionId) => void;
   onOpenBranches?: () => void;
+  onOpenHistory?: () => void;
 };
 
 const actionIcons = { fetch: RefreshCw, commit: GitCommitHorizontal, pull: CloudDownload, push: CloudUpload, "pull-request": GitPullRequest };
@@ -41,6 +43,7 @@ export default function WorkspaceGitActionMenu({
   embedded = false,
   onAction,
   onOpenBranches,
+  onOpenHistory,
 }: WorkspaceGitActionMenuProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
   const items = buildMenuItems(status, busy);
@@ -87,6 +90,12 @@ export default function WorkspaceGitActionMenu({
         >
           <GitBranch size={14} />
           <span>{status.branch ? "Switch branch" : "Create branch"}</span>
+        </button>
+      )}
+      {onOpenHistory && (
+        <button type="button" role="menuitem" onClick={onOpenHistory}>
+          <History size={14} aria-hidden="true" />
+          <span>History…</span>
         </button>
       )}
       {warning && <p className="git-menu-note is-warning">{warning}</p>}

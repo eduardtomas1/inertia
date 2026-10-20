@@ -472,6 +472,11 @@ export interface ProviderHostToolResult {
 export interface ProviderHostToolBridge {
   readonly definitions: readonly ProviderHostToolDefinition[];
   readonly retiredToolNames?: ReadonlySet<string>;
+  /**
+   * The hidden prompt instructions this turn carries only because the bridge
+   * is offered. A harness that cannot attach the bridge withholds them.
+   */
+  readonly instructions?: readonly { readonly label: string; readonly text: string }[];
   invoke(call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
 }
 

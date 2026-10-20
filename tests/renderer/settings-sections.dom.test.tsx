@@ -40,14 +40,14 @@ describe("Review settings", () => {
 describe("Keyboard settings", () => {
   it("resets custom shortcuts to the defaults and is unavailable at the defaults", async () => {
     const onUpdate = vi.fn(async () => undefined);
-    const custom = { ...DEFAULT_APP_KEYBINDINGS, search: "g" as const };
+    const custom = { ...DEFAULT_APP_KEYBINDINGS, search: "u" as const };
     const view = render(<SettingsView {...settingsViewProps({
       target: { section: "keyboard" },
       settings: { ...defaultSettings, keybindings: custom },
       onUpdate,
     })} />);
     const reset = screen.getByRole("button", { name: "Reset shortcuts" });
-    expect(screen.getByLabelText("Search everything key")).toHaveValue("g");
+    expect(screen.getByLabelText("Search everything key")).toHaveValue("u");
 
     expect(reset).not.toHaveAttribute("aria-disabled");
     reset.focus();
@@ -63,6 +63,25 @@ describe("Keyboard settings", () => {
     expect(reset).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(reset);
     expect(onUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("lists the surface chooser shortcut and keeps every key unique", () => {
+    const onUpdate = vi.fn(async () => undefined);
+    render(<SettingsView {...settingsViewProps({ target: { section: "keyboard" }, onUpdate })} />);
+    const surface = screen.getByLabelText("Open a surface key");
+    expect(row("shortcut-open-surface")).toHaveTextContent("Open a surface");
+    expect(surface).toHaveValue("g");
+    const disabled = [...surface.querySelectorAll("option")]
+      .filter((option) => option.disabled)
+      .map((option) => option.value)
+      .sort();
+    expect(disabled).toEqual(["b", "j", "k", "n"]);
+    expect(within(screen.getByLabelText("Search everything key")).getByRole("option", { name: "G" })).toBeDisabled();
+
+    fireEvent.change(surface, { target: { value: "y" } });
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({
+      keybindings: { ...DEFAULT_APP_KEYBINDINGS, "open-surface": "y" },
+    });
   });
 
   it("restores the saved shortcuts and shows an error when the save fails", async () => {

@@ -1,5 +1,6 @@
 import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerAttachmentSelectionIpc } from "./attachment-selection-ipc.js";
+import { registerAttachmentReattachIpc } from "./attachment-reattach.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { MascotMain } from "./mascot-main.js";
 import { MascotFeedMemory } from "./mascot-feed-memory.js";
@@ -570,6 +571,12 @@ function registerIpcHandlers(): void {
     assertTrusted: assertTrustedChatIpc,
     coordinator: rendererAttachmentImports,
     sanitizeError: privacySafeAttachmentImportError,
+  });
+
+  registerAttachmentReattachIpc({
+    ipcMain, channel: IPC.reattachAttachment, assertTrusted: assertTrustedChatIpc,
+    registry: attachmentRegistry, imports: rendererAttachmentImports,
+    retained: () => conversationAttachments,
   });
 
   registerAttachmentLifecycleIpc({

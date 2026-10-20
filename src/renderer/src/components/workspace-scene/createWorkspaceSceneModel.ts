@@ -57,6 +57,11 @@ import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { requestTimelineFocus } from "../../utils/timelineFocus";
 import { requestComposerPrefill } from "../../utils/composerPrefill";
 import { latestPlanDocument } from "../../utils/terminalTurnProjection";
+import {
+  reportedPlanStepCount,
+  textPlanGate,
+  visiblePlanSteps,
+} from "../../utils/planFromText";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../utils/transcriptNavigation";
@@ -66,6 +71,7 @@ import {
 } from "../../utils/goalExecution";
 import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
+import { requestGitBlame } from "../../utils/gitHistoryCommands";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -444,6 +450,14 @@ export function createWorkspaceSceneModel({
     usageQuotaSource,
   });
   const canUpdatePlan = planActionsAvailable(conversation);
+  const panelPlanSteps = visiblePlanSteps(
+    planSteps,
+    textPlanGate(
+      projection.messages,
+      projection.turns,
+      conversation?.interactionMode ?? null,
+    ),
+  );
   const latestPlan = projection.plans.at(-1) ?? null;
   const visibleDetailState = detailState?.conversationId === conversation?.id
     ? detailState
@@ -770,7 +784,7 @@ export function createWorkspaceSceneModel({
           changes: workspaceTools.workspaceGitStatus?.files ?? 0,
           goal: currentWorkflow?.goals.some(({ status }) =>
             status !== "complete") ? 1 : 0,
-          plan: planSteps.length,
+          plan: reportedPlanStepCount(panelPlanSteps),
           attachments: environmentSummary.attachments.length,
         },
         onActivateSurface: openPanelSurface,
@@ -786,7 +800,7 @@ export function createWorkspaceSceneModel({
           : {}),
         ...(actions.openUsageView ? { onOpenUsageView: actions.openUsageView } : {}),
       },
-      attachments: { attachments: environmentSummary.attachments },
+      attachments: { attachments: environmentSummary.attachments, conversationId: conversation?.id ?? null },
       agents: {
         runtimeStatus: environmentSummary.runtime.status,
         subagents: projection.subagents,
@@ -851,6 +865,7 @@ export function createWorkspaceSceneModel({
         summaryLoading: busyAction === "review.summary.generate",
         questionRunning: workspaceTools.selectionQuestionRunning,
         wrapLines: settings.wrapDiffs,
+        diffLayoutScope: `${project.id}:${persistedConversation?.id ?? "draft"}`,
         lastReversal: workspaceTools.lastDiffReversal,
         onRefresh: () => {
           void workspaceTools.loadGit({ authoritative: true }).catch((error) => setActionError(
@@ -902,6 +917,11 @@ export function createWorkspaceSceneModel({
         onSelectFile: workspaceTools.selectWorkspaceFile,
         onOpenWorkspaceEntry: workspaceTools.openWorkspaceFile,
         onLoadEntries: workspaceTools.requestWorkspaceEntries,
+        onSearchContent: workspaceTools.requestWorkspaceContentSearch,
+        onComposerPrefill: (mode) => {
+          // Reveal the composer so the user can type the question.
+          if (mode === "ask" && sheetPanel) setActiveTool(null);
+        },
         onRefresh: () => {
           void workspaceTools.loadGit({ scope: "workspace-status", authoritative: true }).catch(() => undefined);
           void workspaceTools.loadFiles().catch((error) => setActionError(
@@ -916,6 +936,7 @@ export function createWorkspaceSceneModel({
           relativePath: path,
           action: "open-externally",
         }),
+        onLoadBlame: (blameRequest) => requestGitBlame(actions.run, { projectId: project.id, ...runtimeConversation }, blameRequest),
         canSaveFile: workspaceTools.canSaveWorkspaceFile,
         onSaveFile: async (...args) => {
           const saved = await workspaceTools.saveWorkspaceFile(...args);
@@ -943,6 +964,7 @@ export function createWorkspaceSceneModel({
         resumeRequestConversationId: activityActions.pendingResumeConversationId,
         onResumeRequestHandled: activityActions.clearPendingResume,
         onClose: closeTerminal,
+        onOpenWorkspaceFile: workspaceTools.openWorkspaceFile,
       },
       terminalKey: `${project.id}:${conversation?.id ?? "project"}`,
       goal: {
@@ -986,7 +1008,7 @@ export function createWorkspaceSceneModel({
         onStopSubagent: stopSubagent,
       },
       plan: {
-        steps: planSteps,
+        steps: panelPlanSteps,
         document: latestPlanDocument(projection.plans, projection.turns, projection.detail?.plans ?? []),
         markdown: {
           projectRoot: conversation?.worktreePath ?? project.normalizedPath,
@@ -1010,7 +1032,7 @@ export function createWorkspaceSceneModel({
               ));
           },
         } : {}),
-        ...(canUpdatePlan && planSteps.length > 0 ? {
+        ...(canUpdatePlan && panelPlanSteps.length > 0 ? {
           onImplement: () => {
             void actions.updateConversation({ interactionMode: "build" })
               .then(() => actions.sendMessage(

@@ -10,7 +10,10 @@ Inertia is a calm desktop workspace for building with coding agents. It keeps ag
 | **[Chats and agents](chats-and-agents.md)** | Prompts with context, models and access modes, and keeping work organized. |
 | **[Working side by side](working-side-by-side.md)** | Split view and separate chat windows. |
 | **[Duo](duo.md)** | One brief for two agents, with an optional third-model comparison. |
+| **[Files](files.md)** | Browse, preview and edit project files, search names and contents, and send selected lines to a chat. |
 | **[Review and ship](review-and-ship.md)** | Diffs, hunk review, commits, branches and pull requests. |
+| **[Tasks](tasks.md)** | A local to-do list with due dates and priorities that you can hand to an agent. |
+| **[Terminal](terminal.md)** | Terminal tabs and splits, the dock, provider chat resume and project actions. |
 | **[Usage and limits](usage-and-limits.md)** | Recorded usage and each account's remaining quota. |
 | **[Keyboard shortcuts](keyboard-shortcuts.md)** | Everything you can do from the keyboard. |
 | **[Troubleshooting](troubleshooting.md)** | Fixes, grouped by what you see. |

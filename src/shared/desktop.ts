@@ -164,6 +164,27 @@ export interface DesktopAttachmentImportSelection {
   attachments: DesktopAttachment[];
 }
 
+/** Copies one retained (sent) attachment into a fresh draft import lease. */
+export interface ReattachAttachmentRequest {
+  conversationId: string;
+  attachmentId: string;
+}
+
+export function parseReattachAttachmentRequest(value: unknown): ReattachAttachmentRequest | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  const candidate = value as Partial<Record<keyof ReattachAttachmentRequest, unknown>>;
+  if (
+    keys.length !== 2
+    || !keys.every((key) => key === "conversationId" || key === "attachmentId")
+    || typeof candidate.conversationId !== "string"
+    || !UUID_PATTERN.test(candidate.conversationId)
+    || typeof candidate.attachmentId !== "string"
+    || !UUID_PATTERN.test(candidate.attachmentId)
+  ) return null;
+  return { conversationId: candidate.conversationId, attachmentId: candidate.attachmentId };
+}
+
 export type AttachmentPickerMode = "all" | "images";
 
 export function parseAttachmentPickerMode(
@@ -670,6 +691,10 @@ export interface DesktopBridge {
   ) => Promise<void>;
   /** Rolls back every uncommitted capability in the selection. */
   cancelAttachmentImport: (batchId: string) => Promise<void>;
+  /** Copies one retained attachment into a fresh import lease; bytes stay in main. */
+  reattachAttachment: (
+    request: ReattachAttachmentRequest,
+  ) => Promise<DesktopAttachmentImportSelection>;
   /** Pins one exact send request across the renderer/runtime IPC handoff. */
   prepareAttachmentHandoff: (request: {
     requestId: string;

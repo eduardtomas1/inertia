@@ -1,6 +1,13 @@
 import type { Input, KeyboardInputEvent } from "electron";
 
-const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n", "w"]);
+import { APP_SHORTCUT_KEYS } from "../shared/keybindings.js";
+
+/**
+ * Every key an app shortcut can be bound to, plus the fixed close-panel key.
+ * A focused page forwards the whole pool, so a rebound shortcut keeps working
+ * while the Browser has focus.
+ */
+const FORWARDED_SHORTCUT_KEYS: ReadonlySet<string> = new Set([...APP_SHORTCUT_KEYS, "w"]);
 
 export function previewAppShortcutKey(
   input: Pick<Input, "alt" | "control" | "key" | "meta" | "shift" | "type">,
@@ -16,7 +23,7 @@ export function previewAppShortcutKey(
       && modified
       && !input.alt
       && !input.shift
-      && APP_SHORTCUT_KEYS.has(key)
+      && FORWARDED_SHORTCUT_KEYS.has(key)
     ? key
     : null;
 }

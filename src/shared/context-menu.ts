@@ -20,10 +20,21 @@ export type ContextMenuRequest =
       anchor: ContextMenuAnchor;
     }
   | {
-      kind: "project-link" | "diff-file";
+      kind: "project-link";
       projectId: string;
       conversationId?: string;
       relativePath: string;
+      anchor: ContextMenuAnchor;
+    }
+  | {
+      kind: "diff-file";
+      projectId: string;
+      conversationId?: string;
+      relativePath: string;
+      /** The file has working-tree changes the Changes panel can stage. */
+      stageable?: boolean;
+      /** The file has index changes the Changes panel can unstage. */
+      unstageable?: boolean;
       anchor: ContextMenuAnchor;
     }
   | {
@@ -38,19 +49,25 @@ export type ContextMenuRequest =
       kind: "terminal";
       hasSelection: boolean;
       clearable: boolean;
+      /** A chat terminal whose selection can be added to that chat's prompt. */
+      promptable?: boolean;
       anchor: ContextMenuAnchor;
     };
 
 export type ContextMenuAction =
   | "copy-message"
   | "copy-markdown"
+  | "create-task"
   | "copy-code"
   | "open"
   | "reveal"
   | "copy-path"
   | "copy-relative-path"
+  | "git-stage"
+  | "git-unstage"
   | "terminal-copy"
   | "terminal-select-all"
+  | "terminal-add-to-prompt"
   | "terminal-clear";
 
 const MAX_ANCHOR_COORDINATE = 100_000;
@@ -97,6 +114,12 @@ function exactKeys(value: Record<string, unknown>, kind: ContextMenuRequest["kin
   if (OPTIONAL_CONVERSATION.has(kind) && Object.hasOwn(value, "conversationId")) {
     allowed.add("conversationId");
   }
+  if (kind === "terminal" && Object.hasOwn(value, "promptable")) allowed.add("promptable");
+  if (kind === "diff-file") {
+    for (const key of ["stageable", "unstageable"]) {
+      if (Object.hasOwn(value, key)) allowed.add(key);
+    }
+  }
   const keys = Object.keys(value);
   return keys.length === allowed.size && keys.every((key) => allowed.has(key));
 }
@@ -128,9 +151,24 @@ export function parseContextMenuRequest(value: unknown): ContextMenuRequest | nu
       if (typeof value.hasSelection !== "boolean") return null;
       return { kind, ...conversation, hasSelection: value.hasSelection, anchor };
     case "project-link":
-    case "diff-file":
       if (!uuid(value.projectId) || !isProjectRelativePath(value.relativePath)) return null;
       return { kind, projectId: value.projectId, ...conversation, relativePath: value.relativePath, anchor };
+    case "diff-file":
+      if (
+        !uuid(value.projectId)
+        || !isProjectRelativePath(value.relativePath)
+        || (Object.hasOwn(value, "stageable") && typeof value.stageable !== "boolean")
+        || (Object.hasOwn(value, "unstageable") && typeof value.unstageable !== "boolean")
+      ) return null;
+      return {
+        kind,
+        projectId: value.projectId,
+        ...conversation,
+        relativePath: value.relativePath,
+        ...(value.stageable === true ? { stageable: true } : {}),
+        ...(value.unstageable === true ? { unstageable: true } : {}),
+        anchor,
+      };
     case "file":
       if (
         !uuid(value.projectId)
@@ -146,7 +184,17 @@ export function parseContextMenuRequest(value: unknown): ContextMenuRequest | nu
         anchor,
       };
     case "terminal":
-      if (typeof value.hasSelection !== "boolean" || typeof value.clearable !== "boolean") return null;
-      return { kind, hasSelection: value.hasSelection, clearable: value.clearable, anchor };
+      if (
+        typeof value.hasSelection !== "boolean"
+        || typeof value.clearable !== "boolean"
+        || (Object.hasOwn(value, "promptable") && typeof value.promptable !== "boolean")
+      ) return null;
+      return {
+        kind,
+        hasSelection: value.hasSelection,
+        clearable: value.clearable,
+        ...(value.promptable === true ? { promptable: true } : {}),
+        anchor,
+      };
   }
 }

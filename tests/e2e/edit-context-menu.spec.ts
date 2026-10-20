@@ -193,7 +193,10 @@ for (const detached of [false, true]) test(`copies transcript content from the s
     const answer = page.locator("article.message.is-assistant");
     const heading = answer.getByRole("heading", { name: "Settings fixture" });
     const items = await openSurfaceMenu(app, heading);
-    expect(visibleLabels(items)).toEqual(["Copy message", "Copy as Markdown"]);
+    // Detached chat windows cannot create tasks, so they do not offer the item.
+    expect(visibleLabels(items)).toEqual(detached
+      ? ["Copy message", "Copy as Markdown"]
+      : ["Copy message", "Copy as Markdown", "Create task from message"]);
     const box = (await heading.boundingBox())!;
     const position = await app.electronApp.evaluate(() =>
       Reflect.get(globalThis, "surfaceMenuPosition") as { x: number; y: number });
@@ -232,10 +235,10 @@ test("pastes into the workspace shell from the terminal menu", async () => {
     const box = (await mount.boundingBox())!;
     const blankCell = { x: box.width - 8, y: box.height - 8 };
     expect(visibleLabels(await openSurfaceMenu(app, mount, blankCell)))
-      .toEqual(["Copy (disabled)", "role:paste", "Select all", "Clear"]);
+      .toEqual(["Copy (disabled)", "role:paste", "Select all", "Add selection to prompt (disabled)", "Clear"]);
     await chooseSurfaceItem(app, { label: "Select all" });
     expect(visibleLabels(await openSurfaceMenu(app, mount, blankCell)))
-      .toEqual(["Copy", "role:paste", "Select all", "Clear"]);
+      .toEqual(["Copy", "role:paste", "Select all", "Add selection to prompt", "Clear"]);
     await app.electronApp.evaluate(({ clipboard }) => clipboard.writeText("not-copied"));
     await chooseSurfaceItem(app, { label: "Copy" });
     await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))

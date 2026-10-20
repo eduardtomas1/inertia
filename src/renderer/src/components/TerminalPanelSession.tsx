@@ -9,13 +9,25 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { FitAddon } from "@xterm/addon-fit";
+import type { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Maximize2, RotateCcw, Terminal as TerminalIcon, X } from "lucide-react";
+import {
+  Maximize2,
+  MessageSquarePlus,
+  RotateCcw,
+  Search,
+  Terminal as TerminalIcon,
+  X,
+} from "lucide-react";
 import type { ProviderTerminalResumeDescriptor, ServerEvent } from "@shared/contracts";
+import { requestComposerPrefill } from "../utils/composerPrefill";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
-import { terminalContextMenu, terminalPasteKeyHandler } from "../utils/terminalContextMenu";
+import { attachTerminalChatAddons } from "../utils/terminalChatAddons";
+import { terminalContextMenu } from "../utils/terminalContextMenu";
+import { terminalPromptExcerpt } from "../utils/terminalPromptExcerpt";
+import { TerminalFindBar, type TerminalFindDirection } from "./TerminalFindBar";
 import { hasStoredResumeSession, type ProviderTerminalResumeOption } from "./providerResumeOptions";
 import {
   command,
@@ -50,6 +62,8 @@ type TerminalSessionProps = TerminalPanelProps & {
   onProviderResumeStarted: (terminalId: string, conversationId: string) => void;
   /** Tab-bar slot for this session's controls; null keeps its own header. */
   actionsHost?: HTMLElement | null;
+  /** The tab's name, used to label terminal output added to the prompt. */
+  tabLabel?: string;
 };
 const MAX_PENDING_TERMINAL_OUTPUT = 256 * 1_024 + 256;
 const MAX_PENDING_TERMINAL_EXITS = 8;
@@ -80,10 +94,13 @@ export function TerminalSession({
   onClose,
   actionsHost = null,
   visible = true,
+  tabLabel = "Terminal",
+  onOpenWorkspaceFile,
 }: TerminalSessionProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
   const terminalIdRef = useRef<string | null>(initialTerminalId);
   const terminalReadyRef = useRef(false);
   const managedActionTerminalRef = useRef(false);
@@ -116,6 +133,9 @@ export function TerminalSession({
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeInFlight, setResumeInFlight] = useState(false);
   const [activeResume, setActiveResume] = useState<ProviderTerminalResumeDescriptor | null>(null);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findFocusRequest, setFindFocusRequest] = useState(0);
   const resumeOptions = useMemo<readonly ProviderTerminalResumeOption[]>(() => {
     if (providerResumes && providerResumes.length > 0) return providerResumes;
     if (!providerResume || !conversationId) return [];
@@ -146,9 +166,16 @@ export function TerminalSession({
   onRestorableTerminalChangeRef.current = onRestorableTerminalChange;
   onTerminalReplacedRef.current = onTerminalReplaced;
   onProviderResumeStartedRef.current = onProviderResumeStarted;
+  const projectIdRef = useRef(projectId);
+  const conversationIdRef = useRef(conversationId);
+  const onOpenWorkspaceFileRef = useRef(onOpenWorkspaceFile);
+  const openFindRef = useRef<() => void>(() => undefined);
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
   statusRef.current = status;
   projectNameRef.current = projectName;
+  projectIdRef.current = projectId;
+  conversationIdRef.current = conversationId;
+  onOpenWorkspaceFileRef.current = onOpenWorkspaceFile;
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -183,10 +210,31 @@ export function TerminalSession({
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
-    terminal.attachCustomKeyEventHandler(terminalPasteKeyHandler(window.inertia?.getPlatform() === "win32"));
+    const chatAddons = attachTerminalChatAddons(terminal, {
+      platform: window.inertia?.getPlatform(),
+      onFind: () => openFindRef.current(),
+      onSelectionChange: setHasSelection,
+      fileOpener: () => onOpenWorkspaceFileRef.current,
+      resolvePath: async (text) => {
+        if (statusRef.current !== "online") throw new Error("The local service is offline.");
+        const linkConversationId = conversationIdRef.current;
+        const event = await sendCommand(command({
+          type: "workspace.path.resolve",
+          payload: {
+            projectId: projectIdRef.current,
+            ...(linkConversationId ? { conversationId: linkConversationId } : {}),
+            text,
+          },
+        }));
+        return event.type === "request.result" && event.result.kind === "workspace.path"
+          ? event.result.resolution
+          : null;
+      },
+    });
     terminal.open(container);
     terminalRef.current = terminal;
     fitRef.current = fitAddon;
+    searchRef.current = chatAddons.search;
     fitAddon.fit();
     setInstanceReady(true);
 
@@ -234,8 +282,10 @@ export function TerminalSession({
       observer.disconnect();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       inputDisposable.dispose();
+      chatAddons.dispose();
       terminalRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
       setInstanceReady(false);
       terminal.dispose();
     };
@@ -1007,6 +1057,59 @@ export function TerminalSession({
     });
   };
 
+  const addSelectionToPrompt = (selection?: string): void => {
+    if (!conversationId) return;
+    const excerpt = terminalPromptExcerpt(
+      selection ?? terminalRef.current?.getSelection() ?? "",
+      tabLabel,
+    );
+    if (!excerpt) return;
+    requestComposerPrefill({ conversationId, text: excerpt.text });
+  };
+
+  const findInTerminal = (
+    query: string,
+    direction: TerminalFindDirection,
+    incremental: boolean,
+  ): boolean => {
+    const search = searchRef.current;
+    if (!search) return false;
+    const options = { caseSensitive: false, incremental };
+    return direction === "previous"
+      ? search.findPrevious(query, options)
+      : search.findNext(query, options);
+  };
+
+  const openFind = (): void => {
+    setFindOpen(true);
+    setFindFocusRequest((value) => value + 1);
+  };
+  openFindRef.current = openFind;
+
+  const closeFind = (): void => {
+    setFindOpen(false);
+    searchRef.current?.clearDecorations();
+    terminalRef.current?.focus();
+  };
+
+  const findShortcut = window.inertia?.getPlatform() === "darwin" ? "⌘F" : "Ctrl+F";
+  const chatControls = (
+    <>
+      <IconButton label="Find in terminal" shortcut={findShortcut} aria-expanded={findOpen} onClick={openFind}>
+        <Search size={14} />
+      </IconButton>
+      {conversationId && (
+        <IconButton
+          label="Add selection to prompt"
+          disabled={!hasSelection}
+          onClick={() => addSelectionToPrompt()}
+        >
+          <MessageSquarePlus size={14} />
+        </IconButton>
+      )}
+    </>
+  );
+
   const fitTerminal = () => {
     try {
       fitRef.current?.fit();
@@ -1027,6 +1130,7 @@ export function TerminalSession({
     >
       {actionsHost ? createPortal(
         <>
+          {chatControls}
           <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={14} /></IconButton>
           <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
             <RotateCcw size={14} />
@@ -1039,6 +1143,7 @@ export function TerminalSession({
             <span>Terminal</span>
           </div>
           <div className="terminal-actions">
+            {chatControls}
             <IconButton label="Fit terminal" onClick={fitTerminal}><Maximize2 size={14} /></IconButton>
             <IconButton label="Restart terminal" onClick={restartTerminal} disabled={status !== "online" || resumeInFlight}>
               <RotateCcw size={14} />
@@ -1076,8 +1181,19 @@ export function TerminalSession({
         <div
           className="terminal-mount"
           ref={containerRef}
-          onContextMenu={terminalContextMenu(() => terminalRef.current, true)}
+          onContextMenu={terminalContextMenu(
+            () => terminalRef.current,
+            true,
+            conversationId ? addSelectionToPrompt : undefined,
+          )}
         />
+        {findOpen && (
+          <TerminalFindBar
+            find={findInTerminal}
+            onClose={closeFind}
+            focusRequest={findFocusRequest}
+          />
+        )}
         {sessionState !== "ready" && (
           <div className="terminal-overlay" role="status">
             {sessionState === "starting" ? (

@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../../src/server/runtime/harness-capabilities";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
@@ -1303,7 +1304,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("persists visible content separately while the provider receives complete structured execution content", async () => {
-    const runtime = await testRuntime({ harnessInstructionsForTurn: () => [{ label: "test-harness", text: "HARNESS_POLICY: inspect evidence." }] });
+    const runtime = await testRuntime({ capabilityOfferForTurn: () => ({ instructions: [{ label: "test-harness", text: "HARNESS_POLICY: inspect evidence." }], offer: FULL_HARNESS_CAPABILITY_OFFER }) });
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Why is this change safe?",
@@ -1374,10 +1375,10 @@ describe("TurnController authoritative lifecycle", () => {
           hostToolBridgeAvailable: false,
         },
       }],
-      harnessInstructionsForTurn: () => [{
+      capabilityOfferForTurn: () => ({ instructions: [{
         label: "unverified-host-tools",
         text: "UNVERIFIED_HOST_TOOLS_MUST_NOT_BE_ADVERTISED",
-      }],
+      }], offer: FULL_HARNESS_CAPABILITY_OFFER }),
       hostToolsForTurn,
     });
     const queued = runtime.controller.queue({
@@ -1404,10 +1405,10 @@ describe("TurnController authoritative lifecycle", () => {
       invoke: vi.fn(async () => ({ success: true, text: "unused" })),
     };
     const hostToolsForTurn = vi.fn(() => hostTools);
-    const harnessInstructionsForTurn = vi.fn(() => [{
+    const capabilityOfferForTurn = vi.fn(() => ({ instructions: [{
       label: "native-host-tools",
       text: "NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE",
-    }]);
+    }], offer: FULL_HARNESS_CAPABILITY_OFFER }));
     const customProfile = {
       ...providerNativeBackendProfile("codex"),
       id: "custom:no-native-host-bridge",
@@ -1433,7 +1434,7 @@ describe("TurnController authoritative lifecycle", () => {
     const runtime = await testRuntime({
       // The default provider view deliberately claims a fully verified native
       // host bridge. Route identity, not that provider-wide summary, decides.
-      harnessInstructionsForTurn,
+      capabilityOfferForTurn,
       hostToolsForTurn,
     }, {
       modelSelection: customSelection,
@@ -1457,7 +1458,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(runtime.provider.input?.prompt)
       .not.toContain("NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE");
-    expect(harnessInstructionsForTurn).not.toHaveBeenCalled();
+    expect(capabilityOfferForTurn).not.toHaveBeenCalled();
     expect(hostToolsForTurn).not.toHaveBeenCalled();
     expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
 
@@ -1476,10 +1477,10 @@ describe("TurnController authoritative lifecycle", () => {
     delete providerWithoutAttestation.capabilityContract;
     const runtime = await testRuntime({
       providerInfo: () => [providerWithoutAttestation],
-      harnessInstructionsForTurn: () => [{
+      capabilityOfferForTurn: () => ({ instructions: [{
         label: "missing-host-tools",
         text: "MISSING_HOST_TOOLS_MUST_NOT_BE_ADVERTISED",
-      }],
+      }], offer: FULL_HARNESS_CAPABILITY_OFFER }),
       hostToolsForTurn,
     });
     const queued = runtime.controller.queue({

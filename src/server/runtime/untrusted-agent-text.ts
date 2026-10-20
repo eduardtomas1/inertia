@@ -76,7 +76,7 @@ const INERTIA_SECTION_HEADER = /^([ \t]*(?:Internal provider instructions|Struct
 
 // `[label]` lines: hidden-instruction labels (build mode, capability packs,
 // isolated review).
-const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|read-only-diff-review|selected-diff-revision-scope)\])/gimu;
+const INERTIA_SECTION_LABEL = /^([ \t]*)\[(?=(?:build-mode|inertia-orchestration|inertia-frontend-workbench|inertia-workspace|read-only-diff-review|selected-diff-revision-scope)\])/gimu;
 
 function neutralizeControlTag(
   match: string,

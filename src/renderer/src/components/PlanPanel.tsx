@@ -1,11 +1,15 @@
 import clsx from "clsx";
 import { useId, useState, type ComponentProps } from "react";
-import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, Play, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, ListPlus, Play, RotateCcw } from "lucide-react";
+import { todoDraftFromPlanStep } from "@shared/todos";
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
+import type { PlanStepSource } from "../utils/planFromText";
 import { ResponseMarkdown } from "./ResponseMarkdown";
+import { useTaskCreator } from "./tasks/taskCreation";
 import { IconButton, LoadingMark } from "./ui";
+import "./tasks/TaskCreation.css";
 
 export type PlanStepStatus = "pending" | "in-progress" | "completed" | "blocked" | "cancelled";
 
@@ -14,6 +18,7 @@ export type PlanStep = {
   title: string;
   detail?: string | null;
   status: PlanStepStatus;
+  source?: PlanStepSource;
 };
 
 export type PlanMarkdownContext = Pick<
@@ -46,6 +51,10 @@ function statusLabel(status: PlanStepStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function planStepPlainTitle(title: string): string {
+  return planInlineSegments(title).map(({ text }) => text).join("");
+}
+
 function PlanInlineText({ text }: { text: string }): React.JSX.Element {
   return (
     <>
@@ -70,6 +79,7 @@ export function PlanPanel({
 }: PlanPanelProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const documentId = useId();
+  const sourceNoteId = useId();
   const planCopy = useCopiedState();
   const completed = steps.filter((step) => step.status === "completed").length;
   const counted = steps.filter((step) => step.status !== "cancelled").length;
@@ -78,6 +88,11 @@ export function PlanPanel({
   const body = parsed?.body ?? "";
   const collapsible = planDocumentIsLong(body);
   const collapsed = collapsible && !expanded;
+  const derived = steps.length > 0
+    && steps.every((step) => step.source === "derived");
+  const taskCreator = useTaskCreator();
+  // Tasks link to a saved chat; drafts and detached windows offer no action.
+  const taskConversationId = taskCreator ? markdown?.conversationId ?? null : null;
 
   return (
     <section className="plan-panel" aria-label="Implementation plan">
@@ -85,7 +100,9 @@ export function PlanPanel({
         <div className="panel-heading">
           <div className="panel-heading-copy">
             <h2>{heading}</h2>
-            {counted > 0 && <span>{completed} of {counted} complete</span>}
+            {derived
+              ? <span>Derived from the reply</span>
+              : counted > 0 && <span>{completed} of {counted} complete</span>}
           </div>
         </div>
         <div className="plan-toolbar-actions">
@@ -132,7 +149,12 @@ export function PlanPanel({
           </div>
         ) : (
           <>
-            <ol className="plan-steps">
+            {derived && (
+              <p id={sourceNoteId} className="plan-source-note">
+                The provider didn't report a plan. These steps come from the list in its reply and aren't tracked.
+              </p>
+            )}
+            <ol className="plan-steps" aria-describedby={derived ? sourceNoteId : undefined}>
               {steps.map((step, index) => {
                 const content = (
                   <>
@@ -146,9 +168,15 @@ export function PlanPanel({
                     <span className="plan-step-status">{statusLabel(step.status)}</span>
                   </>
                 );
+                const stepLabel = planStepPlainTitle(step.title).trim();
                 return (
                   <li
-                    className={clsx("plan-step", `is-${step.status}`, activeStepId === step.id && "is-active")}
+                    className={clsx(
+                      "plan-step",
+                      `is-${step.status}`,
+                      activeStepId === step.id && "is-active",
+                      taskConversationId && "has-task-action",
+                    )}
                     data-plan-step-status={step.status}
                     key={step.id}
                   >
@@ -163,6 +191,22 @@ export function PlanPanel({
                       </button>
                     ) : (
                       <div className="plan-step-content" aria-current={activeStepId === step.id ? "step" : undefined}>{content}</div>
+                    )}
+                    {taskCreator && taskConversationId && (
+                      <IconButton
+                        className="plan-step-task"
+                        label="Create task"
+                        aria-label={`Create task from step ${index + 1}${stepLabel ? `: ${stepLabel}` : ""}`}
+                        onClick={() => taskCreator.create(
+                          taskConversationId,
+                          (chat) => todoDraftFromPlanStep(
+                            { title: planStepPlainTitle(step.title), detail: step.detail },
+                            chat.title,
+                          ),
+                        )}
+                      >
+                        <ListPlus size={14} aria-hidden="true" />
+                      </IconButton>
                     )}
                   </li>
                 );

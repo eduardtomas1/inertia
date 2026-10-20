@@ -77,7 +77,7 @@ export class TodoRepository {
 
   create(input: TodoCreateInput): Todo {
     const { id, ...fields } = input;
-    const draft = parse(todoDraftSchema, fields);
+    const { conversationId = null, ...draft } = parse(todoDraftSchema, fields);
     return this.database.transaction(() => {
       const current = this.list();
       if (current.length >= MAX_TODOS) {
@@ -91,7 +91,7 @@ export class TodoRepository {
         ...draft,
         id,
         completedAt: null,
-        conversationId: null,
+        conversationId,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
@@ -100,13 +100,14 @@ export class TodoRepository {
         INSERT INTO todos (
           id, title, note, priority, due_date, completed_at,
           conversation_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
       `).run(
         todo.id,
         todo.title,
         todo.note,
         todo.priority,
         todo.dueDate,
+        todo.conversationId,
         todo.createdAt,
         todo.updatedAt,
       );

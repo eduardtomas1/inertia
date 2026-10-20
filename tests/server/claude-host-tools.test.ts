@@ -7,6 +7,13 @@ import { createClaudeHostTools } from "../../src/server/provider/claude-host-too
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { ProviderHostToolRuntime } from "../../src/server/provider/host-tool-runtime";
 import type { AgentApprovalRequest } from "../../src/server/provider/interactions";
+import { INERTIA_HOST_MCP_INSTRUCTIONS } from "../../src/server/provider/host-tool-mcp-protocol";
+import type { AgentTurn, Conversation } from "../../src/shared/contracts";
+import {
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 
 function hostBridge(): ProviderHostToolBridge {
   return {
@@ -45,6 +52,45 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("Claude in-process Inertia chat tools", () => {
+  it.each([
+    { browserAccess: false, browserTools: 0 },
+    { browserAccess: true, browserTools: 12 },
+  ])("lists only the turn's offered tools under the shared host-tool instructions (browserAccess=$browserAccess)", async ({
+    browserAccess,
+    browserTools,
+  }) => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: async () => ({ success: true, text: "{}" }),
+    });
+    const runtime = new ProviderHostToolRuntime({
+      bridge: registry.bridgeFor(
+        { conversation: {} as Conversation, turn: {} as AgentTurn },
+        inertiaCapabilityOfferForProject({ browserAccess }),
+      ),
+      conversationId: "claude-parent",
+      turnId: "claude-turn",
+      cwd: "/project",
+      onApproval: () => undefined,
+      onApprovalResolved: () => undefined,
+    });
+    const tools = createClaudeHostTools(runtime);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "inertia-offer-test", version: "1.0.0" });
+    await tools.config.instance.connect(serverTransport);
+    await client.connect(clientTransport);
+    expect(client.getInstructions()).toBe(INERTIA_HOST_MCP_INSTRUCTIONS);
+    const listed = (await client.listTools()).tools.map(({ name }) => name);
+    expect(listed.filter((name) => name.startsWith("inertia_browser_"))).toHaveLength(browserTools);
+    expect(listed).toContain("inertia_render_html");
+    expect(listed).toEqual(expect.arrayContaining(WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name)));
+    expect([...tools.providerToolNames].filter((name) => name.includes("inertia_browser_")))
+      .toHaveLength(browserTools);
+    await tools.close();
+    await client.close().catch(() => undefined);
+  });
+
   it("returns host-owned images through Claude MCP content", async () => {
     const image = Buffer.from("png-evidence").toString("base64");
     const photo = Buffer.from("jpeg-evidence").toString("base64");

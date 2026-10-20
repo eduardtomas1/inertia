@@ -26,6 +26,7 @@ export const DESKTOP_IPC = {
   importAttachments: "inertia:import-attachments",
   commitAttachmentImport: "inertia:commit-attachment-import",
   cancelAttachmentImport: "inertia:cancel-attachment-import",
+  reattachAttachment: "inertia:reattach-attachment",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
   finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",

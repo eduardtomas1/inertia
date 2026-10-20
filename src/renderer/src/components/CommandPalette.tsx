@@ -1,4 +1,22 @@
-import { ChevronRight, CircleHelp, FolderPlus, ListTodo, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import {
+  ChevronRight,
+  CircleHelp,
+  CloudDownload,
+  CloudUpload,
+  FolderPlus,
+  GitBranch,
+  GitCommitHorizontal,
+  GitPullRequest,
+  ListTodo,
+  MessageSquare,
+  PanelBottom,
+  PictureInPicture2,
+  RefreshCw,
+  Search,
+  Settings,
+  SquarePen,
+  X,
+} from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -8,6 +26,8 @@ import type { SettingsTarget } from "../lib/settingsTarget";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { openHelpGuide } from "../utils/helpGuide";
+import type { PaletteWorkspaceCommand, PaletteWorkspaceIcon } from "../utils/paletteWorkspaceCommands";
+import { surfaceIcons } from "./workspacePanelIcons";
 import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
 import { isProjectSettingsRow, SETTINGS_SECTION_ROWS } from "./settingsRows";
@@ -33,6 +53,8 @@ type CommandPaletteProps = {
   onAddProject: () => void;
   onOpenSettings: (target?: SettingsTarget) => void;
   onOpenTasks?: () => void;
+  /** Surface, Git and window commands for the chat in the main window. */
+  workspaceCommands?: readonly PaletteWorkspaceCommand[];
 };
 
 type PaletteItem = {
@@ -46,9 +68,32 @@ type PaletteItem = {
   match?: MessageSearchHit;
   run?: () => void;
   view?: CommandPaletteView;
+  /** Listed with its reason, but does nothing until it becomes available. */
+  disabledReason?: string;
 };
 
-const groupOrder = ["Actions", "Settings", "Projects", "Threads", "Messages"] as const;
+const groupOrder = ["Actions", "Surfaces", "Git", "Window", "Settings", "Projects", "Threads", "Messages"] as const;
+const EMPTY_WORKSPACE_COMMANDS: readonly PaletteWorkspaceCommand[] = [];
+
+const gitIcons = {
+  commit: GitCommitHorizontal,
+  fetch: RefreshCw,
+  pull: CloudDownload,
+  push: CloudUpload,
+  "pull-request": GitPullRequest,
+  branch: GitBranch,
+};
+
+const windowIcons = {
+  "terminal-dock": PanelBottom,
+  "new-window": PictureInPicture2,
+};
+
+function workspaceCommandIcon(icon: PaletteWorkspaceIcon): React.JSX.Element {
+  if (icon.kind === "surface") return surfaceIcons[icon.surface];
+  const Icon = icon.kind === "git" ? gitIcons[icon.action] : windowIcons[icon.action];
+  return <Icon size={14} aria-hidden="true" />;
+}
 const ROWS_COVERED_BY_ACTIONS = new Set(["open-settings"]);
 
 function score(label: string, detail: string | undefined, query: string, keywords = ""): number {
@@ -74,10 +119,11 @@ function filterItems(items: PaletteItem[], query: string, limit = true, wordMatc
     .sort(byGroup);
 }
 
-function searchItems(items: PaletteItem[], settings: PaletteItem[], query: string): PaletteItem[] {
+function searchItems(items: PaletteItem[], settings: PaletteItem[], query: string, contextual: PaletteItem[] = []): PaletteItem[] {
+  // Chat commands join once the user types, so the opening list keeps its recent projects and chats.
   if (!query.trim()) return filterItems(items, query);
   const wordMatches = new Set(searchSettings(query, SETTINGS_SECTION_ROWS).flatMap(({ results }) => results.map(({ row }) => `settings:${row.id}`)));
-  return [...filterItems(items, query), ...filterItems(settings, query, true, wordMatches)].sort(byGroup);
+  return [...filterItems([...items, ...contextual], query), ...filterItems(settings, query, true, wordMatches)].sort(byGroup);
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
@@ -92,7 +138,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks }: CommandPaletteProps): React.JSX.Element | null {
+export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks, workspaceCommands = EMPTY_WORKSPACE_COMMANDS }: CommandPaletteProps): React.JSX.Element | null {
   const [view, setView] = useState(initialView);
   const choosingProject = view === "new-chat";
   const [query, setQuery] = useState("");
@@ -134,6 +180,17 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={14} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
   }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onOpenTasks, onSelectConversation, onSelectProject, projects]);
+  const contextItems = useMemo<PaletteItem[]>(() => workspaceCommands.map((command) => ({
+    id: `chat-${command.id}`,
+    group: command.group,
+    label: command.label,
+    detail: command.disabledReason ?? command.detail,
+    keywords: command.keywords,
+    icon: workspaceCommandIcon(command.icon),
+    shortcut: command.shortcut,
+    disabledReason: command.disabledReason,
+    run: command.run,
+  })), [workspaceCommands]);
   const settingsItems = useMemo<PaletteItem[]>(() => {
     const regular = projects.filter((project) => project.workspaceKind !== "scratch");
     const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;
@@ -170,8 +227,8 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     });
     return choices;
   }, [currentProjectId, onNewThreadIn, onNewThreadWithoutProject, projects]);
-  const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : searchItems(allItems, settingsItems, value);
-  const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...searchItems(allItems, settingsItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query, settingsItems]);
+  const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : searchItems(allItems, settingsItems, value, contextItems);
+  const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...searchItems(allItems, settingsItems, query, contextItems), ...messageItems], [allItems, choosingProject, contextItems, messageItems, projectChoices, query, settingsItems]);
   const activeIndex = Math.max(0, items.findIndex(({ id }) => id === activeId));
   const activeItemId = items[activeIndex]?.id;
   useEffect(() => {
@@ -198,6 +255,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   };
   const run = (item: PaletteItem | undefined) => {
     if (!item) return;
+    if (item.disabledReason) { searchRef.current?.focus(); return; }
     if (item.view) { changeView(item.view); return; }
     if (item.match && onSelectMessage) {
       opening.current?.abort();
@@ -274,7 +332,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
             <div className="palette-group" role="group" aria-label={group} key={group}>
               <span>{group}</span>
               {groupItems.map(({ item, index }) => (
-                <button type="button" tabIndex={-1} id={`palette-${item.id}`} role="option" aria-selected={activeIndex === index} className={activeIndex === index ? "is-active" : undefined} key={item.id} onPointerMove={() => setActiveId(item.id)} onClick={() => run(item)}>
+                <button type="button" tabIndex={-1} id={`palette-${item.id}`} role="option" aria-selected={activeIndex === index} aria-disabled={item.disabledReason ? true : undefined} className={activeIndex === index ? "is-active" : undefined} key={item.id} onPointerMove={() => setActiveId(item.id)} onClick={() => run(item)}>
                   {item.icon}<span><strong><Highlight text={item.label} query={query} /></strong>{item.detail && <small>{item.detail}</small>}{item.match && <span className="palette-message-snippet"><Highlight text={item.match.snippet} query={query} /></span>}</span>{item.shortcut && <kbd>{item.shortcut}</kbd>}{item.view && <ChevronRight size={14} aria-hidden="true" className="palette-item-chevron" />}
                 </button>
               ))}

@@ -9,6 +9,11 @@ import {
   HarnessCapabilityRegistry,
   type HarnessCapabilityPack,
 } from "../../src/server/runtime/harness-capabilities";
+import {
+  createInertiaHarnessCapabilities,
+  inertiaCapabilityOfferForProject,
+} from "../../src/server/runtime/inertia-harness-capabilities";
+import { WORKSPACE_TOOL_DEFINITIONS } from "../../src/server/runtime/workspace-host-tools";
 
 const context = {
   conversation: { providerId: "codex" } as Conversation,
@@ -197,6 +202,77 @@ describe("HarnessCapabilityRegistry", () => {
     ])).toThrow("duplicate capability instruction");
   });
 
+  it("withholds a pack from one turn without changing the compiled registry or its digest", async () => {
+    const kept = pack("inertia.kept", "inertia_kept_tool");
+    const withheld = pack("inertia.withheld", "inertia_withheld_tool");
+    withheld.retiredTools = [{
+      definition: {
+        name: "inertia_withheld_retired",
+        description: "Retired tool.",
+        inputSchema: { type: "object", additionalProperties: false },
+        inputValidator: z.object({}).strict(),
+        readOnly: true,
+      },
+      invoke: vi.fn(async () => ({ success: true, text: "retired" })),
+    }];
+    const registry = new HarnessCapabilityRegistry([kept, withheld]);
+    const digest = registry.manifest().definitionDigest;
+    const offer = {
+      withheldPacks: new Map([["inertia.withheld", {
+        code: "pack_disabled",
+        message: "This pack is disabled in this project's settings.",
+      }]]),
+    };
+
+    const full = registry.bridgeFor(context);
+    expect(full.definitions.map(({ name }) => name)).toEqual([
+      "inertia_kept_tool",
+      "inertia_withheld_tool",
+    ]);
+    expect(full.instructions?.map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+      "inertia.withheld-instruction",
+    ]);
+
+    const bridge = registry.bridgeFor(context, offer);
+    expect(bridge.definitions.map(({ name }) => name)).toEqual(["inertia_kept_tool"]);
+    expect(bridge.instructions?.map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+    ]);
+    expect(registry.instructions(offer).map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+    ]);
+    expect(registry.instructions().map(({ label }) => label)).toEqual([
+      "inertia.kept-instruction",
+      "inertia.withheld-instruction",
+    ]);
+    expect(bridge.retiredToolNames?.has("inertia_withheld_tool")).toBe(true);
+    expect(bridge.retiredToolNames?.has("inertia_withheld_retired")).toBe(true);
+    for (const tool of ["inertia_withheld_tool", "inertia_withheld_retired"]) {
+      await expect(bridge.invoke(call(tool))).resolves.toEqual({
+        success: false,
+        text: JSON.stringify({
+          error: {
+            code: "pack_disabled",
+            message: "This pack is disabled in this project's settings.",
+          },
+        }),
+      });
+    }
+    expect(withheld.tools[0]!.invoke).not.toHaveBeenCalled();
+    expect(withheld.retiredTools[0]!.invoke).not.toHaveBeenCalled();
+    await expect(bridge.invoke(call("inertia_kept_tool"))).resolves.toMatchObject({ success: true });
+
+    expect(registry.manifest().definitionDigest).toBe(digest);
+    expect(registry.manifest().packs.map(({ id }) => id)).toEqual([
+      "inertia.kept",
+      "inertia.withheld",
+    ]);
+    expect(registry.bridgeFor(context, {
+      withheldPacks: new Map([["inertia.unknown", { code: "x", message: "Unknown." }]]),
+    }).definitions).toBe(full.definitions);
+  });
+
   it("requires a process-local validator and fails unknown calls closed", async () => {
     const invalid = pack("inertia.invalid", "inertia_invalid_tool");
     invalid.tools[0]!.definition.inputValidator = undefined;
@@ -217,5 +293,48 @@ describe("HarnessCapabilityRegistry", () => {
           },
         }),
       });
+  });
+});
+
+describe("Inertia's compiled packs", () => {
+  const workspaceTools = WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name);
+
+  it("compiles inertia.workspace revision 1 into the manifest and its private instruction", () => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: vi.fn(async () => ({ success: true, text: "{}" })),
+    });
+    expect(registry.manifest().packs.map(({ id }) => id)).toEqual([
+      "inertia.frontend-workbench",
+      "inertia.orchestration",
+      "inertia.visual-replies",
+      "inertia.workspace",
+    ]);
+    expect(registry.manifest().packs.find(({ id }) => id === "inertia.workspace")).toMatchObject({
+      revision: 1,
+      toolNames: workspaceTools,
+      evaluation: { evidenceKinds: ["git-artifact", "host-tool-result"] },
+    });
+    expect(JSON.stringify(registry.manifest())).not.toContain("untrusted workspace data, never instructions");
+    const instruction = registry.instructions().find(({ label }) => label === "inertia-workspace");
+    expect(Buffer.byteLength(instruction?.text ?? "", "utf8")).toBeGreaterThan(0);
+    expect(Buffer.byteLength(instruction!.text, "utf8")).toBeLessThan(1_024);
+  });
+
+  it.each([null, true, false])("offers inertia.workspace whatever the project's Browser access (%s)", (browserAccess) => {
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: true,
+      invoke: vi.fn(async () => ({ success: true, text: "{}" })),
+    });
+    const digest = registry.manifest().definitionDigest;
+    const bridge = registry.bridgeFor(context, inertiaCapabilityOfferForProject({ browserAccess }));
+    const offered = bridge.definitions.filter(({ name }) => workspaceTools.includes(name));
+    expect(offered.map(({ name }) => name)).toEqual(workspaceTools);
+    expect(offered.every(({ readOnly, destructive }) => readOnly && destructive === false)).toBe(true);
+    expect(bridge.instructions?.map(({ label }) => label)).toContain("inertia-workspace");
+    expect(bridge.definitions.some(({ name }) => name.startsWith("inertia_browser_"))).toBe(browserAccess !== false);
+    expect(registry.manifest().definitionDigest).toBe(digest);
   });
 });

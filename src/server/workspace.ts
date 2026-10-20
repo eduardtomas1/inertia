@@ -16,13 +16,23 @@ import {
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags";
 import { secureFilePathSegments } from "../node/secure-file-protocol";
-import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../shared/contracts/workspace";
+import {
+  isWorkspaceContentSearchQuery,
+  MAX_WORKSPACE_FILE_EDIT_BYTES,
+  WORKSPACE_CONTENT_SEARCH_LIMITS,
+  type WorkspaceContentMatch,
+} from "../shared/contracts/workspace";
 import {
   SecureFileError,
   type RuntimeSecureFileBroker,
   type SecureFileRead,
   type SecureFileRootCapability,
 } from "./secure-files";
+import {
+  appendContentMatches,
+  literalSearchPattern,
+  readSearchableFile,
+} from "./workspace-content-search";
 import {
   compareWorkspaceEntries,
   describeStableWorkspaceEntry,
@@ -498,6 +508,157 @@ export async function searchWorkspaceEntries(
   }
   entries.sort(compareWorkspaceEntries);
   return { entries, visitedEntries, truncated };
+}
+
+export interface SearchWorkspaceContentOptions {
+  includeHidden?: boolean;
+  maxResults?: number;
+  maxDepth?: number;
+  maxVisitedEntries?: number;
+  ignoredDirectories?: readonly string[];
+  /** Tightens the per-file size bound; never raises it above 1 MiB. */
+  maxFileBytes?: number;
+  /** Tightens the total read budget; never raises it above 64 MiB. */
+  maxTotalBytes?: number;
+  /** Tightens the time budget; never raises it above 3 seconds. */
+  timeBudgetMs?: number;
+  /** Monotonic clock override for focused tests. */
+  now?: () => number;
+  signal?: AbortSignal;
+  /** Focused race hook; production callers never provide it. */
+  afterEntryObserved?: (path: string) => void | Promise<void>;
+}
+
+export interface WorkspaceContentSearchResult {
+  matches: WorkspaceContentMatch[];
+  visitedEntries: number;
+  filesSearched: number;
+  bytesRead: number;
+  truncated: boolean;
+}
+
+/**
+ * Bounded, literal, case-insensitive, line-based project content search.
+ * Traversal, ignore, hidden, containment, and link rules match
+ * {@link searchWorkspaceEntries}; files are opened without following links
+ * and must keep the identity observed inside their stable parent.
+ */
+export async function searchWorkspaceContent(
+  workspacePath: string,
+  query: string,
+  options: SearchWorkspaceContentOptions = {},
+): Promise<WorkspaceContentSearchResult> {
+  if (!isWorkspaceContentSearchQuery(query)) {
+    throw new WorkspaceError(
+      "invalid-input",
+      "Enter search text between 1 and 200 characters without control characters.",
+    );
+  }
+  const limits = WORKSPACE_CONTENT_SEARCH_LIMITS;
+  const root = await workspaceRoot(workspacePath);
+  const maxResults = boundedInteger(options.maxResults, limits.defaultResults, limits.maxResults);
+  const maxDepth = boundedInteger(options.maxDepth, DEFAULT_SEARCH_DEPTH, MAX_SEARCH_DEPTH);
+  const maxVisited = boundedInteger(options.maxVisitedEntries, DEFAULT_VISITED_ENTRIES, MAX_VISITED_ENTRIES);
+  const maxFileBytes = boundedInteger(options.maxFileBytes, limits.maxFileBytes, limits.maxFileBytes);
+  const maxTotalBytes = boundedInteger(options.maxTotalBytes, limits.maxTotalBytes, limits.maxTotalBytes);
+  const timeBudgetMs = boundedInteger(options.timeBudgetMs, limits.timeBudgetMs, limits.timeBudgetMs);
+  const now = options.now ?? (() => performance.now());
+  const deadline = now() + timeBudgetMs;
+  const ignored = new Set(options.ignoredDirectories ?? DEFAULT_IGNORED_DIRECTORIES);
+  const pattern = literalSearchPattern(query);
+  const rootInfo = await lstat(root);
+  const queue: SearchQueueEntry[] = [{
+    absolute: root,
+    depth: 0,
+    identity: { dev: rootInfo.dev, ino: rootInfo.ino },
+  }];
+  const matches: WorkspaceContentMatch[] = [];
+  let visitedEntries = 0;
+  let filesSearched = 0;
+  let bytesRead = 0;
+  let truncated = false;
+  let stopped = false;
+  const checkContinue = (): boolean => {
+    if (options.signal?.aborted) {
+      throw new WorkspaceError("operation-failed", "The content search was cancelled.");
+    }
+    if (now() > deadline || visitedEntries >= maxVisited || matches.length >= maxResults) {
+      truncated = true;
+      stopped = true;
+    }
+    return !stopped;
+  };
+
+  try {
+    for (let queueIndex = 0; queueIndex < queue.length && checkContinue(); queueIndex += 1) {
+      const directory = queue[queueIndex];
+      const directoryHandle = await openStableWorkspaceDirectory(
+        root,
+        directory.absolute,
+        directory.identity,
+      );
+      if (!directoryHandle) continue;
+      for await (const child of directoryHandle) {
+        if (!checkContinue()) break;
+        visitedEntries += 1;
+        if (child.name.startsWith(".") && !options.includeHidden) continue;
+        const kind = workspaceDirentKind(child);
+        const traversable = kind === "directory" && !ignored.has(child.name);
+        if (kind !== "file" && !traversable) continue;
+        const absolute = resolve(directory.absolute, child.name);
+        const projectPath = slashPath(relative(root, absolute));
+        await options.afterEntryObserved?.(projectPath);
+        const described = await describeEntry(
+          root,
+          directory.absolute,
+          directory.identity,
+          absolute,
+          child.name,
+          kind,
+        );
+        if (!described) continue;
+        if (described.entry.kind === "directory") {
+          if (ignored.has(child.name)) continue;
+          if (directory.depth < maxDepth) {
+            queue.push({ absolute, depth: directory.depth + 1, identity: described.identity });
+          } else {
+            truncated = true;
+          }
+          continue;
+        }
+        if (described.entry.kind !== "file") continue;
+        if ((described.entry.size ?? 0) > maxFileBytes) continue;
+        const read = await readSearchableFile(
+          absolute,
+          described.identity,
+          maxFileBytes,
+          maxTotalBytes - bytesRead,
+        );
+        if (read.status === "budget") {
+          truncated = true;
+          stopped = true;
+          break;
+        }
+        bytesRead += read.bytes;
+        if (read.status !== "text") continue;
+        filesSearched += 1;
+        if (appendContentMatches(read.text, projectPath, pattern, matches, maxResults) === "capped") {
+          truncated = true;
+          stopped = true;
+          break;
+        }
+      }
+      // Leaving `for await` closes the directory handle.
+      if (stopped) break;
+    }
+  } catch (error) {
+    if (error instanceof WorkspaceError) throw error;
+    throw new WorkspaceError("operation-failed", "Unable to search this workspace.");
+  }
+  matches.sort((left, right) =>
+    left.projectPath.localeCompare(right.projectPath, "en", { numeric: true })
+    || left.line - right.line);
+  return { matches, visitedEntries, filesSearched, bytesRead, truncated };
 }
 
 function readTextFileResult(

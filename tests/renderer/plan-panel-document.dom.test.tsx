@@ -1,11 +1,17 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { AgentPlan } from "../../src/shared/contracts";
-import { PlanPanel } from "../../src/renderer/src/components/PlanPanel";
+import type { AgentPlan, ChatMessage, Conversation } from "../../src/shared/contracts";
+import { PlanPanel, type PlanStep } from "../../src/renderer/src/components/PlanPanel";
+import { TaskCreationContext, type TaskCreator } from "../../src/renderer/src/components/tasks/taskCreation";
 import { usePlanSteps } from "../../src/renderer/src/hooks/usePlanSteps";
 import { EMPTY_STREAMING_AGENT_SOURCE } from "../../src/renderer/src/hooks/useStreamingAgentState";
 import { planDocument, planInlineSegments } from "../../src/renderer/src/utils/planDocument";
+import {
+  reportedPlanStepCount,
+  textPlanGate,
+  visiblePlanSteps,
+} from "../../src/renderer/src/utils/planFromText";
 import { latestPlanDocument } from "../../src/renderer/src/utils/terminalTurnProjection";
 
 const markdown = { projectRoot: "/workspace", projectId: "project", defaultCodeWrap: true };
@@ -180,5 +186,137 @@ describe("plan panel document", () => {
         turns("build", "question", "continue"),
       )).toBeNull();
     });
+  });
+
+  describe("plan derived from the reply", () => {
+    const reply: ChatMessage = {
+      id: "reply",
+      conversationId: "conversation",
+      turnId: "reply-turn",
+      role: "assistant",
+      content: "Here is the approach:\n1. Read the adapter\n2. Write the projection",
+      attachments: [],
+      createdAt: "2026-10-13T12:00:00.000Z",
+    };
+    const derivedSteps = (mode: "plan" | "build") => {
+      const { result } = renderHook(() => usePlanSteps([], [reply], "completed", EMPTY_STREAMING_AGENT_SOURCE));
+      return visiblePlanSteps(
+        result.current,
+        textPlanGate([reply], [{ id: "reply-turn", interactionMode: mode }], mode),
+      );
+    };
+
+    it("shows nothing for a build-mode reply's list", () => {
+      const steps = derivedSteps("build");
+      expect(steps).toEqual([]);
+      expect(reportedPlanStepCount(steps)).toBe(0);
+      render(<PlanPanel steps={steps} onRefine={() => undefined} onImplement={() => undefined} />);
+      expect(screen.getByText("No plan yet")).toBeTruthy();
+      expect(screen.queryByText("Derived from the reply")).toBeNull();
+    });
+
+    it("labels a plan-mode reply's list as derived without completing it", () => {
+      const steps = derivedSteps("plan");
+      expect(reportedPlanStepCount(steps)).toBe(0);
+      const refine = vi.fn();
+      const implement = vi.fn();
+      const { container } = render(<PlanPanel steps={steps} onRefine={refine} onImplement={implement} />);
+
+      expect(screen.getByText("Derived from the reply")).toBeTruthy();
+      expect(screen.queryByText(/of \d+ complete/u)).toBeNull();
+      const note = screen.getByText(/didn't report a plan/u);
+      const list = container.querySelector(".plan-steps")!;
+      expect(list.getAttribute("aria-describedby")).toBe(note.id);
+      expect([...container.querySelectorAll("[data-plan-step-status]")].map((step) => step.getAttribute("data-plan-step-status")))
+        .toEqual(["pending", "pending"]);
+      expect(screen.queryByText("Completed")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Refine plan" }));
+      fireEvent.click(screen.getByRole("button", { name: "Implement" }));
+      expect(refine).toHaveBeenCalledTimes(1);
+      expect(implement).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a native plan's progress and count unlabeled", () => {
+      const native: AgentPlan = {
+        conversationId: "conversation",
+        runId: "run",
+        turnId: "reply-turn",
+        explanation: null,
+        steps: [
+          { step: "Read the adapter", status: "completed" },
+          { step: "Write the projection", status: "inProgress" },
+        ],
+      };
+      const { result } = renderHook(() => usePlanSteps([native], [reply], "completed", EMPTY_STREAMING_AGENT_SOURCE));
+      const steps = visiblePlanSteps(result.current, { streamed: false, derived: false });
+      expect(reportedPlanStepCount(steps)).toBe(2);
+      render(<PlanPanel steps={steps} />);
+      expect(screen.getByText("1 of 2 complete")).toBeTruthy();
+      expect(screen.queryByText("Derived from the reply")).toBeNull();
+    });
+  });
+});
+
+describe("plan step tasks", () => {
+  const conversationId = "11111111-1111-4111-8111-111111111111";
+  const chat = { id: conversationId, projectId: "project", title: "Release prep" } as Conversation;
+  const steps: PlanStep[] = [
+    { id: "native", title: "**Verify** the `Authorization` header", detail: "Check both tokens.", status: "completed", source: "native" },
+    { id: "streamed", title: "Ship the fix", status: "in-progress", source: "streamed" },
+  ];
+  const derivedSteps: PlanStep[] = [
+    { id: "derived", title: "Write the changelog", status: "pending", source: "derived" },
+  ];
+
+  function renderPanel(
+    taskCreator: TaskCreator | null,
+    props: Partial<React.ComponentProps<typeof PlanPanel>> = {},
+  ) {
+    return render(
+      <TaskCreationContext.Provider value={taskCreator}>
+        <PlanPanel steps={steps} markdown={{ ...markdown, conversationId }} {...props} />
+      </TaskCreationContext.Provider>,
+    );
+  }
+
+  it("creates a task linked to the chat from a step, with its plain title, source and detail", () => {
+    const create = vi.fn<TaskCreator["create"]>();
+    renderPanel({ create }, { onSelectStep: vi.fn() });
+    const button = screen.getByRole("button", { name: "Create task from step 1: Verify the Authorization header" });
+    expect(button.closest("li")).toHaveClass("has-task-action");
+    expect(button.closest(".plan-step-button")).toBeNull();
+    button.focus();
+    expect(button).toHaveFocus();
+    fireEvent.click(button);
+    expect(create).toHaveBeenCalledOnce();
+    const [linked, compose] = create.mock.calls[0]!;
+    expect(linked).toBe(conversationId);
+    expect(compose(chat)).toEqual({
+      title: "Verify the Authorization header",
+      note: "From the plan in Release prep\n\nCheck both tokens.",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create task from step 2: Ship the fix" }));
+    expect(create.mock.calls[1]![1](chat)).toEqual({ title: "Ship the fix", note: "From the plan in Release prep" });
+  });
+
+  it("offers the action for steps derived from the reply", () => {
+    const create = vi.fn<TaskCreator["create"]>();
+    renderPanel({ create }, { steps: derivedSteps });
+    expect(screen.getByText("Derived from the reply")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create task from step 1: Write the changelog" }));
+    expect(create.mock.calls[0]![1](chat)).toEqual({
+      title: "Write the changelog", note: "From the plan in Release prep",
+    });
+  });
+
+  it("hides the action without a saved chat or outside the main window", () => {
+    const { unmount } = renderPanel({ create: vi.fn() }, { markdown });
+    expect(screen.queryByRole("button", { name: /^Create task/u })).toBeNull();
+    unmount();
+    renderPanel(null);
+    expect(screen.queryByRole("button", { name: /^Create task/u })).toBeNull();
+    expect(document.querySelector(".has-task-action")).toBeNull();
   });
 });

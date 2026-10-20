@@ -11,6 +11,7 @@ import type { CommandPaletteView } from "./CommandPalette";
 import type { MessageSearchHit } from "@shared/message-search";
 import type { MessageSearchCommand } from "../hooks/useMessageSearch";
 import type { SettingsTarget } from "../lib/settingsTarget";
+import type { PaletteWorkspaceCommand } from "../utils/paletteWorkspaceCommands";
 
 function PaletteLoadingShell(): React.JSX.Element {
   return (
@@ -40,6 +41,7 @@ interface AppNavigationOverlaysProps {
   importProject: () => Promise<void>;
   openSettings: (target?: SettingsTarget) => void;
   openTasks: () => void;
+  workspaceCommands?: readonly PaletteWorkspaceCommand[];
 }
 
 export function AppNavigationOverlays({
@@ -60,6 +62,7 @@ export function AppNavigationOverlays({
   importProject,
   openSettings,
   openTasks,
+  workspaceCommands,
 }: AppNavigationOverlaysProps): React.JSX.Element {
   // Suspend the native preview from the always-loaded shell. Waiting for the
   // palette's lazy chunk to mount would briefly place untrusted native content
@@ -96,6 +99,7 @@ export function AppNavigationOverlays({
             onAddProject={() => void importProject()}
             onOpenSettings={openSettings}
             onOpenTasks={openTasks}
+            {...(workspaceCommands ? { workspaceCommands } : {})}
           />
         ) : <PaletteLoadingShell />
       )}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, render as renderPalette, screen, within } from "@testing-library/react";
 import { readSourceText } from "../helpers/source-text";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CommandPalette, type CommandPaletteView } from "../../src/renderer/src/components/CommandPalette";
 import type { Conversation, Project } from "../../src/shared/contracts";
+import type { PaletteWorkspaceCommand } from "../../src/renderer/src/utils/paletteWorkspaceCommands";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const project: Project = {
@@ -472,5 +473,104 @@ describe("CommandPalette behavior", () => {
     await user.keyboard("{Enter}{Backspace}");
     expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("CommandPalette commands for the current chat", () => {
+  const workspaceReason = "Available after the first message creates this chat's workspace.";
+
+  function workspaceCommands(overrides: Partial<Record<string, () => void>> = {}): PaletteWorkspaceCommand[] {
+    return [
+      { id: "surface:changes", group: "Surfaces", label: "Open Changes", keywords: "surface diff", icon: { kind: "surface", surface: "changes" }, disabledReason: workspaceReason, run: overrides.changes ?? noOp },
+      { id: "surface:plan", group: "Surfaces", label: "Open Plan", keywords: "surface steps", icon: { kind: "surface", surface: "plan" }, run: overrides.plan ?? noOp },
+      { id: "git:fetch", group: "Git", label: "Fetch", detail: "Refresh remote branches and incoming commits. Keep local changes.", keywords: "git remote", icon: { kind: "git", action: "fetch" }, run: overrides.fetch ?? noOp },
+      { id: "git:branch", group: "Git", label: "Switch branch…", keywords: "git checkout", icon: { kind: "git", action: "branch" }, run: overrides.branch ?? noOp },
+      { id: "window:toggle-terminal", group: "Window", label: "Toggle terminal dock", keywords: "terminal", icon: { kind: "window", action: "terminal-dock" }, shortcut: "⌘J", run: overrides.terminal ?? noOp },
+      { id: "window:new-window", group: "Window", label: "Open chat in a new window", keywords: "detach window", icon: { kind: "window", action: "new-window" }, disabledReason: "Close a chat window before opening another.", run: overrides.newWindow ?? noOp },
+    ];
+  }
+
+  function render(commands: PaletteWorkspaceCommand[], onClose = noOp): ReturnType<typeof renderPalette> {
+    return renderPalette(
+      <CommandPalette open currentProjectId={project.id} projects={[project]} conversations={[conversation]}
+        newThreadShortcut="⌘N" onClose={onClose} onSelectProject={noOp} onSelectConversation={noOp}
+        onNewThread={noOp} onNewThreadIn={noOp} onAddProject={noOp} onOpenSettings={noOp}
+        workspaceCommands={commands} />,
+    );
+  }
+
+  const search = () => screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
+
+  it("keeps the opening list unchanged and finds chat commands by name or keyword", async () => {
+    const user = userEvent.setup();
+    render(workspaceCommands());
+    expect(screen.queryByRole("group", { name: "Surfaces" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Threads" })).toBeInTheDocument();
+
+    await user.type(search(), "open");
+    const groups = screen.getAllByRole("group").map((group) => group.getAttribute("aria-label"));
+    expect(groups.indexOf("Actions")).toBeLessThan(groups.indexOf("Surfaces"));
+    expect(within(screen.getByRole("group", { name: "Surfaces" })).getAllByRole("option").map((option) => option.querySelector("strong")?.textContent))
+      .toEqual(["Open Changes", "Open Plan"]);
+
+    await user.clear(search());
+    await user.type(search(), "checkout");
+    expect(within(screen.getByRole("group", { name: "Git" })).getByRole("option", { name: /Switch branch…/u })).toBeInTheDocument();
+
+    await user.clear(search());
+    await user.type(search(), "terminal");
+    expect(within(screen.getByRole("group", { name: "Window" })).getByRole("option", { name: /Toggle terminal dock/u }))
+      .toHaveTextContent("⌘J");
+  });
+
+  it("lists an unavailable command with its reason and does not run it", async () => {
+    const user = userEvent.setup();
+    const changes = vi.fn();
+    const onClose = vi.fn();
+    render(workspaceCommands({ changes }), onClose);
+    await user.type(search(), "open changes");
+    const option = screen.getByRole("option", { name: /Open Changes/u });
+    expect(option).toHaveAttribute("aria-disabled", "true");
+    expect(option).toHaveTextContent(workspaceReason);
+    expect(option).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{Enter}");
+    await user.click(option);
+    expect(changes).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(search()).toHaveFocus();
+  });
+
+  it("runs an available command from the keyboard and closes", async () => {
+    const user = userEvent.setup();
+    const plan = vi.fn();
+    const fetch = vi.fn();
+    const onClose = vi.fn();
+    render(workspaceCommands({ plan, fetch }), onClose);
+    await user.type(search(), "fetch");
+    const fetchOption = screen.getByRole("option", { name: /Fetch/u });
+    expect(fetchOption).toHaveTextContent("Refresh remote branches and incoming commits. Keep local changes.");
+    expect(fetchOption).toHaveAttribute("id", "palette-chat-git:fetch");
+    expect(search()).toHaveAttribute("aria-activedescendant", "palette-chat-git:fetch");
+    await user.keyboard("{Enter}");
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(plan).not.toHaveBeenCalled();
+  });
+
+  it("moves through chat commands with the arrow keys, including unavailable ones", async () => {
+    const user = userEvent.setup();
+    const plan = vi.fn();
+    render(workspaceCommands({ plan }));
+    await user.type(search(), "surface");
+    const options = within(screen.getByRole("group", { name: "Surfaces" })).getAllByRole("option");
+    expect(screen.getAllByRole("option")[0]).toBe(options[0]);
+    expect(options.map((option) => option.querySelector("strong")?.textContent)).toEqual(["Open Changes", "Open Plan"]);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(search()).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(plan).toHaveBeenCalledOnce();
   });
 });

@@ -998,6 +998,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         "new-chat": "y",
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
+        "open-surface": "b",
       },
     });
     await mkdir(join(workspacePath, ".git"));
@@ -1082,12 +1083,7 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
     expect(reopened.snapshot().settings.providerIdentityLabels).toEqual({});
-    expect(reopened.snapshot().settings.keybindings).toEqual({
-      search: "k",
-      "new-chat": "n",
-      "toggle-sidebar": "b",
-      "toggle-terminal": "j",
-    });
+    expect(reopened.snapshot().settings.keybindings).toEqual({ search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", "open-surface": "g" });
     reopened.close();
   });
 

@@ -45,7 +45,9 @@ import {
 } from "./command-router";
 import { reconcileReviews } from "./review-support";
 import { handleBranchListCommand } from "./source-control-branch-list";
+import { handleStagingCommand } from "./source-control-staging-command";
 import { handlePreMergeConfidenceCommand } from "./pre-merge-confidence-command";
+import { GIT_HISTORY_COMMAND_TYPES, handleGitHistoryCommand } from "./git-history-commands";
 import {
   mapWithinSourceControlDeadline,
   SourceControlDeadline,
@@ -249,10 +251,13 @@ export function createSourceControlCommandHandler(
     "git.fetch",
     "git.pull",
     "git.commit",
+    "git.stage",
+    "git.unstage",
     "git.push",
     "git.pr.open",
     "git.pr.confidence",
     "git.pr.create",
+    ...GIT_HISTORY_COMMAND_TYPES,
   ], async (socket, command) => {
     switch (command.type) {
       case "git.refresh": {
@@ -1089,6 +1094,20 @@ export function createSourceControlCommandHandler(
         dependencies.broadcastSnapshot();
         return "handled";
       }
+      case "git.stage":
+      case "git.unstage": {
+        const repository = await resolveCommandRepository(socket, command.payload, { requireAuthority: true });
+        return await handleStagingCommand({
+          socket,
+          command,
+          send: dependencies.send,
+          runTrackedRepositoryOperation: async (label, operation) =>
+            await dependencies.workspaceRuns.trackSourceControl(label, command.payload.projectId,
+              command.payload.conversationId, repository.workspaceRoot, command.requestId,
+              async () => await runVerifiedRepositoryOperation(repository, operation),
+              trackedRepositoryOptions(repository)),
+        });
+      }
       case "git.push": {
         const repository = await resolveCommandRepository(
           socket,
@@ -1117,6 +1136,8 @@ export function createSourceControlCommandHandler(
         });
         return "handled";
       }
+      case "git.log": case "git.commit.show": case "git.blame":
+        return await handleGitHistoryCommand({ socket, command, resolveRepository: resolveCommandRepository, runVerified: runVerifiedRepositoryOperation, send: dependencies.send });
       case "git.pr.confidence": {
         return await handlePreMergeConfidenceCommand({
           socket,

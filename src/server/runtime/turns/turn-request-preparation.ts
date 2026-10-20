@@ -26,6 +26,7 @@ import {
   type ConversationContextMaterialization,
 } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
 import {
@@ -33,6 +34,7 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -153,9 +155,13 @@ export function resolveTurnRequest(
       harnessId: route.harnessId,
       backendProfile: route.backendProfile,
     });
-  const capabilityInstructions = hostToolBridgeAttested
-    ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
-    : [];
+  // Read once: the prompt's instructions and the tools attached at provider
+  // start must describe the same offer even if project settings change.
+  const capabilityOffer = hostToolBridgeAttested
+    ? dependencies.hooks.capabilityOfferForTurn?.({ conversation })
+      ?? { instructions: [], offer: FULL_HARNESS_CAPABILITY_OFFER }
+    : undefined;
+  const capabilityInstructions = capabilityOffer?.instructions ?? [];
 
   const exactModel = routeSelection.modelId === "provider-default"
     ? exactProvider?.models.find(({ isDefault }) => isDefault)
@@ -241,6 +247,9 @@ export function resolveTurnRequest(
     .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
   let conversationContexts: ConversationContextMaterialization | undefined;
+  // Codex-native goals reach the provider through its own thread-goal API;
+  // only an Inertia-local goal is described here, as visible context.
+  const localGoal = trackedLocalGoal(dependencies.store.agentGoals(conversation.id));
   const assemblyInput = {
     ...(contextPacketIds.length > 0
       ? {
@@ -268,6 +277,7 @@ export function resolveTurnRequest(
       )]),
       ...(request.internalInstructions ?? []),
     ],
+    ...(localGoal ? { trackedGoalLine: trackedGoalContextLine(localGoal) } : {}),
   } satisfies AssembleTurnRequestInput;
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
@@ -478,6 +488,7 @@ export function resolveTurnRequest(
           turn: queued.turn,
           conversation: activeConversation,
           providerInput,
+          ...(capabilityOffer ? { capabilityOffer: capabilityOffer.offer } : {}),
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
           checkpointId: request.checkpointId ?? null,

@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import {
+  boundTodoText,
   compareTodos,
   MAX_TODO_NOTE_CHARS,
   MAX_TODO_TITLE_CHARS,
+  todoDraftFromMessage,
+  todoDraftFromPlanStep,
   todoDraftSchema,
   todoDueDateSchema,
   todoPatchSchema,
@@ -52,6 +55,16 @@ describe("task schemas", () => {
     expect(todoDraftSchema.safeParse({ title: "x".repeat(MAX_TODO_TITLE_CHARS), note: "n".repeat(MAX_TODO_NOTE_CHARS) }).success).toBe(true);
   });
 
+  it("accepts an optional chat link on a draft", () => {
+    expect(todoDraftSchema.parse({ title: "Task", conversationId: ID })).toEqual({
+      title: "Task", note: "", priority: null, dueDate: null, conversationId: ID,
+    });
+    expect(todoDraftSchema.parse({ title: "Task" })).not.toHaveProperty("conversationId");
+    for (const conversationId of ["chat-1", "", null]) {
+      expect(todoDraftSchema.safeParse({ title: "Task", conversationId }).success).toBe(false);
+    }
+  });
+
   it("accepts only real calendar days as due dates", () => {
     for (const valid of ["2026-10-12", "2028-02-29", "2026-12-31"]) {
       expect(todoDueDateSchema.safeParse(valid).success).toBe(true);
@@ -85,6 +98,10 @@ describe("task schemas", () => {
     const command = (type: string, payload: unknown) => clientCommandSchema.safeParse({ type, requestId: ID, payload });
     expect(command("todo.create", { id: ID, title: "Task" }).success).toBe(true);
     expect(command("todo.create", { title: "Task" }).success).toBe(false);
+    expect(command("todo.create", { id: ID, title: "Task", conversationId: ID, projectId: PROJECT }).success).toBe(true);
+    expect(command("todo.create", { id: ID, title: "Task", conversationId: ID }).success).toBe(false);
+    expect(command("todo.create", { id: ID, title: "Task", projectId: PROJECT }).success).toBe(false);
+    expect(command("todo.create", { id: ID, title: "Task", conversationId: ID, projectId: "project" }).success).toBe(false);
     expect(command("todo.update", { id: ID, patch: { completed: true } }).success).toBe(true);
     expect(command("todo.update", { id: ID, patch: {} }).success).toBe(false);
     expect(command("todo.delete", { id: ID }).success).toBe(true);
@@ -121,5 +138,53 @@ describe("task ordering and prompt", () => {
   it("measures the serialized list in UTF-8 bytes", () => {
     expect(todosSerializedBytes([])).toBe(2);
     expect(todosSerializedBytes([todo({ title: "é" })])).toBe(new TextEncoder().encode(JSON.stringify([todo({ title: "é" })])).byteLength);
+  });
+});
+
+describe("tasks made from chat text", () => {
+  const valid = (draft: { title: string; note: string } | null) =>
+    todoDraftSchema.safeParse(draft).success;
+
+  it("bounds text to a limit without splitting characters and marks the cut", () => {
+    expect(boundTodoText("short", 10)).toBe("short");
+    expect(boundTodoText("abcdefghij", 10)).toBe("abcdefghij");
+    expect(boundTodoText("abcd efghijk", 6)).toBe("abcd…");
+    const emoji = boundTodoText(`${"x".repeat(7)}😀😀`, 9);
+    expect(emoji).toBe(`${"x".repeat(7)}…`);
+    expect(emoji.length).toBeLessThanOrEqual(9);
+  });
+
+  it("names a message task after its first non-empty line and keeps the text as its note", () => {
+    const draft = todoDraftFromMessage("\r\n  \n  Fix   the\tbuild  \r\nIt fails on Linux.\n");
+    expect(draft).toEqual({ title: "Fix the build", note: "Fix   the\tbuild  \r\nIt fails on Linux." });
+    expect(valid(draft)).toBe(true);
+    expect(todoDraftFromMessage("  Ship it  ")).toEqual({ title: "Ship it", note: "" });
+    expect(todoDraftFromMessage("Nul\0 byte\nmore\0")).toEqual({ title: "Nul byte", note: "Nul byte\nmore" });
+    for (const empty of ["", "  \n\t\r\n", "\0"]) expect(todoDraftFromMessage(empty)).toBeNull();
+  });
+
+  it("bounds a long message's title and note to the task limits", () => {
+    const draft = todoDraftFromMessage(`${"t".repeat(MAX_TODO_TITLE_CHARS + 50)}\n${"n".repeat(MAX_TODO_NOTE_CHARS)}`)!;
+    expect(draft.title).toHaveLength(MAX_TODO_TITLE_CHARS);
+    expect(draft.title.endsWith("…")).toBe(true);
+    expect(draft.note).toHaveLength(MAX_TODO_NOTE_CHARS);
+    expect(draft.note.endsWith("…")).toBe(true);
+    expect(valid(draft)).toBe(true);
+  });
+
+  it("notes which chat's plan a step came from, followed by its detail", () => {
+    expect(todoDraftFromPlanStep({ title: " Add the  migration ", detail: null }, "Release prep")).toEqual({
+      title: "Add the migration", note: "From the plan in Release prep",
+    });
+    expect(todoDraftFromPlanStep({ title: "Test it", detail: "  Run the fixtures.  " }, "  ")).toEqual({
+      title: "Test it", note: "From the plan in this chat\n\nRun the fixtures.",
+    });
+    const long = todoDraftFromPlanStep(
+      { title: "s".repeat(MAX_TODO_TITLE_CHARS * 2), detail: "d".repeat(MAX_TODO_NOTE_CHARS) },
+      "Chat",
+    );
+    expect(valid(long)).toBe(true);
+    expect(long?.note.endsWith("…")).toBe(true);
+    expect(todoDraftFromPlanStep({ title: "  " }, "Chat")).toBeNull();
   });
 });

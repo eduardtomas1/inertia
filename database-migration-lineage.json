@@ -747,6 +747,11 @@
       "version": 98,
       "name": "PersistConversationTitleLocks",
       "digest": "039b5abb2b597512e2867f1e8a6e12ebba015af44969c26e7bf359d05502af5e"
+    },
+    {
+      "version": 99,
+      "name": "RecordManagedAgentContextReads",
+      "digest": "a5e7c2c1598ae8e8b401e9bc770e05a636306c8e57d70afced8a4f6abb9b903e"
     }
   ]
 }

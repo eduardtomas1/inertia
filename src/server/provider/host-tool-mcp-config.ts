@@ -1,6 +1,8 @@
 import type { McpServer } from "@agentclientprotocol/sdk";
 import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 
+import { withoutInternalProviderInstructions } from "../runtime/turns/request-context";
+import type { ProviderHostToolBridge } from "./contracts";
 import {
   MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES,
   PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE,
@@ -114,6 +116,21 @@ export function acpHostMcpServers(
       { name: INERTIA_HOST_MCP_TOKEN_ENV, value: connection.bearerToken },
     ],
   }];
+}
+
+/**
+ * The prompt an ACP agent receives for one turn. Without HTTP MCP support and
+ * without a stdio proxy runtime, no host MCP server can be attached, so the
+ * instructions that exist only because the bridge was offered are withheld
+ * instead of describing tools the agent cannot call.
+ */
+export function acpPromptForHostMcp(
+  prompt: string,
+  bridge: ProviderHostToolBridge | undefined,
+  servers: readonly McpServer[],
+): string {
+  if (!bridge || servers.length > 0) return prompt;
+  return withoutInternalProviderInstructions(prompt, bridge.instructions ?? []);
 }
 
 function stdioProxyRuntime(

@@ -183,7 +183,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     entries: [
       {
         name: "Surfaces",
-        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. Each chat remembers its own surfaces.",
+        detail: "Open the right panel and choose Changes, Files, Browser, Terminal, Attachments, Background tasks, Usage, Goal or Plan. The shortcut opens the surface chooser, where each surface has a letter, and Search everything lists them too. Each chat remembers its own surfaces.",
+        shortcut: "open-surface",
       },
       {
         name: "Terminal",
@@ -403,6 +404,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Terminal",
         detail: "Show or hide the terminal.",
         shortcut: "toggle-terminal",
+        jump: "Open Settings → Keyboard",
+      },
+      {
+        name: "Open a surface",
+        detail: "Open the surface chooser for this chat, then press a surface's letter, such as D for Changes or T for Terminal.",
+        shortcut: "open-surface",
         jump: "Open Settings → Keyboard",
       },
       { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Search settings finds a setting by name; ↑, ↓ and Enter open it. Escape clears the search, then leaves Settings." },

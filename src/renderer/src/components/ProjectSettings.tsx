@@ -17,6 +17,8 @@ import { SettingDisclosure, SettingRow, SettingsGroup, useDisclosure } from "./s
 import { SettingRadioGroup, SettingSwitch, SettingTextField } from "./settings/SettingControls";
 import { FULL_ACCESS_CAUTION } from "./settings/accessCaution";
 import { ProjectRemoval } from "./settings/ProjectRemoval";
+import { ProjectWorktrees } from "./settings/sections/ProjectWorktrees";
+import { folderName } from "./WorktreeList";
 import { useSettingAction } from "./settings/useSettingAction";
 import { rememberProjectChoice, type SettingsSectionMemory } from "./settings/sectionMemory";
 import "./ProjectSettings.css";
@@ -213,6 +215,11 @@ function ProjectEditor({ project, conversations, providers, backendDefaults, bac
         </SettingRow>
       </SettingDisclosure>
     </SettingsGroup>
+    {project.repositoryRoot && <SettingsGroup title="Worktrees">
+      <SettingRow id="project-worktrees" title="Worktrees"
+        description="Every checkout Git knows for this repository. Inertia removes only clean worktrees it created for chats that are not running." />
+      <ProjectWorktrees projectId={project.id} mainFolderName={folderName(project.repositoryRoot)} disabled={disabled} request={request} onOpenConversation={onOpenConversation} />
+    </SettingsGroup>}
     <SettingsGroup title="Danger zone">
       <ProjectRemoval
         projectName={project.name}

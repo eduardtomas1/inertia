@@ -55,8 +55,10 @@ export function usePlanSteps(
         status: step.status === "inProgress"
           ? "in-progress" as const
           : step.status,
+        source: "native" as const,
       }));
     }
+    // Text-parsed steps are gated on plan mode by visiblePlanSteps.
     return streamed
       ? streamedSteps
       : planFromText(latestAssistantContent, status);

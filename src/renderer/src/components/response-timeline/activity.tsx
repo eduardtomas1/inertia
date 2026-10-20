@@ -73,6 +73,7 @@ import {
   usesActivityOrbs,
 } from "../working-indicator/orbMotion";
 import { messageContextMenu } from "./messageContextMenu";
+import { useTaskCreator } from "../tasks/taskCreation";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
@@ -407,6 +408,7 @@ export const CommentaryRow = memo(function CommentaryRow({
   defaultCodeWrap: boolean;
   onOpenProjectFile: (path: string) => void;
 }): React.JSX.Element {
+  const taskCreator = useTaskCreator();
   useLayoutEffect(() => {
     if (entry.streaming && entry.content) {
       markTestStreamingStage("renderer-live-text-commit");
@@ -417,7 +419,7 @@ export const CommentaryRow = memo(function CommentaryRow({
       className={clsx("turn-commentary-row", entry.streaming && "is-streaming", entry.answer && "is-answer")}
       aria-label={entry.streaming ? "Live agent update" : entry.answer ? "Agent answer" : "Agent update"}
       data-assistant-commentary-id={entry.message?.id ?? entry.id}
-      {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content) : undefined)}
+      {...(entry.message && !entry.streaming ? messageContextMenu(entry.message, entry.content, taskCreator) : undefined)}
     >
       {entry.streaming
         ? (
@@ -449,13 +451,14 @@ export function FollowUpRow({
 }: {
   entry: Extract<TurnExecutionStreamEntry, { kind: "follow-up" }>;
 }): React.JSX.Element {
+  const taskCreator = useTaskCreator();
   return (
     <article
       className="turn-follow-up-row"
       aria-label="Your follow-up"
       data-follow-up-message-id={entry.message.id}
       tabIndex={-1}
-      {...messageContextMenu(entry.message, entry.message.content)}
+      {...messageContextMenu(entry.message, entry.message.content, taskCreator)}
     >
       <p>{entry.message.content}</p>
       <SentMessageAttachmentList

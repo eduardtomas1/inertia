@@ -1,3 +1,5 @@
+import { ACCEPTED_ATTACHMENT_MIME_TYPES, IMAGE_ATTACHMENT_MIME_TYPES, type ChatAttachmentMimeType } from "./attachments";
+
 export const CONVERSATION_ATTACHMENT_GALLERY_LIMIT = 60;
 
 export interface ConversationAttachmentGalleryItem {
@@ -23,4 +25,30 @@ export function isConversationAttachmentGallery(value: unknown): value is Conver
     return true;
   });
 }
-import { ACCEPTED_ATTACHMENT_MIME_TYPES, type ChatAttachmentMimeType } from "./attachments";
+
+export const CONVERSATION_ATTACHMENT_GALLERY_FILTERS = ["all", "images", "documents", "text"] as const;
+export type ConversationAttachmentGalleryFilter = (typeof CONVERSATION_ATTACHMENT_GALLERY_FILTERS)[number];
+
+const TEXT_GALLERY_MIME_TYPES: ReadonlySet<ChatAttachmentMimeType> = new Set([
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+]);
+
+/** Images, text-like files, and everything else (PDFs, workbooks, other files). */
+export function conversationAttachmentGalleryCategory(
+  mimeType: ChatAttachmentMimeType,
+): Exclude<ConversationAttachmentGalleryFilter, "all"> {
+  if ((IMAGE_ATTACHMENT_MIME_TYPES as readonly string[]).includes(mimeType)) return "images";
+  return TEXT_GALLERY_MIME_TYPES.has(mimeType) ? "text" : "documents";
+}
+
+export function filterConversationAttachmentGallery<Item extends { mimeType: ChatAttachmentMimeType }>(
+  items: readonly Item[],
+  filter: ConversationAttachmentGalleryFilter,
+): readonly Item[] {
+  return filter === "all"
+    ? items
+    : items.filter(({ mimeType }) => conversationAttachmentGalleryCategory(mimeType) === filter);
+}

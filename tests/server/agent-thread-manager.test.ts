@@ -291,13 +291,73 @@ describe("AgentThreadManager", () => {
     const browser = { perform: vi.fn() };
     const { manager, project, source, sourceTurn, store } = await runtime(browser);
     try {
+      const digest = manager.capabilityManifest().definitionDigest;
       store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
       for (const harnessId of ["codex-app-server", "claude-agent-sdk", "cursor-acp", "kimi-acp", "opencode-sdk"] as const) {
         const bridge = manager.bridgeFor({ conversation: source, turn: { ...sourceTurn, harnessId } });
-        const result = await bridge!.invoke(call("inertia_browser_snapshot", {}));
+        expect(bridge.definitions.map(({ name }) => name).filter((name) => name.startsWith("inertia_browser_")))
+          .toEqual([]);
+        expect(bridge.definitions.map(({ name }) => name)).toEqual(expect.arrayContaining([
+          "inertia_list_conversations",
+          "inertia_request_context",
+          "inertia_render_html",
+        ]));
+        expect(bridge.instructions?.map(({ label }) => label)).toEqual(["inertia-orchestration", "inertia-workspace"]);
+        expect(bridge.definitions.map(({ name }) => name)).toEqual(expect.arrayContaining([
+          "inertia_git_status", "inertia_turn_diff", "inertia_read_plan", "inertia_read_goal", "inertia_list_tasks", "inertia_project_actions",
+        ]));
+        // A Codex thread that registered Browser tools before the setting
+        // changed still reaches a truthful refusal instead of a protocol error.
+        expect(bridge.retiredToolNames?.has("inertia_browser_snapshot")).toBe(true);
+        const result = await bridge.invoke(call("inertia_browser_snapshot", {}));
         expect(result.success).toBe(false);
         expect(result.text).toContain("browser_disabled");
       }
+      expect(manager.capabilityOfferForTurn(source).instructions.map(({ label }) => label)).toEqual([
+        "inertia-orchestration",
+        "inertia-workspace",
+      ]);
+      expect(manager.capabilityManifest().definitionDigest).toBe(digest);
+      expect(manager.capabilityManifest().packs.map(({ id }) => id)).toContain("inertia.frontend-workbench");
+      expect(browser.perform).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
+  it("attaches the tools of the offer snapshotted for the turn's prompt, not the current setting", async () => {
+    const browser = { perform: vi.fn() };
+    const { manager, project, source, sourceTurn, store } = await runtime(browser);
+    try {
+      const offered = manager.capabilityOfferForTurn(source);
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
+      const withheld = manager.capabilityOfferForTurn(source);
+      store.updateProject(project.id, { preferences: defaultProjectPreferences() });
+
+      const browserTools = (offer: typeof offered) => manager.bridgeFor({ conversation: source, turn: sourceTurn }, offer.offer)
+        .definitions.filter(({ name }) => name.startsWith("inertia_browser_")).length;
+      expect(offered.instructions.map(({ label }) => label)).toContain("inertia-frontend-workbench");
+      expect(browserTools(offered)).toBe(12);
+      expect(withheld.instructions.map(({ label }) => label)).toEqual(["inertia-orchestration", "inertia-workspace"]);
+      expect(browserTools(withheld)).toBe(0);
+    } finally { store.close(); }
+  });
+
+  it("refuses browser calls when Browser access is turned off after the turn's tools were offered", async () => {
+    const browser = { perform: vi.fn() };
+    const { manager, project, source, sourceTurn, store } = await runtime(browser);
+    try {
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      expect(bridge.definitions.map(({ name }) => name)).toContain("inertia_browser_snapshot");
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
+      const result = await bridge.invoke(call("inertia_browser_snapshot", {}));
+      expect(result).toEqual({
+        success: false,
+        text: JSON.stringify({
+          error: {
+            code: "browser_disabled",
+            message: "Agent browser access is disabled in this project's settings.",
+          },
+        }),
+      });
       expect(browser.perform).not.toHaveBeenCalled();
     } finally { store.close(); }
   });
@@ -343,11 +403,17 @@ describe("AgentThreadManager", () => {
           expect.objectContaining({ id: "inertia.frontend-workbench" }),
           expect.objectContaining({ id: "inertia.orchestration" }),
           expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
+          expect.objectContaining({
+            id: "inertia.workspace",
+            revision: 1,
+            toolNames: ["inertia_git_status", "inertia_turn_diff", "inertia_read_plan", "inertia_read_goal", "inertia_list_tasks", "inertia_project_actions"],
+          }),
         ],
       });
-      expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
+      expect(manager.capabilityOfferForTurn(source).instructions.map(({ label }) => label)).toEqual([
         "inertia-frontend-workbench",
         "inertia-orchestration",
+        "inertia-workspace",
       ]);
     } finally {
       store.close();
@@ -370,6 +436,7 @@ describe("AgentThreadManager", () => {
       expect(manager.capabilityManifest().packs.map(({ id }) => id)).toEqual([
         "inertia.orchestration",
         "inertia.visual-replies",
+        "inertia.workspace",
       ]);
       expect(definition?.inputValidator?.safeParse({
         title: "Kimi verifier",
@@ -1146,5 +1213,200 @@ describe("AgentThreadManager", () => {
     } finally {
       env.store.close();
     }
+  });
+});
+
+describe("inertia_wait_for_conversation", () => {
+  const WAIT = "inertia_wait_for_conversation";
+
+  async function managedChild() {
+    const env = await runtime();
+    const bridge = env.manager.bridgeFor({ conversation: env.source, turn: env.sourceTurn });
+    const created = await bridge.invoke(call("inertia_create_conversation", {
+      title: "Child", prompt: "Delegated work",
+    }));
+    expect(created.success).toBe(true);
+    const { conversationId } = JSON.parse(created.text) as { conversationId: string };
+    env.store.updateConversation(conversationId, { status: "running" });
+    return { ...env, bridge, conversationId };
+  }
+
+  function waitCall(args: unknown, controller = new AbortController()): ProviderHostToolCall {
+    return {
+      ...call(WAIT, args),
+      toolCallId: `wait-${Math.random()}`,
+      signal: controller.signal,
+    };
+  }
+
+  function track(promise: Promise<{ success: boolean; text: string }>) {
+    const state: { done: boolean; result?: { success: boolean; text: string } } = { done: false };
+    void promise.then((result) => {
+      state.done = true;
+      state.result = result;
+    });
+    return state;
+  }
+
+  function errorCode(result: { success: boolean; text: string }): string {
+    expect(result.success).toBe(false);
+    return (JSON.parse(result.text) as { error: { code: string } }).error.code;
+  }
+
+  it("is a read-only orchestration tool capped below the provider call timeout", async () => {
+    const env = await runtime();
+    try {
+      const definition = env.manager.bridgeFor({ conversation: env.source, turn: env.sourceTurn })
+        .definitions.find(({ name }) => name === WAIT)!;
+      expect(definition.readOnly).toBe(true);
+      expect(definition.inputSchema).toMatchObject({
+        required: ["conversationId"],
+        properties: { timeoutMs: { minimum: 1_000, maximum: 20_000, default: 15_000 } },
+      });
+      expect(definition.description).toMatch(/30 seconds/u);
+      expect(definition.description).toMatch(/call this tool again/u);
+      expect(env.manager.capabilityManifest().packs.find(({ id }) => id === "inertia.orchestration")?.revision).toBe(3);
+    } finally { env.store.close(); }
+  });
+
+  it("returns as soon as the child settles during the wait", async () => {
+    const env = await managedChild();
+    try {
+      vi.useFakeTimers();
+      const waiting = track(env.bridge.invoke(waitCall({ conversationId: env.conversationId, timeoutMs: 10_000 })));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(waiting.done).toBe(false);
+      env.turns.cancel(env.conversationId);
+      env.store.updateConversation(env.conversationId, { status: "completed" });
+      await vi.advanceTimersByTimeAsync(250);
+      expect(waiting.done).toBe(true);
+      expect(JSON.parse(waiting.result!.text)).toMatchObject({
+        conversationId: env.conversationId,
+        status: "completed",
+        active: false,
+        outcome: "settled",
+        timedOut: false,
+        latestTurn: { turnId: "child-turn-1" },
+      });
+    } finally { env.store.close(); }
+  });
+
+  it("returns when the child needs the user's input", async () => {
+    const env = await managedChild();
+    try {
+      vi.useFakeTimers();
+      const waiting = track(env.bridge.invoke(waitCall({ conversationId: env.conversationId })));
+      await vi.advanceTimersByTimeAsync(250);
+      expect(waiting.done).toBe(false);
+      env.store.updateConversation(env.conversationId, { status: "needs-input" });
+      await vi.advanceTimersByTimeAsync(250);
+      expect(JSON.parse(waiting.result!.text)).toMatchObject({
+        status: "needs-input",
+        active: true,
+        outcome: "needs-input",
+        timedOut: false,
+      });
+    } finally { env.store.close(); }
+  });
+
+  it("returns the current status with timedOut at the timeout, defaulting to 15 seconds", async () => {
+    const env = await managedChild();
+    try {
+      vi.useFakeTimers();
+      const short = track(env.bridge.invoke(waitCall({ conversationId: env.conversationId, timeoutMs: 1_000 })));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(short.done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(JSON.parse(short.result!.text)).toMatchObject({
+        status: "running",
+        active: true,
+        outcome: "timeout",
+        timedOut: true,
+      });
+
+      const fallback = track(env.bridge.invoke(waitCall({ conversationId: env.conversationId })));
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(fallback.done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(JSON.parse(fallback.result!.text)).toMatchObject({ outcome: "timeout", timedOut: true });
+    } finally { env.store.close(); }
+  });
+
+  it("stops waiting when the call is cancelled", async () => {
+    const env = await managedChild();
+    try {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const waiting = track(env.bridge.invoke(waitCall({ conversationId: env.conversationId }, controller)));
+      await vi.advanceTimersByTimeAsync(400);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(waiting.done).toBe(true);
+      expect(errorCode(waiting.result!)).toBe("call_cancelled");
+      expect(vi.getTimerCount()).toBe(0);
+
+      const aborted = new AbortController();
+      aborted.abort();
+      expect(errorCode(await env.bridge.invoke(waitCall({ conversationId: env.conversationId }, aborted))))
+        .toBe("call_cancelled");
+    } finally { env.store.close(); }
+  });
+
+  it("refuses a chat this chat does not manage directly, including a grandchild", async () => {
+    const env = await managedChild();
+    try {
+      const unrelated = env.store.createConversation(env.project.id, "Unrelated", { activate: false });
+      const refused = await env.bridge.invoke(waitCall({ conversationId: unrelated.id }));
+      expect(errorCode(refused)).toBe("host_tool_failed");
+      expect(refused.text).toContain("does not own management authority");
+
+      const grandchild = env.store.createConversation(env.project.id, "Grandchild", { activate: false });
+      env.store.agentThreadManagement.attachManaged({
+        childConversationId: grandchild.id,
+        sourceConversationId: env.conversationId,
+        sourceTurnId: "child-turn-1",
+        sourceRunId: "child-run-1",
+        sourceHarnessId: "codex-app-server",
+        now: "2026-08-19T10:00:00.000Z",
+      });
+      const nested = await env.bridge.invoke(waitCall({ conversationId: grandchild.id }));
+      expect(nested.text).toContain("does not own management authority");
+    } finally { env.store.close(); }
+  });
+
+  it("refuses a settled caller turn, before and during the wait", async () => {
+    const env = await managedChild();
+    try {
+      vi.useFakeTimers();
+      const waiting = track(env.bridge.invoke(waitCall({ conversationId: env.conversationId })));
+      await vi.advanceTimersByTimeAsync(250);
+      const at = "2099-01-01T00:00:00.000Z";
+      env.store.settleAgentTurn(env.sourceTurn.id, {
+        status: "completed", terminalReason: "provider-completed", startedAt: at, completedAt: at, updatedAt: at,
+      });
+      await vi.advanceTimersByTimeAsync(250);
+      expect(waiting.done).toBe(true);
+      expect(errorCode(waiting.result!)).toBe("host_tool_failed");
+      expect(waiting.result!.text).toContain("no longer active");
+
+      const later = await env.bridge.invoke(waitCall({ conversationId: env.conversationId }));
+      expect(later.text).toContain("no longer active");
+    } finally { env.store.close(); }
+  });
+
+  it.each([
+    [{}],
+    [{ conversationId: "not-a-uuid" }],
+    [{ conversationId: "00000000-0000-4000-8000-000000000000", timeoutMs: 999 }],
+    [{ conversationId: "00000000-0000-4000-8000-000000000000", timeoutMs: 20_001 }],
+    [{ conversationId: "00000000-0000-4000-8000-000000000000", timeoutMs: 1_500.5 }],
+    [{ conversationId: "00000000-0000-4000-8000-000000000000", extra: true }],
+  ])("rejects invalid arguments %j", async (args) => {
+    const env = await runtime();
+    try {
+      const result = await env.manager.bridgeFor({ conversation: env.source, turn: env.sourceTurn })
+        .invoke(waitCall(args));
+      expect(errorCode(result)).toBe("invalid_arguments");
+    } finally { env.store.close(); }
   });
 });

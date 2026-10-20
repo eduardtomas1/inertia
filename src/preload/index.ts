@@ -279,6 +279,8 @@ const bridge: MainWindowBridge = Object.freeze({
   importAttachments: (batchId: string, files: Parameters<DesktopBridge["importAttachments"]>[1]) => ipcRenderer.invoke(IPC.importAttachments, batchId, files) as ReturnType<DesktopBridge["importAttachments"]>,
   commitAttachmentImport: (batchId: string, adoptedAttachmentIds: string[]) => ipcRenderer.invoke(IPC.commitAttachmentImport, batchId, adoptedAttachmentIds) as ReturnType<DesktopBridge["commitAttachmentImport"]>,
   cancelAttachmentImport: (batchId: string) => ipcRenderer.invoke(IPC.cancelAttachmentImport, batchId) as ReturnType<DesktopBridge["cancelAttachmentImport"]>,
+  reattachAttachment: (request: Parameters<DesktopBridge["reattachAttachment"]>[0]) =>
+    ipcRenderer.invoke(IPC.reattachAttachment, request) as ReturnType<DesktopBridge["reattachAttachment"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>
     ipcRenderer.invoke(IPC.prepareAttachmentHandoff, request) as Promise<void>,
   finishAttachmentHandoff: (requestId: string) =>

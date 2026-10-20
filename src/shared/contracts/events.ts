@@ -37,6 +37,7 @@ import type {
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
 import type { MessageSearchResult, MessageSearchTarget } from "../message-search";
+import type { TerminalPathResolveResult } from "./terminal-links";
 import type {
   DuoPendingResult,
   DuoPreparedResult,
@@ -54,9 +55,11 @@ import type {
   WorkspaceGitDiffSnapshot,
   WorkspaceGitSnapshot,
 } from "./git";
+import type { GitBlamePage, GitCommitDetail, GitLogPage } from "./git-history";
 import type {
   GitBranchInfo,
   ProjectAction,
+  WorkspaceContentSearchPage,
   WorkspaceEntriesPage,
   WorkspaceFilePreview,
 } from "./workspace";
@@ -196,7 +199,11 @@ export type ServerEvent =
         | { kind: "review.summary"; summary: DiffReviewSummary }
         | { kind: "git.branches"; branches: GitBranchInfo[] }
         | { kind: "git.pr.confidence"; confidence: GitPreMergeConfidence }
+        | { kind: "git.log"; page: GitLogPage }
+        | { kind: "git.commit.show"; commit: GitCommitDetail }
+        | { kind: "git.blame"; blame: GitBlamePage }
         | ({ kind: "workspace.entries" } & WorkspaceEntriesPage)
+        | ({ kind: "workspace.search.content" } & WorkspaceContentSearchPage)
         | {
             kind: "workspace.file";
             file: WorkspaceFilePreview;
@@ -230,6 +237,8 @@ export type ServerEvent =
         | { kind: "usage.reset.outcome"; outcome: UsageResetOutcome }
         | { kind: "usage.dashboard"; dashboard: UsageDashboard }
         | { kind: "daily.work"; dashboard: DailyWorkDashboard }
+        | { kind: "worktree.list"; list: import("../worktrees").WorktreeList }
+        | { kind: "worktree.action"; outcome: import("../worktrees").WorktreeActionOutcome }
         | { kind: "agent.workflow"; workflow: AgentWorkflowState }
         | {
             kind: "agent.skills";
@@ -240,7 +249,8 @@ export type ServerEvent =
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
         | ConversationDetailResult
-        | MessageSearchResult;
+        | MessageSearchResult
+        | TerminalPathResolveResult;
     }
   | RuntimeMutationEvent
   | ({

@@ -35,6 +35,8 @@ vi.mock("@xterm/xterm", () => ({
     hasSelection(): boolean { return this.selection.length > 0; }
     getSelection(): string { return this.selection; }
     loadAddon(): void {}
+    registerLinkProvider(): { dispose: () => void } { return { dispose: () => undefined }; }
+    onSelectionChange(): { dispose: () => void } { return { dispose: () => undefined }; }
     open(): void {}
     onData(): { dispose: () => void } { return { dispose: () => undefined }; }
     writeln(): void {}
@@ -104,7 +106,7 @@ describe("workspace terminal context menu", () => {
     expect(event).toBe(false);
     expect(terminal.focus).toHaveBeenCalled();
     expect(bridge.showContextMenu).toHaveBeenCalledExactlyOnceWith({
-      kind: "terminal", hasSelection: true, clearable: true, anchor: { x: 30, y: 50 },
+      kind: "terminal", hasSelection: true, clearable: true, promptable: true, anchor: { x: 30, y: 50 },
     });
   });
 

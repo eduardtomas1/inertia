@@ -23,6 +23,7 @@ import {
 } from "../../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { messageContextMenu } from "./messageContextMenu";
+import { useTaskCreator } from "../tasks/taskCreation";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { TooltipButton } from "../TooltipButton";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
@@ -93,6 +94,7 @@ export function UserRequestLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
+  const taskCreator = useTaskCreator();
   const isDocumentLike = turn.userMessage.content.length >= 280;
   const collapsible = shouldCollapseUserRequest(turn.userMessage.content);
   const [expanded, setExpanded] = useState(false);
@@ -125,7 +127,7 @@ export function UserRequestLayer({
       data-turn-jump-target="request"
       data-message-search-id={turn.userMessage.id}
       tabIndex={-1}
-      {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
+      {...messageContextMenu(turn.userMessage, turn.userMessage.content, taskCreator)}
     >
       {(turn.userMessage.privateConnectDeviceId || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
         <div className="message-meta">
@@ -419,6 +421,7 @@ export function FinalAnswerDocument({
   props: ResponseTimelineProps;
 }): React.JSX.Element | null {
   const presentation = resolveFinalAnswerPresentation(turn);
+  const taskCreator = useTaskCreator();
   useLayoutEffect(() => {
     if (presentation?.content.includes("STREAM_PROVIDER_COMPLETE_")) {
       const sampleNumber = presentation.content.match(
@@ -440,7 +443,7 @@ export function FinalAnswerDocument({
       data-turn-jump-target="final"
       data-turn-layer="final-answer"
       tabIndex={-1}
-      {...messageContextMenu(presentation.terminalAnswer, presentation.content)}
+      {...messageContextMenu(presentation.terminalAnswer, presentation.content, taskCreator)}
     >
       {turn.providerChanged && (
         <header

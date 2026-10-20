@@ -33,7 +33,7 @@ import type { AppView } from "../appView";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { sidebarThreadView } from "../utils/sidebarModel";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
-import { requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
+import { onHeaderBranchMenuRequest, requestCheckoutBranchMenu } from "../utils/checkoutBranchMenu";
 import type { ConversationActionsMenu as ConversationActionsMenuComponent } from "./ConversationActionsMenu";
 import { ProjectIcon, ProjectName } from "./ProjectIcon";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
@@ -119,6 +119,7 @@ type WorkspaceHeaderProps = {
   onPull: () => void;
   onPush: () => void;
   onRefreshGitStatus?: () => void;
+  onOpenGitHistory?: () => void;
   onRunAction: (action: ProjectAction) => void;
 };
 
@@ -163,6 +164,7 @@ export function WorkspaceHeader({
   onPull,
   onPush,
   onRefreshGitStatus,
+  onOpenGitHistory,
   onRunAction,
 }: WorkspaceHeaderProps): React.JSX.Element {
   const headerRef = useRef<HTMLElement>(null);
@@ -241,6 +243,15 @@ export function WorkspaceHeader({
     onRefreshBranches();
     if (menu !== "branches") toggleMenu("branches");
   };
+  const branchRequestRef = useRef<() => boolean>(() => false);
+  useLayoutEffect(() => {
+    branchRequestRef.current = () => {
+      if (!showGit || !project || busy) return false;
+      openBranches();
+      return true;
+    };
+  });
+  useEffect(() => onHeaderBranchMenuRequest(() => branchRequestRef.current()), []);
   const title = view === "home"
     ? "New chat"
     : view === "settings"
@@ -318,6 +329,7 @@ export function WorkspaceHeader({
         onPushAndCreatePullRequest={onPushAndCreatePullRequest ?? onPush}
         onOpenBranches={openBranches}
         {...(onRefreshGitStatus ? { onRefreshGitStatus } : {})}
+        {...(onOpenGitHistory ? { onOpenGitHistory } : {})}
         onRequestMenuClose={closeOverflow}
       />
     </Suspense>

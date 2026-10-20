@@ -20,6 +20,7 @@ import {
 import { RuntimeStore } from "./database";
 import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
+import { FULL_HARNESS_CAPABILITY_OFFER } from "./runtime/harness-capabilities";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { createConversationTitleRuntime } from "./runtime/conversation-title-service";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
@@ -92,11 +93,13 @@ import {
   createSettingsBackendCommandHandler,
 } from "./runtime/commands/settings-backend-commands";
 import { createSourceControlCommandHandler } from "./runtime/commands/source-control-commands";
+import { createTerminalLinkCommandHandler } from "./runtime/commands/terminal-link-commands";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
+import { createWorktreeCommandHandler } from "./runtime/commands/worktree-commands";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -641,8 +644,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
-      hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
+      capabilityOfferForTurn: ({ conversation }) => agentThreads?.manager.capabilityOfferForTurn(conversation)
+        ?? { instructions: [], offer: FULL_HARNESS_CAPABILITY_OFFER },
+      hostToolsForTurn: ({ conversation, turn, offer }) => agentThreads?.manager.bridgeFor({ conversation, turn }, offer),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
@@ -683,7 +687,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   agentThreads = createAgentThreadRuntime({
-    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
+    store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes, turnGitArtifacts,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
@@ -761,6 +765,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         creation: agentThreads.creation,
         contextRequests: agentThreads.contextRequests,
       }),
+      createWorktreeCommandHandler({ store, workspaceRuns, providerTerminalResumes, dataDirectory, broadcastSnapshot: flushSnapshot, send }),
       queuedMessages.turnInteractionHandler,
       createConversationCompactionCommandHandler({ store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, providerInfo: () => providerInfo, broadcast, send }),
       createSourceControlCommandHandler({
@@ -827,6 +832,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         },
         send,
       }),
+      createTerminalLinkCommandHandler({ workspacePath, send }),
     ],
     send,
     broadcastSnapshot: flushSnapshot,

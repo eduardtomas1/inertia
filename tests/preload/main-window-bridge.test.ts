@@ -98,6 +98,7 @@ describe("main window preload", () => {
       "previewTab",
       "queryDiagnostics",
       "readCompletionSound",
+      "reattachAttachment",
       "releaseAttachment",
       "removeCompletionSound",
       "reportValidationDiagnostic",

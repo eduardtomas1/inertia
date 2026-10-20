@@ -4,6 +4,7 @@ import {
   createPreviewPartition,
   previewAppShortcutKey,
 } from "../../src/main/preview-broker";
+import { APP_SHORTCUT_KEYS } from "../../src/shared/keybindings";
 
 describe("preview broker isolation", () => {
   it("assigns each native preview an unpredictable non-persistent partition", () => {
@@ -32,12 +33,31 @@ describe("preview broker isolation", () => {
     expect(previewAppShortcutKey(input, "darwin")).toBe("k");
     expect(previewAppShortcutKey({ ...input, meta: false, control: true }, "darwin")).toBe("k");
     expect(previewAppShortcutKey({ ...input, key: "w" }, "darwin")).toBe("w");
+    expect(previewAppShortcutKey({ ...input, key: "G" }, "darwin")).toBe("g");
     expect(previewAppShortcutKey({ ...input, key: "w", meta: false, control: true }, "linux")).toBe("w");
     expect(previewAppShortcutKey({ ...input, key: "w", shift: true }, "darwin")).toBeNull();
     expect(previewAppShortcutKey({ ...input, key: "X" }, "darwin")).toBeNull();
     expect(previewAppShortcutKey({ ...input, meta: false }, "darwin")).toBeNull();
     expect(previewAppShortcutKey({ ...input, alt: true }, "darwin")).toBeNull();
     expect(previewAppShortcutKey({ ...input, type: "keyUp" }, "darwin")).toBeNull();
+  });
+
+  it("forwards every key an app shortcut can be rebound to", () => {
+    expect(APP_SHORTCUT_KEYS).toEqual(expect.arrayContaining(["h", "u", "y"]));
+    for (const key of APP_SHORTCUT_KEYS) {
+      for (const platform of ["darwin", "linux", "win32"]) {
+        const input = {
+          type: "keyDown",
+          key: key.toUpperCase(),
+          control: platform !== "darwin",
+          meta: platform === "darwin",
+          alt: false,
+          shift: false,
+        };
+        expect(previewAppShortcutKey(input, platform), `${platform} ${key}`).toBe(key);
+        expect(previewAppShortcutKey({ ...input, shift: true }, platform)).toBeNull();
+      }
+    }
   });
 
   it("leaves Ctrl+W to the page on macOS and Cmd+W to the page elsewhere", () => {

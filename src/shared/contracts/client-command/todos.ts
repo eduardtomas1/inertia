@@ -14,7 +14,14 @@ export const todoCommandSchemas = [
   z.object({
     ...requestBase,
     type: z.literal("todo.create"),
-    payload: todoDraftSchema.extend({ id: z.string().uuid() }),
+    payload: todoDraftSchema.extend({
+      id: z.string().uuid(),
+      /** The linked chat's project, required with `conversationId` so the runtime can check both identities. */
+      projectId: z.string().uuid().optional(),
+    }).strict().refine(
+      ({ conversationId, projectId }) => (conversationId === undefined) === (projectId === undefined),
+      "A task linked to a chat must name the chat's project.",
+    ),
   }).strict(),
   z.object({
     ...requestBase,

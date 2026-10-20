@@ -130,6 +130,25 @@ describe("watcher note divider", () => {
     expect(row.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("shows the watcher's provider mark beside its agent, like the handoff divider", () => {
+    timeline([forwarded], messages(forwarded, "The rename misses two call sites.", { watcherNote: { ...note, providerId: "codex" } }));
+    const separator = screen.getByRole("separator", { name: "Note from watcher · Reviewer · Team Codex fixture-model" });
+    const route = separator.querySelector<HTMLElement>(".provider-handoff-route")!;
+    expect(route).toHaveTextContent(/^Team Codex fixture-model$/u);
+    const mark = route.querySelector<HTMLElement>(".provider-brand-icon")!;
+    expect(route.firstElementChild).toBe(mark);
+    expect(mark).toHaveAttribute("data-provider-id", "codex");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark.style.getPropertyValue("--provider-icon-size")).toBe("14px");
+  });
+
+  it("keeps the agent as plain text when the note names no provider", () => {
+    timeline([forwarded], messages(forwarded, "The rename misses two call sites.", { watcherNote: note }));
+    const separator = screen.getByRole("separator", { name: "Note from watcher · Reviewer · Team Codex fixture-model" });
+    expect(separator.querySelector(".provider-brand-icon")).toBeNull();
+    expect(separator.querySelector(".provider-handoff-marker")).toHaveTextContent("Note from watcher·Reviewer·Team Codex fixture-model");
+  });
+
   it("never presents the note as the user's own words", () => {
     timeline([forwarded], messages(forwarded, "The rename misses two call sites.", { watcherNote: note }));
     const request = document.querySelector<HTMLElement>('[data-turn-id="turn-b"] [data-turn-layer="user-request"]')!;

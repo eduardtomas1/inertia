@@ -1,5 +1,6 @@
 import type { WatcherNoteAttribution } from "@shared/watcher";
 import { watcherPresetName } from "../../utils/watcherLinks";
+import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import "./ContextCompactionRow.css";
 import "./ProviderHandoffRow.css";
 
@@ -30,7 +31,12 @@ export function WatcherNoteRow({
           <i>·</i>
           <span>{watcherPresetName(note.preset)}</span>
           <i>·</i>
-          <span>{note.watcherLabel}</span>
+          {note.providerId ? (
+            <span className="provider-handoff-route">
+              <ProviderBrandIcon providerId={note.providerId} decorative size={14} />
+              <span>{note.watcherLabel}</span>
+            </span>
+          ) : <span>{note.watcherLabel}</span>}
         </small>
         <span aria-hidden="true" />
       </div>

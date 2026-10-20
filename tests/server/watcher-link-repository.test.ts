@@ -341,7 +341,7 @@ describe("watcher link repository", () => {
     expect(links.parentForWatcher(conversation.id)).toBeNull();
   });
 
-  it("counts a watcher turn's settled commands without reading their details", () => {
+  it("counts a watcher turn's completed commands without reading their details", () => {
     const watched = chat();
     const { conversation } = attach(watched);
     const turn = beginTurn(conversation);
@@ -359,7 +359,7 @@ describe("watcher link repository", () => {
       add(other.id, "command", "completed");
     });
     const counts = store.watcherLinks.digest.settledCommandCounts(conversation.id, [turn.id, other.id, "missing"]);
-    expect(Object.fromEntries(counts)).toEqual({ [turn.id]: 2, [other.id]: 1 });
+    expect(Object.fromEntries(counts)).toEqual({ [turn.id]: 1, [other.id]: 1 });
     expect(store.watcherLinks.digest.settledCommandCounts(watched.id, [turn.id]).size).toBe(0);
   });
 

@@ -262,7 +262,7 @@ describe("watcher wake runner", () => {
     }
   });
 
-  it("keeps a check that continued after a declined command quiet, maps a question to permission-declined, and counts commands run", async () => {
+  it("keeps a check that continued after a declined command quiet, maps a question to permission-declined, and counts only commands that ran", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach();
@@ -270,6 +270,8 @@ describe("watcher wake runner", () => {
       let watcherId = await wakeOnce(f, link.id);
       f.provider.emit(watcherId, { type: "activity", kind: "command", phase: "completed", label: "rg parser", activityId: "rg-1" });
       f.provider.emit(watcherId, { type: "approval", request: approval("cmd-1", "command") });
+      f.provider.emit(watcherId, { type: "activity", kind: "command", phase: "started", label: "npm test", activityId: "npm-1" });
+      f.provider.emit(watcherId, { type: "activity", kind: "command", phase: "failed", label: "npm test", activityId: "npm-1" });
       await f.finishTurn(watcherId, "SILENT");
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "silent", commandsRun: 1 });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", commandAttemptsThisTurn: 1 });

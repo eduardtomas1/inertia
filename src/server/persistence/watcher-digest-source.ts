@@ -174,7 +174,7 @@ export class WatcherDigestSource {
   }
 
   /**
-   * Settled command activities per turn of one conversation, counted in SQL
+   * Completed command activities per turn of one conversation, counted in SQL
    * for the receipts' "ran N read-only commands" line; no details are read.
    */
   settledCommandCounts(conversationId: string, turnIds: readonly string[]): Map<string, number> {
@@ -183,7 +183,7 @@ export class WatcherDigestSource {
     const rows = cachedStatement(this.context.database, `
       SELECT turn_id, COUNT(*) AS count FROM activities
       WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?))
-        AND kind = 'command' AND status <> 'running'
+        AND kind = 'command' AND status = 'completed'
       GROUP BY turn_id
     `).all(conversationId, JSON.stringify(bounded)) as Array<{ turn_id: string; count: number }>;
     return new Map(rows.map((row) => [row.turn_id, row.count]));

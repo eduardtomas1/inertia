@@ -111,7 +111,8 @@ describe("WatcherDock", () => {
   it("persists collapse per watched chat", async () => {
     setup();
     await dock();
-    fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Collapse" }));
     expect(readWatcherDock(WATCHED_ID).open).toBe(false);
     expect(JSON.parse(window.localStorage.getItem(watcherDockStorageKey(WATCHED_ID)) ?? "{}")).toMatchObject({ open: false });
     expect(window.localStorage.getItem(watcherDockStorageKey(OTHER_WATCHED_ID))).toBeNull();
@@ -123,9 +124,9 @@ describe("WatcherDock", () => {
   it("collapses on Escape and returns focus to the chip", async () => {
     setup();
     const aside = await dock();
-    const pause = within(aside).getByRole("button", { name: "Pause" });
-    pause.focus();
-    fireEvent.keyDown(pause, { key: "Escape" });
+    const check = within(aside).getByRole("button", { name: "Check now" });
+    check.focus();
+    fireEvent.keyDown(check, { key: "Escape" });
     const chip = screen.getByRole("button", { name: /Watched by/u });
     expect(chip).toHaveFocus();
     expect(chip).toHaveAttribute("aria-expanded", "false");
@@ -290,14 +291,14 @@ describe("WatcherDock", () => {
     setup();
     const aside = await dock();
     vi.useFakeTimers();
-    const collapse = within(aside).getByRole("button", { name: "Collapse" });
-    fireEvent.pointerEnter(collapse, { pointerType: "mouse" });
+    const check = within(aside).getByRole("button", { name: "Check now" });
+    fireEvent.pointerEnter(check, { pointerType: "mouse" });
     act(() => { vi.advanceTimersByTime(TOOLTIP_DELAY_MS); });
     expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
-    fireEvent.keyDown(collapse, { key: "Escape" });
+    fireEvent.keyDown(check, { key: "Escape" });
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     expect(readWatcherDock(WATCHED_ID).open).toBe(true);
-    fireEvent.keyDown(collapse, { key: "Escape" });
+    fireEvent.keyDown(check, { key: "Escape" });
     expect(readWatcherDock(WATCHED_ID).open).toBe(false);
   });
 
@@ -327,9 +328,9 @@ describe("WatcherDock", () => {
   it("re-enables Resume after it settles under StrictMode", async () => {
     setup({ strict: true, link: link({ status: "paused", pauseReason: "wake-budget" }) });
     const aside = await dock();
-    const notice = within(aside).getByText("Paused", { selector: ".watcher-notice-title" }).closest<HTMLElement>(".watcher-notice")!;
-    fireEvent.click(within(notice).getByRole("button", { name: "Resume" }));
-    await waitFor(() => expect(within(notice).getByRole("button", { name: "Resume" })).not.toHaveAttribute("aria-disabled"));
+    const bar = aside.querySelector<HTMLElement>(".watcher-bar")!;
+    fireEvent.click(within(bar).getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(within(bar).getByRole("button", { name: "Resume" })).not.toHaveAttribute("aria-disabled"));
   });
 
   it("does not offer Resume for an archived watched chat, and says why", async () => {
@@ -342,7 +343,7 @@ describe("WatcherDock", () => {
     })}
     />);
     const aside = await dock();
-    expect(within(aside).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
+    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
     expect(within(aside).getByRole("button", { name: "Resume" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(aside).getByRole("button", { name: "Resume" }));
     expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
@@ -361,10 +362,11 @@ describe("WatcherDock", () => {
     const view = render(<Dock model={model(watching)} />);
     const aside = await dock();
     view.rerender(<Dock model={model(paused)} />);
-    expect(within(aside).getAllByText(detail)).toHaveLength(1);
+    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getAllByText(detail)).toHaveLength(1);
+    expect(aside.querySelector(".watcher-notice-blocked")).toBeNull();
     const resume = within(aside).getByRole("button", { name: "Resume" });
     expect(resume).toHaveAttribute("aria-disabled", "true");
-    expect(resume).toHaveAttribute("title", detail);
+    expect(resume).toHaveAccessibleDescription(detail);
     fireEvent.click(resume);
     expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
     const announced = aside.querySelector('.watcher-bar [role="status"]')!.textContent ?? "";
@@ -382,7 +384,7 @@ describe("WatcherDock", () => {
     })}
     />);
     const aside = await dock();
-    expect(within(aside).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
+    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
     const resume = within(aside).getByRole("button", { name: "Resume" });
     expect(resume).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(resume);
@@ -405,9 +407,11 @@ describe("WatcherDock", () => {
   it("does not offer Resume after a route pause while the route is still not ready", async () => {
     setup({ link: link({ status: "paused", pauseReason: "route-unavailable" }) });
     const aside = await dock();
-    const notice = within(aside).getByText("Paused", { selector: ".watcher-notice-title" }).closest<HTMLElement>(".watcher-notice")!;
+    const notice = aside.querySelector<HTMLElement>(".watcher-notice")!;
     expect(within(notice).queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(within(notice).getByText(/^It can resume once its route is ready\./u)).toBeInTheDocument();
+    expect(within(aside.querySelector<HTMLElement>(".watcher-bar")!).getByRole("button", { name: "Resume" }))
+      .toHaveAttribute("aria-disabled", "true");
   });
 
   it("asks before resuming after unexplained changes, focusing Cancel, and keeps focus in the dock", async () => {

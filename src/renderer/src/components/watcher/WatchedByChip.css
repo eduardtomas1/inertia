@@ -6,48 +6,35 @@
   display: flex;
   width: fit-content;
   max-width: var(--watched-by-chip-row);
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
   margin: 0 0 6px calc((100% - var(--watched-by-chip-row)) / 2);
-  padding: 2px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   background: transparent;
   font-size: var(--text-xs);
   line-height: 20px;
+  white-space: pre;
 }
 
 .watched-by-chip:hover {
   color: var(--text);
-  background: var(--fill);
 }
 
-.watched-by-chip-mark {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.6;
-}
-
-.watched-by-chip[data-status="waking"] .watched-by-chip-mark {
-  background: var(--status-working);
-  opacity: 1;
+.watched-by-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .watched-by-chip-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.watched-by-chip-badge {
-  padding: 0 6px;
-  border-radius: 999px;
-  color: var(--accent-text);
-  background: var(--accent);
+.watched-by-chip-new {
+  color: var(--text);
 }
 
 .composer-run-lock {

@@ -177,21 +177,18 @@ export function WatcherFeed({
   }, []);
 
   return (
-    <section className="watcher-feed" aria-labelledby={headingId}>
-      <h3 id={headingId} className="watcher-feed-heading" tabIndex={-1}>Findings</h3>
+    <section className="watcher-feed" aria-label="Findings">
       {!feed.loaded && !feed.error && (
         <p className="watcher-feed-empty"><LoadingMark label="Loading checks" /> Loading checks…</p>
       )}
       {feed.error && (
         <p className="watcher-feed-error" role="alert">
           {feed.error}
-          <button type="button" className="secondary-button" onClick={feed.retry}>Retry</button>
+          <button type="button" className="watcher-text-button" onClick={feed.retry}>Retry</button>
         </p>
       )}
       {feed.loaded && groups.length === 0 && (
-        <p className="watcher-feed-empty">
-          No checks yet. The watcher checks when something in the main chat settles.
-        </p>
+        <p className="watcher-feed-empty">No checks yet</p>
       )}
       {groups.length > 0 && (
         <ol className="watcher-feed-list" aria-label="Watcher findings">

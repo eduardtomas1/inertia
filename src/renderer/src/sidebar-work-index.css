@@ -531,10 +531,6 @@
  * check while its chat is Done) keeps a quiet watcher marker. */
 .thread-watcher-mark {
   flex: 0 0 auto;
-  padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 16px;
 }

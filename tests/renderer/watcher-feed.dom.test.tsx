@@ -35,18 +35,21 @@ function FeedHarness({
   const actions = useMemo(() => createWatcherActions(runtime.request, LINK_ID), [runtime]);
   const feed = useWatcherFeed(LINK_ID, revision, actions);
   return (
-    <WatcherFeed
-      feed={feed}
-      actions={actions}
-      headingId="watcher-findings"
-      linkId={LINK_ID}
-      projectRoot="/workspace/studio"
-      projectId={PROJECT_ID}
-      watchedConversationId={WATCHED_ID}
-      watchedRunning={running}
-      steerable={steerAvailable(harnessId, running)}
-      online
-    />
+    <>
+      <h2 id="watcher-findings" tabIndex={-1}>Watching Refactor parser</h2>
+      <WatcherFeed
+        feed={feed}
+        actions={actions}
+        headingId="watcher-findings"
+        linkId={LINK_ID}
+        projectRoot="/workspace/studio"
+        projectId={PROJECT_ID}
+        watchedConversationId={WATCHED_ID}
+        watchedRunning={running}
+        steerable={steerAvailable(harnessId, running)}
+        online
+      />
+    </>
   );
 }
 
@@ -71,10 +74,10 @@ describe("WatcherFeed", () => {
     const entries = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     expect(entries.map((entry) => entry.dataset.kind)).toEqual(["receipts", "finding", "receipts", "notice"]);
     expect(entries[0]).toHaveTextContent(/Checked 2 times · 10:35–10:36 AM · nothing to report/u);
-    expect(entries[2]).toHaveTextContent(/Checked once at 10:33 AM · nothing to report/u);
+    expect(entries[2]).toHaveTextContent(/Checked once · 10:33 AM · nothing to report/u);
     expect(entries[2]).toHaveTextContent("Checkout check inconclusive");
     expect(entries[3]).toHaveTextContent("The check failed.");
-    expect(within(entries[1]!).getByRole("article", { name: "Finding" })).toHaveTextContent("The parser drops the trailing token.");
+    expect(within(entries[1]!).getByRole("article", { name: "The parser drops the trailing token." })).toBeInTheDocument();
   });
 
   it("shows how many read-only commands the watcher ran in each receipt and check", async () => {
@@ -91,7 +94,7 @@ describe("WatcherFeed", () => {
 
   it("moves focus to the card's own status after Send and reports the queued note", async () => {
     const runtime = renderFeed([finding(4, "Risky rename.")], { running: true });
-    const card = await screen.findByRole("article", { name: "Finding" });
+    const card = await screen.findByRole("article");
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     const status = within(card).getByRole("status");
     expect(status).toHaveFocus();
@@ -105,13 +108,13 @@ describe("WatcherFeed", () => {
 
   it("moves focus to the next card after Dismiss, and to the heading after the last one", async () => {
     const runtime = renderFeed([finding(5, "First."), finding(4, "Second.")]);
-    const [first, second] = await screen.findAllByRole("article", { name: "Finding" });
+    const [first, second] = await screen.findAllByRole("article");
     fireEvent.click(within(first!).getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(second).toHaveFocus());
-    expect(screen.getAllByRole("article", { name: "Finding" })).toHaveLength(1);
+    expect(screen.getAllByRole("article")).toHaveLength(1);
     fireEvent.click(within(second!).getByRole("button", { name: "Dismiss" }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Findings" })).toHaveFocus());
-    expect(screen.queryByRole("article", { name: "Finding" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Watching Refactor parser" })).toHaveFocus());
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
     expect(runtime.commands.filter(({ type }) => type === "watcher.note.dismiss")).toHaveLength(2);
   });
 
@@ -120,8 +123,8 @@ describe("WatcherFeed", () => {
     fireEvent.click(await screen.findByRole("button", { name: "More ways to send" }));
     const menu = await screen.findByRole("menu", { name: "More ways to send" });
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "Queue for next turnSends after the current turn",
-      "Steer nowDelivers the note into the running turn",
+      "Queue for next turn",
+      "Steer now",
     ]);
     // Rendered outside the scrolling feed, so the last card's menu is never clipped.
     expect(menu.closest(".watcher-feed")).toBeNull();
@@ -136,17 +139,23 @@ describe("WatcherFeed", () => {
     ["the watched harness cannot be steered", { running: true, harnessId: "cursor-acp" }],
   ])("shows a plain Send without a menu when %s", async (_case, options) => {
     renderFeed([finding(4, "Queue only.")], options);
-    const card = await screen.findByRole("article", { name: "Finding" });
+    const card = await screen.findByRole("article");
     expect(within(card).getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "More ways to send" })).not.toBeInTheDocument();
   });
 
-  it("heads a card with its time and keeps the lifetime check number muted", async () => {
+  it("titles a card with the finding's first line and keeps the check and time on one muted line", async () => {
+    renderFeed([finding(4, "## A **risky** `rename`\nThe old name is still exported.")]);
+    const card = await screen.findByRole("article", { name: "A risky rename" });
+    expect(card.querySelector(".watcher-finding-meta")).toHaveTextContent(/^Check 4 · 10:34 AM$/u);
+    expect(card.querySelector(".watcher-finding-body")).toHaveTextContent("The old name is still exported.");
+    expect(card).not.toHaveTextContent(/^Finding/u);
+  });
+
+  it("shows a one-line finding as its title alone", async () => {
     renderFeed([finding(4, "A risk.")]);
-    const card = await screen.findByRole("article", { name: "Finding" });
-    const header = card.querySelector("header")!;
-    expect(header.querySelector(".watcher-finding-heading")).toHaveTextContent(/^Finding· 10:34 AM$/u);
-    expect(header.querySelector(".watcher-finding-meta")).toHaveTextContent(/^Check 4$/u);
+    const card = await screen.findByRole("article", { name: "A risk." });
+    expect(card.querySelector(".watcher-finding-body")).toBeNull();
   });
 
   it.each([
@@ -157,7 +166,7 @@ describe("WatcherFeed", () => {
     ["fallback", { mode: "queue", state: "queued", detail: "The turn ended before the note arrived." }, true, /^Queued · the turn ended before the note arrived$/u],
   ] as const)("shows one status line for a %s note", async (_case, delivery, running, expected) => {
     renderFeed([finding(4, "A risk.", { delivery: { ...delivery, at: NOW } })], { running });
-    const card = await screen.findByRole("article", { name: "Finding" });
+    const card = await screen.findByRole("article");
     expect(within(card).getByRole("status")).toHaveTextContent(expected);
     expect(within(card).getByRole("status").children).toHaveLength(0);
   });
@@ -181,7 +190,7 @@ describe("WatcherFeed", () => {
       throw new Error(`Unexpected command ${command.type}`);
     });
     const view = render(<FeedHarness runtime={runtime} running />);
-    const card = await screen.findByRole("article", { name: "Finding" });
+    const card = await screen.findByRole("article");
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(/^Not sent · /u));
     // A retry reuses the same delivery id, so the runtime can't deliver twice.
@@ -198,13 +207,13 @@ describe("WatcherFeed", () => {
 
   it("plays a card's entrance once, not again after a remount", async () => {
     const first = renderFeed([finding(4, "A risk.")]);
-    const card = await screen.findByRole("article", { name: "Finding" });
+    const card = await screen.findByRole("article");
     expect(card).toHaveAttribute("data-enter", "true");
     act(() => { card.dispatchEvent(new Event("animationend", { bubbles: true })); });
     expect(card).not.toHaveAttribute("data-enter");
     void first;
     document.body.innerHTML = "";
     renderFeed([finding(4, "A risk.")]);
-    expect(await screen.findByRole("article", { name: "Finding" })).not.toHaveAttribute("data-enter");
+    expect(await screen.findByRole("article")).not.toHaveAttribute("data-enter");
   });
 });

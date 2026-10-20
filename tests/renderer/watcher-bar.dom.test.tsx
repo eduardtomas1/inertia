@@ -73,25 +73,65 @@ describe("WatcherBar", () => {
     expect(heading).toHaveAttribute("title", "Refactor parser");
     expect(heading.querySelector(".visually-hidden")).toHaveTextContent("Watching");
     expect(screen.getByRole("group", { name: "Watcher for Refactor parser: Team Codex · fixture-model, Reviewer" })).toBeInTheDocument();
-    expect(screen.getByText("Watching · Team Codex · fixture-model · Reviewer")).toBeInTheDocument();
-    expect(screen.getByText(/^Last check /u)).toBeInTheDocument();
-    expect(screen.getByText("9 of 12 checks left this turn")).toBeInTheDocument();
-    expect(screen.getByText("9 events seen")).toBeInTheDocument();
-    expect(screen.getByText("2 waiting")).toBeInTheDocument();
+    expect(document.querySelector(".watcher-bar-state")).toHaveTextContent(/^Team Codex · fixture-model · Reviewer · Watching$/u);
+    expect(screen.queryByText(/checks left this turn/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Watching · /u)).not.toBeInTheDocument();
     expect(liveRegion()).toHaveAttribute("aria-live", "polite");
     expect(liveRegion()).toHaveClass("visually-hidden");
     expect(liveRegion()).toBeEmptyDOMElement();
   });
 
-  it("keeps only More and Collapse beside the title, and orders the More menu", async () => {
-    render(bar(link(), undefined, undefined, { privateConnectConfigured: true }));
-    const identity = document.querySelector<HTMLElement>(".watcher-bar-identity")!;
-    expect(within(identity).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
-      .toEqual(["More watcher actions", "Collapse"]);
+  it("keeps one primary icon button beside the title, with the rest and the numbers in More", async () => {
+    render(bar(link({ quietSince: "2026-10-19T10:50:00.000Z" }), undefined, undefined, { privateConnectConfigured: true }));
+    const actions = document.querySelector<HTMLElement>(".watcher-bar-actions")!;
+    expect(within(actions).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
+      .toEqual(["Check now", "More watcher actions"]);
     fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
     const menu = await screen.findByRole("menu", { name: "More watcher actions" });
-    expect([...menu.querySelectorAll('[role^="menuitem"]')].map((item) => item.textContent))
-      .toEqual(["Open watcher chat", "Hide from paired devices", "Stop watching…"]);
+    expect([...menu.querySelectorAll('[role^="menuitem"]')].map((item) => item.textContent)).toEqual([
+      "Pause",
+      "Open watcher chat",
+      "Hide from paired devices",
+      "Collapse",
+      "Stop watching…",
+      "9 of 12 checks left this turn",
+      "9 events seen",
+      "2 waiting",
+      expect.stringMatching(/^Last check /u),
+      expect.stringMatching(/^Main chat quiet since /u),
+    ]);
+    expect(within(menu).getByRole("menuitem", { name: "2 waiting" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("collapses from the More menu", async () => {
+    const onCollapse = vi.fn();
+    render(
+      <WatcherBar
+        link={link()}
+        watched={shell(WATCHED_ID, "Refactor parser")}
+        watcher={shell(WATCHER_ID, "Watcher")}
+        agentLabel="Team Codex"
+        headingId="watcher-heading"
+        actions={createWatcherActions(watcherRuntime().request, LINK_ID)}
+        privateConnectConfigured={false}
+        resumeBlocked={null}
+        onCollapse={onCollapse}
+        onOpenWatcherChat={null}
+        onResumeRequest={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Collapse" }));
+    expect(onCollapse).toHaveBeenCalledOnce();
+  });
+
+  it("drops the checks-left count while paused for using its checks", async () => {
+    render(bar(link({ status: "paused", pauseReason: "wake-budget" })));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    const menu = await screen.findByRole("menu", { name: "More watcher actions" });
+    expect(menu).not.toHaveTextContent(/checks left/u);
+    expect(document.querySelector(".watcher-bar-state")).toHaveTextContent(/ · Paused$/u);
   });
 
   it("announces findings, failures and pauses only, never routine checks", () => {
@@ -174,7 +214,7 @@ describe("WatcherBar", () => {
       at: STARTED,
     }));
     expect(screen.getByText("Reading src/parser.ts")).toBeInTheDocument();
-    expect(document.querySelector(".watcher-bar-phase")).toHaveAttribute("data-phase", "waking");
+    expect(document.querySelector(".watcher-bar-state")).toHaveAttribute("data-phase", "waking");
   });
 
   it("never shows the previous check's phase when the next check starts", () => {
@@ -195,21 +235,23 @@ describe("WatcherBar", () => {
     expect(screen.queryByText("Writing its review")).not.toBeInTheDocument();
     // The next check starts before its turn reaches the shell.
     view.rerender(bar(link({ status: "waking" })));
-    expect(document.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Checking$/u);
+    expect(document.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Checking…$/u);
   });
 
   it("dispatches Pause and Check now, and routes Resume through the dock", async () => {
     const runtime = watcherRuntime();
     const onResumeRequest = vi.fn();
     const view = render(bar(link(), runtime, onResumeRequest));
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Pause" }));
+    expect(screen.getByRole("button", { name: "More watcher actions" })).toHaveFocus();
     await vi.waitFor(() => expect(runtime.commands.map(({ type }) => type)).toEqual(["watcher.pause"]));
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole("button", { name: "Check now" }));
     await vi.waitFor(() => expect(runtime.commands.map(({ type }) => type)).toEqual(["watcher.pause", "watcher.wake"]));
     expect(runtime.commands.every((command) => payloadOf(command).linkId === LINK_ID)).toBe(true);
     view.rerender(bar(link({ status: "paused", pauseReason: "user" }), runtime, onResumeRequest));
-    expect(screen.getByRole("button", { name: "Check now" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("button", { name: "Check now" })).not.toBeInTheDocument();
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Resume" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(onResumeRequest).toHaveBeenCalledOnce();
@@ -255,10 +297,9 @@ describe("WatcherBar", () => {
   it("re-enables its actions after they settle under StrictMode", async () => {
     const runtime = watcherRuntime();
     render(<StrictMode>{bar(link(), runtime)}</StrictMode>);
-    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-    expect(screen.getByRole("button", { name: "Pause" })).toHaveAttribute("aria-disabled", "true");
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).not.toHaveAttribute("aria-disabled"));
-    expect(screen.getByRole("button", { name: "Check now" })).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(screen.getByRole("button", { name: "Check now" }));
+    expect(screen.getByRole("button", { name: "Check now" })).toHaveAttribute("aria-disabled", "true");
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Check now" })).not.toHaveAttribute("aria-disabled"));
   });
 
   it("does not offer Resume when the runtime would refuse it, and says why", () => {
@@ -271,7 +312,7 @@ describe("WatcherBar", () => {
     ));
     const resume = screen.getByRole("button", { name: "Resume" });
     expect(resume).toHaveAttribute("aria-disabled", "true");
-    expect(resume).toHaveAttribute("title", "Unarchive the watched chat to resume its watcher.");
+    expect(resume).toHaveAccessibleDescription("Unarchive the watched chat to resume its watcher.");
     fireEvent.click(resume);
     expect(onResumeRequest).not.toHaveBeenCalled();
   });

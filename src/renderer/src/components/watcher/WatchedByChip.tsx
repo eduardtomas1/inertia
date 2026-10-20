@@ -58,11 +58,10 @@ export function WatchedByChip({ conversationId }: { conversationId: string }): R
           else dock.setOpen(!dock.open, { focusHeading: !dock.open });
         }}
       >
-        <span className="watched-by-chip-mark" aria-hidden="true" />
         <span className="watched-by-chip-label">{label}</span>
-        {link.status === "paused" && <span className="watched-by-chip-note">Paused</span>}
-        {unseen && <span className="watched-by-chip-badge">New finding</span>}
-        {detached && <span className="watched-by-chip-note">Return to main window</span>}
+        {link.status === "paused" && <span className="watched-by-chip-note"> · Paused</span>}
+        {unseen && <span className="watched-by-chip-new"> · new finding</span>}
+        {detached && <span className="watched-by-chip-note"> · Return to main window</span>}
       </button>
       <span className="visually-hidden" role="status" aria-live="polite">{announcement}</span>
     </>

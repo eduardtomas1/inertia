@@ -81,7 +81,7 @@ describe("watcher chunks that fail to load", () => {
     render(
       <Window>
         <WatcherFindingCard
-          item={finding(3, "The parser drops trailing commas.")}
+          item={finding(3, "Trailing commas\nThe parser drops trailing commas.")}
           motionIndex={0}
           enter={false}
           onEntered={vi.fn()}

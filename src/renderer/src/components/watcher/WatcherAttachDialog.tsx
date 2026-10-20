@@ -71,17 +71,13 @@ export interface WatcherAttachHostProps {
   onOpenBackendSetup: (profileId: string) => void;
 }
 
-const PRESET_DESCRIPTIONS: Readonly<Record<WatcherPreset, string>> = {
-  reviewer: "Looks for mistakes and risks in the work as it happens.",
-  "scope-guard": "Checks that the work stays within what the chat asked for.",
-  explainer: "Describes what the main agent is doing and why.",
-};
+export const WATCHER_READ_ONLY_STATEMENT = "It reads and reports; it never edits files. Codex may run read-only commands.";
 
-const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string; detail: string }> = [
-  { key: "brief", label: "The brief", detail: "The request that started the turn" },
-  { key: "activities", label: "Activities", detail: "Tool calls, commands, file changes and plan updates as they settle" },
-  { key: "changedFiles", label: "Changed files", detail: "The files a turn changed, on its final check" },
-  { key: "partialReplies", label: "Partial replies", detail: "What the main agent has written so far" },
+const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string }> = [
+  { key: "brief", label: "The brief" },
+  { key: "activities", label: "Activities" },
+  { key: "changedFiles", label: "Changed files" },
+  { key: "partialReplies", label: "Partial replies" },
 ];
 
 const BUDGET_FIELDS: ReadonlyArray<{ key: keyof WatcherBudgets; label: string; unit: string }> = [
@@ -151,7 +147,7 @@ function routeChoices(
 /**
  * Attaches a read-only watcher to one chat. Only ready routes on harnesses in
  * the reviewed watcher allowlist can be chosen; the dialog states plainly that
- * the watcher cannot edit, run or send anything without the user.
+ * the watcher never edits files.
  */
 export function WatcherAttachDialog({
   snapshot,
@@ -331,7 +327,7 @@ export function WatcherAttachDialog({
       bodyClassName="watcher-attach-body"
       titleId="watcher-attach-title"
       title="Add a watcher"
-      description={`A read-only second agent that follows “${watched.title}” and keeps its findings beside it. It can't edit files, run commands or tests, or send anything without you.`}
+      description={WATCHER_READ_ONLY_STATEMENT}
       closeLabel="Close"
       closeDisabled={submitting}
       onClose={onClose}
@@ -366,12 +362,10 @@ export function WatcherAttachDialog({
               key={option}
               type="button"
               className="watcher-attach-preset"
-              aria-describedby={`watcher-attach-preset-${option}`}
               disabled={submitting}
               {...presets.radioProps(option)}
             >
-              <strong>{WATCHER_PRESET_LABELS[option]}</strong>
-              <small id={`watcher-attach-preset-${option}`}>{PRESET_DESCRIPTIONS[option]}</small>
+              {WATCHER_PRESET_LABELS[option]}
             </button>
           ))}
         </div>
@@ -395,7 +389,7 @@ export function WatcherAttachDialog({
               <strong>{choices.length === 0 ? "No watcher route" : selectedChoice?.title ?? "Model route unavailable"}</strong>
               <span>
                 {choices.length === 0
-                  ? "Only ready routes on agents that can be watchers are offered. Check Settings → Agents."
+                  ? "Check Settings → Agents."
                   : selectedChoice?.detail ?? "Choose a ready route."}
               </span>
             </span>
@@ -418,18 +412,14 @@ export function WatcherAttachDialog({
           value={instructions}
           maxLength={MAX_WATCHER_INSTRUCTIONS_CHARS}
           disabled={submitting}
-          aria-describedby="watcher-attach-instructions-hint"
           placeholder="For example: watch for changes to the public API."
           onChange={(event) => setInstructions(stripInstructionControls(event.currentTarget.value))}
         />
-        <small id="watcher-attach-instructions-hint" className="watcher-attach-hint">
-          Added to the preset. Up to {MAX_WATCHER_INSTRUCTIONS_CHARS.toLocaleString(INTERFACE_LOCALE)} characters.
-        </small>
       </section>
 
       <fieldset className="watcher-attach-section watcher-attach-sharing" disabled={submitting}>
         <legend>What the watcher sees</legend>
-        {SHARING_FIELDS.map(({ key, label, detail }) => (
+        {SHARING_FIELDS.map(({ key, label }) => (
           <label key={key} className="watcher-attach-check">
             <input
               type="checkbox"
@@ -439,10 +429,7 @@ export function WatcherAttachDialog({
                 setSharing((current) => ({ ...current, [key]: checked }));
               }}
             />
-            <span>
-              {label}
-              <small>{detail}</small>
-            </span>
+            <span>{label}</span>
           </label>
         ))}
       </fieldset>
@@ -467,7 +454,6 @@ export function WatcherAttachDialog({
                     step={1}
                     value={budgetDrafts[key]}
                     disabled={submitting}
-                    aria-describedby={`watcher-attach-budget-${key}`}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
                       setBudgetDrafts((current) => ({ ...current, [key]: value }));
@@ -476,16 +462,10 @@ export function WatcherAttachDialog({
                   />
                   {unit && <span aria-hidden="true">{unit}</span>}
                 </span>
-                <small id={`watcher-attach-budget-${key}`}>
-                  {limits.min} to {limits.max}{unit ? ` ${unit}` : ""} · default {limits.default}
-                </small>
               </label>
             );
           })}
         </div>
-        <p className="watcher-attach-hint">
-          Each check is a turn on the watcher's own account. When its checks for a turn run out it pauses, and it still makes its final check.
-        </p>
       </details>
 
       {privateConnectConfigured && (
@@ -509,25 +489,8 @@ export function WatcherAttachDialog({
           disabled={submitting || !hasCompletedTurn}
           onChange={setInitialReview}
         />
-        <label htmlFor="watcher-attach-initial-review">
-          Review the last turn now
-          <small>{hasCompletedTurn ? "The watcher checks the chat's most recent turn right away." : "Available once the chat has a finished turn."}</small>
-        </label>
+        <label htmlFor="watcher-attach-initial-review">Review the last turn now</label>
       </section>
-
-      <details className="watcher-attach-disclosure watcher-attach-shared">
-        <summary>What is shared with the watcher?</summary>
-        <p>
-          Each check sends a bounded digest of what changed in this chat since the previous check, limited to what you
-          choose above and cut to the digest size. Newer activity is kept in full, older activity is shortened, and the
-          check says what it left out.
-        </p>
-        <p>
-          The watcher works in this chat's checkout and branch and can read the project's files. It may read more of
-          this chat on its own, up to its context-read budget. It receives no credentials and no other chats, and every
-          note it writes stays in the dock until you send it.
-        </p>
-      </details>
 
       {error && <p className="watcher-attach-error" role="alert">{error}</p>}
     </DialogShell>

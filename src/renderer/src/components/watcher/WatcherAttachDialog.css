@@ -37,8 +37,7 @@
   gap: 12px;
 }
 
-.watcher-attach-label small,
-.watcher-attach-hint {
+.watcher-attach-label small {
   color: var(--text-muted);
   font-size: var(--text-xs);
   font-weight: 400;
@@ -53,14 +52,14 @@
 
 .watcher-attach-preset {
   display: grid;
-  align-content: start;
-  gap: 4px;
-  min-height: 84px;
-  padding: 10px 12px;
+  align-content: center;
+  min-height: var(--control-height);
+  padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--text);
   background: transparent;
+  font-size: var(--text-sm);
   text-align: left;
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
@@ -77,17 +76,6 @@
 .watcher-attach-preset:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-}
-
-.watcher-attach-preset strong {
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-
-.watcher-attach-preset small {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: var(--leading-chrome);
 }
 
 .watcher-attach-warning {
@@ -156,16 +144,6 @@
   accent-color: var(--accent);
 }
 
-.watcher-attach-check > span {
-  display: grid;
-  gap: 1px;
-}
-
-.watcher-attach-check small {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
-
 .watcher-attach-disclosure {
   color: var(--text-muted);
 }
@@ -196,12 +174,6 @@
   transform: rotate(180deg);
 }
 
-.watcher-attach-disclosure p {
-  margin: 6px 0 0;
-  font-size: var(--text-sm);
-  line-height: var(--leading-chrome);
-}
-
 .watcher-attach-budgets {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -214,11 +186,6 @@
   gap: 4px;
   color: var(--text);
   font-size: var(--text-sm);
-}
-
-.watcher-attach-budget small {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
 }
 
 .watcher-attach-budget-input {
@@ -243,20 +210,13 @@
 
 .watcher-attach-review {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 
 .watcher-attach-review label {
-  display: grid;
-  gap: 1px;
   color: var(--text);
   font-size: var(--text-sm);
-}
-
-.watcher-attach-review small {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
 }
 
 .watcher-attach-error {

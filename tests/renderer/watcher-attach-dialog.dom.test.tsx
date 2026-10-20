@@ -95,7 +95,7 @@ describe("WatcherAttachDialog", () => {
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]));
     const group = within(dialog).getByRole("radiogroup", { name: "Preset" });
     const radios = within(group).getAllByRole("radio");
-    expect(radios.map((radio) => radio.textContent?.split(/(?=[A-Z][a-z]+ )/u)[0])).toEqual(["Reviewer", "Scope guard", "Explainer"]);
+    expect(radios.map((radio) => radio.textContent)).toEqual(["Reviewer", "Scope guard", "Explainer"]);
     await waitFor(() => expect(radios[0]).toHaveFocus());
     expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
     fireEvent.keyDown(radios[0]!, { key: "ArrowRight" });
@@ -103,7 +103,7 @@ describe("WatcherAttachDialog", () => {
     expect(radios[1]).toHaveAttribute("aria-checked", "true");
     fireEvent.keyDown(radios[1]!, { key: "End" });
     expect(radios[2]).toHaveFocus();
-    expect(radios[2]).toHaveAccessibleDescription("Describes what the main agent is doing and why.");
+    expect(radios[2]).toHaveAccessibleName("Explainer");
   });
 
   it("labels every control and states the read-only boundary", async () => {
@@ -117,8 +117,9 @@ describe("WatcherAttachDialog", () => {
     expect(within(dialog).getByRole("spinbutton", { name: /Cooldown between checks/u })).toHaveValue(45);
     expect(within(dialog).getByRole("switch", { name: /Review the last turn now/u })).toBeDisabled();
     // Stated up front, in the dialog's description, not below the fold.
-    expect(dialog).toHaveAccessibleDescription(/It can't edit files, run commands or tests, or send anything without you\./u);
-    expect(within(dialog).getByText("What is shared with the watcher?")).toBeInTheDocument();
+    expect(dialog).toHaveAccessibleDescription("It reads and reports; it never edits files. Codex may run read-only commands.");
+    expect(within(dialog).queryByText("What is shared with the watcher?")).not.toBeInTheDocument();
+    expect(dialog.querySelectorAll("small:not([aria-hidden])")).toHaveLength(1);
   });
 
   it("keeps a logical Tab order from preset to Attach", async () => {

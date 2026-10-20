@@ -52,17 +52,17 @@ export function WatcherCheckLine({ item }: { item: WatcherFeedEntry }): React.JS
 function receiptTimes(group: ReceiptGroup): string {
   const first = watcherClockTime(group.firstAt);
   const last = watcherClockTime(group.lastAt);
-  if (group.count === 1 || !last || first === last) return ` at ${first}`;
+  if (group.count === 1 || !last || first === last) return first;
   // "7:32–7:41 PM": a shared day period is said once.
   const [firstClock, firstPeriod] = first.split(/\s/u);
   const [, lastPeriod] = last.split(/\s/u);
-  return ` · ${firstPeriod && firstPeriod === lastPeriod ? firstClock : first}–${last}`;
+  return `${firstPeriod && firstPeriod === lastPeriod ? firstClock : first}–${last}`;
 }
 
 function receiptSummary(group: ReceiptGroup): string {
   const times = group.count === 1 ? "once" : `${group.count} times`;
   const commands = commandsNote(group.commandsRun);
-  return `Checked ${times}${receiptTimes(group)} · nothing to report${commands ? ` · ${commands}` : ""}`;
+  return [`Checked ${times}`, receiptTimes(group), "nothing to report", commands].filter(Boolean).join(" · ");
 }
 
 function enterProps(enter: boolean, onEntered: () => void) {
@@ -95,7 +95,6 @@ export function WatcherReceiptGroup({
       {...enterProps(enter, onEntered)}
     >
       <summary>
-        <span className="watcher-receipt-mark" aria-hidden="true" />
         <span className="watcher-receipt-summary">{receiptSummary(group)}</span>
         <ChevronRight className="watcher-receipt-chevron" size={14} aria-hidden="true" />
       </summary>
@@ -128,9 +127,8 @@ export function WatcherNoticeLine({
       style={{ "--motion-index": Math.min(motionIndex, 5) } as CSSProperties}
       {...enterProps(enter, onEntered)}
     >
-      <span className="watcher-receipt-mark" aria-hidden="true" />
       <span className="watcher-notice-line">
-        <strong>{running ? `Check ${item.sequence} · checking now` : watcherOutcomeText(item.outcome)}</strong>
+        <span className="watcher-notice-line-title">{running ? `Check ${item.sequence} · checking now` : watcherOutcomeText(item.outcome)}</span>
         {!running && <WatcherCheckLine item={item} />}
       </span>
     </div>

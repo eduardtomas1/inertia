@@ -56,12 +56,12 @@ export function WatcherNotices({
   if (!paused && !customBackend) return null;
   const pauseText = watcherPauseText(link.pauseReason, link.pauseDetail);
   const resumeButton = (label: string) => resumeBlocked ? (
-    resumeBlocked === pauseText ? null : <p className="watcher-notice-blocked">{resumeBlocked}</p>
+    <p className="watcher-notice-blocked">{resumeBlocked}</p>
   ) : (
     <button
       ref={requestRef}
       type="button"
-      className="secondary-button"
+      className="watcher-text-button is-primary"
       aria-disabled={resuming || undefined}
       onClick={() => { if (!resuming) onResumeRequest(); }}
     >
@@ -111,15 +111,12 @@ export function WatcherNotices({
         </div>
       ) : paused ? (
         <div className="watcher-notice">
-          <p className="watcher-notice-title">Paused</p>
           <p>{pauseText}</p>
-          {resumeButton("Resume")}
+          {resumeBlocked && resumeBlocked !== pauseText && <p className="watcher-notice-blocked">{resumeBlocked}</p>}
         </div>
       ) : null}
       {customBackend && (
-        <p className="watcher-notice is-quiet">
-          Can read the watched chat: no (custom backend). It reviews only what each check sends.
-        </p>
+        <p className="watcher-notice is-quiet">Custom backend: it sees only what each check sends.</p>
       )}
     </div>
   );

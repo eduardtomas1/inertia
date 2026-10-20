@@ -27,6 +27,13 @@ function findingStatus(
   return watcherDeliveryText(delivery, watchedRunning);
 }
 
+function splitFinding(finding: string): { title: string; body: string } {
+  const lines = finding.trim().split(/\r?\n/u);
+  const first = lines[0] ?? "";
+  const title = first.replace(/^\s*(?:#{1,6}\s+|[-*+>]\s+)/u, "").replaceAll("**", "").replaceAll("`", "").trim();
+  return { title, body: lines.slice(1).join("\n").trim() };
+}
+
 export interface WatcherFindingCardProps {
   item: WatcherFeedItem;
   motionIndex: number;
@@ -90,7 +97,8 @@ export function WatcherFindingCard({
   const statusState = sending
     ? "sending"
     : failure && (delivery === null || delivery.state === "failed") ? "failed" : delivery?.state ?? "none";
-  const finding = item.finding ?? "";
+  const { title, body } = splitFinding(item.finding ?? "");
+  const time = watcherClockTime(item.settledAt);
   return (
     <article
       ref={(node) => cardRef(item.wakeId, node)}
@@ -107,25 +115,23 @@ export function WatcherFindingCard({
         onEntered();
       }}
     >
-      <header className="watcher-finding-header">
-        <span className="watcher-finding-heading">
-          <h3 id={titleId}>Finding</h3>
-          {item.settledAt && (
-            <time dateTime={item.settledAt}>· {watcherClockTime(item.settledAt)}</time>
-          )}
-        </span>
-        <span className="watcher-finding-meta">Check {item.sequence}</span>
-      </header>
-      <div className="watcher-finding-body">
-        <WatcherErrorBoundary fallback={<p className="watcher-finding-plain">{finding}</p>}>
-          <FindingMarkdown
-            finding={finding}
-            projectRoot={projectRoot}
-            projectId={projectId}
-            conversationId={watchedConversationId}
-          />
-        </WatcherErrorBoundary>
-      </div>
+      <h3 id={titleId} className="watcher-finding-title">{title}</h3>
+      {body && (
+        <div className="watcher-finding-body">
+          <WatcherErrorBoundary fallback={<p className="watcher-finding-plain">{body}</p>}>
+            <FindingMarkdown
+              finding={body}
+              projectRoot={projectRoot}
+              projectId={projectId}
+              conversationId={watchedConversationId}
+            />
+          </WatcherErrorBoundary>
+        </div>
+      )}
+      <p className="watcher-finding-meta">
+        Check {item.sequence}
+        {time && <> · <time dateTime={item.settledAt ?? undefined}>{time}</time></>}
+      </p>
       {deliverable && (
         <div className="watcher-finding-actions">
           <WatcherDeliverButton
@@ -135,7 +141,7 @@ export function WatcherFindingCard({
           />
           <button
             type="button"
-            className="secondary-button"
+            className="watcher-text-button"
             aria-disabled={sending || !online || undefined}
             onClick={() => { if (!sending && online) onDismiss(item); }}
           >

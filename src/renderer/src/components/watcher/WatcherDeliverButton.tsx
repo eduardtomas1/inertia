@@ -21,7 +21,7 @@ export function WatcherDeliverButton({
   const send = (
     <button
       type="button"
-      className="primary-button watcher-deliver-send"
+      className="watcher-text-button is-primary"
       aria-disabled={disabled || undefined}
       onClick={() => { if (!disabled) onDeliver("queue"); }}
     >
@@ -35,7 +35,7 @@ export function WatcherDeliverButton({
       <WatcherMenu
         label="More ways to send"
         trigger={<ChevronDown size={14} aria-hidden="true" />}
-        triggerClassName="primary-button watcher-deliver-more"
+        triggerClassName="watcher-text-button watcher-deliver-more"
         menuClassName="watcher-deliver-menu"
         disabled={disabled}
         floating
@@ -51,10 +51,7 @@ export function WatcherDeliverButton({
                 onDeliver("queue");
               }}
             >
-              <span>
-                <strong>Queue for next turn</strong>
-                <small>Sends after the current turn</small>
-              </span>
+              Queue for next turn
             </button>
             <button
               type="button"
@@ -65,10 +62,7 @@ export function WatcherDeliverButton({
                 onDeliver("steer");
               }}
             >
-              <span>
-                <strong>Steer now</strong>
-                <small>Delivers the note into the running turn</small>
-              </span>
+              Steer now
             </button>
           </>
         )}

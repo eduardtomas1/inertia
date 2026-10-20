@@ -431,7 +431,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
             <WatcherFeed
               feed={feed}
               actions={actions}
-              headingId={`${dockId}-findings`}
+              headingId={headingId}
               linkId={link.id}
               projectRoot={project?.path ?? ""}
               projectId={watched?.projectId ?? link.projectId}

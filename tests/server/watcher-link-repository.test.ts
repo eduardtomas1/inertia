@@ -379,6 +379,34 @@ describe("watcher link repository", () => {
       .toThrow(/CHECK constraint failed/u);
   });
 
+  it("totals the measured tokens of the watcher chat's settled turns only", () => {
+    const links = store.watcherLinks;
+    const watched = chat();
+    const { link, conversation } = attach(watched);
+    expect(links.usageTotals(link.id)).toEqual({ totalTokens: null });
+    expect(links.usageTotals(randomUUID())).toEqual({ totalTokens: null });
+    const usage = (totalProcessedTokens: number) => ({
+      usedTokens: null, totalProcessedTokens, totalProcessedScope: "run" as const, maxTokens: null,
+      inputTokens: null, cachedInputTokens: null, cacheWriteInputTokens: null, outputTokens: null,
+      reasoningOutputTokens: null, compactsAutomatically: null, capturedAt: tick(),
+    });
+    const settleWith = (turnId: string, usageAtCompletion: ReturnType<typeof usage> | null) => {
+      const at = tick();
+      store.settleAgentTurn(turnId, {
+        status: "completed", terminalReason: "provider-completed", startedAt: at, completedAt: at, updatedAt: at, usageAtCompletion,
+      });
+    };
+    settleWith(beginTurn(conversation).id, null);
+    expect(links.usageTotals(link.id)).toEqual({ totalTokens: null });
+    settleWith(beginTurn(conversation).id, usage(1_200));
+    settleWith(beginTurn(conversation).id, usage(800));
+    settleWith(beginTurn(watched).id, usage(50_000));
+    beginTurn(conversation);
+    expect(links.usageTotals(link.id)).toEqual({ totalTokens: 2_000 });
+    expect(links.get(link.id)).not.toHaveProperty("usage");
+    expect(store.shellSnapshot().watchers?.[0]).not.toHaveProperty("usage");
+  });
+
   it("marks a settled finding resolved by a later check of the same link, once", () => {
     const links = store.watcherLinks;
     const { link } = attach(chat());

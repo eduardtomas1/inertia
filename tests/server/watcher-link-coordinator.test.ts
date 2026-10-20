@@ -494,7 +494,7 @@ describe("watcher link coordinator", () => {
     }
   });
 
-  it("returns instructions in command results but leaves them out of the shell broadcast", async () => {
+  it("returns instructions and usage in command results but leaves them out of the shell broadcast", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach({ instructions: "Watch the error paths." });
@@ -502,9 +502,11 @@ describe("watcher link coordinator", () => {
       const updated = f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1);
       expect(updated).toMatchObject({ link: { id: link.id } });
       expect((updated as { link: object }).link).not.toHaveProperty("instructions");
+      expect((updated as { link: object }).link).not.toHaveProperty("usage");
+      expect(link.usage).toEqual({ totalTokens: null });
       expect(f.store.watcherLinks.views()[0]).not.toHaveProperty("instructions");
       await expect(f.command("watcher.pause", { linkId: link.id }))
-        .resolves.toMatchObject({ result: { link: { instructions: "Watch the error paths." } } });
+        .resolves.toMatchObject({ result: { link: { instructions: "Watch the error paths.", usage: { totalTokens: null } } } });
     } finally {
       await f.close();
     }

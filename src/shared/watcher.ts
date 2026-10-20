@@ -196,6 +196,10 @@ export const watcherFeedHeadlineSchema = z.strictObject({
   text: z.string().max(MAX_WATCHER_HEADLINE_CHARS).refine(watcherPrintableLine, "Watcher headlines stay on one printable line."),
 });
 
+export const watcherUsageSchema = z.strictObject({
+  totalTokens: countSchema.nullable(),
+});
+
 export const watcherCountersSchema = z.strictObject({
   wakesThisTurn: countSchema,
   wakeAllowance: countSchema,
@@ -212,11 +216,13 @@ export const watcherLinkViewSchema = z.strictObject({
   projectId: z.uuid(),
   preset: watcherPresetSchema,
   /**
-   * Present only on `watcher.link` command results. The shell projection
-   * (`AppSnapshot.watchers` and `watcher.link.updated`) leaves it out so eight
-   * links always fit `MAX_WATCHER_LINKS_SERIALIZED_BYTES`.
+   * `instructions` and `usage` are present only on `watcher.link` command
+   * results. The shell projection (`AppSnapshot.watchers` and
+   * `watcher.link.updated`) leaves them out so eight links always fit
+   * `MAX_WATCHER_LINKS_SERIALIZED_BYTES` and no broadcast reads turn usage.
    */
   instructions: watcherInstructionsSchema.optional(),
+  usage: watcherUsageSchema.optional(),
   sharing: watcherSharingSchema,
   budgets: watcherBudgetsSchema,
   privateConnect: watcherPrivateConnectSchema,
@@ -320,6 +326,7 @@ export type WatcherBudgets = z.infer<typeof watcherBudgetsSchema>;
 export type WatcherNoteAttribution = z.infer<typeof watcherNoteAttributionSchema>;
 export type WatcherFeedHeadline = z.infer<typeof watcherFeedHeadlineSchema>;
 export type WatcherCounters = z.infer<typeof watcherCountersSchema>;
+export type WatcherUsage = z.infer<typeof watcherUsageSchema>;
 export type WatcherLinkView = z.infer<typeof watcherLinkViewSchema>;
 export type WatcherDelivery = z.infer<typeof watcherDeliverySchema>;
 export type WatcherFeedItem = z.infer<typeof watcherFeedItemSchema>;

@@ -25,6 +25,7 @@ import {
   type WatcherPreset,
   type WatcherPrivateConnect,
   type WatcherStatus,
+  type WatcherUsage,
   type WatcherWakeOutcome,
   type WatcherWakeState,
   type WatcherWakeSummary,
@@ -274,9 +275,9 @@ export function watcherLinkView(record: WatcherLinkRecord): WatcherLinkView {
   return view;
 }
 
-/** A `watcher.link` command result: the shell view plus the user's instructions. */
-export function watcherLinkDetailView(record: WatcherLinkRecord): WatcherLinkView {
-  return strippedView(record);
+/** A `watcher.link` command result: the shell view plus the user's instructions and the watcher's usage. */
+export function watcherLinkDetailView(record: WatcherLinkRecord, usage: WatcherUsage): WatcherLinkView {
+  return { ...strippedView(record), usage };
 }
 
 function delivery(row: WatcherWakeRow): WatcherDelivery | null {

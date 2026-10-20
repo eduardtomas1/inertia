@@ -127,9 +127,9 @@ export class WatcherLinkCoordinator {
 
   /**
    * Broadcasts the link's shell view; detached links leave the shell. Returns
-   * the command-result view, which also carries the user's instructions.
+   * the stored link, or null when it no longer exists.
    */
-  publish(linkId: string): WatcherLinkView | null {
+  publish(linkId: string): WatcherLinkRecord | null {
     const link = this.#deps.store.watcherLinks.get(linkId);
     if (!link) {
       this.#deps.index.untrack(linkId);
@@ -139,13 +139,17 @@ export class WatcherLinkCoordinator {
     if (link.status === "detached") {
       this.#deps.index.untrack(linkId);
       this.#deps.broadcast({ type: "watcher.link.removed", linkId });
-      return watcherLinkDetailView(link);
+      return link;
     }
     const view = watcherLinkView(link);
     if (watcherLinkViewSchema.safeParse(view).success) {
       this.#deps.broadcast({ type: "watcher.link.updated", link: view });
     }
-    return watcherLinkDetailView(link);
+    return link;
+  }
+
+  #detail(link: WatcherLinkRecord): WatcherLinkView {
+    return watcherLinkDetailView(link, this.#deps.store.watcherLinks.usageTotals(link.id));
   }
 
   async attach(payload: WatcherAttachPayload): Promise<WatcherLinkView> {
@@ -153,7 +157,7 @@ export class WatcherLinkCoordinator {
     const existing = store.watcherLinks.get(payload.linkId);
     if (existing) {
       if (existing.watchedConversationId === payload.watchedConversationId && existing.status !== "detached") {
-        return watcherLinkDetailView(existing);
+        return this.#detail(existing);
       }
       throw new RuntimeRequestError("This watcher already exists.");
     }
@@ -216,7 +220,7 @@ export class WatcherLinkCoordinator {
       throw policyError(error);
     }
     const { link } = created;
-    if (!created.created) return watcherLinkDetailView(link);
+    if (!created.created) return this.#detail(link);
     const latest = store.latestAgentTurnForConversation(watched.id);
     const running = this.#deps.turns.isActive(watched.id);
     if (latest && running) store.watcherLinks.beginWatchedTurn(link.id, latest.id, this.#deps.now());
@@ -232,7 +236,7 @@ export class WatcherLinkCoordinator {
       this.#deps.scheduler.requestWake(link.id, "initial");
     }
     this.#deps.broadcastSnapshot();
-    return this.publish(link.id) ?? watcherLinkDetailView(link);
+    return this.#detail(this.publish(link.id) ?? link);
   }
 
   update(payload: WatcherUpdatePayload): WatcherLinkView {
@@ -244,24 +248,24 @@ export class WatcherLinkCoordinator {
       throw policyError(error);
     }
     if (!updated) throw new RuntimeRequestError("This watcher is no longer attached.");
-    return this.publish(linkId) ?? watcherLinkDetailView(updated);
+    return this.#detail(this.publish(linkId) ?? updated);
   }
 
   pause(linkId: string): WatcherLinkView {
     const link = this.#require(linkId);
-    if (link.status === "paused") return watcherLinkDetailView(link);
+    if (link.status === "paused") return this.#detail(link);
     const paused = this.#deps.store.watcherLinks.transition(
       linkId, ["watching", "waking", "idle"], { status: "paused", reason: "user" }, this.#deps.now(),
     );
     if (!paused) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
     this.#deps.scheduler.pause(linkId);
-    return this.publish(linkId) ?? watcherLinkDetailView(paused);
+    return this.#detail(this.publish(linkId) ?? paused);
   }
 
   async resume(linkId: string): Promise<WatcherLinkView> {
     const { store } = this.#deps;
     const link = this.#require(linkId);
-    if (link.status !== "paused") return watcherLinkDetailView(link);
+    if (link.status !== "paused") return this.#detail(link);
     if (link.pauseReason === "usage-limit" || link.pauseReason === "route-unavailable") {
       const watcher = store.conversation(link.watcherConversationId);
       const route = await this.#deps.route(watcher.modelSelection);
@@ -280,7 +284,7 @@ export class WatcherLinkCoordinator {
     const grant = resumed.budgets.wakesPerWatchedTurn - remaining;
     if (grant > 0) store.watcherLinks.grantWakes(linkId, grant, this.#deps.now());
     this.#deps.scheduler.resume(linkId);
-    return this.publish(linkId) ?? watcherLinkDetailView(resumed);
+    return this.#detail(this.publish(linkId) ?? resumed);
   }
 
   wake(linkId: string): WatcherLinkView {
@@ -288,14 +292,14 @@ export class WatcherLinkCoordinator {
     if (link.status === "paused") throw new RuntimeRequestError("Resume the watcher before asking it to check.");
     if (link.status === "waking") throw new RuntimeRequestError("The watcher is already checking.");
     this.#deps.scheduler.requestWake(linkId, "manual");
-    return watcherLinkDetailView(link);
+    return this.#detail(link);
   }
 
   detach(linkId: string): WatcherLinkView {
     const { store } = this.#deps;
     const link = store.watcherLinks.get(linkId);
     if (!link) throw new RuntimeRequestError("This watcher no longer exists.");
-    if (link.status === "detached") return watcherLinkDetailView(link);
+    if (link.status === "detached") return this.#detail(link);
     if (this.#deps.turns.isActive(link.watcherConversationId)) this.#deps.turns.cancel(link.watcherConversationId);
     const detached = store.watcherLinks.transition(linkId, ATTACHED, { status: "detached", reason: "user" }, this.#deps.now());
     if (!detached) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
@@ -303,7 +307,7 @@ export class WatcherLinkCoordinator {
     this.#deps.forgetLink(linkId);
     this.#deps.index.untrack(linkId);
     this.#deps.broadcastSnapshot();
-    return this.publish(linkId) ?? watcherLinkDetailView(detached);
+    return this.#detail(this.publish(linkId) ?? detached);
   }
 
   feed(linkId: string, beforeSequence?: number): WatcherFeedResult {

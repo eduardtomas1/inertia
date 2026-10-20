@@ -30,15 +30,22 @@ import {
   type WatcherPrivateConnect,
   type WatcherSharing,
   type WatcherStatus,
+  type WatcherUsage,
   type WatcherWakeOutcome,
   type WatcherWakeSummary,
   type WatcherWakeTrigger,
 } from "../../shared/watcher";
+import { measuredProcessedTokens } from "../usage-dashboard";
 import { requireTimestamp } from "./codecs";
 import type { ConversationContextTurnReads } from "./conversation-context-turn-reads";
 import type { ConversationRepository } from "./conversation-repository";
 import { cachedStatement } from "./statement-cache";
 import type { NewConversationOptions } from "./types";
+import {
+  USAGE_DASHBOARD_TURN_COLUMNS,
+  usageDashboardTurnFromRow,
+  type UsageDashboardTurnRow,
+} from "./usage-dashboard-repository";
 import { WatcherDigestSource } from "./watcher-digest-source";
 import {
   activeWatcherLinks,
@@ -673,6 +680,24 @@ export class WatcherLinkRepository {
       this.bumpFeedForWake(wakeId, at);
       return this.getWake(wakeId);
     })();
+  }
+
+  usageTotals(linkId: string): WatcherUsage {
+    const rows = cachedStatement(this.database, `
+      SELECT ${USAGE_DASHBOARD_TURN_COLUMNS}
+      FROM agent_turns
+      WHERE conversation_id = (SELECT watcher_conversation_id FROM watcher_links WHERE id = ?)
+        AND status IN ${TERMINAL_TURN_STATUSES_SQL}
+        AND association = 'authoritative'
+        AND origin IS NULL
+    `).all(linkId) as UsageDashboardTurnRow[];
+    let totalTokens: number | null = null;
+    for (const row of rows) {
+      const measured = measuredProcessedTokens(usageDashboardTurnFromRow(row));
+      if (measured === null) continue;
+      totalTokens = Math.min(Number.MAX_SAFE_INTEGER, (totalTokens ?? 0) + measured);
+    }
+    return { totalTokens };
   }
 
   wakeSummaries(conversationId: string, turnIds?: readonly string[]): WatcherWakeSummary[] {

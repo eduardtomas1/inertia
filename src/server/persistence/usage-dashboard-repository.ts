@@ -17,7 +17,7 @@ import type { AgentTurnRow } from "./rows";
 
 export type { UsageDashboardRange } from "../usage-dashboard";
 
-type UsageDashboardTurnRow = Pick<
+export type UsageDashboardTurnRow = Pick<
   AgentTurnRow,
   | "provider_id"
   | "model_selection_json"
@@ -39,7 +39,16 @@ type UsageDashboardTurnRow = Pick<
   | "association"
 >;
 
-function usageDashboardTurnFromRow(
+export const USAGE_DASHBOARD_TURN_COLUMNS = `
+  provider_id, model_selection_json, continuation_identity_json,
+  harness_id, backend_profile_id, model, model_alias, reasoning_effort,
+  provider_session_before, provider_session_after, started_at,
+  completed_at, suspended_duration_ms, status,
+  usage_start_json, usage_completion_json, configuration_revision,
+  association
+`;
+
+export function usageDashboardTurnFromRow(
   row: UsageDashboardTurnRow,
 ): UsageDashboardTurn {
   const modelSelection = parseModelSelection(
@@ -82,12 +91,7 @@ export class UsageDashboardRepository {
     const fromInclusive = new Date(range.fromInclusive).toISOString();
     const toExclusive = new Date(range.toExclusive).toISOString();
     const rows = this.database.prepare(`
-      SELECT provider_id, model_selection_json, continuation_identity_json,
-        harness_id, backend_profile_id, model, model_alias, reasoning_effort,
-        provider_session_before, provider_session_after, started_at,
-        completed_at, suspended_duration_ms, status,
-        usage_start_json, usage_completion_json, configuration_revision,
-        association
+      SELECT ${USAGE_DASHBOARD_TURN_COLUMNS}
       FROM agent_turns
       WHERE completed_at >= ?
         AND completed_at < ?

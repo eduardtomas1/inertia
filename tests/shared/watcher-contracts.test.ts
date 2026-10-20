@@ -164,6 +164,11 @@ describe("watcher shared contracts", () => {
       { ...link, delivery: undefined },
     ]) expect(watcherLinkViewSchema.safeParse(invalid).success).toBe(false);
     expect(watcherLinkViewSchema.safeParse({ ...link, delivery: "auto" }).success).toBe(true);
+    expect(watcherLinkViewSchema.safeParse({ ...link, usage: { totalTokens: 48_200 } }).success).toBe(true);
+    expect(watcherLinkViewSchema.safeParse({ ...link, usage: { totalTokens: null } }).success).toBe(true);
+    for (const usage of [{ totalTokens: -1 }, { totalTokens: 1.5 }, {}, { totalTokens: 1, cost: 2 }, null]) {
+      expect(watcherLinkViewSchema.safeParse({ ...link, usage }).success).toBe(false);
+    }
   });
 
   it("names the newest undismissed finding apart from the latest check", () => {

@@ -2,6 +2,10 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";
+import {
+  CLAUDE_COMPACTED_CONTEXT_TITLE,
+  CLAUDE_COMPACTING_CONTEXT_TITLE,
+} from "./context-compaction-activity";
 import { CappedProviderBuffer } from "./io";
 import { parseClaudeUsage, type ClaudeUsageLedger } from "./claude-usage";
 import {
@@ -590,7 +594,7 @@ export class ClaudeMessageProjector {
         this.options.emitter.activity(
           "system",
           "completed",
-          "Claude compacted context",
+          CLAUDE_COMPACTED_CONTEXT_TITLE,
           {
             activityId: boundedIdentifier(message.uuid),
             detail: detailLines([
@@ -1016,7 +1020,7 @@ export class ClaudeMessageProjector {
       "system",
       "started",
       message.status === "compacting"
-        ? "Claude is compacting context"
+        ? CLAUDE_COMPACTING_CONTEXT_TITLE
         : "Claude is requesting a response",
       { activityId: `claude:status:${message.status}` },
     );
@@ -1030,7 +1034,7 @@ export class ClaudeMessageProjector {
       "system",
       "completed",
       status === "compacting"
-        ? "Claude compacted context"
+        ? CLAUDE_COMPACTED_CONTEXT_TITLE
         : "Claude received a response",
       { activityId: `claude:status:${status}` },
     );

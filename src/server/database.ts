@@ -1,6 +1,7 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
 import { HtmlRenderRepository } from "./persistence/html-render-repository";
+import { InitiativeNoteProposalRepository } from "./persistence/initiative-note-proposal-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -102,6 +103,7 @@ import type {
   AgentTurnSettlementResult,
   AgentTurnSettlementUpdate,
   BeginAgentTurnInput,
+  BegunAgentTurn,
   CompleteTurnGitArtifactInput,
   CreateAgentTurnInput,
   CreateMessageOptions,
@@ -360,6 +362,9 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  get initiatives() { return this.snapshotRepository.initiatives; }
+  get initiativeNoteProposals() { return new InitiativeNoteProposalRepository(this.database, this); }
+  initiativePreferencesFor(conversation: { initiativeId?: string | null }) { return this.initiatives.preferencesFor(conversation.initiativeId); }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
@@ -472,7 +477,7 @@ export class RuntimeStore {
     return this.turnLedgerRepository.create(input);
   }
 
-  beginAgentTurn(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
+  beginAgentTurn(input: BeginAgentTurnInput): BegunAgentTurn {
     return this.turnLedgerRepository.begin(input);
   }
 
@@ -480,14 +485,11 @@ export class RuntimeStore {
     launchId: string,
     inputs: readonly [BeginAgentTurnInput, BeginAgentTurnInput],
     now = new Date().toISOString(),
-  ): [
-    { message: ChatMessage; turn: AgentTurn },
-    { message: ChatMessage; turn: AgentTurn },
-  ] {
+  ): [BegunAgentTurn, BegunAgentTurn] {
     return this.database.transaction(() => {
       const queued = inputs.map((input) => this.turnLedgerRepository.begin(input)) as [
-        { message: ChatMessage; turn: AgentTurn },
-        { message: ChatMessage; turn: AgentTurn },
+        BegunAgentTurn,
+        BegunAgentTurn,
       ];
       this.pairedLaunchRepository.attachTurns(
         launchId,

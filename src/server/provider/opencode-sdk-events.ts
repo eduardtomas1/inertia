@@ -7,6 +7,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 
 import { stableProviderActivityId } from "./activity-lifecycle";
+import { OPENCODE_COMPACTED_CONTEXT_TITLE } from "./context-compaction-activity";
 import { openCodeAttachmentReadAllowed } from "./attachment-read-grant";
 import type { AgentHarnessStartOptions } from "./agent-harness";
 import { createAgentHarnessEmitter } from "./agent-harness";
@@ -665,7 +666,7 @@ export function handleOpenCodeEvent(
     if (!ownership.markActivePromptWork()) return;
     usageState.currentContextTokens = null;
     emitOpenCodeUsageSnapshot(usageState, emitter.rich);
-    emitter.activity("system", "info", "OpenCode compacted the session context");
+    emitter.activity("system", "info", OPENCODE_COMPACTED_CONTEXT_TITLE);
   }
 }
 

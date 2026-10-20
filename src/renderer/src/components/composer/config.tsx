@@ -6,9 +6,16 @@ import {
   Wrench,
 } from "lucide-react";
 import type { AccessMode } from "@shared/contracts";
+import {
+  ACCESS_MODE_LABELS,
+  accessModeUnavailableReason,
+  exceedsAccessCeiling,
+  providerExceedsAccessLimit,
+  UNSUPERVISED_PROVIDER_LIMIT_REASON,
+} from "@shared/access-modes";
 import { LoadingMark } from "../ui";
-import type { ComposerRouteRepair } from "../../utils/composerReadiness";
-import type { ComposerMenu } from "./types";
+import type { ComposerRouteReadiness, ComposerRouteRepair } from "../../utils/composerReadiness";
+import type { ComposerAccessCeiling, ComposerMenu } from "./types";
 
 export const RESPONSE_SPEED_LABEL = "Response speed";
 
@@ -19,20 +26,55 @@ export const accessOptions: Array<{
 }> = [
   {
     value: "supervised",
-    label: "Supervised",
+    label: ACCESS_MODE_LABELS.supervised,
     description: "Use this provider's restricted mode and native approvals",
   },
   {
     value: "auto-edit",
-    label: "Auto-accept edits",
+    label: ACCESS_MODE_LABELS["auto-edit"],
     description: "Allow edits; other actions follow the provider's policy",
   },
   {
     value: "full",
-    label: "Full access",
+    label: ACCESS_MODE_LABELS.full,
     description: "Bypass provider approval and sandbox protections",
   },
 ];
+
+/**
+ * Why an access option cannot be chosen for this chat, or null. Options above
+ * the chat's initiative ceiling stay listed, disabled, with its reason.
+ */
+export function accessOptionUnavailableReason(
+  providerId: string,
+  mode: AccessMode,
+  ceiling: ComposerAccessCeiling | undefined,
+): string | null {
+  return accessModeUnavailableReason(providerId, mode)
+    ?? (ceiling && exceedsAccessCeiling(mode, ceiling.mode) ? ceiling.reason : null);
+}
+
+/**
+ * Why this chat's route cannot send within its initiative's access limit, in
+ * the composer's route notice, or null. The runtime refuses such a turn with
+ * the same reason: Antigravity runs Supervised as Auto-accept edits, so it
+ * cannot run under a Supervised limit.
+ */
+export function accessLimitRouteReadiness(
+  providerId: string,
+  accessMode: AccessMode,
+  ceiling: ComposerAccessCeiling | undefined,
+): ComposerRouteReadiness | null {
+  if (!ceiling || !providerExceedsAccessLimit(providerId, accessMode, ceiling.mode)) return null;
+  return {
+    ready: false,
+    transient: false,
+    badge: "Access limit",
+    title: `${ceiling.reason} ${UNSUPERVISED_PROVIDER_LIMIT_REASON}`,
+    detail: "Choose another model to send messages in this chat.",
+    action: null,
+  };
+}
 
 export function menuId(menu: ComposerMenu): string {
   return `composer-${menu}-menu`;

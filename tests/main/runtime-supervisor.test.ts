@@ -1407,6 +1407,32 @@ describe("RuntimeSupervisor", () => {
     await expect(interrupted).rejects.toThrow("stopped before the project path was resolved");
   });
 
+  it("resolves an initiative skills folder through the runtime and relays its refusal", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const initiativeId = crypto.randomUUID();
+
+    const resolved = supervisor.resolveProjectPath({ initiativeId });
+    const command = children[0].messages.at(-1);
+    expect(command).toMatchObject({ type: "runtime.resolve-project-path", request: { initiativeId } });
+    if (command?.type !== "runtime.resolve-project-path") throw new Error("Missing skills folder command");
+    const folder = resolve(workspaceDirectory, "initiatives", initiativeId, "skills", ".claude", "skills");
+    children[0].message({ type: "runtime.project-path-resolved", requestId: command.requestId, path: folder });
+    await expect(resolved).resolves.toBe(folder);
+
+    const refused = supervisor.resolveProjectPath({ initiativeId });
+    const second = children[0].messages.at(-1);
+    if (second?.type !== "runtime.resolve-project-path") throw new Error("Missing skills folder command");
+    children[0].message({
+      type: "runtime.project-path-rejected",
+      requestId: second.requestId,
+      message: "Turn on the skills folder for this initiative first.",
+    });
+    await expect(refused).rejects.toThrow("Turn on the skills folder for this initiative first.");
+  });
+
   it("correlates, times out, and rejects Private Connect requests across runtime generations", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();

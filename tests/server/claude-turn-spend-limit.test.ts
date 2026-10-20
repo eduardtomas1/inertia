@@ -1,10 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { ProviderInfo } from "../../src/shared/contracts";
+import type { ProviderInfo, ProviderSkillInput } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
@@ -96,15 +97,19 @@ async function projectWithLimit(limit: number | null) {
   return { store, project };
 }
 
+// Each resolved turn is begun, so identities stay unique across calls.
+let sequence = 0;
+
 function resolveFor(
   store: RuntimeStore,
   conversationId: string,
   routing: {
     resolveModelRoute?: TurnProviderRuntime["resolveModelRoute"];
     validateModelSelection?: () => ReturnType<typeof modelSelectionSchema.parse>;
+    initiativeSkillsRoot?: () => string | null;
+    skills?: ProviderSkillInput[];
   } = {},
 ): ProviderRunInput {
-  let sequence = 0;
   const providers = {
     resolveModelRoute: routing.resolveModelRoute ?? resolveNativeModelRoute,
     harnessIdFor: (input: ProviderRunInput) => input.harnessId,
@@ -119,6 +124,7 @@ function resolveFor(
       ...(routing.validateModelSelection
         ? { validateModelSelection: routing.validateModelSelection }
         : {}),
+      ...(routing.initiativeSkillsRoot ? { initiativeSkillsRoot: routing.initiativeSkillsRoot } : {}),
     },
     id: () => `spend-limit-${conversationId}-${++sequence}`,
     now: () => "2030-01-01T00:00:00.000Z",
@@ -126,6 +132,7 @@ function resolveFor(
   }, {
     conversationId,
     content: "Do the work.",
+    ...(routing.skills ? { skills: routing.skills } : {}),
   });
   return resolved.adopt(store.beginAgentTurn(resolved.input)).active.providerInput;
 }
@@ -219,5 +226,53 @@ describe("Claude per-turn spend limit", () => {
     });
     expect(input.backendProfile.id).toBe("custom:proxy");
     expect(input).not.toHaveProperty("maxBudgetUsd");
+  });
+
+  it("applies the lower of the initiative's and the project's limits, whatever the initiative's status", async () => {
+    const { store, project } = await projectWithLimit(5);
+    const claude = store.createConversation(project.id, "Claude", {
+      modelSelection: providerNativeModelSelection({ providerId: "claude" }),
+    });
+    const initiative = store.initiatives.create({ id: randomUUID(), name: "Budgeted" }, claude.id);
+    let revision = store.initiatives.update(initiative.id, initiative.revision, {
+      preferences: { claudeMaxBudgetUsd: 2 },
+    }).revision;
+    expect(resolveFor(store, claude.id)).toMatchObject({ maxBudgetUsd: 2 });
+
+    revision = store.initiatives.update(initiative.id, revision, { preferences: { claudeMaxBudgetUsd: 8 } }).revision;
+    expect(resolveFor(store, claude.id)).toMatchObject({ maxBudgetUsd: 5 });
+
+    // A restriction outlives the initiative's activity.
+    revision = store.initiatives.update(initiative.id, revision, {
+      status: "archived",
+      preferences: { claudeMaxBudgetUsd: 1.5 },
+    }).revision;
+    expect(resolveFor(store, claude.id)).toMatchObject({ maxBudgetUsd: 1.5 });
+
+    store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), claudeMaxBudgetUsd: null } });
+    expect(resolveFor(store, claude.id)).toMatchObject({ maxBudgetUsd: 1.5 });
+    store.initiatives.update(initiative.id, revision, { preferences: { claudeMaxBudgetUsd: null } });
+    expect(resolveFor(store, claude.id)).not.toHaveProperty("maxBudgetUsd");
+  });
+
+  it("hands the initiative skills root to the provider only with selected Claude skills", async () => {
+    const { store, project } = await projectWithLimit(null);
+    const claude = store.createConversation(project.id, "Claude", {
+      modelSelection: providerNativeModelSelection({ providerId: "claude" }),
+    });
+    const root = "/data/initiatives/11111111-1111-4111-8111-111111111111/skills";
+    const skills: ProviderSkillInput[] = [{ source: "claude-native", name: "review", path: `${root}/.claude/skills/review/SKILL.md` }];
+    const withSkills = resolveFor(store, claude.id, { initiativeSkillsRoot: () => root, skills });
+    expect(withSkills).toMatchObject({ initiativeSkillsRoot: root, skills });
+    expect(validateProviderRunInput(withSkills)).toBe(claude.id);
+    expect(resolveFor(store, claude.id, { initiativeSkillsRoot: () => root })).not.toHaveProperty("initiativeSkillsRoot");
+    expect(resolveFor(store, claude.id, { initiativeSkillsRoot: () => null, skills })).not.toHaveProperty("initiativeSkillsRoot");
+
+    for (const initiativeSkillsRoot of ["relative/skills", `${root}\0`, "/".repeat(4097)]) {
+      expect(() => validateProviderRunInput({ ...withSkills, initiativeSkillsRoot }))
+        .toThrow("The initiative skills folder is invalid.");
+    }
+    expect(() => validateProviderRunInput(runInput("codex", { initiativeSkillsRoot: root })))
+      .toThrow("The initiative skills folder is invalid.");
   });
 });

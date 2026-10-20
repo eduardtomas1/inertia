@@ -222,7 +222,7 @@ function conversation(value: unknown): value is UnknownRecord {
     && nullableStringField(value, "settledAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "lastViewedAt")
-    && ["markedUnreadAt", "pinnedAt", "snoozedUntil"].every((key) => value[key] === undefined || nullableStringField(value, key))
+    && ["markedUnreadAt", "pinnedAt", "snoozedUntil", "initiativeId"].every((key) => value[key] === undefined || nullableStringField(value, key))
     && optionalBooleanField(value, "hasHistory");
 }
 
@@ -488,7 +488,10 @@ function inputRequest(value: unknown): boolean {
     || !uniqueRecordField(value.questions as unknown[], "id")) return false;
   const context = value.conversationContextRequest;
   return context === undefined || (recordWithStrings(context, "requestId", "targetConversationId", "targetTurnId", "createdAt", "expiresAt")
-    && nullableStringField(context, "requestedSourceConversationId") && context.requestId === value.id && context.targetConversationId === value.conversationId
+    && nullableStringField(context, "requestedSourceConversationId")
+    && (context.initiativeName === undefined
+      || (isInitiativeName(context.initiativeName) && context.requestedSourceConversationId !== null))
+    && context.requestId === value.id && context.targetConversationId === value.conversationId
     && context.targetTurnId === value.turnId && context.requestedSourceConversationId !== context.targetConversationId
     && Number.isFinite(Date.parse(context.createdAt as string)) && Date.parse(context.expiresAt as string) > Date.parse(context.createdAt as string) && (value.questions as unknown[]).length === 0);
 }
@@ -533,7 +536,7 @@ function agentSkill(value: unknown): boolean {
   )
     && nullableStringField(value, "shortDescription")
     && booleanField(value, "enabled")
-    && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider"])
+    && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider", "initiative"])
     && oneOf(value, "source", ["codex-native", "claude-native"]);
 }
 
@@ -1090,6 +1093,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   }
 }
 import { issueReportResult } from "../issue-report";
+import { isInitiativeName, isInitiativeNotesResult } from "../initiatives";
 import { messageQueueResultSchema } from "../queued-messages";
 import { updatesRunResultSchema } from "../updates";
 
@@ -1115,6 +1119,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
   "todo.started": (value) => stringField(value, "conversationId"),
+  "initiative.notes": isInitiativeNotesResult,
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) =>
     conversationContextPacket(value.packet),

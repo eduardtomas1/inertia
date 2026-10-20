@@ -4,6 +4,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useEffectEvent, useLayout
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
+import { clampAccessMode } from "@shared/access-modes";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, providerIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
@@ -22,7 +23,7 @@ import {
   supportsActiveParentFollowUp,
   composerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
-import { composerHarnessLabel } from "./config";
+import { accessLimitRouteReadiness, composerHarnessLabel } from "./config";
 import {
   addPromptStashEntry,
   advanceRecurringPrompt,
@@ -79,6 +80,10 @@ export const Composer = memo(function Composer({
   showCheckoutContext = true,
   scratchWorkspace = false,
   newChatProjectPicker,
+  newChatInitiativePicker,
+  initiativeChip,
+  accessCeiling,
+  modelSourceLabel,
   providers,
   actions,
   disabled,
@@ -631,7 +636,13 @@ export const Composer = memo(function Composer({
     ?? selectedModel?.defaultReasoningEffort
     ?? "";
   const selectedFastMode = fastModeProviderValue(conversation.modelSelection) !== null;
-  const routeReadiness = routeState.readiness;
+  const accessLimitReadiness = useMemo(
+    () => accessLimitRouteReadiness(conversation.providerId, conversation.accessMode, accessCeiling),
+    [accessCeiling, conversation.accessMode, conversation.providerId],
+  );
+  const routeReadiness = routeState.readiness.ready
+    ? accessLimitReadiness ?? routeState.readiness
+    : routeState.readiness;
   const selectedIdentityLabel = selectedBackendProfile
     ? `${composerHarnessLabel(selectedBackendProfile.harnessId)} · ${selectedBackendProfile.displayName} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
     : selectedProvider
@@ -825,7 +836,8 @@ export const Composer = memo(function Composer({
       ...(providerId ? { providerId } : {}),
       modelSelection: route.selection,
       ...(route.configuration && {
-        accessMode: route.configuration.accessMode,
+        // A favorite never asks for more access than the chat's initiative allows.
+        accessMode: clampAccessMode(route.configuration.accessMode, accessCeiling?.mode),
         interactionMode: route.configuration.interactionMode,
       }),
     });
@@ -1118,6 +1130,10 @@ export const Composer = memo(function Composer({
           showCheckoutContext={showCheckoutContext}
           scratchWorkspace={scratchWorkspace}
           newChatProjectPicker={newChatProjectPicker}
+          newChatInitiativePicker={newChatInitiativePicker}
+          initiativeChip={initiativeChip}
+          accessCeiling={accessCeiling}
+          modelSourceLabel={modelSourceLabel}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}

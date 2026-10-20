@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"; import type { UtilityProcess } from "e
 import { RuntimeIncidentObserver, isRuntimeIncidentMessage } from "./runtime-incident-observer.js";
 import type { PrivateConnectRuntimeAuthorization, PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
-import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
+import type { RuntimeConnection, RuntimePathRequest } from "../shared/desktop.js";
 import {
   parseRuntimeWorkerEvent, validSystemBootId,
   type RuntimeDatabaseRecoveryOperation, type RuntimeDatabaseRecoverySummary,
@@ -328,7 +328,7 @@ export class RuntimeSupervisor {
     const record = this.phase === "ready" ? this.current : null;
     return Boolean(record?.ready && this.post(record.child, { type: "runtime.record-system-suspend", interval }));
   }
-  resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
+  resolveProjectPath(request: RuntimePathRequest): Promise<string> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
       return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));

@@ -26,6 +26,8 @@ import {
   readPersistedDraftConversation,
   readPersistedMaterializedDraftConversation,
 } from "../../src/renderer/src/utils/draftConversationPersistence";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
+import { initiativeDefaultProject, initiativeModelSourceLabel } from "../../src/renderer/src/utils/initiativeSettings";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
@@ -562,6 +564,116 @@ describe("useDraftConversation", () => {
       act(() => hook.result.current.changeProject(otherId));
       expect(hook.result.current.conversation).toMatchObject({ projectId: otherId, accessMode: "supervised" });
     });
+  });
+
+  it("carries the chosen initiative through project changes and drops one that stopped taking chats", async () => {
+    const initiativeId = "33333333-3333-4333-8333-333333333333";
+    const secondProject = { ...project, id: "44444444-4444-4444-8444-444444444444", name: "Second" };
+    const initiative = {
+      id: initiativeId, name: "Checkout", color: "teal" as const, status: "active" as const, brief: "",
+      preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 1, createdAt: now, updatedAt: now,
+    };
+    let currentSnapshot: AppSnapshot = { ...snapshot, projects: [project, secondProject], initiatives: [initiative] };
+    const commands: CommandWithoutId[] = [];
+    const run = vi.fn(async (_key: string, command: CommandWithoutId): Promise<ServerEvent> => {
+      commands.push(command);
+      return { type: "request.result", requestId: "create", result: { kind: "conversation.created", conversationId } };
+    });
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot, settings: defaultSettings, run,
+      sendMessage: vi.fn(async () => null), persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    expect(hook.result.current.conversation?.initiativeId).toBeNull();
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    expect(hook.result.current.conversation?.initiativeId).toBe(initiativeId);
+    act(() => hook.result.current.changeProject(secondProject.id));
+    expect(hook.result.current.conversation).toMatchObject({ projectId: secondProject.id, initiativeId });
+
+    await act(async () => { await hook.result.current.sendFromComposer("Join the initiative.", []); });
+    expect(commands[0]).toMatchObject({
+      type: "conversation.create",
+      payload: { projectId: secondProject.id, initiativeId },
+    });
+
+    act(() => hook.result.current.discard());
+    currentSnapshot = { ...currentSnapshot, initiatives: [{ ...initiative, status: "archived" }] };
+    hook.rerender();
+    act(() => hook.result.current.start(projectId, true));
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    await act(async () => { await hook.result.current.sendFromComposer("Archived meanwhile.", []); });
+    expect(commands[1]).toMatchObject({ type: "conversation.create" });
+    expect(commands[1]?.type === "conversation.create" && "initiativeId" in commands[1].payload).toBe(false);
+
+    act(() => hook.result.current.discard());
+    act(() => hook.result.current.start(projectId, true));
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    act(() => hook.result.current.changeInitiative(null));
+    expect(hook.result.current.conversation?.initiativeId).toBeNull();
+  });
+
+  it("applies the initiative's model and access defaults to a draft and keeps it under the access limit", async () => {
+    const initiativeId = "55555555-5555-4555-8555-555555555555";
+    const secondProject = { ...project, id: "66666666-6666-4666-8666-666666666666", name: "Second" };
+    const initiativeModel = providerNativeModelSelection({ providerId: "claude", modelId: "opus", alias: "opus" });
+    const chosenModel = providerNativeModelSelection({ providerId: "codex", modelId: "chosen-model" });
+    const initiative = {
+      id: initiativeId, name: "Checkout", color: "teal" as const, status: "active" as const, brief: "",
+      preferences: {
+        ...defaultInitiativePreferences(),
+        defaultModel: initiativeModel,
+        defaultReasoningEffort: "high",
+        defaultAccessMode: "full" as const,
+        accessCeiling: "auto-edit" as const,
+        defaultProjectId: secondProject.id,
+      },
+      briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0, revision: 1, createdAt: now, updatedAt: now,
+    };
+    const currentSnapshot: AppSnapshot = { ...snapshot, projects: [project, secondProject], initiatives: [initiative] };
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot, settings: defaultSettings, run: vi.fn(),
+      sendMessage: vi.fn(async () => null), persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    const settingsModel = hook.result.current.conversation?.modelSelection;
+    expect(hook.result.current.conversation?.accessMode).toBe("supervised");
+
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    // The default access is lowered to the limit; the model and reasoning come from the initiative.
+    expect(hook.result.current.conversation).toMatchObject({
+      initiativeId,
+      projectId,
+      accessMode: "auto-edit",
+      modelSelection: { ...initiativeModel, reasoningEffort: "high" },
+    });
+    expect(initiativeModelSourceLabel(currentSnapshot, defaultSettings, hook.result.current.conversation!, initiative))
+      .toBe("From initiative “Checkout”");
+    // A project change keeps the initiative's defaults first.
+    act(() => hook.result.current.changeProject(secondProject.id));
+    expect(hook.result.current.conversation).toMatchObject({
+      projectId: secondProject.id, initiativeId, accessMode: "auto-edit", modelSelection: { modelId: "opus" },
+    });
+
+    // Asking for more than the limit gets the limit.
+    await act(async () => { await hook.result.current.updateConversation({ accessMode: "full" }); });
+    expect(hook.result.current.conversation?.accessMode).toBe("auto-edit");
+    act(() => { hook.result.current.chooseModel(chosenModel, { accessMode: "full", interactionMode: "build" }); });
+    expect(hook.result.current.conversation).toMatchObject({ accessMode: "auto-edit", modelSelection: chosenModel });
+    expect(initiativeModelSourceLabel(currentSnapshot, defaultSettings, hook.result.current.conversation!, initiative))
+      .toBeUndefined();
+
+    // Leaving the initiative returns inherited values, but keeps what the user chose.
+    act(() => hook.result.current.changeInitiative(null));
+    expect(hook.result.current.conversation).toMatchObject({ initiativeId: null, accessMode: "auto-edit", modelSelection: chosenModel });
+    act(() => hook.result.current.discard());
+    act(() => hook.result.current.start(projectId, true));
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    act(() => hook.result.current.changeInitiative(null));
+    expect(hook.result.current.conversation).toMatchObject({ initiativeId: null, accessMode: "supervised", modelSelection: settingsModel });
+
+    expect(initiativeDefaultProject(currentSnapshot, initiativeId)).toEqual(secondProject);
+    expect(initiativeDefaultProject(currentSnapshot, null)).toBeNull();
+    expect(initiativeDefaultProject({ ...currentSnapshot, projects: [project] }, initiativeId)).toBeNull();
   });
 
   it("keeps a new-project chat local until its first message is sent", async () => {

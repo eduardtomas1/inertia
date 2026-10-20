@@ -85,6 +85,9 @@ import type { QueueCommandRunner } from "./composer/runtimeQueueClient";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type { WorkspacePanelTab } from "./workspacePanelTypes";
 import type {
+  ComposerAccessCeiling,
+  ComposerInitiativeChip,
+  NewChatInitiativePicker,
   NewChatProjectPicker,
   PromptPresetCommandRunner,
 } from "./composer/types";
@@ -155,6 +158,10 @@ type ChatWorkspaceProps = {
   project: Project | null;
   conversation: Conversation | null;
   newChatProjectPicker?: NewChatProjectPicker;
+  newChatInitiativePicker?: NewChatInitiativePicker;
+  initiativeChip?: ComposerInitiativeChip;
+  accessCeiling?: ComposerAccessCeiling;
+  modelSourceLabel?: string;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
   latestTurnSummary: ConversationLatestTurnSummary | null;
@@ -265,6 +272,10 @@ export function ChatWorkspace({
   project,
   conversation,
   newChatProjectPicker,
+  newChatInitiativePicker,
+  initiativeChip,
+  accessCeiling,
+  modelSourceLabel,
   checkoutBranch = null,
   showCheckoutContext = true,
   latestTurnSummary,
@@ -1086,6 +1097,10 @@ export function ChatWorkspace({
           showCheckoutContext={showCheckoutContext}
           scratchWorkspace={project.workspaceKind === "scratch"}
           newChatProjectPicker={newChatProjectPicker}
+          newChatInitiativePicker={newChatInitiativePicker}
+          initiativeChip={initiativeChip}
+          accessCeiling={accessCeiling}
+          modelSourceLabel={modelSourceLabel}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}

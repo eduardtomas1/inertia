@@ -16,6 +16,7 @@ import {
   discoverClaudeFilesystemSkills,
   stageClaudeSkillPlugin,
   type ClaudeFilesystemSkill,
+  type ClaudeSkillRootOptions,
 } from "./claude-skill-plugin";
 import {
   checkClaudeSkillOperation,
@@ -39,12 +40,14 @@ async function queryClaudeSkills(
   filesystem: ClaudeSkillFilesystemTestSeam,
   signal: AbortSignal,
   registerCleanup: (cleanup: Promise<void>) => void,
+  roots: ClaudeSkillRootOptions,
 ): Promise<ClaudeFilesystemSkill[]> {
   const control = { ...filesystem, signal };
   const discovered = await discoverClaudeFilesystemSkills(
     cwd,
     environment,
     control,
+    roots,
   );
   const nameCounts = new Map<string, number>();
   for (const { name } of discovered) {
@@ -61,7 +64,7 @@ async function queryClaudeSkills(
     })),
     cwd,
     environment,
-    { ...control, metadataOnly: true },
+    { ...control, ...roots, metadataOnly: true },
   );
   if (!staged) return [];
   checkClaudeSkillOperation(control);
@@ -135,15 +138,27 @@ async function queryClaudeSkills(
     names.has(`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:${name}`));
 }
 
+/** How one Claude skill discovery runs; every field has a production default. */
+export interface ClaudeSkillDiscoveryOptions extends ClaudeSkillRootOptions {
+  forceReload?: boolean;
+  timeoutMs?: number;
+  createQuery?: ClaudeQueryFactory;
+  lifecycleDependencies?: ClaudeOwnedQueryDependencies;
+  filesystem?: ClaudeSkillFilesystemTestSeam;
+}
+
 export async function readClaudeAgentSdkSkills(
   executable: string,
   environment: NodeJS.ProcessEnv,
   cwd: string,
-  forceReload = false,
-  timeoutMs = 6_000,
-  createQuery: ClaudeQueryFactory = claudeQuery,
-  lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
-  filesystem: ClaudeSkillFilesystemTestSeam = {},
+  {
+    forceReload = false,
+    timeoutMs = 6_000,
+    createQuery = claudeQuery,
+    lifecycleDependencies = {},
+    filesystem = {},
+    initiativeSkillsRoot = null,
+  }: ClaudeSkillDiscoveryOptions = {},
 ): Promise<ClaudeFilesystemSkill[]> {
   const deadline = createClaudeSkillDeadline(
     timeoutMs,
@@ -160,6 +175,7 @@ export async function readClaudeAgentSdkSkills(
     filesystem,
     deadline.signal,
     (value) => { cleanup = value; },
+    { initiativeSkillsRoot },
   );
   try {
     return await raceClaudeSkillOperation(operation, deadline.signal);

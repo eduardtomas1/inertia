@@ -121,7 +121,7 @@ function props(conversation: Conversation, mutateRemote: LayoutProps["actions"][
     projectActions: [],
     reviewStates: [],
     multiSpawn: { open: false } as LayoutProps["multiSpawn"],
-    scene: { tools: null } as unknown as LayoutProps["scene"],
+    scene: { tools: null, chat: { conversation: null } } as unknown as LayoutProps["scene"],
     usage: {} as LayoutProps["usage"],
     providerAuth: { provider: null } as unknown as LayoutProps["providerAuth"],
     actions: { mutateRemote, run: vi.fn() } as unknown as LayoutProps["actions"],

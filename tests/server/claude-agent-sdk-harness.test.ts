@@ -759,9 +759,7 @@ describe("Claude Agent SDK harness", () => {
       "/fake/claude",
       {},
       root,
-      false,
-      1_000,
-      createQuery,
+      { timeoutMs: 1_000, createQuery },
     )).resolves.toEqual([expect.objectContaining({
       name: "review",
       path: skillPath,
@@ -771,9 +769,7 @@ describe("Claude Agent SDK harness", () => {
       "/fake/claude",
       {},
       root,
-      true,
-      1_000,
-      createQuery,
+      { forceReload: true, timeoutMs: 1_000, createQuery },
     )).resolves.toEqual([expect.objectContaining({ name: "review" })]);
     expect(reloads).toBe(1);
     expect(promptWasRead).toBe(false);
@@ -822,29 +818,30 @@ describe("Claude Agent SDK harness", () => {
         "/fake/claude",
         {},
         root,
-        false,
-        25,
-        ({ options }) => {
-          markQueryStarted();
-          stagedPath = options?.plugins?.[0]?.path ?? "";
-          options?.spawnClaudeCodeProcess?.({
-            command: "/fake/claude",
-            args: [],
-            cwd: root,
-            env: {},
-            signal: new AbortController().signal,
-          });
-          return fixtureClaudeQuery(
-            (async function* (): AsyncGenerator<SDKMessage> {
-              yield* [];
-            })(),
-            {
-              supportedCommands: async () => await never,
-              close: () => { closeCalls += 1; },
-            },
-          );
+        {
+          timeoutMs: 25,
+          createQuery: ({ options }) => {
+            markQueryStarted();
+            stagedPath = options?.plugins?.[0]?.path ?? "";
+            options?.spawnClaudeCodeProcess?.({
+              command: "/fake/claude",
+              args: [],
+              cwd: root,
+              env: {},
+              signal: new AbortController().signal,
+            });
+            return fixtureClaudeQuery(
+              (async function* (): AsyncGenerator<SDKMessage> {
+                yield* [];
+              })(),
+              {
+                supportedCommands: async () => await never,
+                close: () => { closeCalls += 1; },
+              },
+            );
+          },
+          lifecycleDependencies: { spawnProcess, terminateProcessTree },
         },
-        { spawnProcess, terminateProcessTree },
       );
       const rejected = expect(discovery).rejects.toThrow(
         "Claude skill discovery timed out",
@@ -892,16 +889,16 @@ describe("Claude Agent SDK harness", () => {
         "/fake/claude",
         {},
         root,
-        false,
-        25,
-        createQuery,
-        {},
         {
-          beforeOperation: async () => {
-            if (intercepted) return;
-            intercepted = true;
-            markFilesystemStarted();
-            await filesystemGate;
+          timeoutMs: 25,
+          createQuery,
+          filesystem: {
+            beforeOperation: async () => {
+              if (intercepted) return;
+              intercepted = true;
+              markFilesystemStarted();
+              await filesystemGate;
+            },
           },
         },
       );
@@ -936,19 +933,20 @@ describe("Claude Agent SDK harness", () => {
         "/fake/claude",
         {},
         root,
-        false,
-        25,
-        ({ options }) => {
-          lateSpawner = options?.spawnClaudeCodeProcess;
-          markQueryStarted();
-          return fixtureClaudeQuery(
-            (async function* (): AsyncGenerator<SDKMessage> {
-              yield* [];
-            })(),
-            { supportedCommands: () => new Promise(() => undefined) },
-          );
+        {
+          timeoutMs: 25,
+          createQuery: ({ options }) => {
+            lateSpawner = options?.spawnClaudeCodeProcess;
+            markQueryStarted();
+            return fixtureClaudeQuery(
+              (async function* (): AsyncGenerator<SDKMessage> {
+                yield* [];
+              })(),
+              { supportedCommands: () => new Promise(() => undefined) },
+            );
+          },
+          lifecycleDependencies: { spawnProcess },
         },
-        { spawnProcess },
       );
       const rejected = expect(discovery).rejects.toThrow(
         "Claude skill discovery timed out",
@@ -987,25 +985,26 @@ describe("Claude Agent SDK harness", () => {
         "/fake/claude",
         {},
         root,
-        false,
-        25,
-        ({ options }) => {
-          options?.spawnClaudeCodeProcess?.({
-            command: "/fake/claude",
-            args: [],
-            cwd: root,
-            env: {},
-            signal: new AbortController().signal,
-          });
-          markQueryStarted();
-          return fixtureClaudeQuery(
-            (async function* (): AsyncGenerator<SDKMessage> {
-              yield* [];
-            })(),
-            { supportedCommands: () => new Promise(() => undefined) },
-          );
+        {
+          timeoutMs: 25,
+          createQuery: ({ options }) => {
+            options?.spawnClaudeCodeProcess?.({
+              command: "/fake/claude",
+              args: [],
+              cwd: root,
+              env: {},
+              signal: new AbortController().signal,
+            });
+            markQueryStarted();
+            return fixtureClaudeQuery(
+              (async function* (): AsyncGenerator<SDKMessage> {
+                yield* [];
+              })(),
+              { supportedCommands: () => new Promise(() => undefined) },
+            );
+          },
+          lifecycleDependencies: { spawnProcess, terminateProcessTree: async () => false },
         },
-        { spawnProcess, terminateProcessTree: async () => false },
       );
       const rejected = expect(discovery).rejects.toThrow(
         "Claude skill discovery process tree could not be confirmed stopped",

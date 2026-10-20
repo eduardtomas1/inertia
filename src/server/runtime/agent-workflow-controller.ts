@@ -15,6 +15,7 @@ import { withCodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
 import { boundedDisplayString, exactBoundedString, parseCodexGoal } from "./codex-goal-parsing";
 import { ConversationProviderContact } from "./conversation-provider-contact";
+import { initiativeOfferingSkillsFolder } from "./initiative-skills-folder";
 import type { RuntimeStore } from "../database";
 import { normalizeIdentityPath } from "../project-identity";
 import type { ProviderManager } from "../providers";
@@ -157,6 +158,10 @@ export class AgentWorkflowController {
     private readonly store: RuntimeStore,
     providers: ProviderManager,
     private readonly clock: () => Date = () => new Date(),
+    private readonly options: {
+      /** The contained skills folder of a chat's initiative, when it offers one. */
+      initiativeSkillsRoot?: (conversation: Conversation) => string | null;
+    } = {},
   ) {
     this.contact = new ConversationProviderContact(store, providers);
   }
@@ -789,7 +794,11 @@ export class AgentWorkflowController {
     routeKey: string,
   ): Promise<AgentSkillSummary[]> {
     if (isNativeClaudeConversation(conversation)) {
-      const rawSkills = await this.contact.claudeSkills(conversationId, forceReload);
+      const rawSkills = await this.contact.claudeSkills(
+        conversationId,
+        forceReload,
+        this.initiativeSkillsRoot(conversation),
+      );
       this.requireCurrentSkillRoute(conversationId, routeKey);
       return this.replaceSkills(
         conversationId,
@@ -827,6 +836,11 @@ export class AgentWorkflowController {
         routeKey,
       );
     }
+    // Codex skill roots outside the chat folder are not offered until the
+    // app-server contract for extra skill roots is verified: whether a skill
+    // listed through a second `skills/list` cwd is honoured when a turn invokes
+    // it has not been checked against Codex. Until then only the chat folder's
+    // skills are listed here, and the initiative folder stays Claude-only.
     const context = await this.contact.codexControl(conversationId);
     const response = await withCodexControlClient(
       context,
@@ -912,13 +926,34 @@ export class AgentWorkflowController {
     );
   }
 
+  /**
+   * The contained skills folder of a native Claude chat's initiative, checked
+   * on disk. Only discovery calls it; route keys never touch the disk.
+   */
+  private initiativeSkillsRoot(conversation: Conversation): string | null {
+    return isNativeClaudeConversation(conversation)
+      ? this.options.initiativeSkillsRoot?.(conversation) ?? null
+      : null;
+  }
+
+  /**
+   * Skills discovered for one route stay valid while the route, its folder
+   * and the initiative whose skills folder it may read are unchanged; moving
+   * the chat to another initiative, or turning the folder off, invalidates
+   * them. The key reads only the database, so `state()` never walks the disk;
+   * discovery and turn staging check the folder itself.
+   */
   private skillRouteKey(conversation: Conversation, cwd: string): string {
+    const initiativeId = isNativeClaudeConversation(conversation)
+      ? initiativeOfferingSkillsFolder(this.store, conversation)
+      : null;
     return [
       conversation.providerId,
       conversation.modelSelection.harnessId,
       conversation.modelSelection.backendProfileId,
       conversation.modelSelection.backendConfigurationRevision,
       normalizeIdentityPath(cwd),
+      initiativeId ?? "",
     ].join("\0");
   }
 

@@ -72,14 +72,15 @@ describe("HarnessCapabilityRegistry", () => {
       "inertia.zeta",
     ]);
     expect(JSON.stringify(registry.manifest())).not.toContain("Private provider guidance");
-    expect(registry.instructions().map(({ label }) => label)).toEqual([
+    expect(registry.allInstructions().map(({ label }) => label)).toEqual([
       "inertia.alpha-instruction",
       "inertia.zeta-instruction",
     ]);
+    expect(registry.instructionsFor(context)).toEqual(registry.allInstructions());
 
     second.instructions[0]!.text = "Mutated after registration.";
     second.tools[0]!.definition.name = "inertia_mutated_tool";
-    expect(registry.instructions()[0]!.text).toBe(
+    expect(registry.allInstructions()[0]!.text).toBe(
       "Private provider guidance for inertia.alpha.",
     );
 
@@ -195,6 +196,48 @@ describe("HarnessCapabilityRegistry", () => {
       pack("inertia.first", "inertia_first_tool", "shared-label"),
       pack("inertia.second", "inertia_second_tool", "shared-label"),
     ])).toThrow("duplicate capability instruction");
+  });
+
+  it("offers a conditional pack only to the chats it is available for, keeping its tools callable", async () => {
+    const always = pack("inertia.always", "inertia_always_tool");
+    const conditional = {
+      ...pack("inertia.conditional", "inertia_conditional_tool"),
+      availableFor: vi.fn(({ conversation }: { conversation: Conversation }) => conversation.id === "member"),
+    };
+    const registry = new HarnessCapabilityRegistry([always, conditional]);
+    const member = { conversation: { id: "member" } as Conversation, turn: context.turn };
+    const outsider = { conversation: { id: "outsider" } as Conversation, turn: context.turn };
+
+    expect(registry.allInstructions().map(({ label }) => label)).toEqual([
+      "inertia.always-instruction",
+      "inertia.conditional-instruction",
+    ]);
+    expect(registry.instructionsFor(member).map(({ label }) => label)).toEqual([
+      "inertia.always-instruction",
+      "inertia.conditional-instruction",
+    ]);
+    expect(registry.instructionsFor(outsider).map(({ label }) => label)).toEqual(["inertia.always-instruction"]);
+
+    expect(registry.bridgeFor(member).definitions.map(({ name }) => name)).toEqual([
+      "inertia_always_tool",
+      "inertia_conditional_tool",
+    ]);
+    const withheld = registry.bridgeFor(outsider);
+    expect(withheld.definitions.map(({ name }) => name)).toEqual(["inertia_always_tool"]);
+    expect(withheld.retiredToolNames?.has("inertia_conditional_tool")).toBe(true);
+    // A provider session that registered the tool earlier still reaches its handler.
+    await expect(withheld.invoke(call("inertia_conditional_tool"))).resolves.toMatchObject({ success: true });
+    expect(conditional.tools[0]!.invoke).toHaveBeenCalledWith(outsider, expect.anything());
+
+    // The manifest lists the pack; only the digest records that it is conditional.
+    expect(registry.manifest().packs.map(({ id }) => id)).toEqual(["inertia.always", "inertia.conditional"]);
+    const { availableFor: _unused, ...unconditional } = conditional;
+    expect(new HarnessCapabilityRegistry([always, unconditional]).manifest().definitionDigest)
+      .not.toBe(registry.manifest().definitionDigest);
+    // Pinned from the registry before conditional packs existed: an
+    // unconditional pack's digest is unchanged.
+    expect(new HarnessCapabilityRegistry([always]).manifest().definitionDigest)
+      .toBe("ead01e56f9682df5908d8314438c9c82f97fe26dd3ccf8981dc53e3776f31871");
   });
 
   it("requires a process-local validator and fails unknown calls closed", async () => {

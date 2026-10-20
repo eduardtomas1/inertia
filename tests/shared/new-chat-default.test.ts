@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultSettings, type ModelBackendDefault, type ProviderInfo } from "../../src/shared/contracts";
+import {
+  defaultSettings,
+  type Initiative,
+  type ModelBackendDefault,
+  type ModelBackendProfileView,
+  type ModelSelection,
+  type ProviderInfo,
+} from "../../src/shared/contracts";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import { effectiveNewChatDefault } from "../../src/shared/new-chat-default";
 
@@ -124,6 +132,134 @@ describe("effective new-chat default", () => {
         backendProfiles: [],
         backendDefaults: [codexDefault("project"), nativeDefault("global", "opus", "medium")],
       }, defaultSettings, projectId)).toMatchObject({ source: "project-backend", providerId: "codex", modelId: "gpt-5", reasoning: "high" });
+    });
+  });
+
+  describe("initiative layer", () => {
+    const initiativeId = "22222222-2222-4222-8222-222222222222";
+    const initiativeWith = (defaultModel: ModelSelection, defaultReasoningEffort: string | null = null): Initiative => ({
+      id: initiativeId,
+      name: "Checkout",
+      color: "teal",
+      status: "active",
+      preferences: { ...defaultInitiativePreferences(), defaultModel, defaultReasoningEffort },
+      brief: "",
+      briefRevision: 0,
+      briefUpdatedAt: null,
+      notesRevision: 0,
+      proposedNoteCount: 0,
+      revision: 1,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    const claude = (models: string[], freshness: "fresh" | "unavailable" = "fresh") => ({
+      id: "claude",
+      available: true,
+      installState: "installed",
+      authState: "authenticated",
+      canRun: true,
+      models: models.map((id) => ({ id })),
+      metadataState: { models: { freshness } },
+    }) as unknown as ProviderInfo;
+    const native = (modelId: string) => providerNativeModelSelection({ providerId: "claude", modelId, alias: modelId, reasoningEffort: null });
+
+    it("comes before the project and global defaults, with its reasoning level", () => {
+      const snapshot = {
+        providers: [claude(["opus", "haiku"])],
+        backendProfiles: [],
+        backendDefaults: [nativeDefault("global", "sonnet", null), nativeDefault("project", "haiku", null)],
+        initiatives: [initiativeWith(native("opus"), "high")],
+      };
+      expect(effectiveNewChatDefault(snapshot, defaultSettings, projectId, initiativeId))
+        .toMatchObject({ source: "initiative", providerId: "claude", modelId: "opus", reasoning: "high" });
+      // Without the initiative the project layer still applies.
+      expect(effectiveNewChatDefault(snapshot, defaultSettings, projectId))
+        .toMatchObject({ source: "project-backend", modelId: "haiku" });
+      expect(effectiveNewChatDefault(snapshot, defaultSettings, projectId, "33333333-3333-4333-8333-333333333333"))
+        .toMatchObject({ source: "project-backend", modelId: "haiku" });
+    });
+
+    it("falls through when the live catalog no longer offers the model", () => {
+      const snapshot = {
+        providers: [claude(["haiku"])],
+        backendProfiles: [],
+        backendDefaults: [nativeDefault("project", "haiku", null)],
+        initiatives: [initiativeWith(native("opus"), "high")],
+      };
+      expect(effectiveNewChatDefault(snapshot, defaultSettings, projectId, initiativeId))
+        .toMatchObject({ source: "project-backend", modelId: "haiku" });
+      // An unrefreshed catalog cannot prove removal, so the initiative still applies.
+      expect(effectiveNewChatDefault({ ...snapshot, providers: [claude([], "unavailable")] }, defaultSettings, projectId, initiativeId))
+        .toMatchObject({ source: "initiative", modelId: "opus" });
+    });
+
+    it("falls through when the initiative's provider cannot run, and waits while it is being checked", () => {
+      const state = (installState: string, authState: string, canRun: boolean) => ({
+        ...claude(["opus"]), available: canRun, installState, authState, canRun,
+      }) as unknown as ProviderInfo;
+      const snapshot = (provider: ProviderInfo) => ({
+        providers: [provider],
+        backendProfiles: [],
+        backendDefaults: [nativeDefault("project", "haiku", null)],
+        initiatives: [initiativeWith(native("opus"), "high")],
+      });
+      // The project default is Claude too, so it falls through to Settings.
+      expect(effectiveNewChatDefault(snapshot(state("not-installed", "unknown", false)), {
+        defaultProvider: "codex", defaultModel: "gpt-5", defaultReasoningEffort: "high",
+      }, projectId, initiativeId)).toMatchObject({ source: "settings", providerId: "codex", modelId: "gpt-5" });
+      expect(effectiveNewChatDefault(snapshot(state("checking", "checking", false)), defaultSettings, projectId, initiativeId))
+        .toMatchObject({ source: "initiative", modelId: "opus", reasoning: "high" });
+    });
+
+    it("ignores an unknown initiative id, and a snapshot without initiatives", () => {
+      const unknown = "33333333-3333-4333-8333-333333333333";
+      const settings = { defaultProvider: "claude" as const, defaultModel: "sonnet", defaultReasoningEffort: "low" };
+      const withInitiative = {
+        providers: [claude(["opus", "sonnet", "haiku"])],
+        backendProfiles: [],
+        backendDefaults: [],
+        initiatives: [initiativeWith(native("opus"), "high")],
+      };
+      expect(effectiveNewChatDefault(withInitiative, settings, null, unknown))
+        .toMatchObject({ source: "settings", modelId: "sonnet", reasoning: "low" });
+      expect(effectiveNewChatDefault({ ...withInitiative, initiatives: undefined }, settings, null, initiativeId))
+        .toMatchObject({ source: "settings", modelId: "sonnet" });
+      expect(effectiveNewChatDefault({ ...withInitiative, backendDefaults: [nativeDefault("global", "haiku", null)] }, settings, null, unknown))
+        .toMatchObject({ source: "global-backend", modelId: "haiku" });
+    });
+
+    it("falls through when its backend profile is disabled or reconfigured", () => {
+      const selection = modelSelectionSchema.parse({
+        harnessId: "codex-app-server",
+        backendProfileId: "custom:gateway",
+        backendProfileDisplayName: "Gateway",
+        backendConfigurationRevision: 3,
+        modelId: "gateway-model",
+        alias: null,
+        reasoningEffort: null,
+        contextWindowOverride: null,
+        providerOptions: {},
+        capabilities: [],
+      });
+      const profile = (enabled: boolean, configurationRevision = 3) => ({
+        id: "custom:gateway",
+        enabled,
+        harnessId: "codex-app-server",
+        configurationRevision,
+        models: [{ id: "gateway-model" }],
+      }) as unknown as ModelBackendProfileView;
+      const snapshot = (backendProfiles: ModelBackendProfileView[]) => ({
+        providers: [],
+        backendProfiles,
+        backendDefaults: [nativeDefault("global", "sonnet", null)],
+        initiatives: [initiativeWith(selection)],
+      });
+      expect(effectiveNewChatDefault(snapshot([profile(true)]), defaultSettings, null, initiativeId))
+        .toMatchObject({ source: "initiative", modelId: "gateway-model" });
+      expect(effectiveNewChatDefault(snapshot([profile(false)]), defaultSettings, null, initiativeId))
+        .toMatchObject({ source: "global-backend", modelId: "sonnet" });
+      expect(effectiveNewChatDefault(snapshot([profile(true, 4)]), defaultSettings, null, initiativeId))
+        .toMatchObject({ source: "global-backend", modelId: "sonnet" });
     });
   });
 });

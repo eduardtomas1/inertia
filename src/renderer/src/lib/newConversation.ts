@@ -167,6 +167,7 @@ export function buildDraftConversation(
     settledAt: null,
     completedAt: null,
     lastViewedAt: now,
+    initiativeId: payload.initiativeId ?? null,
     hasHistory: false,
     createdAt: now,
     updatedAt: now,

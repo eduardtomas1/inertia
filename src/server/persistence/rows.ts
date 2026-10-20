@@ -72,6 +72,8 @@ export interface ConversationRow {
   marked_unread_at?: string | null;
   pinned_at: string | null;
   snoozed_until: string | null;
+  /** Absent only on rows read from databases before schema 99. */
+  initiative_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -202,6 +204,7 @@ export interface MessageRow {
   private_connect_device_id?: string | null;
   compaction_json?: string | null;
   html_render_json?: string | null;
+  initiative_context_json?: string | null;
   id: string;
   conversation_id: string;
   turn_id: string | null;

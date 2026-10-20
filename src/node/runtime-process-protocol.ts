@@ -7,7 +7,7 @@ import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } 
 import { isMascotFocus } from "../shared/mascot.js";
 import { isMascotRequest, parseMascotFeed, type MascotFeed } from "../shared/mascot-feed.js";
 import { isAbsolute } from "node:path";
-import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
+import { parseRuntimePathRequest, type RuntimePathRequest } from "../shared/desktop";
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
 import { parseRuntimeIssueEvidenceRequest, parseRuntimeIssueEvidenceResult, type RuntimeIssueEvidenceRequest, type RuntimeIssueEvidenceResult } from "./runtime-issue-evidence-protocol";
 import { parseRuntimeHtmlRenderEvent, parseRuntimeHtmlRenderReadCommand, type RuntimeHtmlRenderEvent, type RuntimeHtmlRenderReadCommand } from "./runtime-html-render-protocol";
@@ -100,7 +100,7 @@ export type RuntimeWorkerCommand =
       interval: RuntimeSystemSuspendInterval;
     }
   | RuntimeUpdateWorkerCommand
-  | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
+  | { type: "runtime.resolve-project-path"; requestId: string; request: RuntimePathRequest }
   | RuntimeHtmlRenderReadCommand
   | {
       type: "runtime.private-connect-request";
@@ -478,7 +478,7 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     && typeof value.requestId === "string"
     && UUID_PATTERN.test(value.requestId)
   ) {
-    const request = parseOpenProjectPathRequest(value.request);
+    const request = parseRuntimePathRequest(value.request);
     return request ? { type: "runtime.resolve-project-path", requestId: value.requestId, request } : null;
   }
   if (

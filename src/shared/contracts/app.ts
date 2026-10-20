@@ -31,6 +31,8 @@ import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 import type { Todo } from "../todos";
+import type { Initiative } from "../initiatives";
+import type { AccessMode } from "../access-modes";
 
 export type { ProviderId } from "../provider";
 
@@ -42,7 +44,7 @@ export type MessageRole = "user" | "assistant" | "system";
 export type ProviderInstallState = "checking" | "installed" | "not-installed" | "unresponsive" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 export type InteractionMode = "build" | "plan";
-export type AccessMode = "supervised" | "auto-edit" | "full";
+export type { AccessMode };
 export type ThreadStatus = "idle" | "running" | "needs-input" | "completed" | "failed";
 export type AgentApprovalDecision = "approve" | "deny" | "cancel";
 export type ResponseDensity = "compact" | "default" | "comfortable";
@@ -276,6 +278,11 @@ export interface Conversation {
   pinnedAt?: string | null;
   /** Optional only for snapshots created before thread organization shipped. */
   snoozedUntil?: string | null;
+  /**
+   * The initiative this chat belongs to, if any. Optional only for snapshots
+   * created before initiatives shipped.
+   */
+  initiativeId?: string | null;
   hasHistory?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -336,6 +343,8 @@ export interface AppSnapshot {
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
   todos?: Todo[];
+  /** Present on authoritative snapshots; optional only for legacy fixtures. */
+  initiatives?: Initiative[];
   activeProjectId: string | null;
   activeConversationId: string | null;
   /** Present on authoritative runtime snapshots; optional for legacy fixtures. */

@@ -24,6 +24,7 @@ import {
   type ProviderGoalSnapshot,
   type ProviderId,
   type ProviderManagerOptions,
+  type ProviderMcpServerResolution,
   type ProviderRunCallbacks,
   type ProviderRunIdentity,
   type ProviderRunInput,
@@ -40,6 +41,7 @@ import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
 import { providerChildEnvironment } from "../environment";
+import { RunSecretRedactor } from "./run-secret-redaction";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
 
@@ -82,6 +84,7 @@ export interface ProviderRunCoordinatorOptions {
   metadataCache: ProviderMetadataCache;
   resolveBackendLaunchOptions:
     | ProviderManagerOptions["resolveBackendLaunchOptions"];
+  resolveInitiativeMcpServers?: ProviderManagerOptions["resolveInitiativeMcpServers"];
   conversationProviderGate?: ProviderManagerOptions["conversationProviderGate"];
   commandFor(providerId: ProviderId): string;
   resolvedCommandFor(providerId: ProviderId): string | undefined;
@@ -227,6 +230,15 @@ export class ProviderRunCoordinator {
       );
     }
     const expectedIdentity = providerRunIdentity(input);
+    if (input.mcpServers !== undefined) {
+      // Resolved secrets exist only in the harness's copy made below, never in
+      // a caller's request, so they cannot outlive this run in shared state.
+      this.refuse(
+        expectedIdentity,
+        "invalid_input",
+        "Resolved MCP servers can only come from Inertia's launch step.",
+      );
+    }
     if (!isIsolatedProviderConversationId(conversationId)) {
       try {
         this.options.conversationProviderGate?.(conversationId, input.providerId);
@@ -370,6 +382,16 @@ export class ProviderRunCoordinator {
     };
     let active!: ActiveRun;
     let protocolViolation: ProviderRuntimeError | null = null;
+    // Secrets resolved for this run (initiative MCP values). Once any exist,
+    // every event, the terminal result and failures pass through this single
+    // redactor; harnesses add nothing of their own for them.
+    let runRedactor: RunSecretRedactor | null = null;
+    const releaseHeldText = (): void => {
+      if (runRedactor) compatibilityEmitter.deliver(runRedactor.flush());
+    };
+    const redactRunError = (error: unknown): void => {
+      runRedactor?.error(error);
+    };
     const compatibilityEmitter = createProviderEmitter(
       providerId,
       conversationId,
@@ -400,6 +422,7 @@ export class ProviderRunCoordinator {
             this.cancelStartedHarness(active);
           }
         },
+        transform: (event) => runRedactor ? runRedactor.event(event) : [event],
       },
     );
     const harness = this.options.harnessRegistry.resolve(input);
@@ -484,8 +507,10 @@ export class ProviderRunCoordinator {
     };
     const startHarness = (
       resolvedLaunchOptions: ProviderBackendLaunchOptions,
+      mcp: ProviderMcpServerResolution | null = null,
     ): Promise<ProviderRunResult> => {
       launchOptions = resolvedLaunchOptions;
+      if (mcp && mcp.secrets.length > 0) runRedactor = new RunSecretRedactor(mcp.secrets);
       if (active.cancelRequested || active.settled) {
         releaseLaunch();
         disposeLaunch();
@@ -516,12 +541,25 @@ export class ProviderRunCoordinator {
             "Codex backend configuration was supplied to a different harness.",
           );
         }
-        const launchInput = launchOptions.modelArgument === undefined
+        const modelInput = launchOptions.modelArgument === undefined
           ? input
           : {
               ...input,
               model: launchOptions.modelArgument ?? undefined,
             };
+        // The harness's private copy is the only object that holds resolved
+        // MCP secrets; the caller's request keeps only the unresolved plan.
+        const launchInput = mcp && mcp.servers.length > 0
+          ? { ...modelInput, mcpServers: mcp.servers }
+          : modelInput;
+        for (const omitted of mcp?.omitted ?? []) {
+          compatibilityEmitter.activity(
+            "system",
+            "info",
+            `Initiative MCP server not added · ${omitted.name}`,
+            { detail: omitted.reason },
+          );
+        }
         active.harnessStartInvoked = true;
         harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
@@ -636,15 +674,40 @@ export class ProviderRunCoordinator {
         baseEnvironment,
         { signal: launchAbort.signal },
       ) ?? launchOptions;
-      launched = isPromiseLike(resolved)
-        ? Promise.resolve(resolved).then(
-            startHarness,
+      const mcpPlan = input.initiativeMcpServers;
+      const resolveMcp = mcpPlan && mcpPlan.servers.length > 0
+        ? this.options.resolveInitiativeMcpServers
+        : undefined;
+      launched = resolveMcp
+        ? Promise.allSettled([
+            Promise.resolve(resolved),
+            resolveMcp(mcpPlan!, { signal: launchAbort.signal }),
+          ]).then(([launch, mcp]): [ProviderBackendLaunchOptions, ProviderMcpServerResolution] => {
+            if (launch.status === "rejected") throw launch.reason;
+            if (mcp.status === "rejected") {
+              // The backend launch was prepared but will never start: let its
+              // resolver clear and release what it materialised.
+              try { launch.value.releaseAfterStart?.(); } catch { /* best effort */ }
+              try { launch.value.dispose?.(); } catch { /* best effort */ }
+              throw mcp.reason;
+            }
+            return [launch.value, mcp.value];
+          }).then(
+            ([launch, mcp]) => startHarness(launch, mcp),
             (error: unknown) => {
               if (active.cancelRequested) return cancelledBeforeStart();
               throw error;
             },
           )
-        : startHarness(resolved);
+        : isPromiseLike(resolved)
+          ? Promise.resolve(resolved).then(
+              (launch) => startHarness(launch),
+              (error: unknown) => {
+                if (active.cancelRequested) return cancelledBeforeStart();
+                throw error;
+              },
+            )
+          : startHarness(resolved);
     } catch (error) {
       if (!active.harnessStartInvoked) {
         active.processCleanupConfirmed = true;
@@ -652,10 +715,14 @@ export class ProviderRunCoordinator {
       } else {
         active.quarantine("provider-run-start-terminal-outcome-unavailable");
       }
+      redactRunError(error);
       throw error;
     }
     const result = launched.then(
-      (value) => {
+      (unredacted) => {
+        // Text held back by the redactor reaches the transcript before the result.
+        releaseHeldText();
+        const value = runRedactor ? runRedactor.result(unredacted) : unredacted;
         if (
           !hasExactProviderRunIdentity(value, expectedIdentity)
           || !hasConsistentProviderTerminalOutcome(value)
@@ -702,6 +769,7 @@ export class ProviderRunCoordinator {
         return value;
       },
       (error: unknown) => {
+        releaseHeldText();
         if (!active.harnessStartInvoked) {
           active.processCleanupConfirmed = true;
           settle();
@@ -709,6 +777,7 @@ export class ProviderRunCoordinator {
           active.quarantine("provider-run-terminal-outcome-unavailable");
           this.cancelStartedHarness(active);
         }
+        redactRunError(error);
         throw error;
       },
     );
@@ -721,8 +790,9 @@ export class ProviderRunCoordinator {
     instruction?: string,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderCompactionResult> {
+    const { initiativeMcpServers: _mcpPlan, ...compactionInput } = input;
     const operationInput: ProviderRunInput = {
-      ...input,
+      ...compactionInput,
       prompt: "/compact",
       // Compaction is a non-durable control operation with an authoritative
       // caller-allocated correlation turn, never a user-tool execution turn.

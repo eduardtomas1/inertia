@@ -398,6 +398,33 @@ afterEach(async () => {
 });
 
 describe("Duo third-model comparison", () => {
+  it("joins every Duo chat, including the judge, to an active initiative and refuses an inactive one", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const initiative = runtime.store.initiatives.create({ id: randomUUID(), name: "Duo work" });
+    const withInitiative = () => {
+      const payload = comparisonPreparePayload(runtime);
+      return {
+        ...payload,
+        sides: payload.sides.map((side) => ({ ...side, initiativeId: initiative.id })) as typeof payload.sides,
+        comparison: { ...payload.comparison!, initiativeId: initiative.id },
+      };
+    };
+    const prepared = await launches.prepare(withInitiative());
+    const ids = [...prepared.sides.map(({ conversationId }) => conversationId), prepared.comparison!.conversationId];
+    for (const id of ids) {
+      expect(runtime.store.conversationShell(id)).toMatchObject({ projectId: runtime.projectId, initiativeId: initiative.id });
+    }
+    await launches.cancel(prepared.launchId);
+    runtime.store.initiatives.update(initiative.id, 1, { status: "archived" });
+    const before = runtime.store.shellSnapshot().conversations.length;
+    await expect(launches.prepare(withInitiative()))
+      .rejects.toThrow("Only active initiatives can take chats. Reopen the initiative first.");
+    expect(runtime.store.shellSnapshot().conversations).toHaveLength(before);
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+  });
+
   it.each(["left", "right", "judge"] as const)("rejects a managed scratch %s before creating shared-root chats", async (target) => {
     const runtime = await createRuntime();
     try {

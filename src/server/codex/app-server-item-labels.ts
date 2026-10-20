@@ -1,5 +1,6 @@
 import { commandExecutionLabel } from "./app-server-config";
 import { boundedText, objectValue, stringValue, type JsonObject } from "./protocol";
+import { CODEX_CONTEXT_COMPACTION_TITLE } from "../provider/context-compaction-activity";
 
 export function codexMcpToolLabel(item: JsonObject): string {
   const server = boundedText(item.server, 120);
@@ -59,7 +60,7 @@ export function codexItemActivityLabel(item: JsonObject): string | null {
     case "imageGeneration":
       return "Generate image";
     case "contextCompaction":
-      return "Context compaction";
+      return CODEX_CONTEXT_COMPACTION_TITLE;
     default:
       return null;
   }

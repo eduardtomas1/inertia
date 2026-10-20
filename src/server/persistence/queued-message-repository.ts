@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
+import { accessModesAboveCeiling, type AccessMode } from "../../shared/access-modes";
 import type { ChatAttachment, Conversation } from "../../shared/contracts";
 import { MAX_QUEUED_MESSAGES, type QueuedMessage } from "../../shared/queued-messages";
 import { parseStoredAttachments, rendererSafeAttachments } from "./codecs";
@@ -19,6 +20,50 @@ export function queuedRouteIdentity(conversation: Conversation): string {
   return JSON.stringify([conversation.projectId, conversation.worktreePath, conversation.providerId,
     conversation.modelSelection, conversation.model, conversation.reasoningEffort,
     conversation.interactionMode, conversation.accessMode]);
+}
+/** `queuedRouteIdentity` has eight fields; the access mode is the last. */
+const ROUTE_IDENTITY_LENGTH = 8;
+const ROUTE_IDENTITY_ACCESS_INDEX = ROUTE_IDENTITY_LENGTH - 1;
+
+/**
+ * Lowers the access that pending queued messages were queued with to `limit`,
+ * for every member of an initiative or for one chat, inside the caller's
+ * transaction. It runs with the statement that lowers the chats themselves, so
+ * a message queued before an access limit was lowered still matches its chat
+ * and is sent at the lower access instead of being blocked as a changed route.
+ * Nothing else about a message's route changes.
+ */
+export function lowerQueuedMessageAccess(
+  database: Database.Database,
+  limit: AccessMode,
+  scope: { initiativeId: string } | { conversationId: string },
+): void {
+  const above = new Set<unknown>(accessModesAboveCeiling(limit));
+  if (above.size === 0) return;
+  const [column, value] = "initiativeId" in scope
+    ? ["initiative_id", scope.initiativeId]
+    : ["id", scope.conversationId];
+  const rows = database.prepare(`
+    SELECT queued_messages.id, queued_messages.route_identity FROM queued_messages
+    JOIN conversations ON conversations.id = queued_messages.conversation_id
+    WHERE conversations.${column} = ? AND queued_messages.state IN ('waiting','dispatching','blocked')
+  `).all(value) as Pick<QueueRow, "id" | "route_identity">[];
+  const update = database.prepare("UPDATE queued_messages SET route_identity = ? WHERE id = ?");
+  for (const row of rows) {
+    let identity: unknown;
+    try {
+      identity = JSON.parse(row.route_identity);
+    } catch {
+      continue;
+    }
+    if (
+      !Array.isArray(identity)
+      || identity.length !== ROUTE_IDENTITY_LENGTH
+      || !above.has(identity[ROUTE_IDENTITY_ACCESS_INDEX])
+    ) continue;
+    identity[ROUTE_IDENTITY_ACCESS_INDEX] = limit;
+    update.run(JSON.stringify(identity), row.id);
+  }
 }
 export function queuedIntentDigest(content: string, attachments: readonly ChatAttachment[]): string {
   return createHash("sha256").update(JSON.stringify([content.trim(), attachments.map(({ id }) => id)])).digest("hex");

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,9 +6,11 @@ import {
   defaultSettings,
   type AppSnapshot,
   type ConversationDetail,
+  type Initiative,
   type Project,
   type ServerEvent,
 } from "../../src/shared/contracts";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 import {
   buildDraftConversation,
   buildNewConversationPayload,
@@ -217,6 +219,38 @@ describe("detached chat window", () => {
     message.dispatchEvent(shortcut);
     expect(shortcut.defaultPrevented).toBe(true);
     expect(closes).toEqual(["keep this"]);
+  });
+
+  it("disables access above its initiative's limit in the window's composer, with the reason", async () => {
+    const initiative: Initiative = {
+      id: "63636363-6363-4363-8363-636363636363",
+      name: "Checkout",
+      color: "blue",
+      status: "active",
+      // The window's snapshot carries only the setting its composer enforces.
+      preferences: { ...defaultInitiativePreferences(), accessCeiling: "auto-edit" },
+      brief: "",
+      briefRevision: 0,
+      briefUpdatedAt: null,
+      notesRevision: 0,
+      proposedNoteCount: 0,
+      revision: 2,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const member = { ...conversation, initiativeId: initiative.id, accessMode: "supervised" as const };
+    harness.connection = connectionFor({ ...snapshot, conversations: [member], initiatives: [initiative] });
+    harnessDetail.current = { ...detail, conversation: member };
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    await screen.findByRole("textbox", { name: "Message" });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Choose project access\./u }));
+    const access = screen.getByRole("menu", { name: "Project access" });
+    const full = within(access).getByRole("menuitemradio", { name: /Full access/u });
+    expect(full).toBeDisabled();
+    expect(full).toHaveTextContent("“Checkout” limits chats to Auto-accept edits.");
+    expect(within(access).getByRole("menuitemradio", { name: /^Auto-accept edits/u })).toBeEnabled();
   });
 
   it("connects with cached settings when browser storage is unavailable", async () => {

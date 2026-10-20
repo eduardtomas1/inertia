@@ -5,8 +5,10 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { CommandPalette, type CommandPaletteView } from "../../src/renderer/src/components/CommandPalette";
-import type { Conversation, Project } from "../../src/shared/contracts";
+import { commandPaletteConversation } from "../../src/renderer/src/appView";
+import type { Conversation, Initiative, Project } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { defaultInitiativePreferences } from "../../src/shared/initiatives";
 
 const project: Project = {
   id: "project-1",
@@ -472,5 +474,118 @@ describe("CommandPalette behavior", () => {
     await user.keyboard("{Enter}{Backspace}");
     expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("CommandPalette initiatives", () => {
+  const checkout: Initiative = {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    name: "Checkout redesign",
+    color: "teal",
+    status: "active",
+    brief: "",
+    preferences: defaultInitiativePreferences(), briefRevision: 0, briefUpdatedAt: null, notesRevision: 0, proposedNoteCount: 0,
+    revision: 1,
+    createdAt: "2026-07-28T08:00:00.000Z",
+    updatedAt: "2026-07-28T08:00:00.000Z",
+  };
+  const docs: Initiative = { ...checkout, id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Docs refresh" };
+  const shelved: Initiative = { ...checkout, id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Shelved idea", status: "archived" };
+
+  function renderPalette(overrides: Partial<React.ComponentProps<typeof CommandPalette>> = {}) {
+    const props = {
+      onClose: vi.fn(),
+      onOpenInitiative: vi.fn(),
+      onNewInitiative: vi.fn(),
+      onMoveConversationToInitiative: vi.fn(),
+      onNewInitiativeForConversation: vi.fn(),
+    };
+    render(
+      <CommandPalette open currentProjectId={project.id} projects={[project]}
+        conversations={[{ ...conversation, initiativeId: checkout.id }]} newThreadShortcut="⌘N"
+        onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={noOp}
+        onAddProject={noOp} onOpenSettings={noOp} initiatives={[checkout, docs, shelved]}
+        activeConversation={{ ...conversation, initiativeId: checkout.id }} {...props} {...overrides} />,
+    );
+    return props;
+  }
+
+  it("lists initiatives by name in their own group and opens the chosen one", async () => {
+    const user = userEvent.setup();
+    const props = renderPalette();
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "shelved");
+    const group = screen.getByRole("group", { name: "Initiatives" });
+    const option = screen.getByRole("option", { name: /Shelved idea/u });
+    expect(group).toContainElement(option);
+    expect(option).toHaveTextContent("Archived · 0 chats");
+    await user.keyboard("{Enter}");
+    expect(props.onOpenInitiative).toHaveBeenCalledExactlyOnceWith(shelved.id);
+    expect(props.onClose).toHaveBeenCalledOnce();
+  });
+
+  it("starts a new initiative from an action", async () => {
+    const user = userEvent.setup();
+    const props = renderPalette();
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "new initiative");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("New initiative…");
+    await user.keyboard("{Enter}");
+    expect(props.onNewInitiative).toHaveBeenCalledOnce();
+  });
+
+  it("moves the active chat to another active initiative, out of one, or into a new one", async () => {
+    const user = userEvent.setup();
+    const props = renderPalette();
+    const search = screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" });
+    await user.type(search, "move chat");
+    expect(screen.getByRole("option", { name: /Move chat to initiative…/u })).toHaveTextContent("Feedback loop");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "Move chat to initiative" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search initiatives for this chat" })).toHaveFocus();
+    expect(screen.getAllByRole("option").map((option) => option.querySelector("strong")?.textContent))
+      .toEqual(["Docs refresh", "New initiative…", "Remove from initiative"]);
+    await user.keyboard("{Enter}");
+    expect(props.onMoveConversationToInitiative).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: conversation.id }),
+      docs.id,
+    );
+  });
+
+  it("removes the active chat from its initiative and steps back to search", async () => {
+    const user = userEvent.setup();
+    const props = renderPalette();
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "move chat");
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Backspace}");
+    expect(screen.getByRole("dialog", { name: "Search Inertia" })).toBeInTheDocument();
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "move chat");
+    await user.keyboard("{Enter}");
+    await user.type(screen.getByRole("combobox", { name: "Search initiatives for this chat" }), "remove");
+    await user.keyboard("{Enter}");
+    expect(props.onMoveConversationToInitiative).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: conversation.id }),
+      null,
+    );
+  });
+
+  it("offers no move action without an active chat", () => {
+    renderPalette({ activeConversation: null });
+    expect(screen.queryByRole("option", { name: /Move chat to initiative/u })).not.toBeInTheDocument();
+  });
+
+  it("moves only the visible server chat, never one behind another view, a draft or an archived chat", async () => {
+    const user = userEvent.setup();
+    expect(commandPaletteConversation("workspace", true, conversation)).toBe(conversation);
+    for (const view of ["tasks", "initiatives", "settings", "usage", "home"] as const) {
+      expect(commandPaletteConversation(view, true, conversation)).toBeNull();
+    }
+    // A new-chat draft is on screen but does not exist on the runtime yet.
+    expect(commandPaletteConversation("workspace", false, conversation)).toBeNull();
+    expect(commandPaletteConversation("workspace", true, { ...conversation, archivedAt: "2026-07-29T08:00:00.000Z" }))
+      .toBeNull();
+    expect(commandPaletteConversation("workspace", true, null)).toBeNull();
+
+    renderPalette({ activeConversation: commandPaletteConversation("tasks", true, conversation) });
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "move chat");
+    expect(screen.queryByRole("option", { name: /Move chat to initiative/u })).not.toBeInTheDocument();
   });
 });

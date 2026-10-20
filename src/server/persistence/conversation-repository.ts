@@ -14,6 +14,13 @@ import {
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { assertConversationProvider } from "./conversation-provider-policy";
+import {
+  clampAccessMode,
+  exceedsAccessCeiling,
+  initiativeAccessCeilingMessage,
+} from "../../shared/initiatives";
+import { initiativeAccessCeiling, requireInitiativeAcceptingChats } from "./initiative-repository";
+import { InitiativeRepositoryError } from "./initiative-repository-error";
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
@@ -79,24 +86,33 @@ export class ConversationRepository {
       lastViewedAt: now,
       pinnedAt: null,
       snoozedUntil: null,
+      initiativeId: options.initiativeId ?? null,
       createdAt: now,
       updatedAt: now,
     };
     const modelSelectionJson = JSON.stringify(modelSelection);
     this.context.database.transaction(() => {
+      if (conversation.initiativeId) {
+        requireInitiativeAcceptingChats(this.context.database, conversation.initiativeId);
+        // A chat starts at most at its initiative's access ceiling.
+        conversation.accessMode = clampAccessMode(
+          conversation.accessMode,
+          initiativeAccessCeiling(this.context.database, conversation.initiativeId)?.ceiling,
+        );
+      }
       this.context.database.prepare(`
         INSERT INTO conversations (
           id, project_id, title, provider_id, model_selection_json, continuation_identity_json,
           model, reasoning_effort, interaction_mode,
           access_mode, status, attention_kind, branch, worktree_path, provider_session_id,
           archived_at, settled_at, completed_at, last_viewed_at, pinned_at, snoozed_until,
-          created_at, updated_at
+          initiative_id, created_at, updated_at
         ) VALUES (
           @id, @projectId, @title, @providerId, @modelSelectionJson, NULL,
           @model, @reasoningEffort, @interactionMode,
           @accessMode, @status, @attentionKind, @branch, @worktreePath, @providerSessionId,
           @archivedAt, @settledAt, @completedAt, @lastViewedAt, @pinnedAt, @snoozedUntil,
-          @createdAt, @updatedAt
+          @initiativeId, @createdAt, @updatedAt
         )
       `).run({ ...conversation, modelSelectionJson });
       if (conversation.worktreePath !== null) {
@@ -208,6 +224,14 @@ export class ConversationRepository {
     update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
   ): Conversation {
     const current = conversationFromRow(this.context.requireConversation(conversationId));
+    if (update.accessMode !== undefined) {
+      // The command layer refuses first with the same message; this keeps the
+      // ceiling authoritative for every caller that changes a chat's access.
+      const limit = initiativeAccessCeiling(this.context.database, current.initiativeId);
+      if (limit && exceedsAccessCeiling(update.accessMode, limit.ceiling)) {
+        throw new InitiativeRepositoryError(initiativeAccessCeilingMessage(limit.name, limit.ceiling));
+      }
+    }
     const requestedProviderId = update.providerId ?? current.providerId;
     const legacySelectionChanged = update.providerId !== undefined
       || update.model !== undefined

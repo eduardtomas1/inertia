@@ -23,6 +23,8 @@ export const conversationCreatePayloadSchema = z
     useWorktree: z.boolean().optional(),
     branch: z.string().trim().min(1).max(255).nullable().optional(),
     worktreePath: z.string().min(1).max(4096).nullable().optional(),
+    /** Joins the new chat to an active initiative; membership never changes its project or workspace. */
+    initiativeId: z.string().uuid().nullable().optional(),
   })
   .strict();
 

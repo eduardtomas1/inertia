@@ -19,6 +19,7 @@ import {
   AGENT_THREAD_MAX_DEPTH,
   type AgentThreadMutationTool,
 } from "../persistence/agent-thread-management-repository";
+import { InitiativeRepositoryError } from "../persistence/initiative-repository";
 import type {
   ProviderHostToolBridge,
   ProviderHostToolCall,
@@ -28,7 +29,10 @@ import type {
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import type { ProviderManager } from "../providers";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
-import type { ConversationCreationService } from "./conversation-creation-service";
+import type {
+  ConversationCreatePayload,
+  ConversationCreationService,
+} from "./conversation-creation-service";
 import type {
   ConversationContextRequestCoordinator,
 } from "./conversation-context-request-coordinator";
@@ -53,7 +57,13 @@ import {
 } from "./harness-capabilities";
 import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
+import { effectiveBrowserAccess } from "../../shared/initiatives";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
+import {
+  activeInitiativeOf,
+  INITIATIVE_TOOL_NAMES,
+  InitiativeHostTools,
+} from "./initiative-host-tools";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
 import type { HiddenProviderInstruction } from "./turns/request-context";
@@ -338,6 +348,7 @@ export class AgentThreadManager {
   private readonly capabilities: HarnessCapabilityRegistry;
   private readonly htmlRenders: HtmlRenderHostTool;
   private readonly contextTool: AgentContextTool;
+  private readonly initiativeTools: InitiativeHostTools;
 
   constructor(private readonly dependencies: AgentThreadManagerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
@@ -350,15 +361,41 @@ export class AgentThreadManager {
       now: this.now,
       assertSource: (source) => this.assertSource(source),
     });
+    this.initiativeTools = new InitiativeHostTools({
+      store: dependencies.store,
+      readConversation: async (source, call, options) => await this.contextTool.invoke(source, call, options),
+      broadcast: dependencies.broadcast,
+      broadcastSnapshot: dependencies.broadcastSnapshot,
+    });
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
+      initiativeToolsAvailable: ({ conversation }) => this.initiativeToolsAvailable(conversation.id),
       invoke: async (context, call) => await this.invoke(context, call),
     });
   }
 
-  capabilityInstructions(): readonly HiddenProviderInstruction[] {
-    return this.capabilities.instructions();
+  /**
+   * The reviewed instructions for one chat's turn. Conditional packs, such as
+   * the initiative tools, contribute only when they are offered to that chat.
+   */
+  capabilityInstructions(conversation: Conversation): readonly HiddenProviderInstruction[] {
+    return this.capabilities.instructionsFor({ conversation });
+  }
+
+  /**
+   * Membership is read from the store by chat id whenever a turn's request or
+   * bridge is built, never from the caller's copy of the chat or agent input.
+   */
+  private initiativeToolsAvailable(conversationId: string): boolean {
+    try {
+      return activeInitiativeOf(
+        this.dependencies.store,
+        this.dependencies.store.conversation(conversationId),
+      ) !== null;
+    } catch {
+      return false;
+    }
   }
 
   capabilityManifest(): HarnessCapabilityManifest {
@@ -405,9 +442,16 @@ export class AgentThreadManager {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
+      if (INITIATIVE_TOOL_NAMES.has(call.tool)) return await this.initiativeTools.invoke(source, current, call);
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
-        if (this.dependencies.store.project(current.projectId).preferences?.browserAccess === false) {
-          return failure("browser_disabled", "Agent browser access is disabled in this project's settings.");
+        const browser = effectiveBrowserAccess(
+          this.dependencies.store.initiativePreferencesFor(current),
+          this.dependencies.store.project(current.projectId).preferences,
+        );
+        if (!browser.allowed) {
+          return failure("browser_disabled", browser.source === "initiative"
+            ? "Agent browser access is disabled in this chat's initiative settings."
+            : "Agent browser access is disabled in this project's settings.");
         }
         return await this.agentBrowser.invoke(current, call, {
           conversationId: current.id,
@@ -708,6 +752,8 @@ export class AgentThreadManager {
       if (accessRank(accessMode) > accessRank(current.accessMode)) {
         throw new Error("A managed chat cannot exceed its parent chat's access mode.");
       }
+      // Refuses before approval when the parent's access limit cannot follow.
+      this.inheritedInitiativeId(current);
       const workspace = input.workspace ?? { kind: "project" as const };
       if (workspace.kind === "reuse-current" && this.dependencies.store.project(current.projectId).workspaceKind === "scratch") {
         throw new Error("A chat without a project cannot share its folder with another chat.");
@@ -852,6 +898,49 @@ export class AgentThreadManager {
     }
   }
 
+  /**
+   * A managed child joins its source chat's initiative while that initiative
+   * still takes chats. Otherwise it is created without one rather than failing,
+   * unless the initiative sets an access limit: outside it the child could
+   * later be raised above its parent's limit, so creation is refused instead.
+   * Membership is derived here from the source chat, never from agent input.
+   */
+  private inheritedInitiativeId(source: Conversation): string | undefined {
+    if (!source.initiativeId) return undefined;
+    if (this.dependencies.store.initiatives.acceptsChats(source.initiativeId)) return source.initiativeId;
+    this.assertNoAccessLimitToCarry(source.initiativeId);
+    return undefined;
+  }
+
+  private assertNoAccessLimitToCarry(initiativeId: string): void {
+    const initiative = this.dependencies.store.initiatives.get(initiativeId);
+    if (initiative?.preferences.accessCeiling) {
+      throw new Error(
+        `“${initiative.name}” no longer accepts chats; its access limit cannot be carried to a new chat.`,
+      );
+    }
+  }
+
+  /**
+   * The initiative can stop taking chats between the inheritance read and the
+   * insert, whose atomic re-check then refuses it. Membership is optional for a
+   * managed child without an access limit to carry, so it is created once more
+   * without one. Nothing else has happened before the insert, so the retry
+   * cannot duplicate work.
+   */
+  private async createManagedChild(
+    payload: ConversationCreatePayload,
+    requestId: string,
+  ): Promise<Conversation> {
+    try {
+      return await this.dependencies.creation.create(payload, requestId);
+    } catch (error) {
+      if (!payload.initiativeId || !(error instanceof InitiativeRepositoryError)) throw error;
+      this.assertNoAccessLimitToCarry(payload.initiativeId);
+      return await this.dependencies.creation.create({ ...payload, initiativeId: undefined }, requestId);
+    }
+  }
+
   private async create(
     source: AgentThreadSource,
     args: unknown,
@@ -885,6 +974,7 @@ export class AgentThreadManager {
     if (workspace.kind === "reuse-current" && !current.worktreePath) {
       throw new Error("The parent chat does not own an attached worktree to reuse.");
     }
+    const initiativeId = this.inheritedInitiativeId(current);
     if (signal.aborted) throw new Error("The parent turn ended before chat creation.");
     this.dependencies.store.agentThreadManagement.transition(
       operationId,
@@ -894,7 +984,7 @@ export class AgentThreadManager {
       this.now(),
     );
     const route = this.dependencies.providers.resolveModelRoute(selection);
-    const child = await this.dependencies.creation.create({
+    const child = await this.createManagedChild({
       projectId: current.projectId,
       title: input.title,
       providerId: route.providerId,
@@ -912,6 +1002,7 @@ export class AgentThreadManager {
       worktreePath: workspace.kind === "reuse-current"
         ? current.worktreePath
         : undefined,
+      initiativeId,
     }, `agent-thread:${operationId}`);
     this.dependencies.store.agentThreadManagement.attachManaged({
       childConversationId: child.id,

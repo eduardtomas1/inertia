@@ -342,7 +342,11 @@ export function ConversationContextRequestCard({
         aria-label="Agent requested chat context"
       >
         <header>
-          <strong>The agent asked to read another chat</strong>
+          <strong>
+            {request.initiativeName
+              ? `The agent asked to read another chat in the initiative “${request.initiativeName}”`
+              : "The agent asked to read another chat"}
+          </strong>
         </header>
         {preselected
           ? <p>{source?.conversationTitle ?? "That chat is unavailable."}</p>

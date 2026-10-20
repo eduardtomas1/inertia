@@ -179,7 +179,7 @@ describe("agent browser tool contract", () => {
   });
 
   it("tells every provider to navigate first and to follow failure messages", () => {
-    const [instruction] = registry().instructions()
+    const [instruction] = registry().allInstructions()
       .filter(({ label }) => label === "inertia-frontend-workbench");
     expect(instruction?.text).toContain("inertia_browser_navigate before anything else");
     expect(instruction?.text).toContain("whether or not its panel is showing");

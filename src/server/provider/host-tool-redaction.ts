@@ -13,6 +13,8 @@ const REDACTED_OVER_DEPTH = "[redacted:over-depth]";
  * payloads can become activity, transcript text, metadata, diagnostics, or
  * persisted state. The traversal runs only on turns with a credentialed MCP
  * bridge; ordinary provider runs return their original payload by identity.
+ * String values are rewritten; object keys are kept as they are, so a payload
+ * keeps its shape and no two fields can collapse into one.
  */
 export function redactHostToolPayload<T>(
   value: T,
@@ -27,10 +29,7 @@ export function redactHostToolPayload<T>(
       return current.map((entry) => visit(entry, depth + 1));
     }
     return Object.fromEntries(
-      Object.entries(current).map(([key, entry]) => [
-        redactString(key, secrets),
-        visit(entry, depth + 1),
-      ]),
+      Object.entries(current).map(([key, entry]) => [key, visit(entry, depth + 1)]),
     );
   };
   return visit(value, 0) as T;

@@ -59,7 +59,20 @@ export type TurnExecutionContextKind =
   | "diff"
   | "terminal"
   | "preview"
-  | "review-note";
+  | "review-note"
+  | "initiative";
+
+/**
+ * At most one each per turn: the notice that the chat left an initiative,
+ * the brief and the notes index.
+ */
+const MAX_INITIATIVE_CONTEXTS = 3;
+
+/** Shared initiative material, already bounded and labelled by the caller. */
+export interface InitiativeExecutionContext {
+  label: string;
+  content: string;
+}
 
 export interface HiddenProviderInstruction {
   label: string;
@@ -138,6 +151,13 @@ export interface AssembleTurnRequestInput {
   imagePaths?: readonly string[];
   /** Privileged, bounded document text derived from verified attachment bytes. */
   documentContexts?: readonly DocumentAttachmentContext[];
+  /**
+   * The chat's initiative brief and notes index. They follow document
+   * attachments and precede file references, chat packets, carried packets and
+   * restored history, so they reduce the capacity offered to those like
+   * documents do.
+   */
+  initiativeContexts?: readonly InitiativeExecutionContext[];
   context?: TurnRequestContext;
   conversationContexts?: (capacityBytes: number) => ConversationContextMaterialization;
   carriedConversationContexts?: readonly MaterializedConversationContext[];
@@ -160,6 +180,7 @@ const CONTEXT_KINDS = new Set<TurnExecutionContextKind>([
   "terminal",
   "preview",
   "review-note",
+  "initiative",
 ]);
 
 function rejectUnsafeText(value: string, label: string): string {
@@ -384,9 +405,13 @@ function materializeContext(
   cwd: string,
   context: TurnRequestContext = {},
   documents: readonly DocumentAttachmentContext[] = [],
+  initiatives: readonly InitiativeExecutionContext[] = [],
 ): { contexts: MaterializedContext[]; conversationContextIndex: number } {
   if (documents.length > 8) {
     throw new Error("Execution context contains too many document attachments.");
+  }
+  if (initiatives.length > MAX_INITIATIVE_CONTEXTS) {
+    throw new Error("Execution context contains too many initiative blocks.");
   }
   if ((context.fileReferences?.length ?? 0) > 16) {
     throw new Error("Execution context contains too many file references.");
@@ -421,6 +446,16 @@ function materializeContext(
     ),
     truncated: document.truncated,
   }));
+  materialized.push(...initiatives.map((initiative): MaterializedContext => ({
+    kind: "initiative",
+    label: boundedLabel(initiative.label, "Initiative context label"),
+    content: boundedText(
+      initiative.content,
+      "Initiative context",
+      MAX_EXECUTION_CONTEXT_BLOB_BYTES,
+    ),
+    truncated: false,
+  })));
   materialized.push(
     ...materializeFileReferences(cwd, context.fileReferences ?? []),
   );
@@ -630,6 +665,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
       attachmentId: attachment.id, label: `Snapshot · ${attachment.snapshot!.appName}`,
       content: snapshotPromptContext([attachment]), truncated: attachment.snapshot!.accessibility.truncated,
     }))],
+    input.initiativeContexts,
   );
   const { imagePaths, imageBytes } = validateImages(
     input.attachments ?? [],

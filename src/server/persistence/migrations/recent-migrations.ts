@@ -22,6 +22,8 @@ import { conversationContextTransportV3Migration } from "./conversation-context-
 import { todosMigration } from "./todos";
 import { restartContinuationPlansMigration } from "./restart-continuation-plans";
 import { conversationTitleLocksMigration } from "./conversation-title-locks";
+import { initiativesMigration } from "./initiatives";
+import { initiativeNotesMigration } from "./initiative-notes";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -47,4 +49,6 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   todosMigration,
   restartContinuationPlansMigration,
   conversationTitleLocksMigration,
+  initiativesMigration,
+  initiativeNotesMigration,
 ];

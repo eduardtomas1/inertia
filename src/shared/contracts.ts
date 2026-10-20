@@ -17,6 +17,19 @@ export type {
   PromptPresetRoute,
 } from "./prompt-presets";
 export type { Todo, TodoDraft, TodoPatch, TodoPriority } from "./todos";
+export type {
+  Initiative,
+  InitiativeColor,
+  InitiativeContextReceipt,
+  InitiativeNote,
+  InitiativeNoteProvenance,
+  InitiativeNoteState,
+  InitiativePatch,
+  InitiativePreferences,
+  InitiativePreferencesPatch,
+  InitiativeStatus,
+} from "./initiatives";
+export type { InitiativeMcpServer, InitiativeMcpTransport } from "./initiative-mcp";
 export * from "./contracts/agent";
 export * from "./contracts/agent-workflows";
 export * from "./contracts/app";

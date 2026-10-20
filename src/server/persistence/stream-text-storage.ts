@@ -148,6 +148,7 @@ export const MESSAGE_PROJECTION_COLUMNS = `
   messages.attachments_json,
   messages.compaction_json,
   messages.html_render_json,
+  messages.initiative_context_json,
   messages.private_connect_device_id,
   messages.created_at
 `;

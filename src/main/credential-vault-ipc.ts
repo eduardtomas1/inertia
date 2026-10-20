@@ -7,16 +7,12 @@ import {
   DISCORD_RELEASE_WEBHOOK_PROFILE_ID,
 } from "../shared/backend-credentials.js";
 import { DESKTOP_IPC } from "../shared/desktop-ipc.js";
-
-type ProfileCredentialVault = {
-  setForProfile: (profileId: string, secret: string) => Promise<unknown>;
-  clearForProfile: (profileId: string) => Promise<unknown>;
-  stateForProfile: (profileId: string) => Promise<unknown>;
-};
+import type { CredentialVault } from "./credential-vault.js";
+import { registerInitiativeMcpSecretIpc } from "./initiative-mcp-secret-ipc.js";
 
 export function registerCredentialVaultIpc(
   ipcMain: IpcMain,
-  credentialVault: () => ProfileCredentialVault | null,
+  credentialVault: () => CredentialVault | null,
   assertTrusted: (
     event: IpcMainInvokeEvent,
     receivedArgumentCount: number,
@@ -27,7 +23,7 @@ export function registerCredentialVaultIpc(
   const report = createIncidentReporter(onIncident);
   let storageIncident: string | null = null;
   const unavailable = (): string | null => storageIncident ??= report({ code: "discord.credential-unavailable", outcome: "unknown" });
-  const perform = async (profileId: string, action: (vault: ProfileCredentialVault) => Promise<unknown>): Promise<unknown> => {
+  const perform = async (profileId: string, action: (vault: CredentialVault) => Promise<unknown>): Promise<unknown> => {
     try {
       const vault = credentialVault();
       if (!vault) throw new Error("Credential storage unavailable");
@@ -67,5 +63,12 @@ export function registerCredentialVaultIpc(
     const request = parseBackendCredentialProfileRequest(args[0]);
     if (!request) throw new Error("The backend credential request is invalid.");
     return await perform(request.profileId, (vault) => vault.stateForProfile(request.profileId));
+  });
+  // Initiative MCP secrets share the vault and the main-window trust check.
+  registerInitiativeMcpSecretIpc({
+    ipcMain,
+    channels: { set: DESKTOP_IPC.setInitiativeMcpSecret, state: DESKTOP_IPC.getInitiativeMcpSecretState },
+    assertTrusted: (event, count, expected) => assertTrusted(event, count, expected),
+    vault: credentialVault,
   });
 }

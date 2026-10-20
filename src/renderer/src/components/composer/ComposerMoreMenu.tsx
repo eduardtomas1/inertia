@@ -1,4 +1,4 @@
-import { accessModeUnavailableReason, effectiveAccessMode } from "@shared/access-modes";
+import { effectiveAccessMode } from "@shared/access-modes";
 import {
   ArrowLeft,
   Check,
@@ -14,13 +14,14 @@ import type {
   ProjectAction,
 } from "@shared/contracts";
 import {
+  accessOptionUnavailableReason,
   accessOptions,
   menuId,
   RESPONSE_SPEED_LABEL,
 } from "./config";
 import type { ComposerSettingsModel } from "./ComposerSettings";
 import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
-import type { MoreSection } from "./types";
+import type { ComposerAccessCeiling, MoreSection } from "./types";
 import {
   moreSectionLabel,
   type ComposerMenuController,
@@ -46,6 +47,8 @@ export interface ComposerMoreMenuProps {
     >>,
   ) => Promise<void>;
   conversationUpdatePending: boolean;
+  /** Options above the chat's initiative access ceiling are disabled with its reason. */
+  accessCeiling?: ComposerAccessCeiling;
 }
 
 export function ComposerMoreMenu({
@@ -63,6 +66,7 @@ export function ComposerMoreMenu({
   onUpdateFastMode,
   onUpdateConversation,
   conversationUpdatePending,
+  accessCeiling,
 }: ComposerMoreMenuProps): React.JSX.Element {
   const {
     menu,
@@ -183,7 +187,7 @@ export function ComposerMoreMenu({
       ));
     }
     return accessOptions.map((option) => {
-      const unavailable = accessModeUnavailableReason(conversation.providerId, option.value);
+      const unavailable = accessOptionUnavailableReason(conversation.providerId, option.value, accessCeiling);
       return (
         <button
           type="button"

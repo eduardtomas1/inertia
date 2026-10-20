@@ -12,6 +12,7 @@ import type {
   SidebarWorkSection,
   SidebarWorkSectionId,
 } from "../utils/sidebarModel";
+import { isCollapsibleWorkSection } from "../utils/sidebarWorkSections";
 import { useSidebarIndexMotion } from "./useSidebarIndexMotion";
 import "../sidebar-work-index.css";
 
@@ -23,13 +24,7 @@ export const WORK_ROW_COMPACT_HEIGHT = 50;
 const WORK_SECTION_HEIGHT = 36;
 const WORK_SHOW_MORE_HEIGHT = 30;
 
-export const COLLAPSIBLE_WORK_SECTIONS: ReadonlySet<SidebarWorkSectionId> = new Set([
-  "earlier",
-  "done",
-  "snoozed",
-  "no-project-done",
-  "no-project-snoozed",
-]);
+export { COLLAPSIBLE_WORK_SECTIONS, isCollapsibleWorkSection } from "../utils/sidebarWorkSections";
 
 export type WorkIndexItem =
   | {
@@ -94,14 +89,19 @@ export function useSidebarWorkIndex({
   const items = useMemo<WorkIndexItem[]>(() => {
     const next: WorkIndexItem[] = [];
     let threadPosition = 0;
+    let followsInitiative = false;
     for (const section of sections) {
       if ((section.totalCount ?? section.threads.length) === 0) continue;
-      const collapsible = COLLAPSIBLE_WORK_SECTIONS.has(section.id);
+      const collapsible = isCollapsibleWorkSection(section.id);
       const disclosure = collapsible && !searchActive;
       const expanded = !collapsible
         || searchActive
         || expandedSections.has(section.id);
-      if (section.id !== "recent" && section.id !== "yesterday") next.push({
+      // Recent and Yesterday stay unlabelled unless initiative sections sit
+      // above them, where a label marks where the initiative's chats end.
+      const unlabelled = (section.id === "recent" || section.id === "yesterday") && !followsInitiative;
+      if (section.initiative) followsInitiative = true;
+      if (!unlabelled) next.push({
         id: `section:${section.id}`,
         kind: "section",
         section,

@@ -108,12 +108,16 @@ async function expectTasksRowBetweenNewChatAndSearch(tasks: Locator): Promise<vo
   const sidebar = app.page.locator(".sidebar");
   const newChat = await sidebar.locator(".sidebar-primary-row").getByRole("button", { name: "New chat", exact: true }).boundingBox();
   const row = await tasks.boundingBox();
+  const initiatives = await sidebar.getByRole("button", { name: "Initiatives", exact: true }).boundingBox();
   const search = await sidebar.locator(".sidebar-search-wrap").boundingBox();
   expect(row!.height).toBeCloseTo(newChat!.height, 1);
   expect(row!.x).toBeCloseTo(newChat!.x, 1);
   expect(row!.x + row!.width).toBeCloseTo(search!.x + search!.width, 1);
   expect(row!.y).toBeCloseTo(newChat!.y + newChat!.height + 2, 1);
-  expect(search!.y).toBeCloseTo(row!.y + row!.height + 2, 1);
+  expect(initiatives!.height).toBeCloseTo(row!.height, 1);
+  expect(initiatives!.x).toBeCloseTo(row!.x, 1);
+  expect(initiatives!.y).toBeCloseTo(row!.y + row!.height + 2, 1);
+  expect(search!.y).toBeCloseTo(initiatives!.y + initiatives!.height + 2, 1);
 }
 
 async function expectAlignedHandOff(agent: Locator): Promise<void> {

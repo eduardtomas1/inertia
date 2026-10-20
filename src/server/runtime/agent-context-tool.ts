@@ -84,6 +84,22 @@ export interface AgentContextToolSource {
   turn: AgentTurn;
 }
 
+/** How another reviewed tool asks through this one. */
+export interface AgentContextToolOptions {
+  /**
+   * Set when an initiative tool asks for another chat of the same initiative;
+   * the approval card names the initiative. Membership is checked by the caller.
+   */
+  initiativeName?: string;
+  /**
+   * Called once the user has shared the requested chat on the card, before
+   * anything is read. A result returned here ends the request as failed and
+   * is returned instead, for a caller whose own condition (initiative
+   * membership) may have changed while the card was open.
+   */
+  afterApproval?(): ProviderHostToolResult | null;
+}
+
 export interface AgentContextToolDependencies {
   store: RuntimeStore;
   contextRequests: ConversationContextRequestCoordinator;
@@ -130,6 +146,7 @@ export class AgentContextTool {
   async invoke(
     source: AgentContextToolSource,
     call: ProviderHostToolCall,
+    options: AgentContextToolOptions = {},
   ): Promise<ProviderHostToolResult> {
     const input = inputSchema.parse(call.arguments ?? {});
     const current = this.dependencies.assertSource(source);
@@ -143,14 +160,14 @@ export class AgentContextTool {
     if (
       !input.conversationId
       || reads.requestedByCall(source.turn.id, hostToolDigest(call.toolCallId))
-    ) return await this.requestApproval(source, call, current, input);
+    ) return await this.requestApproval(source, call, current, input, options);
     const access = reads.access({
       targetConversationId: current.id,
       targetTurnId: source.turn.id,
       targetUserMessageId: source.turn.userMessageId,
       sourceConversationId: input.conversationId,
     });
-    if (!access) return await this.requestApproval(source, call, current, input);
+    if (!access) return await this.requestApproval(source, call, current, input, options);
     return await this.read(source, call, current, access, {
       conversationId: input.conversationId,
       turnId: input.turnId,
@@ -304,6 +321,7 @@ export class AgentContextTool {
     call: ProviderHostToolCall,
     current: Conversation,
     input: z.infer<typeof inputSchema>,
+    options: AgentContextToolOptions,
   ): Promise<ProviderHostToolResult> {
     const requestedSourceConversationId = input.conversationId ?? null;
     const toolCallIdHash = hostToolDigest(call.toolCallId);
@@ -355,6 +373,9 @@ export class AgentContextTool {
       },
       providerId: source.turn.providerId,
       requestedSourceConversationId,
+      ...(options.initiativeName && requestedSourceConversationId !== null
+        ? { initiativeName: options.initiativeName }
+        : {}),
       createdAt,
       signal: call.signal,
     });
@@ -385,6 +406,18 @@ export class AgentContextTool {
             ? "The user did not share chat context."
             : "The parent turn ended before context selection settled.",
       );
+    }
+    const withdrawn = options.afterApproval?.() ?? null;
+    if (withdrawn) {
+      if (this.dependencies.store.contextPackets.agentRequest(durable.id)?.status === "selection-pending") {
+        this.dependencies.store.contextPackets.finishAgentRequest(
+          durable.id,
+          "failed",
+          "The requesting tool withdrew the request after the user shared the chat.",
+          this.dependencies.now(),
+        );
+      }
+      return withdrawn;
     }
     try {
       this.dependencies.assertSource(source);

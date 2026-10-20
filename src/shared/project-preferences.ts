@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidClaudeTurnBudgetUsd } from "./claude-turn-budget";
 import { PROJECT_COLOR_EMPHASES, PROJECT_COLOR_NAMES } from "./project-colors";
 
 export const PROJECT_ICON_NAMES = ["folder", "code", "database", "globe", "terminal", "layers", "box", "sparkles"] as const;
@@ -12,15 +13,9 @@ function boundedPng(value: string): boolean {
       && [integer(16), integer(20)].every((size) => size > 0 && size <= PROJECT_ICON_SIZE);
   } catch { return false; }
 }
-/** Upper bound for the optional per-turn Claude spend limit, in USD. */
-export const MAX_CLAUDE_TURN_BUDGET_USD = 10_000;
-/** A positive USD amount up to the bound, with at most two decimal places. */
-export function isValidClaudeTurnBudgetUsd(value: unknown): value is number {
-  // Every in-range number prints in plain decimal notation, so the pattern
-  // checks the exact value the user entered rather than a float product.
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    && value <= MAX_CLAUDE_TURN_BUDGET_USD && /^\d+(?:\.\d{1,2})?$/u.test(String(value));
-}
+// Kept in its own module so initiative settings can validate the limit without
+// loading project preferences; re-exported for existing callers.
+export { isValidClaudeTurnBudgetUsd, MAX_CLAUDE_TURN_BUDGET_USD } from "./claude-turn-budget";
 export const projectIconSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("symbol"), name: z.enum(PROJECT_ICON_NAMES) }),
   z.strictObject({ kind: z.literal("image"), data: z.string().max(MAX_PROJECT_ICON_DATA_LENGTH).regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u).refine(boundedPng, "Use a normalized small PNG icon.") }),

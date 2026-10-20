@@ -12,7 +12,7 @@ import {
   providerNativeModelSelection,
 } from "./model-routing";
 
-export type NewChatDefaultSource = "project-backend" | "global-backend" | "settings" | "fallback";
+export type NewChatDefaultSource = "initiative" | "project-backend" | "global-backend" | "settings" | "fallback";
 
 export interface NewChatDefault {
   source: NewChatDefaultSource;
@@ -22,7 +22,8 @@ export interface NewChatDefault {
   selection: ModelSelection;
 }
 
-export type NewChatDefaultSnapshot = Pick<AppSnapshot, "backendDefaults" | "backendProfiles" | "providers">;
+export type NewChatDefaultSnapshot = Pick<AppSnapshot, "backendDefaults" | "backendProfiles" | "providers">
+  & Partial<Pick<AppSnapshot, "initiatives">>;
 
 export type NewChatDefaultSettings = Pick<AppSettings, "defaultProvider" | "defaultModel" | "defaultReasoningEffort">;
 
@@ -36,7 +37,7 @@ function cloneSelection(selection: ModelSelection): ModelSelection {
 
 function validBackendDefault(
   snapshot: NewChatDefaultSnapshot,
-  candidate: ModelBackendDefault | undefined,
+  candidate: Pick<ModelBackendDefault, "selection"> | undefined,
 ): ModelSelection | null {
   if (!candidate) return null;
   const selection = candidate.selection;
@@ -78,11 +79,30 @@ function fromSelection(source: NewChatDefaultSource, selection: ModelSelection):
   };
 }
 
+/**
+ * The model a new chat starts with, from the first layer that names a model
+ * the live catalog still offers: the initiative the chat starts in, then its
+ * project, then Settings. A removed model or a disabled backend profile at one
+ * layer falls through to the next. Pure; callers pass the snapshot they render.
+ */
 export function effectiveNewChatDefault(
   snapshot: NewChatDefaultSnapshot,
   settings: NewChatDefaultSettings,
   projectId: string | null = null,
+  initiativeId: string | null = null,
 ): NewChatDefault {
+  const initiativePreferences = initiativeId === null
+    ? undefined
+    : snapshot.initiatives?.find(({ id }) => id === initiativeId)?.preferences;
+  const initiativeSelection = initiativePreferences?.defaultModel
+    ? validBackendDefault(snapshot, {
+        selection: {
+          ...initiativePreferences.defaultModel,
+          reasoningEffort: initiativePreferences.defaultReasoningEffort,
+        },
+      })
+    : null;
+  if (initiativeSelection) return fromSelection("initiative", initiativeSelection);
   const projectDefault = projectId === null
     ? undefined
     : snapshot.backendDefaults?.find(({ scope, projectId: scoped }) => scope === "project" && scoped === projectId);

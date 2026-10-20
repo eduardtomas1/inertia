@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   ChevronRight,
   CircleCheck,
   Check,
@@ -20,6 +21,7 @@ import {
   Folder,
   FolderGit2,
   FolderOpen,
+  Flag,
   Gauge,
   GitBranch,
   ListTodo,
@@ -33,7 +35,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import type { Conversation, ConversationShell, Project, ProjectGroupingMode } from "@shared/contracts";
+import type { Conversation, ConversationShell, Initiative, Project, ProjectGroupingMode } from "@shared/contracts";
 import { canOrganizeThread } from "../../../shared/thread-organization";
 import { projectRepositoryLimitChoices } from "../../../shared/project-repository-limit";
 import { useThreadPreview } from "./sidebar/useThreadPreview";
@@ -46,23 +48,37 @@ import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useSnoozeClock } from "../hooks/useSnoozeClock";
 import {
-  COLLAPSIBLE_WORK_SECTIONS,
+  isCollapsibleWorkSection,
   WORK_ROW_COMPACT_HEIGHT,
   WORK_ROW_HEIGHT,
   useSidebarWorkIndex,
   type PaginatedWorkSectionId,
   type WorkIndexItem,
 } from "../hooks/useSidebarWorkIndex";
+import { groupWorkThreadsWithInitiatives, initiativeAggregate } from "../utils/sidebarInitiatives";
 import {
-  groupWorkThreads,
   nextSidebarNavigationIndex,
   isSidebarNavigationKey,
   sidebarThreadView,
   sidebarThreadViewMap,
   sortSidebarThreadViews,
   type SidebarThreadStatus,
+  type SidebarWorkSection,
   type SidebarWorkSectionId,
 } from "../utils/sidebarModel";
+import {
+  expandedWorkSections as expandedWorkSectionsFor,
+  readWorkSectionPreferences,
+  serializeWorkSectionPreferences,
+  toggleWorkSectionPreference,
+  WORK_SECTIONS_STORAGE_KEY,
+  type WorkSectionPreferences,
+} from "../utils/sidebarWorkSections";
+import {
+  initiativeAggregateLabel,
+  InitiativeDot,
+  InitiativeStatusBadge,
+} from "./initiatives/InitiativeMark";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
@@ -71,7 +87,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadInitiativesView, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
@@ -92,8 +108,8 @@ const INITIAL_DONE_VISIBLE: Readonly<Record<PaginatedWorkSectionId, number>> = {
   done: WORK_DONE_PAGE_SIZE,
   "no-project-done": WORK_DONE_PAGE_SIZE,
 };
-const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
+const EMPTY_INITIATIVES: readonly Initiative[] = [];
 
 const statusLabels: Record<SidebarThreadStatus, string> = {
   working: "Working",
@@ -191,6 +207,9 @@ function SidebarView({
   updateEverything,
   projectScopeId,
   onProjectScopeChange,
+  onOpenInitiative,
+  onAssignConversationInitiative,
+  onCreateInitiativeForConversation,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const {
@@ -212,16 +231,11 @@ function SidebarView({
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [doneVisible, setDoneVisible] = useState(INITIAL_DONE_VISIBLE);
-  const [expandedWorkSections, setExpandedWorkSections] = useState<Set<SidebarWorkSectionId>>(() => {
-    try {
-      const stored = (window.localStorage.getItem(WORK_SECTIONS_STORAGE_KEY) ?? "")
-        .split(",");
-      return new Set([...COLLAPSIBLE_WORK_SECTIONS].filter((section) => (
-        stored.includes(section)
-      )));
-    } catch { return new Set(); }
-  });
+  const [workSectionPreferences, setWorkSectionPreferences] = useState<WorkSectionPreferences>(
+    readWorkSectionPreferences,
+  );
   const conversations = snapshot?.conversations ?? EMPTY_CONVERSATIONS;
+  const initiatives = snapshot?.initiatives ?? EMPTY_INITIATIVES;
   const preview = useThreadPreview(conversations, snapshot?.projects ?? [], Boolean(menu));
   const snoozeNow = useSnoozeClock(conversations);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -249,14 +263,23 @@ function SidebarView({
     )
       ?.focus({ preventScroll: true });
   }, [projectMenu]);
+  // Keyed on the joined ids so ordinary snapshots do not rewrite storage.
+  const knownInitiativeIds = snapshot?.initiatives === undefined
+    ? null
+    : initiatives.map(({ id }) => id).join(",");
   useEffect(() => {
     try {
       window.localStorage.setItem(
         WORK_SECTIONS_STORAGE_KEY,
-        [...expandedWorkSections].join(","),
+        serializeWorkSectionPreferences(
+          workSectionPreferences,
+          knownInitiativeIds === null
+            ? undefined
+            : new Set(knownInitiativeIds ? knownInitiativeIds.split(",") : []),
+        ),
       );
     } catch { /* Storage can be unavailable in hardened renderer sessions. */ }
-  }, [expandedWorkSections]);
+  }, [knownInitiativeIds, workSectionPreferences]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -366,9 +389,17 @@ function SidebarView({
     threadViewsById,
   ]);
   const workSections = useMemo(
-    () => groupWorkThreads(activityThreads, snoozeNow, scratchProjectIds),
-    [activityThreads, snoozeNow, scratchProjectIds],
+    () => groupWorkThreadsWithInitiatives(activityThreads, initiatives, snoozeNow, scratchProjectIds),
+    [activityThreads, initiatives, snoozeNow, scratchProjectIds],
   );
+  const expandedWorkSections = useMemo(
+    () => expandedWorkSectionsFor(workSectionPreferences, workSections),
+    [workSectionPreferences, workSections],
+  );
+  const toggleWorkSection = (section: SidebarWorkSection): void => {
+    dismissMenu("context-change");
+    setWorkSectionPreferences((current) => toggleWorkSectionPreference(current, section));
+  };
   const workSearchActive = Boolean(query.trim());
   const [
     focusWorkIdentity,
@@ -471,7 +502,7 @@ function SidebarView({
       )))
       .find((section) => section !== undefined);
     const collapsedDestinationSection = destinationSection
-      && COLLAPSIBLE_WORK_SECTIONS.has(destinationSection.id)
+      && isCollapsibleWorkSection(destinationSection.id)
       && !workSearchActive
       && !expandedWorkSections.has(destinationSection.id)
       ? destinationSection
@@ -691,6 +722,9 @@ function SidebarView({
         onSetPopover={(node) => setMenuPopover(conversation.id, node)}
         onSettleConversation={onSettleConversation}
         onSnoozeConversation={onSnoozeConversation}
+        initiatives={initiatives}
+        onAssignInitiative={onAssignConversationInitiative}
+        onCreateInitiative={onCreateInitiativeForConversation}
         onStartRename={() => {
           renameOriginalRef.current = conversation.title;
           setRenameDraft(conversation.title);
@@ -889,6 +923,63 @@ function SidebarView({
       );
     }
     const { disclosure, expanded, section } = item;
+    if (section.initiative) {
+      const initiative = section.initiative;
+      const aggregate = initiativeAggregate(section.threads);
+      const count = section.threads.length;
+      const summary = initiativeAggregateLabel(aggregate);
+      const accessibleName = [
+        `${initiative.name} initiative`,
+        `${count} ${count === 1 ? "chat" : "chats"}`,
+        summary,
+        initiative.status === "done" ? "Done" : null,
+      ].filter((part): part is string => Boolean(part)).join(", ");
+      const content = (
+        <>
+          <InitiativeDot color={initiative.color} />
+          <span className="initiative-section-name">{initiative.name}</span>
+          {disclosure && <ChevronRight size={14} aria-hidden="true" />}
+          <InitiativeStatusBadge aggregate={aggregate} />
+          <span className="initiative-section-count" aria-hidden="true">{count}</span>
+        </>
+      );
+      return (
+        <div
+          className={clsx("work-thread-section is-initiative", `is-initiative-${initiative.status}`)}
+          role="presentation"
+          data-initiative-id={initiative.id}
+        >
+          <h2 id={`work-section-${section.id}`} aria-label={disclosure ? undefined : accessibleName}>
+            {disclosure ? (
+              <button
+                type="button"
+                className="work-thread-section-toggle initiative-section-toggle"
+                data-sidebar-nav
+                data-work-focus-id={`section:${section.id}`}
+                aria-expanded={expanded}
+                aria-label={accessibleName}
+                onClick={() => toggleWorkSection(section)}
+              >
+                {content}
+              </button>
+            ) : content}
+          </h2>
+          {onOpenInitiative && (
+            <IconButton
+              label={`Open ${initiative.name}`}
+              className="initiative-section-open"
+              onClick={() => {
+                dismissMenu("context-change");
+                onOpenInitiative(initiative.id);
+                onClose();
+              }}
+            >
+              <ArrowRight size={14} />
+            </IconButton>
+          )}
+        </div>
+      );
+    }
     return (
       <div
         className={`work-thread-section is-${section.id}`}
@@ -903,15 +994,7 @@ function SidebarView({
               data-work-focus-id={`section:${section.id}`}
               aria-expanded={expanded}
               aria-label={section.id.startsWith("no-project-") ? `${section.label} ${section.threads.length}, No project` : undefined}
-              onClick={() => {
-                dismissMenu("context-change");
-                setExpandedWorkSections((current) => {
-                  const next = new Set(current);
-                  if (next.has(section.id)) next.delete(section.id);
-                  else next.add(section.id);
-                  return next;
-                });
-              }}
+              onClick={() => toggleWorkSection(section)}
             >
               <span>{section.label}</span>
               <ChevronRight size={14} aria-hidden="true" />
@@ -998,6 +1081,10 @@ function SidebarView({
         <button type="button" className={clsx("sidebar-primary-action sidebar-tasks-action", view === "tasks" && "is-active")} aria-current={view === "tasks" ? "page" : undefined} onFocus={() => void loadTasksView()} onPointerDown={() => void loadTasksView()} onPointerEnter={() => void loadTasksView()} onClick={() => navigate("tasks")}>
           <ListTodo size={16} aria-hidden="true" />
           <span>Tasks</span>
+        </button>
+        <button type="button" className={clsx("sidebar-primary-action sidebar-tasks-action sidebar-initiatives-action", view === "initiatives" && "is-active")} aria-current={view === "initiatives" ? "page" : undefined} onFocus={() => void loadInitiativesView()} onPointerDown={() => void loadInitiativesView()} onPointerEnter={() => void loadInitiativesView()} onClick={() => navigate("initiatives")}>
+          <Flag size={16} aria-hidden="true" />
+          <span>Initiatives</span>
         </button>
         <div className="sidebar-search-wrap">
           <Search size={16} aria-hidden="true" />

@@ -54,6 +54,11 @@ import {
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
 import {
+  acpInitiativeMcpServers,
+  inheritedLaunchCredentialNames,
+  withoutInheritedCredentials,
+} from "./initiative-mcp-config";
+import {
   BoundedKimiJsonLineTransform,
   kimiErrorDetail,
   kimiRuntimeFailure,
@@ -445,13 +450,28 @@ function startKimiRun(
       if (hostMcpConnection) {
         secretRedactor.addSecrets([hostMcpConnection.bearerToken, hostMcpConnection.url]);
       }
-      const hostMcpServers = hostMcpConnection
-        ? acpHostMcpServers(
-            hostMcpConnection,
-            initialized.agentCapabilities?.mcpCapabilities?.http === true,
-            options.environment,
-          )
-        : [];
+      const supportsHttpMcp = initialized.agentCapabilities?.mcpCapabilities?.http === true;
+      // The initiative's servers follow Inertia's host server. A stdio server
+      // the agent starts gets an empty value for every launch credential it
+      // would inherit; resolved secrets are redacted by the run coordinator.
+      const initiativeMcp = acpInitiativeMcpServers(
+        "Kimi Code",
+        withoutInheritedCredentials(options.input.mcpServers ?? [], inheritedLaunchCredentialNames(options.environment)),
+        supportsHttpMcp,
+      );
+      for (const skipped of initiativeMcp.skipped) {
+        emitter.activity("system", "info", `Initiative MCP server not added · ${skipped.name}`, { detail: skipped.reason });
+      }
+      const sessionMcpServers = [
+        ...(hostMcpConnection
+          ? acpHostMcpServers(
+              hostMcpConnection,
+              supportsHttpMcp,
+              options.environment,
+            )
+          : []),
+        ...initiativeMcp.value,
+      ];
 
       let modes: SessionModeState | null | undefined;
       let configOptions: SessionConfigOption[] | null | undefined;
@@ -468,7 +488,7 @@ function startKimiRun(
             context.request(acp.methods.agent.session.resume, {
               sessionId: options.input.sessionId,
               cwd: options.input.cwd,
-              mcpServers: hostMcpServers,
+              mcpServers: sessionMcpServers,
             }),
             "session/resume",
           );
@@ -481,7 +501,7 @@ function startKimiRun(
             context.request(acp.methods.agent.session.load, {
               sessionId: options.input.sessionId,
               cwd: options.input.cwd,
-              mcpServers: hostMcpServers,
+              mcpServers: sessionMcpServers,
             }),
             "session/load",
           );
@@ -500,7 +520,7 @@ function startKimiRun(
         const created = await requestControl(
           context.request(acp.methods.agent.session.new, {
             cwd: options.input.cwd,
-            mcpServers: hostMcpServers,
+            mcpServers: sessionMcpServers,
           }),
           "session/new",
         );

@@ -189,6 +189,30 @@ describe("todo command handler", () => {
     }]);
   });
 
+  it("passes the chosen initiative through to the task's new chat", async () => {
+    const { store, project, creation, run, startPayload } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Group this work" });
+    const initiative = store.initiatives.create({ id: randomUUID(), name: "Grouped tasks" });
+    const payload = startPayload(id);
+    const withInitiative = { ...payload, conversation: { ...payload.conversation, initiativeId: initiative.id } };
+
+    const { command, events } = await run("todo.start", withInitiative);
+
+    expect(creation.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      projectId: project.id,
+      initiativeId: initiative.id,
+    }), command.requestId);
+    const { conversationId } = (events.at(-1) as Extract<ServerEvent, { type: "request.result" }>).result as {
+      conversationId: string;
+    };
+    expect(store.conversationShell(conversationId)).toMatchObject({
+      projectId: project.id,
+      initiativeId: initiative.id,
+    });
+    expect(store.todos.get(id)?.conversationId).toBe(conversationId);
+  });
+
   it("refuses to start a task while Inertia is updating and starts it once the update ends", async () => {
     const { store, creation, turns, run, startPayload } = fixture(providersOn);
     const id = randomUUID();

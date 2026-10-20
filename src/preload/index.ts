@@ -288,6 +288,8 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.openAttachmentExternally, id) as Promise<void>,
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
+  openInitiativeSkillsFolder: (initiativeId: string) =>
+    ipcRenderer.invoke(IPC.openInitiativeSkillsFolder, initiativeId) as Promise<void>,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
   showContextMenu: (request: Parameters<DesktopBridge["showContextMenu"]>[0]) =>
     ipcRenderer.invoke(IPC.showContextMenu, request) as ReturnType<DesktopBridge["showContextMenu"]>,
@@ -339,6 +341,10 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.clearBackendCredential, request) as ReturnType<DesktopBridge["clearBackendCredential"]>,
   getBackendCredentialState: (request: Parameters<DesktopBridge["getBackendCredentialState"]>[0]) =>
     ipcRenderer.invoke(IPC.getBackendCredentialState, request) as ReturnType<DesktopBridge["getBackendCredentialState"]>,
+  setInitiativeMcpSecret: (request: Parameters<DesktopBridge["setInitiativeMcpSecret"]>[0]) =>
+    ipcRenderer.invoke(IPC.setInitiativeMcpSecret, request) as ReturnType<DesktopBridge["setInitiativeMcpSecret"]>,
+  getInitiativeMcpSecretState: (request: Parameters<DesktopBridge["getInitiativeMcpSecretState"]>[0]) =>
+    ipcRenderer.invoke(IPC.getInitiativeMcpSecretState, request) as ReturnType<DesktopBridge["getInitiativeMcpSecretState"]>,
   getPrivateConnectState: () =>
     ipcRenderer.invoke(PRIVATE_CONNECT_IPC.getState) as ReturnType<DesktopBridge["getPrivateConnectState"]>,
   onPrivateConnectState: (listener: Parameters<DesktopBridge["onPrivateConnectState"]>[0]) => {

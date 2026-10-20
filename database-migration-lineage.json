@@ -747,6 +747,16 @@
       "version": 98,
       "name": "PersistConversationTitleLocks",
       "digest": "039b5abb2b597512e2867f1e8a6e12ebba015af44969c26e7bf359d05502af5e"
+    },
+    {
+      "version": 99,
+      "name": "PersistInitiatives",
+      "digest": "a7a251bbbed0e87110710c22edf766f3919e41a93e3ecfe848d68038c80e5536"
+    },
+    {
+      "version": 100,
+      "name": "PersistInitiativeNotes",
+      "digest": "1dcca691adc24fe8526eb5430e981e497ecba073bd607c84a63a861dd3751cc8"
     }
   ]
 }

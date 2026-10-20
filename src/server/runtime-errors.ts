@@ -12,6 +12,7 @@ import { ProviderMaintenanceError } from "./provider/maintenance-controller";
 import { WorkspacePathAuthorityError } from "./workspace-path-authority";
 import { PromptPresetRepositoryError } from "./persistence/prompt-preset-repository";
 import { TodoRepositoryError } from "./persistence/todo-repository";
+import { InitiativeRepositoryError } from "./persistence/initiative-repository";
 import { ConversationAttachmentDiskFullError, ConversationAttachmentStorageFullError } from "../node/conversation-attachment-store-capacity";
 import {
   ATTACHMENT_RESOLUTION_PUBLIC_ERROR,
@@ -51,6 +52,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof WorkspacePathAuthorityError
     || error instanceof PromptPresetRepositoryError
     || error instanceof TodoRepositoryError
+    || error instanceof InitiativeRepositoryError
     || error instanceof ConversationAttachmentDiskFullError
     || error instanceof ConversationAttachmentStorageFullError
   ) return error.message;

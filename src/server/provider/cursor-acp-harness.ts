@@ -52,6 +52,11 @@ import {
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
 import {
+  acpInitiativeMcpServers,
+  inheritedLaunchCredentialNames,
+  withoutInheritedCredentials,
+} from "./initiative-mcp-config";
+import {
   cursorCleanupResult,
   cursorRuntimeFailure,
 } from "./cursor-acp-failures";
@@ -524,13 +529,28 @@ function startCursorRun(
     if (hostMcpConnection) {
       secretRedactor.addSecrets([hostMcpConnection.bearerToken, hostMcpConnection.url]);
     }
-    const hostMcpServers = hostMcpConnection
-      ? acpHostMcpServers(
-          hostMcpConnection,
-          initialized.agentCapabilities?.mcpCapabilities?.http === true,
-          options.environment,
-        )
-      : [];
+    const supportsHttpMcp = initialized.agentCapabilities?.mcpCapabilities?.http === true;
+    // The initiative's servers follow Inertia's host server. A stdio server
+    // the agent starts gets an empty value for every launch credential it
+    // would inherit; resolved secrets are redacted by the run coordinator.
+    const initiativeMcp = acpInitiativeMcpServers(
+      "Cursor",
+      withoutInheritedCredentials(options.input.mcpServers ?? [], inheritedLaunchCredentialNames(options.environment)),
+      supportsHttpMcp,
+    );
+    for (const skipped of initiativeMcp.skipped) {
+      emitter.activity("system", "info", `Initiative MCP server not added · ${skipped.name}`, { detail: skipped.reason });
+    }
+    const sessionMcpServers = [
+      ...(hostMcpConnection
+        ? acpHostMcpServers(
+            hostMcpConnection,
+            supportsHttpMcp,
+            options.environment,
+          )
+        : []),
+      ...initiativeMcp.value,
+    ];
     const cursorLogin = selectAcpAgentAuthMethod("Cursor", initialized.authMethods, "cursor_login");
     if (cursorLogin) {
       activeFailurePhase = "auth"; activeTerminalEvent = "authenticate";
@@ -549,7 +569,7 @@ function startCursorRun(
       const loadRequest = requestControl(context.request(acp.methods.agent.session.load, {
         sessionId: options.input.sessionId,
         cwd: options.input.cwd,
-        mcpServers: hostMcpServers,
+        mcpServers: sessionMcpServers,
       }), "session/load");
       // The requested session ID is known before the connection starts, so a
       // same-session notification received before this request could be stale.
@@ -563,7 +583,7 @@ function startCursorRun(
       activeFailurePhase = "session"; activeTerminalEvent = "session/new";
       const created = await requestControl(context.request(acp.methods.agent.session.new, {
         cwd: options.input.cwd,
-        mcpServers: hostMcpServers,
+        mcpServers: sessionMcpServers,
       }), "session/new");
       sessionId = created.sessionId;
       todoSessions.reset(sessionId);

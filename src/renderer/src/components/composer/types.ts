@@ -8,6 +8,7 @@ import type {
   Conversation,
   ConversationContextPacketSummary,
   ConversationLatestTurnSummary,
+  Initiative,
   MessageSendAcceptance,
   ModelBackendProfileView,
   Project,
@@ -31,6 +32,9 @@ import type {
   ConversationContextCommandRunner,
   ConversationContextSourceOption,
 } from "../conversation-context/types";
+import type { ComposerAccessCeiling } from "../../utils/initiativeAccess";
+
+export type { ComposerAccessCeiling };
 
 export interface ComposerProps {
   conversation: Conversation;
@@ -38,6 +42,12 @@ export interface ComposerProps {
   showCheckoutContext?: boolean;
   scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
+  newChatInitiativePicker?: NewChatInitiativePicker;
+  initiativeChip?: ComposerInitiativeChip;
+  /** The chat's initiative access ceiling; options above it are disabled with its reason. */
+  accessCeiling?: ComposerAccessCeiling;
+  /** Names the initiative a new chat's model comes from, when it supplies it. */
+  modelSourceLabel?: string;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -124,6 +134,24 @@ export interface NewChatProjectPicker {
   selectedProject: Project;
   disabled: boolean;
   onChange: (project: Project | null) => void;
+}
+
+/**
+ * The initiative an existing chat belongs to, shown quietly with its checkout
+ * context. Choosing it opens the Initiative page.
+ */
+export interface ComposerInitiativeChip {
+  name: string;
+  color: Initiative["color"];
+  onOpen: () => void;
+}
+
+export interface NewChatInitiativePicker {
+  /** Every initiative; the picker offers only active ones. */
+  initiatives: readonly Initiative[];
+  selectedId: string | null;
+  disabled: boolean;
+  onChange: (initiativeId: string | null) => void;
 }
 
 export interface ComposerQueuedPrompt {

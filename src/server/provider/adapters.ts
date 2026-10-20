@@ -217,6 +217,18 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   ) {
     throw new ProviderRuntimeError("invalid_input", "An attachment read root is invalid.");
   }
+  if (
+    input.initiativeSkillsRoot !== undefined
+    && (
+      typeof input.initiativeSkillsRoot !== "string"
+      || !isAbsolute(input.initiativeSkillsRoot)
+      || input.initiativeSkillsRoot.length > 4096
+      || input.initiativeSkillsRoot.includes("\0")
+      || input.harnessId !== "claude-agent-sdk"
+    )
+  ) {
+    throw new ProviderRuntimeError("invalid_input", "The initiative skills folder is invalid.");
+  }
   const skills = input.skills ?? [];
   if (skills.length > MAX_SKILL_COUNT) {
     throw new ProviderRuntimeError("invalid_input", "Too many skills were selected.");

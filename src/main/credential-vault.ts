@@ -690,6 +690,23 @@ export class CredentialVault {
     return await this.state(profileId, secretReference);
   }
 
+  /**
+   * Stores a secret under a reference the trusted caller derived, such as an
+   * initiative MCP secret's. Answers only whether a secret is now set.
+   */
+  async setSecret(secretReference: string, secret: string): Promise<BackendCredentialStatus> {
+    if (!isBackendSecretReference(secretReference) || !isBackendCredentialSecret(secret)) {
+      throw new CredentialVaultError(
+        "invalid-input",
+        secret === BACKEND_CREDENTIAL_MASK
+          ? "The masked credential placeholder cannot replace a saved credential."
+          : "The secret is invalid.",
+      );
+    }
+    await this.enqueueMutation(() => this.write(secretReference, secret));
+    return await this.status(secretReference);
+  }
+
   async resolve(secretReference: string): Promise<string | null> {
     if (!isBackendSecretReference(secretReference)) {
       throw new CredentialVaultError(

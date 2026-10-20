@@ -76,6 +76,7 @@ export function applyFreshSessionFallback(
     executionContext: request.persistence,
     sessionRecovery: request.sessionRecovery,
     restartedAt,
+    initiativeContext: request.initiativeContext,
   });
   const {
     sessionId: _sessionId,

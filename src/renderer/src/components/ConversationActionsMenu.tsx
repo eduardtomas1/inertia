@@ -14,6 +14,7 @@ import {
   Clock,
   Columns2,
   Copy,
+  Flag,
   FolderOpen,
   Hash,
   History,
@@ -21,18 +22,20 @@ import {
   Pencil,
   PictureInPicture2,
   Pin,
+  Plus,
   RefreshCw,
   Settings,
   Trash2,
   X,
 } from "lucide-react";
-import type { Conversation, WorkspaceRun } from "@shared/contracts";
+import type { Conversation, Initiative, WorkspaceRun } from "@shared/contracts";
 import { workspaceRunAttentionView } from "../../../shared/attention";
 import type { SidebarThreadView } from "../utils/sidebarModel";
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { canOrganizeThread, threadSnoozePresets } from "../../../shared/thread-organization";
 import { ThreadSubmenu } from "./sidebar/ThreadSubmenu";
 import { HintButton } from "./HintButton";
+import { InitiativeDot } from "./initiatives/InitiativeMark";
 import "./sidebar/thread-actions.css";
 
 type DismissReason = "selection" | "context-change";
@@ -107,6 +110,9 @@ interface ConversationActionsMenuProps {
   onSettleConversation: (conversation: Conversation) => void;
   onSnoozeConversation: (conversation: Conversation, until: string | null) => void;
   onStartRename: () => void;
+  initiatives?: readonly Initiative[];
+  onAssignInitiative?: (conversation: Conversation, initiativeId: string | null) => void;
+  onCreateInitiative?: (conversation: Conversation) => void;
 }
 
 export function ConversationActionsMenu({
@@ -139,10 +145,13 @@ export function ConversationActionsMenu({
   onSettleConversation,
   onSnoozeConversation,
   onStartRename,
+  initiatives = [],
+  onAssignInitiative,
+  onCreateInitiative,
 }: ConversationActionsMenuProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
-  const [submenu, setSubmenu] = useState<"snooze" | "copy" | null>(initialSubmenu ?? null);
+  const [submenu, setSubmenu] = useState<"snooze" | "copy" | "initiative" | null>(initialSubmenu ?? null);
   const [presets] = useState(() => threadSnoozePresets(new Date()));
   const setMenuRef = useCallback((node: HTMLDivElement | null) => {
     menuRef.current = node;
@@ -198,6 +207,11 @@ export function ConversationActionsMenu({
     && activeConversationId !== conversation.id,
   );
   const itemProps = { onDismiss };
+  const currentInitiative = conversation.initiativeId
+    ? initiatives.find(({ id }) => id === conversation.initiativeId) ?? null
+    : null;
+  const initiativeTargets = initiatives
+    .filter(({ id, status }) => status === "active" && id !== conversation.initiativeId);
   const copy = async (text: string): Promise<void> => {
     try {
       if (!await window.inertia.copyText(text)) throw new Error("Clipboard unavailable");
@@ -238,6 +252,27 @@ export function ConversationActionsMenu({
           if (current) onSnoozeConversation(conversation, current.until);
         }}>{preset.label}</ConversationMenuItem>)}
       </ThreadSubmenu>
+      {onAssignInitiative && (
+        <ThreadSubmenu label="Move to initiative" icon={<Flag size={14} />}
+          open={submenu === "initiative"} onOpenChange={(open) => setSubmenu((current) => open ? "initiative" : current === "initiative" ? null : current)}>
+          {initiativeTargets.map((initiative) => (
+            <ConversationMenuItem {...itemProps} key={initiative.id}
+              onActivate={() => onAssignInitiative(conversation, initiative.id)}>
+              <InitiativeDot color={initiative.color} />{initiative.name}
+            </ConversationMenuItem>
+          ))}
+          {onCreateInitiative && (
+            <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={() => onCreateInitiative(conversation)}>
+              <Plus size={14} />New initiative…
+            </ConversationMenuItem>
+          )}
+          {conversation.initiativeId && (
+            <ConversationMenuItem {...itemProps} onActivate={() => onAssignInitiative(conversation, null)}>
+              <X size={14} />{currentInitiative ? `Remove from ${currentInitiative.name}` : "Remove from initiative"}
+            </ConversationMenuItem>
+          )}
+        </ThreadSubmenu>
+      )}
       <div role="separator" />
       <ConversationMenuItem {...itemProps} restoreFocus={false} onActivate={onStartRename}><Pencil size={14} />Rename thread</ConversationMenuItem>
       {onRegenerateTitle && <ConversationMenuItem {...itemProps} disabled={!canSettle} hint={canSettle ? "Use the latest user message as the title. Runs locally without an AI request." : "Available after the current turn finishes."} onActivate={onRegenerateTitle}><RefreshCw size={14} />Regenerate title</ConversationMenuItem>}

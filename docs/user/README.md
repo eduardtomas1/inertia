@@ -7,7 +7,7 @@ Inertia is a calm desktop workspace for building with coding agents. It keeps ag
 | Guide | What it covers |
 |---|---|
 | **[Getting started](getting-started.md)** | Install Inertia, add a project and connect your first agent. |
-| **[Chats and agents](chats-and-agents.md)** | Prompts with context, models and access modes, and keeping work organized. |
+| **[Chats and agents](chats-and-agents.md)** | Prompts with context, models and access modes, initiatives, and keeping work organized. |
 | **[Working side by side](working-side-by-side.md)** | Split view and separate chat windows. |
 | **[Duo](duo.md)** | One brief for two agents, with an optional third-model comparison. |
 | **[Review and ship](review-and-ship.md)** | Diffs, hunk review, commits, branches and pull requests. |

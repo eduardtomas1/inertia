@@ -380,6 +380,8 @@ export function createConversationCommandHandler(
           snoozedUntil,
           ...update
         } = command.payload;
+        // Access above the chat's initiative limit is refused by the store,
+        // with a message naming the initiative, before anything changes.
         const current = dependencies.store.conversation(conversationId);
         if (
           dependencies.backendProfileController.isExternalSelection(

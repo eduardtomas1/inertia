@@ -34,6 +34,12 @@ import type {
   ProviderSteerInput,
 } from "../../provider/contracts";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
+import type { TurnInitiativeContextRecord } from "../../persistence/types";
+
+/** A re-assembled request for a fresh provider session, with what it carries of the initiative. */
+export type FreshSessionTurnRequest = AssembledTurnRequest & {
+  initiativeContext: TurnInitiativeContextRecord | null;
+};
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
 import type { DeltaTimerScheduler } from "./turn-stream-coalescer";
 import type { TurnStreamChannel } from "./turn-stream-channel";
@@ -184,6 +190,8 @@ export interface TurnControllerHooks {
   /** Optional metadata; failure cannot change a committed provider outcome. */
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
   validateModelSelection?(selection: ModelSelection): ModelSelection;
+  /** The contained skills folder of the chat's initiative, when it offers one. */
+  initiativeSkillsRoot?(conversation: Conversation): string | null;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
   attachmentReadRoots?(input: {
     conversationId: string;
@@ -306,6 +314,12 @@ export interface ActiveTurn {
   runStartedAt: number;
   workspaceRunCreated: boolean;
   providerRunStarted: boolean;
+  /**
+   * True once the provider was handed this request. Unlike providerRunStarted
+   * it stays set after the provider run is cleaned up, so settlement knows
+   * whether the request (and the initiative material it carried) was delivered.
+   */
+  providerInvoked: boolean;
   providerStartAcknowledgement: ((started: boolean) => void) | null;
   nativeGoalStartAcknowledgement: NativeGoalStartAcknowledgement | null;
   attachmentsReleased: boolean;
@@ -325,7 +339,7 @@ export interface ActiveTurn {
   providerStopStarted: boolean;
   sessionAfter: string | null;
   providerSessionTitle?: string;
-  freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
+  freshSessionRequest?: ((excludedMessageId: string) => FreshSessionTurnRequest) | null;
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;
   assistantPendingHighSurrogate: string;

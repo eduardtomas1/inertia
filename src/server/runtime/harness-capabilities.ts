@@ -35,6 +35,11 @@ export interface HarnessCapabilityContext {
   turn: AgentTurn;
 }
 
+/** What decides, per turn, whether a conditional pack is offered. */
+export interface HarnessCapabilityAvailabilityContext {
+  conversation: Conversation;
+}
+
 export interface HarnessCapabilityEvaluation {
   tags: readonly string[];
   evidenceKinds: readonly (
@@ -64,6 +69,15 @@ export interface HarnessCapabilityPack {
   tools: readonly HarnessCapabilityTool[];
   retiredTools?: readonly HarnessCapabilityTool[];
   evaluation: HarnessCapabilityEvaluation;
+  /**
+   * Makes the pack conditional. It is offered to a turn (its instructions in
+   * the request, its tools in the bridge's definitions) only when this returns
+   * true for that turn's chat, read at the moment the request or bridge is
+   * built. Its tools stay callable either way, like retired tools, because a
+   * provider session may have registered them while the pack was offered;
+   * their handlers must re-check availability and refuse with a clear reason.
+   */
+  availableFor?(context: HarnessCapabilityAvailabilityContext): boolean;
 }
 
 export interface HarnessCapabilityManifest {
@@ -228,7 +242,6 @@ export class HarnessCapabilityRegistry {
   readonly #packs: readonly HarnessCapabilityPack[];
   readonly #tools: ReadonlyMap<string, HarnessCapabilityTool>;
   readonly #retiredToolNames: ReadonlySet<string>;
-  readonly #definitions: readonly ProviderHostToolDefinition[];
   readonly #instructions: readonly HiddenProviderInstruction[];
   readonly #manifest: HarnessCapabilityManifest;
 
@@ -340,9 +353,6 @@ export class HarnessCapabilityRegistry {
     this.#retiredToolNames = new Set(
       retiredTools.map(({ definition }) => definition.name),
     );
-    this.#definitions = Object.freeze(
-      orderedTools.map(({ definition }) => Object.freeze({ ...definition })),
-    );
     this.#instructions = Object.freeze(
       this.#packs.flatMap((pack) => (
         pack.instructions.map((instruction) => Object.freeze({ ...instruction }))
@@ -370,6 +380,8 @@ export class HarnessCapabilityRegistry {
         destructive: definition.destructive === true,
       })),
       evaluation: pack.evaluation,
+      // Present only for conditional packs, so unconditional digests are unchanged.
+      ...(pack.availableFor ? { conditional: true } : {}),
     }));
     this.#manifest = Object.freeze({
       schemaVersion: 1,
@@ -380,7 +392,13 @@ export class HarnessCapabilityRegistry {
     });
   }
 
-  instructions(): readonly HiddenProviderInstruction[] {
+  /** The reviewed instructions of the packs offered to this turn's chat. */
+  instructionsFor(context: HarnessCapabilityAvailabilityContext): readonly HiddenProviderInstruction[] {
+    return Object.freeze(this.#offered(context).flatMap((pack) => pack.instructions));
+  }
+
+  /** Every reviewed instruction, whether or not a chat is offered its pack; for inspection and tests. */
+  allInstructions(): readonly HiddenProviderInstruction[] {
     return this.#instructions;
   }
 
@@ -388,10 +406,23 @@ export class HarnessCapabilityRegistry {
     return this.#manifest;
   }
 
+  /**
+   * Advertises the tools of the packs offered to this turn's chat. Tools of
+   * packs it is not offered are listed with the retired tools: a provider
+   * session that registered them earlier can still call them, and their
+   * handlers refuse.
+   */
   bridgeFor(context: HarnessCapabilityContext): ProviderHostToolBridge {
+    const offered = new Set(this.#offered(context));
+    const toolsOf = (available: boolean) => this.#packs
+      .filter((pack) => offered.has(pack) === available)
+      .flatMap((pack) => pack.tools);
     return {
-      definitions: this.#definitions,
-      retiredToolNames: this.#retiredToolNames,
+      definitions: Object.freeze(toolsOf(true).map(({ definition }) => definition)),
+      retiredToolNames: new Set([
+        ...this.#retiredToolNames,
+        ...toolsOf(false).map(({ definition }) => definition.name),
+      ]),
       invoke: async (call) => {
         const tool = this.#tools.get(call.tool);
         if (!tool) return failure("That Inertia capability tool is unavailable.");
@@ -402,5 +433,17 @@ export class HarnessCapabilityRegistry {
         }
       },
     };
+  }
+
+  /** Packs offered to this chat now; a predicate that throws withholds its pack. */
+  #offered(context: HarnessCapabilityAvailabilityContext): readonly HarnessCapabilityPack[] {
+    return this.#packs.filter((pack) => {
+      if (!pack.availableFor) return true;
+      try {
+        return pack.availableFor({ conversation: context.conversation }) === true;
+      } catch {
+        return false;
+      }
+    });
   }
 }

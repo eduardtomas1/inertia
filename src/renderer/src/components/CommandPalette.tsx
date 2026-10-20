@@ -1,7 +1,8 @@
-import { ChevronRight, CircleHelp, FolderPlus, ListTodo, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, CircleHelp, Flag, FolderPlus, ListTodo, MessageSquare, Plus, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { Conversation, Project } from "@shared/contracts";
+import type { Conversation, Initiative, Project } from "@shared/contracts";
+import { INITIATIVE_STATUS_LABELS, initiativeMembers } from "@shared/initiatives";
 import { MESSAGE_SEARCH_QUERY_MAX, messageSearchPattern, type MessageSearchHit } from "@shared/message-search";
 import { useMessageSearch, type MessageSearchCommand } from "../hooks/useMessageSearch";
 import type { SettingsTarget } from "../lib/settingsTarget";
@@ -10,10 +11,11 @@ import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { openHelpGuide } from "../utils/helpGuide";
 import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
+import { InitiativeDot } from "./initiatives/InitiativeMark";
 import { isProjectSettingsRow, SETTINGS_SECTION_ROWS } from "./settingsRows";
 import { searchSettings } from "./settings/settingsMatcher";
 
-export type CommandPaletteView = "search" | "new-chat";
+export type CommandPaletteView = "search" | "new-chat" | "move-initiative";
 
 type CommandPaletteProps = {
   open: boolean;
@@ -33,6 +35,13 @@ type CommandPaletteProps = {
   onAddProject: () => void;
   onOpenSettings: (target?: SettingsTarget) => void;
   onOpenTasks?: () => void;
+  initiatives?: readonly Initiative[];
+  /** The chat that "Move chat to initiative…" acts on. */
+  activeConversation?: Conversation | null;
+  onOpenInitiative?: (initiativeId: string) => void;
+  onNewInitiative?: () => void;
+  onMoveConversationToInitiative?: (conversation: Conversation, initiativeId: string | null) => void;
+  onNewInitiativeForConversation?: (conversation: Conversation) => void;
 };
 
 type PaletteItem = {
@@ -48,7 +57,7 @@ type PaletteItem = {
   view?: CommandPaletteView;
 };
 
-const groupOrder = ["Actions", "Settings", "Projects", "Threads", "Messages"] as const;
+const groupOrder = ["Actions", "Settings", "Projects", "Initiatives", "Threads", "Messages"] as const;
 const ROWS_COVERED_BY_ACTIONS = new Set(["open-settings"]);
 
 function score(label: string, detail: string | undefined, query: string, keywords = ""): number {
@@ -92,16 +101,20 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return <>{parts}{text.slice(offset)}</>;
 }
 
-export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks }: CommandPaletteProps): React.JSX.Element | null {
+const EMPTY_INITIATIVES: readonly Initiative[] = [];
+
+export function CommandPalette({ open, initialView = "search", currentProjectId, projects, conversations, newThreadShortcut, onClose, onSelectProject, onSelectConversation, sendCommand, onSelectMessage, onNewThread, onNewThreadIn, onNewThreadWithoutProject, onAddProject, onOpenSettings, onOpenTasks, initiatives = EMPTY_INITIATIVES, activeConversation = null, onOpenInitiative, onNewInitiative, onMoveConversationToInitiative, onNewInitiativeForConversation }: CommandPaletteProps): React.JSX.Element | null {
   const [view, setView] = useState(initialView);
   const choosingProject = view === "new-chat";
+  const choosingInitiative = view === "move-initiative";
+  const choosing = choosingProject || choosingInitiative;
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [openError, setOpenError] = useState(false);
   const opening = useRef<AbortController | null>(null);
   const restorePriorFocus = useRef(true);
   const searchRef = useRef<HTMLInputElement>(null);
-  const search = useMessageSearch(open && !choosingProject, query, sendCommand);
+  const search = useMessageSearch(open && !choosing, query, sendCommand);
   useNativePreviewSuspension(open);
 
   useLayoutEffect(() => {
@@ -126,14 +139,28 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
       ...(onNewThreadWithoutProject ? [{ id: "action:no-project", group: "Actions" as const, label: "Start without a project", icon: <SquarePen size={14} />, run: onNewThreadWithoutProject }] : []),
       { id: "action:add-project", group: "Actions", label: "Add project", icon: <FolderPlus size={14} />, run: onAddProject },
       ...(onOpenTasks ? [{ id: "action:tasks", group: "Actions" as const, label: "Open tasks", icon: <ListTodo size={14} />, run: onOpenTasks }] : []),
+      ...(onNewInitiative ? [{ id: "action:new-initiative", group: "Actions" as const, label: "New initiative…", keywords: "group chats", icon: <Plus size={14} />, run: onNewInitiative }] : []),
+      ...(activeConversation && onMoveConversationToInitiative ? [{ id: "action:move-initiative", group: "Actions" as const, label: "Move chat to initiative…", detail: activeConversation.title, keywords: "group initiative", icon: <Flag size={14} />, view: "move-initiative" as const }] : []),
       { id: "action:settings", group: "Actions", label: "Open settings", icon: <Settings size={14} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", icon: <CircleHelp size={14} />, run: openHelpGuide },
     ];
     const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={14} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={14} />, run: () => onSelectConversation(thread) }));
-    return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onOpenTasks, onSelectConversation, onSelectProject, projects]);
+    const members = initiativeMembers(
+      conversations.filter(({ archivedAt }) => archivedAt === null),
+      ({ initiativeId }) => initiativeId,
+    );
+    const initiativeItems: PaletteItem[] = onOpenInitiative ? initiatives.map((initiative) => {
+      const count = members.get(initiative.id)?.length ?? 0;
+      return {
+        id: `initiative:${initiative.id}`, group: "Initiatives" as const, label: initiative.name,
+        detail: `${INITIATIVE_STATUS_LABELS[initiative.status]} · ${count} ${count === 1 ? "chat" : "chats"}`,
+        keywords: "initiative", icon: <InitiativeDot color={initiative.color} />, run: () => onOpenInitiative(initiative.id),
+      };
+    }) : [];
+    return [...actions, ...projectItems, ...initiativeItems, ...threadItems];
+  }, [activeConversation, conversations, initiatives, newThreadShortcut, onAddProject, onMoveConversationToInitiative, onNewInitiative, onNewThread, onNewThreadWithoutProject, onOpenInitiative, onOpenSettings, onOpenTasks, onSelectConversation, onSelectProject, projects]);
   const settingsItems = useMemo<PaletteItem[]>(() => {
     const regular = projects.filter((project) => project.workspaceKind !== "scratch");
     const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;
@@ -170,8 +197,27 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     });
     return choices;
   }, [currentProjectId, onNewThreadIn, onNewThreadWithoutProject, projects]);
-  const filterView = (value: string): PaletteItem[] => choosingProject ? filterItems(projectChoices, value, false) : searchItems(allItems, settingsItems, value);
-  const items = useMemo(() => choosingProject ? filterItems(projectChoices, query, false) : [...searchItems(allItems, settingsItems, query), ...messageItems], [allItems, choosingProject, messageItems, projectChoices, query, settingsItems]);
+  const initiativeChoices = useMemo<PaletteItem[]>(() => {
+    if (!activeConversation || !onMoveConversationToInitiative) return [];
+    const current = initiatives.find(({ id }) => id === activeConversation.initiativeId) ?? null;
+    return [
+      ...initiatives.filter(({ id, status }) => status === "active" && id !== activeConversation.initiativeId).map((initiative): PaletteItem => ({
+        id: `move-initiative:${initiative.id}`, group: "Initiatives", label: initiative.name,
+        icon: <InitiativeDot color={initiative.color} />, run: () => onMoveConversationToInitiative(activeConversation, initiative.id),
+      })),
+      ...(onNewInitiativeForConversation ? [{
+        id: "move-initiative:new", group: "Initiatives" as const, label: "New initiative…", detail: "Create one and move this chat into it",
+        icon: <Plus size={14} />, run: () => onNewInitiativeForConversation(activeConversation),
+      }] : []),
+      ...(activeConversation.initiativeId ? [{
+        id: "move-initiative:none", group: "Initiatives" as const, label: "Remove from initiative", detail: current?.name,
+        icon: <X size={14} />, run: () => onMoveConversationToInitiative(activeConversation, null),
+      }] : []),
+    ];
+  }, [activeConversation, initiatives, onMoveConversationToInitiative, onNewInitiativeForConversation]);
+  const choices = choosingProject ? projectChoices : initiativeChoices;
+  const filterView = (value: string): PaletteItem[] => choosing ? filterItems(choices, value, false) : searchItems(allItems, settingsItems, value);
+  const items = useMemo(() => choosing ? filterItems(choices, query, false) : [...searchItems(allItems, settingsItems, query), ...messageItems], [allItems, choices, choosing, messageItems, query, settingsItems]);
   const activeIndex = Math.max(0, items.findIndex(({ id }) => id === activeId));
   const activeItemId = items[activeIndex]?.id;
   useEffect(() => {
@@ -230,17 +276,17 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         className="command-palette"
         role="dialog"
         aria-modal="true"
-        aria-label={choosingProject ? "New chat in project" : "Search Inertia"}
+        aria-label={choosingProject ? "New chat in project" : choosingInitiative ? "Move chat to initiative" : "Search Inertia"}
         onKeyDown={(event) => {
           trapModalFocus(event, event.currentTarget);
           if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
           event.preventDefault();
-          if (choosingProject && initialView === "search") changeView("search");
+          if (choosing && initialView === "search") changeView("search");
           else closePalette();
         }}
       >
         <div className="palette-search">
-          {choosingProject ? <SquarePen size={16} aria-hidden="true" /> : <Search size={16} />}
+          {choosingProject ? <SquarePen size={16} aria-hidden="true" /> : choosingInitiative ? <Flag size={16} aria-hidden="true" /> : <Search size={16} />}
           <input
             ref={searchRef}
             value={query}
@@ -248,7 +294,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
             onChange={(event) => { opening.current?.abort(); setOpenError(false); setQuery(event.target.value); setActiveId(null); }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return;
-              if (event.key === "Backspace" && choosingProject && initialView === "search" && !event.currentTarget.value) { event.preventDefault(); changeView("search"); }
+              if (event.key === "Backspace" && choosing && initialView === "search" && !event.currentTarget.value) { event.preventDefault(); changeView("search"); }
               if (event.key === "ArrowDown") { event.preventDefault(); setActiveId(items[(activeIndex + 1) % items.length]?.id ?? null); }
               if (event.key === "ArrowUp") { event.preventDefault(); setActiveId(items[(activeIndex - 1 + items.length) % items.length]?.id ?? null); }
               if (event.key === "Enter") {
@@ -258,8 +304,8 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
                 run(currentItems[currentQuery === query ? activeIndex : 0]);
               }
             }}
-            placeholder={choosingProject ? "Start a new chat in…" : "Search commands, projects, chats, and messages…"}
-            aria-label={choosingProject ? "Search projects for the new chat" : "Search commands, projects, chats, and messages"}
+            placeholder={choosingProject ? "Start a new chat in…" : choosingInitiative ? "Move this chat to…" : "Search commands, projects, chats, and messages…"}
+            aria-label={choosingProject ? "Search projects for the new chat" : choosingInitiative ? "Search initiatives for this chat" : "Search commands, projects, chats, and messages"}
             aria-controls="palette-results"
             aria-activedescendant={items[activeIndex] ? `palette-${items[activeIndex].id}` : undefined}
             role="combobox"
@@ -269,7 +315,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
           <IconButton label="Close search" onClick={closePalette}><X size={16} /></IconButton>
         </div>
         <div className="palette-results">
-          <div id="palette-results" role="listbox" aria-label={choosingProject ? "Projects" : "Search results"}>
+          <div id="palette-results" role="listbox" aria-label={choosingProject ? "Projects" : choosingInitiative ? "Initiatives" : "Search results"}>
           {groups.map(({ group, items: groupItems }) => (
             <div className="palette-group" role="group" aria-label={group} key={group}>
               <span>{group}</span>
@@ -286,8 +332,8 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
           {search.error && <div className="palette-search-status" role="status">{search.error} <button type="button" onClick={() => { search.retry(); searchRef.current?.focus(); }}>Retry</button></div>}
           {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}
           {search.result?.hasMore && <div className="palette-search-status" role="status">More message matches are available. Refine your search to find them.</div>}
-          {items.length === 0 && (choosingProject
-            ? <p className="palette-empty">No matching projects</p>
+          {items.length === 0 && (choosing
+            ? <p className="palette-empty">{choosingProject ? "No matching projects" : "No matching initiatives"}</p>
             : !search.loading && !search.error && !search.result?.incomplete && <p className="palette-empty">No matches</p>)}
         </div>
       </section>

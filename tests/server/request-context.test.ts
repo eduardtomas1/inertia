@@ -19,6 +19,7 @@ import {
   assembleTurnRequest,
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
+  validatePersistedTurnExecutionContext,
 } from "../../src/server/runtime/turns/request-context";
 
 const directories: string[] = [];
@@ -684,5 +685,201 @@ describe("restored history respects the selected request's capacity", () => {
     expect(assembleTurnRequest({ ...request, restoredHistory })).toEqual({ ...assembleTurnRequest(request), sessionRecovery: unrestored });
     request.visibleContent += "x";
     expect(() => assembleTurnRequest({ ...request, restoredHistory })).toThrow(/Assembled execution payload exceeds/u);
+  });
+});
+
+describe("initiative execution context", () => {
+  const brief = {
+    label: "Initiative brief · Checkout redesign · revision 3",
+    content: `Initiative: Checkout redesign\n\n## Objective\n${"Ship the shorter checkout. ".repeat(290)}`,
+  };
+  const notes = {
+    label: "Initiative notes · Checkout redesign · 2 notes · revision 1",
+    content: `- Database: Use Postgres.\n- Payments: ${"Stripe only. ".repeat(600)}`,
+  };
+  const left = {
+    label: "Initiative change · Checkout",
+    content: 'This chat is no longer part of the initiative "Checkout"; its brief and notes no longer apply. It is now part of the initiative "Checkout redesign".',
+  };
+  const historyBlock = {
+    label: "Earlier messages restored for a new session · 12 messages",
+    content: JSON.stringify({ about: "Historical reference only", messages: [["user", "h".repeat(60_000)]] }),
+  };
+
+  it("places the brief and notes after documents and before files, chat packets and restored history", async () => {
+    const cwd = await workspace();
+    await writeFile(join(cwd, "form.ts"), "export const form = true;");
+    expect(Buffer.byteLength(brief.content)).toBeLessThanOrEqual(8 * 1_024 + 64);
+    const assembled = assembleTurnRequest({
+      cwd,
+      visibleContent: "Continue the checkout form.",
+      documentContexts: [{
+        attachmentId: "11111111-1111-4111-8111-111111111111",
+        label: "Document · plan.txt",
+        content: "The plan.",
+        truncated: false,
+      }],
+      initiativeContexts: [brief, notes],
+      context: { fileReferences: [{ path: "form.ts" }] },
+      conversationContexts: () => ({
+        blocks: [{ packetId: "packet-1", label: "Chat context · Payments", content: "Earlier decision.", blockIndex: 0, blockCount: 1 }],
+        deliveries: [],
+      }),
+      restoredHistory: () => ({ blocks: [historyBlock], messageCount: 12, omittedMessageCount: 0 }),
+    });
+    const { manifest } = assembled.persistence;
+    expect(manifest.references.map(({ kind, label }) => [kind, label])).toEqual([
+      ["attachment", "Document · plan.txt"],
+      ["initiative", brief.label],
+      ["initiative", notes.label],
+      ["file", "form.ts"],
+      ["attachment", "Chat context · Payments"],
+      ["attachment", historyBlock.label],
+    ]);
+    expect(assembled.sessionRecovery).toEqual({ restoredMessageCount: 12, omittedMessageCount: 0 });
+    // Persisted by digest, so the turn record shows exactly what was shared.
+    const persisted = validatePersistedTurnExecutionContext(assembled.persistence);
+    expect(persisted.blobs.map(({ content }) => content)).toEqual(expect.arrayContaining([brief.content, notes.content]));
+    expect(parseSanitizedTurnExecutionManifest(JSON.parse(JSON.stringify(manifest))).references[1]).toMatchObject({
+      kind: "initiative", label: brief.label, truncated: false,
+    });
+    expect(JSON.stringify(manifest)).not.toContain("Ship the shorter checkout");
+    // The prompt carries both blocks as structured reference material, in order.
+    const structured = JSON.parse(assembled.executionPrompt.split("\n")
+      .find((line) => line.startsWith("{\"version\":1"))!) as { attachments: Array<{ kind: string; content: string }> };
+    expect(structured.attachments.slice(1, 3)).toEqual([
+      expect.objectContaining({ kind: "initiative", content: brief.content }),
+      expect.objectContaining({ kind: "initiative", content: notes.content }),
+    ]);
+    expect(assembled.visibleContent).toBe("Continue the checkout form.");
+  });
+
+  it("reduces the capacity offered to chat packets and restored history, which still fit in a representative turn", async () => {
+    const cwd = await workspace();
+    const capacities = { packets: [] as number[], history: [] as number[] };
+    const request = (initiativeContexts: AssembleTurnRequestInput["initiativeContexts"]): AssembleTurnRequestInput => ({
+      cwd,
+      // A long message, so the capacity left is below the per-turn chat cap.
+      visibleContent: "p".repeat(48 * 1_024),
+      interactionMode: "build",
+      initiativeContexts,
+      conversationContexts: (capacityBytes) => {
+        capacities.packets.push(capacityBytes);
+        return { blocks: [], deliveries: [] };
+      },
+      restoredHistory: (capacityBytes) => {
+        capacities.history.push(capacityBytes);
+        return { blocks: [historyBlock], messageCount: 12, omittedMessageCount: 3 };
+      },
+    });
+    const plain = assembleTurnRequest(request(undefined));
+    const shared = assembleTurnRequest(request([brief, notes]));
+    const sharedBytes = Buffer.byteLength(brief.content) + Buffer.byteLength(notes.content);
+    expect(capacities.packets[0]! - capacities.packets[1]!).toBeGreaterThanOrEqual(sharedBytes);
+    expect(capacities.history[0]! - capacities.history[1]!).toBeGreaterThanOrEqual(sharedBytes);
+    expect(plain.sessionRecovery).toEqual({ restoredMessageCount: 12, omittedMessageCount: 3 });
+    expect(shared.sessionRecovery).toEqual({ restoredMessageCount: 12, omittedMessageCount: 3 });
+    expect(shared.persistence.manifest.references.map(({ kind }) => kind)).toEqual(["initiative", "initiative", "attachment"]);
+  });
+
+  it("counts toward the payload, reference and segment limits with the existing errors", async () => {
+    const cwd = await workspace();
+    const bigBrief = { ...brief, content: "b".repeat(8 * 1_024) };
+    const bigNotes = { ...notes, content: "n".repeat(8 * 1_024) };
+    const crowded: AssembleTurnRequestInput = {
+      cwd,
+      visibleContent: "x",
+      initiativeContexts: [bigBrief, bigNotes],
+      documentContexts: Array.from({ length: 4 }, (_, index) => ({
+        attachmentId: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+        label: `Document · part-${index + 1}.txt`,
+        content: "d".repeat(24 * 1_024),
+        truncated: false,
+      })),
+      internalInstructions: [
+        { label: "one", text: "i".repeat(16 * 1_024) },
+        { label: "two", text: "j".repeat(16 * 1_024) },
+      ],
+      context: {
+        terminalContexts: Array.from({ length: 3 }, (_, i) => ({
+          terminalId: `terminal-${i}`, terminalLabel: "Logs", lineStart: 1, lineEnd: 1, content: "t".repeat(12_000),
+        })),
+      },
+    };
+    const measured = assembleTurnRequest(crowded).persistence.manifest.assembledPayloadBytes;
+    const padding = MAX_EXECUTION_PAYLOAD_BYTES - 2_000 - measured;
+    expect(padding).toBeGreaterThan(2_001);
+    expect(padding).toBeLessThan(60_000);
+    crowded.visibleContent += "x".repeat(padding);
+    const chats = () => ({ blocks: [], deliveries: [] });
+    expect(() => assembleTurnRequest(crowded)).not.toThrow();
+    // The shared blocks take the room referenced chats would have had.
+    expect(() => assembleTurnRequest({ ...crowded, conversationContexts: chats }))
+      .toThrow(/The referenced chats do not fit beside the rest of this message/u);
+    expect(() => assembleTurnRequest({ ...crowded, initiativeContexts: undefined, conversationContexts: chats })).not.toThrow();
+    crowded.visibleContent += "x".repeat(2_001);
+    expect(() => assembleTurnRequest(crowded)).toThrow(/Assembled execution payload exceeds the 245,760 byte limit/u);
+    expect(() => assembleTurnRequest({ ...crowded, initiativeContexts: undefined })).not.toThrow();
+
+    expect(() => assembleTurnRequest({ cwd, visibleContent: "x", initiativeContexts: [left, brief, notes, brief] }))
+      .toThrow(/too many initiative blocks/u);
+    expect(() => assembleTurnRequest({ cwd, visibleContent: "x", initiativeContexts: [{ label: "Initiative brief", content: "" }] }))
+      .toThrow(/Initiative context is empty/u);
+    expect(() => assembleTurnRequest({ cwd, visibleContent: "x", initiativeContexts: [{ label: "Initiative brief", content: "a\0b" }] }))
+      .toThrow(/invalid null byte/u);
+    await writeFile(join(cwd, "source.ts"), "export const answer = 42;");
+    expect(() => assembleTurnRequest({
+      cwd,
+      visibleContent: "x",
+      initiativeContexts: [brief],
+      context: {
+        fileReferences: Array.from({ length: 16 }, () => ({ path: "source.ts" })),
+        diffSelections: Array.from({ length: 8 }, () => ({ path: "source.ts", hunkHeader: "@@ -1 +1 @@", content: "+answer", selectedLineCount: 1 })),
+        terminalContexts: Array.from({ length: 8 }, (_, i) => ({ terminalId: `t-${i}`, terminalLabel: "Tests", lineStart: 1, lineEnd: 1, content: `o-${i}` })),
+      },
+    })).toThrow(/32 reference limit/u);
+  });
+
+  it("fits all three initiative blocks beside the maximum of 8 documents", async () => {
+    const cwd = await workspace();
+    const documents = Array.from({ length: 8 }, (_, index) => ({
+      attachmentId: `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`,
+      label: `Document · part-${index + 1}.txt`,
+      content: `Part ${index + 1}. ${"d".repeat(8 * 1_024)}`,
+      truncated: false,
+    }));
+    const assembled = assembleTurnRequest({
+      cwd,
+      visibleContent: "Compare the parts.",
+      documentContexts: documents,
+      initiativeContexts: [left, brief, notes],
+      conversationContexts: () => ({
+        blocks: [{ packetId: "packet-1", label: "Chat context · Payments", content: "Earlier decision.", blockIndex: 0, blockCount: 1 }],
+        deliveries: [],
+      }),
+      restoredHistory: () => ({ blocks: [historyBlock], messageCount: 12, omittedMessageCount: 0 }),
+    });
+    expect(assembled.persistence.manifest.references.map(({ kind, label }) => [kind, label])).toEqual([
+      ...documents.map(({ label }) => ["attachment", label]),
+      ["initiative", left.label],
+      ["initiative", brief.label],
+      ["initiative", notes.label],
+      ["attachment", "Chat context · Payments"],
+      ["attachment", historyBlock.label],
+    ]);
+    expect(assembled.sessionRecovery).toEqual({ restoredMessageCount: 12, omittedMessageCount: 0 });
+    // The document limit is unchanged by initiative blocks.
+    expect(() => assembleTurnRequest({
+      cwd,
+      visibleContent: "x",
+      documentContexts: [...documents, { ...documents[0]!, attachmentId: "00000009-1111-4111-8111-111111111111" }],
+      initiativeContexts: [brief],
+    })).toThrow(/too many document attachments/u);
+  });
+
+  it("leaves a request without initiative context byte-identical", async () => {
+    const cwd = await workspace();
+    const request: AssembleTurnRequestInput = { cwd, visibleContent: "Same as before.", interactionMode: "build" };
+    expect(assembleTurnRequest({ ...request, initiativeContexts: [] })).toEqual(assembleTurnRequest(request));
   });
 });

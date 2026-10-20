@@ -2,6 +2,7 @@ import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
+import { isInitiativeContextReceipt } from "../../shared/initiatives";
 import { isHtmlRenderReference } from "../../shared/html-render";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import {
@@ -262,6 +263,7 @@ export function conversationFromRow(row: ConversationRow): Conversation {
     markedUnreadAt: row.marked_unread_at ?? null,
     pinnedAt: row.pinned_at,
     snoozedUntil: row.snoozed_until,
+    initiativeId: row.initiative_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -398,6 +400,7 @@ export function conversationShellFromRow(
     markedUnreadAt: conversation.markedUnreadAt ?? null,
     pinnedAt: conversation.pinnedAt,
     snoozedUntil: conversation.snoozedUntil,
+    initiativeId: conversation.initiativeId ?? null,
     hasHistory: row.has_history === 1,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
@@ -761,11 +764,14 @@ export function messageFromRow(row: MessageRow): ChatMessage {
   try { compaction = row.compaction_json ? JSON.parse(row.compaction_json) : undefined; } catch { /* Older or malformed optional metadata stays unprojected. */ }
   let htmlRender: unknown;
   try { htmlRender = row.role === "system" && row.html_render_json ? JSON.parse(row.html_render_json) : undefined; } catch { /* Malformed optional metadata stays unprojected. */ }
+  let initiativeContext: unknown;
+  try { initiativeContext = row.role === "system" && row.initiative_context_json ? JSON.parse(row.initiative_context_json) : undefined; } catch { /* Malformed optional metadata stays unprojected. */ }
   return {
     ...(row.role === "user" && isMessageOriginDeviceId(row.private_connect_device_id)
       ? { privateConnectDeviceId: row.private_connect_device_id } : {}),
     ...(row.role === "system" && row.turn_id === null && isContextCompaction(compaction) ? { compaction } : {}),
     ...(row.role === "system" && row.turn_id !== null && isHtmlRenderReference(htmlRender) ? { htmlRender } : {}),
+    ...(row.role === "system" && row.turn_id !== null && !isHtmlRenderReference(htmlRender) && isInitiativeContextReceipt(initiativeContext) ? { initiativeContext } : {}),
     id: row.id,
     conversationId: row.conversation_id,
     turnId: row.turn_id,

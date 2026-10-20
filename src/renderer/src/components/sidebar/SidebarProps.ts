@@ -62,4 +62,10 @@ export interface SidebarProps {
   onSetProjectGitRepositoryLimit: (project: Project, limit: number) => void;
   onRemoveProject: (project: Project) => void;
   onUpdateProjectAppearance?: ProjectAppearanceUpdate;
+  /** Opens the Initiative page with this initiative selected. */
+  onOpenInitiative?: (initiativeId: string) => void;
+  /** Moves a chat into an active initiative, or out of its initiative with null. */
+  onAssignConversationInitiative?: (conversation: Conversation, initiativeId: string | null) => void;
+  /** Asks for a name, creates an initiative and moves the chat into it. */
+  onCreateInitiativeForConversation?: (conversation: Conversation) => void;
 }

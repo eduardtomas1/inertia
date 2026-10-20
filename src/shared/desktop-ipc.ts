@@ -31,6 +31,7 @@ export const DESKTOP_IPC = {
   releaseAttachment: "inertia:release-attachment",
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
+  openInitiativeSkillsFolder: "inertia:open-initiative-skills-folder",
   openExternal: "inertia:open-external",
   showContextMenu: "inertia:show-context-menu",
   showThreadNotification: "inertia:show-thread-notification",
@@ -49,4 +50,6 @@ export const DESKTOP_IPC = {
   setBackendCredential: "inertia:set-backend-credential",
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
+  setInitiativeMcpSecret: "inertia:set-initiative-mcp-secret",
+  getInitiativeMcpSecretState: "inertia:get-initiative-mcp-secret-state",
 } as const;

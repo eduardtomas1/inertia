@@ -13,6 +13,13 @@ import {
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
+import {
+  clampAccessMode,
+  initiativeAccessCeilingMessage,
+  providerExceedsAccessLimit,
+  UNSUPERVISED_PROVIDER_LIMIT_REASON,
+} from "../../../shared/access-modes";
+import { effectiveClaudeBudget } from "../../../shared/initiatives";
 import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
@@ -25,6 +32,7 @@ import {
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
 } from "./request-context";
+import { initiativeTurnContext, type InitiativeTurnContext } from "./initiative-turn-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -33,8 +41,12 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import { INITIATIVES_INSTRUCTION_LABEL } from "../initiative-host-tools";
+import { initiativeMcpServerPlan } from "../initiative-mcp-runtime";
+import { broadcastConversationShell } from "./turn-controller-support";
 import type {
   ActiveTurn,
+  FreshSessionTurnRequest,
   QueuedTurn,
   QueueTurnRequest,
   TurnControllerHooks,
@@ -78,6 +90,13 @@ export function prepareTurnRequest(
   const resolved = resolveTurnRequest(dependencies, request);
   const queued = dependencies.store.beginAgentTurn(resolved.input);
   try {
+    if (queued.initiativeContextReceipt) {
+      dependencies.hooks.broadcast({
+        type: "conversation.message.persisted",
+        message: queued.initiativeContextReceipt,
+      });
+    }
+    if (queued.accessLowered) broadcastConversationShell(dependencies.hooks, queued.turn.conversationId);
     if (resolved.handoffFromTurnId) {
       retireUsageLimitSnooze(dependencies, queued.turn.conversationId, resolved.handoffFromTurnId);
     }
@@ -142,6 +161,23 @@ export function resolveTurnRequest(
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
   dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  // The provider's access is fixed for the whole turn, so the initiative's
+  // access limit is applied here: the turn never runs above it, even when the
+  // chat's stored access is (restored or racing data, which the turn's
+  // persistence then lowers). A provider that cannot stay within the limit,
+  // such as Antigravity under a Supervised limit, is refused.
+  const initiativePreferences = dependencies.store.initiativePreferencesFor(conversation);
+  const accessLimit = initiativePreferences?.accessCeiling ?? null;
+  const accessMode = clampAccessMode(conversation.accessMode, accessLimit);
+  if (accessLimit && providerExceedsAccessLimit(route.providerId, accessMode, accessLimit)) {
+    const name = dependencies.store.initiatives.get(conversation.initiativeId!)?.name ?? "This initiative";
+    throw new RuntimeRequestError(
+      `${initiativeAccessCeilingMessage(name, accessLimit)} ${UNSUPERVISED_PROVIDER_LIMIT_REASON}`,
+    );
+  }
+  const turnConversation = accessMode === conversation.accessMode
+    ? conversation
+    : { ...conversation, accessMode };
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const capabilityContract = exactProvider?.capabilityContract;
   const hostToolBridgeAttested = capabilityContract !== undefined
@@ -236,10 +272,22 @@ export function resolveTurnRequest(
     : resolvedContinuation;
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
+  // A chat that has the initiative tools is framed once, by their pack; the
+  // shorter `initiative-context` framing is only for routes without them.
+  const framedByInitiativeTools = !resumesImportedCodex && capabilityInstructions.some(
+    ({ label }) => label === INITIATIVES_INSTRUCTION_LABEL,
+  );
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const interruptedTurnId = dependencies.store.turnLedgerRepository
     .runtimeInterruptionSource(conversation.id);
   const requestedAt = dependencies.now();
+  const canResume = continuation.action === "resume-session";
+  // The initiative's brief and notes index: in full on a fresh provider
+  // session, and afterwards only when a part changed since this session last
+  // received it.
+  const initiativeContext = initiativeTurnContext(dependencies.store, conversation, {
+    freshSession: !canResume,
+  });
   let conversationContexts: ConversationContextMaterialization | undefined;
   const assemblyInput = {
     ...(contextPacketIds.length > 0
@@ -269,6 +317,29 @@ export function resolveTurnRequest(
       ...(request.internalInstructions ?? []),
     ],
   } satisfies AssembleTurnRequestInput;
+  /**
+   * The one place a request is assembled with its initiative material. Both
+   * the turn's own request and a fresh-session fallback return the record of
+   * what they carried, which is what the ledger writes.
+   */
+  const assemble = (
+    initiative: InitiativeTurnContext | null,
+    extra: Pick<AssembleTurnRequestInput, "restoredHistory" | "carriedConversationContexts">,
+  ): FreshSessionTurnRequest => ({
+    ...assembleTurnRequest({
+      ...assemblyInput,
+      ...extra,
+      ...(initiative
+        ? {
+            initiativeContexts: initiative.contexts,
+            internalInstructions: framedByInitiativeTools
+              ? assemblyInput.internalInstructions
+              : [...assemblyInput.internalInstructions, initiative.instruction],
+          }
+        : {}),
+    }),
+    initiativeContext: initiative?.record ?? null,
+  });
   const ownChatPacketId = dependencies.store.contextPackets
     .ownConversationPacketId(conversation.id, contextPacketIds);
   const unattributedHistoryOnRoute = () => {
@@ -323,19 +394,27 @@ export function resolveTurnRequest(
       },
     );
   };
-  const assembleOnFreshSession = (excludedMessageId?: string) => assembleTurnRequest({
-    ...assemblyInput,
-    restoredHistory: ownChatPacketId === null
-      ? (capacityBytes: number) => dependencies.store.continuationHistory(
-          conversation.id,
-          restoredCapacity(capacityBytes),
-          requestedAt,
-          excludedMessageId,
-          restoredHistoryRoute(),
-        )
-      : referencedHistory,
-  });
-  const canResume = continuation.action === "resume-session";
+  const assembleOnFreshSession = (initiative: InitiativeTurnContext | null, excludedMessageId?: string) =>
+    assemble(initiative, {
+      restoredHistory: ownChatPacketId === null
+        ? (capacityBytes: number) => dependencies.store.continuationHistory(
+            conversation.id,
+            restoredCapacity(capacityBytes),
+            requestedAt,
+            excludedMessageId,
+            restoredHistoryRoute(),
+          )
+        : referencedHistory,
+    });
+  // A resumed turn that falls back to a fresh session sends everything again,
+  // read from the chat as it is when the fallback happens: it may have moved
+  // to another initiative, or left one, since this request was prepared.
+  const assembleFallback = (excludedMessageId: string) => assembleOnFreshSession(
+    initiativeTurnContext(dependencies.store, dependencies.store.conversation(conversation.id), {
+      freshSession: true,
+    }),
+    excludedMessageId,
+  );
   const importNote = latestTurn?.origin === "cli-import"
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
     : null;
@@ -343,9 +422,8 @@ export function resolveTurnRequest(
     && continuation.reasonCode !== "first-turn"
     && request.goalStart === undefined;
   const assembled = startsFreshInEstablishedChat
-    ? assembleOnFreshSession()
-    : assembleTurnRequest({
-        ...assemblyInput,
+    ? assembleOnFreshSession(initiativeContext)
+    : assemble(initiativeContext, {
         carriedConversationContexts: dependencies.store.contextPackets
           .unreachedReferences(conversation.id)
           .flatMap((reference) => reference.sentBlocks() ?? []),
@@ -358,12 +436,24 @@ export function resolveTurnRequest(
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
       && goal.status === "active"));
+  // The lower of the initiative's and the project's limits; an initiative
+  // restriction holds whatever the initiative's status.
   const maxBudgetUsd = route.providerId === "claude"
     && route.harnessId === "claude-agent-sdk"
     && route.backendProfile.id === NATIVE_ANTHROPIC_PROFILE_ID
-    ? dependencies.store.project(conversation.projectId).preferences
-      ?.claudeMaxBudgetUsd ?? null
+    ? effectiveClaudeBudget(
+        initiativePreferences,
+        dependencies.store.project(conversation.projectId).preferences,
+      ).usd
     : null;
+  // Selected Claude skills may come from the initiative's skills folder; the
+  // harness revalidates them against this contained root when staging.
+  const initiativeSkillsRoot = request.skills?.some(({ source }) => source === "claude-native")
+    ? dependencies.hooks.initiativeSkillsRoot?.(conversation) ?? null
+    : null;
+  // The initiative's enabled MCP servers, unresolved: the provider launch step
+  // reads their secrets from the vault just before the harness starts.
+  const initiativeMcpServers = initiativeMcpServerPlan(dependencies.store, conversation, route.harnessId);
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -383,7 +473,7 @@ export function resolveTurnRequest(
       : routeSelection.modelId,
     reasoningEffort: routeSelection.reasoningEffort || undefined,
     interactionMode: conversation.interactionMode,
-    access: conversation.accessMode,
+    access: accessMode,
     sessionId: canResume ? conversation.providerSessionId! : undefined,
     ...(supportedFastMode ? { supportedFastMode } : {}),
     ...(canResume
@@ -402,9 +492,11 @@ export function resolveTurnRequest(
       attachmentIds: attachments.map(({ id }) => id),
     }) ?? [],
     skills: request.skills,
+    ...(initiativeSkillsRoot ? { initiativeSkillsRoot } : {}),
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
+    ...(initiativeMcpServers ? { initiativeMcpServers } : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {
@@ -437,6 +529,7 @@ export function resolveTurnRequest(
           contextRequestId: request.contextRequestId,
         }
       : {}),
+    ...(assembled.initiativeContext ? { initiativeContext: assembled.initiativeContext } : {}),
     providerId: route.providerId,
     modelSelection,
     continuationIdentity: route.continuationIdentity,
@@ -448,7 +541,7 @@ export function resolveTurnRequest(
     modelAlias: modelSelection.alias,
     reasoningEffort: modelSelection.reasoningEffort ?? "",
     interactionMode: conversation.interactionMode,
-    accessMode: conversation.accessMode,
+    accessMode,
     providerSessionBefore: canResume ? conversation.providerSessionId : null,
     ...(providerSessionInvalidation ? { providerSessionInvalidation } : {}),
     requestedAt,
@@ -467,11 +560,11 @@ export function resolveTurnRequest(
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
       const activeConversation = providerSessionInvalidation
         ? {
-            ...conversation,
+            ...turnConversation,
             providerSessionId: null,
             continuationIdentity: null,
           }
-        : conversation;
+        : turnConversation;
       return {
         queued,
         active: {
@@ -493,6 +586,7 @@ export function resolveTurnRequest(
           runStartedAt: dependencies.clock().getTime(),
           workspaceRunCreated: false,
           providerRunStarted: false,
+          providerInvoked: false,
           providerStartAcknowledgement: null,
           nativeGoalStartAcknowledgement: null,
           attachmentsReleased: false,
@@ -510,7 +604,7 @@ export function resolveTurnRequest(
           providerStopStarted: false,
           sessionAfter: canResume ? conversation.providerSessionId : null,
           freshSessionRequest: canResume && request.goalStart === undefined
-            ? assembleOnFreshSession
+            ? assembleFallback
             : null,
           lastUsage: null,
           assistantText: "",

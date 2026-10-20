@@ -66,6 +66,14 @@ export function launchCredentialValues(environment: NodeJS.ProcessEnv): string[]
     .sort((left, right) => right.length - left.length);
 }
 
+/** The names of the launch environment's credential variables, whatever their values. */
+export function launchCredentialNames(environment: NodeJS.ProcessEnv): string[] {
+  return Object.entries(environment)
+    .filter(([key, value]) => CREDENTIAL_ENVIRONMENT_KEY.test(key) && typeof value === "string" && value.length > 0)
+    .map(([key]) => key)
+    .sort();
+}
+
 export function redactExactCredentials(value: string, credentials: readonly string[]): string {
   return credentials.reduce((text, credential) => text.replaceAll(credential, "[redacted]"), value);
 }

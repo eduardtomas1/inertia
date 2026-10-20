@@ -17,6 +17,7 @@ import type {
   ThreadUsageSnapshot,
 } from "../../shared/contracts";
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
+import type { InitiativeMcpServer } from "../../shared/initiative-mcp";
 import type {
   AgentApprovalDecision,
   AgentApprovalPermissionRoot,
@@ -39,6 +40,54 @@ export type ProviderInteractionMode = "build" | "plan";
 export type ProviderAccessMode = "full" | "supervised" | "auto-edit";
 export type ProviderInstallState = "checking" | "installed" | "not-installed" | "unresponsive" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
+
+/**
+ * The initiative MCP servers a turn should receive, as stored: names,
+ * transports and plain values, with secret entries marked but never resolved.
+ * Turn preparation fills it; only the provider launch step reads it.
+ */
+export interface ProviderInitiativeMcpPlan {
+  initiativeId: string;
+  servers: readonly InitiativeMcpServer[];
+}
+
+export interface ProviderMcpNameValue {
+  name: string;
+  value: string;
+  /** Set when the value came from the credential vault; the run coordinator redacts it. */
+  secret?: true;
+}
+
+/**
+ * One MCP server as a provider receives it, provider-neutral and with every
+ * secret resolved. It exists only in memory, from the launch step into the
+ * provider's own process or request, and is never persisted or logged.
+ */
+export type ProviderMcpServerInput =
+  | {
+      name: string;
+      transport: "http";
+      url: string;
+      headers: readonly ProviderMcpNameValue[];
+    }
+  | {
+      name: string;
+      transport: "stdio";
+      command: string;
+      args: readonly string[];
+      env: readonly ProviderMcpNameValue[];
+    };
+
+export interface ProviderMcpServerResolution {
+  servers: ProviderMcpServerInput[];
+  /**
+   * The exact strings to redact from the run's output (each value, and the
+   * credential after an authorization scheme), none shorter than 8 characters.
+   */
+  secrets: string[];
+  /** Servers left out, with a reason that never contains a value. */
+  omitted: { name: string; reason: string }[];
+}
 
 export interface ProviderInfo {
   id: ProviderId;
@@ -107,6 +156,13 @@ interface ProviderRunRequest {
   attachmentReadRoots?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   /**
+   * Privileged, realpath-contained skills root of the chat's initiative. Only
+   * native Claude skill staging reads it, to revalidate selected skills from
+   * its `.claude/skills` folder. Present only when the turn selects Claude
+   * skills and the initiative offers its folder.
+   */
+  initiativeSkillsRoot?: string;
+  /**
    * Privileged Codex-only launch mode for a user-authored native goal. The
    * App Server owns the automatic turns started by this mutation; `prompt`
    * remains the durable visible request label and is not sent as a turn.
@@ -126,6 +182,18 @@ interface ProviderRunRequest {
    * means no limit.
    */
   maxBudgetUsd?: number;
+  /**
+   * Privileged: the chat's initiative MCP servers before their secrets are
+   * resolved. Present only for a member chat of a non-archived initiative
+   * with enabled servers on a route that takes them.
+   */
+  initiativeMcpServers?: ProviderInitiativeMcpPlan;
+  /**
+   * Resolved initiative MCP servers. Only the provider launch step sets this,
+   * in the harness's private copy of the request, after resolving secrets from
+   * the credential vault; a request that arrives with it set is refused.
+   */
+  mcpServers?: readonly ProviderMcpServerInput[];
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {
     kind: "compact";
@@ -676,6 +744,15 @@ export interface ProviderManagerOptions {
     context: ProviderBackendLaunchContext,
   ) => ProviderBackendLaunchOptions | Promise<ProviderBackendLaunchOptions>;
   conversationProviderGate?: (conversationId: string, providerId: ProviderId) => void;
+  /**
+   * Privileged, process-local resolution of a turn's initiative MCP servers:
+   * reads secrets through the credential broker into memory just before the
+   * harness starts. The values reach only the harness's copy of the request.
+   */
+  resolveInitiativeMcpServers?: (
+    plan: ProviderInitiativeMcpPlan,
+    context: ProviderBackendLaunchContext,
+  ) => Promise<ProviderMcpServerResolution>;
 }
 
 export interface ProviderBackendLaunchContext {

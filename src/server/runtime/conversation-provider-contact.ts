@@ -15,8 +15,14 @@ export class ConversationProviderContact {
   async claudeSkills(
     conversationId: string,
     forceReload: boolean,
+    initiativeSkillsRoot: string | null = null,
   ): ReturnType<ProviderManager["claudeSkills"]> {
     this.store.assertConversationProvider(conversationId, "claude");
-    return await this.providers.claudeSkills(this.store.conversationPath(conversationId), forceReload);
+    return await this.providers.claudeSkills(
+      this.store.conversationPath(conversationId),
+      forceReload,
+      {},
+      initiativeSkillsRoot,
+    );
   }
 }

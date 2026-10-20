@@ -13,6 +13,7 @@ import type {
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
+  Initiative,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -45,6 +46,7 @@ import {
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
 import type { NewConversationLocation } from "../../lib/newConversation";
+import type { NewChatInitiativePicker } from "../composer/types";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { SettingsViewProps } from "../settings/settingsTypes";
 import {
@@ -70,6 +72,20 @@ import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 const EMPTY_LIST: never[] = [];
+
+/**
+ * The new-chat initiative picker appears only once an initiative exists, so a
+ * composer without initiatives is unchanged and never loads the picker chunk.
+ */
+export function newChatInitiativePickerProps(
+  initiatives: readonly Initiative[] | undefined,
+  selectedId: string | null,
+  disabled: boolean,
+  onChange: ((initiativeId: string | null) => void) | undefined,
+): { newChatInitiativePicker?: NewChatInitiativePicker } {
+  if (!onChange || !initiatives || initiatives.length === 0) return {};
+  return { newChatInitiativePicker: { initiatives, selectedId, disabled, onChange } };
+}
 
 type ProviderMaintenance = ReturnType<typeof useProviderMaintenance>;
 type ConversationProjection = ReturnType<typeof useConversationProjection>;
@@ -179,6 +195,7 @@ export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
   openConversation?: (conversationId: string) => boolean;
   selectGlobalChatProject?: (project: Project | null) => void;
+  selectGlobalChatInitiative?: (initiativeId: string | null) => void;
   createConversation: (
     targetProject?: Project | null,
     location?: NewConversationLocation,
@@ -598,6 +615,12 @@ export function createWorkspaceSceneModel({
             || busyAction === "conversation.create:draft",
           onChange: actions.selectGlobalChatProject,
         },
+        ...newChatInitiativePickerProps(
+          connection.snapshot?.initiatives,
+          draftConversation.initiativeId ?? null,
+          connection.status !== "online" || busyAction === "conversation.create:draft",
+          actions.selectGlobalChatInitiative,
+        ),
       } : {}),
       checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
       latestTurnSummary: visibleConversationLatestTurnSummary(

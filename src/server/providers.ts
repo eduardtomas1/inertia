@@ -278,6 +278,7 @@ export class ProviderManager {
       harnessRegistry: this.harnessRegistry,
       metadataCache: this.metadataCache,
       resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
+      resolveInitiativeMcpServers: options.resolveInitiativeMcpServers,
       conversationProviderGate: this.conversationProviderGate,
       commandFor: (providerId) => this.commandFor(providerId),
       resolvedCommandFor: (providerId) => this.resolvedCommands.get(providerId),
@@ -1069,6 +1070,7 @@ export class ProviderManager {
     cwd: string,
     forceReload: boolean,
     context: ProviderInstallationReadContext = {},
+    initiativeSkillsRoot: string | null = null,
   ): Promise<Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>> {
     let executable = this.resolvedCommands.get("claude");
     if (!executable) executable = (await this.detect("claude", { ...context, cwd })).executable;
@@ -1095,7 +1097,7 @@ export class ProviderManager {
         executable,
         providerChildEnvironment("claude", environment.env),
         cwd,
-        forceReload,
+        { forceReload, initiativeSkillsRoot },
       );
     } catch (error) {
       if (isProcessTreeTerminationUnconfirmed(error)) {

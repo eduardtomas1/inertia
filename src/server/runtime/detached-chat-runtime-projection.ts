@@ -5,6 +5,7 @@ import type {
   RuntimeSequencedFrame,
 } from "../../shared/contracts";
 import { defaultSettings } from "../../shared/contracts/app";
+import { defaultInitiativePreferences } from "../../shared/initiatives";
 import type { RuntimeDetailSubscription } from "../runtime-sequencing";
 import { projectRuntimeFrame, runtimeCursorFrame } from "../runtime-sequencing";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
@@ -86,6 +87,17 @@ export function projectDetachedChatSnapshot(
     settings: projectedSettings(snapshot.settings),
     promptPresets: [],
     todos: [],
+    // Only the chat's own initiative, so its membership reference stays
+    // coherent, with only the setting the chat's composer enforces.
+    initiatives: (snapshot.initiatives ?? [])
+      .filter(({ id }) => conversation?.initiativeId === id)
+      .map((initiative) => ({
+        ...initiative,
+        preferences: {
+          ...defaultInitiativePreferences(),
+          accessCeiling: initiative.preferences.accessCeiling,
+        },
+      })),
     activeProjectId: project?.id ?? null,
     activeConversationId: conversation?.id ?? null,
     ...(snapshot.sync ? { sync: snapshot.sync } : {}),

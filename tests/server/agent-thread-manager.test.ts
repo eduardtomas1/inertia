@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -302,6 +303,31 @@ describe("AgentThreadManager", () => {
     } finally { store.close(); }
   });
 
+  it("blocks browser calls when the chat's initiative blocks them, even where the project allows them", async () => {
+    const browser = { perform: vi.fn() };
+    const { manager, project, source, sourceTurn, store } = await runtime(browser);
+    try {
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: true } });
+      const initiative = store.initiatives.create({ id: randomUUID(), name: "Locked down" }, source.id);
+      store.initiatives.update(initiative.id, initiative.revision, { preferences: { browserAccess: false } });
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const blocked = await bridge!.invoke(call("inertia_browser_snapshot", {}));
+      expect(blocked.success).toBe(false);
+      expect(JSON.parse(blocked.text)).toEqual({ error: {
+        code: "browser_disabled",
+        message: "Agent browser access is disabled in this chat's initiative settings.",
+      } });
+      expect(browser.perform).not.toHaveBeenCalled();
+
+      // "Allow" cannot reopen tools that the project blocks.
+      store.initiatives.update(initiative.id, initiative.revision + 1, { preferences: { browserAccess: true } });
+      store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), browserAccess: false } });
+      expect((await bridge!.invoke(call("inertia_browser_snapshot", {}))).text)
+        .toContain("disabled in this project's settings");
+      expect(browser.perform).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
   it("exposes the same real host bridge to every audited provider harness", async () => {
     const browser = { perform: vi.fn() };
     const { manager, source, sourceTurn, store } = await runtime(browser);
@@ -341,11 +367,17 @@ describe("AgentThreadManager", () => {
         definitionDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
         packs: [
           expect.objectContaining({ id: "inertia.frontend-workbench" }),
+          expect.objectContaining({
+            id: "inertia.initiatives",
+            revision: 1,
+            toolNames: ["inertia_initiative_overview", "inertia_initiative_read", "inertia_initiative_remember"],
+          }),
           expect.objectContaining({ id: "inertia.orchestration" }),
           expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
         ],
       });
-      expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
+      // A chat outside any initiative is not offered the initiative pack.
+      expect(manager.capabilityInstructions(source).map(({ label }) => label)).toEqual([
         "inertia-frontend-workbench",
         "inertia-orchestration",
       ]);
@@ -368,6 +400,7 @@ describe("AgentThreadManager", () => {
       } | undefined)?.route;
       expect(route?.properties?.providerId?.enum).toContain("kimi");
       expect(manager.capabilityManifest().packs.map(({ id }) => id)).toEqual([
+        "inertia.initiatives",
         "inertia.orchestration",
         "inertia.visual-replies",
       ]);
@@ -894,6 +927,113 @@ describe("AgentThreadManager", () => {
       }).agentThreadManagement;
       expect(operations.managed(receipt.conversationId)).not.toBeNull();
       expect(toolCall.requestApproval).toHaveBeenCalledOnce();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("lets a managed child join its source chat's active initiative only", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const initiative = store.initiatives.create({ id: crypto.randomUUID(), name: "Shared goal" }, source.id);
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const create = async (title: string) => {
+        const result = await bridge!.invoke(call("inertia_create_conversation", {
+          title,
+          prompt: "Help with the shared goal.",
+          accessMode: "supervised",
+          workspace: { kind: "project" },
+        }));
+        expect(result.success).toBe(true);
+        return (JSON.parse(result.text) as { conversationId: string }).conversationId;
+      };
+      const joined = await create("Joined helper");
+      expect(store.conversationShell(joined)).toMatchObject({
+        projectId: source.projectId,
+        initiativeId: initiative.id,
+      });
+      store.initiatives.update(initiative.id, 1, { status: "done" });
+      const outside = await create("Late helper");
+      expect(store.conversationShell(outside)?.initiativeId).toBeNull();
+      expect(store.conversationShell(source.id)?.initiativeId).toBe(initiative.id);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still creates the managed child without membership when its initiative closes before the insert", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const initiative = store.initiatives.create({ id: crypto.randomUUID(), name: "Closing" }, source.id);
+      store.initiatives.update(initiative.id, 1, { status: "archived" });
+      // The inheritance reads (before approval and before the insert) saw an
+      // active initiative; the atomic insert re-check (this harness creates
+      // chats with a direct store insert) does not.
+      const acceptsChats = vi.spyOn(store.initiatives, "acceptsChats").mockReturnValue(true);
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const result = await bridge!.invoke(call("inertia_create_conversation", {
+        title: "Raced helper",
+        prompt: "Carry on.",
+        accessMode: "supervised",
+        workspace: { kind: "project" },
+      }));
+      expect(result.success).toBe(true);
+      expect(acceptsChats.mock.calls).toEqual([[initiative.id], [initiative.id]]);
+      const childId = (JSON.parse(result.text) as { conversationId: string }).conversationId;
+      expect(store.conversationShell(childId)).toMatchObject({
+        projectId: source.projectId,
+        title: "Raced helper",
+        initiativeId: null,
+      });
+      expect(store.shellSnapshot().conversations.filter(({ title }) => title === "Raced helper")).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses a managed child that would leave its initiative's access limit behind", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const initiative = store.initiatives.create({ id: crypto.randomUUID(), name: "Locked" }, source.id);
+      store.initiatives.update(initiative.id, 1, { preferences: { accessCeiling: "auto-edit" } });
+      store.initiatives.update(initiative.id, 2, { status: "done" });
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const titles = () => store.shellSnapshot().conversations.map(({ title }) => title);
+      const before = titles();
+      const toolCall = call("inertia_create_conversation", {
+        title: "Escaped helper",
+        prompt: "Carry on.",
+        accessMode: "supervised",
+        workspace: { kind: "project" },
+      });
+      const refused = await bridge!.invoke(toolCall);
+      expect(refused).toMatchObject({
+        success: false,
+        text: expect.stringContaining(
+          "“Locked” no longer accepts chats; its access limit cannot be carried to a new chat.",
+        ),
+      });
+      // Refused before the user is asked to approve anything.
+      expect(toolCall.requestApproval).not.toHaveBeenCalled();
+      expect(titles()).toEqual(before);
+
+      // The same refusal when the initiative closes between the inheritance
+      // read and the insert's atomic re-check.
+      store.initiatives.update(initiative.id, 3, { status: "active" });
+      const acceptsChats = vi.spyOn(store.initiatives, "acceptsChats").mockReturnValue(true);
+      store.initiatives.update(initiative.id, 4, { status: "archived" });
+      const raced = await bridge!.invoke(call("inertia_create_conversation", {
+        title: "Raced helper",
+        prompt: "Carry on.",
+        accessMode: "supervised",
+        workspace: { kind: "project" },
+      }));
+      expect(raced).toMatchObject({
+        success: false,
+        text: expect.stringContaining("its access limit cannot be carried to a new chat."),
+      });
+      expect(acceptsChats).toHaveBeenCalled();
+      expect(titles()).toEqual(before);
     } finally {
       store.close();
     }

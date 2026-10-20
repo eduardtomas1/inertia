@@ -42,6 +42,11 @@ export interface ProviderEmitter {
   close: () => void;
   matches: (identity: ProviderEventBase) => boolean;
   event: (event: ProviderEvent) => void;
+  /**
+   * Delivers events the policy already admitted and rewrote, such as text a
+   * redactor held back until the run ended. Nothing is delivered once closed.
+   */
+  deliver: (events: readonly ProviderEvent[]) => void;
   text: (text: string) => void;
   textSnapshot: (itemId: string, text: string) => void;
   activity: (
@@ -72,6 +77,12 @@ export interface ProviderEmitter {
 export interface ProviderEmitterPolicy {
   accept(event: ProviderEvent): boolean;
   reject(event: ProviderEvent): void;
+  /**
+   * Rewrites an accepted event before delivery, such as redacting run
+   * secrets: the events to deliver in its place, which may be none (text held
+   * back) or several (held text released before the event).
+   */
+  transform?(event: ProviderEvent): readonly ProviderEvent[];
 }
 
 export function createProviderEmitter(
@@ -89,12 +100,25 @@ export function createProviderEmitter(
     && identity.conversationId === conversationId
     && identity.runId === runId
     && identity.turnId === turnId;
-  const event = (providerEvent: ProviderEvent): void => {
-    if (!accepting || !matches(providerEvent)) return;
-    if (policy && !policy.accept(providerEvent)) {
-      policy.reject(providerEvent);
+  const event = (rawEvent: ProviderEvent): void => {
+    if (!accepting || !matches(rawEvent)) return;
+    if (policy && !policy.accept(rawEvent)) {
+      policy.reject(rawEvent);
       return;
     }
+    if (!policy?.transform) {
+      dispatch(rawEvent);
+      return;
+    }
+    deliver(policy.transform(rawEvent));
+  };
+  const deliver = (events: readonly ProviderEvent[]): void => {
+    for (const providerEvent of events) {
+      if (!accepting) return;
+      dispatch(providerEvent);
+    }
+  };
+  const dispatch = (providerEvent: ProviderEvent): void => {
     safeCallback(() => callbacks.onEvent?.(providerEvent));
     switch (providerEvent.type) {
       case "text":
@@ -152,6 +176,7 @@ export function createProviderEmitter(
     close: () => { accepting = false; },
     matches,
     event,
+    deliver,
     text: (text) => event({ ...base, type: "text", text }),
     textSnapshot: (itemId, text) => event({
       ...base,

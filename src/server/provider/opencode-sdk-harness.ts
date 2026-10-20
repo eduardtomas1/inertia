@@ -36,6 +36,7 @@ import {
   stripTerminalControlSequences,
 } from "./activity-detail";
 import { CappedProviderBuffer } from "./io";
+import { createOpenCodeInitiativeMcp } from "./opencode-initiative-mcp";
 import {
   createOwnedOpenCodeClient,
   ownedOpenCodeCredentials,
@@ -283,6 +284,14 @@ function startOpenCodeRun(
     runDeadlineTimer = undefined;
     eventInactivityTimer = undefined;
   };
+  // Resolved initiative MCP secrets are redacted by the run coordinator.
+  const initiativeMcp = createOpenCodeInitiativeMcp({
+    servers: options.input.mcpServers,
+    cwd: options.input.cwd,
+    report: (label, detail) => emitter.activity("system", "info", label, { detail }),
+    redact: (value) => redactDiagnostics(value),
+    stopping: () => cancelRequested || terminalError !== undefined,
+  });
   const redactDiagnostics = (value: string): string => {
     const text = stripTerminalControlSequences(value);
     return redactExactCredentials(hostTools?.redact(text) ?? text, launchCredentials);
@@ -485,6 +494,7 @@ function startOpenCodeRun(
       ]);
       if (installation.status === "rejected") throw installation.reason;
       if (discovery.status === "rejected") throw discovery.reason;
+      await initiativeMcp.install(client, initialize, environment);
       const [providerResponse, agentResponse] = discovery.value;
       const providerData = {
         ...providerResponse,
@@ -862,6 +872,9 @@ function startOpenCodeRun(
         };
       }
     }
+    // The owned server, and every stdio server it started, stops below;
+    // disconnecting first ends the initiative servers' sessions cleanly.
+    await initiativeMcp.disconnect(client);
     eventAbort.abort();
     rejectPending();
     if (child) {

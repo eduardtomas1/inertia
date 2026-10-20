@@ -97,6 +97,14 @@ import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createConversationCompactionCommandHandler } from "./runtime/commands/conversation-compaction-commands";
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
+import { createInitiativeCommandHandler } from "./runtime/commands/initiative-commands";
+import { createInitiativeMcpResolver, retryPendingInitiativeMcpForgets } from "./runtime/initiative-mcp-runtime";
+import { initiativeMcpPendingForgets } from "./runtime/initiative-mcp-pending-forgets";
+import {
+  ensureInitiativeSkillsFolder,
+  initiativeSkillsFolderPath,
+  initiativeSkillsRootFor,
+} from "./runtime/initiative-skills-folder";
 import {
   createAgentWorkflowCommandHandler,
 } from "./runtime/commands/agent-workflow-commands";
@@ -341,7 +349,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         ? { codex: savedSettings.codexBinaryPath }
         : undefined,
     ...backendProfileController.providerManagerOptions(),
+    // Initiative MCP secrets are read from the vault only here, in memory,
+    // when a provider run starts.
+    resolveInitiativeMcpServers: createInitiativeMcpResolver(options.backendCredentials),
   }, options.agentHarnessRegistry);
+  // Initiative MCP secrets whose removal failed earlier are removed now, in
+  // the background; any that still fail wait for the next start.
+  const mcpPendingForgets = initiativeMcpPendingForgets(dataDirectory);
+  void retryPendingInitiativeMcpForgets(options.backendCredentials, store, mcpPendingForgets).catch(() => undefined);
   backendProfileController.attachProviderManager(providers);
   const maintenanceCleanupAuthorities = !runtimeSafetyLock
     && options.enableProviders !== false
@@ -370,7 +385,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const enableProviders = !runtimeSafetyLock
     && providerMaintenanceRecovery.length === 0
     && (options.enableProviders ?? true);
-  const agentWorkflows = new AgentWorkflowController(store, providers);
+  const agentWorkflows = new AgentWorkflowController(store, providers, undefined, {
+    initiativeSkillsRoot: (conversation) => initiativeSkillsRootFor(store, dataDirectory, conversation),
+  });
   const attachmentResolver = options.attachmentRoot && options.attachments
     ? new TrustedAttachmentResolver(
         resolve(options.attachmentRoot),
@@ -641,7 +658,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
+      harnessInstructionsForTurn: ({ conversation }) => agentThreads?.manager.capabilityInstructions(conversation) ?? [],
       hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
@@ -667,6 +684,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       attachmentReadRoots: conversationAttachmentReadRoots(store, initializedConversationAttachments),
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
+      initiativeSkillsRoot: (conversation) => initiativeSkillsRootFor(store, dataDirectory, conversation),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),
       onTurnSettled: (turn, settlement) => dispatchSettledTurnOwners(turn, [
         (settled) => queuedMessages?.onTurnSettled(settled),
@@ -726,6 +744,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
+      createInitiativeCommandHandler({
+        store,
+        send,
+        validateDefaultModel: (selection) => backendProfileController.validateDefault(selection),
+        ensureSkillsFolder: (initiativeId) => { ensureInitiativeSkillsFolder(dataDirectory, initiativeId); },
+        ...(options.backendCredentials ? { mcpSecrets: options.backendCredentials, mcpPendingForgets } : {}),
+      }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
         conversationWork: store.conversationWork,
@@ -999,6 +1024,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
       }
+      if ("initiativeId" in request) return initiativeSkillsFolderPath(store, dataDirectory, request.initiativeId);
       return (await resolveAuthoritativeProjectPath(
         store,
         request,

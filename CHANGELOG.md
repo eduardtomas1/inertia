@@ -2,6 +2,86 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+- **Initiatives** group chats from any project, including chats without a
+  project, under one name. Each active initiative is its own section at the
+  top of Work with its colour, the number of chats in it, a count of chats
+  that need you or are working, and a chevron to fold it. Its snoozed and
+  settled chats stay in Snoozed and Done as before, and chats outside an
+  initiative stay in Recent, Yesterday and Earlier. Done initiatives fold
+  after Earlier with all of their chats, and archived ones drop their section
+  while keeping membership.
+- Move a chat with **Move to initiative** in its actions menu or with
+  **Move chat to initiative…** in the command palette, and create an
+  initiative from any of these with **New initiative…**. Once an initiative
+  exists, a new chat offers an initiative picker next to the project. Moving
+  a chat never changes its project, checkout, agent or session. Chats an
+  agent starts from a chat join that chat's initiative while it is active.
+- The **Initiatives** page, always in the sidebar under Tasks, lists every
+  initiative by status. Rename one, pick its colour, mark it done, reopen,
+  archive or delete it, and open its chats, grouped by Waiting on you,
+  Working, Done and Idle. Deleting an initiative keeps its chats and their
+  history.
+- Each initiative has a **Brief** (objective, constraints and decisions in
+  Markdown, up to 8 KiB) and **Notes** (a title and up to 2 KiB each), edited
+  on the Initiatives page. Every chat in an initiative that is not archived
+  (active or done) receives the brief and a list of its accepted notes as
+  shared reference material on the first message of a new session, again
+  after you change them and after its context is compacted, never on every
+  message. A chat that leaves its initiative tells its agent once that the
+  material no longer applies. A receipt under the message says what was
+  shared, for example "Shared the initiative brief (revision 3) and 5 notes
+  with the agent."; a message that never reached the agent leaves none. Notes
+  show who wrote them. A chat's composer names its initiative and opens it in
+  one click.
+- **Agents in an initiative** can see it, read it and suggest notes for it.
+  With the initiative tools (Codex, Claude, Cursor, Kimi and OpenCode; not
+  Antigravity or custom backends), an agent sees the initiative's brief revision, its notes and
+  its other chats with their status, reads a whole note, and reads another of
+  its chats after you approve it on the usual card, which now names the
+  initiative. It can also propose a note: proposals wait under **Needs
+  review** on the Initiatives page, marked **Agent** with the chat they came
+  from, and reach other chats only once you accept them; the chat shows
+  "Proposed an initiative note: …". Instruction-like text in a proposal is
+  escaped, titles with invisible, text-direction or separator characters are
+  refused, a title the initiative already has or that you rejected is not
+  proposed again, and one reply can propose at most five notes. At most 16
+  proposals, 5 from one chat, wait for review at a time, and they count toward
+  an initiative's 64 notes only once you accept them. Rejected notes are kept
+  in a **Rejected** list, where you can delete them. Notes in any script keep
+  their own text direction on the page.
+- **Tools & defaults** on the Initiatives page set what every chat in an
+  initiative shares, each falling back to the chat's project and then
+  Settings, with a hint saying where an inherited value comes from: a default
+  model and access for new chats, a default project picked for you, an
+  **Access limit** no chat in the initiative can exceed (lowering it lowers its
+  chats and their queued messages at once, and the composer, also in a chat's
+  own window, explains the options above it), blocking the
+  agent browser tools, a Claude spend limit per turn (the lower of the
+  initiative's and the project's applies), and a **Skills folder** whose skills
+  Claude chats in the initiative can invoke with `$`. Codex chats don't use the
+  folder yet. A reply already running when you lower the access limit keeps
+  its access until it ends (stop it to apply the limit now), a chat waiting to
+  resume after a usage limit may then need resuming by hand, and Antigravity
+  can't run under a Supervised limit.
+- **MCP servers for an initiative**: in Tools & defaults, add HTTP or
+  command MCP servers that every chat in the initiative gets with its next
+  message, on Codex, Claude, Cursor, Kimi Code and OpenCode (not
+  Antigravity). They are added beside your own provider servers, never in
+  their place. Mark a header or environment variable **Secret** (Inertia
+  ticks it for names such as `Authorization` or `API_TOKEN`; `Authorization`,
+  `Proxy-Authorization` and `Cookie` are always secret) and its value, at
+  least 8 characters, goes to your system's secure storage, is shown
+  afterwards only as **Set**, and is read only when a message starts, for that
+  provider alone. When the provider repeats the exact value in its answer,
+  thinking, tool details or errors, even split across streamed pieces, Inertia
+  shows `[secret]` instead; a changed form of the value (encoded, or only part
+  of it) is not caught. A secret stays with the URL or command it was entered
+  for: change the address and the server asks for it again. Command servers on
+  Claude, Cursor, Kimi Code and OpenCode don't inherit the provider sign-in
+  Inertia passes to the provider.
+
 ## 0.0.73 — 2026-10-19
 
 Open a chat for any folder straight from a terminal, send a queued message

@@ -29,6 +29,14 @@ const SECRET_PATTERNS: readonly (readonly [RegExp, string])[] = [
   [/\bxox[abeoprs]-[A-Za-z0-9-]{10,255}/gu, "[redacted]"],
   [/\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|AUTH_TOKEN|aws_secret_access_key|aws_session_token)\s*[:=]\s*[^\s,;]+/giu, "[redacted]"],
   [/("(?:[A-Za-z0-9_-]{0,40}[_-])?(?:api[_-]?key|token|secret|password|passwd)"\s{0,8}:\s{0,8})"[^"\n]{0,4096}"/giu, "$1\"[redacted]\""],
+  // MCP server configuration as providers echo it (JSON, TOML or header
+  // lines): an Authorization value, and any header or key named *-key,
+  // *-token, *-secret or *-password, such as X-Tracker-Key.
+  [/((["']?)(?:Proxy-)?Authorization\2\s{0,8}[:=]\s{0,8})(["'])[^"'\n]{1,4096}\3/giu, "$1$3[redacted]$3"],
+  [/((["'])[A-Za-z0-9][A-Za-z0-9_-]{0,80}[_-](?:key|token|secret|password)\2\s{0,8}[:=]\s{0,8})(["'])[^"'\n]{1,4096}\3/giu, "$1$3[redacted]$3"],
+  [/(\b[A-Za-z0-9][A-Za-z0-9-]{0,80}-(?:Key|Token|Secret|Password)\s{0,8}:\s{0,8})(?!\[redacted\])[^\s'"]{1,4096}/giu, "$1[redacted]"],
+  // ACP's name/value entries for MCP headers and environment variables.
+  [/("name"\s{0,8}:\s{0,8}"[^"\n]{0,128}(?:authorization|key|token|secret|password)[^"\n]{0,64}"\s{0,8},\s{0,8}"value"\s{0,8}:\s{0,8})"[^"\n]{1,4096}"/giu, "$1\"[redacted]\""],
   [/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s:@/]{1,256}:)[^\s@/]{1,256}@/giu, "$1[redacted]@"],
 ];
 

@@ -3,6 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import {
+  buildResponseTimeline,
+  shouldConsolidateSettledWorkIntoRunDetails,
+} from "../../src/renderer/src/utils/response-timeline/model";
 import { sessionRecoveryDetail } from "../../src/renderer/src/utils/sessionRecovery";
 import type { ConversationContextCommandRunner } from "../../src/renderer/src/components/conversation-context/types";
 import type {
@@ -92,6 +96,7 @@ function renderRequest(
     turn?: Partial<AgentTurn>;
     activities?: AgentActivity[];
     onConversationContextCommand?: ConversationContextCommandRunner;
+    messages?: ChatMessage[];
   } = {},
 ): string {
   const currentTurn = { ...turn(options.checkpoint?.id ?? null), ...options.turn };
@@ -110,6 +115,7 @@ function renderRequest(
             createdAt: "2026-07-23T10:00:00.500Z",
           }]
         : []),
+      ...(options.messages ?? []),
     ],
     contextPackets: options.contextPackets,
     activities: options.activities ?? [],
@@ -330,6 +336,141 @@ describe("Quiet Ledger user request layer", () => {
     ]) {
       expect(renderRequest("Continue.", { turn: quiet })).not.toContain("New provider session");
     }
+  });
+
+  it("hides the initiative receipt of a request that never reached its provider", () => {
+    const receipt: ChatMessage = {
+      id: "receipt-1",
+      conversationId,
+      turnId: "turn-1",
+      role: "system",
+      content: "Shared the initiative brief (revision 3) with the agent.",
+      attachments: [],
+      createdAt: requestedAt,
+      initiativeContext: {
+        initiativeId: "44444444-4444-4444-8444-444444444444",
+        brief: { revision: 3, change: "shared" },
+        notes: null,
+      },
+    };
+    for (const terminalReason of ["turn-start-failed", "turn-start-failed: The response could not be saved.", "turn-adoption-failed"]) {
+      const html = renderRequest("Continue the checkout work.", {
+        messages: [receipt],
+        turn: { status: "failed", terminalReason, completedAt: "2026-07-23T10:00:01.000Z" },
+      });
+      expect(html).toContain("Continue the checkout work.");
+      expect(html).not.toContain("Shared the initiative brief");
+      expect(html).not.toContain('aria-label="Shared initiative context"');
+    }
+    // A request stopped after it reached the provider keeps its receipt.
+    expect(renderRequest("Continue the checkout work.", {
+      messages: [receipt],
+      turn: { status: "cancelled", terminalReason: "user-cancelled", completedAt: "2026-07-23T10:00:01.000Z" },
+    })).toContain("Shared the initiative brief (revision 3) with the agent.");
+    // So does a receipt that only says the chat left its initiative.
+    expect(renderRequest("Continue the checkout work.", {
+      messages: [{
+        ...receipt,
+        content: "Told the agent this chat left the initiative “Checkout”.",
+        initiativeContext: { initiativeId: null, brief: null, notes: null, left: true },
+      }],
+    })).toContain("Told the agent this chat left the initiative “Checkout”.");
+  });
+
+  it("shows what the request shared of its initiative under the request, not as an agent notice", () => {
+    const receipt: ChatMessage = {
+      id: "receipt-1",
+      conversationId,
+      turnId: "turn-1",
+      role: "system",
+      content: "Shared the initiative brief (revision 3) and 5 notes with the agent.",
+      attachments: [],
+      createdAt: requestedAt,
+      initiativeContext: {
+        initiativeId: "44444444-4444-4444-8444-444444444444",
+        brief: { revision: 3, change: "shared" },
+        notes: { revision: 2, count: 5, change: "shared" },
+      },
+    };
+    const answer: ChatMessage = {
+      id: "answer-1", conversationId, turnId: "turn-1", role: "assistant",
+      content: "Done.", attachments: [], createdAt: "2026-07-23T10:00:02.000Z",
+    };
+    const html = renderRequest("Continue the checkout work.", { messages: [receipt] });
+    const requestStart = html.indexOf('aria-label="Your request"');
+    const request = html.slice(requestStart, html.indexOf("</article>", requestStart));
+    expect(request).toContain('aria-label="Shared initiative context"');
+    expect(request).toContain("<strong>Initiative context</strong>");
+    expect(request).toContain("Shared the initiative brief (revision 3) and 5 notes with the agent.");
+    expect(request.indexOf("Initiative context")).toBeGreaterThan(request.indexOf("Continue the checkout work."));
+    expect(html).not.toContain('aria-label="Agent system notice"');
+
+    // A receipt never keeps settled work out of Run details.
+    const [item] = buildResponseTimeline({
+      turns: [{ ...turn(), terminalAssistantMessageId: answer.id }],
+      messages: [message("Continue the checkout work."), receipt, answer],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    });
+    expect(item?.kind).toBe("turn");
+    if (item?.kind !== "turn") return;
+    expect(item.turn.initiativeContextReceipts).toEqual([receipt]);
+    expect(item.turn.systemMessages).toEqual([]);
+    expect(shouldConsolidateSettledWorkIntoRunDetails(item.turn)).toBe(true);
+    // A receipt that arrives before its turn is not shown as orphan history.
+    expect(buildResponseTimeline({ turns: [], messages: [receipt], activities: [], reasonings: [], checkpoints: [] }))
+      .toEqual([]);
+    expect(renderRequest("Continue.")).not.toContain("Shared initiative context");
+  });
+
+  it("shows a note the agent proposed with the turn's activity, not under the request", () => {
+    const proposal: ChatMessage = {
+      id: "proposal-1",
+      conversationId,
+      turnId: "turn-1",
+      role: "system",
+      content: "Proposed an initiative note: Cache order totals",
+      attachments: [],
+      createdAt: "2026-07-23T10:00:01.000Z",
+      initiativeContext: {
+        initiativeId: "44444444-4444-4444-8444-444444444444",
+        brief: null,
+        notes: null,
+        proposal: { noteId: "55555555-5555-4555-8555-555555555555", kind: "decision" },
+      },
+    };
+    const answer: ChatMessage = {
+      id: "answer-1", conversationId, turnId: "turn-1", role: "assistant",
+      content: "Done.", attachments: [], createdAt: "2026-07-23T10:00:02.000Z",
+    };
+    const html = renderRequest("Remember the totals rule.", { messages: [proposal] });
+    const requestStart = html.indexOf('aria-label="Your request"');
+    const request = html.slice(requestStart, html.indexOf("</article>", requestStart));
+    expect(request).not.toContain("Proposed an initiative note");
+    expect(html).toContain('aria-label="Proposed initiative notes"');
+    expect(html).toContain("<strong>Initiative note · Decision</strong>");
+    expect(html).toContain("Proposed an initiative note: Cache order totals");
+    expect(html).not.toContain('aria-label="Agent system notice"');
+    expect(html).not.toContain('aria-label="Shared initiative context"');
+
+    const [item] = buildResponseTimeline({
+      turns: [{ ...turn(), terminalAssistantMessageId: answer.id }],
+      messages: [message("Remember the totals rule."), proposal, answer],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    });
+    if (item?.kind !== "turn") throw new Error("Expected a turn.");
+    expect(item.turn.initiativeNoteProposals).toEqual([proposal]);
+    expect(item.turn.initiativeContextReceipts).toEqual([]);
+    expect(item.turn.systemMessages).toEqual([]);
+    expect(shouldConsolidateSettledWorkIntoRunDetails(item.turn)).toBe(true);
+    // Without a kind the row says only that it is an initiative note.
+    const plain = renderRequest("Remember.", {
+      messages: [{ ...proposal, initiativeContext: { ...proposal.initiativeContext!, proposal: { noteId: "55555555-5555-4555-8555-555555555555", kind: null } } }],
+    });
+    expect(plain).toContain("<strong>Initiative note</strong>");
   });
 
   it("describes every session recovery outcome without overstating it", () => {

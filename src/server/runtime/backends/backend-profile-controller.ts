@@ -431,8 +431,17 @@ export class BackendProfileController {
     projectId: string | null,
     selectionInput: ModelSelection,
   ): ModelBackendDefault {
-    const selection = this.validateSelection(selectionInput);
+    const selection = this.validateDefault(selectionInput);
     this.runtime.assertConfigurationMutable(selection.harnessId);
+    return this.store.saveModelBackendDefault(projectId, selection);
+  }
+
+  /**
+   * The canonical selection when it can be a new-chat default: a valid route
+   * on an enabled, compatible backend. Project and initiative defaults share it.
+   */
+  validateDefault(selectionInput: ModelSelection): ModelSelection {
+    const selection = this.validateSelection(selectionInput);
     const record = this.recordForSelection(selection);
     const compatibility = this.runtime.compatibility(
       record.profile,
@@ -444,7 +453,7 @@ export class BackendProfileController {
         "Only an enabled compatible backend can be a default.",
       );
     }
-    return this.store.saveModelBackendDefault(projectId, selection);
+    return selection;
   }
 
   clearDefault(projectId: string | null): void {

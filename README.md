@@ -42,7 +42,7 @@ When a stopped chat has a reported subscription reset time, the composer offers 
 - **Work side by side.** Drag chats into a split workspace with up to four panes, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Open the tools you need.** Choose Terminal in **Open a surface** for multiple terminal tabs and splits, or use the bottom dock. Find sent files in the dedicated **Attachments** surface. New chats start with the panel closed; each chat remembers its own surfaces and visibility.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
-- **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
+- **Keep useful work close.** Pin or snooze tasks, group related chats into initiatives, save prompts, follow plans and goals, and inspect locally recorded usage.
 - **Follow active work.** The Work tab shows activity and elapsed time for running threads, with a brief cue when a thread needs input or finishes. Choose a Working indicator in Settings for the Work tab and working cue; Automatic can also match individual tool and agent activity.
 - **Optional desktop mascot.** Enable it in **Settings → Notifications → Desktop mascot** for a movable companion with progress, question, approval, and result previews in a compact bubble above its head. Pick up the character to move it between screens; it returns to its current activity when released and remembers its position. Click the bubble to open the relevant chat; right-click to pause or hide. The bubble shows the chat that needs you most and lists up to five other active or unread chats; click one to open it. Hiding lasts until you choose **Unhide** in Settings, **Show mascot** in the Window menu or the macOS Dock menu, or restart Inertia. Export a sprite template and preview your own artwork before applying it. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
@@ -59,6 +59,8 @@ Keep an objective in view alongside the latest conversation plan. Goals distingu
 The Plan tab shows the agent's plan as a formatted document and marks each step as the provider reports progress.
 
 ![A plan document with live step progress in the Plan tab](docs/screenshots/inertia-plan.png)
+
+Group related chats into an **Initiative**, across projects and chats without a project. Each active initiative is its own section at the top of Work with a quiet count of chats that need you, while snoozed and settled chats keep their usual places, and the **Initiatives** page under Tasks lists its chats by what they need. Moving a chat into an initiative never changes its project, checkout or agent. Write the initiative's brief and notes once, and each of its chats receives them as shared reference material when a session starts and after you change them, with a receipt in the chat.
 
 Keep a to-do list on the **Tasks** page with due dates and priorities. Open a task to hand it to an agent: choose a model and a project or folder, and **Start** opens a chat with the task as its first message.
 

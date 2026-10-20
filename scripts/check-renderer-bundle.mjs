@@ -71,16 +71,53 @@ const budgets = {
   // title match add 750 core bytes (2,294,025 measured on macOS arm64, where
   // the previous build measures the same 2,293,275 bytes as Linux x64).
   // See docs/pr-evidence/visual-replies/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21,
+  // Initiatives add the membership contract, the New initiative request host
+  // and the new-chat picker loader to first load: 5,612 bytes over e165a0aa
+  // (889,926 -> 895,538 on Linux x64). The page, dialog and picker stay deferred.
+  // Initiative brief and notes add the turn receipt row, its message contract,
+  // the notes read result guard and the composer initiative chip: 2,543 bytes
+  // over b4c53d4a (895,538 -> 898,081 on Linux x64). The Brief and Notes
+  // editors load with the deferred Initiatives page. Hiding the receipt of a
+  // request that never reached its provider and the leaving-an-initiative
+  // receipt contract add 87 bytes over 614c70dc (898,081 -> 898,168).
+  // Initiative defaults and the access limit in the new-chat draft, the
+  // composer's disabled access options with their reason and the model
+  // source label add 2,761 bytes over 8d09a254 (898,168 -> 900,929 on Linux
+  // x64). The Tools & defaults rows load with the deferred Initiatives page.
+  // Lowering a starred model's access to the limit and refusing Antigravity
+  // under a Supervised limit in the composer add 206 bytes over aa173691
+  // (900,929 -> 901,135).
+  // Agent note proposals in the turn timeline, the initiative named on the
+  // context approval card and the shared Work status add 468 bytes over
+  // 80fc8520 (901,135 -> 901,603 on Linux x64). The proposal helpers live
+  // apart from the initiative schemas, which stay deferred.
+  // Initiative MCP servers add 61 bytes over 11cbca78 (-> 901,664 on Linux
+  // x64), the empty server list in the default settings; the MCP schema and
+  // card load with the deferred Initiatives page.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 5_612 + 2_543 + 87 + 2_761 + 206 + 468 + 61,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342,
+  // Initiative membership on chat shells and the snapshot coherence check add
+  // 766 bytes (681,993 -> 682,759); the picker never loads in detached chats.
+  // The initiative context receipt under a request and its message contract
+  // add 2,818 bytes over b4c53d4a (682,759 -> 685,577); hiding unreached
+  // receipts and the leaving receipt contract add 87 more (-> 685,664).
+  // The composer's access limit and its reason add 841 bytes over 8d09a254
+  // (685,664 -> 686,505 on Linux x64). The window's own access limit, its
+  // Antigravity refusal and the starred-model clamp add 659 bytes over
+  // aa173691 (-> 687,164); the limit helpers load without new-chat defaults.
+  // Agent note proposals in the timeline and the initiative named on the
+  // context approval card add 468 bytes over 80fc8520 (-> 687,632).
+  // Initiative MCP servers add 32 bytes over 11cbca78 (-> 687,664).
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 766 + 2_818 + 87 + 841 + 659 + 468 + 32,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
-  entryCss: 241_004 + 256,
+  // The composer initiative chip adds 593 bytes over b4c53d4a (240,972 ->
+  // 241,565 on Linux x64); the headroom is unchanged.
+  entryCss: 241_004 + 256 + 593,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -99,13 +136,16 @@ const budgets = {
   deferredAttachmentStorageSettingsJavaScript: 5 * kibibyte + 172 + 128 + 84,
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
   // measured).
-  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21,
-  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17,
+  deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21 + 44,
+  // Initiatives move 44 / 49 shared bytes into these chunks on the same source.
+  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 49,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   deferredCliConversationImportJavaScript: 9_797 + 256,
-  deferredThreadActionsJavaScript: 8 * kibibyte + 75,
-  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
+  // The keyboard-reachable Move to initiative submenu adds 864 bytes (9,113).
+  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 864,
+  // The palette-only swatch picker shared with initiatives adds 423 bytes.
+  deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406 + 423,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
   deferredDiagnosticCatalogJavaScript: 12 * kibibyte,
@@ -180,7 +220,36 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27,
+  // Initiatives add 30,023 core bytes (2,315,854 -> 2,345,877 on Linux x64):
+  // the deferred Initiatives page, New initiative dialog and composer picker,
+  // the sidebar sections, palette group and shared contracts. Existing
+  // headroom is unchanged.
+  // Initiative brief and notes add 13,707 core bytes over b4c53d4a
+  // (2,345,877 -> 2,359,584 on Linux x64), mostly the deferred Brief and Notes
+  // editors on the Initiatives page. Per-initiative brief drafts, note title
+  // validation and the review in-flight guard add 1,236 more over 614c70dc
+  // (-> 2,360,820), all deferred with that page. Existing headroom is unchanged.
+  // Initiative tool settings add 12,552 core bytes over 8d09a254
+  // (2,360,820 -> 2,373,372 on Linux x64), mostly the deferred Tools & defaults
+  // rows and the Settings rows they share with the Settings page, which Rollup
+  // now splits into shared deferred chunks. Existing headroom is unchanged.
+  // The access-limit fixes add 446 core bytes over aa173691 (-> 2,373,818).
+  // Agent note proposals add 3,378 core bytes over 80fc8520 (-> 2,377,196 on
+  // Linux x64), mostly the deferred proposal source and Rejected list on the
+  // Initiatives page and the proposal contract. Existing headroom is unchanged.
+  // The note Unicode rules, the proposal kind label and per-state note bounds
+  // add 802 core bytes over 2aa2e9a5 (-> 2,377,998 on Linux x64), all in the
+  // deferred Initiatives page and shared initiative contract.
+  // Initiative MCP servers add 16,515 core bytes over 11cbca78 (-> 2,394,513
+  // on Linux x64): the MCP servers card (11,446) in the deferred Tools &
+  // defaults chunk and the MCP server schema (10,364) in its own deferred
+  // chunk, less code Rollup now shares. Existing headroom is unchanged.
+  // The MCP security fixes add 2,497 core bytes over 0b0ad77e (-> 2,397,010
+  // on Linux x64): secret length, credential-header and destination rules in
+  // the deferred MCP schema chunk (1,818), the form's Secret defaults and
+  // focus handling in the deferred Tools & defaults chunk (664), and 15 in a
+  // shared chunk. Existing headroom is unchanged.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 30_023 + 13_707 + 1_236 + 12_552 + 446 + 3_378 + 802 + 16_515 + 2_497,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

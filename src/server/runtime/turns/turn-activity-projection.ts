@@ -6,6 +6,7 @@ import {
 } from "../../provider/activity-detail";
 import type { ProviderActivityEvent } from "../../provider/contracts";
 import { PROVIDER_INFO } from "../../provider/catalog";
+import { INTERRUPTED_ACTIVITY_TITLE_PREFIX } from "../../provider/context-compaction-activity";
 import {
   broadcastTurnConversationShell,
   projectActionKind,
@@ -166,7 +167,7 @@ export class TurnActivityProjection {
           status,
           ...(interruptedMessage
             ? {
-                title: `Interrupted · ${pending.title}`,
+                title: `${INTERRUPTED_ACTIVITY_TITLE_PREFIX}${pending.title}`,
                 detail: this.detail(
                   active,
                   pending.detail,

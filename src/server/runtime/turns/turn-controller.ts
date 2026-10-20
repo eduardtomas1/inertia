@@ -817,6 +817,7 @@ export class TurnController {
         this.now(),
       );
       active.providerRunStarted = true;
+      active.providerInvoked = true;
       const result = this.providers.run(active.providerInput, {
         hostTools,
         onStarted: () => {
@@ -886,6 +887,7 @@ export class TurnController {
       };
       if (isUnreceiptedProviderRunRefusal(error, owner)) {
         active.providerRunStarted = false;
+        active.providerInvoked = false;
         this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
       } else if (!isProviderRunRefusal(error, owner)) {
         requestProviderCancellation(this.providers, active.conversation.id);

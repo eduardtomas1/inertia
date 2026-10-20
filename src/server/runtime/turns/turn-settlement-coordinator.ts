@@ -227,6 +227,7 @@ export class TurnSettlementCoordinator {
         // A queued turn may fail after command acceptance but before start().
         // Give that direct terminal transition one coherent lifecycle boundary.
         startedAt: active.turn.startedAt ?? completedAt,
+        providerReached: active.providerInvoked,
         completedAt,
         updatedAt: completedAt,
         projection: {

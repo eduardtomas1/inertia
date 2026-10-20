@@ -1,4 +1,4 @@
-import type { WorkspaceRun } from "./contracts";
+import type { Conversation, ConversationLatestTurnSummary, WorkspaceRun } from "./contracts";
 
 export type WorkspaceRunOperationalBucket = "attention" | "active" | "recent" | "hidden";
 export type WorkspaceRunAttentionReason = "waiting" | "failure" | null;
@@ -127,4 +127,44 @@ export function selectConversationWorkspaceRun(
   runs: readonly WorkspaceRun[],
 ): WorkspaceRun | null {
   return indexConversationWorkspaceRuns(runs).get(conversationId) ?? null;
+}
+
+/**
+ * The Work status vocabulary for one chat, shared by the sidebar and by the
+ * runtime when it describes an initiative's chats to an agent: its canonical
+ * agent run decides when there is one, otherwise the chat's own status. A
+ * failure caused by a usage limit reads as `limited`.
+ */
+export type ConversationWorkStatus = "working" | "approval" | "input" | "failed" | "limited" | "completed" | "idle";
+
+export function conversationWorkStatus(
+  conversation: Pick<Conversation, "status" | "attentionKind"> & {
+    latestTurn?: Pick<ConversationLatestTurnSummary, "status" | "usageLimited"> | null;
+  },
+  run: WorkspaceRun | null,
+): ConversationWorkStatus {
+  const reported: ConversationWorkStatus = run?.status === "waiting"
+    ? conversation.attentionKind === "approval" ? "approval" : "input"
+    : run?.status === "running"
+      ? "working"
+      : run?.status === "failed"
+        ? "failed"
+        : run?.status === "succeeded"
+          ? "completed"
+          : run
+            ? "idle"
+            : conversation.status === "needs-input"
+              ? conversation.attentionKind === "approval" ? "approval" : "input"
+              : conversation.status === "running"
+                ? "working"
+                : conversation.status === "failed"
+                  ? "failed"
+                  : conversation.status === "completed"
+                    ? "completed"
+                    : "idle";
+  return reported === "failed"
+    && conversation.latestTurn?.status === "failed"
+    && conversation.latestTurn.usageLimited === true
+    ? "limited"
+    : reported;
 }

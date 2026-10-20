@@ -82,6 +82,8 @@ describe("detached chat preload", () => {
       "checkAppUpdate",
       "exportRecoveryData",
       "getBackendCredentialState",
+      "setInitiativeMcpSecret",
+      "getInitiativeMcpSecretState",
       "getPrivateConnectState",
       "previewConnect",
       "previewNavigate",

@@ -8,9 +8,14 @@ import {
 import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
 import {
   HarnessCapabilityRegistry,
+  type HarnessCapabilityAvailabilityContext,
   type HarnessCapabilityTool,
   type HarnessCapabilityPack,
 } from "./harness-capabilities";
+import {
+  INITIATIVE_TOOL_DEFINITIONS,
+  INITIATIVES_INSTRUCTION,
+} from "./initiative-host-tools";
 import type { HiddenProviderInstruction } from "./turns/request-context";
 
 const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
@@ -40,6 +45,12 @@ const FRONTEND_INSTRUCTION: HiddenProviderInstruction = {
 interface InertiaHarnessCapabilityInput {
   orchestrationTools: readonly ProviderHostToolDefinition[];
   browserEnabled: boolean;
+  /**
+   * Whether a chat may use the initiative tools now: it belongs to an
+   * initiative that is not archived. Read from the store whenever a turn's
+   * request or tool bridge is built. Without it the pack is not composed.
+   */
+  initiativeToolsAvailable?(context: HarnessCapabilityAvailabilityContext): boolean;
   invoke: HarnessCapabilityTool["invoke"];
 }
 
@@ -102,6 +113,27 @@ export function createInertiaHarnessCapabilities(
       evidenceKinds: ["host-tool-result"],
       scenarioIds: ["inline-rendered-page", "exact-turn-render"],
     },
+  });
+  if (input.initiativeToolsAvailable) packs.push({
+    id: "inertia.initiatives",
+    revision: 1,
+    title: "Inertia initiatives",
+    summary: "See this chat's initiative, read its notes and, with the user's approval, its other chats, and propose notes the user reviews.",
+    instructions: [INITIATIVES_INSTRUCTION],
+    tools: INITIATIVE_TOOL_DEFINITIONS.map((definition) => ({
+      definition,
+      invoke: input.invoke,
+    })),
+    evaluation: {
+      tags: ["initiatives", "memory", "permissions", "untrusted-text"],
+      evidenceKinds: ["host-tool-result"],
+      scenarioIds: [
+        "initiative-membership-authority",
+        "initiative-sibling-read-approval",
+        "initiative-note-proposal-review",
+      ],
+    },
+    availableFor: input.initiativeToolsAvailable,
   });
   return new HarnessCapabilityRegistry(packs);
 }

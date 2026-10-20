@@ -87,17 +87,37 @@ function normalizedSecrets(values: readonly string[]): string[] {
     .sort((left, right) => right.length - left.length);
 }
 
-class BoundarySecretRedactor {
+/**
+ * Exact-value redaction across a stream's chunks: text that could still be the
+ * start of a secret is held back until the next chunk decides it, so a value
+ * split across chunks is replaced as a whole. `flush` releases what is held
+ * at a boundary (a held partial secret is replaced when it is significant),
+ * and the stream continues; `finish` does the same and ends the stream.
+ */
+export class BoundarySecretRedactor {
   private pending = "";
   private finished = false;
   private root: SecretTrieNode | undefined;
 
-  constructor(private readonly secrets: () => readonly string[]) {}
+  constructor(
+    private readonly secrets: () => readonly string[],
+    private readonly marker = "[redacted]",
+  ) {}
 
   push(value: string): string {
     if (this.finished || !value) return "";
     this.pending += value;
     return this.drain(false);
+  }
+
+  /** Whether text is held back, waiting for the next chunk. */
+  holding(): boolean {
+    return this.pending.length > 0;
+  }
+
+  flush(redactPartial: PartialSecretRedaction): string {
+    if (this.finished || !this.pending) return "";
+    return this.drain(true, redactPartial);
   }
 
   finish(redactPartial: PartialSecretRedaction): string {
@@ -137,7 +157,7 @@ class BoundarySecretRedactor {
       }
       if (scan < this.pending.length) {
         if (lastTerminal >= 0) {
-          output += "[redacted]";
+          output += this.marker;
           cursor = lastTerminal;
         } else {
           output += this.pending[cursor]!;
@@ -146,16 +166,16 @@ class BoundarySecretRedactor {
         continue;
       }
       if (node.terminal && (final || node.children.size === 0)) {
-        output += "[redacted]";
+        output += this.marker;
         cursor = scan;
         continue;
       }
       if (!final) break;
       if (lastTerminal >= 0) {
-        output += "[redacted]";
+        output += this.marker;
         cursor = lastTerminal;
       } else if (scan > cursor && redactsPartialSecret(redactPartial, scan - cursor, node)) {
-        output += "[redacted]";
+        output += this.marker;
         cursor = scan;
       } else {
         output += this.pending[cursor]!;
@@ -167,7 +187,7 @@ class BoundarySecretRedactor {
   }
 }
 
-type PartialSecretRedaction = "all" | "significant";
+export type PartialSecretRedaction = "all" | "significant";
 
 interface SecretTrieNode {
   readonly children: Map<string, SecretTrieNode>;

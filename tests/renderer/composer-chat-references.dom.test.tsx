@@ -200,6 +200,20 @@ describe("composer chat references", () => {
     }));
   });
 
+  it("names the initiative when an initiative tool asks for another of its chats", () => {
+    const onCommand = vi.fn();
+    render(<ConversationContextRequestCard request={{ requestId: "request", targetConversationId: "target",
+      targetTurnId: "turn", requestedSourceConversationId: sourceOption.conversationId,
+      initiativeName: "Checkout redesign", createdAt: "now", expiresAt: "later" }}
+    sources={[{ ...sourceOption, workspaceRelation: "different-workspace", workspaceLabel: "/workspace/other" }]}
+    onCommand={onCommand} />);
+    const card = screen.getByRole("region", { name: "Agent requested chat context" });
+    expect(card).toHaveTextContent(/^The agent asked to read another chat in the initiative “Checkout redesign”/u);
+    // The same confirmation as any other cross-workspace read.
+    expect(screen.getByRole("button", { name: "Share chat" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Share context across these different workspaces" })).not.toBeChecked();
+  });
+
   it("allows declining a preselected cross-workspace request without authorizing a share", async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ type: "request.ok", requestId: "reply" });

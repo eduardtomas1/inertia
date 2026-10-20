@@ -62,6 +62,7 @@ import { type NewConversationLocation } from "./lib/newConversation";
 import { useLaunchRequests } from "./hooks/useLaunchRequests";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
+import { initiativeDefaultProject } from "./utils/initiativeSettings";
 import {
   cacheColorTheme,
   cacheThemePreference,
@@ -759,6 +760,14 @@ export default function App(): React.JSX.Element {
   const workspaceSceneActions = useStableActions({
       importProject,
       selectGlobalChatProject,
+      selectGlobalChatInitiative: (initiativeId: string | null) => {
+        draftConversation.changeInitiative(initiativeId);
+        // Starting a chat from an initiative pre-fills its default project.
+        const defaultProject = initiativeDefaultProject(connection.snapshot, initiativeId);
+        if (defaultProject && defaultProject.id !== draftConversation.conversation?.projectId) {
+          selectGlobalChatProject(defaultProject);
+        }
+      },
       createConversation,
       sendMessage,
       compactConversation: async (instruction?: string) => {

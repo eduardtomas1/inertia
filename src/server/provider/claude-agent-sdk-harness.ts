@@ -13,6 +13,7 @@ import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profile
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import {
   launchCredentialValues,
+  redactExactCredentials,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   sanitizeProviderFailureDetail,
 } from "./activity-detail";
@@ -73,6 +74,12 @@ import {
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+import {
+  claudeAllowedInitiativeMcpServers,
+  claudeInitiativeMcpServers,
+  inheritedLaunchCredentialNames,
+  withoutInheritedCredentials,
+} from "./initiative-mcp-config";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -285,7 +292,17 @@ function startClaudeRun(
   emitter.status("starting");
   const usesNativeAnthropic = options.input.backendProfile.id
     === NATIVE_ANTHROPIC_PROFILE_ID;
-  const launchCredentials = launchCredentialValues(claudeRunEnvironment(options.environment));
+  const runEnvironment = claudeRunEnvironment(options.environment);
+  const launchCredentials = launchCredentialValues(runEnvironment);
+  // Initiative MCP servers are attached after the query starts and before
+  // the prompt is sent, through the SDK control channel (see below). Claude
+  // Code starts stdio servers with its own environment, so each one gets an
+  // empty value for every launch credential it would otherwise inherit. Their
+  // resolved secrets are redacted by the run coordinator, not here.
+  const initiativeMcpServers = withoutInheritedCredentials(
+    options.input.mcpServers ?? [],
+    inheritedLaunchCredentialNames(runEnvironment),
+  );
   const routeFailure = (error: string): string =>
     claudeRouteFailureMessage(usesNativeAnthropic, error, options.input.backendProfile);
   const routeDetail = (rawError: string, detail: string | null): string | null =>
@@ -308,6 +325,39 @@ function startClaudeRun(
     refreshContextUsage,
     checklistTasks: () => checklistTasks,
   });
+  /**
+   * Attaches the initiative's MCP servers with `setMcpServers`. Its control
+   * request carries header and environment values over the SDK's private
+   * stdin channel; the `mcpServers` query option would put them on the Claude
+   * Code command line. Inertia's own server is named again so it stays
+   * attached. A server Claude could not connect is reported, not fatal.
+   */
+  const attachInitiativeMcpServers = async (activeQuery: Query): Promise<void> => {
+    let failures: Record<string, string>;
+    try {
+      const attached = await activeQuery.setMcpServers({
+        ...(claudeHostTools ? { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config } : {}),
+        ...claudeInitiativeMcpServers(initiativeMcpServers),
+      });
+      failures = attached.errors ?? {};
+    } catch (error) {
+      if (cancelRequested || abortController.signal.aborted) return;
+      const detail = redactExactCredentials(
+        error instanceof Error ? error.message : "Claude did not attach the servers.",
+        launchCredentials,
+      );
+      emitter.activity("system", "info", "Initiative MCP servers not added", { detail });
+      return;
+    }
+    for (const server of initiativeMcpServers) {
+      const failure = failures[server.name];
+      if (failure === undefined) continue;
+      emitter.activity("system", "info", `Initiative MCP server failed to connect · ${server.name}`, {
+        detail: redactExactCredentials(failure, launchCredentials),
+      });
+    }
+  };
+
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
       const compactInstruction = options.input.operation?.instruction;
@@ -328,7 +378,9 @@ function startClaudeRun(
       }
       prompt.uuid = randomUUID();
       delegateLifecycle.expectPrompt(prompt.uuid);
-      if (!promptChannel.push(prompt, promptReservation)) {
+      // With initiative MCP servers the prompt waits until they are attached,
+      // so Claude's first request already offers their tools.
+      if (initiativeMcpServers.length === 0 && !promptChannel.push(prompt, promptReservation)) {
         return finishResult("cancelled");
       }
       const selectedClaudeSkills = (options.input.skills ?? []).filter(
@@ -343,7 +395,11 @@ function startClaudeRun(
         selectedClaudeSkills,
         options.input.cwd,
         options.environment,
-        { ...skillFilesystem, signal: skillDeadline.signal },
+        {
+          ...skillFilesystem,
+          signal: skillDeadline.signal,
+          initiativeSkillsRoot: options.input.initiativeSkillsRoot ?? null,
+        },
       );
       try {
         stagedSkillPlugin = await raceClaudeSkillStaging(
@@ -381,7 +437,14 @@ function startClaudeRun(
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
           systemPrompt: { type: "preset", preset: "claude_code", snapshot: true },
-          managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
+          // The MCP allowlist names exactly the initiative's servers; with
+          // none it stays empty, so no server of the user's is admitted.
+          managedSettings: initiativeMcpServers.length > 0
+            ? {
+                ...CLAUDE_ISOLATED_SKILL_SETTINGS,
+                allowedMcpServers: claudeAllowedInitiativeMcpServers(initiativeMcpServers),
+              }
+            : CLAUDE_ISOLATED_SKILL_SETTINGS,
           ...(supportsFastMode
             ? {
                 settings: {
@@ -405,7 +468,9 @@ function startClaudeRun(
                 mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
                 strictMcpConfig: true,
               }
-            : {}),
+            : initiativeMcpServers.length > 0
+              ? { strictMcpConfig: true }
+              : {}),
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
           // Custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL instead.
@@ -423,6 +488,16 @@ function startClaudeRun(
             : {}),
         },
       });
+      if (initiativeMcpServers.length > 0) {
+        await attachInitiativeMcpServers(query);
+        if (cancelRequested || abortController.signal.aborted) {
+          promptChannel.release(promptReservation);
+          return finishResult("cancelled");
+        }
+        if (!promptChannel.push(prompt, promptReservation)) {
+          return finishResult("cancelled");
+        }
+      }
       acceptingFollowUps = true;
       emitter.status("running");
       if (usesNativeAnthropic) {

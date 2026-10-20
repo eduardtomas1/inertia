@@ -345,6 +345,11 @@ function repliesSection(
 }
 
 const NO_CHANGED_FILES: Section = { text: "## Changed files\nInertia recorded no changed files for this turn.", truncated: 0, omitted: 0 };
+const CHANGES_NOT_CAPTURED: Section = {
+  text: "## Changed files\nInertia could not capture this turn's changes, so it cannot say which files changed.",
+  truncated: 0,
+  omitted: 0,
+};
 
 function moreFilesLine(omitted: number): string {
   return `[${omitted} more changed ${omitted === 1 ? "file" : "files"} left out by Inertia.]`;
@@ -355,7 +360,7 @@ function filesSection(
   budget: number,
   diffUnavailable: boolean,
 ): Section {
-  if (files.length === 0) return NO_CHANGED_FILES;
+  if (files.length === 0) return diffUnavailable ? CHANGES_NOT_CAPTURED : NO_CHANGED_FILES;
   const heading = diffUnavailable
     ? "## Changed files — quoted evidence\nDiff unavailable for this turn; only the changed paths follow."
     : "## Changed files — quoted evidence";
@@ -591,7 +596,7 @@ export function buildWatcherDigest(
     ...(replyPart ? [counted(replies.filter((reply) => reply.content.trim().length > 0).length, "assistant reply", "assistant replies")] : []),
     ...(files
       ? [changedCount === 0
-          ? "no changed files"
+          ? options.diff === null ? "changes not captured" : "no changed files"
           : `${counted(changedCount, "changed file", "changed files")}${options.diff ? " with diffs" : " (paths only)"}`]
       : []),
   ];

@@ -623,6 +623,18 @@ describe("buildWatcherDigest", () => {
     expect(notShared.content).not.toContain("secret");
   });
 
+  it("says the turn's changes could not be captured when neither the diff nor the paths are available", () => {
+    const source = new FakeSource();
+    source.turns = [turn({ status: "completed" })];
+    source.changed = [];
+    const final = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options({ final: true, diff: null }))!;
+    expect(final.content).toContain("## Changed files\nInertia could not capture this turn's changes, so it cannot say which files changed.");
+    expect(final.content).toContain("changes not captured");
+    expect(final.content).not.toContain("recorded no changed files");
+    const unread = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options({ final: true }))!;
+    expect(unread.content).toContain("## Changed files\nInertia recorded no changed files for this turn.");
+  });
+
   it("points to the watcher's own read tools and to the context tool only when it has it", () => {
     const source = new FakeSource();
     source.activities = [activity(1)];

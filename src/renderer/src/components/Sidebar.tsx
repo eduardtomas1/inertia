@@ -140,12 +140,12 @@ function workRepositoryLabel(project: Project | undefined): string | null {
 }
 
 function workFocusConversationId(identity: string): string | null {
-  if (identity.startsWith("thread-actions:")) {
-    return identity.slice("thread-actions:".length);
-  }
-  return identity.startsWith("thread:")
-    ? identity.slice("thread:".length)
-    : null;
+  const prefix = ["thread-actions:", "thread:", "watcher:"].find((candidate) => identity.startsWith(candidate));
+  return prefix ? identity.slice(prefix.length) : null;
+}
+
+function workConversationIdentities(conversationId: string): readonly string[] {
+  return [`thread:${conversationId}`, `watcher:${conversationId}`];
 }
 
 function SidebarView({
@@ -437,7 +437,7 @@ function SidebarView({
     const conversationId = renameFocusRef.current;
     if (renaming || !conversationId) return;
     renameFocusRef.current = null;
-    focusWorkIdentity(`thread:${conversationId}`);
+    workConversationIdentities(conversationId).some((identity) => focusWorkIdentity(identity));
   }, [focusWorkIdentity, renaming]);
   useLayoutEffect(() => {
     const identity = workFocusIdentityRef.current;
@@ -472,7 +472,7 @@ function SidebarView({
       ? [focusedConversationId]
       : workFocusConversationIdsRef.current;
     const destinationThreadIdentity = focusedConversationIds
-      .map((conversationId) => `thread:${conversationId}` as const)
+      .flatMap(workConversationIdentities)
       .find((candidate) => workIndexByIdentity.has(candidate));
     const destinationSection = focusedConversationIds
       .map((conversationId) => workSections.find((section) => (

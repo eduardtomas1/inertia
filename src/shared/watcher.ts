@@ -60,6 +60,75 @@ const singleLine = (value: string): boolean => {
   return true;
 };
 
+/**
+ * Replaces NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR, which renderers and
+ * models treat as line breaks, so quoted text cannot step outside its quote.
+ */
+export function watcherReplaceLineSeparators(value: string, replacement: string): string {
+  return value.replace(/[\u0085\u2028\u2029]/gu, replacement);
+}
+
+/** True when every UTF-16 surrogate is paired, so JSON never escapes it to six bytes. */
+function wellFormed(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xDC00 && next <= 0xDFFF)) return false;
+      index += 1;
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * One printable line: no C0 controls, DEL, C1 controls or line separators, and
+ * no lone surrogates. Each code unit then serializes to at most three bytes of
+ * JSON, which is what keeps the shell projection's size provable.
+ */
+export function watcherPrintableLine(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) return false;
+  }
+  return wellFormed(value);
+}
+
+/** Replaces controls and separators with spaces and lone surrogates with U+FFFD. */
+export function watcherPrintableText(value: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        result += value[index]! + value[index + 1]!;
+        index += 1;
+      } else {
+        result += "\uFFFD";
+      }
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      result += "\uFFFD";
+    } else if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) {
+      result += " ";
+    } else {
+      result += value[index]!;
+    }
+  }
+  return result;
+}
+
+/** Instructions may use newlines and tabs; every other control character is refused. */
+function instructionCharactersAllowed(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if ((code < 0x20 && code !== 0x0a && code !== 0x09) || (code >= 0x7f && code <= 0x9f)) return false;
+  }
+  return wellFormed(value);
+}
+
 export const watcherPresetSchema = z.enum(WATCHER_PRESETS);
 export const watcherStatusSchema = z.enum(WATCHER_STATUSES);
 export const watcherPauseReasonSchema = z.enum(WATCHER_PAUSE_REASONS);
@@ -75,7 +144,7 @@ export const watcherLivePhaseSchema = z.enum(WATCHER_LIVE_PHASES);
 
 export const watcherInstructionsSchema = z.string()
   .max(MAX_WATCHER_INSTRUCTIONS_CHARS)
-  .refine((value) => !value.includes("\0"), "Watcher instructions cannot contain NUL bytes.");
+  .refine(instructionCharactersAllowed, "Watcher instructions can use newlines and tabs but no other control characters.");
 
 export const watcherSharingSchema = z.strictObject({
   brief: z.boolean(),
@@ -122,7 +191,7 @@ export const watcherNoteAttributionSchema = z.strictObject({
 export const watcherFeedHeadlineSchema = z.strictObject({
   outcome: watcherWakeOutcomeSchema,
   at: timestampSchema,
-  text: z.string().max(MAX_WATCHER_HEADLINE_CHARS),
+  text: z.string().max(MAX_WATCHER_HEADLINE_CHARS).refine(watcherPrintableLine, "Watcher headlines stay on one printable line."),
 });
 
 export const watcherCountersSchema = z.strictObject({
@@ -139,13 +208,19 @@ export const watcherLinkViewSchema = z.strictObject({
   watchedConversationId: z.uuid().nullable(),
   projectId: z.uuid(),
   preset: watcherPresetSchema,
-  instructions: watcherInstructionsSchema,
+  /**
+   * Present only on `watcher.link` command results. The shell projection
+   * (`AppSnapshot.watchers` and `watcher.link.updated`) leaves it out so eight
+   * links always fit `MAX_WATCHER_LINKS_SERIALIZED_BYTES`.
+   */
+  instructions: watcherInstructionsSchema.optional(),
   sharing: watcherSharingSchema,
   budgets: watcherBudgetsSchema,
   privateConnect: watcherPrivateConnectSchema,
   status: watcherStatusSchema,
   pauseReason: watcherPauseReasonSchema.nullable(),
-  pauseDetail: z.string().max(MAX_WATCHER_PAUSE_DETAIL_CHARS).nullable(),
+  pauseDetail: z.string().max(MAX_WATCHER_PAUSE_DETAIL_CHARS)
+    .refine(watcherPrintableLine, "Watcher pause details stay on one printable line.").nullable(),
   detachedReason: watcherDetachReasonSchema.nullable(),
   watchedTurnId: turnIdSchema.nullable(),
   counters: watcherCountersSchema,
@@ -153,6 +228,8 @@ export const watcherLinkViewSchema = z.strictObject({
   quietSince: timestampSchema.nullable(),
   feedRevision: countSchema,
   latest: watcherFeedHeadlineSchema.nullable(),
+  /** Settlement time of the newest finding that was not dismissed, whatever later checks reported. */
+  latestFindingAt: timestampSchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 }).superRefine((link, context) => {

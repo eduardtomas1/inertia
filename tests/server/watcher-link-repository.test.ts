@@ -19,6 +19,9 @@ import {
   DEFAULT_WATCHER_BUDGETS,
   DEFAULT_WATCHER_SHARING,
   MAX_ACTIVE_WATCHERS,
+  MAX_WATCHER_LINKS_SERIALIZED_BYTES,
+  MAX_WATCHER_PAUSE_DETAIL_CHARS,
+  watcherLinksSerializedBytes,
   watcherLinkViewSchema,
   type WatcherNoteAttribution,
 } from "../../src/shared/watcher";
@@ -215,12 +218,14 @@ describe("watcher link repository", () => {
     expect(links.recordAttempt(link.id, "command")).toBe(1);
     expect(links.beginWatchedTurn(link.id, "turn-1", tick())?.writeAttemptsThisTurn).toBe(2);
     const cursor = { turnId: "turn-1", activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-9", messageAt: null, pendingRunningIds: ["a", "a", "b"] };
-    links.notePendingEvents(link.id, 7, tick());
+    expect(links.notePendingEvents(link.id, 7, tick())?.counters.eventsPending).toBe(7);
+    expect(links.notePendingEvents(link.id, 7, tick())).toBeNull();
+    // The scheduler is the only source of the pending count: neither a check nor a new turn changes it.
     const advanced = links.advanceCursor(link.id, cursor, 4, tick());
-    expect(advanced).toMatchObject({ cursor: { ...cursor, pendingRunningIds: ["a", "b"] }, counters: { eventsSeen: 4, eventsPending: 3 } });
+    expect(advanced).toMatchObject({ cursor: { ...cursor, pendingRunningIds: ["a", "b"] }, counters: { eventsSeen: 4, eventsPending: 7 } });
     expect(links.grantWakes(link.id, 3)?.counters.wakeAllowance).toBe(8);
     expect(links.beginWatchedTurn(link.id, "turn-2", tick())).toMatchObject({
-      writeAttemptsThisTurn: 0, commandAttemptsThisTurn: 0, counters: { wakeAllowance: 5, eventsPending: 0 },
+      writeAttemptsThisTurn: 0, commandAttemptsThisTurn: 0, counters: { wakeAllowance: 5, eventsPending: 7 },
       cursor: { turnId: "turn-2", activityAt: null, activityId: null, pendingRunningIds: [] },
     });
     expect(links.markQuiet(link.id, tick())?.quietSince).not.toBeNull();
@@ -229,6 +234,133 @@ describe("watcher link repository", () => {
     expect(links.get(link.id)?.quietSince).toBeNull();
     expect(links.markFinalPass(link.id, "turn-2", tick())).toBe(true);
     expect(links.markFinalPass(link.id, "turn-2", tick())).toBe(false);
+  });
+
+  it("moves the cursor only while it still follows the check's turn", () => {
+    const { link } = attach(chat());
+    const links = store.watcherLinks;
+    const covered = (turnId: string) => ({ turnId, activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-1", messageAt: null, pendingRunningIds: [] });
+    // A first check of a link that followed no turn yet takes the digest's turn.
+    expect(links.advanceCursor(link.id, covered("turn-1"), 2, tick(), null)?.cursor).toEqual(covered("turn-1"));
+    // The next turn begins while a check of turn-1 is still running; its late settlement must not rewind.
+    links.beginWatchedTurn(link.id, "turn-2", tick());
+    const late = links.advanceCursor(link.id, { ...covered("turn-1"), activityId: "activity-2" }, 3, tick(), "turn-1");
+    expect(late).toMatchObject({
+      watchedTurnId: "turn-2",
+      cursor: { turnId: "turn-2", activityAt: null, activityId: null },
+      counters: { eventsSeen: 5 },
+    });
+    expect(links.advanceCursor(link.id, covered("turn-2"), 1, tick(), "turn-2")?.cursor).toEqual(covered("turn-2"));
+  });
+
+  it("charges a check to the turn the link follows, never to the next turn", () => {
+    const { link } = attach(chat());
+    const links = store.watcherLinks;
+    links.beginWatchedTurn(link.id, "turn-2", tick());
+    const open = (watchedTurnId: string, trigger: "turn-end" | "activity") => {
+      links.transition(link.id, ["watching"], { status: "waking" }, tick());
+      const wake = links.createWake({ id: randomUUID(), linkId: link.id, watchedTurnId, trigger, eventsCovered: 0, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 0 }, tick())!;
+      links.settleWake(wake.wakeId, "silent", null, null, null, tick());
+      links.transition(link.id, ["waking"], { status: "watching" }, tick());
+    };
+    open("turn-1", "turn-end");
+    expect(links.get(link.id)?.counters).toMatchObject({ wakesThisTurn: 0, wakesTotal: 1 });
+    open("turn-2", "activity");
+    expect(links.get(link.id)?.counters).toMatchObject({ wakesThisTurn: 1, wakesTotal: 2 });
+  });
+
+  it("ends a wake-budget pause when the next watched turn starts, and only that pause", () => {
+    const links = store.watcherLinks;
+    const { link } = attach(chat("Budget"));
+    links.beginWatchedTurn(link.id, "turn-1", tick());
+    links.transition(link.id, ["watching"], { status: "paused", reason: "wake-budget", detail: "Used its checks." }, tick());
+    expect(links.beginWatchedTurn(link.id, "turn-1", tick())).toMatchObject({ status: "paused", pauseReason: "wake-budget" });
+    expect(links.beginWatchedTurn(link.id, "turn-2", tick())).toMatchObject({
+      status: "watching", pauseReason: null, pauseDetail: null, counters: { wakeAllowance: 12, wakesThisTurn: 0 },
+    });
+    const user = attach(chat("User pause")).link;
+    links.beginWatchedTurn(user.id, "turn-1", tick());
+    links.transition(user.id, ["watching"], { status: "paused", reason: "user" }, tick());
+    expect(links.beginWatchedTurn(user.id, "turn-2", tick())).toMatchObject({ status: "paused", pauseReason: "user" });
+  });
+
+  it("names the newest undismissed finding apart from the latest check", () => {
+    const { link } = attach(chat());
+    const links = store.watcherLinks;
+    expect(links.get(link.id)?.latestFindingAt).toBeNull();
+    const first = check(link.id, "finding");
+    expect(links.get(link.id)?.latestFindingAt).toBe(first.settledAt);
+    const quiet = check(link.id, "silent");
+    expect(links.get(link.id)).toMatchObject({ latest: { outcome: "silent", at: quiet.settledAt }, latestFindingAt: first.settledAt });
+    const second = check(link.id, "finding");
+    links.setDelivery(second.wakeId, { mode: null, state: "dismissed" }, tick());
+    expect(links.get(link.id)?.latestFindingAt).toBe(first.settledAt);
+    links.setDelivery(first.wakeId, { mode: null, state: "dismissed" }, tick());
+    expect(links.get(link.id)?.latestFindingAt).toBeNull();
+    expect(watcherLinkViewSchema.safeParse(store.shellSnapshot().watchers?.[0]).success).toBe(true);
+  });
+
+  it("keeps eight maximal links under the snapshot cap and leaves instructions out of the shell", () => {
+    const links = store.watcherLinks;
+    expect(() => attach(chat("Bell"), { instructions: "ring\u0007" })).toThrow();
+    const instructions = `${"界".repeat(1_000)}\n\t${"\"\\".repeat(499)}`;
+    for (let index = 0; index < MAX_ACTIVE_WATCHERS; index += 1) {
+      const { link } = attach(chat(`Chat ${index}`), { instructions, preset: "scope-guard" });
+      check(link.id, "finding");
+      raw((database) => database.prepare("UPDATE watcher_wakes SET finding_preview = ? WHERE link_id = ?")
+        .run(`\u0001\u2028${"界".repeat(2_000)}`, link.id));
+      const detail = `${"\u0007\n\u2028\uD800".repeat(100)}${"界".repeat(2_000)}`;
+      expect(links.transition(link.id, ["watching"], { status: "paused", reason: "route-unavailable", detail }, tick())?.pauseDetail)
+        .toHaveLength(MAX_WATCHER_PAUSE_DETAIL_CHARS);
+      links.recordAttempt(link.id, "write");
+    }
+    const views = store.shellSnapshot().watchers ?? [];
+    expect(views).toHaveLength(MAX_ACTIVE_WATCHERS);
+    for (const view of views) {
+      expect(watcherLinkViewSchema.safeParse(view).success).toBe(true);
+      expect(view).not.toHaveProperty("instructions");
+      expect(view.latest?.text).toHaveLength(200);
+    }
+    expect(watcherLinksSerializedBytes(views)).toBeLessThan(MAX_WATCHER_LINKS_SERIALIZED_BYTES);
+    expect(links.get(views[0]!.id)?.instructions).toBe(instructions);
+  });
+
+  it("answers the shell's per-chat questions from single indexed rows", () => {
+    const watched = chat();
+    const { link, conversation } = attach(watched, { privateConnect: "hidden" });
+    const links = store.watcherLinks;
+    expect(links.parentForWatcher(conversation.id)).toEqual({ watchedConversationId: watched.id, privateConnect: "hidden" });
+    expect(links.parentForWatcher(watched.id)).toBeNull();
+    expect(links.watcherTurnActiveFor(watched.id)).toBe(false);
+    const turn = beginTurn(conversation);
+    expect(links.watcherTurnActiveFor(watched.id)).toBe(true);
+    expect(links.watcherTurnActiveFor(conversation.id)).toBe(false);
+    settleTurn(turn.id);
+    expect(links.watcherTurnActiveFor(watched.id)).toBe(false);
+    links.transition(link.id, ["watching"], { status: "detached", reason: "user" }, tick());
+    expect(links.parentForWatcher(conversation.id)).toBeNull();
+  });
+
+  it("counts a watcher turn's settled commands without reading their details", () => {
+    const watched = chat();
+    const { conversation } = attach(watched);
+    const turn = beginTurn(conversation);
+    const other = beginTurn(conversation, "Second");
+    raw((database) => {
+      const insert = database.prepare(`
+        INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2030-01-01T00:00:00.000Z')
+      `);
+      const add = (turnId: string, kind: string, status: string) => insert.run(randomUUID(), conversation.id, turn.runId, turnId, kind, "rg parser", "x".repeat(100_000), status);
+      add(turn.id, "command", "completed");
+      add(turn.id, "command", "failed");
+      add(turn.id, "command", "running");
+      add(turn.id, "tool", "completed");
+      add(other.id, "command", "completed");
+    });
+    const counts = store.watcherLinks.digest.settledCommandCounts(conversation.id, [turn.id, other.id, "missing"]);
+    expect(Object.fromEntries(counts)).toEqual({ [turn.id]: 2, [other.id]: 1 });
+    expect(store.watcherLinks.digest.settledCommandCounts(watched.id, [turn.id]).size).toBe(0);
   });
 
   it("enforces the plan, supervised and harness locks only for attached watchers", () => {

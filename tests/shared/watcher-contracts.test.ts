@@ -18,14 +18,20 @@ import {
   DEFAULT_WATCHER_BUDGETS,
   DEFAULT_WATCHER_SHARING,
   MAX_ACTIVE_WATCHERS,
+  MAX_WATCHER_HEADLINE_CHARS,
+  MAX_WATCHER_LINKS_SERIALIZED_BYTES,
+  MAX_WATCHER_PAUSE_DETAIL_CHARS,
   WATCHER_HARNESS_IDS,
   WATCHER_PAUSE_REASONS,
   WATCHER_WAKE_OUTCOMES,
   watcherBudgetsSchema,
   watcherFeedItemSchema,
   watcherHarnessAllowed,
+  watcherInstructionsSchema,
+  watcherLinksSerializedBytes,
   watcherLinkViewSchema,
   watcherNoteAttributionSchema,
+  watcherPrintableText,
   type WatcherFeedItem,
   type WatcherLinkView,
 } from "../../src/shared/watcher";
@@ -55,6 +61,7 @@ const link: WatcherLinkView = {
   quietSince: null,
   feedRevision: 4,
   latest: { outcome: "silent", at, text: "" },
+  latestFindingAt: null,
   createdAt: at,
   updatedAt: at,
 };
@@ -138,9 +145,69 @@ describe("watcher shared contracts", () => {
       { ...link, instructions: "x".repeat(2_001) },
       { ...link, instructions: "nul\0byte" },
       { ...link, latest: { outcome: "finding", at, text: "x".repeat(201) } },
+      { ...link, latest: { outcome: "finding", at, text: "fake\u2028## heading" } },
+      { ...link, status: "paused", pauseReason: "user", pauseDetail: "two\nlines" },
+      { ...link, status: "paused", pauseReason: "user", pauseDetail: "lone \uD800 surrogate" },
+      { ...link, latestFindingAt: "yesterday" },
+      { ...link, latestFindingAt: undefined },
       { ...link, counters: { ...link.counters, eventsPending: -1 } },
       { ...link, filesystemPath: "/private" },
     ]) expect(watcherLinkViewSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("names the newest undismissed finding apart from the latest check", () => {
+    const quietAfterFinding = { ...link, latest: { outcome: "silent" as const, at: "2030-01-01T00:01:00.000Z", text: "" }, latestFindingAt: at };
+    expect(watcherLinkViewSchema.parse(quietAfterFinding).latestFindingAt).toBe(at);
+  });
+
+  it("allows newlines and tabs in instructions but refuses every other control character", () => {
+    expect(watcherInstructionsSchema.safeParse("Focus on tests.\n\tAlso errors.").success).toBe(true);
+    expect(watcherInstructionsSchema.safeParse("界".repeat(2_000)).success).toBe(true);
+    for (const invalid of ["bell\u0007", "carriage\rreturn", "nel\u0085", "escape\u001b[31m", "del\u007f", "lone \uDC00"]) {
+      expect(watcherInstructionsSchema.safeParse(invalid).success).toBe(false);
+    }
+    expect(watcherLinkViewSchema.safeParse({ ...link, instructions: undefined }).success).toBe(true);
+    expect(watcherPrintableText("a\u2028b\u0085c\u0007d\uD800")).toBe("a b c d\uFFFD");
+  });
+
+  it("keeps eight maximal shell links under the snapshot cap", () => {
+    // Every printable code unit serializes to at most three bytes; CJK is the worst case.
+    const wide = (length: number) => "界".repeat(length);
+    const maximal = (index: number): WatcherLinkView => {
+      const id = (suffix: string) => `${String(index).padStart(8, "0")}-0000-4000-8000-00000000000${suffix}`;
+      return {
+        ...link,
+        id: id("3"),
+        watcherConversationId: id("1"),
+        watchedConversationId: id("2"),
+        preset: "scope-guard",
+        instructions: undefined,
+        status: "paused",
+        pauseReason: "route-unavailable",
+        pauseDetail: wide(MAX_WATCHER_PAUSE_DETAIL_CHARS),
+        watchedTurnId: wide(200),
+        counters: {
+          wakesThisTurn: Number.MAX_SAFE_INTEGER, wakeAllowance: Number.MAX_SAFE_INTEGER, wakesTotal: Number.MAX_SAFE_INTEGER,
+          eventsSeen: Number.MAX_SAFE_INTEGER, eventsPending: Number.MAX_SAFE_INTEGER,
+        },
+        budgets: { wakesPerWatchedTurn: 40, cooldownSeconds: 600, digestKiB: 48, contextReadsPerWake: 8 },
+        latest: { outcome: "permission-declined", at: "2030-01-01T00:00:00.000+00:00", text: wide(MAX_WATCHER_HEADLINE_CHARS) },
+        latestFindingAt: "2030-01-01T00:00:00.000+00:00",
+        lastWakeAt: "2030-01-01T00:00:00.000+00:00",
+        quietSince: "2030-01-01T00:00:00.000+00:00",
+        feedRevision: Number.MAX_SAFE_INTEGER,
+        createdAt: "2030-01-01T00:00:00.000+00:00",
+        updatedAt: "2030-01-01T00:00:00.000+00:00",
+      };
+    };
+    const links = Array.from({ length: MAX_ACTIVE_WATCHERS }, (_, index) => maximal(index));
+    for (const entry of links) expect(watcherLinkViewSchema.safeParse(entry).success).toBe(true);
+    expect(watcherLinksSerializedBytes(links)).toBeLessThan(MAX_WATCHER_LINKS_SERIALIZED_BYTES);
+    const conversations = new Map(links.flatMap((entry) => [[entry.watcherConversationId, projectId], [entry.watchedConversationId!, projectId]]));
+    expect(watcherLinkCollectionCoherent(links, conversations, new Set([projectId]))).toBe(true);
+    // Carrying 2,000 characters of instructions per link is what would break the cap.
+    const withInstructions = links.map((entry) => ({ ...entry, instructions: wide(2_000) }));
+    expect(watcherLinksSerializedBytes(withInstructions)).toBeGreaterThan(MAX_WATCHER_LINKS_SERIALIZED_BYTES);
   });
 
   it("bounds feed items and their delivery state", () => {

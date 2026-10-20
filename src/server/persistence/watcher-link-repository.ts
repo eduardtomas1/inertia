@@ -42,6 +42,7 @@ import {
   truncateCodeUnits,
   truncateUtf8Bytes,
   watcherFeedItem,
+  watcherPrintableLineOf,
   watcherLinkFromRow,
   watcherLinkViews,
   watcherWakeFromRow,
@@ -240,16 +241,43 @@ export class WatcherLinkRepository {
 
   /** The link owning a watcher conversation, including detached ones. */
   findByWatcher(conversationId: string): WatcherLinkRecord | null {
-    const row = this.database.prepare(`${LATEST_WATCHER_WAKE_SQL} WHERE link.watcher_conversation_id = ?`)
+    const row = cachedStatement(this.database, `${LATEST_WATCHER_WAKE_SQL} WHERE link.watcher_conversation_id = ?`)
       .get(conversationId) as WatcherLinkRow | undefined;
     return row ? watcherLinkFromRow(row) : null;
   }
 
   findActiveByWatched(conversationId: string): WatcherLinkRecord | null {
-    const row = this.database.prepare(`${LATEST_WATCHER_WAKE_SQL}
+    const row = cachedStatement(this.database, `${LATEST_WATCHER_WAKE_SQL}
       WHERE link.watched_conversation_id = ? AND link.status <> 'detached'`)
       .get(conversationId) as WatcherLinkRow | undefined;
     return row ? watcherLinkFromRow(row) : null;
+  }
+
+  /**
+   * The Private Connect parent of an attached watcher chat: one indexed row,
+   * with no check join, because the shell projection asks once per chat.
+   */
+  parentForWatcher(conversationId: string): { watchedConversationId: string | null; privateConnect: WatcherPrivateConnect } | null {
+    const row = cachedStatement(this.database, `
+      SELECT watched_conversation_id, private_connect FROM watcher_links
+      WHERE watcher_conversation_id = ? AND status <> 'detached'
+    `).get(conversationId) as { watched_conversation_id: string | null; private_connect: WatcherPrivateConnect } | undefined;
+    return row ? { watchedConversationId: row.watched_conversation_id, privateConnect: row.private_connect } : null;
+  }
+
+  /**
+   * True while the attached watcher of this chat has an unfinished turn: the
+   * same condition the delete trigger refuses on, checked before any side
+   * effect of a delete.
+   */
+  watcherTurnActiveFor(watchedConversationId: string): boolean {
+    return cachedStatement(this.database, `
+      SELECT 1 FROM watcher_links AS link
+      JOIN agent_turns AS turn ON turn.conversation_id = link.watcher_conversation_id
+      WHERE link.watched_conversation_id = ? AND link.status <> 'detached'
+        AND turn.status NOT IN ${TERMINAL_TURN_STATUSES_SQL}
+      LIMIT 1
+    `).get(watchedConversationId) !== undefined;
   }
 
   /** Attached links, oldest first. Detached links leave the shell projection. */
@@ -280,7 +308,7 @@ export class WatcherLinkRepository {
     `).run(
       next.status,
       paused?.reason ?? null,
-      paused?.detail ? truncateCodeUnits(paused.detail.replaceAll("\0", ""), MAX_WATCHER_PAUSE_DETAIL_CHARS) : null,
+      paused?.detail ? watcherPrintableLineOf(paused.detail, MAX_WATCHER_PAUSE_DETAIL_CHARS) || null : null,
       detached?.reason ?? null,
       at,
       linkId,
@@ -313,7 +341,10 @@ export class WatcherLinkRepository {
 
   /**
    * Starts following a new watched turn: resets the cursor, the per-turn
-   * counters and the wake allowance. Repeating it for the same turn is a no-op.
+   * counters and the wake allowance. A pause for the previous turn's wake
+   * budget ends with it, because that budget is per turn. Repeating it for the
+   * same turn is a no-op. The pending-event count is the scheduler's and is
+   * left alone.
    */
   beginWatchedTurn(linkId: string, turnId: string, now: string): WatcherLinkRecord | null {
     const at = requireTimestamp(now, "Watched turn start time");
@@ -326,39 +357,65 @@ export class WatcherLinkRepository {
         SET cursor_turn_id = ?, cursor_activity_at = NULL, cursor_activity_id = NULL,
             cursor_message_at = NULL, pending_running_ids_json = '[]',
             wakes_this_turn = 0, wake_allowance = ?, write_attempts_this_turn = 0,
-            command_attempts_this_turn = 0, events_pending = 0,
-            last_watched_output_at = ?, quiet_since = NULL, updated_at = ?
+            command_attempts_this_turn = 0,
+            last_watched_output_at = ?, quiet_since = NULL, updated_at = ?,
+            status = CASE WHEN status = 'paused' AND pause_reason = 'wake-budget' THEN 'watching' ELSE status END,
+            pause_detail = CASE WHEN status = 'paused' AND pause_reason = 'wake-budget' THEN NULL ELSE pause_detail END,
+            pause_reason = CASE WHEN status = 'paused' AND pause_reason = 'wake-budget' THEN NULL ELSE pause_reason END
         WHERE id = ?
       `).run(turnId, link.budgets.wakesPerWatchedTurn, at, at, linkId);
       return this.require(linkId);
     })();
   }
 
-  /** Moves coverage forward after a check that saw `eventsDelta` new events. */
-  advanceCursor(linkId: string, cursor: WatcherCursor, eventsDelta: number, now: string): WatcherLinkRecord | null {
+  /**
+   * Moves coverage forward after a check that saw `eventsDelta` new events.
+   * The move is a compare-and-set: it applies only while the stored cursor is
+   * still on `expectedTurnId` (the cursor the check's digest was built from)
+   * or on the digest's own turn. A check that settles after the next watched
+   * turn began only adds to `events_seen`, so it never rewinds coverage.
+   */
+  advanceCursor(
+    linkId: string,
+    cursor: WatcherCursor,
+    eventsDelta: number,
+    now: string,
+    expectedTurnId: string | null = cursor.turnId,
+  ): WatcherLinkRecord | null {
     const at = requireTimestamp(now, "Watcher cursor time");
     const delta = boundedCount(eventsDelta);
     const pending = [...new Set(cursor.pendingRunningIds)].slice(0, MAX_WATCHER_PENDING_RUNNING_IDS);
-    const changed = this.database.prepare(`
-      UPDATE watcher_links
-      SET cursor_turn_id = ?, cursor_activity_at = ?, cursor_activity_id = ?, cursor_message_at = ?,
-          pending_running_ids_json = ?, events_seen = events_seen + ?,
-          events_pending = MAX(0, events_pending - ?), updated_at = ?
-      WHERE id = ? AND status <> 'detached'
-    `).run(
-      cursor.turnId, cursor.activityAt, cursor.activityId, cursor.messageAt,
-      JSON.stringify(pending), delta, delta, at, linkId,
-    ).changes;
-    return changed === 1 ? this.get(linkId) : null;
+    return this.database.transaction(() => {
+      const moved = this.database.prepare(`
+        UPDATE watcher_links
+        SET cursor_turn_id = ?, cursor_activity_at = ?, cursor_activity_id = ?, cursor_message_at = ?,
+            pending_running_ids_json = ?, events_seen = events_seen + ?, updated_at = ?
+        WHERE id = ? AND status <> 'detached' AND (cursor_turn_id IS ? OR cursor_turn_id IS ?)
+      `).run(
+        cursor.turnId, cursor.activityAt, cursor.activityId, cursor.messageAt,
+        JSON.stringify(pending), delta, at, linkId, expectedTurnId, cursor.turnId,
+      ).changes;
+      if (moved === 1) return this.get(linkId);
+      const counted = this.database.prepare(`
+        UPDATE watcher_links SET events_seen = events_seen + ?, updated_at = ?
+        WHERE id = ? AND status <> 'detached'
+      `).run(delta, at, linkId).changes;
+      return counted === 1 ? this.get(linkId) : null;
+    })();
   }
 
-  /** Records how many observed events wait for the next check. */
+  /**
+   * Records how many observed events wait for the next check. The wake
+   * scheduler is the only source of this count; returns the link only when the
+   * stored count changed.
+   */
   notePendingEvents(linkId: string, pending: number, now: string): WatcherLinkRecord | null {
     const at = requireTimestamp(now, "Watcher event time");
-    const changed = this.database.prepare(`
+    const count = boundedCount(pending);
+    const changed = cachedStatement(this.database, `
       UPDATE watcher_links SET events_pending = ?, updated_at = ?
-      WHERE id = ? AND status <> 'detached'
-    `).run(boundedCount(pending), at, linkId).changes;
+      WHERE id = ? AND status <> 'detached' AND events_pending <> ?
+    `).run(count, at, linkId, count).changes;
     return changed === 1 ? this.get(linkId) : null;
   }
 
@@ -438,12 +495,16 @@ export class WatcherLinkRepository {
         boundedCount(draft.eventsCovered), boundedCount(draft.itemsTruncated),
         boundedCount(draft.itemsOmitted), Math.min(65_536, boundedCount(draft.digestBytes)), at,
       );
+      // A check spends the allowance of the turn the link follows now; a late
+      // final pass of an earlier turn never spends the next turn's checks.
       this.database.prepare(`
         UPDATE watcher_links
-        SET wakes_this_turn = wakes_this_turn + ?, wakes_total = wakes_total + 1,
+        SET wakes_this_turn = wakes_this_turn
+              + CASE WHEN ? = 1 AND (cursor_turn_id IS NULL OR cursor_turn_id IS ?) THEN 1 ELSE 0 END,
+            wakes_total = wakes_total + 1,
             last_wake_at = ?, feed_revision = feed_revision + 1, updated_at = ?
         WHERE id = ?
-      `).run(draft.consumesAllowance === false ? 0 : 1, at, at, draft.linkId);
+      `).run(draft.consumesAllowance === false ? 0 : 1, draft.watchedTurnId, at, at, draft.linkId);
       return this.getWake(draft.id);
     })();
   }

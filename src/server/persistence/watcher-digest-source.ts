@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 
 import type { AgentActivity, AgentPlan, AgentTurn } from "../../shared/contracts";
-import { MAX_WATCHER_PENDING_RUNNING_IDS } from "../../shared/watcher";
+import { MAX_WATCHER_FEED_PAGE, MAX_WATCHER_PENDING_RUNNING_IDS } from "../../shared/watcher";
 import { activityFromRow, agentTurnFromRow, planFromRow } from "./codecs";
 import type {
   ConversationContextTurnFile,
@@ -123,6 +123,22 @@ export class WatcherDigestSource {
       createdAt: row.created_at,
       ...reads.messageText(row.id, Math.max(0, Math.trunc(maximumBytes))),
     }));
+  }
+
+  /**
+   * Settled command activities per turn of one conversation, counted in SQL
+   * for the receipts' "ran N read-only commands" line; no details are read.
+   */
+  settledCommandCounts(conversationId: string, turnIds: readonly string[]): Map<string, number> {
+    const bounded = [...new Set(turnIds)].slice(0, MAX_WATCHER_FEED_PAGE);
+    if (bounded.length === 0) return new Map();
+    const rows = cachedStatement(this.context.database, `
+      SELECT turn_id, COUNT(*) AS count FROM activities
+      WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?))
+        AND kind = 'command' AND status <> 'running'
+      GROUP BY turn_id
+    `).all(conversationId, JSON.stringify(bounded)) as Array<{ turn_id: string; count: number }>;
+    return new Map(rows.map((row) => [row.turn_id, row.count]));
   }
 
   plan(conversationId: string, turnId: string): AgentPlan | null {

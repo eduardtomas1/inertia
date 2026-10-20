@@ -1994,7 +1994,7 @@ describe("server event remaining discriminant and identity boundary", () => {
       budgets: { wakesPerWatchedTurn: 12, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4 },
       pauseReason: null, pauseDetail: null, detachedReason: null, watchedTurnId: null,
       counters: { wakesThisTurn: 0, wakeAllowance: 12, wakesTotal: 0, eventsSeen: 0, eventsPending: 0 },
-      lastWakeAt: null, quietSince: null, feedRevision: 0, latest: null, createdAt: checkedAt, updatedAt: checkedAt,
+      lastWakeAt: null, quietSince: null, feedRevision: 0, latest: null, latestFindingAt: null, createdAt: checkedAt, updatedAt: checkedAt,
     };
     const shells = [watcherId, watchedId].map((id) => ({ ...conversationShell, id, projectId }));
     const withWatchers = (watchers: unknown, conversations: unknown[] = shells): unknown => parseServerEvent({

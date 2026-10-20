@@ -7,8 +7,10 @@ import {
   DEFAULT_WATCHER_SHARING,
   MAX_WATCHER_GUARD_PATHS,
   MAX_WATCHER_HEADLINE_CHARS,
+  MAX_WATCHER_PAUSE_DETAIL_CHARS,
   MAX_WATCHER_PENDING_RUNNING_IDS,
   watcherLinkViewSchema,
+  watcherPrintableText,
   watcherSharingSchema,
   type WatcherDelivery,
   type WatcherDeliveryMode,
@@ -64,6 +66,7 @@ export interface WatcherLinkRow {
   latest_outcome?: WatcherWakeOutcome | null;
   latest_at?: string | null;
   latest_finding?: string | null;
+  latest_finding_at?: string | null;
 }
 
 export interface WatcherWakeRow {
@@ -106,6 +109,7 @@ export interface WatcherCursor {
 
 /** Server-side link state; the renderer only ever sees the `WatcherLinkView` part. */
 export interface WatcherLinkRecord extends WatcherLinkView {
+  instructions: string;
   cursor: WatcherCursor;
   writeAttemptsThisTurn: number;
   commandAttemptsThisTurn: number;
@@ -125,7 +129,13 @@ export interface WatcherWakeRecord extends WatcherFeedItem {
 
 export const LATEST_WATCHER_WAKE_SQL = `
   SELECT link.*, latest.outcome AS latest_outcome, latest.settled_at AS latest_at,
-    substr(latest.finding_preview, 1, 1024) AS latest_finding
+    substr(latest.finding_preview, 1, 1024) AS latest_finding,
+    (
+      SELECT finding.settled_at FROM watcher_wakes AS finding
+      WHERE finding.link_id = link.id AND finding.state = 'settled' AND finding.outcome = 'finding'
+        AND finding.delivery_state IS NOT 'dismissed'
+      ORDER BY finding.sequence DESC LIMIT 1
+    ) AS latest_finding_at
   FROM watcher_links AS link
   LEFT JOIN watcher_wakes AS latest ON latest.id = (
     SELECT candidate.id FROM watcher_wakes AS candidate
@@ -172,10 +182,18 @@ export function truncateUtf8Bytes(value: string, maximumBytes: number): string {
   return value.slice(0, end);
 }
 
+/**
+ * One printable line of at most `maximum` code units. Every code unit then
+ * serializes to at most three bytes, which bounds the shell projection.
+ */
+export function watcherPrintableLineOf(value: string, maximum: number): string {
+  return truncateCodeUnits(watcherPrintableText(value).replace(/\s+/gu, " ").trim(), maximum).trim();
+}
+
 function headline(row: WatcherLinkRow): WatcherFeedHeadline | null {
   if (!row.latest_outcome || !row.latest_at) return null;
   const text = row.latest_outcome === "finding" && row.latest_finding
-    ? truncateCodeUnits(row.latest_finding.replace(/\s+/gu, " ").trim(), MAX_WATCHER_HEADLINE_CHARS)
+    ? watcherPrintableLineOf(row.latest_finding, MAX_WATCHER_HEADLINE_CHARS)
     : "";
   return { outcome: row.latest_outcome, at: row.latest_at, text };
 }
@@ -195,7 +213,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
     privateConnect: row.private_connect,
     status: row.status,
     pauseReason: row.pause_reason,
-    pauseDetail: row.pause_detail,
+    pauseDetail: row.pause_detail === null ? null : watcherPrintableLineOf(row.pause_detail, MAX_WATCHER_PAUSE_DETAIL_CHARS) || null,
     detachedReason: row.detached_reason,
     watchedTurnId: row.cursor_turn_id,
     counters: {
@@ -209,6 +227,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
     quietSince: row.quiet_since,
     feedRevision: row.feed_revision,
     latest: headline(row),
+    latestFindingAt: row.latest_finding_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     cursor: {
@@ -226,7 +245,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
 }
 
 /** Strips server-only fields so the projection matches the strict view schema. */
-export function watcherLinkView(record: WatcherLinkRecord): WatcherLinkView {
+function strippedView(record: WatcherLinkRecord): WatcherLinkView & { instructions: string } {
   const {
     cursor: _cursor,
     writeAttemptsThisTurn: _writes,
@@ -236,6 +255,21 @@ export function watcherLinkView(record: WatcherLinkRecord): WatcherLinkView {
     ...view
   } = record;
   return view;
+}
+
+/**
+ * The shell projection of a link (`AppSnapshot.watchers`, `watcher.link.updated`):
+ * server-only fields and the user's instructions are left out, so eight links
+ * stay provably under `MAX_WATCHER_LINKS_SERIALIZED_BYTES`.
+ */
+export function watcherLinkView(record: WatcherLinkRecord): WatcherLinkView {
+  const { instructions: _instructions, ...view } = strippedView(record);
+  return view;
+}
+
+/** A `watcher.link` command result: the shell view plus the user's instructions. */
+export function watcherLinkDetailView(record: WatcherLinkRecord): WatcherLinkView {
+  return strippedView(record);
 }
 
 function delivery(row: WatcherWakeRow): WatcherDelivery | null {

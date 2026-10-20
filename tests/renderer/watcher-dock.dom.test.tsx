@@ -458,6 +458,8 @@ describe("WatcherDock", () => {
         guardPaths: ["src/parser.ts"],
         finding: null,
         delivery: null,
+        resolvedBySequence: null,
+        commandsDeclined: 0,
         createdAt: "2026-10-19T10:40:00.000Z",
         settledAt: "2026-10-19T10:41:00.000Z",
       }],

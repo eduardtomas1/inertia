@@ -94,7 +94,7 @@ describe("WatcherBar", () => {
       "Hide from paired devices",
       "Collapse",
       "Stop watching…",
-      "9 of 12 checks left this turn",
+      "27 of 30 checks left this turn",
       "9 events seen",
       "2 waiting",
       expect.stringMatching(/^Last check /u),

@@ -245,7 +245,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(dock().getByRole("heading", { level: 2 })).toHaveText(`Watching ${WATCHED_TITLE}`);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
     await expect(phase()).toHaveText(/^.+ · Reviewer · Watching$/u);
-    await expectMenuNote(/^\d+ of 12 checks left this turn$/u);
+    await expectMenuNote(/^\d+ of 30 checks left this turn$/u);
     await expect(dock().getByRole("button", { name: "More watcher actions" })).toBeFocused();
     // Inline beside the chat, not a split pane and not a sheet.
     await expect(page.locator(".watcher-dock-frame")).toHaveAttribute("data-presentation", "inline");

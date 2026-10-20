@@ -113,7 +113,7 @@ describe("WatcherAttachDialog", () => {
       expect(within(dialog).getByRole("checkbox", { name })).toBeChecked();
     }
     expect(within(dialog).getByRole("group", { name: "What the watcher sees" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("spinbutton", { name: /Checks per turn/u })).toHaveValue(12);
+    expect(within(dialog).getByRole("spinbutton", { name: /Checks per turn/u })).toHaveValue(30);
     expect(within(dialog).getByRole("spinbutton", { name: /Cooldown between checks/u })).toHaveValue(45);
     expect(within(dialog).getByRole("switch", { name: /Review the last turn now/u })).toBeDisabled();
     // Stated up front, in the dialog's description, not below the fold.
@@ -258,13 +258,13 @@ describe("WatcherAttachDialog", () => {
     const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
     const checks = within(dialog).getByRole("spinbutton", { name: /Checks per turn/u });
-    fireEvent.change(checks, { target: { value: "30" } });
+    fireEvent.change(checks, { target: { value: "50" } });
     fireEvent.change(checks, { target: { value: "" } });
     fireEvent.blur(checks);
-    expect(checks).toHaveValue(12);
+    expect(checks).toHaveValue(30);
     fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
     await waitFor(() => expect(request).toHaveBeenCalled());
-    expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ budgets: { wakesPerWatchedTurn: 12 } });
+    expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ budgets: { wakesPerWatchedTurn: 30 } });
   });
 
   it("retries an ambiguous attach with the same link id and closes when the link appears", async () => {

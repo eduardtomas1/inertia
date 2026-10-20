@@ -62,7 +62,7 @@ export function watcherTriggerText(trigger: WatcherWakeTrigger): string {
 export { watcherEventsText } from "./watcherLinks";
 
 const PHASE_TEXT: Readonly<Record<WatcherLivePhase, string>> = {
-  starting: "Starting the check",
+  starting: "Starting",
   reading: "Reading",
   searching: "Searching",
   thinking: "Thinking",

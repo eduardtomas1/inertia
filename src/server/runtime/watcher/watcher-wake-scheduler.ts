@@ -14,6 +14,7 @@ export const WATCHER_RETRY_MAX_MS = 120_000;
 export const WATCHER_RECHECK_MS = 5_000;
 export const WATCHER_ACCUMULATE_MIN = 6;
 export const WATCHER_ACCUMULATE_AGE_COOLDOWNS = 3;
+export const WATCHER_SPACING_MAX_COOLDOWNS = 10;
 
 /**
  * What `onWake` reports back:
@@ -98,6 +99,7 @@ interface LinkState {
   finalDoneTurnIds: string[];
   watchedTurnId: string | null;
   watchedRunning: boolean;
+  turnStartedAt: number;
   lastWakeEndAt: number | null;
   inFlight: boolean;
   paused: { finalPass: boolean } | null;
@@ -188,6 +190,7 @@ export class WatcherWakeScheduler {
     if (event.type === "agent.started") {
       if (event.turnId !== state.watchedTurnId) {
         state.watchedTurnId = event.turnId;
+        state.turnStartedAt = now;
         state.budgetNotified = false;
       }
       state.watchedRunning = true;
@@ -330,6 +333,7 @@ export class WatcherWakeScheduler {
         finalDoneTurnIds: [],
         watchedTurnId: null,
         watchedRunning: false,
+        turnStartedAt: this.#deps.clock(),
         lastWakeEndAt: null,
         inFlight: false,
         paused: null,
@@ -354,6 +358,15 @@ export class WatcherWakeScheduler {
       : WATCHER_BUDGET_LIMITS.cooldownSeconds.default * 1_000;
   }
 
+  #cooldownEnd(linkId: string, state: LinkState): number {
+    if (state.lastWakeEndAt === null) return 0;
+    const cooldown = this.#cooldown(linkId);
+    const checksLeft = this.#deps.allowance(linkId) - 1;
+    if (checksLeft < 1) return state.lastWakeEndAt + cooldown;
+    const spread = Math.ceil(Math.max(0, state.lastWakeEndAt - state.turnStartedAt) / checksLeft);
+    return state.lastWakeEndAt + Math.min(WATCHER_SPACING_MAX_COOLDOWNS * cooldown, Math.max(cooldown, spread));
+  }
+
   /** The next wake to run and when it is due, ignoring busy and deferral. */
   #next(linkId: string, state: LinkState): { kind: Consumed["kind"]; at: number } | null {
     const final = state.finals[0];
@@ -364,7 +377,7 @@ export class WatcherWakeScheduler {
     if (state.request) return { kind: "request", at: Math.max(this.#deps.clock(), state.retryAt ?? 0) };
     const waiting = state.pending > 0 && state.firstPendingAt !== null;
     if (!waiting && !state.continuation) return null;
-    const cooldownEnd = state.lastWakeEndAt === null ? 0 : state.lastWakeEndAt + this.#cooldown(linkId);
+    const cooldownEnd = this.#cooldownEnd(linkId, state);
     const settledAt = waiting && state.firstPendingAt !== null ? state.firstPendingAt + this.#settleDelayMs : 0;
     const gatheredAt = !waiting || state.firstPendingAt === null || state.immediate || state.continuation
       || state.pending >= WATCHER_ACCUMULATE_MIN

@@ -9,6 +9,7 @@ import {
   WATCHER_RECHECK_MS,
   WATCHER_RETRY_BASE_MS,
   WATCHER_SETTLE_DELAY_MS,
+  WATCHER_SPACING_MAX_COOLDOWNS,
   WATCHER_STALL_TICK_MS,
   WatcherWakeScheduler,
   type WatcherWakeAttempt,
@@ -192,6 +193,101 @@ describe("WatcherWakeScheduler", () => {
     timers.advance(WATCHER_RETRY_BASE_MS);
     expect(wakes).toHaveLength(2);
     expect(wakes[1]!.context.events).toBe(2);
+  });
+
+  it("spaces automatic checks over the time the watched turn has run, by the checks left", () => {
+    const { scheduler, timers, wakes, start } = harness();
+    scheduler.observe(LINK, started());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    timers.advance(60 * 60_000 - 2 * WATCHER_SETTLE_DELAY_MS);
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    expect(wakes[1]!.at).toBe(start + 60 * 60_000);
+    scheduler.wakeFinished(LINK);
+    const endedAt = timers.now;
+    const spacing = Math.ceil((60 * 60_000) / (ALLOWANCE - 1));
+    expect(spacing).toBeGreaterThan(COOLDOWN_MS);
+    expect(spacing).toBeLessThan(WATCHER_SPACING_MAX_COOLDOWNS * COOLDOWN_MS);
+    scheduler.observe(LINK, settled());
+    timers.advance(spacing - 1);
+    expect(wakes).toHaveLength(2);
+    timers.advance(1);
+    expect(wakes[2]!.at).toBe(endedAt + spacing);
+  });
+
+  it("caps the spacing at ten cooldowns and lets Check now ignore it", () => {
+    const { scheduler, timers, wakes } = harness({ allowance: () => 2 });
+    scheduler.observe(LINK, started());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    timers.advance(60 * 60_000);
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    const endedAt = timers.now;
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SPACING_MAX_COOLDOWNS * COOLDOWN_MS - 1);
+    expect(wakes).toHaveLength(2);
+    timers.advance(1);
+    expect(wakes[2]!.at).toBe(endedAt + WATCHER_SPACING_MAX_COOLDOWNS * COOLDOWN_MS);
+    scheduler.wakeFinished(LINK);
+    scheduler.requestWake(LINK, "manual");
+    timers.advance(0);
+    expect(wakes[3]).toMatchObject({ trigger: "manual", at: timers.now });
+  });
+
+  it("reports a used-up allowance at the plain cooldown late in a long turn", () => {
+    let allowance: number = ALLOWANCE;
+    const { scheduler, timers, wakes, exhausted } = harness({ allowance: () => allowance });
+    scheduler.observe(LINK, started());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    timers.advance(60 * 60_000);
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    allowance = 1;
+    scheduler.wakeFinished(LINK);
+    const endedAt = timers.now;
+    scheduler.observe(LINK, settled());
+    timers.advance(COOLDOWN_MS - 1);
+    expect(exhausted).toEqual([]);
+    timers.advance(1);
+    expect(exhausted).toEqual([endedAt + COOLDOWN_MS]);
+    expect(wakes).toHaveLength(2);
+  });
+
+  it("spaces checks of a turn that was already running when tracked from the moment it was tracked", () => {
+    const { scheduler, timers, wakes } = harness();
+    scheduler.track(LINK, { watchedTurnId: "turn-1", watchedRunning: true });
+    const trackedAt = timers.now;
+    timers.advance(60 * 60_000);
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    const endedAt = timers.now;
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SPACING_MAX_COOLDOWNS * COOLDOWN_MS);
+    expect(wakes[1]!.at).toBe(endedAt + Math.ceil((endedAt - trackedAt) / (ALLOWANCE - 1)));
+  });
+
+  it("starts the spacing over when the next watched turn begins", () => {
+    const { scheduler, timers, wakes } = harness();
+    scheduler.observe(LINK, started("turn-1"));
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    timers.advance(60 * 60_000);
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    scheduler.onWatchedTurnSettled(LINK, "turn-1");
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    const finalEndedAt = timers.now;
+    scheduler.observe(LINK, started("turn-2"));
+    timers.advance(WATCHER_SPACING_MAX_COOLDOWNS * COOLDOWN_MS);
+    expect(wakes.map(({ trigger }) => trigger)).toEqual(["activity", "activity", "turn-end", "activity"]);
+    expect(wakes[3]!.at).toBe(finalEndedAt + COOLDOWN_MS);
   });
 
   it("ranks an error above activity and plan when coalescing", () => {

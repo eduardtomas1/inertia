@@ -489,6 +489,36 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("runs Check now with nothing new and records its receipt, mid-turn and after the final check", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "SILENT");
+      await f.command("watcher.wake", { linkId: link.id });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no mid-turn Check now"); });
+      expect(f.provider.input(watcherId).prompt).toContain("Nothing new since check 1; the turn is still running.");
+      await f.finishTurn(watcherId, "SILENT");
+
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      await f.finishTurn(watcherId, "SILENT");
+      await f.command("watcher.wake", { linkId: link.id });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no Check now after the final pass"); });
+      expect(f.provider.input(watcherId).prompt).toContain("Nothing new since check 3; the turn ended with status completed.");
+      await f.finishTurn(watcherId, "SILENT");
+      expect(feed(f, link.id).map(({ sequence, outcome }) => [sequence, outcome])).toEqual([[4, "silent"], [3, "silent"], [2, "silent"], [1, "silent"]]);
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.inputs.at(-1)!.turnId)).toMatchObject({ trigger: "manual", sequence: 4 });
+    } finally {
+      await f.close();
+    }
+  });
+
   it("quotes the turn's diff on the final pass and never reads it for a mid-turn check", async () => {
     const turnDiff = vi.fn(async (_turnId: string) => ({
       patchState: "available" as const,

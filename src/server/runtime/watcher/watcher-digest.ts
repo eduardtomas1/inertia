@@ -72,6 +72,7 @@ export type WatcherEarlierFinding = Pick<
 export interface WatcherDigestOptions {
   /** The final pass after the watched turn ended; it is built even with nothing new. */
   final: boolean;
+  requested?: boolean;
   /** The watcher's provider session has no memory of earlier checks. */
   sessionFresh: boolean;
   /** When the check is built; shown in the header next to the coverage start. */
@@ -560,7 +561,7 @@ export function buildWatcherDigest(
   const lastClosed = streaming ? read.at(-2) : read.at(-1);
   const showBrief = sharing.brief && (firstWake || options.sessionFresh);
   const somethingNew = settled.length > 0 || replies.length > 0 || planChanged || (firstWake && (showBrief || showPlan));
-  if (!somethingNew && !options.final) return null;
+  if (!somethingNew && !options.final && options.requested !== true) return null;
 
   const cap = link.budgets.digestKiB * 1_024;
   let remaining = cap - FRAME_RESERVE_BYTES;
@@ -621,10 +622,11 @@ export function buildWatcherDigest(
     ? [options.lastPage ? PAGE_LIMIT_LINE : "More activity followed; the next check covers it."]
     : [];
   const body = [[...header, pointer, ...follows].join("\n"), ...sections.map(({ text }) => text)];
-  if (evidence.length === 0) {
+  if (evidence.length === 0 || (options.requested === true && settled.length === 0 && replies.length === 0 && !planChanged)) {
+    const ended = isAgentTurnTerminalStatus(turn.status);
     body.push(sequence > 1
-      ? `Nothing new since check ${sequence - 1}; the turn ended with status ${statusLabel(turn.status)}.`
-      : `Nothing new settled in this turn; it ended with status ${statusLabel(turn.status)}.`);
+      ? `Nothing new since check ${sequence - 1}; ${ended ? `the turn ended with status ${statusLabel(turn.status)}` : "the turn is still running"}.`
+      : `Nothing new settled in this turn; ${ended ? `it ended with status ${statusLabel(turn.status)}` : "it is still running"}.`);
   }
   let content = body.join("\n\n");
   if (bytes(content) > cap) {

@@ -269,6 +269,7 @@ export class WatcherWakeRunner {
         : {};
       const digest = buildWatcherDigest(store.watcherLinks.digest, { ...claimed, cursor }, {
         final: context.final,
+        requested: request !== null,
         sessionFresh: watcher.providerSessionId === null,
         now: this.#deps.now(),
         watchedTitle: watched.title,

@@ -38,6 +38,7 @@ export const WATCHER_ROUTE_RETRY_LIMIT = 3;
 /** Consecutive checks that fail to dispatch before the link pauses with `route-unavailable`. */
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
 export const WATCHER_FINAL_PASS_MAX_PAGES = 4;
+export const WATCHER_FINAL_PASS_RETRY_LIMIT = 2;
 export const WATCHER_EARLIER_FINDINGS = 5;
 
 export function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
@@ -163,6 +164,7 @@ export class WatcherWakeRunner {
   readonly #priorCursors = new TurnMemory<WatcherCursor>();
   readonly #openReplies = new TurnMemory<WatcherOpenReply>();
   readonly #finalPages = new Map<string, { turnId: string; pages: number }>();
+  readonly #finalFailures = new Map<string, { turnId: string; failures: number }>();
 
   constructor(dependencies: WatcherWakeRunnerDependencies) {
     this.#deps = dependencies;
@@ -181,6 +183,7 @@ export class WatcherWakeRunner {
     this.#priorCursors.forget(linkId);
     this.#openReplies.forget(linkId);
     this.#finalPages.delete(linkId);
+    this.#finalFailures.delete(linkId);
   }
 
   /** A resumed link starts its route and dispatch retries afresh. */
@@ -397,6 +400,17 @@ export class WatcherWakeRunner {
     this.#priorCursors.delete(linkId, turnId);
     this.#openReplies.delete(linkId, turnId);
     if (this.#finalPages.get(linkId)?.turnId === turnId) this.#finalPages.delete(linkId);
+    if (this.#finalFailures.get(linkId)?.turnId === turnId) this.#finalFailures.delete(linkId);
+  }
+
+  #finalPassDue(linkId: string, turnId: string, outcome: WatcherWakeOutcome): boolean {
+    if (outcome === "usage-limited") return true;
+    if (outcome !== "failed") return false;
+    const known = this.#finalFailures.get(linkId);
+    const failures = (known?.turnId === turnId ? known.failures : 0) + 1;
+    if (failures > WATCHER_FINAL_PASS_RETRY_LIMIT) return false;
+    this.#finalFailures.set(linkId, { turnId, failures });
+    return true;
   }
 
   /**
@@ -461,6 +475,7 @@ export class WatcherWakeRunner {
     this.#running.delete(turn.id);
     const linkId = wake.linkId;
     let pause: WatcherTransition | null = null;
+    let outcome: WatcherWakeOutcome = "failed";
     let settled = false;
     let continues = false;
     let found = false;
@@ -473,7 +488,6 @@ export class WatcherWakeRunner {
         guard = { state: "unavailable", paths: [], pauseDetail: null };
       }
       const usageLimited = turn.usageLimited === true || store.limitResets.usageLimited(turn.id);
-      let outcome: WatcherWakeOutcome;
       let finding: string | null = null;
       let resolved: number[] = [];
       if (turn.status === "cancelled") outcome = "cancelled";
@@ -541,6 +555,8 @@ export class WatcherWakeRunner {
           if (finalTurnId !== null && running) this.#finalPages.set(linkId, { turnId: finalTurnId, pages: running.finalPage });
           scheduler.continueWake(linkId, finalTurnId);
           store.watcherLinks.notePendingEvents(linkId, scheduler.pendingEvents(linkId), now);
+        } else if (finalTurnId !== null && this.#finalPassDue(linkId, finalTurnId, settled ? outcome : "failed")) {
+          scheduler.continueWake(linkId, finalTurnId);
         } else if (finalTurnId !== null) {
           this.#finalPassDone(linkId, finalTurnId);
         }
@@ -616,5 +632,6 @@ export class WatcherWakeRunner {
     this.#priorCursors.clear();
     this.#openReplies.clear();
     this.#finalPages.clear();
+    this.#finalFailures.clear();
   }
 }

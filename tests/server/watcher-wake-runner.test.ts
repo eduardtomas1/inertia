@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../src/shared/contracts";
 
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
-import { WATCHER_ROUTE_RETRY_LIMIT } from "../../src/server/runtime/watcher/watcher-wake-runner";
+import { WATCHER_FINAL_PASS_RETRY_LIMIT, WATCHER_ROUTE_RETRY_LIMIT } from "../../src/server/runtime/watcher/watcher-wake-runner";
 import {
   WATCHER_ACCUMULATE_AGE_COOLDOWNS,
   WATCHER_ACCUMULATE_MIN,
@@ -154,6 +154,67 @@ describe("watcher wake runner", () => {
       await f.command("watcher.resume", { linkId: link.id });
       await wakeOnce(f, link.id);
       expect(f.provider.inputs.filter((input) => input.conversationId === watcherId)).toHaveLength(2);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("makes a usage-limited final pass again after Resume", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const watchedTurn = await f.startWatchedTurn();
+      watchedActivity(f);
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      await f.finishTurn(watcherId, null, "failed", { reason: "provider-error", message: "Usage limit reached.", usageLimited: true });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "usage-limit", finalPassTurnId: null });
+      await f.advance(30 * 60_000);
+      expect(f.provider.runs.has(watcherId)).toBe(false);
+
+      await f.command("watcher.resume", { linkId: link.id });
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass after Resume"); });
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({
+        trigger: "turn-end", watchedTurnId: watchedTurn.id,
+      });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", finalPassTurnId: watchedTurn.id });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("retries a failed final pass a bounded number of times, and never a cancelled one", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const first = await f.startWatchedTurn("A");
+      watchedActivity(f);
+      await f.finishTurn(f.watched.id, "Done A.");
+      for (let attempt = 0; attempt <= WATCHER_FINAL_PASS_RETRY_LIMIT; attempt += 1) {
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+        await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error(`no final pass attempt ${attempt}`); });
+        expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({ trigger: "turn-end", watchedTurnId: first.id });
+        await f.finishTurn(watcherId, null, "failed", { reason: "provider-error", message: "The provider stopped." });
+      }
+      await f.advance(30 * 60_000);
+      expect(f.provider.runs.has(watcherId)).toBe(false);
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", finalPassTurnId: first.id });
+      expect(feed(f, link.id).map(({ outcome }) => outcome)).toEqual(Array(WATCHER_FINAL_PASS_RETRY_LIMIT + 1).fill("failed"));
+
+      const second = await f.startWatchedTurn("B");
+      watchedActivity(f);
+      await f.finishTurn(f.watched.id, "Done B.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass of B"); });
+      await f.finishTurn(watcherId, null, "cancelled");
+      await f.advance(30 * 60_000);
+      expect(f.provider.runs.has(watcherId)).toBe(false);
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", finalPassTurnId: second.id });
     } finally {
       await f.close();
     }

@@ -172,7 +172,7 @@ describe("Private Connect supervised runtime gateway", () => {
     expect(JSON.stringify(response)).not.toMatch(/private-model|Reading private files/u);
   });
 
-  it("labels a forwarded watcher note so it never reads as the user's own message", async () => {
+  it("labels a forwarded or automatic watcher note so it never reads as the user's own message", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-note-"));
     directories.push(directory);
     const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
@@ -187,6 +187,15 @@ describe("Private Connect supervised runtime gateway", () => {
         linkId: "55555555-5555-4555-8555-555555555555", wakeId: "66666666-6666-4666-8666-666666666666",
         watcherConversationId: "77777777-7777-4777-8777-777777777777", preset: "reviewer",
         watcherLabel: "codex · gpt-test", delivery: "queue",
+      } });
+    store.beginAgentTurn({ id: "turn-auto", runId: "run-auto",
+      conversationId: conversation.id, content: "The test for empty lines is gone.", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative",
+      watcherNote: {
+        linkId: "55555555-5555-4555-8555-555555555555", wakeId: "88888888-8888-4888-8888-888888888888",
+        watcherConversationId: "77777777-7777-4777-8777-777777777777", preset: "reviewer",
+        watcherLabel: "codex · gpt-test", delivery: "queue", automatic: true,
       } });
     store.beginAgentTurn({ id: "turn-user", runId: "run-user",
       conversationId: conversation.id, content: "Fix it.", providerId: "codex", harnessId: "codex-app-server",
@@ -215,6 +224,7 @@ describe("Private Connect supervised runtime gateway", () => {
     if (!response.ok || response.result.kind !== "conversation") throw new Error("Expected a conversation detail.");
     expect(response.result.detail.messages.map(({ role, content }) => [role, content])).toEqual([
       ["user", "[Forwarded watcher note]\n\nThe parser drops a token."],
+      ["user", "[Watcher note sent automatically]\n\nThe test for empty lines is gone."],
       ["user", "Fix it."],
     ]);
   });

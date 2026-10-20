@@ -82,6 +82,7 @@ const PREPARED_PROMPT_TTL_MS = 15_000;
 const PREPARED_PROMPT_LIMIT =
   PRIVATE_CONNECT_RUNTIME_LIMITS.sessions * PRIVATE_CONNECT_RUNTIME_LIMITS.inFlightRequestsPerSession;
 const FORWARDED_WATCHER_NOTE_LABEL = "[Forwarded watcher note]\n\n";
+const AUTOMATIC_WATCHER_NOTE_LABEL = "[Watcher note sent automatically]\n\n";
 const PROJECTION_VALIDATOR_PLACEHOLDER = "A".repeat(43) as PrivateConnectRuntimeProjectionValidator;
 
 export class PrivateConnectRuntimeGateway {
@@ -277,7 +278,9 @@ export class PrivateConnectRuntimeGateway {
                 message.id,
                 message.htmlRender
                   ? htmlRenderContextLine(message.htmlRender.title)
-                  : message.watcherNote ? `${FORWARDED_WATCHER_NOTE_LABEL}${message.content}` : message.content,
+                  : message.watcherNote
+                    ? `${message.watcherNote.automatic ? AUTOMATIC_WATCHER_NOTE_LABEL : FORWARDED_WATCHER_NOTE_LABEL}${message.content}`
+                    : message.content,
               ),
               createdAt: message.createdAt,
             })),

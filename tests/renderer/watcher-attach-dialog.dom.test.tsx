@@ -6,7 +6,7 @@ import type { AppSnapshot, ProviderId, ProviderInfo } from "../../src/shared/con
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, type WatcherLinkView } from "../../src/shared/watcher";
-import { WatcherAttachDialog } from "../../src/renderer/src/components/watcher/WatcherAttachDialog";
+import { WatcherAttachDialog, WatcherAttachPresence } from "../../src/renderer/src/components/watcher/WatcherAttachDialog";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { WATCHED_ID, link, payloadOf, project, recordingRequest, shell } from "./watcher-fixtures";
 
@@ -223,6 +223,35 @@ describe("WatcherAttachDialog", () => {
     view.rerender(<WatcherAttachDialog snapshot={{ ...value, conversations: [] }} {...props} />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("leaves Escape to the page while it closes after an attach", async () => {
+    const value = snapshot([ready("codex", "Codex")]);
+    const props = {
+      snapshot: value,
+      settings: value.settings,
+      request: recordingRequest(() => ({ kind: "watcher.link", link: link() })).request,
+      onClose: vi.fn(),
+      onAttached: vi.fn(),
+      onOpenProviderSetup: vi.fn(),
+      onOpenBackendSetup: vi.fn(),
+    };
+    const pageEscape = vi.fn();
+    const tree = (target: { watchedId: string; returnFocusTo: null } | null) => (
+      <>
+        <button type="button" onKeyDown={(event) => { if (event.key === "Escape") pageEscape(); }}>Pause</button>
+        <WatcherAttachPresence target={target} {...props} />
+      </>
+    );
+    const view = render(tree({ watchedId: WATCHED_ID, returnFocusTo: null }));
+    await screen.findByRole("dialog", { name: "Add a watcher" });
+    view.rerender(tree(null));
+    expect(document.querySelector(".watcher-attach-dialog")).not.toBeNull();
+    const pause = screen.getByRole("button", { name: "Pause" });
+    pause.focus();
+    fireEvent.keyDown(pause, { key: "Escape" });
+    expect(pageEscape).toHaveBeenCalledOnce();
+    expect(props.onClose).not.toHaveBeenCalled();
   });
 
   it("restores a cleared budget field to its default, not its minimum", async () => {

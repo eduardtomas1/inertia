@@ -52,6 +52,7 @@ export interface WatcherAttachDialogProps {
   settings: AppSettings;
   watchedConversationId: string;
   returnFocusTo?: HTMLElement | null;
+  closing?: boolean;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   onClose: () => void;
   onAttached: (link: WatcherLinkView) => void;
@@ -154,6 +155,7 @@ export function WatcherAttachDialog({
   settings,
   watchedConversationId,
   returnFocusTo = null,
+  closing = false,
   request,
   onClose,
   onAttached,
@@ -247,6 +249,7 @@ export function WatcherAttachDialog({
   }, [attachedLink, onAttached]);
 
   useEffect(() => {
+    if (closing) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         const nested = event.target instanceof Element ? event.target.closest('[role="dialog"]') : null;
@@ -260,7 +263,7 @@ export function WatcherAttachDialog({
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose, submitting]);
+  }, [closing, onClose, submitting]);
 
   const watchedGone = !watched;
   useEffect(() => {
@@ -510,6 +513,7 @@ export function WatcherAttachPresence({ target, snapshot, ...props }: WatcherAtt
         snapshot={snapshot}
         watchedConversationId={shown.watchedId}
         returnFocusTo={shown.returnFocusTo}
+        closing={target === null}
         {...props}
       />
     </DialogPresence>

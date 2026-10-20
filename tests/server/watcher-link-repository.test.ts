@@ -813,7 +813,7 @@ describe("watcher link repository", () => {
     expect(() => store.createMessage(watched.id, "Bad", "user", [], null, undefined, { watcherNote: { ...note, delivery: "auto" as "queue" } }))
       .toThrow("Invalid watcher note attribution.");
     const turn = beginTurn(watched, "Main work");
-    const steered = store.createAcknowledgedFollowUpMessage(watched.id, turn.id, "Steered note", tick(), tick(), [], { watcherNote: { ...note, delivery: "steer" } });
+    const steered = store.createAcknowledgedFollowUpMessage(watched.id, turn.id, "Steered note", tick(), tick(), [], undefined, { watcherNote: { ...note, delivery: "steer" } });
     expect(store.conversationDetail(watched.id)?.messages.find(({ id }) => id === steered.id)?.watcherNote?.delivery).toBe("steer");
     const queue = (content: string, watcherNote?: WatcherNoteAttribution) => store.queuedMessages.add({
       id: randomUUID(), conversation: watched, content, attachments: [], digest: "a".repeat(64), ...(watcherNote ? { watcherNote } : {}),

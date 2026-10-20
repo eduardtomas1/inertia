@@ -236,6 +236,8 @@ export interface FollowUpSteerOptions {
   providerContent?: string;
   /** Server-only attribution for a forwarded watcher note. */
   watcherNote?: WatcherNoteAttribution;
+  /** Queue entry completed in the same transaction as the accepted follow-up. */
+  queuedMessageId?: string;
 }
 
 export interface TurnSettledEvidence {

@@ -737,7 +737,7 @@ describe("watcher note steering", () => {
       await coordinator.steer(lease, { content: "Plain", imagePaths: [] }, [], undefined, undefined, { providerContent: "  " });
       expect(steer).not.toHaveBeenCalled();
       await coordinator.steer(lease, { content: "Plain", imagePaths: [] }, []);
-      expect(persist).toHaveBeenCalledWith("conversation-1", "turn-1", "Plain", lease.submittedAt, "2026-09-08T09:00:00.000Z", []);
+      expect(persist).toHaveBeenCalledWith("conversation-1", "turn-1", "Plain", lease.submittedAt, "2026-09-08T09:00:00.000Z", [], undefined);
     } finally { lease.release(); }
   });
 });

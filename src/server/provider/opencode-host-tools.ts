@@ -1,6 +1,7 @@
 import type { OpencodeClient, PermissionRuleset } from "@opencode-ai/sdk/v2";
 
-import type { ProviderHostToolBridge } from "./contracts";
+import { classifyReadOnlyCommand } from "../runtime/watcher/read-only-commands";
+import type { ProviderHostToolBridge, ProviderRunInput } from "./contracts";
 import type { AgentApprovalDecision, AgentApprovalRequest } from "./interactions";
 import { INERTIA_HOST_MCP_NAME, openCodeHostMcpConfig } from "./host-tool-mcp-config";
 import {
@@ -46,10 +47,11 @@ export function openCodePermissions(
 ): PermissionRuleset {
   if (readOnlyProfile === "watcher") {
     // The supervised catch-all would make every read prompt, and a watcher
-    // declines every prompt. Deny-by-default removes edit, shell and every
+    // declines every prompt. Deny-by-default removes edit and every
     // other native tool; the last matching rule wins, so the allows follow.
     return [
       { permission: "*", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "*", action: "ask" },
       ...OPENCODE_WATCHER_READ_TOOLS.map((permission) => ({ permission, pattern: "*", action: "allow" } as const)),
       ...OPENCODE_WATCHER_DENIED_READS.map((pattern) => ({ permission: "read", pattern, action: "deny" } as const)),
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
@@ -75,6 +77,21 @@ export function openCodePermissions(
     },
     ...planEdits,
   ];
+}
+
+export function openCodeWatcherCommandAllowed(
+  permission: string,
+  properties: Record<string, unknown>,
+  input: Pick<ProviderRunInput, "cwd" | "readOnlyProfile">,
+): boolean {
+  const metadata = properties.metadata;
+  const command = typeof metadata === "object" && metadata !== null
+    ? (metadata as Record<string, unknown>).command
+    : undefined;
+  return input.readOnlyProfile === "watcher"
+    && permission === "bash"
+    && typeof command === "string"
+    && classifyReadOnlyCommand(command, { cwd: input.cwd, windows: process.platform === "win32" }).allowed;
 }
 
 export function createOpenCodeHostTools(input: {

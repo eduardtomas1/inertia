@@ -18,7 +18,7 @@ import { validateProviderRunInput } from "../../src/server/provider/adapters";
 import { CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS, createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
-import { openCodePermissions } from "../../src/server/provider/opencode-host-tools";
+import { openCodePermissions, openCodeWatcherCommandAllowed } from "../../src/server/provider/opencode-host-tools";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
@@ -682,6 +682,7 @@ const OPENCODE_SCRIPTED_CALLS = [
   { tool: "grep", pattern: "parse" },
   { tool: "list", pattern: "src" },
   { tool: "edit", pattern: "src/parser.ts" },
+  { tool: "bash", pattern: "git diff --stat" },
   { tool: "bash", pattern: "rm src/parser.ts" },
 ];
 
@@ -739,7 +740,7 @@ const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\
 const part = (index, state) => sendEvent({ type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "tool-" + index, sessionID, messageID: "assistant-1", type: "tool", callID: "call-" + index, tool: calls[index].tool, state: { input: { pattern: calls[index].pattern }, time: { start: Date.now(), end: Date.now() }, ...state } } } });
 const execute = (index) => {
   const call = calls[index];
-  if (call.tool === "edit" || call.tool === "bash") fs.writeFileSync(target, ${JSON.stringify(OVERWRITE)});
+  if (call.tool === "edit" || call.pattern.startsWith("rm ")) fs.writeFileSync(target, ${JSON.stringify(OVERWRITE)});
   const output = call.tool === "read" || call.tool === "grep" ? fs.readFileSync(target, "utf8") : "src/parser.ts";
   part(index, { status: "completed", output, title: call.pattern, metadata: {} });
 };
@@ -758,7 +759,7 @@ const step = (index) => {
     return step(index + 1);
   }
   pending = { index, id: "permission-" + index };
-  sendEvent({ type: "permission.asked", properties: { id: pending.id, sessionID, permission: call.tool, patterns: [call.pattern], metadata: {}, always: [] } });
+  sendEvent({ type: "permission.asked", properties: { id: pending.id, sessionID, permission: call.tool, patterns: [call.pattern], metadata: call.tool === "bash" ? { command: call.pattern } : {}, always: [] } });
 };
 const json = (res, value, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(status === 204 ? undefined : JSON.stringify(value)); };
 const server = http.createServer((req, res) => {
@@ -850,11 +851,12 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { tool: "list", action: "ask", reply: "reject" },
       { tool: "edit", action: "deny" },
       { tool: "bash", action: "ask", reply: "reject" },
+      { tool: "bash", action: "ask", reply: "reject" },
     ]);
-    expect(asked).toEqual(["read", "glob", "grep", "list", "bash"].map((tool) => `OpenCode wants to use ${tool}`));
+    expect(asked).toEqual(["read", "glob", "grep", "list", "bash", "bash"].map((tool) => `OpenCode wants to use ${tool}`));
   });
 
-  it("carries the watcher profile, so reads run without a prompt and writes are denied", async () => {
+  it("carries the watcher profile, so reads and allowlisted commands run without a prompt and writes are denied", async () => {
     const root = portableFixtureRoot("watcher opencode");
     roots.push(root);
     const repo = repository(root, ["serve"]);
@@ -868,6 +870,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     const capture = opencode.capture();
     expect(capture.sessionPermission).toEqual([
       { permission: "*", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "*", action: "ask" },
       { permission: "read", pattern: "*", action: "allow" },
       { permission: "glob", pattern: "*", action: "allow" },
       { permission: "grep", pattern: "*", action: "allow" },
@@ -877,14 +880,15 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { permission: "read", pattern: "*.env.*", action: "deny" },
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ]);
-    expect(capture.offeredTools).toEqual(["read", "glob", "grep", "list"]);
+    expect(capture.offeredTools).toEqual(["bash", "read", "glob", "grep", "list"]);
     expect(capture.calls).toEqual([
       { tool: "read", action: "allow" },
       { tool: "glob", action: "allow" },
       { tool: "grep", action: "allow" },
       { tool: "list", action: "allow" },
       { tool: "edit", action: "deny" },
-      { tool: "bash", action: "deny" },
+      { tool: "bash", action: "ask", reply: "once" },
+      { tool: "bash", action: "ask", reply: "reject" },
     ]);
     expect(runtime.activities()).toEqual([
       { kind: "tool", status: "completed", title: "src/parser.ts" },
@@ -892,9 +896,12 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { kind: "tool", status: "completed", title: "parse" },
       { kind: "tool", status: "completed", title: "src" },
       { kind: "tool", status: "failed", title: "edit" },
+      { kind: "command", status: "completed", title: "git diff --stat" },
+      { kind: "status", status: "completed", title: "Needed permission: OpenCode wants to use bash — declined (watchers are read-only)" },
       { kind: "command", status: "failed", title: "bash" },
     ].sort(byActivity));
-    expect(runtime.violations).toEqual([]);
+    expect(runtime.store.watcherLinks.digest.settledCommandCounts(runtime.watcherId, [turn.id]).get(turn.id)).toBe(1);
+    expect(runtime.violations).toEqual([expect.objectContaining({ linkId: runtime.linkId, kind: "command-attempt", stopped: false })]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
@@ -920,9 +927,10 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     const evaluate = (rules: PermissionRuleset, permission: string, pattern: string) =>
       rules.findLast((rule) => wildcard(permission, rule.permission) && wildcard(pattern, rule.pattern))?.action ?? "ask";
     const merged = [...permissiveAgent, ...profile];
-    for (const tool of ["edit", "write", "patch", "bash", "webfetch", "task", "todowrite", "question", "plan_exit"]) {
+    for (const tool of ["edit", "write", "patch", "webfetch", "task", "todowrite", "question", "plan_exit"]) {
       expect(evaluate(merged, tool, "src/parser.ts")).toBe("deny");
     }
+    expect(evaluate(merged, "bash", "git diff > out.txt")).toBe("ask");
     expect(evaluate(merged, "external_directory", "/etc/*")).toBe("deny");
     for (const tool of ["read", "glob", "grep", "list", `${INERTIA_HOST_MCP_NAME}_inertia_request_context`]) {
       expect(evaluate(merged, tool, "src/parser.ts")).toBe("allow");
@@ -947,16 +955,32 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     const turn = await runtime.settled(runtime.startCheck().id);
     const capture = opencode.capture();
     expect(capture.sessionPermission).toEqual(profile);
-    expect(capture.offeredTools).toEqual(["read", "glob", "grep", "list"]);
+    expect(capture.offeredTools).toEqual(["bash", "read", "glob", "grep", "list"]);
     expect(capture.calls.filter(({ tool }) => tool === "edit" || tool === "bash")).toEqual([
       { tool: "edit", action: "deny" },
-      { tool: "bash", action: "deny" },
+      { tool: "bash", action: "ask", reply: "once" },
+      { tool: "bash", action: "ask", reply: "reject" },
     ]);
-    expect(runtime.violations).toEqual([]);
+    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "command-attempt", stopped: false })]);
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
     await opencode.manager.disposeAll();
     await expectProcessGone(opencode.pid());
+  });
+
+  it("lets only a watcher's allowlisted bash command, read from the permission's full command text, skip the prompt", () => {
+    const watcher = { cwd: process.cwd(), readOnlyProfile: "watcher" as const };
+    const asked = (command: unknown, permission = "bash") => ({ permission, patterns: ["git diff"], metadata: { command } });
+    expect(openCodeWatcherCommandAllowed("bash", asked("git diff --stat"), watcher)).toBe(true);
+    expect(openCodeWatcherCommandAllowed("bash", { action: "bash", resources: ["git log"], metadata: { command: "git log -5" } }, watcher)).toBe(true);
+    expect(openCodeWatcherCommandAllowed("bash", asked("git diff > out.txt"), watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("bash", asked("git diff; rm -rf ."), watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("bash", asked(["git", "diff"]), watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("bash", { permission: "bash", patterns: ["git diff"] }, watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("bash", { permission: "bash", metadata: null }, watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("edit", asked("git diff", "edit"), watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("external_directory", asked("cat ../x", "external_directory"), watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("bash", asked("git diff --stat"), { cwd: process.cwd() })).toBe(false);
   });
 
   it("admits the watcher profile only on a plan-mode, supervised run", () => {

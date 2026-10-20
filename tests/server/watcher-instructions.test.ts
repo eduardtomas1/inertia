@@ -146,7 +146,8 @@ describe("watcher instruction", () => {
     expect(WATCHER_PRESET_DESCRIPTIONS.reviewer).toBe("Looks for mistakes and risks in the work as it happens.");
     expect(WATCHER_PRESET_DESCRIPTIONS["scope-guard"]).toBe("Checks that the work stays within what the chat asked for.");
     expect(WATCHER_PRESET_DESCRIPTIONS.explainer).toBe("Describes what the main agent is doing and why.");
-    const guide = readFileSync(new URL("../../docs/user/watcher.md", import.meta.url), "utf8");
+    // Windows checkouts may carry CRLF line endings; compare on LF.
+    const guide = readFileSync(new URL("../../docs/user/watcher.md", import.meta.url), "utf8").replaceAll("\r\n", "\n");
     for (const preset of WATCHER_PRESETS) {
       const description = WATCHER_PRESET_DESCRIPTIONS[preset];
       expect(guide).toContain(`- **${WATCHER_PRESET_LABELS[preset]}** ${description[0]!.toLowerCase()}${description.slice(1)}\n`);

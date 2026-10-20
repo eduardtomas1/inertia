@@ -717,7 +717,10 @@ describe("watcher note steering", () => {
       const persisted = runtime.store.conversationDetail(runtime.conversationId)!.messages
         .find(({ content }) => content === "The export test still fails on Windows paths.");
       expect(persisted?.watcherNote).toEqual(note);
-    } finally { lease.release(); }
+    } finally {
+      lease.release();
+      runtime.store.close();
+    }
   });
 
   it("keeps ordinary follow-ups free of watcher attribution", async () => {

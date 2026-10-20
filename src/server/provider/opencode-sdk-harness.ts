@@ -13,6 +13,7 @@ import {
   type OwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import { WATCHER_COMMAND_ENVIRONMENT } from "../runtime/watcher/read-only-commands";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -423,7 +424,10 @@ function startOpenCodeRun(
     let cleanupConfirmed = true;
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
-      const environment = ownedOpenCodeEnvironment(options.environment, credentials);
+      const environment = {
+        ...ownedOpenCodeEnvironment(options.environment, credentials),
+        ...(options.input.readOnlyProfile === "watcher" ? WATCHER_COMMAND_ENVIRONMENT : {}),
+      };
       launchCredentials = credentialEncodings([
         ...launchCredentialValues(environment),
         credentials.password,

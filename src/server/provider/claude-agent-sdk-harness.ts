@@ -11,6 +11,7 @@ import {
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
+import { WATCHER_COMMAND_ENVIRONMENT } from "../runtime/watcher/read-only-commands";
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -34,6 +35,7 @@ import {
 import {
   providerRunTerminal,
   type ProviderRunFailure,
+  type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
 import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
@@ -365,7 +367,7 @@ function startClaudeRun(
         options: {
           abortController,
           cwd: options.input.cwd,
-          env: claudeRunEnvironment(options.environment),
+          env: claudeRunEnvironment(options.environment, options.input.readOnlyProfile),
           pathToClaudeCodeExecutable: options.executable,
           spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
           includePartialMessages: true,
@@ -1110,12 +1112,14 @@ export function claudeSupportsThinkingDisplay(
 
 function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
+  readOnlyProfile?: ProviderRunInput["readOnlyProfile"],
 ): NodeJS.ProcessEnv {
   return {
     ...CLAUDE_SUBAGENT_LIMITS,
     ...CLAUDE_STARTUP_FAILURE_RESULTS,
     ...CLAUDE_TRANSCRIPT_FLUSH,
     ...(environment ?? process.env),
+    ...(readOnlyProfile === "watcher" ? WATCHER_COMMAND_ENVIRONMENT : {}),
   };
 }
 

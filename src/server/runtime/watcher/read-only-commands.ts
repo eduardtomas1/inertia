@@ -2,6 +2,7 @@ import { posix, win32 } from "node:path";
 
 export const MAX_READ_ONLY_COMMAND_CHARS = 4_096;
 export const MAX_READ_ONLY_COMMAND_ARGUMENTS = 256;
+export const WATCHER_COMMAND_ENVIRONMENT = Object.freeze({ GIT_OPTIONAL_LOCKS: "0" });
 
 export interface ReadOnlyCommandContext {
   cwd: string;
@@ -261,7 +262,7 @@ function gitRule(args: readonly string[]): string | null {
   let index = 0;
   while (args[index]?.startsWith("-")) {
     const option = args[index]!;
-    if (option === "--no-pager") index += 1;
+    if (option === "--no-pager" || option === "--no-optional-locks") index += 1;
     else if (option === "-C" && index + 1 < args.length) index += 2;
     else if (option === "-c" && args[index + 1] === "core.pager=cat") index += 2;
     else return UNSAFE_OPTION;

@@ -230,6 +230,7 @@ interface ClaudeQueryOptions {
   planModeInstructions?: string;
   allowDangerouslySkipPermissions?: boolean;
   settingSources?: unknown;
+  env?: NodeJS.ProcessEnv;
   canUseTool?: CanUseTool;
   abortController?: AbortController;
 }
@@ -396,6 +397,7 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     const turn = await runtime.settled(runtime.startCheck().id);
 
     expect(record.options[0]).toMatchObject({ permissionMode: "plan", planModeInstructions: CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS });
+    expect(record.options[0]!.env?.GIT_OPTIONAL_LOCKS).toBe("0");
     expect(CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS).toContain("ExitPlanMode");
     expect(decisions["toolu-status"]).toMatchObject({ behavior: "allow" });
     expect(decisions["toolu-cat"]).toMatchObject({ behavior: "allow" });
@@ -442,6 +444,7 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     expect(result).toMatchObject({ status: "completed" });
     expect(asked).toEqual(["git status --porcelain"]);
     expect(record.options[0]).not.toHaveProperty("planModeInstructions");
+    expect(record.options[0]!.env?.GIT_OPTIONAL_LOCKS).toBeUndefined();
   });
 
   it("stops a started edit before it runs, cancels the query and shuts down cleanly", async () => {
@@ -691,6 +694,7 @@ interface OpenCodeCapture {
   offeredTools?: string[];
   calls: Array<{ tool: string; action: string; reply?: string }>;
   aborted?: boolean;
+  gitOptionalLocks: string | null;
 }
 
 /**
@@ -707,7 +711,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
-const capture = { calls: [] };
+const capture = { calls: [], gitOptionalLocks: process.env.GIT_OPTIONAL_LOCKS ?? null };
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(capture));
 const agentRules = ${JSON.stringify(agentRules)};
 const nativeTools = ${JSON.stringify(OPENCODE_NATIVE_TOOLS)};
@@ -844,6 +848,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     expect(result).toMatchObject({ status: "completed" });
     const capture = opencode.capture();
     expect(capture.sessionPermission).toEqual(openCodePermissions("supervised", "plan"));
+    expect(capture.gitOptionalLocks).toBeNull();
     expect(capture.calls).toEqual([
       { tool: "read", action: "ask", reply: "reject" },
       { tool: "glob", action: "ask", reply: "reject" },
@@ -881,6 +886,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ]);
     expect(capture.offeredTools).toEqual(["bash", "read", "glob", "grep", "list"]);
+    expect(capture.gitOptionalLocks).toBe("0");
     expect(capture.calls).toEqual([
       { tool: "read", action: "allow" },
       { tool: "glob", action: "allow" },

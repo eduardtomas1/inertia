@@ -1,0 +1,466 @@
+import type { AgentActivity, RuntimeMutationEvent } from "../../../shared/contracts";
+import {
+  WATCHER_BUDGET_LIMITS,
+  type WatcherWakeTrigger,
+} from "../../../shared/watcher";
+import type { DeltaTimerScheduler } from "../turns/turn-stream-coalescer";
+
+export const WATCHER_SETTLE_DELAY_MS = 2_000;
+export const WATCHER_STALL_TICK_MS = 60_000;
+export const WATCHER_QUIET_AFTER_MS = 10 * 60_000;
+export const WATCHER_RETRY_BASE_MS = 5_000;
+export const WATCHER_RETRY_MAX_MS = 120_000;
+/** How often a wake that is due re-checks a busy watcher or a deferral. */
+export const WATCHER_RECHECK_MS = 5_000;
+
+/**
+ * What `onWake` reports back:
+ * - `started`: a check began; call `wakeFinished` once it settles.
+ * - `skipped`: nothing to check (no new digest, link gone); the events are dropped.
+ * - `transient`: the runtime is held, closing or has no route; retried with backoff.
+ */
+export type WatcherWakeAttempt = "started" | "skipped" | "transient";
+
+export interface WatcherWakeContext {
+  /** True for the final pass after the watched turn ended. */
+  final: boolean;
+  watchedTurnId: string | null;
+  /** Observed events this wake covers. */
+  events: number;
+}
+
+export interface WatcherWakeSchedulerDependencies {
+  /** Compatible with `TurnTimerScheduler`, so tests can use `FakeTurnScheduler`. */
+  scheduler: DeltaTimerScheduler;
+  /** Milliseconds since the epoch. */
+  clock: () => number;
+  onWake(
+    linkId: string,
+    trigger: WatcherWakeTrigger,
+    context: WatcherWakeContext,
+  ): WatcherWakeAttempt | Promise<WatcherWakeAttempt>;
+  onQuiet(linkId: string): void;
+  /** The watcher conversation already has a turn in flight. */
+  isBusy(linkId: string): boolean;
+  /** Wakes left in the watched turn, counting the unit reserved for the final pass. */
+  allowance(linkId: string): number;
+  /** Mid-turn wakes ran out; called once per watched turn until `resume`. */
+  onBudgetExhausted?(linkId: string): void;
+  cooldownMs?(linkId: string): number;
+  onError?(linkId: string, error: unknown): void;
+  settleDelayMs?: number;
+  stallTickMs?: number;
+  quietAfterMs?: number;
+  retryBaseMs?: number;
+  retryMaxMs?: number;
+  recheckMs?: number;
+}
+
+export interface WatcherTrackOptions {
+  watchedTurnId?: string | null;
+  watchedRunning?: boolean;
+  /** Last watched output in epoch milliseconds; defaults to now. */
+  lastOutputAt?: number;
+}
+
+type ActivityTrigger = Extract<WatcherWakeTrigger, "activity" | "plan" | "error">;
+type RequestTrigger = Extract<WatcherWakeTrigger, "manual" | "initial">;
+
+const TRIGGER_RANK: Readonly<Record<ActivityTrigger, number>> = { plan: 1, activity: 2, error: 3 };
+const SETTLED_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
+const OUTPUT_EVENTS: ReadonlySet<RuntimeMutationEvent["type"]> = new Set([
+  "agent.started", "agent.text", "agent.text.replaced", "agent.reasoning", "agent.commentary.persisted",
+  "agent.activity", "agent.plan.updated", "agent.subagent.updated",
+]);
+
+interface LinkState {
+  pending: number;
+  firstPendingAt: number | null;
+  trigger: ActivityTrigger | null;
+  request: RequestTrigger | null;
+  final: { turnId: string; requestedAt: number } | null;
+  finalDoneTurnId: string | null;
+  watchedTurnId: string | null;
+  watchedRunning: boolean;
+  lastWakeEndAt: number | null;
+  inFlight: boolean;
+  paused: { finalPass: boolean } | null;
+  defer: (() => boolean) | null;
+  retryAttempt: number;
+  retryAt: number | null;
+  wakeTimer: unknown;
+  lastOutputAt: number;
+  quiet: boolean;
+  stallTimer: unknown;
+  budgetNotified: boolean;
+}
+
+interface Consumed {
+  kind: "final" | "request" | "pending";
+  pending: number;
+  firstPendingAt: number | null;
+  trigger: ActivityTrigger | null;
+  request: RequestTrigger | null;
+  final: LinkState["final"];
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return typeof (value as { then?: unknown } | null)?.then === "function";
+}
+
+/**
+ * Decides when a watcher wakes. It counts only settled watched events,
+ * coalesces them, honours the cooldown and a short settle delay, keeps the
+ * last wake of each watched turn for the final pass, waits while the watcher
+ * is busy or the user's own watcher turn runs, retries transient failures and
+ * marks the watched chat quiet after ten minutes without output. It never
+ * talks to a model or the database; everything goes through injected callbacks.
+ */
+export class WatcherWakeScheduler {
+  readonly #deps: WatcherWakeSchedulerDependencies;
+  readonly #links = new Map<string, LinkState>();
+  readonly #settleDelayMs: number;
+  readonly #stallTickMs: number;
+  readonly #quietAfterMs: number;
+  readonly #retryBaseMs: number;
+  readonly #retryMaxMs: number;
+  readonly #recheckMs: number;
+  #disposed = false;
+
+  constructor(dependencies: WatcherWakeSchedulerDependencies) {
+    this.#deps = dependencies;
+    this.#settleDelayMs = dependencies.settleDelayMs ?? WATCHER_SETTLE_DELAY_MS;
+    this.#stallTickMs = dependencies.stallTickMs ?? WATCHER_STALL_TICK_MS;
+    this.#quietAfterMs = dependencies.quietAfterMs ?? WATCHER_QUIET_AFTER_MS;
+    this.#retryBaseMs = dependencies.retryBaseMs ?? WATCHER_RETRY_BASE_MS;
+    this.#retryMaxMs = dependencies.retryMaxMs ?? WATCHER_RETRY_MAX_MS;
+    this.#recheckMs = dependencies.recheckMs ?? WATCHER_RECHECK_MS;
+  }
+
+  /** Registers a link, for example after attach or restart, with its watched turn state. */
+  track(linkId: string, options: WatcherTrackOptions = {}): void {
+    const state = this.#state(linkId);
+    if (!state) return;
+    if (options.watchedTurnId !== undefined) state.watchedTurnId = options.watchedTurnId;
+    if (options.watchedRunning !== undefined) state.watchedRunning = options.watchedRunning;
+    state.lastOutputAt = options.lastOutputAt ?? this.#deps.clock();
+    if (state.watchedRunning) this.#startStall(linkId, state);
+    else this.#stopStall(state);
+  }
+
+  /**
+   * Feeds one runtime event of the watched conversation. Returns true when
+   * the event counts toward a wake. Text and reasoning only refresh the
+   * quiet marker.
+   */
+  observe(linkId: string, event: RuntimeMutationEvent): boolean {
+    const state = this.#state(linkId);
+    if (!state) return false;
+    if (!OUTPUT_EVENTS.has(event.type)) return false;
+    const now = this.#deps.clock();
+    state.lastOutputAt = now;
+    state.quiet = false;
+    let trigger: ActivityTrigger | null = null;
+    if (event.type === "agent.started") {
+      if (event.turnId !== state.watchedTurnId) {
+        state.watchedTurnId = event.turnId;
+        state.budgetNotified = false;
+      }
+      state.watchedRunning = true;
+      trigger = "activity";
+    } else if (event.type === "agent.activity") {
+      const { activity } = event;
+      if (activity.status !== "running" && SETTLED_KINDS.has(activity.kind)) {
+        trigger = activity.kind === "error" || activity.status === "failed" ? "error" : "activity";
+      }
+    } else if (event.type === "agent.plan.updated") {
+      trigger = "plan";
+    }
+    if (state.watchedRunning) this.#startStall(linkId, state);
+    if (!trigger) return false;
+    state.pending += 1;
+    state.firstPendingAt ??= now;
+    if (!state.trigger || TRIGGER_RANK[trigger] > TRIGGER_RANK[state.trigger]) state.trigger = trigger;
+    this.#schedule(linkId, state);
+    return true;
+  }
+
+  /** The watched turn ended; schedules its final pass once. */
+  onWatchedTurnSettled(linkId: string, turnId: string): void {
+    const state = this.#state(linkId);
+    if (!state) return;
+    if (state.watchedTurnId === null || state.watchedTurnId === turnId) {
+      state.watchedTurnId = turnId;
+      state.watchedRunning = false;
+      this.#stopStall(state);
+    }
+    if (state.finalDoneTurnId === turnId || state.final?.turnId === turnId) return;
+    state.final = { turnId, requestedAt: this.#deps.clock() };
+    this.#schedule(linkId, state);
+  }
+
+  /** "Check now" or the initial review: skips the settle delay, cooldown and budget gate. */
+  requestWake(linkId: string, trigger: RequestTrigger): void {
+    const state = this.#state(linkId);
+    if (!state) return;
+    state.request = trigger;
+    state.retryAt = null;
+    this.#schedule(linkId, state);
+  }
+
+  /** Holds due wakes while `predicate` is true, for example while the user's own watcher turn runs. */
+  deferWhile(linkId: string, predicate: (() => boolean) | null): void {
+    const state = this.#state(linkId);
+    if (!state) return;
+    state.defer = predicate;
+    this.#schedule(linkId, state);
+  }
+
+  /** A started check settled; the cooldown starts now. */
+  wakeFinished(linkId: string): void {
+    const state = this.#links.get(linkId);
+    if (!state || this.#disposed) return;
+    state.inFlight = false;
+    state.lastWakeEndAt = this.#deps.clock();
+    this.#schedule(linkId, state);
+  }
+
+  /** Re-evaluates a link, for example after the user's own watcher turn ended. */
+  poke(linkId: string): void {
+    const state = this.#links.get(linkId);
+    if (state && !this.#disposed) this.#schedule(linkId, state);
+  }
+
+  /** Stops new wakes. With `finalPass`, the final pass still runs (budget pauses). */
+  pause(linkId: string, options: { finalPass?: boolean } = {}): void {
+    const state = this.#state(linkId);
+    if (!state) return;
+    state.paused = { finalPass: options.finalPass === true };
+    this.#schedule(linkId, state);
+  }
+
+  /** Resumes wakes; a resume after budget exhaustion follows a new grant. */
+  resume(linkId: string): void {
+    const state = this.#state(linkId);
+    if (!state) return;
+    state.paused = null;
+    state.budgetNotified = false;
+    state.retryAttempt = 0;
+    state.retryAt = null;
+    this.#schedule(linkId, state);
+  }
+
+  /** Observed events waiting for the next wake. */
+  pendingEvents(linkId: string): number {
+    return this.#links.get(linkId)?.pending ?? 0;
+  }
+
+  forget(linkId: string): void {
+    const state = this.#links.get(linkId);
+    if (!state) return;
+    this.#clearWake(state);
+    this.#stopStall(state);
+    this.#links.delete(linkId);
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    for (const linkId of this.#links.keys()) this.forget(linkId);
+  }
+
+  #state(linkId: string): LinkState | null {
+    if (this.#disposed) return null;
+    let state = this.#links.get(linkId);
+    if (!state) {
+      state = {
+        pending: 0,
+        firstPendingAt: null,
+        trigger: null,
+        request: null,
+        final: null,
+        finalDoneTurnId: null,
+        watchedTurnId: null,
+        watchedRunning: false,
+        lastWakeEndAt: null,
+        inFlight: false,
+        paused: null,
+        defer: null,
+        retryAttempt: 0,
+        retryAt: null,
+        wakeTimer: null,
+        lastOutputAt: this.#deps.clock(),
+        quiet: false,
+        stallTimer: null,
+        budgetNotified: false,
+      };
+      this.#links.set(linkId, state);
+    }
+    return state;
+  }
+
+  #cooldown(linkId: string): number {
+    const value = this.#deps.cooldownMs?.(linkId);
+    return typeof value === "number" && Number.isFinite(value) && value >= 0
+      ? value
+      : WATCHER_BUDGET_LIMITS.cooldownSeconds.default * 1_000;
+  }
+
+  /** The next wake to run and when it is due, ignoring busy and deferral. */
+  #next(linkId: string, state: LinkState): { kind: Consumed["kind"]; at: number } | null {
+    if (state.final && (!state.paused || state.paused.finalPass)) {
+      return { kind: "final", at: Math.max(state.final.requestedAt + this.#settleDelayMs, state.retryAt ?? 0) };
+    }
+    if (state.paused) return null;
+    if (state.request) return { kind: "request", at: Math.max(this.#deps.clock(), state.retryAt ?? 0) };
+    if (state.pending === 0 || state.firstPendingAt === null) return null;
+    const cooldownEnd = state.lastWakeEndAt === null ? 0 : state.lastWakeEndAt + this.#cooldown(linkId);
+    return {
+      kind: "pending",
+      at: Math.max(cooldownEnd, state.firstPendingAt + this.#settleDelayMs, state.retryAt ?? 0),
+    };
+  }
+
+  #clearWake(state: LinkState): void {
+    if (state.wakeTimer !== null) this.#deps.scheduler.clearTimeout(state.wakeTimer);
+    state.wakeTimer = null;
+  }
+
+  #schedule(linkId: string, state: LinkState, at?: number): void {
+    this.#clearWake(state);
+    if (this.#disposed || state.inFlight) return;
+    const due = at ?? this.#next(linkId, state)?.at;
+    if (due === undefined) return;
+    const delay = Math.max(0, due - this.#deps.clock());
+    state.wakeTimer = this.#deps.scheduler.setTimeout(() => this.#fire(linkId), delay);
+  }
+
+  #fire(linkId: string): void {
+    const state = this.#links.get(linkId);
+    if (!state || this.#disposed) return;
+    state.wakeTimer = null;
+    if (state.inFlight) return;
+    const next = this.#next(linkId, state);
+    if (!next) return;
+    const now = this.#deps.clock();
+    if (now < next.at) {
+      this.#schedule(linkId, state, next.at);
+      return;
+    }
+    if (this.#deps.isBusy(linkId) || state.defer?.() === true) {
+      this.#schedule(linkId, state, now + this.#recheckMs);
+      return;
+    }
+    if (next.kind === "pending" && this.#deps.allowance(linkId) <= 1) {
+      if (!state.budgetNotified) {
+        state.budgetNotified = true;
+        this.#deps.onBudgetExhausted?.(linkId);
+      }
+      return;
+    }
+    this.#run(linkId, state, next.kind);
+  }
+
+  #run(linkId: string, state: LinkState, kind: Consumed["kind"]): void {
+    const consumed: Consumed = {
+      kind,
+      pending: state.pending,
+      firstPendingAt: state.firstPendingAt,
+      trigger: state.trigger,
+      request: state.request,
+      final: state.final,
+    };
+    const trigger: WatcherWakeTrigger = kind === "final"
+      ? "turn-end"
+      : kind === "request" ? state.request ?? "manual" : state.trigger ?? "activity";
+    const context: WatcherWakeContext = {
+      final: kind === "final",
+      watchedTurnId: kind === "final" ? state.final?.turnId ?? null : state.watchedTurnId,
+      events: state.pending,
+    };
+    state.pending = 0;
+    state.firstPendingAt = null;
+    state.trigger = null;
+    state.request = null;
+    if (kind === "final") {
+      state.finalDoneTurnId = state.final?.turnId ?? null;
+      state.final = null;
+    }
+    state.inFlight = true;
+    let result: WatcherWakeAttempt | Promise<WatcherWakeAttempt>;
+    try {
+      result = this.#deps.onWake(linkId, trigger, context);
+    } catch (error) {
+      this.#settleAttempt(linkId, state, consumed, "transient", error);
+      return;
+    }
+    if (isPromiseLike(result)) {
+      void result.then(
+        (attempt) => this.#settleAttempt(linkId, state, consumed, attempt),
+        (error: unknown) => this.#settleAttempt(linkId, state, consumed, "transient", error),
+      );
+    } else {
+      this.#settleAttempt(linkId, state, consumed, result);
+    }
+  }
+
+  #settleAttempt(
+    linkId: string,
+    state: LinkState,
+    consumed: Consumed,
+    attempt: WatcherWakeAttempt,
+    error?: unknown,
+  ): void {
+    if (this.#disposed || this.#links.get(linkId) !== state) return;
+    if (error !== undefined) this.#deps.onError?.(linkId, error);
+    if (attempt === "started") {
+      state.retryAttempt = 0;
+      state.retryAt = null;
+      return;
+    }
+    state.inFlight = false;
+    if (attempt === "transient") {
+      state.pending += consumed.pending;
+      if (consumed.firstPendingAt !== null) {
+        state.firstPendingAt = Math.min(state.firstPendingAt ?? consumed.firstPendingAt, consumed.firstPendingAt);
+      }
+      if (consumed.trigger && (!state.trigger || TRIGGER_RANK[consumed.trigger] > TRIGGER_RANK[state.trigger])) {
+        state.trigger = consumed.trigger;
+      }
+      state.request ??= consumed.request;
+      if (consumed.kind === "final" && !state.final) {
+        state.final = consumed.final;
+        state.finalDoneTurnId = null;
+      }
+      state.retryAttempt += 1;
+      const delay = Math.min(this.#retryMaxMs, this.#retryBaseMs * 2 ** (state.retryAttempt - 1));
+      state.retryAt = this.#deps.clock() + delay;
+    } else {
+      state.retryAttempt = 0;
+      state.retryAt = null;
+    }
+    this.#schedule(linkId, state);
+  }
+
+  #startStall(linkId: string, state: LinkState): void {
+    if (state.stallTimer !== null || this.#disposed) return;
+    state.stallTimer = this.#deps.scheduler.setTimeout(() => this.#stallTick(linkId), this.#stallTickMs);
+  }
+
+  #stopStall(state: LinkState): void {
+    if (state.stallTimer !== null) this.#deps.scheduler.clearTimeout(state.stallTimer);
+    state.stallTimer = null;
+  }
+
+  #stallTick(linkId: string): void {
+    const state = this.#links.get(linkId);
+    if (!state || this.#disposed) return;
+    state.stallTimer = null;
+    if (!state.watchedRunning || state.quiet) return;
+    if (this.#deps.clock() - state.lastOutputAt >= this.#quietAfterMs) {
+      state.quiet = true;
+      this.#deps.onQuiet(linkId);
+      return;
+    }
+    this.#startStall(linkId, state);
+  }
+}

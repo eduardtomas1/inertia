@@ -12,6 +12,8 @@ export const WATCHER_RETRY_BASE_MS = 5_000;
 export const WATCHER_RETRY_MAX_MS = 120_000;
 /** How often a wake that is due re-checks a busy watcher or a deferral. */
 export const WATCHER_RECHECK_MS = 5_000;
+export const WATCHER_ACCUMULATE_MIN = 6;
+export const WATCHER_ACCUMULATE_AGE_COOLDOWNS = 3;
 
 /**
  * What `onWake` reports back:
@@ -74,6 +76,7 @@ type RequestTrigger = Extract<WatcherWakeTrigger, "manual" | "initial">;
 
 const TRIGGER_RANK: Readonly<Record<ActivityTrigger, number>> = { plan: 1, activity: 2, error: 3 };
 const SETTLED_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
+const ACCUMULATING_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command"]);
 /** Final passes kept per link: the ended turn's and the one after it. */
 export const WATCHER_MAX_PENDING_FINALS = 2;
 const MAX_DONE_FINALS = 4;
@@ -86,6 +89,7 @@ interface LinkState {
   pending: number;
   firstPendingAt: number | null;
   trigger: ActivityTrigger | null;
+  immediate: boolean;
   request: RequestTrigger | null;
   /** A settled check left activity of its watched turn unread; another check follows without new events. */
   continuation: boolean;
@@ -117,6 +121,7 @@ interface Consumed {
   pending: number;
   firstPendingAt: number | null;
   trigger: ActivityTrigger | null;
+  immediate: boolean;
   request: RequestTrigger | null;
   continuation: boolean;
   final: FinalPass | null;
@@ -179,6 +184,7 @@ export class WatcherWakeScheduler {
     state.lastOutputAt = now;
     state.quiet = false;
     let trigger: ActivityTrigger | null = null;
+    let accumulating = false;
     if (event.type === "agent.started") {
       if (event.turnId !== state.watchedTurnId) {
         state.watchedTurnId = event.turnId;
@@ -190,6 +196,7 @@ export class WatcherWakeScheduler {
       const { activity } = event;
       if (activity.status !== "running" && SETTLED_KINDS.has(activity.kind)) {
         trigger = activity.kind === "error" || activity.status === "failed" ? "error" : "activity";
+        accumulating = trigger === "activity" && ACCUMULATING_KINDS.has(activity.kind);
       }
     } else if (event.type === "agent.plan.updated") {
       trigger = "plan";
@@ -198,6 +205,7 @@ export class WatcherWakeScheduler {
     if (!trigger) return false;
     state.pending += 1;
     state.firstPendingAt ??= now;
+    state.immediate ||= !accumulating;
     if (!state.trigger || TRIGGER_RANK[trigger] > TRIGGER_RANK[state.trigger]) state.trigger = trigger;
     this.#schedule(linkId, state);
     return true;
@@ -315,6 +323,7 @@ export class WatcherWakeScheduler {
         pending: 0,
         firstPendingAt: null,
         trigger: null,
+        immediate: false,
         request: null,
         continuation: false,
         finals: [],
@@ -357,7 +366,11 @@ export class WatcherWakeScheduler {
     if (!waiting && !state.continuation) return null;
     const cooldownEnd = state.lastWakeEndAt === null ? 0 : state.lastWakeEndAt + this.#cooldown(linkId);
     const settledAt = waiting && state.firstPendingAt !== null ? state.firstPendingAt + this.#settleDelayMs : 0;
-    return { kind: "pending", at: Math.max(cooldownEnd, settledAt, state.retryAt ?? 0) };
+    const gatheredAt = !waiting || state.firstPendingAt === null || state.immediate || state.continuation
+      || state.pending >= WATCHER_ACCUMULATE_MIN
+      ? 0
+      : state.firstPendingAt + WATCHER_ACCUMULATE_AGE_COOLDOWNS * this.#cooldown(linkId);
+    return { kind: "pending", at: Math.max(cooldownEnd, settledAt, gatheredAt, state.retryAt ?? 0) };
   }
 
   #clearWake(state: LinkState): void {
@@ -407,6 +420,7 @@ export class WatcherWakeScheduler {
       pending: state.pending,
       firstPendingAt: state.firstPendingAt,
       trigger: state.trigger,
+      immediate: state.immediate,
       request: state.request,
       continuation: kind !== "final" && state.continuation,
       final,
@@ -422,6 +436,7 @@ export class WatcherWakeScheduler {
     state.pending = 0;
     state.firstPendingAt = null;
     state.trigger = null;
+    state.immediate = false;
     state.request = null;
     if (consumed.continuation) state.continuation = false;
     if (final) {
@@ -471,6 +486,7 @@ export class WatcherWakeScheduler {
       if (consumed.trigger && (!state.trigger || TRIGGER_RANK[consumed.trigger] > TRIGGER_RANK[state.trigger])) {
         state.trigger = consumed.trigger;
       }
+      state.immediate ||= consumed.immediate;
       state.request ??= consumed.request;
       state.continuation ||= consumed.continuation;
       if (consumed.pending > 0) this.#deps.onPendingChanged?.(linkId);

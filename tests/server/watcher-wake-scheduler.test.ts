@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentActivity, RuntimeMutationEvent } from "../../src/shared/contracts";
-import type { WatcherWakeTrigger } from "../../src/shared/watcher";
+import { WATCHER_BUDGET_LIMITS, type WatcherWakeTrigger } from "../../src/shared/watcher";
 import {
+  WATCHER_ACCUMULATE_AGE_COOLDOWNS,
+  WATCHER_ACCUMULATE_MIN,
   WATCHER_QUIET_AFTER_MS,
   WATCHER_RECHECK_MS,
   WATCHER_RETRY_BASE_MS,
@@ -17,6 +19,7 @@ import { FakeTurnScheduler } from "../support/fake-turn-provider";
 const LINK = "link-1";
 const WATCHED = "watched-1";
 const COOLDOWN_MS = 45_000;
+const ALLOWANCE = WATCHER_BUDGET_LIMITS.wakesPerWatchedTurn.default;
 
 /** The shared fake scheduler, plus due times so tests can advance a clock. */
 class ClockedScheduler extends FakeTurnScheduler {
@@ -77,7 +80,7 @@ function harness(options: {
     },
     onQuiet: () => quiet.push(timers.now),
     isBusy: () => state.busy,
-    allowance: options.allowance ?? (() => 12),
+    allowance: options.allowance ?? (() => ALLOWANCE),
     onBudgetExhausted: () => exhausted.push(timers.now),
     cooldownMs: () => COOLDOWN_MS,
     onError: (_linkId, error) => errors.push(error),
@@ -86,7 +89,7 @@ function harness(options: {
 }
 
 let sequence = 0;
-function settled(kind: AgentActivity["kind"] = "tool", status: AgentActivity["status"] = "completed"): RuntimeMutationEvent {
+function settled(kind: AgentActivity["kind"] = "file", status: AgentActivity["status"] = "completed"): RuntimeMutationEvent {
   sequence += 1;
   return {
     type: "agent.activity",
@@ -132,6 +135,63 @@ describe("WatcherWakeScheduler", () => {
     expect(wakes[0]).toMatchObject({ linkId: LINK, trigger: "activity", at: start + WATCHER_SETTLE_DELAY_MS });
     expect(wakes[0]!.context).toMatchObject({ final: false, events: 3 });
     expect(scheduler.pendingEvents(LINK)).toBe(0);
+  });
+
+  it("holds settled tool calls and commands until enough of them settle", () => {
+    const { scheduler, timers, wakes } = harness();
+    for (let index = 1; index < WATCHER_ACCUMULATE_MIN; index += 1) {
+      expect(scheduler.observe(LINK, settled(index % 2 === 0 ? "tool" : "command"))).toBe(true);
+      timers.advance(10_000);
+    }
+    expect(wakes).toHaveLength(0);
+    expect(scheduler.pendingEvents(LINK)).toBe(WATCHER_ACCUMULATE_MIN - 1);
+    scheduler.observe(LINK, settled("tool"));
+    const observedAt = timers.now;
+    timers.advance(0);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]).toMatchObject({ trigger: "activity", at: observedAt, context: { events: WATCHER_ACCUMULATE_MIN } });
+  });
+
+  it("wakes for gathered tool calls once the first is older than the age limit", () => {
+    const { scheduler, timers, wakes, start } = harness();
+    scheduler.observe(LINK, settled("command"));
+    timers.advance(60_000);
+    scheduler.observe(LINK, settled("tool"));
+    timers.advance(WATCHER_ACCUMULATE_AGE_COOLDOWNS * COOLDOWN_MS - 60_000 - 1);
+    expect(wakes).toHaveLength(0);
+    timers.advance(1);
+    expect(wakes[0]).toMatchObject({ trigger: "activity", at: start + WATCHER_ACCUMULATE_AGE_COOLDOWNS * COOLDOWN_MS, context: { events: 2 } });
+  });
+
+  it("wakes at the cooldown for a file change, an error or a plan update among gathered tool calls", () => {
+    const { scheduler, timers, wakes, start } = harness();
+    scheduler.observe(LINK, settled("tool"));
+    timers.advance(10_000);
+    scheduler.observe(LINK, settled("file"));
+    timers.advance(0);
+    expect(wakes[0]).toMatchObject({ trigger: "activity", at: start + 10_000, context: { events: 2 } });
+    for (const [index, immediate] of [settled("command", "failed"), settled("error"), plan].entries()) {
+      scheduler.wakeFinished(LINK);
+      const endedAt = timers.now;
+      scheduler.observe(LINK, settled("command"));
+      scheduler.observe(LINK, immediate);
+      timers.advance(COOLDOWN_MS - 1);
+      expect(wakes).toHaveLength(index + 1);
+      timers.advance(1);
+      expect(wakes[index + 1]).toMatchObject({ at: endedAt + COOLDOWN_MS, context: { events: 2 } });
+    }
+    expect(wakes.map(({ trigger }) => trigger)).toEqual(["activity", "error", "error", "activity"]);
+  });
+
+  it("keeps a retried immediate wake immediate", () => {
+    const attempts: WatcherWakeAttempt[] = ["transient", "started"];
+    const { scheduler, timers, wakes } = harness({ attempt: () => attempts.shift() ?? "started" });
+    scheduler.observe(LINK, settled("tool"));
+    scheduler.observe(LINK, settled("file"));
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    timers.advance(WATCHER_RETRY_BASE_MS);
+    expect(wakes).toHaveLength(2);
+    expect(wakes[1]!.context.events).toBe(2);
   });
 
   it("ranks an error above activity and plan when coalescing", () => {
@@ -280,7 +340,7 @@ describe("WatcherWakeScheduler", () => {
     scheduler.observe(LINK, started());
     timers.advance(WATCHER_SETTLE_DELAY_MS);
     expect(exhausted).toHaveLength(1);
-    allowance = 12;
+    allowance = ALLOWANCE;
     scheduler.resume(LINK);
     timers.advance(0);
     expect(wakes).toHaveLength(1);
@@ -459,7 +519,7 @@ describe("WatcherWakeScheduler", () => {
       onWake: () => attempts.shift() ?? "started",
       onQuiet: () => undefined,
       isBusy: () => false,
-      allowance: () => 12,
+      allowance: () => ALLOWANCE,
       onPendingChanged: (linkId) => changes.push(scheduler.pendingEvents(linkId)),
     });
     scheduler.observe(LINK, settled());

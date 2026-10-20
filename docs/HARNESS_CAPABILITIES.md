@@ -230,7 +230,7 @@ through `watcherHarnessAllowed`:
 | --- | --- |
 | `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn, so every command needs approval and is declined. |
 | `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. |
-| `opencode-sdk` | Plan mode with the supervised permission ruleset. Edit and shell tools surface as approvals, which are declined. Read, glob, grep and list must run without a prompt; where the supervised ruleset would prompt for them, the run carries `readOnlyProfile: "watcher"`, which denies every tool except read, glob, grep, list and Inertia host tools. |
+| `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. With the profile, reads run without a prompt, and edit, shell and every other native tool are denied by OpenCode itself, without an approval. |
 
 The gate is checked when a watcher is attached, when every watcher turn is
 prepared (including a message the user types into the watcher chat), and when
@@ -342,17 +342,32 @@ deleting the watcher chat removes it; the delete command then broadcasts
 
 `tests/server/watcher-read-only-harnesses.test.ts` is a portable suite
 (`// @inertia-test-suite portable`, without an `@inertia-harness` marker,
-because each harness can be registered only once). It drives
-`tests/helpers/claude-harness-fixture.ts`,
-`tests/helpers/codex-app-server-fixture.ts` and
-`tests/helpers/opencode-lifecycle-server.ts` and proves, for each harness, that
-the watcher input maps to plan mode, the read-only sandbox or the deny
-ruleset; that a scripted edit or command attempt becomes an approval or
-activity that is declined or stopped; that the temporary repository has no new
-files and an identical fingerprint; and that cancellation and shutdown are
-clean. For Codex it also proves that the read-only sandbox is requested. For
-OpenCode it proves that read and grep do not prompt, or exercises the
-read-only profile. Run it with `npm run test:portable`. Integration coverage
+because each harness can be registered only once). It runs watcher turns
+through the TurnController's read-only policy and the real harness adapters,
+with the real `ProviderManager`, against scripted providers in a temporary Git
+repository. Each scripted provider writes only if Inertia lets it, and every
+case compares the checkout fingerprint, `git status` and the file contents
+before and after the turn.
+
+- Claude: the query receives `permissionMode: "plan"`, no setting sources and
+  Inertia's `canUseTool`. Read and Grep run without `canUseTool`, as Claude
+  Code's plan mode does; a Write permission request is declined as a
+  `write-attempt` and the turn completes. A streamed Edit tool start stops
+  the turn, aborts the query before the edit and releases the run.
+- Codex: `thread/start` carries `approvalPolicy: "untrusted"` and
+  `sandbox: "read-only"`, and `turn/start` carries the same policy,
+  `sandboxPolicy: { type: "readOnly", networkAccess: false }` and plan
+  collaboration mode. A known-safe read command runs without an approval; a
+  write command's approval is answered `decline` and recorded as a
+  `command-attempt`. A malformed frame fails the turn and the app-server
+  process exits.
+- OpenCode: the scripted server evaluates rules as OpenCode does (agent rules,
+  then session rules, last match wins). Under the supervised plan ruleset
+  alone, read, glob, grep, list and bash all prompt. A watcher turn sends the
+  profile ruleset, reads complete without a prompt, edit and bash are denied
+  and not offered, and the server process exits on shutdown.
+
+Run it with `npm run test:portable`. Integration coverage
 lives in `tests/server/watcher-read-only-guard.test.ts` and
 `tests/server/watcher-delivery.test.ts`, which also checks that steering a note
 is refused on Cursor.

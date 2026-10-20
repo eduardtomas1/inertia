@@ -148,13 +148,14 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
 
   const readFocusToken = useCallback(() => watcherDockFocusToken(watchedId), [watchedId]);
   const focusToken = useSyncExternalStore(subscribeWatcherDock, readFocusToken, readFocusToken);
+  // Waits for the frame to lose `hidden` on reopen: a hidden heading can't take focus.
   useEffect(() => {
-    if (!dock.open || focusToken === 0 || !consumeWatcherDockFocus(watchedId)) return;
+    if (!dock.open || presence !== "open" || focusToken === 0 || !consumeWatcherDockFocus(watchedId)) return;
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(headingId)?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [dock.open, focusToken, headingId, watchedId]);
+  }, [dock.open, focusToken, headingId, presence, watchedId]);
 
   const latestFindingAt = link.latest?.outcome === "finding" ? link.latest.at : null;
   const { markSeen } = dock;

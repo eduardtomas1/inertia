@@ -83,6 +83,12 @@
     box-shadow: var(--shadow-overlay);
   }
 
+  /* An absolute grid child is sized by its grid area; the auto dock column
+   * is empty here, so span the pane's chat row instead. */
+  .conversation-pane-workspace > .watcher-dock-frame {
+    grid-column: 1 / -1;
+  }
+
   .watcher-dock {
     box-shadow: none;
   }

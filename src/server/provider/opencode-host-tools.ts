@@ -35,10 +35,24 @@ export interface OpenCodeHostTools {
   respondToApproval(requestId: string, decision: AgentApprovalDecision): boolean;
 }
 
+/** Native OpenCode tools a read-only watcher may run without a prompt. */
+export const OPENCODE_WATCHER_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
+
 export function openCodePermissions(
   access: "full" | "supervised" | "auto-edit",
   interactionMode: "build" | "plan",
+  readOnlyProfile?: "watcher",
 ): PermissionRuleset {
+  if (readOnlyProfile === "watcher") {
+    // The supervised catch-all would make every read prompt, and a watcher
+    // declines every prompt. Deny-by-default removes edit, shell and every
+    // other native tool; the last matching rule wins, so the allows follow.
+    return [
+      { permission: "*", pattern: "*", action: "deny" },
+      ...OPENCODE_WATCHER_READ_TOOLS.map((permission) => ({ permission, pattern: "*", action: "allow" } as const)),
+      { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
+    ];
+  }
   const planEdits = interactionMode === "plan"
     ? [{ permission: "edit", pattern: "*", action: "deny" } as const]
     : [];

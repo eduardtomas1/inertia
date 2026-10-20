@@ -37,7 +37,12 @@ function bar(
   current: WatcherLinkView,
   runtime = watcherRuntime({ link: () => current }),
   onResumeRequest = vi.fn(),
-  options: { privateConnectConfigured?: boolean; resumeBlocked?: string | null; usageTokens?: number | null } = {},
+  options: {
+    privateConnectConfigured?: boolean;
+    resumeBlocked?: string | null;
+    usageTokens?: number | null;
+    onError?: (message: string | null) => void;
+  } = {},
 ) {
   return (
     <WatcherBar
@@ -53,7 +58,7 @@ function bar(
       onCollapse={vi.fn()}
       onOpenWatcherChat={vi.fn()}
       onResumeRequest={onResumeRequest}
-      onError={vi.fn()}
+      onError={options.onError ?? vi.fn()}
     />
   );
 }
@@ -93,6 +98,7 @@ describe("WatcherBar", () => {
     const menu = await screen.findByRole("menu", { name: "More watcher actions" });
     expect([...menu.querySelectorAll('[role^="menuitem"]')].map((item) => item.textContent)).toEqual([
       "Pause",
+      "Review the last turn",
       "Open watcher chat",
       "Send findings automatically",
       "Hide from paired devices",
@@ -107,6 +113,44 @@ describe("WatcherBar", () => {
     ]);
     expect(within(menu).getByRole("menuitem", { name: "2 waiting" })).toHaveAttribute("aria-disabled", "true");
     expect(within(menu).getByRole("menuitem", { name: "Used 48.2K tokens" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("asks for a review of the last turn from the More menu", async () => {
+    const runtime = watcherRuntime();
+    render(bar(link(), runtime));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Review the last turn" }));
+    await vi.waitFor(() => expect(runtime.commands.map(({ type }) => type)).toEqual(["watcher.review"]));
+    expect(payloadOf(runtime.commands[0])).toEqual({ linkId: LINK_ID });
+    expect(screen.getByRole("button", { name: "More watcher actions" })).toHaveFocus();
+  });
+
+  it.each([
+    ["paused", link({ status: "paused", pauseReason: "user" })],
+    ["mid-check", link({ status: "waking" })],
+  ])("offers no review of the last turn while %s", async (_case, current) => {
+    const runtime = watcherRuntime({ link: () => current });
+    render(bar(current, runtime));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    const item = await screen.findByRole("menuitem", { name: "Review the last turn" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(item);
+    await act(async () => { await Promise.resolve(); });
+    expect(runtime.commands).toEqual([]);
+  });
+
+  it("reports the runtime's refusal of a review in the dock's error line", async () => {
+    const refusal = "The watched chat has no turn to review yet.";
+    const runtime = watcherRuntime();
+    const request = vi.fn(async (command: Parameters<typeof runtime.request>[0]) => {
+      if (command.type === "watcher.review") throw new Error(refusal);
+      return runtime.request(command);
+    });
+    const onError = vi.fn();
+    render(bar(link(), { ...runtime, request }, undefined, { onError }));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Review the last turn" }));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(refusal));
   });
 
   it("shows no usage line until the watcher's token use is known", async () => {

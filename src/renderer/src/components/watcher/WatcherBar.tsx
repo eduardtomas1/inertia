@@ -38,7 +38,7 @@ export interface WatcherBarProps {
   onError: (message: string | null) => void;
 }
 
-type Pending = "pause" | "resume" | "wake" | "detach" | "visibility" | "delivery" | null;
+type Pending = "pause" | "resume" | "wake" | "review" | "detach" | "visibility" | "delivery" | null;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The watcher could not be updated.";
@@ -147,6 +147,7 @@ export function WatcherBar({
   // Pending actions keep focus: aria-disabled, never disabled, while busy.
   const resumeUnavailable = !actions || pending !== null || resumeBlocked !== null;
   const checkUnavailable = !actions || pending !== null || waking;
+  const reviewUnavailable = checkUnavailable || paused || link.status === "detached";
   const primaryUnavailable = paused ? resumeUnavailable : checkUnavailable;
   const primaryLabel = paused ? "Resume" : "Check now";
   const restoreMoreFocus = (): void => {
@@ -206,6 +207,19 @@ export function WatcherBar({
                     Pause
                   </button>
                 )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  aria-disabled={reviewUnavailable || undefined}
+                  onClick={() => {
+                    if (reviewUnavailable || !actions) return;
+                    close();
+                    run("review", actions.review);
+                  }}
+                >
+                  Review the last turn
+                </button>
                 {onOpenWatcherChat && (
                   <button
                     type="button"

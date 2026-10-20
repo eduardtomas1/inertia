@@ -28,6 +28,7 @@ export interface WatcherActions {
   pause: () => Promise<WatcherLinkView>;
   resume: () => Promise<WatcherLinkView>;
   wake: () => Promise<WatcherLinkView>;
+  review: () => Promise<WatcherLinkView>;
   detach: () => Promise<WatcherLinkView>;
   update: (patch: Omit<WatcherUpdatePayload, "linkId">) => Promise<WatcherLinkView>;
   feed: (beforeSequence?: number) => Promise<WatcherFeedResult>;
@@ -41,12 +42,13 @@ export interface WatcherActions {
  * updated link, which the shell also receives as `watcher.link.updated`.
  */
 export function createWatcherActions(request: WatcherRequest, linkId: string): WatcherActions {
-  const link = async (type: "watcher.pause" | "watcher.resume" | "watcher.wake" | "watcher.detach") =>
+  const link = async (type: "watcher.pause" | "watcher.resume" | "watcher.wake" | "watcher.review" | "watcher.detach") =>
     expectResult(await request({ type, payload: { linkId } }), "watcher.link").link;
   return {
     pause: () => link("watcher.pause"),
     resume: () => link("watcher.resume"),
     wake: () => link("watcher.wake"),
+    review: () => link("watcher.review"),
     detach: () => link("watcher.detach"),
     update: async (patch) => expectResult(
       await request({ type: "watcher.update", payload: { ...patch, linkId } }),

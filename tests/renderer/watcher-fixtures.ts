@@ -177,6 +177,7 @@ export function watcherRuntime(options: {
         return { kind: "watcher.link", link: { ...currentLink(), status: "paused", pauseReason: "user" } };
       case "watcher.resume":
       case "watcher.wake":
+      case "watcher.review":
       case "watcher.detach":
       case "watcher.update":
         return { kind: "watcher.link", link: currentLink() };

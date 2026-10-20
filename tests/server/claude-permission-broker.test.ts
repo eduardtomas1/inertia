@@ -37,6 +37,40 @@ function broker(
   });
 }
 
+function watcherBroker(events: AgentHarnessEvent[], readOnlyProfile: "watcher" | null = "watcher"): ClaudePermissionBroker {
+  return new ClaudePermissionBroker({
+    input: {
+      ...nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-permission-broker-watcher",
+        cwd: "/workspace",
+        prompt: "Review the work",
+        interactionMode: "plan",
+        access: "supervised",
+      }),
+      ...(readOnlyProfile ? { readOnlyProfile } : {}),
+    },
+    emitter: createAgentHarnessEmitter(
+      "claude",
+      "claude-permission-broker-watcher",
+      { onEvent: (event) => events.push(event) },
+      "claude-permission-broker-run",
+      "claude-permission-broker-turn",
+    ),
+    providerNativeToolsAvailable: true,
+    hostToolNames: new Set([HOST_TOOL]),
+    cancelled: () => false,
+  });
+}
+
+function approvalRequests(events: readonly AgentHarnessEvent[]): Array<{ requestId: string; kind: string; command?: string }> {
+  return events.flatMap((event) => event.type === "extension"
+    && event.extension === "claude-agent-sdk"
+    && event.event.type === "approval"
+    ? [event.event.request]
+    : []);
+}
+
 function callbackOptions(extra: Record<string, unknown> = {}) {
   return {
     signal: new AbortController().signal,
@@ -80,5 +114,48 @@ describe("Claude permission broker", () => {
     }
     await expect(broker(false).canUseTool(toolName, input, callbackOptions()))
       .resolves.toMatchObject({ behavior: "deny" });
+  });
+
+  it.each([
+    "git diff --stat",
+    "git log --oneline | head -5",
+    "rg -n parse src",
+    "cat /workspace/src/parser.ts",
+  ])("runs the read-only command %s for a watcher without an approval", async (command) => {
+    const events: AgentHarnessEvent[] = [];
+    const input = { command, description: "Inspect the work" };
+    await expect(watcherBroker(events).canUseTool("Bash", input, callbackOptions()))
+      .resolves.toEqual({ behavior: "allow", updatedInput: input });
+    expect(events).toEqual([]);
+  });
+
+  it.each([
+    ["a command outside the allowlist", { command: "npm test" }, {}],
+    ["a redirect", { command: "git diff > out.txt" }, {}],
+    ["a read outside the workspace", { command: "cat /etc/passwd" }, {}],
+    ["a background command", { command: "git diff", run_in_background: true }, {}],
+    ["a command outside Claude's sandbox", { command: "git diff", dangerouslyDisableSandbox: true }, {}],
+    ["a path Claude flagged", { command: "cat src/parser.ts" }, { blockedPath: "/elsewhere/parser.ts" }],
+    ["a command that is not text", { command: ["git", "diff"] }, {}],
+  ])("keeps the approval path for %s in a watcher turn", async (_label, input, extra) => {
+    const events: AgentHarnessEvent[] = [];
+    const permissions = watcherBroker(events);
+    const decision = permissions.canUseTool("Bash", input, callbackOptions(extra));
+    await expect.poll(() => approvalRequests(events).length).toBe(1);
+    const [request] = approvalRequests(events);
+    expect(request).toMatchObject({ kind: "command" });
+    expect(permissions.settleApproval(request!.requestId, "deny")).toBe(true);
+    await expect(decision).resolves.toEqual({ behavior: "deny", message: "User declined tool execution." });
+  });
+
+  it("asks before an allowlisted command outside a watcher turn and before a host-served Bash tool", async () => {
+    for (const [profile, extra] of [[null, {}], ["watcher", { mcpServer: { name: "other", source: "sdk" } }]] as const) {
+      const events: AgentHarnessEvent[] = [];
+      const permissions = watcherBroker(events, profile);
+      const decision = permissions.canUseTool("Bash", { command: "git diff" }, callbackOptions(extra));
+      await expect.poll(() => approvalRequests(events).length).toBe(1);
+      expect(permissions.settleApproval(approvalRequests(events)[0]!.requestId, "deny")).toBe(true);
+      await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+    }
   });
 });

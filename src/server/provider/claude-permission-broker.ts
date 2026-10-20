@@ -6,6 +6,7 @@ import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { claudeQuestions } from "./claude-questions";
+import { classifyReadOnlyCommand } from "../runtime/watcher/read-only-commands";
 import type { ProviderRunInput } from "./contracts";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import type { AgentApprovalDecision, AgentInputRequest, AgentPlanStep } from "./interactions";
@@ -93,6 +94,14 @@ export class ClaudePermissionBroker {
       if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan) });
       return deny("The proposed plan was returned to the user for review.");
     }
+
+    if (
+      input.readOnlyProfile === "watcher"
+      && toolName === "Bash"
+      && !mcpServer
+      && callbackOptions.blockedPath === undefined
+      && watcherCommandAllowed(toolInput, input.cwd)
+    ) return { behavior: "allow", updatedInput: toolInput };
 
     if (
       (input.access === "full" && input.interactionMode !== "plan")
@@ -194,6 +203,13 @@ export class ClaudePermissionBroker {
       pending.resolve({});
     }
   }
+}
+
+function watcherCommandAllowed(toolInput: Record<string, unknown>, cwd: string): boolean {
+  return typeof toolInput.command === "string"
+    && toolInput.run_in_background !== true
+    && toolInput.dangerouslyDisableSandbox !== true
+    && classifyReadOnlyCommand(toolInput.command, { cwd, windows: process.platform === "win32" }).allowed;
 }
 
 function planSteps(markdown: string): AgentPlanStep[] {

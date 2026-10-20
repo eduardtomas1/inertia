@@ -449,7 +449,7 @@ button:disabled,
   background: var(--surface-raised);
   box-shadow: var(--shadow-float);
   transform-origin: top center;
-  animation: popover-in var(--dur) var(--ease) both;
+  animation: popover-in var(--dur) var(--ease) backwards;
 }
 
 @keyframes popover-in {

@@ -160,7 +160,7 @@ describe("popover primitives", () => {
       "  background: var(--surface-raised);",
       "  box-shadow: var(--shadow-float);",
       "  transform-origin: top center;",
-      "  animation: popover-in var(--dur) var(--ease) both;",
+      "  animation: popover-in var(--dur) var(--ease) backwards;",
     ].join("\n"));
     for (const surface of surfaces) {
       expect(base?.list.split("|"), surface).toContain(surface);
@@ -176,7 +176,7 @@ describe("popover primitives", () => {
   it("offsets the duo dialog's model picker with translate so the shared scale entrance cannot move it", () => {
     const multiSpawn = readSourceText("src/renderer/src/components/MultiSpawnDialog.css");
     const rule = /\n\.multi-spawn-route \.model-chooser-palette \{(?<body>[^}]*)\}/u.exec(multiSpawn)?.groups?.body;
-    expect(whereRule(".model-chooser-palette")?.body).toContain("animation: popover-in var(--dur) var(--ease) both;");
+    expect(whereRule(".model-chooser-palette")?.body).toContain("animation: popover-in var(--dur) var(--ease) backwards;");
     expect(rule).toContain("translate: -50% -50%;");
     expect(rule).not.toContain("transform:");
   });

@@ -469,7 +469,7 @@ export class WatcherLinkRepository {
     return changed === 1 ? this.get(linkId) : null;
   }
 
-  /** Records that the final pass for a watched turn was scheduled, at most once per turn. */
+  /** Records that a watched turn needs no further final pass: its final pass settled, or an initial review covered the turn. */
   markFinalPass(linkId: string, turnId: string, now: string): boolean {
     const at = requireTimestamp(now, "Watcher final pass time");
     return this.database.prepare(`

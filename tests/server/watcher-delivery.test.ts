@@ -233,6 +233,55 @@ describe("watcher note delivery", () => {
     }
   });
 
+  it("never holds later notes behind a blocked one, and withdraws the blocked copy on Dismiss", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Busy");
+      const blockedId = randomUUID();
+      await deliver(f, link.id, wakeId, "queue", blockedId);
+      f.store.updateConversation(f.watched.id, { reasoningEffort: "low" });
+      await f.finishTurn(f.watched.id, "Done.");
+      await vi.waitFor(() => {
+        if (f.store.queuedMessages.get(f.watched.id, blockedId)?.state !== "blocked") throw new Error("not blocked");
+      });
+      await f.command("watcher.resume", { linkId: link.id });
+      const nextFinding = async (task: string, text: string) => {
+        await f.startWatchedTurn(task);
+        await f.finishTurn(f.watched.id, `${task} done.`);
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+        await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no final pass"); });
+        await f.finishTurn(link.watcherConversationId, text);
+        const item = f.watchers.coordinator.feed(link.id).items[0]!;
+        expect(item.outcome).toBe("finding");
+        return item.wakeId;
+      };
+
+      const idle = await nextFinding("Second task", "- The lexer drops tabs in src/lexer.ts:7.");
+      await expect(deliver(f, link.id, idle, "queue")).resolves.toMatchObject({ result: { delivery: { state: "sent" } } });
+      await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
+      expect(f.provider.input(f.watched.id).prompt).toContain("The lexer drops tabs");
+      await f.finishTurn(f.watched.id, "Fixed the lexer.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no final pass"); });
+      await f.finishTurn(link.watcherConversationId, "SILENT");
+
+      const busy = await nextFinding("Third task", "- The printer drops newlines in src/printer.ts:3.");
+      await f.startWatchedTurn("Fourth task");
+      await expect(deliver(f, link.id, busy, "queue")).resolves.toMatchObject({ result: { delivery: { state: "queued" } } });
+      await f.finishTurn(f.watched.id, "Fourth done.");
+      await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("queued note not dispatched"); });
+      expect(f.provider.input(f.watched.id).prompt).toContain("The printer drops newlines");
+
+      await expect(f.command("watcher.note.dismiss", { linkId: link.id, wakeId })).resolves.toMatchObject({
+        result: { delivery: { state: "dismissed" } },
+      });
+      expect(f.store.queuedMessages.list(f.watched.id).map(({ id }) => id)).not.toContain(blockedId);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("reconciles a queued finding whose queue entry disappeared without notice", async () => {
     const f = await createWatcherFixture();
     try {

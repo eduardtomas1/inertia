@@ -157,6 +157,9 @@ export class WatcherDeliveryService {
     if (this.#inFlight.has(wakeId)) throw new RuntimeRequestError("This finding is being sent.");
     const dismissed = this.#deps.store.watcherLinks.setDelivery(wakeId, { mode: null, state: "dismissed" }, this.#deps.now());
     if (!dismissed) throw new RuntimeRequestError("This finding can no longer be dismissed.");
+    if (wake.queuedMessageId !== null && found.link.watchedConversationId !== null) {
+      this.#deps.queue()?.withdrawWatcherNote?.(found.link.watchedConversationId, wake.queuedMessageId);
+    }
     this.#deps.changed(linkId);
     return this.#result(linkId, dismissed);
   }
@@ -361,7 +364,7 @@ export class WatcherDeliveryService {
     reason: QueueReason,
   ): Promise<WatcherDeliveryResult> {
     const detail = QUEUE_DETAILS[reason];
-    const queuedAhead = this.#deps.store.queuedMessages.list(watchedId).length > 0;
+    const queuedAhead = this.#deps.store.queuedMessages.list(watchedId).some(({ state }) => state !== "blocked");
     if (!this.#deps.turns.isActive(watchedId) && !queuedAhead) {
       const started = await this.#sendNow(linkId, wakeId, watchedId, note, attribution, deliveryId, detail);
       if (started) return started;

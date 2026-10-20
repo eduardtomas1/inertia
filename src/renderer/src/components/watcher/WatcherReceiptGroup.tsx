@@ -9,8 +9,14 @@ import {
   watcherTriggerText,
 } from "../../utils/watcherCopy";
 
+export function watcherChangedFilesText(paths: readonly string[]): string {
+  return paths.length > 0
+    ? `Files changed during this check: ${paths.join(", ")}`
+    : "The checkout changed during this check";
+}
+
 function guardNote(item: WatcherFeedEntry): string | null {
-  if (item.guardState === "inconclusive") return "Checkout check inconclusive: other work was busy";
+  if (item.guardState === "inconclusive") return watcherChangedFilesText(item.guardPaths);
   if (item.guardState === "unavailable") return "No Git fingerprint for this checkout";
   return null;
 }

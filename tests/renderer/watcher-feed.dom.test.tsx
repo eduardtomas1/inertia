@@ -75,7 +75,7 @@ describe("WatcherFeed", () => {
     expect(entries.map((entry) => entry.dataset.kind)).toEqual(["receipts", "finding", "receipts", "notice"]);
     expect(entries[0]).toHaveTextContent(/Checked 2 times · 10:35–10:36 AM · nothing to report/u);
     expect(entries[2]).toHaveTextContent(/Checked once · 10:33 AM · nothing to report/u);
-    expect(entries[2]).toHaveTextContent("Checkout check inconclusive");
+    expect(entries[2]).toHaveTextContent("The checkout changed during this check");
     expect(entries[3]).toHaveTextContent("The check failed.");
     expect(within(entries[1]!).getByRole("article", { name: "The parser drops the trailing token." })).toBeInTheDocument();
   });
@@ -107,6 +107,31 @@ describe("WatcherFeed", () => {
     expect(checks[0]).toHaveTextContent(/ · ran 2 read-only commands · 1 declined$/u);
     expect(checks[1]).toHaveTextContent(/ · 2 commands declined$/u);
     expect(checks[2]).toHaveTextContent(/ · 1 command declined$/u);
+  });
+
+  it("lists the files that changed during an inconclusive check, never blaming busy work", async () => {
+    renderFeed([
+      feedItem(2, { guardState: "inconclusive", guardPaths: ["src/parser.ts", "README.md"] }),
+      feedItem(1),
+    ]);
+    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
+    const checks = receipt!.querySelectorAll(".watcher-check-notes");
+    expect(checks[0]).toHaveTextContent(/ · Files changed during this check: src\/parser\.ts, README\.md$/u);
+    expect(receipt).not.toHaveTextContent(/busy/u);
+    expect(checks[1]).not.toHaveTextContent(/changed/u);
+  });
+
+  it("shows a finding's changed files quietly behind one collapsed row", async () => {
+    renderFeed([finding(4, "A risk.", { guardState: "inconclusive", guardPaths: ["src/parser.ts"] })]);
+    const card = await screen.findByRole("article", { name: "A risk." });
+    const row = card.querySelector<HTMLDetailsElement>("details.watcher-finding-paths")!;
+    expect(row.open).toBe(false);
+    expect(row.querySelector("summary")).toHaveTextContent(/^Files changed during this check$/u);
+    expect(within(row).getByText("src/parser.ts")).toBeInTheDocument();
+    renderFeed([finding(5, "Another risk.")]);
+    const plain = await screen.findByRole("article", { name: "Another risk." });
+    expect(plain.querySelector("details.watcher-finding-paths")).toBeNull();
   });
 
   it("moves focus to the card's own status after Send and reports the queued note", async () => {

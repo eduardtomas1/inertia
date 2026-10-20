@@ -471,6 +471,47 @@
   font-variant-numeric: tabular-nums;
 }
 
+.watcher-finding-paths {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.watcher-finding-paths > summary {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.watcher-finding-paths > summary::-webkit-details-marker {
+  display: none;
+}
+
+.watcher-finding-paths > summary:hover {
+  color: var(--text);
+}
+
+.watcher-finding-paths > summary:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.watcher-finding-paths[open] > summary .watcher-receipt-chevron {
+  transform: rotate(90deg);
+}
+
+.watcher-finding-paths > ul {
+  display: grid;
+  margin: 2px 0 0 12px;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
 .watcher-finding-body {
   min-width: 0;
   color: var(--text);

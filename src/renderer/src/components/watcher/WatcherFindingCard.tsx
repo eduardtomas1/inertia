@@ -1,4 +1,5 @@
 import { useId, type CSSProperties } from "react";
+import { ChevronRight } from "lucide-react";
 
 import type { WatcherDeliveryMode, WatcherFeedItem } from "@shared/watcher";
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
@@ -6,6 +7,7 @@ import { createSurfaceLoader } from "../../utils/surfaceLoader";
 import { watcherClockTime, watcherDeliveryText } from "../../utils/watcherCopy";
 import { WatcherDeliverButton } from "./WatcherDeliverButton";
 import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
+import { watcherChangedFilesText } from "./WatcherReceiptGroup";
 
 // The existing deferred Markdown renderer; the card shows plain text until
 // it arrives, so a finding is readable even if that chunk is still loading.
@@ -146,6 +148,19 @@ export function WatcherFindingCard({
         Check {item.sequence}
         {time && <> · <time dateTime={item.settledAt ?? undefined}>{time}</time></>}
       </p>
+      {item.guardState === "inconclusive" && (item.guardPaths.length > 0 ? (
+        <details className="watcher-finding-paths">
+          <summary>
+            Files changed during this check
+            <ChevronRight className="watcher-receipt-chevron" size={14} aria-hidden="true" />
+          </summary>
+          <ul>
+            {item.guardPaths.map((path) => <li key={path}>{path}</li>)}
+          </ul>
+        </details>
+      ) : (
+        <p className="watcher-finding-meta">{watcherChangedFilesText([])}</p>
+      ))}
       {item.resolvedBySequence !== null && (
         <p className="watcher-finding-resolved">Resolved in check {item.resolvedBySequence}</p>
       )}

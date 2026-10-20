@@ -66,12 +66,12 @@ function useTransitionAnnouncement(link: WatcherLinkView): string {
       parts.push(watcherOutcomeText(outcome));
     }
     if (link.status === "paused" && (prior.status !== "paused" || prior.reason !== link.pauseReason)) {
-      parts.push(watcherPauseAnnouncement(link.pauseReason));
+      parts.push(watcherPauseAnnouncement(link.pauseReason, link.pauseDetail));
     }
     if (parts.length === 0) return;
     const text = parts.join(". ");
     setAnnouncement((current) => current !== text ? text : text.endsWith(".") ? text.slice(0, -1) : `${text}.`);
-  }, [latestAt, latestFindingAt, link.pauseReason, link.status, outcome]);
+  }, [latestAt, latestFindingAt, link.pauseDetail, link.pauseReason, link.status, outcome]);
   return announcement;
 }
 

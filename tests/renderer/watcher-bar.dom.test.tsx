@@ -246,6 +246,13 @@ describe("WatcherBar", () => {
     expect(liveRegion()).toHaveTextContent("Paused: It used its checks for this turn.");
   });
 
+  it("announces the runtime's own words for a pause it explains", () => {
+    const detail = "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.";
+    const view = render(bar(link()));
+    view.rerender(bar(link({ status: "paused", pauseReason: "wake-budget", pauseDetail: detail })));
+    expect(liveRegion()).toHaveTextContent(`Paused: ${detail}`);
+  });
+
   it("announces a second finding and a repeated failure again", () => {
     const view = render(bar(link()));
     const finding = (at: string) => link({ latest: { outcome: "finding", at, text: "A risk" }, latestFindingAt: at });

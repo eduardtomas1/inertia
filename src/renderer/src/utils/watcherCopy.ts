@@ -10,7 +10,7 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 /** User-facing watcher copy, shared by the dock and the watcher chat rows. */
 export const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = {
   user: "You paused it.",
-  "wake-budget": "It used its checks for this turn. Resume grants a new set.",
+  "wake-budget": "It used its checks for this turn.",
   "usage-limit": "Its account reached a usage limit. It can resume once its route is ready.",
   "write-detected": "Files changed that no running agent accounts for.",
   "write-attempts": "It tried to edit a file twice during one turn.",
@@ -24,9 +24,8 @@ export function watcherPauseText(reason: WatcherPauseReason | null, detail: stri
   return detail && reason !== "write-detected" ? detail : base;
 }
 
-export function watcherPauseAnnouncement(reason: WatcherPauseReason | null): string {
-  const text = reason ? WATCHER_PAUSE_REASON_TEXT[reason] : "";
-  return `Paused: ${text || "the watcher is paused."}`;
+export function watcherPauseAnnouncement(reason: WatcherPauseReason | null, detail: string | null): string {
+  return reason ? `Paused: ${watcherPauseText(reason, detail)}` : "Paused: the watcher is paused.";
 }
 
 const OUTCOME_TEXT: Readonly<Record<Exclude<WatcherWakeOutcome, "silent" | "finding">, string>> = {

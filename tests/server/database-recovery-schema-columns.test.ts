@@ -11,6 +11,7 @@ import {
   databaseRecoveryPaths,
 } from "../../src/server/persistence/database-recovery";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { DATABASE_SCHEMA_REQUIREMENTS } from "../../src/server/persistence/database-recovery-required-tables";
 
 const directories: string[] = [];
 
@@ -26,6 +27,29 @@ const contextPacketTriggers = [
   "conversation_context_packets_discard_source_drafts",
   "conversation_context_packets_draft_limit",
 ];
+
+const deliveriesColumns = [
+  "id TEXT PRIMARY KEY CHECK (length(id) = 36)",
+  "conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE",
+  "initiative_id TEXT REFERENCES initiatives(id) ON DELETE SET NULL",
+  "initiative_name TEXT",
+  "turn_id TEXT NOT NULL UNIQUE REFERENCES agent_turns(id) ON DELETE CASCADE",
+  "brief_revision INTEGER",
+  "notes_revision INTEGER",
+  "notes_digest TEXT",
+  "delivered_at TEXT NOT NULL",
+];
+
+/** SQLite cannot drop a column a CHECK names, so rebuild the empty table without it. */
+function deliveriesTableWithout(column: string): string {
+  return [
+    "DROP TABLE initiative_context_deliveries",
+    `CREATE TABLE initiative_context_deliveries (${deliveriesColumns
+      .filter((definition) => !definition.startsWith(`${column} `)).join(", ")})`,
+    "CREATE INDEX initiative_context_deliveries_conversation_idx ON initiative_context_deliveries(conversation_id, delivered_at)",
+    "CREATE INDEX initiative_context_deliveries_initiative_idx ON initiative_context_deliveries(initiative_id)",
+  ].join("; ");
+}
 
 function labelSchema(database: Database.Database, version: number): void {
   if (version < 98) database.exec("DROP TABLE conversation_title_locks");
@@ -130,6 +154,39 @@ describe("database health check for settings and subagent columns", () => {
     const manager = new DatabaseBackupManager(primary, databasePath);
     await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
     primary.close();
+  });
+
+  it.each([
+    { label: "without initiative_name", sql: deliveriesTableWithout("initiative_name") },
+    { label: "without notes_digest", sql: deliveriesTableWithout("notes_digest") },
+    { label: "without its initiative index", sql: "DROP INDEX initiative_context_deliveries_initiative_idx" },
+  ])("rejects a schema 100 backup $label during off-thread validation", async ({ sql }) => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-columns-"));
+    directories.push(directory);
+    const databasePath = join(directory, "inertia.sqlite");
+    new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
+    const primary = new Database(databasePath);
+    primary.exec(sql);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    primary.close();
+  });
+
+  it("requires every column of the tables that initiatives introduced", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-columns-"));
+    directories.push(directory);
+    const databasePath = join(directory, "inertia.sqlite");
+    new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false }).close();
+    const database = new Database(databasePath, { readonly: true });
+    for (const table of ["initiatives", "initiative_notes", "initiative_context_deliveries"]) {
+      const actual = (database.pragma(`table_info(${table})`) as Array<{ name: string }>).map(({ name }) => name).sort();
+      const required = DATABASE_SCHEMA_REQUIREMENTS.columns
+        .filter(([, requiredTable]) => requiredTable === table)
+        .flatMap(([, , columns]) => columns)
+        .sort();
+      expect(required, table).toEqual(actual);
+    }
+    database.close();
   });
 
   it.each(contextPacketTriggers)("rejects a backup missing %s during off-thread validation", async (trigger) => {

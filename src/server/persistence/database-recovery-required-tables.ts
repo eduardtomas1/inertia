@@ -85,9 +85,11 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "id",
     "conversation_id",
     "initiative_id",
+    "initiative_name",
     "turn_id",
     "brief_revision",
     "notes_revision",
+    "notes_digest",
     "delivered_at",
   ]],
   [100, "messages", ["initiative_context_json"]],
@@ -154,5 +156,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [99, "conversations_initiative_idx"],
     [100, "initiative_notes_state_idx"],
     [100, "initiative_context_deliveries_conversation_idx"],
+    [100, "initiative_context_deliveries_initiative_idx"],
   ],
 };

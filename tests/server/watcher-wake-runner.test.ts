@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import { WATCHER_ROUTE_RETRY_LIMIT } from "../../src/server/runtime/watcher/watcher-wake-runner";
-import { WATCHER_RETRY_MAX_MS, WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
+import {
+  WATCHER_ACCUMULATE_AGE_COOLDOWNS,
+  WATCHER_ACCUMULATE_MIN,
+  WATCHER_RETRY_MAX_MS,
+  WATCHER_SETTLE_DELAY_MS,
+} from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
   createWatcherFixture,
@@ -21,7 +26,7 @@ function watchedActivity(f: WatcherFixture, label = "Read src/parser.ts", kind: 
 async function wakeOnce(f: WatcherFixture, linkId: string): Promise<string> {
   const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
   watchedActivity(f);
-  await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+  await f.advance(WATCHER_SETTLE_DELAY_MS + WATCHER_ACCUMULATE_AGE_COOLDOWNS * 60_000);
   await vi.waitFor(() => {
     if (!f.provider.runs.has(watcherConversationId)) throw new Error("watcher not running");
   });
@@ -319,7 +324,7 @@ describe("watcher wake runner", () => {
 
       // The started check reset the count: three more retries, then the fourth failure pauses.
       ready = false;
-      watchedActivity(f, "Read src/b.ts");
+      for (let index = 0; index < WATCHER_ACCUMULATE_MIN; index += 1) watchedActivity(f, `Read src/b${index}.ts`);
       await failAttempts(WATCHER_ROUTE_RETRY_LIMIT);
       expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
       await failAttempts(1);

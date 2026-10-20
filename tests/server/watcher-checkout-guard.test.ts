@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { watcherAttributionForm } from "../../src/server/runtime/watcher/watcher-checkout-guard";
-import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
+import { WATCHER_ACCUMULATE_AGE_COOLDOWNS, WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
   createWatcherFixture,
@@ -40,7 +40,7 @@ async function check(
 ) {
   const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
   f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `r-${++sequence}` });
-  await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+  await f.advance(WATCHER_SETTLE_DELAY_MS + WATCHER_ACCUMULATE_AGE_COOLDOWNS * 60_000);
   await vi.waitFor(() => {
     if (!f.provider.runs.has(watcherConversationId)) throw new Error("watcher not running");
   });

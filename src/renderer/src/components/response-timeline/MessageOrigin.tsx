@@ -7,7 +7,11 @@ export function MessageOrigin({ message }: { message: ChatMessage }) {
   if (message.watcherNote) {
     // The divider above carries the full attribution; the bubble only marks it.
     const note = message.watcherNote;
-    return <TooltipText className="message-watcher-origin" tooltip={`Forwarded by the watcher (${watcherPresetName(note.preset)} · ${note.watcherLabel}) when you chose Send`}>
+    const source = `${watcherPresetName(note.preset)} · ${note.watcherLabel}`;
+    const automatic = "automatic" in note && note.automatic === true;
+    return <TooltipText className="message-watcher-origin" tooltip={automatic
+      ? `Sent automatically by the watcher (${source})`
+      : `Forwarded by the watcher (${source}) when you chose Send`}>
       From watcher
     </TooltipText>;
   }

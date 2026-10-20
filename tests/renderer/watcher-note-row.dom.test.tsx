@@ -1,13 +1,18 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { TOOLTIP_DELAY_MS } from "../../src/renderer/src/components/Tooltip";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import type { WatcherNoteAttribution, WatcherWakeSummary } from "../../src/shared/watcher";
 import { providerNativeBackendProfile } from "../../src/shared/model-routing";
 import { LINK_ID, WATCHER_ID, wakeId } from "./watcher-fixtures";
 
 const conversationId = "99999999-9999-4999-8999-999999999999";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function turn(id: string, requestedAt: string): AgentTurn {
   const backendProfileId = providerNativeBackendProfile("codex").id;
@@ -156,6 +161,18 @@ describe("watcher note divider", () => {
     // The divider carries the full attribution; the bubble only says where it came from.
     expect(within(request).getByText("From watcher")).toBeInTheDocument();
     expect(within(request).queryByText(/Note from watcher ·/u)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [false, "Forwarded by the watcher (Reviewer · Team Codex fixture-model) when you chose Send"],
+    [true, "Sent automatically by the watcher (Reviewer · Team Codex fixture-model)"],
+  ])("says who sent the note in its origin tooltip when automatic is %s", (automatic, expected) => {
+    vi.useFakeTimers();
+    const attribution: WatcherNoteAttribution & { automatic?: boolean } = { ...note, delivery: "queue", automatic };
+    timeline([forwarded], messages(forwarded, "The rename misses two call sites.", { watcherNote: attribution }));
+    fireEvent.pointerEnter(screen.getByText("From watcher"), { pointerType: "mouse" });
+    act(() => { vi.advanceTimersByTime(TOOLTIP_DELAY_MS); });
+    expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent(expected);
   });
 
   it("draws no divider for ordinary turns", () => {

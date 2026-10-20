@@ -230,7 +230,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Watcher",
-        detail: "Choose Add a watcher… in a chat's actions to attach a read-only Reviewer, Scope guard or Explainer. It follows the chat as it works, keeps its findings in a dock beside it and sends a note only when you choose Send.",
+        detail: "Choose Add a watcher… in a chat's actions to attach a read-only Reviewer, Scope guard or Explainer. It follows the chat as it works, keeps its findings in a dock beside it and sends a note when you choose Send, or on its own once you turn on automatic sending.",
       },
     ],
     jumps: [],

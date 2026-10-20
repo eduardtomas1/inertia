@@ -131,6 +131,53 @@ describe("watcher link coordinator", () => {
     }
   });
 
+  it("broadcasts the removal of a link whose watched chat is deleted and drops its pending checks", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read a.ts", activityId: `a-${++sequence}` });
+      await f.finishTurn(f.watched.id, "Done");
+      expect(f.provider.runs.has(link.watcherConversationId)).toBe(false);
+      const before = f.watcherEvents().length;
+      const handler = createConversationCommandHandler({
+        store: f.store,
+        providerTerminalResumes: { acquireAtCheckout: () => true, release: () => undefined },
+        runtimeSync: { broadcast: () => undefined },
+        conversationAttachments: { release: async () => undefined },
+        rememberDeletedConversation: () => undefined,
+        forgetRemoteTranscript: () => undefined,
+        watchers: f.watchers,
+      } as unknown as ConversationCommandDependencies);
+      await handler({} as never, { type: "conversation.delete", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
+      expect(f.linkView(link.id)).toMatchObject({ status: "detached", detachedReason: "watched-deleted", watchedConversationId: null });
+      expect(f.watcherEvents().slice(before)).toEqual([{ type: "watcher.link.removed", linkId: link.id }]);
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 120_000);
+      expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
+      expect(f.store.watcherLinks.views()).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("broadcasts the removal of a link whose watcher chat is deleted", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const unrelated = f.watchers.beforeConversationDelete(randomUUID());
+      const publish = f.watchers.beforeConversationDelete(link.watcherConversationId);
+      f.store.deleteConversation(link.watcherConversationId);
+      const before = f.watcherEvents().length;
+      unrelated();
+      expect(f.watcherEvents()).toHaveLength(before);
+      publish();
+      expect(f.store.watcherLinks.get(link.id)).toBeNull();
+      expect(f.watcherEvents().slice(before)).toEqual([{ type: "watcher.link.removed", linkId: link.id }]);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("pauses and resumes, gating usage-limit resumes on a ready route and re-granting checks", async () => {
     const f = await createWatcherFixture();
     try {

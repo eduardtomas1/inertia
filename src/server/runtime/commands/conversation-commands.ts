@@ -108,8 +108,12 @@ export interface ConversationCommandDependencies {
     DuoLaunchCoordinator,
     "reconcileConversationDeletion"
   >;
-  /** Pauses the watcher of a chat that was just archived. */
-  watchers?: { onWatchedArchived(conversationId: string): void };
+  /** Pauses the watcher of an archived chat and publishes the links a deleted chat took part in. */
+  watchers?: {
+    onWatchedArchived(conversationId: string): void;
+    /** Captures the watcher links a chat takes part in; the result publishes them after the delete. */
+    beforeConversationDelete?(conversationId: string): () => void;
+  };
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
@@ -735,9 +739,11 @@ export function createConversationCommandHandler(
           const contextTargetConversationIds = dependencies.store.contextPackets
             .targetConversationIdsForSource(finalConversation.id);
           dependencies.contextRequests?.cancelForSource(finalConversation.id);
+          const publishDeletedWatcherLinks = dependencies.watchers?.beforeConversationDelete?.(finalConversation.id);
           dependencies.store.deleteConversation(
             finalConversation.id,
           );
+          publishDeletedWatcherLinks?.();
           for (const targetConversationId of contextTargetConversationIds) {
             dependencies.runtimeSync.broadcast({
               type: "conversation.detail.invalidated",

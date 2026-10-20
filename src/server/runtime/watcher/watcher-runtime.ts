@@ -88,6 +88,12 @@ export interface WatcherRuntime {
   /** The Private Connect parent of an attached watcher conversation. */
   watcherParent(conversationId: string): { watchedConversationId: string | null; privateConnect: WatcherPrivateConnect } | null;
   onWatchedArchived(conversationId: string): void;
+  /**
+   * Call before deleting a chat; call the result once the delete committed.
+   * Links the chat watched or ran are forgotten and broadcast as removed, so
+   * the renderer does not wait for the next snapshot to drop them.
+   */
+  beforeConversationDelete(conversationId: string): () => void;
   handler: RuntimeCommandHandler;
   coordinator: WatcherLinkCoordinator;
   delivery: WatcherDeliveryService;
@@ -320,6 +326,16 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
         : null;
     },
     onWatchedArchived: (conversationId) => coordinator.onWatchedArchived(conversationId),
+    beforeConversationDelete(conversationId) {
+      const linkIds = disposed ? [] : coordinator.linksTouching(conversationId);
+      return () => {
+        if (disposed) return;
+        for (const linkId of linkIds) {
+          forget(linkId);
+          coordinator.publish(linkId);
+        }
+      };
+    },
     handler,
     coordinator,
     delivery,

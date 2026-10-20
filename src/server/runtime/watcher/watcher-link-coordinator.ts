@@ -307,6 +307,21 @@ export class WatcherLinkCoordinator {
     return { kind: "watcher.feed", linkId, feedRevision: page.feedRevision, items, next: page.next };
   }
 
+  /**
+   * Attached links a chat takes part in, as watched chat or watcher chat.
+   * Read before the chat is deleted: the delete detaches or removes them in
+   * SQL, so they can no longer be found by that chat afterwards.
+   */
+  linksTouching(conversationId: string): string[] {
+    const { watcherLinks } = this.#deps.store;
+    const ids = new Set<string>();
+    const watched = watcherLinks.findActiveByWatched(conversationId);
+    if (watched) ids.add(watched.id);
+    const watcher = watcherLinks.findByWatcher(conversationId);
+    if (watcher && watcher.status !== "detached") ids.add(watcher.id);
+    return [...ids];
+  }
+
   /** The watched chat was archived: its watcher pauses until the user resumes it. */
   onWatchedArchived(conversationId: string): void {
     const link = this.#deps.store.watcherLinks.findActiveByWatched(conversationId);

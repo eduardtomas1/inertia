@@ -359,7 +359,13 @@ test.describe("watcher on the fake Codex route", () => {
     const watcherBox = await row.locator(".watcher-work-row-title").boundingBox();
     expect(watcherBox!.y).toBeGreaterThanOrEqual(parentBox!.y + parentBox!.height - 1);
     expect(watcherBox!.x).toBeGreaterThan(parentBox!.x);
+    // It joins the Work tab's arrow-key order right after its parent.
+    await watchedRow().focus();
+    await app.page.keyboard.press("ArrowDown");
+    await expect(row.getByRole("button")).toBeFocused();
     await capture(info, "work-tab-nested-light");
+    await app.page.keyboard.press("ArrowUp");
+    await expect(watchedRow()).toBeFocused();
     expect(app.rendererErrors).toEqual([]);
   });
 

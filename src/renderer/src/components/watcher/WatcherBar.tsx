@@ -35,7 +35,7 @@ export interface WatcherBarProps {
   onError: (message: string | null) => void;
 }
 
-type Pending = "pause" | "resume" | "wake" | "detach" | "visibility" | null;
+type Pending = "pause" | "resume" | "wake" | "detach" | "visibility" | "delivery" | null;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The watcher could not be updated.";
@@ -80,7 +80,7 @@ function stateText(link: WatcherLinkView, live: string | null): string {
   if (link.status === "waking") return live ?? "Checking…";
   if (link.status === "paused") return "Paused";
   if (link.status === "idle") return "Waiting for the next event";
-  return "Watching";
+  return link.delivery === "auto" ? "Sends findings automatically" : "Watching";
 }
 
 function MenuNote({ children }: { children: string }): React.JSX.Element {
@@ -216,6 +216,20 @@ export function WatcherBar({
                     Open watcher chat
                   </button>
                 )}
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  tabIndex={-1}
+                  aria-checked={link.delivery === "auto"}
+                  aria-disabled={pending !== null || undefined}
+                  onClick={() => {
+                    if (pending !== null || !actions) return;
+                    close();
+                    run("delivery", () => actions.update({ delivery: link.delivery === "auto" ? "manual" : "auto" }));
+                  }}
+                >
+                  Send findings automatically
+                </button>
                 {privateConnectConfigured && (
                   <button
                     type="button"

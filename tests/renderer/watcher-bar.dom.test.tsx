@@ -91,6 +91,7 @@ describe("WatcherBar", () => {
     expect([...menu.querySelectorAll('[role^="menuitem"]')].map((item) => item.textContent)).toEqual([
       "Pause",
       "Open watcher chat",
+      "Send findings automatically",
       "Hide from paired devices",
       "Collapse",
       "Stop watching…",
@@ -101,6 +102,30 @@ describe("WatcherBar", () => {
       expect.stringMatching(/^Main chat quiet since /u),
     ]);
     expect(within(menu).getByRole("menuitem", { name: "2 waiting" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("turns automatic sending on and off from the More menu and says so in the bar", async () => {
+    const runtime = watcherRuntime();
+    const view = render(bar(link(), runtime));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    const off = await screen.findByRole("menuitemcheckbox", { name: "Send findings automatically" });
+    expect(off).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(off);
+    await vi.waitFor(() => expect(runtime.commands.map(({ type }) => type)).toEqual(["watcher.update"]));
+    expect(payloadOf(runtime.commands[0])).toEqual({ linkId: LINK_ID, delivery: "auto" });
+    expect(screen.getByRole("button", { name: "More watcher actions" })).toHaveFocus();
+    await act(async () => { await Promise.resolve(); });
+
+    view.rerender(bar(link({ delivery: "auto" }), runtime));
+    expect(document.querySelector(".watcher-bar-state")).toHaveTextContent(/ · Reviewer · Sends findings automatically$/u);
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    const on = await screen.findByRole("menuitemcheckbox", { name: "Send findings automatically" });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(on);
+    await vi.waitFor(() => expect(runtime.commands).toHaveLength(2));
+    expect(payloadOf(runtime.commands[1])).toEqual({ linkId: LINK_ID, delivery: "manual" });
+    view.rerender(bar(link({ delivery: "auto", status: "paused", pauseReason: "user" }), runtime));
+    expect(document.querySelector(".watcher-bar-state")).toHaveTextContent(/ · Paused$/u);
   });
 
   it("collapses from the More menu", async () => {

@@ -580,7 +580,7 @@ describe("watcher wake runner", () => {
       const watcherId = await wakeOnce(f, link.id);
       await f.finishTurn(watcherId, "- The parser drops the last token.");
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", delivery: { mode: "queue", state: "queued" } });
-      expect(f.store.queuedMessages.list(f.watched.id)).toMatchObject([{ content: "- The parser drops the last token." }]);
+      expect(f.store.queuedMessages.list(f.watched.id)).toMatchObject([{ content: "- The parser drops the last token.", watcherNote: { automatic: true } }]);
       expect(f.provider.steerCalls).toEqual([]);
     } finally {
       await f.close();
@@ -601,11 +601,19 @@ describe("watcher wake runner", () => {
       await f.finishTurn(f.watched.id, "Done.");
       await finalPass("- The parser drops the last token.");
       await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
-      expect(f.provider.input(f.watched.id).prompt).toContain("[inertia-watcher-note]");
+      const notePrompt = f.provider.input(f.watched.id).prompt;
+      expect(notePrompt).toContain("[inertia-watcher-note]");
+      expect(notePrompt).toContain("The watcher sent this note automatically");
+      expect(notePrompt).not.toContain("The user forwarded");
+      expect(f.store.conversationDetail(f.watched.id)!.messages.find((message) => message.watcherNote)?.watcherNote)
+        .toMatchObject({ automatic: true, delivery: "queue" });
       expect(feed(f, link.id)[0]).toMatchObject({ delivery: { mode: "queue", state: "sent" } });
 
       await f.finishTurn(f.watched.id, "Fixed.");
-      await finalPass("- The fix misses the empty input.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      expect(f.provider.input(watcherId).prompt).toContain("The watcher's own note started this turn automatically; it is not the user's own request.");
+      await f.finishTurn(watcherId, "- The fix misses the empty input.");
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", finding: "- The fix misses the empty input.", delivery: null });
       expect(f.provider.runs.has(f.watched.id)).toBe(false);
       expect(f.store.queuedMessages.list(f.watched.id)).toEqual([]);

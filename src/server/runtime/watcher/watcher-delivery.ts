@@ -132,13 +132,14 @@ export class WatcherDeliveryService {
     wakeId: string,
     mode: WatcherDeliveryMode,
     deliveryId: string,
+    automatic = false,
   ): Promise<WatcherDeliveryResult> {
     const running = this.#inFlight.get(wakeId);
     if (running) {
       await running.catch(() => undefined);
       return this.#replay(linkId, wakeId, deliveryId);
     }
-    const operation = this.#deliver(linkId, wakeId, mode, deliveryId);
+    const operation = this.#deliver(linkId, wakeId, mode, deliveryId, automatic);
     this.#inFlight.set(wakeId, operation);
     try {
       return await operation;
@@ -267,6 +268,7 @@ export class WatcherDeliveryService {
     wakeId: string,
     mode: WatcherDeliveryMode,
     deliveryId: string,
+    automatic: boolean,
   ): Promise<WatcherDeliveryResult> {
     const found = this.#finding(linkId, wakeId);
     const { link } = found;
@@ -298,6 +300,7 @@ export class WatcherDeliveryService {
       watcherLabel: label,
       delivery,
       providerId,
+      ...(automatic ? { automatic: true } : {}),
     });
 
     if (mode === "steer") {

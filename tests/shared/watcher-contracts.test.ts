@@ -276,7 +276,11 @@ describe("watcher shared contracts", () => {
     expect(watcherNoteAttributionSchema.safeParse(note).success).toBe(true);
     expect(watcherNoteAttributionSchema.parse({ ...note, providerId: "antigravity" }).providerId).toBe("antigravity");
     expect(watcherNoteAttributionSchema.parse(note)).not.toHaveProperty("providerId");
+    expect(watcherNoteAttributionSchema.parse({ ...note, automatic: true }).automatic).toBe(true);
+    expect(watcherNoteAttributionSchema.parse(note)).not.toHaveProperty("automatic");
     for (const invalid of [
+      { ...note, automatic: "yes" },
+      { ...note, automatic: null },
       { ...note, providerId: "gpt" },
       { ...note, providerId: "" },
       { ...note, providerId: null },

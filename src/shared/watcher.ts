@@ -191,6 +191,7 @@ export const watcherNoteAttributionSchema = z.strictObject({
   watcherLabel: watcherLabelSchema,
   delivery: watcherDeliveryModeSchema,
   providerId: providerIdSchema.optional(),
+  automatic: z.boolean().optional(),
 });
 
 export const watcherFeedHeadlineSchema = z.strictObject({

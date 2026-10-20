@@ -598,8 +598,8 @@ export class WatcherWakeRunner {
     const delivery = this.#deps.delivery?.();
     if (!delivery || store.watcherLinks.get(linkId)?.delivery !== "auto") return;
     const startedBy = watchedTurnId === null ? null : this.#turnUserMessage(watchedTurnId);
-    if (startedBy === null || store.watcherLinks.digest.isForwardedWatcherNote(startedBy)) return;
-    void delivery.deliver(linkId, wakeId, "queue", this.#deps.id()).catch(() => undefined);
+    if (startedBy === null || store.watcherLinks.digest.watcherNoteOrigin(startedBy) !== null) return;
+    void delivery.deliver(linkId, wakeId, "queue", this.#deps.id(), true).catch(() => undefined);
   }
 
   #turnUserMessage(turnId: string): string | null {

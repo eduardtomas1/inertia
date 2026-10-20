@@ -62,6 +62,7 @@ class FakeSource implements WatcherDigestReader {
   activities: AgentActivity[] = [];
   brief = "Add a login rate limiter and tests.";
   briefIsWatcherNote = false;
+  watcherNoteOriginValue: "forwarded" | "automatic" = "forwarded";
   plans: AgentPlan | null = null;
   replies: Array<{ id: string; createdAt: string; content: string }> = [];
   changed: Array<{ path: string; status: string; insertions: number; deletions: number }> = [];
@@ -114,8 +115,8 @@ class FakeSource implements WatcherDigestReader {
     this.calls.push(`files:${turnId}`);
     return this.changed;
   }
-  isForwardedWatcherNote(messageId: string) {
-    return this.briefIsWatcherNote && messageId === "user-1";
+  watcherNoteOrigin(messageId: string) {
+    return this.briefIsWatcherNote && messageId === "user-1" ? this.watcherNoteOriginValue : null;
   }
 }
 
@@ -253,6 +254,10 @@ describe("buildWatcherDigest", () => {
     const digest = buildWatcherDigest(source, link(), options())!;
     expect(digest.content).toContain("## Forwarded watcher note — quoted evidence\nThe user started this turn by forwarding a watcher's note; it is not the user's own request.\n> - The parser drops the last token.");
     expect(digest.content).not.toContain("## Brief");
+    source.watcherNoteOriginValue = "automatic";
+    const automatic = buildWatcherDigest(source, link(), options())!;
+    expect(automatic.content).toContain("## Watcher note sent automatically — quoted evidence\nThe watcher's own note started this turn automatically; it is not the user's own request.\n> - The parser drops the last token.");
+    expect(automatic.content).not.toContain("forwarding");
   });
 
   it("produces a brief-only first check when a watched turn just started", () => {

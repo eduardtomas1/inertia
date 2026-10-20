@@ -221,10 +221,13 @@ export class WatcherDigestSource {
     return this.context.turnReads().files(turnId);
   }
 
-  isForwardedWatcherNote(messageId: string): boolean {
-    return cachedStatement(this.context.database, `
-      SELECT 1 FROM messages WHERE id = ? AND role = 'user' AND watcher_note_json IS NOT NULL
-    `).get(messageId) !== undefined;
+  watcherNoteOrigin(messageId: string): "forwarded" | "automatic" | null {
+    const row = cachedStatement(this.context.database, `
+      SELECT json_extract(watcher_note_json, '$.automatic') IS 1 AS automatic
+      FROM messages WHERE id = ? AND role = 'user' AND watcher_note_json IS NOT NULL
+    `).get(messageId) as { automatic: number } | undefined;
+    if (!row) return null;
+    return row.automatic === 1 ? "automatic" : "forwarded";
   }
 }
 

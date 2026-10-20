@@ -142,8 +142,9 @@ describe("watcher link migration", () => {
         .toThrow(/CHECK constraint failed/u);
       for (const watcherLabel of ["界".repeat(MAX_WATCHER_LABEL_CHARS), "\"".repeat(MAX_WATCHER_LABEL_CHARS)]) {
         const widest = watcherNoteAttributionSchema.parse({
-          ...note, preset: "scope-guard", delivery: "steer", providerId: "antigravity", watcherLabel,
+          ...note, preset: "scope-guard", delivery: "steer", providerId: "antigravity", watcherLabel, automatic: true,
         });
+        expect(widest.automatic).toBe(true);
         expect(Buffer.byteLength(JSON.stringify(widest), "utf8")).toBeLessThan(1_024);
         expect(() => setNote.run(JSON.stringify(widest), userMessageId)).not.toThrow();
         expect(() => migrated.prepare("UPDATE queued_messages SET watcher_note_json = ?").run(JSON.stringify(widest))).not.toThrow();

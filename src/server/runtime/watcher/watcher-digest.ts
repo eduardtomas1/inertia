@@ -40,12 +40,13 @@ const PAGE_LIMIT_LINE = "More activity followed than this check reads. Inertia l
 const HUNK_SHORTENED_LINE = "> [hunk shortened by Inertia]";
 const READ_TOOLS_LINE = "Read whole files with your own read tools.";
 const FORWARDED_NOTE_LINE = "The user started this turn by forwarding a watcher's note; it is not the user's own request.";
+const AUTOMATIC_NOTE_LINE = "The watcher's own note started this turn automatically; it is not the user's own request.";
 const RELEVANT_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
 
 export type WatcherDigestReader = Pick<
   WatcherDigestSource,
   | "turn" | "latestTurn" | "activitiesAfter" | "activitiesByIds" | "assistantMessagesAfter" | "messageTextAfter" | "plan"
-  | "messageText" | "files" | "isForwardedWatcherNote"
+  | "messageText" | "files" | "watcherNoteOrigin"
 >;
 
 export interface WatcherOpenReply {
@@ -284,9 +285,12 @@ function briefSection(source: WatcherDigestReader, turn: AgentTurn, budget: numb
   if (read.content.trim().length === 0) return null;
   const body = bounded(read.content.trim(), budget, WATCHER_DIGEST_BRIEF_MAX_CHARS);
   const truncated = body.truncated || read.truncated;
-  const heading = source.isForwardedWatcherNote(turn.userMessageId)
-    ? `## Forwarded watcher note — quoted evidence\n${FORWARDED_NOTE_LINE}`
-    : "## Brief — quoted evidence";
+  const origin = source.watcherNoteOrigin(turn.userMessageId);
+  const heading = origin === "automatic"
+    ? `## Watcher note sent automatically — quoted evidence\n${AUTOMATIC_NOTE_LINE}`
+    : origin === "forwarded"
+      ? `## Forwarded watcher note — quoted evidence\n${FORWARDED_NOTE_LINE}`
+      : "## Brief — quoted evidence";
   return {
     text: `${heading}\n${quote(shortened(body.text, truncated))}`,
     truncated: truncated ? 1 : 0,
@@ -580,7 +584,7 @@ export function buildWatcherDigest(
   const changedCount = options.diff ? options.diff.files.length : changedPaths.length;
   const contents = [
     ...(earlier ? ["your earlier findings"] : []),
-    ...(brief ? [source.isForwardedWatcherNote(turn.userMessageId) ? "the forwarded note" : "brief"] : []),
+    ...(brief ? [source.watcherNoteOrigin(turn.userMessageId) === null ? "brief" : "the watcher's note"] : []),
     ...(planPart ? [planChanged ? "changed plan" : "plan"] : []),
     ...(activities ? [counted(settled.length, "activity", "activities")] : []),
     ...(replyPart ? [counted(replies.filter((reply) => reply.content.trim().length > 0).length, "assistant reply", "assistant replies")] : []),

@@ -88,7 +88,9 @@ interface RunningWake {
   /** The final pass's turn, or null for a mid-turn check. */
   finalTurnId: string | null;
   finalPage: number;
-  lastFinalPage: boolean;
+  request: Extract<WatcherWakeTrigger, "manual" | "initial"> | null;
+  requestPage: number;
+  lastPage: boolean;
   restore: WatcherTransition;
   violations: ReadOnlyWatcherViolation[];
   pause: WatcherTransition | null;
@@ -165,6 +167,7 @@ export class WatcherWakeRunner {
   readonly #openReplies = new TurnMemory<WatcherOpenReply>();
   readonly #finalPages = new Map<string, { turnId: string; pages: number }>();
   readonly #finalFailures = new Map<string, { turnId: string; failures: number }>();
+  readonly #requestPages = new Map<string, number>();
 
   constructor(dependencies: WatcherWakeRunnerDependencies) {
     this.#deps = dependencies;
@@ -184,6 +187,7 @@ export class WatcherWakeRunner {
     this.#openReplies.forget(linkId);
     this.#finalPages.delete(linkId);
     this.#finalFailures.delete(linkId);
+    this.#requestPages.delete(linkId);
   }
 
   /** A resumed link starts its route and dispatch retries afresh. */
@@ -247,14 +251,17 @@ export class WatcherWakeRunner {
         ? claimed.cursor
         : this.#priorCursors.get(linkId, finalTurnId)
           ?? { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
-      const review = trigger === "initial";
+      const request = trigger === "manual" || trigger === "initial" ? trigger : null;
+      const review = trigger === "initial" && !context.continued;
       const previousPlanKey = !staleTurn && !review && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
       const remaining = claimed.counters.wakeAllowance - claimed.counters.wakesThisTurn;
       const consumesAllowance = trigger !== "manual" && trigger !== "initial" && remaining > 0;
       const drained = this.#finalPages.get(linkId);
       const finalPage = finalTurnId === null ? 0 : drained?.turnId === finalTurnId ? drained.pages + 1 : 1;
       const spare = staleTurn ? 0 : remaining - (consumesAllowance ? 1 : 0);
-      const lastFinalPage = finalTurnId !== null && finalPage >= WATCHER_FINAL_PASS_MAX_PAGES && spare <= 0;
+      const requestPage = request === null ? 0 : context.continued ? (this.#requestPages.get(linkId) ?? 0) + 1 : 1;
+      const lastPage = (finalTurnId !== null && finalPage >= WATCHER_FINAL_PASS_MAX_PAGES && spare <= 0)
+        || requestPage >= WATCHER_FINAL_PASS_MAX_PAGES;
       const digestTurnId = finalTurnId ?? cursor.turnId;
       const turnDiff = this.#deps.turnDiff;
       const diff = finalTurnId !== null && claimed.sharing.changedFiles && turnDiff
@@ -270,7 +277,7 @@ export class WatcherWakeRunner {
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),
         openReply: review ? null : this.#openReplies.get(linkId, cursor.turnId) ?? null,
-        lastFinalPage,
+        lastPage,
         contextAccess: route.contextAccess !== false && claimed.budgets.contextReadsPerWake !== 0,
         earlierFindings: digestTurnId === null ? [] : store.watcherLinks.findingsForTurn(linkId, digestTurnId, WATCHER_EARLIER_FINDINGS),
         ...diff,
@@ -320,7 +327,7 @@ export class WatcherWakeRunner {
       store.watcherLinks.attachWakeTurn(wake.wakeId, queuedTurnId, this.#deps.now());
       this.#running.set(queuedTurnId, {
         linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest,
-        start: cursor, finalTurnId, finalPage, lastFinalPage, restore, violations: [], pause: null,
+        start: cursor, finalTurnId, finalPage, request, requestPage, lastPage, restore, violations: [], pause: null,
       });
       if (!staleTurn) this.#planKeys.set(linkId, digest.planKey);
       this.#deps.live.begin(linkId, watcher.id, queuedTurnId);
@@ -516,7 +523,7 @@ export class WatcherWakeRunner {
       const now = this.#deps.now();
       if (running && (outcome === "silent" || outcome === "finding")) {
         continues = this.#advance(linkId, running, now) && running.digest.stats.moreFollows && advanced(running)
-          && !running.lastFinalPage;
+          && !running.lastPage;
       }
       const record = store.watcherLinks.settleWake(
         wake.wakeId,
@@ -553,7 +560,8 @@ export class WatcherWakeRunner {
         if (continues && !pause) {
           // More of the same watched turn waits: check it without waiting for new events.
           if (finalTurnId !== null && running) this.#finalPages.set(linkId, { turnId: finalTurnId, pages: running.finalPage });
-          scheduler.continueWake(linkId, finalTurnId);
+          if (running?.request) this.#requestPages.set(linkId, running.requestPage);
+          scheduler.continueWake(linkId, finalTurnId, running?.request ?? null);
           store.watcherLinks.notePendingEvents(linkId, scheduler.pendingEvents(linkId), now);
         } else if (finalTurnId !== null && this.#finalPassDue(linkId, finalTurnId, settled ? outcome : "failed")) {
           scheduler.continueWake(linkId, finalTurnId);
@@ -633,5 +641,6 @@ export class WatcherWakeRunner {
     this.#openReplies.clear();
     this.#finalPages.clear();
     this.#finalFailures.clear();
+    this.#requestPages.clear();
   }
 }

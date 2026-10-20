@@ -36,7 +36,7 @@ const MAX_REPLY_BYTES = 2 * 1_024;
 const FRAME_RESERVE_BYTES = 1_024;
 const HARD_CAP_MARKER = "\n\n[This check was cut at its size limit by Inertia.]";
 const EARLIER_TEXT_MARKER = "[… earlier text left out by Inertia]";
-const FINAL_PAGE_LIMIT_LINE = "More activity followed than one final check reads. Inertia left it out; use inertia_request_context to read the rest.";
+const PAGE_LIMIT_LINE = "More activity followed than this check reads. Inertia left it out; use inertia_request_context to read the rest.";
 const HUNK_SHORTENED_LINE = "> [hunk shortened by Inertia]";
 const READ_TOOLS_LINE = "Read whole files with your own read tools.";
 const FORWARDED_NOTE_LINE = "The user started this turn by forwarding a watcher's note; it is not the user's own request.";
@@ -90,7 +90,7 @@ export interface WatcherDigestOptions {
    */
   turnId?: string;
   openReply?: WatcherOpenReply | null;
-  lastFinalPage?: boolean;
+  lastPage?: boolean;
   diff?: WatcherDigestDiff | null;
   contextAccess?: boolean;
   earlierFindings?: readonly WatcherEarlierFinding[];
@@ -614,7 +614,7 @@ export function buildWatcherDigest(
       : [`For the rest of this turn, use inertia_request_context with conversationId=${watchedId} and turnId=${turnRef}.`]),
   ].join(" ");
   const follows = moreFollows
-    ? [options.lastFinalPage ? FINAL_PAGE_LIMIT_LINE : "More activity followed; the next check covers it."]
+    ? [options.lastPage ? PAGE_LIMIT_LINE : "More activity followed; the next check covers it."]
     : [];
   const body = [[...header, pointer, ...follows].join("\n"), ...sections.map(({ text }) => text)];
   if (evidence.length === 0) {

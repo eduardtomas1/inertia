@@ -344,6 +344,26 @@ describe("WatcherWakeScheduler", () => {
     expect(exhausted).toHaveLength(1);
   });
 
+  it("keeps a request's further page a request, with no cooldown or budget gate, and retries it as one", () => {
+    const attempts: WatcherWakeAttempt[] = ["started", "transient", "started"];
+    const { scheduler, timers, wakes, exhausted } = harness({ attempt: () => attempts.shift() ?? "started", allowance: () => 1 });
+    scheduler.requestWake(LINK, "initial");
+    timers.advance(0);
+    expect(wakes[0]).toMatchObject({ trigger: "initial", context: { continued: false } });
+    scheduler.continueWake(LINK, null, "initial");
+    scheduler.wakeFinished(LINK);
+    timers.advance(0);
+    expect(wakes[1]).toMatchObject({ trigger: "initial", context: { final: false, continued: true } });
+    timers.advance(WATCHER_RETRY_BASE_MS);
+    expect(wakes[2]).toMatchObject({ trigger: "initial", context: { continued: true } });
+    scheduler.continueWake(LINK, null, "initial");
+    scheduler.requestWake(LINK, "manual");
+    scheduler.wakeFinished(LINK);
+    timers.advance(0);
+    expect(wakes[3]).toMatchObject({ trigger: "manual", context: { continued: false } });
+    expect(exhausted).toHaveLength(0);
+  });
+
   it("queues another final pass of the same turn as a continuation, even after the turn's final pass ran", () => {
     const { scheduler, timers, wakes } = harness({ allowance: () => 1 });
     scheduler.onWatchedTurnSettled(LINK, "turn-1");

@@ -31,6 +31,7 @@ export interface WatcherWakeContext {
   watchedTurnId: string | null;
   /** Observed events this wake covers. */
   events: number;
+  continued: boolean;
 }
 
 export interface WatcherWakeSchedulerDependencies {
@@ -92,6 +93,7 @@ interface LinkState {
   trigger: ActivityTrigger | null;
   immediate: boolean;
   request: RequestTrigger | null;
+  requestContinues: boolean;
   /** A settled check left activity of its watched turn unread; another check follows without new events. */
   continuation: boolean;
   /** Final passes still due, oldest first; a new watched turn never erases one. */
@@ -125,6 +127,7 @@ interface Consumed {
   trigger: ActivityTrigger | null;
   immediate: boolean;
   request: RequestTrigger | null;
+  requestContinues: boolean;
   continuation: boolean;
   final: FinalPass | null;
 }
@@ -236,6 +239,7 @@ export class WatcherWakeScheduler {
     const state = this.#state(linkId);
     if (!state) return;
     state.request = trigger;
+    state.requestContinues = false;
     state.retryAt = null;
     this.#schedule(linkId, state);
   }
@@ -243,13 +247,19 @@ export class WatcherWakeScheduler {
   /**
    * A settled check read only the first page of what waits. Without a final
    * turn, another mid-turn check follows with no new events, after the
-   * cooldown and within the allowance like any automatic check. With one, the
-   * final pass of that turn is due again, so its remaining pages drain.
+   * cooldown and within the allowance like any automatic check; the next page
+   * of a request stays that request. With a final turn, the final pass of
+   * that turn is due again, so its remaining pages drain.
    */
-  continueWake(linkId: string, finalTurnId: string | null): void {
+  continueWake(linkId: string, finalTurnId: string | null, request: RequestTrigger | null = null): void {
     const state = this.#state(linkId);
     if (!state) return;
-    if (finalTurnId === null) {
+    if (finalTurnId === null && request !== null) {
+      if (state.request === null) {
+        state.request = request;
+        state.requestContinues = true;
+      }
+    } else if (finalTurnId === null) {
       state.continuation = true;
     } else if (!state.finals.some(({ turnId }) => turnId === finalTurnId)) {
       state.finals.unshift({ turnId: finalTurnId, requestedAt: this.#deps.clock() });
@@ -328,6 +338,7 @@ export class WatcherWakeScheduler {
         trigger: null,
         immediate: false,
         request: null,
+        requestContinues: false,
         continuation: false,
         finals: [],
         finalDoneTurnIds: [],
@@ -435,6 +446,7 @@ export class WatcherWakeScheduler {
       trigger: state.trigger,
       immediate: state.immediate,
       request: state.request,
+      requestContinues: kind === "request" && state.requestContinues,
       continuation: kind !== "final" && state.continuation,
       final,
     };
@@ -445,12 +457,14 @@ export class WatcherWakeScheduler {
       final: kind === "final",
       watchedTurnId: kind === "final" ? final?.turnId ?? null : state.watchedTurnId,
       events: state.pending,
+      continued: consumed.requestContinues,
     };
     state.pending = 0;
     state.firstPendingAt = null;
     state.trigger = null;
     state.immediate = false;
     state.request = null;
+    state.requestContinues = false;
     if (consumed.continuation) state.continuation = false;
     if (final) {
       state.finalDoneTurnIds.push(final.turnId);
@@ -500,7 +514,10 @@ export class WatcherWakeScheduler {
         state.trigger = consumed.trigger;
       }
       state.immediate ||= consumed.immediate;
-      state.request ??= consumed.request;
+      if (state.request === null && consumed.request !== null) {
+        state.request = consumed.request;
+        state.requestContinues = consumed.requestContinues;
+      }
       state.continuation ||= consumed.continuation;
       if (consumed.pending > 0) this.#deps.onPendingChanged?.(linkId);
       state.retryAttempt += 1;

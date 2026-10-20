@@ -421,6 +421,70 @@ describe("watcher final pass page limit", () => {
   });
 });
 
+describe("watcher review and Check now past the per-check activity cap", () => {
+  it("reads a review's further pages as the review, free of the allowance, and stops after four pages", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ budgets: { wakesPerWatchedTurn: 2, cooldownSeconds: 15, digestKiB: 24, contextReadsPerWake: 4 } });
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      watchedActivities(f, 1_200);
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      let checks = 0;
+      for (;;) {
+        const page = await check(f, watcherId, ++checks);
+        await f.finishTurn(watcherId, "SILENT");
+        if (!page.digest.includes(MORE_FOLLOWS)) break;
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      }
+      await f.advance(30 * 60_000);
+      const before = f.linkView(link.id);
+      expect(before).toMatchObject({ status: "watching" });
+      expect(watcherInputs(f, watcherId)).toHaveLength(checks);
+
+      await f.command("watcher.review", { linkId: link.id });
+      for (const [index, more] of [[1, true], [2, true], [3, true], [4, false]] as const) {
+        await f.advance(1);
+        const page = await check(f, watcherId, checks + index);
+        expect(page.wake.trigger).toBe("initial");
+        expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
+        expect(page.digest.includes(FINAL_PAGE_LIMIT)).toBe(!more);
+        await f.finishTurn(watcherId, "SILENT");
+      }
+      await f.advance(30 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(checks + 4);
+      expect(f.linkView(link.id)).toMatchObject({
+        status: "watching", pauseReason: null,
+        counters: { wakesThisTurn: before.counters.wakesThisTurn, wakeAllowance: before.counters.wakeAllowance },
+      });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("reads Check now's further pages as Check now while the turn runs, without the budget gate", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ budgets: { wakesPerWatchedTurn: 2, cooldownSeconds: 15, digestKiB: 24, contextReadsPerWake: 4 } });
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      watchedActivities(f, 450);
+      await f.command("watcher.wake", { linkId: link.id });
+      for (const [index, more] of [[1, true], [2, true], [3, false]] as const) {
+        await f.advance(1);
+        const page = await check(f, watcherId, index);
+        expect(page.wake.trigger).toBe("manual");
+        expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
+        await f.finishTurn(watcherId, "SILENT");
+      }
+      expect(f.linkView(link.id)).toMatchObject({ status: "watching", pauseReason: null, counters: { wakesThisTurn: 0 } });
+    } finally {
+      await f.close();
+    }
+  });
+});
+
 describe("watcher check dispatch and settlement", () => {
   it("pauses after three consecutive dispatch failures instead of retrying forever", async () => {
     const f = await createWatcherFixture();

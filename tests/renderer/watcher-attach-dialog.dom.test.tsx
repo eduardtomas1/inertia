@@ -205,6 +205,25 @@ describe("WatcherAttachDialog", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("closes when the watched chat disappears, so Escape and previews are released", async () => {
+    const value = snapshot([ready("codex", "Codex")]);
+    const onClose = vi.fn();
+    const props = {
+      settings: value.settings,
+      watchedConversationId: WATCHED_ID,
+      request: recordingRequest(() => ({ kind: "watcher.link", link: link() })).request,
+      onClose,
+      onAttached: vi.fn(),
+      onOpenProviderSetup: vi.fn(),
+      onOpenBackendSetup: vi.fn(),
+    };
+    const view = render(<WatcherAttachDialog snapshot={value} {...props} />);
+    await screen.findByRole("dialog", { name: "Add a watcher" });
+    view.rerender(<WatcherAttachDialog snapshot={{ ...value, conversations: [] }} {...props} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("restores a cleared budget field to its default, not its minimum", async () => {
     const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });

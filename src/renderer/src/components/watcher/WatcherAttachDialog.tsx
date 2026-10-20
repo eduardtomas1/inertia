@@ -266,6 +266,11 @@ export function WatcherAttachDialog({
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [onClose, submitting]);
 
+  const watchedGone = !watched;
+  useEffect(() => {
+    if (watchedGone) onClose();
+  }, [onClose, watchedGone]);
+
   if (!watched) return null;
 
   const openRepair = (): void => {

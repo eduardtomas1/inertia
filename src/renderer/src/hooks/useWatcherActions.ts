@@ -37,7 +37,7 @@ export interface WatcherActions {
 }
 
 /**
- * Typed wrappers over the nine watcher commands. Timeouts and delivery
+ * Typed wrappers over the ten watcher commands. Timeouts and delivery
  * semantics come from `runtimeCommandPolicy`; every mutation answers with the
  * updated link, which the shell also receives as `watcher.link.updated`.
  */

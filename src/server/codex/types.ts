@@ -49,6 +49,8 @@ export interface CodexAppServerOptions {
   >[];
   planMode: boolean;
   access: "supervised" | "auto-edit" | "full";
+  /** A read-only watcher thread: the user's MCP servers, apps, plugins, hooks and web search are disabled. */
+  readOnlyProfile?: "watcher";
   /** Exact-run Inertia tools; advertised only on new provider threads. */
   hostTools?: ProviderHostToolBridge;
   /** Test seam that may shorten, but never extend, host-tool approval expiry. */

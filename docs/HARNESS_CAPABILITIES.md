@@ -229,7 +229,7 @@ through `watcherHarnessAllowed`:
 | Harness | Read-only mechanism |
 | --- | --- |
 | `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn, so every command needs approval and is declined. |
-| `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. |
+| `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. Watcher threads, started or resumed, also disable the user's MCP servers, apps, plugins, hooks, subagents and web search through the thread's `config`. |
 | `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. With the profile, reads run without a prompt, and edit, shell and every other native tool are denied by OpenCode itself, without an approval. |
 
 The gate is checked when a watcher is attached, when every watcher turn is
@@ -382,8 +382,10 @@ before and after the turn.
   Code's plan mode does; a Write permission request is declined as a
   `write-attempt` and the turn completes. A streamed Edit tool start stops
   the turn, aborts the query before the edit and releases the run.
-- Codex: `thread/start` carries `approvalPolicy: "untrusted"` and
-  `sandbox: "read-only"`, and `turn/start` carries the same policy,
+- Codex: `thread/start` and `thread/resume` carry `approvalPolicy: "untrusted"`,
+  `sandbox: "read-only"` and a `config` that disables every MCP server
+  `config/read` reports, apps, plugins, hooks, subagents and web search, and
+  `turn/start` carries the same policy,
   `sandboxPolicy: { type: "readOnly", networkAccess: false }` and plan
   collaboration mode. A known-safe read command runs without an approval; a
   write command's approval is answered `decline` and recorded as a

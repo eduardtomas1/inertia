@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentTurn, ModelSelection, ProviderId, ServerEvent } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../src/shared/watcher";
+import { CODEX_WATCHER_DISABLED_CONFIG_KEYS } from "../../src/server/codex/read-only-thread-config";
 import { RuntimeStore } from "../../src/server/database";
 import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { validateProviderRunInput } from "../../src/server/provider/adapters";
@@ -425,7 +426,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   capture(message);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
   if (message.method === "initialized") return;
-  if (message.method === "thread/start") {
+  if (message.method === "config/read") {
+    return send({ id: message.id, result: { config: { mcp_servers: { filesystem: { command: "fs-mcp" }, github: { url: "https://mcp.invalid" } } } } });
+  }
+  if (message.method === "thread/start" || message.method === "thread/resume") {
     return send({ id: message.id, result: {
       thread: { id: threadId }, model: message.params.model ?? "fixture", modelProvider: "openai", serviceTier: null,
       disabledPluginIds: [], cwd: process.cwd(), instructionSources: [], approvalPolicy: message.params.approvalPolicy,
@@ -487,13 +491,23 @@ describe("watcher turns on the Codex app-server harness", () => {
     const requests = codex.requests();
     const threadStart = requests.find(({ method }) => method === "thread/start")?.params as Record<string, unknown>;
     const turnStart = requests.find(({ method }) => method === "turn/start")?.params as Record<string, unknown>;
+    expect(requests.find(({ method }) => method === "config/read")?.params).toEqual({ includeLayers: false, cwd: runtime.inputs[0]!.cwd });
     expect(threadStart).toEqual({
       cwd: runtime.inputs[0]!.cwd,
       approvalPolicy: "untrusted",
       approvalsReviewer: "user",
       sandbox: "read-only",
       model: "model-a",
+      config: {
+        ...Object.fromEntries(CODEX_WATCHER_DISABLED_CONFIG_KEYS.map((key) => [key, false])),
+        web_search: "disabled",
+        default_permissions: ":read-only",
+        mcp_servers: { filesystem: { enabled: false }, github: { enabled: false } },
+      },
     });
+    expect(CODEX_WATCHER_DISABLED_CONFIG_KEYS).toEqual(expect.arrayContaining([
+      "features.apps", "features.plugins", "features.hooks", "features.multi_agent", "features.standalone_web_search",
+    ]));
     expect(turnStart).toEqual({
       threadId: "watcher-thread",
       input: [expect.objectContaining({ type: "text" })],
@@ -522,6 +536,35 @@ describe("watcher turns on the Codex app-server harness", () => {
     expect(await checkoutState(repo)).toEqual(before);
     await codex.manager.disposeAll();
     await expectProcessGone(codex.pid());
+  });
+
+  it("disables the user's MCP servers, apps, plugins, hooks and web search on a resumed watcher thread too", async () => {
+    const root = portableFixtureRoot("watcher codex resume");
+    roots.push(root);
+    const repo = repository(root, ["app-server"]);
+    const codex = codexAppServer(root, repo, "read-then-write");
+    const runtime = watcherHarnessRuntime(root, repo, codex.manager, providerNativeModelSelection({ providerId: "codex", modelId: "model-a" }));
+    const first = await runtime.settled(runtime.startCheck().id);
+    runtime.store.watcherLinks.settleWake(runtime.store.watcherLinks.wakeForTurn(first.id)!.wakeId, "silent", null, null, null, now());
+
+    await runtime.settled(runtime.startCheck().id);
+
+    expect(runtime.inputs[1]).toMatchObject({ sessionId: "watcher-thread", readOnlyProfile: "watcher" });
+    const resume = codex.requests().find(({ method }) => method === "thread/resume")?.params as Record<string, unknown>;
+    expect(resume).toMatchObject({
+      threadId: "watcher-thread",
+      sandbox: "read-only",
+      approvalPolicy: "untrusted",
+      config: {
+        "features.apps": false,
+        "features.plugins": false,
+        "features.hooks": false,
+        web_search: "disabled",
+        mcp_servers: { filesystem: { enabled: false }, github: { enabled: false } },
+      },
+    });
+    expect(codex.requests().filter(({ method }) => method === "config/read")).toHaveLength(2);
+    await codex.manager.disposeAll();
   });
 
   it("fails a malformed frame closed, terminates the app-server and leaves the checkout unchanged", async () => {

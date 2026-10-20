@@ -133,15 +133,16 @@ function useComposerClearance(frameRef: RefObject<HTMLDivElement | null>, active
     }
     const composer = host.querySelector<HTMLElement>(".composer-region");
     if (!composer) return;
+    const chat = composer.closest<HTMLElement>(".conversation-pane-chat, .workspace-chat-column") ?? host;
     const measure = (): void => {
-      const hostBottom = host.getBoundingClientRect().bottom;
+      const chatBottom = chat.getBoundingClientRect().bottom;
       const composerTop = composer.getBoundingClientRect().top;
-      setClearance(Math.max(0, Math.round(hostBottom - composerTop + SHEET_COMPOSER_GAP)));
+      setClearance(Math.max(0, Math.round(chatBottom - composerTop + SHEET_COMPOSER_GAP)));
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    observer.observe(host);
+    observer.observe(chat);
     observer.observe(composer);
     return () => observer.disconnect();
   }, [active, frameRef]);

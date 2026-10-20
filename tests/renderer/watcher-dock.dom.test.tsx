@@ -45,33 +45,44 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-function Dock({ model, watchedId = WATCHED_ID, width = 1200, attached = true }: {
+function Dock({ model, watchedId = WATCHED_ID, width = 1200, attached = true, pane = false }: {
   model: WatcherSurfaceModel;
   watchedId?: string;
   width?: number;
   attached?: boolean;
+  pane?: boolean;
 }) {
+  const composer = (
+    <div className="composer-region">
+      {attached && <WatchedByChip conversationId={watchedId} />}
+      <textarea aria-label="Message" />
+    </div>
+  );
   return (
     <WatcherContext.Provider value={model}>
-      <div className="workspace-body" data-test-width={width}>
-        <div className="workspace-chat-column">
-          <div className="composer-region">
-            {attached && <WatchedByChip conversationId={watchedId} />}
-            <textarea aria-label="Message" />
-          </div>
+      {pane ? (
+        <div className="conversation-pane-workspace has-tools" data-test-width={width}>
+          <div className="conversation-pane-chat">{composer}</div>
+          <WatcherDockHost watchedId={watchedId} />
+          <div className="workspace-tools-resize-handle" />
+          <div className="workspace-panel" />
         </div>
-        <WatcherDockHost watchedId={watchedId} />
-      </div>
+      ) : (
+        <div className="workspace-body" data-test-width={width}>
+          <div className="workspace-chat-column">{composer}</div>
+          <WatcherDockHost watchedId={watchedId} />
+        </div>
+      )}
     </WatcherContext.Provider>
   );
 }
 
-function setup(options: { link?: WatcherLinkView; width?: number; strict?: boolean; feed?: () => WatcherFeedItem[] } = {}) {
+function setup(options: { link?: WatcherLinkView; width?: number; strict?: boolean; pane?: boolean; feed?: () => WatcherFeedItem[] } = {}) {
   let current = options.link ?? link();
   const runtime = watcherRuntime({ link: () => current, feed: options.feed });
   const model = (next: WatcherLinkView | null) => surfaceModel({ watchers: next ? [next] : [], request: runtime.request });
   const tree = (next: WatcherLinkView | null) => {
-    const dockTree = <Dock model={model(next)} width={options.width} attached={next !== null} />;
+    const dockTree = <Dock model={model(next)} width={options.width} attached={next !== null} pane={options.pane} />;
     return options.strict ? <StrictMode>{dockTree}</StrictMode> : dockTree;
   };
   const view = render(tree(current));
@@ -219,6 +230,7 @@ describe("WatcherDock", () => {
     const original = HTMLElement.prototype.getBoundingClientRect;
     HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
       if (this.classList.contains("workspace-body")) return rect(0, 800) as DOMRect;
+      if (this.classList.contains("workspace-chat-column")) return rect(0, 800) as DOMRect;
       if (this.classList.contains("composer-region")) return rect(660, 800) as DOMRect;
       return original.call(this);
     };
@@ -229,6 +241,27 @@ describe("WatcherDock", () => {
       const frame = document.querySelector<HTMLElement>(".watcher-dock-frame")!;
       await waitFor(() => expect(frame.style.bottom).toBe("148px"));
       expect(document.querySelector<HTMLElement>(".watcher-dock-scrim")!.style.bottom).toBe("148px");
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it("stops a split pane's sheet above the composer when the tools panel is open below the chat", async () => {
+    const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 500, width: 500, height: bottom - top, x: 0, y: top, toJSON: () => ({}) });
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.classList.contains("conversation-pane-workspace")) return rect(0, 800) as DOMRect;
+      if (this.classList.contains("conversation-pane-chat")) return rect(0, 533) as DOMRect;
+      if (this.classList.contains("composer-region")) return rect(383, 533) as DOMRect;
+      return original.call(this);
+    };
+    try {
+      setup({ width: 500, pane: true });
+      fireEvent.click(await screen.findByRole("button", { name: /Watched by/u, expanded: false }));
+      await dock();
+      const frame = document.querySelector<HTMLElement>(".watcher-dock-frame")!;
+      await waitFor(() => expect(frame.style.bottom).toBe("158px"));
+      expect(document.querySelector<HTMLElement>(".watcher-dock-scrim")!.style.bottom).toBe("158px");
     } finally {
       HTMLElement.prototype.getBoundingClientRect = original;
     }

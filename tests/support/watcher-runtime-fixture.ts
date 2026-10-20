@@ -22,6 +22,7 @@ import { providerNativeModelSelection, type KnownHarnessId } from "../../src/sha
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, type WatcherLinkView } from "../../src/shared/watcher";
 import { RuntimeStore } from "../../src/server/database";
 import type { CheckoutFingerprint, CheckoutFingerprintOptions } from "../../src/server/git/checkout-fingerprint";
+import type { WatcherTurnDiffSnapshot } from "../../src/server/persistence/watcher-digest-source";
 import {
   providerRunTerminal,
   type ProviderEvent,
@@ -192,6 +193,7 @@ export interface WatcherFixtureOptions {
   readiness?: (selection: ModelSelection) => Promise<{ ready: boolean; message: string | null } | null>;
   /** The platform whose path rules the checkout guard applies. */
   platform?: NodeJS.Platform;
+  turnDiff?: (turnId: string) => Promise<WatcherTurnDiffSnapshot>;
 }
 
 export async function createWatcherFixture(options: WatcherFixtureOptions = {}) {
@@ -309,6 +311,7 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     clock: () => timers.now,
     captureFingerprint: (path, captureOptions) => capture(path, captureOptions),
     ...(options.platform ? { platform: options.platform } : {}),
+    ...(options.turnDiff ? { turnDiff: options.turnDiff } : {}),
   });
   watchers = buildRuntime();
 

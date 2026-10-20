@@ -724,7 +724,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   queuedMessages.start();
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
-    interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send });
+    interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
+    turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
     dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
   });

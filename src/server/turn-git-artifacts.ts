@@ -568,6 +568,11 @@ export class TurnGitArtifactManager {
     };
   }
 
+  async settledTurnDiff(turnId: string): Promise<TurnGitDiffSnapshot> {
+    await this.#finalizations.get(turnId)?.catch(() => undefined);
+    return this.turnDiff(turnId);
+  }
+
   async compare(
     earlierTurnId: string,
     laterTurnId: string,

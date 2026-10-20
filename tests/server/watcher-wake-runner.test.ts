@@ -381,4 +381,38 @@ describe("watcher wake runner", () => {
       await f.close();
     }
   });
+
+  it("quotes the turn's diff on the final pass and never reads it for a mid-turn check", async () => {
+    const turnDiff = vi.fn(async (_turnId: string) => ({
+      patchState: "available" as const,
+      truncated: false,
+      patch: "diff --git a/src/parser.ts b/src/parser.ts\n--- a/src/parser.ts\n+++ b/src/parser.ts\n@@ -40,3 +40,3 @@\n context\n-  return tokens.slice(0, -1);\n+  return tokens;\n",
+      files: [{ path: "src/parser.ts", status: "M", insertions: 1, deletions: 1, untracked: false, staged: false, unstaged: true, indexStatus: " ", worktreeStatus: "M" }],
+    }));
+    const f = await createWatcherFixture({ turnDiff });
+    try {
+      const link = await f.attach();
+      const watchedTurn = await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      expect(f.provider.input(watcherId).prompt).not.toContain("## Changed files");
+      await f.finishTurn(watcherId, "SILENT");
+      expect(turnDiff).not.toHaveBeenCalled();
+
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      expect(turnDiff).toHaveBeenCalledWith(watchedTurn.id);
+      expect(f.provider.input(watcherId).prompt).toContain([
+        "## Changed files — quoted evidence (unified diff)",
+        "> - M src/parser.ts (+1 −1)",
+        "> @@ -40,3 +40,3 @@",
+        ">  context",
+        "> -  return tokens.slice(0, -1);",
+        "> +  return tokens;",
+      ].join("\n"));
+      await f.finishTurn(watcherId, "SILENT");
+    } finally {
+      await f.close();
+    }
+  });
 });

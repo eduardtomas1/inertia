@@ -6,6 +6,7 @@ import {
   type WatcherWakeTrigger,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
+import { readWatcherTurnDiff, type WatcherTurnDiffSnapshot } from "../../persistence/watcher-digest-source";
 import type { WatcherCursor, WatcherLinkRecord, WatcherTransition } from "../../persistence/watcher-link-repository";
 import type { TurnController } from "../turns/turn-controller";
 import type { ReadOnlyWatcherViolation } from "../turns/turn-controller-types";
@@ -61,6 +62,7 @@ export interface WatcherWakeRunnerDependencies {
   publish(linkId: string): void;
   /** Refreshes the watcher chat's shell row after a check settles. */
   refreshConversation?(conversationId: string): void;
+  turnDiff?(turnId: string): Promise<WatcherTurnDiffSnapshot>;
   now(): string;
   id(): string;
 }
@@ -238,6 +240,10 @@ export class WatcherWakeRunner {
       const finalPage = finalTurnId === null ? 0 : drained?.turnId === finalTurnId ? drained.pages + 1 : 1;
       const spare = staleTurn ? 0 : remaining - (consumesAllowance ? 1 : 0);
       const lastFinalPage = finalTurnId !== null && finalPage >= WATCHER_FINAL_PASS_MAX_PAGES && spare <= 0;
+      const turnDiff = this.#deps.turnDiff;
+      const diff = finalTurnId !== null && claimed.sharing.changedFiles && turnDiff
+        ? { diff: await readWatcherTurnDiff(turnDiff, finalTurnId) }
+        : {};
       const digest = buildWatcherDigest(store.watcherLinks.digest, { ...claimed, cursor }, {
         final: context.final,
         sessionFresh: watcher.providerSessionId === null,
@@ -248,6 +254,8 @@ export class WatcherWakeRunner {
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),
         openReply: this.#openReplies.get(linkId, cursor.turnId) ?? null,
         lastFinalPage,
+        contextAccess: route.contextAccess !== false && claimed.budgets.contextReadsPerWake !== 0,
+        ...diff,
       });
       if (!digest) return release("skipped");
       window = await this.#deps.guard.before(watcher.id);

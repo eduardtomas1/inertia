@@ -11,6 +11,7 @@ import type {
 import type { WatcherPrivateConnect } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
 import type { CheckoutFingerprint, CheckoutFingerprintOptions } from "../../git/checkout-fingerprint";
+import type { WatcherTurnDiffSnapshot } from "../../persistence/watcher-digest-source";
 import type { ProviderHostToolBridge } from "../../provider/contracts";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeCommandHandler } from "../commands/command-router";
@@ -74,6 +75,7 @@ export interface WatcherRuntimeDependencies {
   signal?: AbortSignal;
   /** The platform whose path rules the checkout guard applies; defaults to the running one. */
   platform?: NodeJS.Platform;
+  turnDiff?(turnId: string): Promise<WatcherTurnDiffSnapshot>;
   /** Test-only overrides of the wake scheduler's timing. */
   wakeTiming?: Pick<
     WatcherWakeSchedulerDependencies,
@@ -176,6 +178,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     scheduler: () => wakeScheduler,
     publish,
     refreshConversation: (conversationId) => dependencies.broadcastConversationShell?.(conversationId),
+    ...(dependencies.turnDiff ? { turnDiff: dependencies.turnDiff } : {}),
     now,
     id,
   });

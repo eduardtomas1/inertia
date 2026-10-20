@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 
-import type { AgentActivity, AgentPlan, AgentTurn } from "../../shared/contracts";
+import type { AgentActivity, AgentPlan, AgentTurn, ChangedFile, TurnGitDiffSnapshot } from "../../shared/contracts";
+import { parseUnifiedDiff } from "../../shared/diff-review";
 import { MAX_WATCHER_FEED_PAGE, MAX_WATCHER_PENDING_RUNNING_IDS } from "../../shared/watcher";
 import { activityFromRow, agentTurnFromRow, planFromRow } from "./codecs";
 import type {
@@ -12,6 +13,7 @@ import { cachedStatement } from "./statement-cache";
 
 export const MAX_WATCHER_DIGEST_ACTIVITIES = 200;
 export const MAX_WATCHER_DIGEST_MESSAGES = 20;
+export const MAX_WATCHER_DIGEST_DIFF_FILES = 200;
 /** Activity details are bounded at the query so a huge tool result never loads whole. */
 export const MAX_WATCHER_ACTIVITY_DETAIL_CHARS = 8_192;
 
@@ -28,6 +30,24 @@ export interface WatcherDigestMessage {
   truncated: boolean;
   bytes: number;
 }
+
+export interface WatcherDigestDiffFile {
+  path: string;
+  status: string;
+  insertions: number;
+  deletions: number;
+  patch: string;
+  binary: boolean;
+}
+
+export interface WatcherDigestDiff {
+  files: WatcherDigestDiffFile[];
+  truncated: boolean;
+}
+
+export type WatcherTurnDiffSnapshot = Pick<TurnGitDiffSnapshot, "patch" | "patchState" | "truncated"> & {
+  files: ReadonlyArray<ChangedFile & { binary?: boolean }>;
+};
 
 export interface WatcherDigestSourceContext {
   database: Database.Database;
@@ -206,4 +226,34 @@ export class WatcherDigestSource {
       SELECT 1 FROM messages WHERE id = ? AND role = 'user' AND watcher_note_json IS NOT NULL
     `).get(messageId) !== undefined;
   }
+}
+
+export async function readWatcherTurnDiff(
+  read: (turnId: string) => Promise<WatcherTurnDiffSnapshot>,
+  turnId: string,
+): Promise<WatcherDigestDiff | null> {
+  let snapshot: WatcherTurnDiffSnapshot;
+  try {
+    snapshot = await read(turnId);
+  } catch {
+    return null;
+  }
+  if (snapshot.patchState !== "available" && snapshot.patchState !== "truncated") return null;
+  const parsed = new Map(parseUnifiedDiff(snapshot.patch).files.map((file) => [file.path, file]));
+  return {
+    truncated: snapshot.truncated || snapshot.patchState === "truncated",
+    files: snapshot.files.slice(0, MAX_WATCHER_DIGEST_DIFF_FILES).map((file) => {
+      const patched = parsed.get(file.path);
+      return {
+        path: file.path,
+        status: file.status,
+        insertions: file.insertions,
+        deletions: file.deletions,
+        binary: file.binary === true || patched?.binary === true,
+        patch: (patched?.hunks ?? [])
+          .map((hunk) => [hunk.header, ...hunk.lines.map(({ patchLine }) => patchLine)].join("\n"))
+          .join("\n"),
+      };
+    }),
+  };
 }

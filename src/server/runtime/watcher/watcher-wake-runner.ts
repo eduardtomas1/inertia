@@ -1,4 +1,5 @@
 import { modelSelectionIdentityLabel } from "../../../shared/claude-backend-profiles";
+import { watcherAgentLabel } from "../../../shared/watcher-agent-label";
 import type { AgentTurn, ModelSelection } from "../../../shared/contracts";
 import {
   MAX_WATCHER_FINDING_BYTES,
@@ -6,6 +7,7 @@ import {
   type WatcherWakeTrigger,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
+import { PROVIDER_INFO } from "../../provider/catalog";
 import { readWatcherTurnDiff, type WatcherTurnDiffSnapshot } from "../../persistence/watcher-digest-source";
 import type { WatcherCursor, WatcherLinkRecord, WatcherTransition } from "../../persistence/watcher-link-repository";
 import type { TurnController } from "../turns/turn-controller";
@@ -47,6 +49,10 @@ export function watcherDispatchFailedDetail(message: string): string {
   return `The watcher's checks could not start ${WATCHER_DISPATCH_FAILURE_LIMIT} times in a row: ${message.trim()} `
     + "It can resume once the watcher chat can run again.";
 }
+
+const PROVIDER_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(PROVIDER_INFO).map(([id, info]) => [id, info.name]),
+);
 
 /** Room for a finding preview plus its trailing marker. */
 const MAX_REPLY_READ_BYTES = MAX_WATCHER_FINDING_BYTES * 2;
@@ -254,6 +260,7 @@ export class WatcherWakeRunner {
         sessionFresh: watcher.providerSessionId === null,
         now: this.#deps.now(),
         watchedTitle: watched.title,
+        watchedAgent: watcherAgentLabel(watched, PROVIDER_NAMES),
         sequence: claimed.counters.wakesTotal + 1,
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),

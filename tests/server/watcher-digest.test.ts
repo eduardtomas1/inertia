@@ -186,6 +186,53 @@ describe("buildWatcherDigest", () => {
     });
   });
 
+  it("names the watched agent, the turn's elapsed time and the sections the check carries", () => {
+    const source = new FakeSource();
+    source.activities = [activity(1), activity(2), activity(3, { kind: "command", title: "npm test" }), activity(4)];
+    source.plans = { conversationId: WATCHED, runId: "run-1", turnId: TURN, explanation: null, steps: [{ step: "Add tests", status: "pending" }] };
+    const running = buildWatcherDigest(source, link(), options({ watchedAgent: "Codex · gpt-test" }))!;
+    const lines = running.content.split("\n");
+    expect(lines[1]).toBe("Main chat (Codex · gpt-test): turn running for 30 min.");
+    expect(lines[2]).toBe("This check has: brief, plan, 4 activities.");
+
+    source.turns = [turn({ status: "completed", startedAt: at(0), completedAt: "2026-10-19T11:15:40.000Z" })];
+    source.plans = null;
+    source.changed = [{ path: "src/a.ts", status: "M", insertions: 1, deletions: 0 }];
+    source.replies = [{ id: "m1", createdAt: at(5), content: "Done." }];
+    const diff: WatcherDigestDiff = {
+      truncated: false,
+      files: [
+        { path: "src/a.ts", status: "M", insertions: 1, deletions: 0, binary: false, patch: "@@ -1 +1,2 @@\n a\n+b" },
+        { path: "src/b.ts", status: "M", insertions: 1, deletions: 0, binary: false, patch: "@@ -1 +1,2 @@\n a\n+c" },
+      ],
+    };
+    const final = buildWatcherDigest(source, link({ cursor: seenCursor(4) }), options({
+      final: true, diff, earlierFindings: [{ sequence: 1, finding: "Bug.", createdAt: at(1), settledAt: at(2), delivery: null, resolvedBySequence: null }],
+    }))!;
+    expect(final.content.split("\n").slice(1, 4)).toEqual([
+      "Final check for this turn: the main chat's turn ended (completed).",
+      "Main chat: turn completed after 1 h 15 min.",
+      "This check has: your earlier findings, 1 assistant reply, 2 changed files with diffs.",
+    ]);
+    const short = buildWatcherDigest(source, link({ cursor: seenCursor(4) }), options({ final: true, diff: null, now: at(20) }))!;
+    expect(short.content).toContain("This check has: 1 assistant reply, 1 changed file (paths only).");
+    source.turns = [turn({ startedAt: at(0) })];
+    source.activities.push(activity(5));
+    expect(buildWatcherDigest(source, link({ cursor: seenCursor(4) }), options({ now: at(40) }))!.content.split("\n")[1])
+      .toBe("Main chat: turn running for under a minute.");
+  });
+
+  it("says what the final pass covers when nothing new settled", () => {
+    const source = new FakeSource();
+    source.turns = [turn({ status: "interrupted" })];
+    const sharing = { changedFiles: false, partialReplies: false };
+    const later = buildWatcherDigest(source, link({ cursor: seenCursor(0), sharing, wakesTotal: 3 }), options({ final: true }))!;
+    expect(later.content).toContain("Nothing new since check 3; the turn ended with status interrupted.");
+    expect(later.content).not.toContain("This check has:");
+    const only = buildWatcherDigest(source, link({ cursor: seenCursor(0), sharing }), options({ final: true }))!;
+    expect(only.content).toContain("Nothing new settled in this turn; it ended with status interrupted.");
+  });
+
   it("includes the brief only on the first check of a watched turn or a fresh session", () => {
     const source = new FakeSource();
     source.activities = [activity(1), activity(2)];
@@ -618,7 +665,7 @@ describe("buildWatcherDigest", () => {
     source.turns = [turn({ status: "failed", usageLimited: true })];
     const digest = buildWatcherDigest(source, link({ cursor: seenCursor(0), sharing: { changedFiles: false, partialReplies: false } }), options({ final: true }))!;
     expect(digest.content).toContain("Main chat stopped: usage limit reached.");
-    expect(digest.content).toContain("Nothing new settled since the previous check.");
+    expect(digest.content).toContain("Nothing new settled in this turn; it ended with status failed.");
     expect(digest.stats.eventsCovered).toBe(0);
   });
 

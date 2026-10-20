@@ -62,6 +62,7 @@ describe("watcher wake runner", () => {
       const input = f.provider.input(watcherId);
       expect(input).toMatchObject({ interactionMode: "plan", access: "supervised" });
       expect(input.prompt).toContain("Check 1 for \"Fix the parser\"");
+      expect(input.prompt).toContain("Main chat (Codex · gpt-test): turn running for ");
       expect(input.prompt).toContain("[inertia-watcher]");
       expect(input.prompt).not.toContain("Capability pack.");
       expect(f.provider.runs.get(watcherId)!.callbacks.hostTools?.definitions.map(({ name }) => name))

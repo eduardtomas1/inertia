@@ -19,7 +19,7 @@ export const WATCHER_SILENT_RULE =
   "If nothing needs the user's attention, reply with exactly SILENT and nothing else.";
 
 export const WATCHER_COMMAND_RULE =
-  "You may run read-only commands such as git diff, git log, git show, git status, rg, grep, cat, head, ls and find, with paths inside the workspace written with forward slashes; Inertia declines anything else, including redirection, chaining, command substitution and other programs, so do not try them.";
+  "You may run read-only commands such as git diff, git log, git show, git status, rg, grep, cat, head, ls and find, with paths inside the workspace, forward slashes and single quotes; Inertia declines anything else, including redirection, chaining, command substitution and other programs, so do not try them.";
 
 /** One sentence per preset for the attach dialog and the dock. */
 export const WATCHER_PRESET_DESCRIPTIONS: Readonly<Record<WatcherPreset, string>> = Object.freeze({

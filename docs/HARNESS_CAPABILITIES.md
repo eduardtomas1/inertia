@@ -249,9 +249,11 @@ refuses redirection, chaining, background jobs, command and variable
 substitution, subshells, brace, home and equals expansion, comments,
 backslashes outside single quotes, control characters, Unicode quotes, dashes
 and spaces, PowerShell's `--%`, and unbalanced quotes. On Windows it also
-refuses `%`, `^`, `,` and `&`, `|`, `<`, `>` anywhere except a plain pipe, and
-any `:` in a path argument other than a drive letter, which keeps PowerShell
-provider paths such as `env:` out. OpenCode's shell can be PowerShell on any
+refuses `%`, `^`, `,`, `"`, `\` and `&`, `|`, `<`, `>` anywhere except a plain
+pipe, empty arguments, and any `:` in a path argument other than a drive
+letter. That keeps cmd.exe expansion, PowerShell provider paths such as `env:`,
+and Windows PowerShell's legacy argument passing, which can split an argument
+that contains a quote or ends in a backslash, out. OpenCode's shell can be PowerShell on any
 platform, so OpenCode watchers also refuse unquoted commas, which PowerShell
 turns into separate arguments. A pipe is allowed only when every segment is. The programs are read-only `git` subcommands (only
 `-C`, `--no-pager` and `-c core.pager=cat` as global options; `--output`,

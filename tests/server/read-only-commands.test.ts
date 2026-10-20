@@ -276,7 +276,7 @@ describe("classifyReadOnlyCommand", () => {
     expect(allowed("cat src/parser.ts", WINDOWS)).toEqual({ allowed: true, program: "cat" });
     expect(allowed("cat C:/work/repo/src/parser.ts", WINDOWS)).toEqual({ allowed: true, program: "cat" });
     expect(allowed("cat c:/WORK/Repo/src/parser.ts", WINDOWS)).toEqual({ allowed: true, program: "cat" });
-    expect(allowed("cat 'src\\parser.ts'", WINDOWS)).toEqual({ allowed: true, program: "cat" });
+    expect(allowed("rg -n 'parse input' src", WINDOWS)).toEqual({ allowed: true, program: "rg" });
     expect(allowed("git log --oneline | head -5", WINDOWS)).toEqual({ allowed: true, program: "git" });
     expect(allowed("git show HEAD:src/parser.ts", WINDOWS)).toEqual({ allowed: true, program: "git" });
     expect(allowed("cat 'src/a,b.ts'", WINDOWS)).toEqual({ allowed: true, program: "cat" });
@@ -304,6 +304,12 @@ describe("classifyReadOnlyCommand", () => {
       "cat 'Microsoft.PowerShell.Core\\FileSystem::C:\\Windows\\win.ini'",
       "cat 'FileSystem::C:/Windows/win.ini'",
       "cat -LiteralPath:env:OPENAI_API_KEY",
+      "cat 'src\\parser.ts'",
+      "rg \"parse input\" src",
+      "rg 'a\" --pre=cmd \"b' src",
+      "git log \"a\"\" --output=x \"\"b\"",
+      "rg 'a b\\' 'c --output=x d'",
+      "git diff ''",
     ]) {
       expect(allowed(command, WINDOWS)).toMatchObject({ allowed: false });
     }

@@ -28,7 +28,7 @@ const ENVIRONMENT_FILE = "The command reads an environment file.";
 const UNQUOTED_REJECTED = new Set([";", "&", "<", ">", "(", ")", "{", "}", "$", "\\"]);
 const WORD_START_REJECTED = new Set(["#", "~", "="]);
 const DOUBLE_QUOTED_REJECTED = new Set(["$", "\\"]);
-const WINDOWS_REJECTED = new Set(["%", "^", "&", "|", "<", ">"]);
+const WINDOWS_REJECTED = new Set(["%", "^", "&", "|", "<", ">", "\"", "\\"]);
 const GLOB = new Set(["*", "?", "["]);
 const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
 const ENVIRONMENT_FILE_NAME = /^\.env(?:$|\.)/u;
@@ -151,7 +151,9 @@ function tokenize(command: string, windows: boolean, powershell: boolean): Word[
   }
   if (quote !== null) return SHELL_SYNTAX;
   if (word) segments.at(-1)!.push(word);
-  if (segments.some((words) => words.length === 0 || words.some(({ value }) => value === "--%"))) return SHELL_SYNTAX;
+  if (segments.some((words) => words.length === 0 || words.some(({ value }) => value === "--%" || (windows && value === "")))) {
+    return SHELL_SYNTAX;
+  }
   return segments;
 }
 

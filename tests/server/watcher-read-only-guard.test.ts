@@ -150,7 +150,23 @@ describe("read-only watcher turns", () => {
       expect(respond).toHaveBeenCalledTimes(2);
       expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
       expect(runtime.provider.cancelCount).toBeGreaterThan(0);
-      expect(runtime.violations.at(-1)).toMatchObject({ kind: "approval-limit", stopped: true, linkId: runtime.link.id });
+      expect(runtime.violations.at(-1)).toMatchObject({ kind: "write-attempt", stopped: true, linkId: runtime.link.id });
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("stops at the second command request as the approval limit", async () => {
+    const runtime = await watcherRuntime();
+    try {
+      const { turn } = runtime.startWake();
+      const base = identity(runtime, runtime.watcher.id);
+      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-1") });
+      runtime.provider.emit({ ...base, type: "approval", request: approval("approval-2") });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
+      expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped]))
+        .toEqual([["command-attempt", false], ["approval-limit", true]]);
     } finally {
       runtime.store.close();
     }
@@ -201,6 +217,7 @@ describe("read-only watcher turns", () => {
     ["a file change", "File change"],
     ["an edit tool", "Edit"],
     ["a write tool", "Write"],
+    ["a multi-edit tool", "MultiEdit"],
   ])("stops on %s as soon as it starts", async (_name, label) => {
     const runtime = await watcherRuntime();
     try {

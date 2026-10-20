@@ -264,7 +264,7 @@ export class TurnInteractionCoordinator {
     });
     this.options.hooks.broadcast({ type: "agent.activity", activity });
     if (!responded || watcher.deniedApprovals >= READ_ONLY_WATCHER_MAX_DENIALS) {
-      this.stopForReadOnly(active, responded ? "approval-limit" : kind, detail);
+      this.stopForReadOnly(active, responded && kind !== "write-attempt" ? "approval-limit" : kind, detail);
       return;
     }
     this.reportReadOnlyViolation(active, kind, detail, false);

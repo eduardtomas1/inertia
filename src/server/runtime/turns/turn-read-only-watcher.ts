@@ -8,6 +8,7 @@ export const READ_ONLY_WATCHER_STOP_MESSAGE = "Watchers are read-only. Inertia s
 export const READ_ONLY_WATCHER_MAX_DENIALS = 2;
 
 const MAX_DETAIL_CHARS = 200;
+const MULTI_EDIT_TOOL_PATTERN = /^multi[\s_-]?edit$/iu;
 
 type ApprovalRequest = Extract<ProviderEvent, { type: "approval" }>["request"];
 
@@ -25,6 +26,7 @@ export function isReadOnlyWriteActivity(event: ProviderActivityEvent): boolean {
   if (event.phase !== "started") return false;
   const kind = agentActivityKind(event);
   if (kind === "command") return false;
+  if (kind === "tool" && MULTI_EDIT_TOOL_PATTERN.test(event.label.trim())) return true;
   return activityExecutionCategory({ kind, title: event.label, status: "running" }) === "coding";
 }
 

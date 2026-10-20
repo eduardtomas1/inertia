@@ -225,6 +225,24 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("counts a second denied edit request in one check as the second write attempt and pauses", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, { type: "approval", request: approval("write-1", "file-change") });
+      f.provider.emit(watcherId, { type: "approval", request: approval("write-2", "file-change") });
+      await f.flush();
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "write-attempt" });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({
+        status: "paused", pauseReason: "write-attempts", writeAttemptsThisTurn: 2,
+      });
+    } finally {
+      await f.close();
+    }
+  });
+
   it("maps a denied command to command-attempt and a question to permission-declined, and counts commands run", async () => {
     const f = await createWatcherFixture();
     try {

@@ -82,10 +82,6 @@ export function watcherAttributionForm(value: string, platform: NodeJS.Platform)
   return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
 }
 
-/**
- * An activity of the watcher's own turn that could have written: any command,
- * or a started edit, which Inertia stops before it runs.
- */
 export function watcherActivityMayWrite(activity: Pick<AgentActivity, "kind" | "title">): boolean {
   const title = activity.title.replace(/^Interrupted · /u, "");
   return activity.kind === "command"

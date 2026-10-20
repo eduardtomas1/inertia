@@ -37,7 +37,6 @@ export interface OpenCodeHostTools {
 
 /** Native OpenCode tools a read-only watcher may run without a prompt. */
 export const OPENCODE_WATCHER_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
-/** Secret files OpenCode itself asks before reading; a watcher, which declines every prompt, is denied them. */
 const OPENCODE_WATCHER_DENIED_READS = [".env", "*.env", "*.env.*"] as const;
 
 export function openCodePermissions(

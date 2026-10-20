@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderInfo } from "../../src/shared/contracts";
+import type { WatcherAttachPayload } from "../../src/shared/contracts/client-command/watcher";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, MAX_ACTIVE_WATCHERS } from "../../src/shared/watcher";
 import {
   createConversationCommandHandler,
@@ -368,10 +369,11 @@ describe("watcher link coordinator", () => {
   it("answers concurrent attaches with one link id and over the limit with policy errors, never a raw SQLite error", async () => {
     const f = await createWatcherFixture();
     try {
-      const payload = {
-        linkId: randomUUID(), watchedConversationId: f.watched.id, modelSelection: watcherTestSelection("codex"),
-        preset: "reviewer" as const, instructions: "", sharing: { ...DEFAULT_WATCHER_SHARING }, budgets: { ...DEFAULT_WATCHER_BUDGETS },
-        privateConnect: "inherit" as const, initialReview: false,
+      const payload: WatcherAttachPayload = {
+        linkId: randomUUID(), watchedConversationId: f.watched.id,
+        modelSelection: watcherTestSelection("codex") as WatcherAttachPayload["modelSelection"],
+        preset: "reviewer", instructions: "", sharing: { ...DEFAULT_WATCHER_SHARING }, budgets: { ...DEFAULT_WATCHER_BUDGETS },
+        privateConnect: "inherit", initialReview: false,
       };
       const [first, second] = await Promise.all([f.watchers.coordinator.attach(payload), f.watchers.coordinator.attach(payload)]);
       expect(second.id).toBe(first.id);

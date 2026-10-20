@@ -27,7 +27,6 @@ export interface CapturedCheckoutFingerprint {
   state: "captured";
   root: string;
   head: string | null;
-  /** The branch HEAD names, or null when HEAD is detached. */
   branch: string | null;
   /** Repository-relative path to an opaque state descriptor; clean paths are absent. */
   entries: ReadonlyMap<string, string>;
@@ -76,7 +75,6 @@ async function filterDriverNames(root: string, options: CheckoutFingerprintOptio
   return [...names];
 }
 
-/** One line of Git output, or null when Git reports that there is none. */
 async function optionalLine(
   root: string,
   args: readonly string[],
@@ -93,7 +91,6 @@ async function optionalLine(
   }
 }
 
-/** Submodule paths from `.gitmodules` that resolve inside the checkout, at most `MAX_SUBMODULES`. */
 async function submodulePaths(root: string, options: CheckoutFingerprintOptions): Promise<string[]> {
   let output: string;
   try {
@@ -119,12 +116,6 @@ async function submodulePaths(root: string, options: CheckoutFingerprintOptions)
   return [...paths];
 }
 
-/**
- * Folds each initialized submodule's own fingerprint into `entries`: its
- * dirty paths under the submodule's path, and its HEAD and branch on the
- * submodule's own entry. A submodule that resolves outside the checkout is
- * skipped.
- */
 async function addSubmoduleEntries(
   root: string,
   entries: Map<string, string>,

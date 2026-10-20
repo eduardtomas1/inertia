@@ -6,7 +6,6 @@ export interface DatabaseSchemaRequirements {
   tables: DatabaseRequiredTables;
   columns: readonly (readonly [number, string, readonly string[]])[];
   indexes: readonly (readonly [number, string])[];
-  /** Triggers whose whitespace-folded, lowercase SQL must contain every fragment. */
   triggers: readonly (readonly [number, string, readonly string[]])[];
 }
 

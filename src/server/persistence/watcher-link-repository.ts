@@ -722,13 +722,6 @@ export class WatcherLinkRepository {
     })();
   }
 
-  /**
-   * Deletes up to `MAX_RETIRED_WAKES_PER_CHECK` checks at or below `through`,
-   * oldest first, each with its own settled watcher turn and that turn's
-   * messages, activities, reasonings and plans. A turn outside the watcher
-   * chat, still unfinished, or still owned by a provider run is left alone.
-   * The retention trigger stays as the backstop for the check rows.
-   */
   private retireWakes(linkId: string, through: number): void {
     if (through < 1) return;
     const retired = this.database.prepare(`

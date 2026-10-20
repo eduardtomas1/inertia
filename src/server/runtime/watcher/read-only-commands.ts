@@ -35,7 +35,7 @@ const WINDOWS_REJECTED = new Set(["%", "^", "&", "|", "<", ">", "\"", "\\"]);
 const GLOB = new Set(["*", "?", "["]);
 const STDERR_REDIRECTS = ["2>/dev/null", "2>&1"];
 const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
-const ENVIRONMENT_FILE_NAME = /^\.env(?:$|\.)/u;
+const ENVIRONMENT_FILE_NAME = /\.env(?:$|\.)/iu;
 
 const GIT_UNSAFE_LONG = ["output", "ext-diff", "textconv", "open-files-in-pager", "exec", "upload-pack", "receive-pack", "filters"];
 const GIT_READ_SUBCOMMANDS = new Set(["diff", "log", "show", "status", "blame", "grep", "ls-files", "rev-parse", "shortlog", "describe"]);

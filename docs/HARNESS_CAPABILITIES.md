@@ -228,9 +228,9 @@ through `watcherHarnessAllowed`:
 
 | Harness | Read-only mechanism |
 | --- | --- |
-| `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn, so every command needs approval and is declined. |
+| `claude-agent-sdk` | `permissionMode: "plan"`, with `planModeInstructions` telling Claude to review directly and never write a plan file or call `ExitPlanMode`. Claude Code runs its own read-only tools without asking: Read, Grep and Glob inside the working directory, and the Bash commands its own classifier treats as read-only. Every other call, including Write, Edit, MultiEdit and NotebookEdit, reaches Inertia's approval broker. For a watcher turn the broker runs a Bash command that passes the read-only command allowlist below, and declines everything else. |
 | `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. Watcher threads, started or resumed, also disable the user's MCP servers, apps, plugins, hooks, subagents and web search through the thread's `config`. |
-| `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`, with `read` of `.env`, `*.env` and `*.env.*` denied after the read allow, since OpenCode's own default asks before reading them. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. With the profile, reads run without a prompt, and edit, shell and every other native tool are denied by OpenCode itself, without an approval. |
+| `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`, with `read` of `.env`, `*.env` and `*.env.*` denied after the read allow, since OpenCode's own default asks before reading them. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. The profile also sets `bash` to `ask`. With the profile, reads run without a prompt. A shell command reaches OpenCode's permission request, whose metadata carries the full command text; Inertia answers `once` when that text passes the read-only command allowlist and declines it otherwise. Edit and every other native tool are denied by OpenCode itself, without an approval. OpenCode's own `bash` patterns are not used as the allowlist: OpenCode 1.19.2 matches each pattern against a command's text including its redirections, so a prefix rule such as `git diff *` would also allow `git diff > file`. |
 
 The gate is checked when a watcher is attached, when every watcher turn is
 prepared (including a message the user types into the watcher chat), and when
@@ -238,6 +238,37 @@ prepared (including a message the user types into the watcher chat), and when
 only ready routes on these harnesses. A watcher can change its model only
 within the allowlist; its interaction mode and access mode cannot change while
 it is attached.
+
+### Read-only command allowlist
+
+`classifyReadOnlyCommand` in `src/server/runtime/watcher/read-only-commands.ts`
+is Inertia's own allowlist for Claude and OpenCode watchers; Codex keeps its
+sandboxed known-safe set. It never runs anything. It splits the command with
+quoting rules that hold under POSIX shells, PowerShell and cmd.exe, and
+refuses redirection, chaining, background jobs, command and variable
+substitution, subshells, brace, home and equals expansion, comments,
+backslashes outside single quotes, control characters, Unicode quotes, dashes
+and spaces, and unbalanced quotes. On Windows it also refuses `%`, `^`, `,`
+and `&`, `|`, `<`, `>` anywhere except a plain pipe. A pipe is allowed only
+when every segment is. The programs are read-only `git` subcommands (only
+`-C`, `--no-pager` and `-c core.pager=cat` as global options; `--output`,
+`--ext-diff`, `--textconv`, `git grep -O` and their abbreviations refused),
+`rg` without `--pre` or `--hostname-bin`, `grep`, `cat`, `head`, `tail`
+without follow, `ls`, `find` without `-exec`, `-ok`, `-delete` or `-fprint`
+forms, `wc`, `diff`, `stat`, `file` without `-C`, `tree` without `-o` or `-R`,
+`sort` without `-o`, `-T` or `--compress-program`, `uniq` with at most one
+file, `cut`, `nl`, `tr`, `column`, `jq` without environment access, `pwd`,
+`which` and `echo`. An argument that is absolute, starts with `~` or contains a
+`..` segment must stay inside the workspace, Windows provider paths such as
+`env:` are refused, and so are `.env` files. A command is capped at 4,096
+characters and 256 arguments. An allowed command runs without an approval and
+counts towards the receipt's command count; a declined one is a
+`command-attempt`. Known limits: containment is lexical, so a symbolic link
+inside the workspace can lead outside it; programs still honor their own
+configuration (a `diff.external`, textconv or `core.fsmonitor` command in Git
+config, `RIPGREP_CONFIG_PATH`, or aliases a provider's shell loads), which only
+someone who can already write that configuration can set; and a recursive
+search can still read ignored files such as `.env`.
 
 ### Why an allowlist and not a capability id
 

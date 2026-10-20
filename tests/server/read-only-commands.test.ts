@@ -5,6 +5,7 @@ import { classifyReadOnlyCommand } from "../../src/server/runtime/watcher/read-o
 
 const POSIX = { cwd: "/work/repo", windows: false };
 const WINDOWS = { cwd: "C:\\work\\repo", windows: true };
+const POWERSHELL = { ...POSIX, powershell: true };
 
 const allowed = (command: string, context = POSIX) => classifyReadOnlyCommand(command, context);
 
@@ -258,6 +259,8 @@ describe("classifyReadOnlyCommand", () => {
     "git diff\u0085",
     "git diff\u007f",
     "tail -5f src/parser.ts",
+    "cat --% %HOME%/.ssh/id_rsa",
+    "git blame -L 1,20 src/a.ts --% x",
     "constructor",
     "toString src",
     "echo a=~/x",
@@ -298,11 +301,22 @@ describe("classifyReadOnlyCommand", () => {
       "cat Function:/prompt",
       "cat -Path:C:/Windows/win.ini",
       "cat src/a,C:/Windows/win.ini",
+      "cat 'Microsoft.PowerShell.Core\\FileSystem::C:\\Windows\\win.ini'",
+      "cat 'FileSystem::C:/Windows/win.ini'",
+      "cat -LiteralPath:env:OPENAI_API_KEY",
     ]) {
       expect(allowed(command, WINDOWS)).toMatchObject({ allowed: false });
     }
     expect(allowed("cat '..\\outside.txt'", POSIX)).toEqual({ allowed: true, program: "cat" });
     expect(allowed("git log --format=%h", POSIX)).toEqual({ allowed: true, program: "git" });
+  });
+
+  it("refuses PowerShell array arguments where the provider's shell may be PowerShell", () => {
+    expect(allowed("git blame -L 1,20 src/parser.ts")).toEqual({ allowed: true, program: "git" });
+    expect(allowed("git blame -L '1,20' src/parser.ts", POWERSHELL)).toEqual({ allowed: true, program: "git" });
+    for (const command of ["cat src/a,/etc/passwd", "uniq src/a.txt,src/b.txt", "git log a,--output=x", "git blame -L 1,20 src/parser.ts"]) {
+      expect(allowed(command, POWERSHELL)).toMatchObject({ allowed: false });
+    }
   });
 
   it("names the reason for a refused command", () => {

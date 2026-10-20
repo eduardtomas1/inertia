@@ -248,9 +248,12 @@ quoting rules that hold under POSIX shells, PowerShell and cmd.exe, and
 refuses redirection, chaining, background jobs, command and variable
 substitution, subshells, brace, home and equals expansion, comments,
 backslashes outside single quotes, control characters, Unicode quotes, dashes
-and spaces, and unbalanced quotes. On Windows it also refuses `%`, `^`, `,`
-and `&`, `|`, `<`, `>` anywhere except a plain pipe. A pipe is allowed only
-when every segment is. The programs are read-only `git` subcommands (only
+and spaces, PowerShell's `--%`, and unbalanced quotes. On Windows it also
+refuses `%`, `^`, `,` and `&`, `|`, `<`, `>` anywhere except a plain pipe, and
+any `:` in a path argument other than a drive letter, which keeps PowerShell
+provider paths such as `env:` out. OpenCode's shell can be PowerShell on any
+platform, so OpenCode watchers also refuse unquoted commas, which PowerShell
+turns into separate arguments. A pipe is allowed only when every segment is. The programs are read-only `git` subcommands (only
 `-C`, `--no-pager` and `-c core.pager=cat` as global options; `--output`,
 `--ext-diff`, `--textconv`, `git grep -O` and their abbreviations refused),
 `rg` without `--pre` or `--hostname-bin`, `grep`, `cat`, `head`, `tail`
@@ -259,8 +262,7 @@ forms, `wc`, `diff`, `stat`, `file` without `-C`, `tree` without `-o` or `-R`,
 `sort` without `-o`, `-T` or `--compress-program`, `uniq` with at most one
 file, `cut`, `nl`, `tr`, `column`, `jq` without environment access, `pwd`,
 `which` and `echo`. An argument that is absolute, starts with `~` or contains a
-`..` segment must stay inside the workspace, Windows provider paths such as
-`env:` are refused, and so are `.env` files. A command is capped at 4,096
+`..` segment must stay inside the workspace, and `.env` files are refused. A command is capped at 4,096
 characters and 256 arguments. An allowed command runs without an approval and
 counts towards the receipt's command count; a declined one is a
 `command-attempt`. Known limits: containment is lexical, so a symbolic link

@@ -6,6 +6,7 @@ export const MAX_READ_ONLY_COMMAND_ARGUMENTS = 256;
 export interface ReadOnlyCommandContext {
   cwd: string;
   windows: boolean;
+  powershell?: boolean;
 }
 
 export type ReadOnlyCommandVerdict =
@@ -31,7 +32,6 @@ const WINDOWS_REJECTED = new Set(["%", "^", "&", "|", "<", ">"]);
 const GLOB = new Set(["*", "?", "["]);
 const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
 const ENVIRONMENT_FILE_NAME = /^\.env(?:$|\.)/u;
-const WINDOWS_PROVIDER_PATH = /^[A-Za-z][A-Za-z0-9_-]+:/u;
 
 const GIT_UNSAFE_LONG = ["output", "ext-diff", "textconv", "open-files-in-pager", "exec", "upload-pack", "receive-pack", "filters"];
 const GIT_READ_SUBCOMMANDS = new Set(["diff", "log", "show", "status", "blame", "grep", "ls-files", "rev-parse", "shortlog", "describe"]);
@@ -73,7 +73,7 @@ const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
 
 export function classifyReadOnlyCommand(command: string, context: ReadOnlyCommandContext): ReadOnlyCommandVerdict {
   if (command.length > MAX_READ_ONLY_COMMAND_CHARS) return refuse("The command is too long.");
-  const segments = tokenize(command, context.windows);
+  const segments = tokenize(command, context.windows, context.windows || context.powershell === true);
   if (typeof segments === "string") return refuse(segments);
   if (segments.flat().length > MAX_READ_ONLY_COMMAND_ARGUMENTS) return refuse("The command has too many arguments.");
   let first: string | null = null;
@@ -108,7 +108,7 @@ function programName(value: string): string | null {
   return /^[a-z][a-z0-9-]*$/u.test(name) ? name : null;
 }
 
-function tokenize(command: string, windows: boolean): Word[][] | string {
+function tokenize(command: string, windows: boolean, powershell: boolean): Word[][] | string {
   const segments: Word[][] = [[]];
   let word: Word | null = null;
   let quote: "'" | "\"" | null = null;
@@ -144,14 +144,14 @@ function tokenize(command: string, windows: boolean): Word[][] | string {
     if (UNQUOTED_REJECTED.has(character)) return SHELL_SYNTAX;
     if (!word && WORD_START_REJECTED.has(character)) return SHELL_SYNTAX;
     if (character === "~" && /[=:]$/u.test(word?.value ?? "")) return SHELL_SYNTAX;
-    if (windows && character === ",") return SHELL_SYNTAX;
+    if (powershell && character === ",") return SHELL_SYNTAX;
     word ??= { value: "", glob: [] };
     if (character === "'" || character === "\"") quote = character;
     else append(word, character, GLOB.has(character));
   }
   if (quote !== null) return SHELL_SYNTAX;
   if (word) segments.at(-1)!.push(word);
-  if (segments.some((words) => words.length === 0)) return SHELL_SYNTAX;
+  if (segments.some((words) => words.length === 0 || words.some(({ value }) => value === "--%"))) return SHELL_SYNTAX;
   return segments;
 }
 
@@ -176,7 +176,7 @@ function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths:
   for (const candidate of pathCandidates(word.value)) {
     if (candidate.startsWith("~")) return OUTSIDE;
     if (context.windows && /^[A-Za-z]:(?![\\/])/u.test(candidate)) return OUTSIDE;
-    if (context.windows && providerPaths && WINDOWS_PROVIDER_PATH.test(candidate)) return OUTSIDE;
+    if (context.windows && providerPaths && candidate.replace(/^[A-Za-z]:(?=[\\/])/u, "").includes(":")) return OUTSIDE;
     const segments = candidate.split(separators);
     if (paths.isAbsolute(candidate) || segments.includes("..")) {
       const relative = paths.relative(context.cwd, paths.resolve(context.cwd, candidate));

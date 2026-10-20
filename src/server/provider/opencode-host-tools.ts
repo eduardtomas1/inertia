@@ -91,7 +91,7 @@ export function openCodeWatcherCommandAllowed(
   return input.readOnlyProfile === "watcher"
     && permission === "bash"
     && typeof command === "string"
-    && classifyReadOnlyCommand(command, { cwd: input.cwd, windows: process.platform === "win32" }).allowed;
+    && classifyReadOnlyCommand(command, { cwd: input.cwd, windows: process.platform === "win32", powershell: true }).allowed;
 }
 
 export function createOpenCodeHostTools(input: {

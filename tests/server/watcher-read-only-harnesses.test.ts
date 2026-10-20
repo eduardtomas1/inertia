@@ -975,6 +975,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     expect(openCodeWatcherCommandAllowed("bash", { action: "bash", resources: ["git log"], metadata: { command: "git log -5" } }, watcher)).toBe(true);
     expect(openCodeWatcherCommandAllowed("bash", asked("git diff > out.txt"), watcher)).toBe(false);
     expect(openCodeWatcherCommandAllowed("bash", asked("git diff; rm -rf ."), watcher)).toBe(false);
+    expect(openCodeWatcherCommandAllowed("bash", asked("cat src/parser.ts,../outside.txt"), watcher)).toBe(false);
     expect(openCodeWatcherCommandAllowed("bash", asked(["git", "diff"]), watcher)).toBe(false);
     expect(openCodeWatcherCommandAllowed("bash", { permission: "bash", patterns: ["git diff"] }, watcher)).toBe(false);
     expect(openCodeWatcherCommandAllowed("bash", { permission: "bash", metadata: null }, watcher)).toBe(false);

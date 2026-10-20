@@ -163,6 +163,14 @@ describe("watcher shared contracts", () => {
     ]) expect(watcherFeedItemSchema.safeParse(invalid).success).toBe(false);
   });
 
+  it("carries an optional, bounded count of the read-only commands a check ran", () => {
+    expect(watcherFeedItemSchema.parse({ ...feedItem, commandsRun: 3 }).commandsRun).toBe(3);
+    expect(watcherFeedItemSchema.parse(feedItem)).not.toHaveProperty("commandsRun");
+    for (const commandsRun of [0, -1, 1.5, 10_001, "2"]) {
+      expect(watcherFeedItemSchema.safeParse({ ...feedItem, commandsRun }).success).toBe(false);
+    }
+  });
+
   it("accepts only bounded, single-line watcher note attribution", () => {
     expect(watcherNoteAttributionSchema.safeParse(note).success).toBe(true);
     for (const invalid of [

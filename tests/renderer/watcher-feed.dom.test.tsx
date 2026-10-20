@@ -69,6 +69,18 @@ describe("WatcherFeed", () => {
     expect(within(entries[1]!).getByRole("article", { name: "Finding" })).toHaveTextContent("The parser drops the trailing token.");
   });
 
+  it("shows how many read-only commands the watcher ran in each receipt and check", async () => {
+    renderFeed([
+      feedItem(3, { commandsRun: 2 }),
+      feedItem(2),
+      feedItem(1, { commandsRun: 1 }),
+    ]);
+    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
+    expect(receipt).toHaveTextContent(/Checked 3 times since .* · nothing to report · ran 3 read-only commands/u);
+    expect(receipt).toHaveTextContent("ran 1 read-only command");
+  });
+
   it("moves focus to the card's own status after Send and reports the queued note", async () => {
     const runtime = renderFeed([finding(4, "Risky rename.")], { running: true });
     const card = await screen.findByRole("article", { name: "Finding" });

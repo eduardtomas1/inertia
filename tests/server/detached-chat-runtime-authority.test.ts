@@ -263,6 +263,20 @@ describe("detached chat runtime authority", () => {
       .toEqual({ type: "runtime.cursor", sync });
   });
 
+  it("passes the removal of a deleted link to the detached chat it touched, from the sides the event names", () => {
+    const LINK = "22222222-2222-4222-8222-222222222222";
+    const sync = { runtimeGeneration: "33333333-3333-4333-8333-333333333333", latestSequence: 2 };
+    const removed: RuntimeSequencedFrame & { type: "runtime.event" } = {
+      type: "runtime.event", sync, scope: { kind: "shell" },
+      event: { type: "watcher.link.removed", linkId: LINK, watcherConversationId: OTHER_CONVERSATION, watchedConversationId: CONVERSATION },
+    };
+    const project = (conversationId: string) =>
+      projectRuntimeFrameForAuthority(removed, { conversationIds: [] }, { ...authority, conversationId }, () => null);
+    expect(project(CONVERSATION)).toEqual(removed);
+    expect(project(OTHER_CONVERSATION)).toEqual(removed);
+    expect(project("55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
+  });
+
   it("requires detached messages to target the owner without activation", () => {
     type MessageCommand = Extract<ClientCommand, { type: "message.send" }>;
     const message = (activate?: boolean): MessageCommand => ({

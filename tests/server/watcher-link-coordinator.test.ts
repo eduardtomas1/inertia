@@ -129,7 +129,9 @@ describe("watcher link coordinator", () => {
       await f.flush();
       expect(f.store.agentTurn(turnId).status).toBe("cancelled");
       expect(f.store.watcherLinks.wakeForTurn(turnId)).toMatchObject({ state: "settled", outcome: "cancelled" });
-      expect(f.watcherEvents()).toContainEqual({ type: "watcher.link.removed", linkId: link.id });
+      expect(f.watcherEvents()).toContainEqual({
+        type: "watcher.link.removed", linkId: link.id, watcherConversationId: link.watcherConversationId, watchedConversationId: f.watched.id,
+      });
       expect(f.watchers.isWatcherConversation(link.watcherConversationId)).toBe(false);
       expect(f.store.watcherLinks.views()).toEqual([]);
     } finally {
@@ -157,7 +159,9 @@ describe("watcher link coordinator", () => {
       } as unknown as ConversationCommandDependencies);
       await handler({} as never, { type: "conversation.delete", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
       expect(f.linkView(link.id)).toMatchObject({ status: "detached", detachedReason: "watched-deleted", watchedConversationId: null });
-      expect(f.watcherEvents().slice(before)).toEqual([{ type: "watcher.link.removed", linkId: link.id }]);
+      expect(f.watcherEvents().slice(before)).toEqual([{
+        type: "watcher.link.removed", linkId: link.id, watcherConversationId: link.watcherConversationId, watchedConversationId: f.watched.id,
+      }]);
       await f.advance(WATCHER_SETTLE_DELAY_MS + 120_000);
       expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
       expect(f.store.watcherLinks.views()).toEqual([]);
@@ -178,7 +182,9 @@ describe("watcher link coordinator", () => {
       expect(f.watcherEvents()).toHaveLength(before);
       publish();
       expect(f.store.watcherLinks.get(link.id)).toBeNull();
-      expect(f.watcherEvents().slice(before)).toEqual([{ type: "watcher.link.removed", linkId: link.id }]);
+      expect(f.watcherEvents().slice(before)).toEqual([{
+        type: "watcher.link.removed", linkId: link.id, watcherConversationId: link.watcherConversationId, watchedConversationId: f.watched.id,
+      }]);
     } finally {
       await f.close();
     }

@@ -377,12 +377,15 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
       }
     },
     beforeConversationDelete(conversationId) {
-      const linkIds = disposed ? [] : coordinator.linksTouching(conversationId);
+      const links = (disposed ? [] : coordinator.linksTouching(conversationId)).flatMap((linkId) => {
+        const link = store.watcherLinks.get(linkId);
+        return link ? [link] : [];
+      });
       return () => {
         if (disposed) return;
-        for (const linkId of linkIds) {
-          forget(linkId);
-          coordinator.publish(linkId);
+        for (const link of links) {
+          forget(link.id);
+          coordinator.publish(link.id, link);
         }
       };
     },

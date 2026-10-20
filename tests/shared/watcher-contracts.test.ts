@@ -298,6 +298,8 @@ describe("watcher shared contracts", () => {
   it("validates the three watcher events and the three request results", () => {
     expect(watcherMutationEvent({ type: "watcher.link.updated", link })).toBe(true);
     expect(watcherMutationEvent({ type: "watcher.link.removed", linkId: link.id })).toBe(true);
+    expect(watcherMutationEvent({ type: "watcher.link.removed", linkId: link.id, watcherConversationId: watcherId, watchedConversationId: null })).toBe(true);
+    expect(watcherMutationEvent({ type: "watcher.link.removed", linkId: link.id, watcherConversationId: watcherId, watchedConversationId: link.watchedConversationId })).toBe(true);
     const live = {
       type: "watcher.live", linkId: link.id, watcherConversationId: watcherId, turnId: "watcher-turn-3",
       phase: "reading", label: "Reading src/index.ts", at,
@@ -309,6 +311,8 @@ describe("watcher shared contracts", () => {
       { ...live, label: "x".repeat(121) },
       { ...live, label: "line\nbreak" },
       { type: "watcher.link.removed", linkId: "not-a-uuid" },
+      { type: "watcher.link.removed", linkId: link.id, watcherConversationId: "chat" },
+      { type: "watcher.link.removed", linkId: link.id, watchedConversationId: link.watchedConversationId },
       { type: "watcher.link.updated", link: { ...link, status: "paused" } },
       { type: "watcher.unknown" },
       null,

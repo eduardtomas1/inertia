@@ -82,6 +82,8 @@ export class WatcherLinkIndex {
   }
 }
 
+export type WatcherLinkSides = Pick<WatcherLinkRecord, "watcherConversationId" | "watchedConversationId">;
+
 export interface WatcherLinkCoordinatorDependencies {
   store: RuntimeStore;
   turns: Pick<TurnController, "isActive" | "cancel">;
@@ -131,16 +133,19 @@ export class WatcherLinkCoordinator {
    * Broadcasts the link's shell view; detached links leave the shell. Returns
    * the stored link, or null when it no longer exists.
    */
-  publish(linkId: string): WatcherLinkRecord | null {
+  publish(linkId: string, sides?: WatcherLinkSides): WatcherLinkRecord | null {
     const link = this.#deps.store.watcherLinks.get(linkId);
-    if (!link) {
+    if (!link || link.status === "detached") {
       this.#deps.index.untrack(linkId);
-      this.#deps.broadcast({ type: "watcher.link.removed", linkId });
-      return null;
-    }
-    if (link.status === "detached") {
-      this.#deps.index.untrack(linkId);
-      this.#deps.broadcast({ type: "watcher.link.removed", linkId });
+      const known = sides ?? link;
+      this.#deps.broadcast(known
+        ? {
+            type: "watcher.link.removed",
+            linkId,
+            watcherConversationId: known.watcherConversationId,
+            watchedConversationId: known.watchedConversationId,
+          }
+        : { type: "watcher.link.removed", linkId });
       return link;
     }
     const view = watcherLinkView(link);

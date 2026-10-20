@@ -33,7 +33,12 @@ export const watcherLinkUpdatedEventSchema = z.strictObject({
 export const watcherLinkRemovedEventSchema = z.strictObject({
   type: z.literal("watcher.link.removed"),
   linkId: z.uuid(),
-});
+  watcherConversationId: z.uuid().optional(),
+  watchedConversationId: z.uuid().nullable().optional(),
+}).refine(
+  (event) => (event.watcherConversationId === undefined) === (event.watchedConversationId === undefined),
+  "A removed watcher link names both of its sides or neither.",
+);
 
 export const watcherLiveEventSchema = z.strictObject({
   type: z.literal("watcher.live"),

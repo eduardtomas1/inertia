@@ -166,11 +166,12 @@ export function projectRuntimeFrameForAuthority(
       return watcherLinkTouches(frame.event.link, authority.conversationId)
         ? frame
         : runtimeCursorFrame(frame);
-    // Neither event names both sides of its link, so the link is looked up;
-    // without a lookup, or for an unknown link, the window gets only a cursor.
     case "watcher.link.removed":
     case "watcher.live": {
-      const link = watcherLink?.(frame.event.linkId) ?? null;
+      const named = frame.event.type === "watcher.link.removed" && frame.event.watcherConversationId !== undefined
+        ? { watcherConversationId: frame.event.watcherConversationId, watchedConversationId: frame.event.watchedConversationId ?? null }
+        : null;
+      const link = named ?? watcherLink?.(frame.event.linkId) ?? null;
       return link
         && (frame.event.type !== "watcher.live" || link.watcherConversationId === frame.event.watcherConversationId)
         && watcherLinkTouches(link, authority.conversationId)

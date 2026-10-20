@@ -126,7 +126,7 @@ export type RuntimeMutationEvent =
   | { type: "agent.plan.updated"; plan: AgentPlan }
   | { type: "agent.goal.updated"; goal: AgentGoal }
   | { type: "watcher.link.updated"; link: WatcherLinkView }
-  | { type: "watcher.link.removed"; linkId: string }
+  | { type: "watcher.link.removed"; linkId: string; watcherConversationId?: string; watchedConversationId?: string | null }
   | {
       /** Ephemeral phase of a running watcher check; never folded into a snapshot. */
       type: "watcher.live";

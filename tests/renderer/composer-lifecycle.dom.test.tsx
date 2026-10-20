@@ -43,6 +43,8 @@ import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 
 import { composerProps, conversation, deferred, openComposerTools, provider } from "./composer-fixtures";
+import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
+import { WATCHER_ID, link, surfaceModel } from "./watcher-fixtures";
 
 function attachment(id: string): ChatAttachment {
   return {
@@ -952,6 +954,24 @@ describe("composer asynchronous ownership", () => {
     expect(screen.queryByRole("button", { name: "Send queued message now" }))
       .not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps /plan and /build unavailable in an attached watcher's composer", async () => {
+    const current = conversation(WATCHER_ID);
+    const onUpdateConversation = vi.fn(async () => undefined);
+    render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(current, { onUpdateConversation })} />
+      </WatcherContext.Provider>,
+    );
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/b" } });
+    expect(await screen.findByRole("option", { name: /\/build/u })).toBeDisabled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "/p" } });
+    expect(await screen.findByRole("option", { name: /\/plan/u })).toBeDisabled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUpdateConversation).not.toHaveBeenCalled();
   });
 
   it("opens goal and folder resume flows directly from slash commands", async () => {

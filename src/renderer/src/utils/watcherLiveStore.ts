@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 import type { RuntimeMutationEvent } from "@shared/contracts";
+import type { WatcherLinkView } from "@shared/watcher";
 
 export type WatcherLiveEvent = Extract<RuntimeMutationEvent, { type: "watcher.live" }>;
 
@@ -24,6 +25,17 @@ export function publishWatcherLive(event: WatcherLiveEvent): void {
 export function clearWatcherLive(linkId: string): void {
   if (!latestByLink.delete(linkId)) return;
   for (const listener of listeners) listener();
+}
+
+export function retainWatcherLive(links: readonly WatcherLinkView[] | undefined): void {
+  const waking = new Set((links ?? []).filter(({ status }) => status === "waking").map(({ id }) => id));
+  let changed = false;
+  for (const linkId of latestByLink.keys()) {
+    if (waking.has(linkId)) continue;
+    latestByLink.delete(linkId);
+    changed = true;
+  }
+  if (changed) for (const listener of listeners) listener();
 }
 
 function subscribe(listener: () => void): () => void {

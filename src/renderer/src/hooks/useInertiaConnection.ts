@@ -23,7 +23,7 @@ import {
   applyConversationShellEvent,
   applyWatcherLinkEvent,
 } from "../utils/runtimeSnapshotProjection";
-import { clearWatcherLive, publishWatcherLive } from "../utils/watcherLiveStore";
+import { clearWatcherLive, publishWatcherLive, retainWatcherLive } from "../utils/watcherLiveStore";
 import {
   publishesWorkspaceGitCompletion,
   runtimeCommandPolicy,
@@ -185,6 +185,7 @@ export function useInertiaConnection(): InertiaConnection {
                   setRuntimeGeneration(null);
                   setStatus("online");
                 }
+                retainWatcherLive(event.snapshot.watchers);
                 setSnapshot(event.snapshot);
               } else if (event.type === "runtime.resumed") {
                 if (projectionRef.current.beginResume(event.sync) !== "resume") {
@@ -205,6 +206,7 @@ export function useInertiaConnection(): InertiaConnection {
                 if (event.type === "runtime.cursor") return;
                 event = event.event;
                 if (event.type === "snapshot.updated") {
+                  retainWatcherLive(event.snapshot.watchers);
                   setSnapshot(event.snapshot);
                 } else if (event.type === "conversation.shell.updated") {
                   const shellEvent = event;
@@ -236,6 +238,7 @@ export function useInertiaConnection(): InertiaConnection {
                   setError(null);
                 }
               } else if (event.type === "snapshot.updated") {
+                retainWatcherLive(event.snapshot.watchers);
                 setSnapshot(event.snapshot);
               } else if (event.type === "conversation.shell.updated") {
                 const shellEvent = event;

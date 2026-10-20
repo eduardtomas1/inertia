@@ -215,7 +215,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const clearance = useComposerClearance(frameRef, sheet && presence !== "closed");
   const visible = useDocumentVisibility();
   const actions = useWatcherActions(surface.request, link.id);
-  const feed = useWatcherFeed(link.id, link.feedRevision, actions, presence !== "closed");
+  const feed = useWatcherFeed(link.id, link.feedRevision, surface.online ? actions : null, presence !== "closed");
   const privateConnect = usePrivateConnectState();
   const [error, setError] = useState<string | null>(null);
   const [confirmingResume, setConfirmingResume] = useState(false);

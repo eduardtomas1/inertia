@@ -267,6 +267,25 @@ describe("WatcherDock", () => {
     }
   });
 
+  it("loads the feed once the connection returns, without waiting for Retry", async () => {
+    const runtime = watcherRuntime({ feed: () => [] });
+    let reconnecting = true;
+    const request = vi.fn(async (command: Parameters<typeof runtime.request>[0]) => {
+      if (command.type === "watcher.feed.get" && reconnecting) throw new Error("The local service is reconnecting.");
+      return runtime.request(command);
+    });
+    const tree = (online: boolean) => (
+      <Dock model={surfaceModel({ watchers: [link()], request, online })} />
+    );
+    const view = render(tree(false));
+    await dock();
+    await act(async () => undefined);
+    reconnecting = false;
+    view.rerender(tree(true));
+    await waitFor(() => expect(screen.getByText(/^No checks yet/u)).toBeInTheDocument());
+    expect(screen.queryByText("The local service is reconnecting.")).not.toBeInTheDocument();
+  });
+
   it("keeps the dock open when Escape only closes a tooltip", async () => {
     setup();
     const aside = await dock();

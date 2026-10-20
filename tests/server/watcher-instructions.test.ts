@@ -70,6 +70,7 @@ describe("watcher instruction", () => {
     expect(explainer).toMatch(/no advice/u);
     for (const text of texts) {
       expect(text).toContain("one-line verdict");
+      expect(text).toContain("If an earlier finding is now fixed, end your reply with a line `Resolved: check 3, check 5` naming those checks; do not repeat findings that are unchanged.");
       expect(text).toContain(WATCHER_SILENT_RULE);
     }
   });

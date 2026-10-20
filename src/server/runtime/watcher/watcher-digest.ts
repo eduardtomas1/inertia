@@ -5,6 +5,7 @@ import {
   watcherReplaceLineSeparators,
   type WatcherBudgets,
   type WatcherCounters,
+  type WatcherFeedItem,
   type WatcherSharing,
 } from "../../../shared/watcher";
 import type { WatcherCursor } from "../../persistence/watcher-link-codecs";
@@ -28,6 +29,7 @@ export const WATCHER_DIGEST_SHORT_ACTIVITY_CHARS = 240;
 export const WATCHER_DIGEST_MAX_FILES = 200;
 export const WATCHER_DIGEST_DIFF_FILE_BYTES = 6 * 1_024;
 const MAX_TITLE_CHARS = 200;
+const MAX_HEADLINE_CHARS = 200;
 const MAX_PATH_CHARS = 512;
 const MAX_REPLY_BYTES = 2 * 1_024;
 /** Bytes held back for the header, pointer and the hard-cap marker. */
@@ -61,6 +63,11 @@ export interface WatcherDigestLink {
   lastWakeAt?: string | null;
 }
 
+export type WatcherEarlierFinding = Pick<
+  WatcherFeedItem,
+  "sequence" | "createdAt" | "settledAt" | "finding" | "delivery" | "resolvedBySequence"
+>;
+
 export interface WatcherDigestOptions {
   /** The final pass after the watched turn ended; it is built even with nothing new. */
   final: boolean;
@@ -86,6 +93,7 @@ export interface WatcherDigestOptions {
   lastFinalPage?: boolean;
   diff?: WatcherDigestDiff | null;
   contextAccess?: boolean;
+  earlierFindings?: readonly WatcherEarlierFinding[];
 }
 
 export interface WatcherDigestStats {
@@ -417,6 +425,42 @@ function diffSection(diff: WatcherDigestDiff, budget: number): Section {
   };
 }
 
+function minutes(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u.test(value) ? value.slice(11, 16) : singleLine(value, 40);
+}
+
+function headline(finding: string): string {
+  const first = sanitize(finding).split("\n").find((line) => line.trim().length > 0) ?? "";
+  const line = singleLine(first.trim().replace(/^[-*•]\s+/u, ""), MAX_HEADLINE_CHARS + 1);
+  return line.length > MAX_HEADLINE_CHARS ? `${clipCodeUnits(line, MAX_HEADLINE_CHARS - 1).trimEnd()}…` : line;
+}
+
+const DELIVERY_WORDS: Readonly<Record<"queued" | "sent" | "dismissed" | "failed", string>> = {
+  queued: "queued",
+  sent: "sent",
+  dismissed: "dismissed",
+  failed: "not sent",
+};
+
+function earlierFindingsSection(findings: readonly WatcherEarlierFinding[], budget: number): Section | null {
+  const heading = "## Your earlier findings this turn";
+  const lines = findings.flatMap((finding) => {
+    if (finding.finding === null) return [];
+    const state = finding.delivery ? DELIVERY_WORDS[finding.delivery.state] : "not sent";
+    const resolved = finding.resolvedBySequence === null ? "" : `; resolved by check ${finding.resolvedBySequence}`;
+    return [`- Check ${finding.sequence} (${minutes(finding.settledAt ?? finding.createdAt)}): ${headline(finding.finding)} — ${state}${resolved}`];
+  });
+  if (lines.length === 0) return null;
+  let remaining = budget - bytes(heading) - 1;
+  const kept: string[] = [];
+  for (const line of lines.reverse()) {
+    if (bytes(line) + 1 > remaining) break;
+    remaining -= bytes(line) + 1;
+    kept.unshift(line);
+  }
+  return kept.length === 0 ? null : { text: [heading, ...kept].join("\n"), truncated: 0, omitted: 0 };
+}
+
 function statusLabel(status: AgentTurn["status"]): string {
   return status.replaceAll("-", " ");
 }
@@ -497,6 +541,7 @@ export function buildWatcherDigest(
     if (section) remaining -= bytes(section.text) + 2;
     return section;
   };
+  const earlier = take(earlierFindingsSection(options.earlierFindings ?? [], Math.min(2_048, remaining)));
   const brief = showBrief ? take(briefSection(source, turn, Math.min(Math.floor(cap / 4), remaining))) : null;
   const planPart = showPlan && plan ? take(planSection(plan, planChanged, Math.min(Math.floor(cap / 8), 4_096, remaining))) : null;
   const files = !options.final || !sharing.changedFiles
@@ -506,7 +551,8 @@ export function buildWatcherDigest(
       : take(filesSection(source.files(turn.id), Math.min(Math.floor(cap / 8), 4_096, remaining), options.diff === null));
   const replyPart = take(repliesSection(replies, options.final, Math.min(Math.floor(cap / 5), remaining)));
   const activities = take(activitySection(settled, sharing.activities, remaining));
-  const sections = [brief, planPart, activities, replyPart, files].filter((section): section is Section => section !== null);
+  const evidence = [brief, planPart, activities, replyPart, files].filter((section): section is Section => section !== null);
+  const sections = earlier ? [earlier, ...evidence] : evidence;
 
   let itemsTruncated = sections.reduce((sum, section) => sum + section.truncated, 0);
   const itemsOmitted = sections.reduce((sum, section) => sum + section.omitted, 0);
@@ -532,7 +578,7 @@ export function buildWatcherDigest(
     ? [options.lastFinalPage ? FINAL_PAGE_LIMIT_LINE : "More activity followed; the next check covers it."]
     : [];
   const body = [[...header, pointer, ...follows].join("\n"), ...sections.map(({ text }) => text)];
-  if (sections.length === 0) body.push("Nothing new settled since the previous check.");
+  if (evidence.length === 0) body.push("Nothing new settled since the previous check.");
   let content = body.join("\n\n");
   if (bytes(content) > cap) {
     content = `${truncateUtf8(content, cap - bytes(HARD_CAP_MARKER)).text}${HARD_CAP_MARKER}`;

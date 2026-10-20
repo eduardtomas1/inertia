@@ -20,6 +20,9 @@ const WRAPPERS: ReadonlyArray<readonly [string, string]> = [
   ["‘", "’"],
 ];
 const SHORTENED_MARKER = "\n\n[Shortened by Inertia.]";
+export const MAX_WATCHER_RESOLVED_CHECKS = 20;
+const RESOLVED_LINE_PATTERN = /^resolved: check \d{1,9}(?:, check \d{1,9})*\.?$/iu;
+const MAX_RESOLVED_LINE_CHARS = 400;
 
 function unwrap(value: string): string {
   let current = value.trim();
@@ -49,6 +52,16 @@ export function classifyWatcherReply(
   if (trimmed.length === 0) return turnStatus === "completed" ? "silent" : "finding";
   if (trimmed.length > MAX_SILENT_CANDIDATE_CHARS) return "finding";
   return SILENT_PATTERN.test(unwrap(trimmed)) ? "silent" : "finding";
+}
+
+export function splitWatcherResolvedLine(text: string): { text: string; resolved: number[] } {
+  const trimmed = text.trim();
+  const lineStart = trimmed.lastIndexOf("\n") + 1;
+  const line = unwrap(trimmed.slice(lineStart));
+  if (line.length > MAX_RESOLVED_LINE_CHARS || !RESOLVED_LINE_PATTERN.test(line)) return { text: trimmed, resolved: [] };
+  const checks = [...line.matchAll(/\d+/gu)].map(([digits]) => Number(digits));
+  if (checks.length > MAX_WATCHER_RESOLVED_CHECKS || checks.some((check) => check < 1)) return { text: trimmed, resolved: [] };
+  return { text: trimmed.slice(0, lineStart).trim(), resolved: [...new Set(checks)] };
 }
 
 function clipCodeUnits(value: string, maximum: number): string {

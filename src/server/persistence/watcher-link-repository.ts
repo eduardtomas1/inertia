@@ -682,6 +682,30 @@ export class WatcherLinkRepository {
     })();
   }
 
+  findingsForTurn(linkId: string, watchedTurnId: string, limit: number): WatcherWakeRecord[] {
+    const bounded = Math.min(MAX_WATCHER_FEED_PAGE, Math.max(0, Math.trunc(limit) || 0));
+    if (bounded === 0) return [];
+    const rows = cachedStatement(this.database, `
+      SELECT * FROM watcher_wakes
+      WHERE link_id = ? AND watched_turn_id = ? AND state = 'settled' AND outcome = 'finding'
+      ORDER BY sequence DESC LIMIT ?
+    `).all(linkId, watchedTurnId, bounded) as WatcherWakeRow[];
+    return rows.reverse().map(watcherWakeFromRow);
+  }
+
+  findingsBySequence(linkId: string, sequences: readonly number[]): WatcherWakeRecord[] {
+    const bounded = [...new Set(sequences.filter((sequence) => Number.isSafeInteger(sequence) && sequence > 0))]
+      .slice(0, MAX_WATCHER_FEED_PAGE);
+    if (bounded.length === 0) return [];
+    const rows = cachedStatement(this.database, `
+      SELECT * FROM watcher_wakes
+      WHERE link_id = ? AND sequence IN (SELECT value FROM json_each(?))
+        AND state = 'settled' AND outcome = 'finding'
+      ORDER BY sequence ASC
+    `).all(linkId, JSON.stringify(bounded)) as WatcherWakeRow[];
+    return rows.map(watcherWakeFromRow);
+  }
+
   usageTotals(linkId: string): WatcherUsage {
     const rows = cachedStatement(this.database, `
       SELECT ${USAGE_DASHBOARD_TURN_COLUMNS}

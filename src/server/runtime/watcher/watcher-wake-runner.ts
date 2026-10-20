@@ -16,7 +16,7 @@ import type { WatcherCheckoutGuard, WatcherGuardOutcome, WatcherGuardWindow } fr
 import { buildWatcherDigest, type WatcherDigest, type WatcherOpenReply } from "./watcher-digest";
 import { watcherInstruction } from "./watcher-instructions";
 import type { WatcherLiveProjection } from "./watcher-live-projection";
-import { classifyWatcherReply, findingPreview } from "./watcher-outcome";
+import { classifyWatcherReply, findingPreview, splitWatcherResolvedLine } from "./watcher-outcome";
 import type { WatcherRouteReadiness } from "./watcher-route";
 import {
   WATCHER_MAX_PENDING_FINALS,
@@ -35,6 +35,7 @@ export const WATCHER_ROUTE_RETRY_LIMIT = 3;
 /** Consecutive checks that fail to dispatch before the link pauses with `route-unavailable`. */
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
 export const WATCHER_FINAL_PASS_MAX_PAGES = 4;
+export const WATCHER_EARLIER_FINDINGS = 5;
 
 export function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
   return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()} `
@@ -240,6 +241,7 @@ export class WatcherWakeRunner {
       const finalPage = finalTurnId === null ? 0 : drained?.turnId === finalTurnId ? drained.pages + 1 : 1;
       const spare = staleTurn ? 0 : remaining - (consumesAllowance ? 1 : 0);
       const lastFinalPage = finalTurnId !== null && finalPage >= WATCHER_FINAL_PASS_MAX_PAGES && spare <= 0;
+      const digestTurnId = finalTurnId ?? cursor.turnId;
       const turnDiff = this.#deps.turnDiff;
       const diff = finalTurnId !== null && claimed.sharing.changedFiles && turnDiff
         ? { diff: await readWatcherTurnDiff(turnDiff, finalTurnId) }
@@ -255,6 +257,7 @@ export class WatcherWakeRunner {
         openReply: this.#openReplies.get(linkId, cursor.turnId) ?? null,
         lastFinalPage,
         contextAccess: route.contextAccess !== false && claimed.budgets.contextReadsPerWake !== 0,
+        earlierFindings: digestTurnId === null ? [] : store.watcherLinks.findingsForTurn(linkId, digestTurnId, WATCHER_EARLIER_FINDINGS),
         ...diff,
       });
       if (!digest) return release("skipped");
@@ -453,15 +456,17 @@ export class WatcherWakeRunner {
       const usageLimited = turn.usageLimited === true || store.limitResets.usageLimited(turn.id);
       let outcome: WatcherWakeOutcome;
       let finding: string | null = null;
+      let resolved: number[] = [];
       if (turn.status === "cancelled") outcome = "cancelled";
       else if (usageLimited) outcome = "usage-limited";
       else if (turn.status !== "completed") outcome = "failed";
       else {
-        const text = turn.terminalAssistantMessageId
+        const reply = splitWatcherResolvedLine(turn.terminalAssistantMessageId
           ? store.watcherLinks.digest.messageText(turn.terminalAssistantMessageId, MAX_REPLY_READ_BYTES).content
-          : "";
-        outcome = classifyWatcherReply(text, turn.status);
-        if (outcome === "finding") finding = findingPreview(text);
+          : "");
+        resolved = reply.resolved;
+        outcome = classifyWatcherReply(reply.text, turn.status);
+        if (outcome === "finding") finding = findingPreview(reply.text);
       }
       const violations = running?.violations ?? [];
       const stopped = violations.some((violation) => violation.stopped) || (running?.pause ?? null) !== null;
@@ -494,6 +499,11 @@ export class WatcherWakeRunner {
         ? { status: "paused", reason: "write-detected", detail: guard.pauseDetail }
         : running?.pause
           ?? (usageLimited ? { status: "paused", reason: "usage-limit", detail: WATCHER_USAGE_LIMIT_DETAIL } : null);
+      if (outcome === "silent" || outcome === "finding") {
+        for (const earlier of store.watcherLinks.findingsBySequence(linkId, resolved)) {
+          store.watcherLinks.markResolved(earlier.wakeId, wake.sequence, now);
+        }
+      }
     } finally {
       const now = this.#deps.now();
       if (!settled) {

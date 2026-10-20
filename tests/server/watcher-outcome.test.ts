@@ -4,6 +4,7 @@ import { MAX_WATCHER_FINDING_BYTES, MAX_WATCHER_NOTE_CHARS } from "../../src/sha
 import {
   classifyWatcherReply,
   findingPreview,
+  splitWatcherResolvedLine,
 } from "../../src/server/runtime/watcher/watcher-outcome";
 
 describe("classifyWatcherReply", () => {
@@ -71,5 +72,37 @@ describe("findingPreview", () => {
 
   it("replaces NUL bytes", () => {
     expect(findingPreview("a\0b")).toBe("a�b");
+  });
+});
+
+describe("splitWatcherResolvedLine", () => {
+  it.each([
+    ["Resolved: check 3", "", [3]],
+    ["Resolved: check 3, check 5", "", [3, 5]],
+    ["- The parser still drops a token.\n\nResolved: check 2\n", "- The parser still drops a token.", [2]],
+    ["SILENT\nResolved: check 4.", "SILENT", [4]],
+    ["`Resolved: check 1, check 1`", "", [1]],
+    ["resolved: Check 7", "", [7]],
+  ])("reads the trailing line of %j", (reply, text, resolved) => {
+    expect(splitWatcherResolvedLine(reply)).toEqual({ text, resolved });
+  });
+
+  it.each([
+    "Resolved: check 3 and the parser is fine",
+    "Resolved: checks 3, 5",
+    "Resolved: check three",
+    "Resolved: check 0",
+    "Resolved: check -2",
+    "Resolved: check 3\n- A new finding after it.",
+    "- The fix in Resolved: check 3 is wrong.",
+    `Resolved: ${Array.from({ length: 21 }, (_, index) => `check ${index + 1}`).join(", ")}`,
+    "Resolved: check 12345678901234567890",
+  ])("keeps %j as it is", (reply) => {
+    expect(splitWatcherResolvedLine(reply)).toEqual({ text: reply.trim(), resolved: [] });
+  });
+
+  it("accepts twenty checks", () => {
+    const line = `Resolved: ${Array.from({ length: 20 }, (_, index) => `check ${index + 1}`).join(", ")}`;
+    expect(splitWatcherResolvedLine(line).resolved).toHaveLength(20);
   });
 });

@@ -63,6 +63,7 @@ const OUTPUT_FORMAT = [
   "Output format: concise markdown with no preamble and no account of your own process.",
   "List findings as bullet points; each starts with a one-line verdict and then says where to look (file and line, command, or plan step).",
   "Keep the whole reply short enough to read at a glance.",
+  "If an earlier finding is now fixed, end your reply with a line `Resolved: check 3, check 5` naming those checks; do not repeat findings that are unchanged.",
 ].join(" ");
 
 export interface WatcherInstructionLink {

@@ -415,4 +415,53 @@ describe("watcher wake runner", () => {
       await f.close();
     }
   });
+
+  it("reminds each check of this turn's earlier findings and marks the ones a later check reports resolved", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      let watcherId = await wakeOnce(f, link.id);
+      expect(f.provider.input(watcherId).prompt).not.toContain("## Your earlier findings");
+      await f.finishTurn(watcherId, "- The parser drops the last token.");
+
+      watcherId = await wakeOnce(f, link.id);
+      expect(f.provider.input(watcherId).prompt).toMatch(
+        /## Your earlier findings this turn\n- Check 1 \(\d{2}:\d{2}\): The parser drops the last token\. — not sent\n/u,
+      );
+      await f.finishTurn(watcherId, "- The lexer skips tabs.\n\nResolved: check 1, check 7");
+      const [second, first] = feed(f, link.id);
+      expect(first).toMatchObject({ sequence: 1, outcome: "finding", resolvedBySequence: 2 });
+      expect(second).toMatchObject({ sequence: 2, outcome: "finding", finding: "- The lexer skips tabs.", resolvedBySequence: null });
+      expect(f.store.watcherLinks.get(link.id)!.latest).toMatchObject({ outcome: "finding", text: "- The lexer skips tabs." });
+
+      watcherId = await wakeOnce(f, link.id);
+      expect(f.provider.input(watcherId).prompt).toMatch(
+        /- Check 1 \(\d{2}:\d{2}\): The parser drops the last token\. — not sent; resolved by check 2\n- Check 2 \(\d{2}:\d{2}\): The lexer skips tabs\. — not sent/u,
+      );
+      await f.finishTurn(watcherId, "SILENT\nResolved: check 2");
+      expect(feed(f, link.id)[0]).toMatchObject({ sequence: 3, outcome: "silent", finding: null });
+      expect(feed(f, link.id)[1]).toMatchObject({ sequence: 2, resolvedBySequence: 3 });
+      expect(f.watcherEvents().filter((event) => event.type === "watcher.link.updated").length).toBeGreaterThan(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("marks checks resolved by a reply that is only a Resolved line, as a silent check", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      let watcherId = await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "- The parser drops the last token.");
+      watcherId = await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "Resolved: check 1");
+      expect(feed(f, link.id)[0]).toMatchObject({ sequence: 2, outcome: "silent", finding: null });
+      expect(feed(f, link.id)[1]).toMatchObject({ sequence: 1, resolvedBySequence: 2 });
+      expect(f.store.watcherLinks.get(link.id)!.counters.findingsTotal).toBe(1);
+    } finally {
+      await f.close();
+    }
+  });
 });

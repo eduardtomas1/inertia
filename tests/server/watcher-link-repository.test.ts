@@ -109,10 +109,10 @@ function settleTurn(turnId: string) {
 }
 
 /** Runs one complete check through the compare-and-set lifecycle. */
-function check(linkId: string, outcome: "silent" | "finding" = "silent") {
+function check(linkId: string, outcome: "silent" | "finding" = "silent", watchedTurnId: string | null = null) {
   expect(store.watcherLinks.transition(linkId, ["watching"], { status: "waking" }, tick())).not.toBeNull();
   const wake = store.watcherLinks.createWake({
-    id: randomUUID(), linkId, watchedTurnId: null, trigger: "activity",
+    id: randomUUID(), linkId, watchedTurnId, trigger: "activity",
     eventsCovered: 2, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 512,
   }, tick());
   expect(wake).not.toBeNull();
@@ -405,6 +405,26 @@ describe("watcher link repository", () => {
     expect(links.usageTotals(link.id)).toEqual({ totalTokens: 2_000 });
     expect(links.get(link.id)).not.toHaveProperty("usage");
     expect(store.shellSnapshot().watchers?.[0]).not.toHaveProperty("usage");
+  });
+
+  it("lists the newest findings of one watched turn oldest first, and finds a link's findings by check number", () => {
+    const links = store.watcherLinks;
+    const { link } = attach(chat());
+    const { link: other } = attach(chat("Other"));
+    const first = check(link.id, "finding", "turn-a");
+    check(link.id, "silent", "turn-a");
+    const second = check(link.id, "finding", "turn-a");
+    const third = check(link.id, "finding", "turn-a");
+    check(link.id, "finding", "turn-b");
+    check(other.id, "finding", "turn-a");
+    expect(links.findingsForTurn(link.id, "turn-a", 5).map(({ sequence }) => sequence)).toEqual([first.sequence, second.sequence, third.sequence]);
+    expect(links.findingsForTurn(link.id, "turn-a", 2).map(({ wakeId }) => wakeId)).toEqual([second.wakeId, third.wakeId]);
+    expect(links.findingsForTurn(link.id, "turn-c", 5)).toEqual([]);
+    expect(links.findingsForTurn(link.id, "turn-a", 0)).toEqual([]);
+    expect(links.findingsBySequence(link.id, [first.sequence, 2, third.sequence, 99]).map(({ wakeId }) => wakeId))
+      .toEqual([first.wakeId, third.wakeId]);
+    expect(links.findingsBySequence(other.id, [first.sequence])).toHaveLength(1);
+    expect(links.findingsBySequence(link.id, [])).toEqual([]);
   });
 
   it("marks a settled finding resolved by a later check of the same link, once", () => {

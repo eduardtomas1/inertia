@@ -1764,6 +1764,8 @@ describe("compact Work sidebar", () => {
     expect(nestedRow).toHaveClass("is-watcher");
     const rows = [...stream.querySelectorAll(".activity-thread")];
     expect(rows.indexOf(nestedRow)).toBe(1);
+    expect(rows.map((row) => [row.getAttribute("aria-posinset"), row.getAttribute("aria-setsize")]))
+      .toEqual([["1", "3"], ["2", "3"], ["3", "3"]]);
     const parent = screen.getByRole("button", { name: /^Refactor parser,/u });
     parent.focus();
     fireEvent.keyDown(parent, { key: "ArrowDown" });

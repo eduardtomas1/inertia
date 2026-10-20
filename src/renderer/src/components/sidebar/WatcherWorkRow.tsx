@@ -35,6 +35,8 @@ export function WatcherWorkRow({
   conversation,
   parentTitle,
   link,
+  position,
+  setSize,
   active,
   statusLabel,
   menu,
@@ -43,6 +45,8 @@ export function WatcherWorkRow({
   conversation: Conversation;
   parentTitle: string;
   link: WatcherLinkView | undefined;
+  position: number;
+  setSize: number;
   active: boolean;
   statusLabel: string;
   menu: WatcherWorkRowMenu;
@@ -56,6 +60,8 @@ export function WatcherWorkRow({
     <div
       className={clsx("activity-thread is-watcher", active && "is-active", menu.open && "has-open-menu")}
       role="listitem"
+      aria-posinset={position}
+      aria-setsize={setSize}
       data-sidebar-motion-id={`watcher:${conversation.id}`}
       data-watcher-status={link?.status}
       onContextMenu={(event) => {

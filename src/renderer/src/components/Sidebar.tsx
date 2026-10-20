@@ -898,6 +898,8 @@ function SidebarView({
           conversation={watcher}
           parentTitle={threadViewsById.get(item.parentId)?.conversation.title ?? "this chat"}
           link={watcherLinks?.find(({ watcherConversationId }) => watcherConversationId === watcher.id)}
+          position={item.position}
+          setSize={visibleWorkConversationIds.size}
           active={snapshot?.activeConversationId === watcher.id && view === "workspace"}
           statusLabel={statusLabels[model?.status ?? "idle"]}
           menu={{

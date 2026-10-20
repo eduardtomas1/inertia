@@ -54,6 +54,7 @@ export type WorkIndexItem =
       kind: "watcher";
       conversation: Conversation;
       parentId: string;
+      position: number;
       sectionId: SidebarWorkSectionId;
     }
   | {
@@ -137,11 +138,13 @@ export function useSidebarWorkIndex({
         });
         const watcher = watchersByParent?.get(conversation.id);
         if (watcher) {
+          threadPosition += 1;
           next.push({
             id: `watcher:${watcher.conversation.id}`,
             kind: "watcher",
             conversation: watcher.conversation,
             parentId: conversation.id,
+            position: threadPosition,
             sectionId: section.id,
           });
         }

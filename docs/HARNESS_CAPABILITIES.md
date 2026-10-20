@@ -228,7 +228,7 @@ through `watcherHarnessAllowed`:
 
 | Harness | Read-only mechanism |
 | --- | --- |
-| `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn. |
+| `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn, so every command needs approval and is declined. |
 | `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. |
 | `opencode-sdk` | Plan mode with the supervised permission ruleset. Edit and shell tools surface as approvals, which are declined. Read, glob, grep and list must run without a prompt; where the supervised ruleset would prompt for them, the run carries `readOnlyProfile: "watcher"`, which denies every tool except read, glob, grep, list and Inertia host tools. |
 
@@ -262,17 +262,21 @@ Each layer works on its own; none relies on the model following instructions.
 2. **Fail-closed interactions.** Approval requests are declined through the
    provider's own deny decision and recorded as a visible activity. No approval
    card is broadcast, so watcher conversations never have pending approvals. A
-   second declined request in one turn, or a request without a deny option,
-   stops the turn. An input request stops the turn.
+   declined edit request (a `file-change` approval, or a `permissions` approval
+   asking for write access) is recorded as a `write-attempt` and the turn
+   continues; any other declined request is a `command-attempt`. A second
+   declined request in one turn, or a request without a deny option, stops the
+   turn. An input request stops the turn.
 3. **Real-time activity guard.** A started `file` activity, or an activity in
    the `coding` category, cancels the provider run and settles the turn as
    failed with "Watchers are read-only. Inertia stopped this check." The
-   outcome is `write-attempt`; a second attempt during the same watched turn
-   pauses the link with `write-attempts`. A started `command` activity does
+   outcome is `write-attempt`. Write attempts are counted per watched turn,
+   whether declined or stopped: the second pauses the link with
+   `write-attempts` and stops the check. A started `command` activity does
    not stop the turn: commands are governed by the provider gates in the table
-   above, and the receipt records how many read-only commands ran. The
-   `command-attempt` outcome is used only for a command approval that was
-   requested and declined.
+   above, and the receipt records how many commands the watcher ran
+   (`commandsRun` on the feed item). The `command-attempt` outcome is used only
+   for a command approval that was requested and declined.
 4. **Git fingerprint backstop.** `src/server/git/checkout-fingerprint.ts`
    fingerprints the checkout before and after each check through
    `runGitInspection` (`--no-optional-locks`, `core.fsmonitor=false`):
@@ -315,7 +319,18 @@ Both labels are part of the `INERTIA_SECTION_LABEL` alternation in
 imitates them is neutralized. The digest for each check is the watcher turn's
 visible content (64 KiB turn cap, `digestKiB` default 24), not a hidden
 instruction, and every quoted string passes through
-`boundedUntrustedAgentText`.
+`boundedUntrustedAgentText`. It honours the link's sharing choices; the
+watched turn's plan is shared under `activities`.
+
+### Pauses and resume
+
+A paused link records its reason. `usage-limit` and `route-unavailable`
+resume only once `watcherRouteReadiness` reports the watcher's route ready,
+and `watched-archived` refuses to resume until the watched chat is
+unarchived. Every resume tops the turn's check allowance back up to
+`wakesPerWatchedTurn`. Deleting the watched chat detaches the link in SQL and
+deleting the watcher chat removes it; the delete command then broadcasts
+`watcher.link.removed` for each link the chat took part in.
 
 ### Fixtures
 

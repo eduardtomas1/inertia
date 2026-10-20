@@ -8,7 +8,7 @@ A watcher is a read-only second agent that sits beside a chat and follows its wo
 2. Choose a model route. Only ready routes on [agents that can be watchers](#which-agents-can-be-watchers) are offered.
 3. Choose a [preset](#presets): **Reviewer**, **Scope guard** or **Explainer**.
 4. Optionally add your own instructions, up to 2,000 characters.
-5. Under **What the watcher sees**, choose what each check includes: the brief, activities, changed files and partial replies.
+5. Under **What the watcher sees**, choose what each check includes: the brief, activities, changed files and partial replies. The main agent's plan is shared with **Activities**.
 6. Optionally open the budgets and change them. See [Budgets and cost](#budgets-and-cost).
 7. If Private Connect is set up, choose whether the watcher follows the chat's visibility or stays hidden. See [Private Connect](#private-connect).
 8. Turn on **Review the last turn now** to have the watcher check the chat's most recent turn right away.
@@ -81,8 +81,8 @@ A watcher can read the chat it watches and the project's files. It can't change 
 
 - **Locked mode and access.** The watcher always runs in Plan mode with Supervised access, which can't be changed. You can switch its model only to another agent that can be a watcher.
 - **Approvals are declined.** Every approval request is declined automatically, and the watcher chat records what was declined. The watcher never shows you an approval card. A second declined request in one check stops that check, and a question from the watcher stops the check too.
-- **Edits stop the check.** If the watcher starts to edit, create or delete a file, Inertia stops that check. A second attempt during the same turn of the main chat pauses the watcher.
-- **Commands stay read-only.** Codex runs read-only commands inside its own read-only sandbox, without network access. On other agents a command needs approval, so it is declined. Receipts show how many read-only commands ran.
+- **Edits are attempts, never changes.** If the watcher asks to edit a file, the request is declined, Inertia records it as an attempt, and the check continues. If the watcher actually starts to edit, create or delete a file, or asks to edit a second time in the same check, Inertia stops that check. A second attempt during the same turn of the main chat pauses the watcher.
+- **Commands stay read-only.** Codex may run known-safe read-only commands inside its own read-only sandbox, without network access; any other command needs approval and is declined. On Claude Code and OpenCode every command needs approval, so it is declined. Receipts show how many commands the watcher ran.
 - **Changed files pause the watcher.** Before and after each check, Inertia takes a fingerprint of the checkout's Git state. If files changed that no running agent accounts for, the watcher pauses and a banner lists the changed paths. **Resume** asks you to confirm: if you edited those files yourself, resume. When another agent, a terminal or a Git operation was busy at the same time, the receipt notes that the result was inconclusive and the watcher keeps going. Outside a Git repository the fingerprint is unavailable and the other layers still apply.
 - **The watcher's instructions** tell it that it is read-only.
 
@@ -99,11 +99,11 @@ Each check is a turn on the watcher's own account and uses that account's quota,
 | Digest size | 24 KiB | 4 to 48 KiB |
 | Context reads per check | 4 | 0 to 8 |
 
-- **Checks per turn** counts checks during one turn of the main chat, including the final check. When the checks are used up, the watcher pauses and says why, and it still makes its final check when the turn ends. **Resume** grants a new set of checks.
+- **Checks per turn** counts checks during one turn of the main chat, including the final check. When the checks are used up, the watcher pauses and says why, and it still makes its final check when the turn ends. **Resume** tops the checks back up to the full allowance, whatever the reason for the pause.
 - **Digest size** caps what one check sends: newer activity is kept in full, older activity is shortened and the oldest is left out, and the check says what was left out.
 - **Context reads per check** limits how often the watcher may read more of the watched chat on its own during one check.
 
-If the watcher reaches its own account's usage limit, it pauses with the same explanation as **Limits**, and it can resume once its route is ready again. This never stops or slows the main chat.
+If the watcher reaches its own account's usage limit, it pauses with the same explanation as **Limits**, and it can resume once its route is ready again. A watcher paused because its route is unavailable likewise resumes only when the route is ready. Neither stops or slows the main chat.
 
 ## Which agents can be watchers
 
@@ -123,7 +123,7 @@ On a device paired with [Private Connect](../PRIVATE_CONNECT.md), a watcher is v
 
 - **Pause** stops new checks and keeps the watcher attached. **Resume** continues.
 - **Stop watching** asks you to confirm, stops any running check and detaches the watcher. It becomes an ordinary chat in the **Work** tab, and its mode is no longer locked.
-- **Archiving the watched chat** pauses the watcher. Unarchiving the chat offers to resume it.
+- **Archiving the watched chat** pauses the watcher, and **Resume** is refused until you unarchive the chat. Unarchiving the chat offers to resume it.
 - **Deleting the watched chat** detaches its watcher.
 - **Deleting the watcher** removes it. The shared checkout and worktree stay.
 
@@ -155,10 +155,10 @@ The dock says why:
 - you paused it;
 - it used its checks for this turn: choose **Resume**;
 - it reached its account's usage limit: it can resume once its route is ready;
-- its route is unavailable: check **Settings → Agents**;
+- its route is unavailable: check **Settings → Agents**; it can resume once the route is ready;
 - it tried to edit a file twice during one turn;
 - files changed that no running agent accounts for (see below);
-- the watched chat was archived.
+- the watched chat was archived: unarchive it, then resume.
 
 ### A banner lists changed files
 

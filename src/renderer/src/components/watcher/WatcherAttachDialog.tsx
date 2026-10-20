@@ -78,7 +78,7 @@ const PRESET_DESCRIPTIONS: Readonly<Record<WatcherPreset, string>> = {
 
 const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string; detail: string }> = [
   { key: "brief", label: "The brief", detail: "The request that started the turn" },
-  { key: "activities", label: "Activities", detail: "Tool calls, commands and file changes as they settle" },
+  { key: "activities", label: "Activities", detail: "Tool calls, commands, file changes and plan updates as they settle" },
   { key: "changedFiles", label: "Changed files", detail: "The files a turn changed, on its final check" },
   { key: "partialReplies", label: "Partial replies", detail: "What the main agent has written so far" },
 ];

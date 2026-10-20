@@ -355,9 +355,12 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(queue.first()).toBeVisible();
     await capture(info, "gif-06-sent");
 
-    // The watched turn ends; its final check is quiet and the note starts the
-    // next turn under its own divider, never as the user's words.
-    await queueWatcherReply("SILENT");
+    // The watched turn ends; its final check is quiet, reports the finding
+    // resolved, and the note starts the next turn under its own divider,
+    // never as the user's words.
+    const findingCheck = (await finding.locator(".watcher-finding-meta").textContent())?.match(/^Check (\d+)/u)?.[1];
+    expect(findingCheck).toBeDefined();
+    await queueWatcherReply(`SILENT\nResolved: check ${findingCheck}`);
     await queueWatcherReply("SILENT");
     await gate("main-finish");
     await expect(page.getByText(MAIN_ANSWER, { exact: true }).first()).toBeVisible();
@@ -381,7 +384,9 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(feedEntries().nth(2)).toHaveAttribute("data-kind", "receipts");
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await expect(dock().locator(".watcher-notice-line")).toHaveCount(0);
+    await expect(finding.locator(".watcher-finding-resolved")).toHaveText(/^Resolved in check \d+$/u);
     await capture(info, "main-chat-note-light");
+    await capture(info, "dock-resolved-light");
     expect(app.rendererErrors).toEqual([]);
   });
 
@@ -479,6 +484,14 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" })).toHaveAttribute("aria-checked", "true");
     await menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" }).click();
     await expect(phase()).toHaveText(/ · Reviewer · Watching$/u);
+
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    await menu.getByRole("menuitem", { name: "Review the last turn" }).click();
+    await expect(phase()).toHaveAttribute("data-phase", "waking");
+    await queueWatcherReply("SILENT");
+    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 3 times · .+ · nothing to report/u);
+    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    await expect(dock().locator(".watcher-dock-error")).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);
   });
 

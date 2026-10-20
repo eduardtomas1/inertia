@@ -22,6 +22,7 @@ import { openCodePermissions, openCodeWatcherCommandAllowed } from "../../src/se
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import { watcherActivityMayWrite } from "../../src/server/runtime/watcher/watcher-checkout-guard";
 import type { ReadOnlyWatcherViolation, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { CLAUDE_PROTOCOL_SESSION_ID, claudeSuccessResult, claudeSystem, fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
 import { processExists } from "../helpers/codex-app-server-fixture";
@@ -407,6 +408,9 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
     const commands = runtime.store.conversationDetail(runtime.watcherId)!.activities.filter(({ kind }) => kind === "command");
     expect(commands.map(({ status }) => status).sort()).toEqual(["completed", "completed", "failed"]);
+    expect(commands.map(({ title }) => title)).toEqual(["Bash", "Bash", "Bash"]);
+    expect(commands.map((activity) => [activity.status, watcherActivityMayWrite(activity, { cwd: repo, windows: false })]).sort())
+      .toEqual([["completed", false], ["completed", false], ["failed", true]]);
     expect(runtime.store.watcherLinks.digest.settledCommandCounts(runtime.watcherId, [turn.id]).get(turn.id)).toBe(2);
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
@@ -613,6 +617,8 @@ describe("watcher turns on the Codex app-server harness", () => {
       { status: "completed", detail: `Command:\ncat src/parser.ts\n\nOutput:\n${PARSER_SOURCE.trimEnd()}` },
       { status: "failed", detail: "Command:\ntee src/parser.ts" },
     ]);
+    expect(commands.map((activity) => [activity.status, watcherActivityMayWrite(activity, { cwd: repo, windows: false })]).sort())
+      .toEqual([["completed", false], ["failed", true]]);
     expect(runtime.violations).toEqual([expect.objectContaining({ kind: "command-attempt", stopped: false })]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
     expect(turn).toMatchObject({ status: "completed" });
@@ -685,8 +691,8 @@ const OPENCODE_SCRIPTED_CALLS = [
   { tool: "grep", pattern: "parse" },
   { tool: "list", pattern: "src" },
   { tool: "edit", pattern: "src/parser.ts" },
-  { tool: "bash", pattern: "git diff --stat" },
-  { tool: "bash", pattern: "rm src/parser.ts" },
+  { tool: "bash", pattern: "git diff --stat", description: "Shows changed files" },
+  { tool: "bash", pattern: "rm src/parser.ts", description: "Removes the parser" },
 ];
 
 interface OpenCodeCapture {
@@ -741,12 +747,12 @@ let events;
 let promptMessageID;
 let pending = null;
 const sendEvent = (event) => events?.write("data: " + JSON.stringify(event) + "\\n\\n");
-const part = (index, state) => sendEvent({ type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "tool-" + index, sessionID, messageID: "assistant-1", type: "tool", callID: "call-" + index, tool: calls[index].tool, state: { input: { pattern: calls[index].pattern }, time: { start: Date.now(), end: Date.now() }, ...state } } } });
+const part = (index, state) => sendEvent({ type: "message.part.updated", properties: { sessionID, time: Date.now(), part: { id: "tool-" + index, sessionID, messageID: "assistant-1", type: "tool", callID: "call-" + index, tool: calls[index].tool, state: { input: calls[index].tool === "bash" ? { command: calls[index].pattern, description: calls[index].description } : { pattern: calls[index].pattern }, time: { start: Date.now(), end: Date.now() }, ...state } } } });
 const execute = (index) => {
   const call = calls[index];
   if (call.tool === "edit" || call.pattern.startsWith("rm ")) fs.writeFileSync(target, ${JSON.stringify(OVERWRITE)});
   const output = call.tool === "read" || call.tool === "grep" ? fs.readFileSync(target, "utf8") : "src/parser.ts";
-  part(index, { status: "completed", output, title: call.pattern, metadata: {} });
+  part(index, { status: "completed", output, title: call.tool === "bash" ? call.description : call.pattern, metadata: {} });
 };
 const step = (index) => {
   if (index >= calls.length) {
@@ -902,10 +908,13 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { kind: "tool", status: "completed", title: "parse" },
       { kind: "tool", status: "completed", title: "src" },
       { kind: "tool", status: "failed", title: "edit" },
-      { kind: "command", status: "completed", title: "git diff --stat" },
+      { kind: "command", status: "completed", title: "Shows changed files" },
       { kind: "status", status: "completed", title: "Needed permission: OpenCode wants to use bash — declined (watchers are read-only)" },
       { kind: "command", status: "failed", title: "bash" },
     ].sort(byActivity));
+    const commands = runtime.store.conversationDetail(runtime.watcherId)!.activities.filter(({ kind }) => kind === "command");
+    expect(commands.map((activity) => [activity.status, watcherActivityMayWrite(activity, { cwd: repo, windows: false })]).sort())
+      .toEqual([["completed", false], ["failed", true]]);
     expect(runtime.store.watcherLinks.digest.settledCommandCounts(runtime.watcherId, [turn.id]).get(turn.id)).toBe(1);
     expect(runtime.violations).toEqual([expect.objectContaining({ linkId: runtime.linkId, kind: "command-attempt", stopped: false })]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);

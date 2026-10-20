@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
-import { watcherAttributionForm } from "../../src/server/runtime/watcher/watcher-checkout-guard";
+import { providerActivityDetailSections } from "../../src/server/provider/activity-detail";
+import { watcherActivityMayWrite, watcherAttributionForm } from "../../src/server/runtime/watcher/watcher-checkout-guard";
 import { WATCHER_ACCUMULATE_AGE_COOLDOWNS, WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
@@ -35,7 +36,7 @@ async function check(
   f: WatcherFixture,
   linkId: string,
   during: (watcherId: string) => void,
-  watcherActivity: boolean | { command: string } | "edit" = true,
+  watcherActivity: boolean | { command: string; title?: string } | "edit" = true,
   reply = "SILENT",
 ) {
   const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
@@ -48,7 +49,10 @@ async function check(
     f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `w-${++sequence}` });
   }
   if (typeof watcherActivity === "object") {
-    f.provider.emit(watcherConversationId, { type: "activity", kind: "command", phase: "completed", label: watcherActivity.command, activityId: `w-${++sequence}` });
+    const activityId = `w-${++sequence}`;
+    const label = watcherActivity.title ?? "Bash";
+    f.provider.emit(watcherConversationId, { type: "activity", kind: "command", phase: "started", label, activityId, detail: providerActivityDetailSections({ command: watcherActivity.command })! });
+    f.provider.emit(watcherConversationId, { type: "activity", kind: "command", phase: "completed", label, activityId, detail: providerActivityDetailSections({ output: "src/b.ts | 2 +-" })! });
   }
   if (watcherActivity === "edit") {
     f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "started", label: "Edit", detail: "src/a.ts", activityId: `w-${++sequence}` });
@@ -60,6 +64,20 @@ async function check(
 }
 
 describe("watcher checkout guard", () => {
+  it("classifies the command each harness records in the activity detail, not its title", () => {
+    const context = { cwd: "/repo", windows: false };
+    const command = (title: string, detail: string | null) => watcherActivityMayWrite({ kind: "command", title, detail }, context);
+    const shown = (text: string, output = "M src/a.ts") => `${providerActivityDetailSections({ command: text })}\n\n${providerActivityDetailSections({ output })}`;
+    expect(command("Bash", shown("git diff --stat"))).toBe(false);
+    expect(command("Command", shown("git status --short"))).toBe(false);
+    expect(command("Interrupted · Command", providerActivityDetailSections({ command: "rg parse src" }))).toBe(false);
+    expect(command("Bash", shown("cat src/a.ts > src/b.ts"))).toBe(true);
+    expect(command("Bash", shown("git status\nrm -rf src"))).toBe(true);
+    expect(command("Bash", null)).toBe(true);
+    expect(command("Command", providerActivityDetailSections({ output: "git diff --stat" }))).toBe(true);
+    expect(command("git diff --stat", null)).toBe(false);
+  });
+
   it("treats a change another turn on the checkout reported as explained", async () => {
     let root = "";
     const f = await createWatcherFixture({ captureFingerprint: fingerprints(() => root, { "src/a.ts": "1" }, { "src/a.ts": "2" }) });
@@ -165,7 +183,10 @@ describe("watcher checkout guard", () => {
   it("keeps watching when files change during a check whose own commands were all read-only", async () => {
     let root = "";
     const f = await createWatcherFixture({
-      captureFingerprint: fingerprints(() => root, { "src/b.ts": "1" }, { "src/b.ts": "2" }, { "src/b.ts": "2" }, { "src/b.ts": "3" }),
+      captureFingerprint: fingerprints(
+        () => root,
+        { "src/b.ts": "1" }, { "src/b.ts": "2" }, { "src/b.ts": "2" }, { "src/b.ts": "3" }, { "src/b.ts": "3" }, { "src/b.ts": "4" },
+      ),
     });
     root = f.workspace;
     try {
@@ -173,6 +194,9 @@ describe("watcher checkout guard", () => {
       await f.startWatchedTurn();
       const read = await check(f, link.id, () => undefined, { command: "git diff --stat" }, "The parser drops empty tokens.");
       expect(read).toMatchObject({ outcome: "finding", guardState: "inconclusive", guardPaths: ["src/b.ts"] });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", pauseReason: null });
+      const codex = await check(f, link.id, () => undefined, { command: "git status --short", title: "Command" }, "The lexer drops tabs.");
+      expect(codex).toMatchObject({ outcome: "finding", guardState: "inconclusive", guardPaths: ["src/b.ts"] });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", pauseReason: null });
       const unknown = await check(f, link.id, () => undefined, { command: "cat src/a.ts > src/b.ts" });
       expect(unknown).toMatchObject({ outcome: "write-detected", guardState: "changed" });

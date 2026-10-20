@@ -83,12 +83,23 @@ export function watcherAttributionForm(value: string, platform: NodeJS.Platform)
   return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
 }
 
+const COMMAND_SECTION = "Command:\n";
+const NEXT_SECTION = /\n\n(?:Command|Output|Error):\n/u;
+
+function activityCommand(activity: Pick<AgentActivity, "title" | "detail">, title: string): string {
+  const detail = activity.detail ?? "";
+  if (!detail.startsWith(COMMAND_SECTION)) return title;
+  const rest = detail.slice(COMMAND_SECTION.length);
+  const end = rest.search(NEXT_SECTION);
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
 export function watcherActivityMayWrite(
-  activity: Pick<AgentActivity, "kind" | "title">,
+  activity: Pick<AgentActivity, "kind" | "title" | "detail">,
   context: ReadOnlyCommandContext,
 ): boolean {
   const title = activity.title.replace(/^Interrupted · /u, "");
-  if (activity.kind === "command") return !classifyReadOnlyCommand(title, context).allowed;
+  if (activity.kind === "command") return !classifyReadOnlyCommand(activityCommand(activity, title), context).allowed;
   return activityExecutionCategory({ kind: activity.kind, title, status: "running" }) === "coding";
 }
 

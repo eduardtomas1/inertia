@@ -8,6 +8,13 @@ import { INTERFACE_LOCALE } from "../lib/locale";
  * `@shared/watcher`: its schema values stay in the deferred validator chunk
  * so the first-load routes do not grow with the feature.
  */
+/**
+ * Renderer copy of `MAX_ACTIVE_WATCHERS`: importing the value from
+ * `@shared/watcher` would pull its zod schemas into the thread actions menu.
+ * A unit test keeps the two equal.
+ */
+export const MAX_ACTIVE_WATCHERS = 8;
+
 export interface WatcherLinkIndex {
   /** Attached (not detached) links, keyed by the chat they watch. */
   byWatched: ReadonlyMap<string, WatcherLinkView>;
@@ -50,18 +57,21 @@ export function watcherPresetName(preset: WatcherPreset): string {
   return WATCHER_PRESET_NAMES[preset] ?? preset;
 }
 
-/** The watcher's agent, named by the provider identity labels and its model. */
-export function watcherAgentLabel(
-  conversation: Pick<Conversation, "providerId" | "modelSelection"> | undefined,
+/** The watcher's provider, named by the provider identity labels. */
+export function watcherProviderLabel(
+  conversation: Pick<Conversation, "providerId"> | undefined,
   labels: ProviderIdentityLabels | undefined,
 ): string {
   if (!conversation) return "Watcher";
-  const provider = labels?.[conversation.providerId] ?? conversation.providerId;
-  const selection = conversation.modelSelection;
-  const model = selection.alias?.trim()
-    || (selection.modelId && selection.modelId !== "provider-default" ? selection.modelId : "");
-  return model ? `${provider} ${model}` : provider;
+  return labels?.[conversation.providerId] ?? conversation.providerId;
 }
+
+/**
+ * The watcher's agent ("Codex", or "Codex · <model>" when a model is chosen),
+ * from the same schema-free helper the runtime stamps on forwarded notes, so
+ * the dock and the note always name it the same way.
+ */
+export { watcherAgentLabel } from "@shared/watcher-agent-label";
 
 /** "1 event" / "9 events"; eager because transcript estimates name checks. */
 export function watcherEventsText(count: number): string {

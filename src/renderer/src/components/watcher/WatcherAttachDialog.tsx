@@ -29,6 +29,7 @@ import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspensi
 import { usePrivateConnectState } from "../../hooks/usePrivateConnectState";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { resultEvent, type CommandWithoutId } from "../../lib/runtimeCommands";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import {
   composerRouteReadiness,
   type ComposerRouteRepair,
@@ -89,6 +90,11 @@ const BUDGET_FIELDS: ReadonlyArray<{ key: keyof WatcherBudgets; label: string; u
   { key: "digestKiB", label: "Digest size", unit: "KiB" },
   { key: "contextReadsPerWake", label: "Context reads per check", unit: "" },
 ];
+
+/** Instructions keep newlines and tabs; the runtime refuses other controls. */
+function stripInstructionControls(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu, "");
+}
 
 interface RouteChoice {
   route: ComposerModelRoute;
@@ -191,6 +197,10 @@ export function WatcherAttachDialog({
   const privateConnectConfigured = Boolean(
     privateConnectState.state?.enabled || (privateConnectState.state?.devices.length ?? 0) > 0,
   );
+  // Kept across an ambiguous timeout so a retry is the same attach, which
+  // the runtime recognizes, and replaced only after a definite failure.
+  const linkIdRef = useRef<string | null>(null);
+  const attachedRef = useRef(false);
   const presets = useRovingRadios(WATCHER_PRESETS, preset, setPreset);
   useNativePreviewSuspension(true);
 
@@ -205,8 +215,9 @@ export function WatcherAttachDialog({
   const selectedRoute = selection
     ? selectedModelSearchRoute(choices.map(({ route }) => route), selection)
     : null;
+  // An empty field means the default, not the minimum.
   const budgets = clampWatcherBudgets(Object.fromEntries(
-    BUDGET_FIELDS.map(({ key }) => [key, Number(budgetDrafts[key])]),
+    BUDGET_FIELDS.map(({ key }) => [key, budgetDrafts[key].trim() === "" ? undefined : Number(budgetDrafts[key])]),
   ) as Partial<Record<keyof WatcherBudgets, number>>);
   const hasCompletedTurn = watched?.latestTurn?.status === "completed";
   const canAttach = Boolean(watched && selection && routeReady && !submitting
@@ -227,6 +238,17 @@ export function WatcherAttachDialog({
       else restoreFocus();
     };
   }, []);
+
+  // An attach whose answer was lost still lands: close once the link shows up.
+  const attachedLink = linkIdRef.current
+    ? snapshot.watchers?.find(({ id, status }) => id === linkIdRef.current && status !== "detached") ?? null
+    : null;
+  useEffect(() => {
+    if (!attachedLink || attachedRef.current) return;
+    attachedRef.current = true;
+    restoreFocusRef.current = false;
+    onAttached(attachedLink);
+  }, [attachedLink, onAttached]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -263,10 +285,12 @@ export function WatcherAttachDialog({
     if (!canAttach || !selection) return;
     setSubmitting(true);
     setError(null);
+    const linkId = linkIdRef.current ?? crypto.randomUUID();
+    linkIdRef.current = linkId;
     void request({
       type: "watcher.attach",
       payload: {
-        linkId: crypto.randomUUID(),
+        linkId,
         watchedConversationId,
         modelSelection: {
           ...selection,
@@ -283,9 +307,13 @@ export function WatcherAttachDialog({
     }).then((event) => {
       const { result } = resultEvent(event);
       if (result.kind !== "watcher.link") throw new Error("The watcher could not be attached.");
+      if (attachedRef.current) return;
+      attachedRef.current = true;
       restoreFocusRef.current = false;
       onAttached(result.link);
     }).catch((failure: unknown) => {
+      if (attachedRef.current) return;
+      if (runtimeCommandDelivery(failure) !== "ambiguous") linkIdRef.current = null;
       setError(failure instanceof Error ? failure.message : "The watcher could not be attached.");
       setSubmitting(false);
     });
@@ -298,7 +326,7 @@ export function WatcherAttachDialog({
       bodyClassName="watcher-attach-body"
       titleId="watcher-attach-title"
       title="Add a watcher"
-      description={`A read-only second agent that follows “${watched.title}” and keeps its findings beside it.`}
+      description={`A read-only second agent that follows “${watched.title}” and keeps its findings beside it. It can't edit files, run commands or tests, or send anything without you.`}
       closeLabel="Close"
       closeDisabled={submitting}
       onClose={onClose}
@@ -387,7 +415,7 @@ export function WatcherAttachDialog({
           disabled={submitting}
           aria-describedby="watcher-attach-instructions-hint"
           placeholder="For example: watch for changes to the public API."
-          onChange={(event) => setInstructions(event.currentTarget.value.replaceAll("\0", ""))}
+          onChange={(event) => setInstructions(stripInstructionControls(event.currentTarget.value))}
         />
         <small id="watcher-attach-instructions-hint" className="watcher-attach-hint">
           Added to the preset. Up to {MAX_WATCHER_INSTRUCTIONS_CHARS.toLocaleString(INTERFACE_LOCALE)} characters.
@@ -482,9 +510,6 @@ export function WatcherAttachDialog({
         </label>
       </section>
 
-      <p className="watcher-attach-readonly">
-        The watcher is read-only: it can't edit files, run commands or tests, or send anything without you.
-      </p>
       <details className="watcher-attach-disclosure watcher-attach-shared">
         <summary>What is shared with the watcher?</summary>
         <p>

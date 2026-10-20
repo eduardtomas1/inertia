@@ -5,9 +5,10 @@ import { TooltipText } from "../TooltipText";
 export function MessageOrigin({ message }: { message: ChatMessage }) {
   if (message.role !== "user") return null;
   if (message.watcherNote) {
+    // The divider above carries the full attribution; the bubble only marks it.
     const note = message.watcherNote;
-    return <TooltipText className="message-watcher-origin" tooltip={`Forwarded by the watcher (${note.watcherLabel}) when you chose Send`}>
-      Note from watcher · {watcherPresetName(note.preset)}
+    return <TooltipText className="message-watcher-origin" tooltip={`Forwarded by the watcher (${watcherPresetName(note.preset)} · ${note.watcherLabel}) when you chose Send`}>
+      From watcher
     </TooltipText>;
   }
   if (!message.privateConnectDeviceId) return null;

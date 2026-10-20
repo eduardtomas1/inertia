@@ -1,22 +1,28 @@
 import type { Conversation } from "@shared/contracts";
-import { MAX_ACTIVE_WATCHERS, type WatcherLinkView } from "@shared/watcher";
+import type { WatcherLinkView } from "@shared/watcher";
+import { MAX_ACTIVE_WATCHERS } from "../../utils/watcherLinks";
 import type { WatcherSurfaceModel } from "./watcherContext";
 
 export type WatcherEntry =
   | { kind: "attach" }
   | { kind: "show"; link: WatcherLinkView }
-  | { kind: "unavailable"; reason: string };
+  /** `link` is set when the chat has a watcher this window can't show. */
+  | { kind: "unavailable"; reason: string; link?: WatcherLinkView };
 
 /**
- * What a chat's watcher entry point offers. Used only by deferred surfaces
- * (thread actions, command palette), so it may read the shared constants.
+ * What a chat's watcher entry point offers (thread actions, command palette).
+ * It imports no schema values, so the actions menu stays free of zod.
  */
 export function watcherEntryFor(
   surface: WatcherSurfaceModel,
   conversation: Pick<Conversation, "id" | "projectId" | "archivedAt">,
 ): WatcherEntry {
   const existing = surface.links.byWatched.get(conversation.id);
-  if (existing) return { kind: "show", link: existing };
+  if (existing) {
+    return surface.detachedConversationIds.has(conversation.id)
+      ? { kind: "unavailable", reason: "Return this chat to the main window to see its watcher.", link: existing }
+      : { kind: "show", link: existing };
+  }
   if (surface.links.byWatcher.has(conversation.id)) {
     return { kind: "unavailable", reason: "A watcher can't watch another watcher." };
   }

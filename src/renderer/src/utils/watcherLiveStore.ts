@@ -17,6 +17,15 @@ export function publishWatcherLive(event: WatcherLiveEvent): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Drops a link's phase when its check ends, so the next check never shows
+ * the previous one's phase before its own first tick arrives.
+ */
+export function clearWatcherLive(linkId: string): void {
+  if (!latestByLink.delete(linkId)) return;
+  for (const listener of listeners) listener();
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);

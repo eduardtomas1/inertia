@@ -1,14 +1,32 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { navigateMenuItems } from "../../utils/menuKeyboard";
 
 const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';
+const FLOATING_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
+/** Places a floating menu under its trigger, or above it when there's no room. */
+function floatingPosition(trigger: HTMLElement, menu: HTMLElement): CSSProperties {
+  const anchor = trigger.getBoundingClientRect();
+  const height = menu.offsetHeight;
+  const width = menu.offsetWidth;
+  const below = anchor.bottom + FLOATING_GAP;
+  const top = below + height > window.innerHeight - VIEWPORT_MARGIN && anchor.top - FLOATING_GAP - height >= VIEWPORT_MARGIN
+    ? anchor.top - FLOATING_GAP - height
+    : below;
+  const left = Math.max(VIEWPORT_MARGIN, Math.min(anchor.left, window.innerWidth - VIEWPORT_MARGIN - width));
+  return { position: "fixed", top, left, right: "auto" };
+}
 
 /**
  * A small `role="menu"` popover in the app's existing grammar: the trigger
  * owns `aria-expanded`/`aria-controls`, the first item takes focus, arrow keys
  * move between items and Escape returns focus to the trigger without
- * reaching the dock's own Escape handling.
+ * reaching the dock's own Escape handling. A `floating` menu renders in the
+ * document body at fixed coordinates, so a scrolling feed can't clip it; it
+ * closes when its trigger scrolls.
  */
 export function WatcherMenu({
   label,
@@ -16,6 +34,7 @@ export function WatcherMenu({
   triggerClassName,
   menuClassName,
   disabled = false,
+  floating = false,
   children,
 }: {
   label: string;
@@ -23,36 +42,89 @@ export function WatcherMenu({
   triggerClassName?: string;
   menuClassName?: string;
   disabled?: boolean;
+  floating?: boolean;
   children: (close: (restoreFocus?: boolean) => void) => ReactNode;
 }): React.JSX.Element {
   const menuId = `${useId().replaceAll(":", "")}-watcher-menu`;
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<CSSProperties | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const close = (restoreFocus = true): void => {
     setOpen(false);
     if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   };
+  useLayoutEffect(() => {
+    if (!open || !floating || !triggerRef.current || !menuRef.current) {
+      setPosition(null);
+      return;
+    }
+    setPosition(floatingPosition(triggerRef.current, menuRef.current));
+  }, [floating, open]);
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
-      document.getElementById(menuId)?.querySelector<HTMLElement>(MENU_ITEMS)?.focus({ preventScroll: true });
+      menuRef.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [menuId, open]);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
+    const inside = (target: EventTarget | null): boolean => target instanceof Node
+      && Boolean(rootRef.current?.contains(target) || menuRef.current?.contains(target));
     const dismiss = (event: Event): void => {
-      if (event.target instanceof Node && rootRef.current?.contains(event.target)) return;
+      if (inside(event.target)) return;
+      setOpen(false);
+    };
+    const scrolled = (event: Event): void => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
       setOpen(false);
     };
     document.addEventListener("pointerdown", dismiss, true);
     document.addEventListener("focusin", dismiss);
+    if (floating) {
+      window.addEventListener("scroll", scrolled, true);
+      window.addEventListener("resize", scrolled);
+    }
     return () => {
       document.removeEventListener("pointerdown", dismiss, true);
       document.removeEventListener("focusin", dismiss);
+      window.removeEventListener("scroll", scrolled, true);
+      window.removeEventListener("resize", scrolled);
     };
-  }, [open]);
+  }, [floating, open]);
+  const menu = open ? (
+    <div
+      ref={menuRef}
+      id={menuId}
+      className={`conversation-menu watcher-menu${menuClassName ? ` ${menuClassName}` : ""}${floating ? " is-floating" : ""}`}
+      role="menu"
+      aria-label={label}
+      style={floating ? position ?? { position: "fixed", top: 0, left: 0, visibility: "hidden" } : undefined}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+          return;
+        }
+        if (event.key === "Tab") {
+          // A floating menu sits at the end of the body: return to the trigger.
+          if (floating) {
+            event.preventDefault();
+            close();
+          } else {
+            setOpen(false);
+          }
+          return;
+        }
+        navigateMenuItems(event, MENU_ITEMS);
+      }}
+    >
+      {children(close)}
+    </div>
+  ) : null;
   return (
     <div ref={rootRef} className="watcher-menu-anchor">
       <button
@@ -73,29 +145,7 @@ export function WatcherMenu({
       >
         {trigger}
       </button>
-      {open && (
-        <div
-          id={menuId}
-          className={`conversation-menu watcher-menu${menuClassName ? ` ${menuClassName}` : ""}`}
-          role="menu"
-          aria-label={label}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              close();
-              return;
-            }
-            if (event.key === "Tab") {
-              setOpen(false);
-              return;
-            }
-            navigateMenuItems(event, MENU_ITEMS);
-          }}
-        >
-          {children(close)}
-        </div>
-      )}
+      {floating && menu ? createPortal(menu, document.body) : menu}
     </div>
   );
 }

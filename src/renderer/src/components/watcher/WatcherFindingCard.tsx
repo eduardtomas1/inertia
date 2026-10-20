@@ -12,20 +12,26 @@ const loadFindingMarkdown = createSurfaceLoader(async () => ({
   default: (await import("../ResponseMarkdown")).ResponseMarkdown,
 }));
 
+/**
+ * One status line. A local failure shows only while the runtime still has no
+ * delivery (or a failed one): once the feed says queued or sent, that wins.
+ */
 function findingStatus(
   delivery: WatcherFeedItem["delivery"],
   { sending, failure, watchedRunning }: { sending: boolean; failure: string | null; watchedRunning: boolean },
 ): string {
   if (sending) return "Sending…";
-  if (failure) return `Not sent · ${failure}`;
+  if (failure && (delivery === null || delivery.state === "failed")) return `Not sent · ${failure}`;
   if (!delivery) return "";
-  const text = watcherDeliveryText(delivery, watchedRunning);
-  return delivery.state === "failed" && delivery.detail ? `${text} · ${delivery.detail}` : text;
+  return watcherDeliveryText(delivery, watchedRunning);
 }
 
 export interface WatcherFindingCardProps {
   item: WatcherFeedItem;
   motionIndex: number;
+  /** True until this card's entrance has played once. */
+  enter: boolean;
+  onEntered: () => void;
   projectRoot: string;
   projectId: string;
   watchedConversationId: string;
@@ -43,6 +49,8 @@ export interface WatcherFindingCardProps {
 export function WatcherFindingCard({
   item,
   motionIndex,
+  enter,
+  onEntered,
   projectRoot,
   projectId,
   watchedConversationId,
@@ -61,7 +69,9 @@ export function WatcherFindingCard({
   const delivery = item.delivery;
   const deliverable = delivery === null || delivery.state === "failed";
   const status = findingStatus(delivery, { sending, failure, watchedRunning });
-  const detail = delivery && delivery.state !== "failed" ? delivery.detail : null;
+  const statusState = sending
+    ? "sending"
+    : failure && (delivery === null || delivery.state === "failed") ? "failed" : delivery?.state ?? "none";
   const finding = item.finding ?? "";
   return (
     <article
@@ -71,14 +81,22 @@ export function WatcherFindingCard({
       data-wake-id={item.wakeId}
       data-delivery={delivery?.state ?? (sending ? "sending" : "none")}
       tabIndex={-1}
+      data-enter={enter || undefined}
       style={{ "--motion-index": Math.min(motionIndex, 5) } as CSSProperties}
+      onAnimationEnd={(event) => {
+        if (event.target !== event.currentTarget) return;
+        delete event.currentTarget.dataset.enter;
+        onEntered();
+      }}
     >
       <header className="watcher-finding-header">
-        <h3 id={titleId}>Finding</h3>
-        <span className="watcher-finding-meta">
-          Check {item.sequence}
-          {item.settledAt ? ` · ${watcherClockTime(item.settledAt)}` : ""}
+        <span className="watcher-finding-heading">
+          <h3 id={titleId}>Finding</h3>
+          {item.settledAt && (
+            <time dateTime={item.settledAt}>· {watcherClockTime(item.settledAt)}</time>
+          )}
         </span>
+        <span className="watcher-finding-meta">Check {item.sequence}</span>
       </header>
       <div className="watcher-finding-body">
         {Markdown ? (
@@ -101,8 +119,8 @@ export function WatcherFindingCard({
           <button
             type="button"
             className="secondary-button"
-            disabled={sending || !online}
-            onClick={() => onDismiss(item)}
+            aria-disabled={sending || !online || undefined}
+            onClick={() => { if (!sending && online) onDismiss(item); }}
           >
             Dismiss
           </button>
@@ -114,10 +132,9 @@ export function WatcherFindingCard({
         role="status"
         aria-live="polite"
         tabIndex={-1}
-        data-state={delivery?.state ?? (sending ? "sending" : "none")}
+        data-state={statusState}
       >
         {status}
-        {detail && <small>{detail}</small>}
       </p>
     </article>
   );

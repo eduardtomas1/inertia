@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { ChevronRight } from "lucide-react";
 
 import type { WatcherFeedEntry, WatcherReceiptGroup as ReceiptGroup } from "@shared/watcher-feed";
 import {
@@ -47,31 +48,56 @@ export function WatcherCheckLine({ item }: { item: WatcherFeedEntry }): React.JS
   );
 }
 
-function receiptSummary(group: ReceiptGroup): string {
-  const times = group.count === 1 ? "once" : `${group.count} times`;
-  const since = group.count === 1
-    ? `at ${watcherClockTime(group.firstAt)}`
-    : `since ${watcherClockTime(group.firstAt)}`;
-  const commands = commandsNote(group.commandsRun);
-  return `Checked ${times} ${since} · nothing to report${commands ? ` · ${commands}` : ""}`;
+/** "7:32 PM" or "7:32–7:41 PM": the time range the receipt covers. */
+function receiptTimes(group: ReceiptGroup): string {
+  const first = watcherClockTime(group.firstAt);
+  const last = watcherClockTime(group.lastAt);
+  if (group.count === 1 || !last || first === last) return ` at ${first}`;
+  // "7:32–7:41 PM": a shared day period is said once.
+  const [firstClock, firstPeriod] = first.split(/\s/u);
+  const [, lastPeriod] = last.split(/\s/u);
+  return ` · ${firstPeriod && firstPeriod === lastPeriod ? firstClock : first}–${last}`;
 }
 
-/** Consecutive quiet checks, folded into one calm receipt. */
+function receiptSummary(group: ReceiptGroup): string {
+  const times = group.count === 1 ? "once" : `${group.count} times`;
+  const commands = commandsNote(group.commandsRun);
+  return `Checked ${times}${receiptTimes(group)} · nothing to report${commands ? ` · ${commands}` : ""}`;
+}
+
+function enterProps(enter: boolean, onEntered: () => void) {
+  return {
+    "data-enter": enter || undefined,
+    onAnimationEnd: (event: React.AnimationEvent<HTMLElement>) => {
+      if (event.target !== event.currentTarget) return;
+      delete event.currentTarget.dataset.enter;
+      onEntered();
+    },
+  };
+}
+
+/** Consecutive quiet checks, folded into one calm receipt the user can open. */
 export function WatcherReceiptGroup({
   group,
   motionIndex,
+  enter,
+  onEntered,
 }: {
   group: ReceiptGroup;
   motionIndex: number;
+  enter: boolean;
+  onEntered: () => void;
 }): React.JSX.Element {
   return (
     <details
       className="watcher-receipt"
       style={{ "--motion-index": Math.min(motionIndex, 5) } as CSSProperties}
+      {...enterProps(enter, onEntered)}
     >
       <summary>
         <span className="watcher-receipt-mark" aria-hidden="true" />
-        <span>{receiptSummary(group)}</span>
+        <span className="watcher-receipt-summary">{receiptSummary(group)}</span>
+        <ChevronRight className="watcher-receipt-chevron" size={14} aria-hidden="true" />
       </summary>
       <ol className="watcher-receipt-checks">
         {group.items.map((item) => (
@@ -86,9 +112,13 @@ export function WatcherReceiptGroup({
 export function WatcherNoticeLine({
   item,
   motionIndex,
+  enter,
+  onEntered,
 }: {
   item: WatcherFeedEntry;
   motionIndex: number;
+  enter: boolean;
+  onEntered: () => void;
 }): React.JSX.Element {
   const running = item.state !== "settled";
   return (
@@ -96,6 +126,7 @@ export function WatcherNoticeLine({
       className="watcher-receipt is-notice"
       data-outcome={item.outcome ?? "running"}
       style={{ "--motion-index": Math.min(motionIndex, 5) } as CSSProperties}
+      {...enterProps(enter, onEntered)}
     >
       <span className="watcher-receipt-mark" aria-hidden="true" />
       <span className="watcher-notice-line">

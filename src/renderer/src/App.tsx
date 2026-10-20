@@ -975,6 +975,7 @@ export default function App(): React.JSX.Element {
     request,
     primaryConversationId: conversation?.id ?? null,
     visibleConversationIds: split.splitConversationIds,
+    detachedConversationIds: detachedChats.conversationIds,
     selectConversation,
     openConversationInSplit,
   });

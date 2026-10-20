@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WatchedByChip } from "../../src/renderer/src/components/watcher/WatchedByChip";
@@ -34,7 +34,7 @@ describe("WatchedByChip", () => {
 
   it("names the watcher's agent and preset and toggles the dock it controls", () => {
     renderChip(surfaceModel());
-    const chip = screen.getByRole("button", { name: /Watched by Team Codex fixture-model · Reviewer/u });
+    const chip = screen.getByRole("button", { name: /^Watched by Team Codex · Reviewer$/u });
     expect(chip).toHaveAttribute("aria-controls", `watcher-dock-${WATCHED_ID}`);
     expect(chip).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(chip);
@@ -46,13 +46,66 @@ describe("WatchedByChip", () => {
 
   it("shows a badge only for a finding the user has not seen", () => {
     const latest = { outcome: "finding" as const, at: NOW, text: "The parser drops a token." };
-    const first = renderChip(surfaceModel({ watchers: [link({ latest })] }));
-    expect(screen.getByText("New finding")).toBeInTheDocument();
+    const first = renderChip(surfaceModel({ watchers: [link({ latest, latestFindingAt: NOW })] }));
+    expect(screen.getByText("New finding", { selector: ".watched-by-chip-badge" })).toBeInTheDocument();
     first.unmount();
     window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: true, seenAt: NOW }));
     resetWatcherDockStore();
-    renderChip(surfaceModel({ watchers: [link({ latest })] }));
-    expect(screen.queryByText("New finding")).not.toBeInTheDocument();
+    renderChip(surfaceModel({ watchers: [link({ latest, latestFindingAt: NOW })] }));
+    expect(document.querySelector(".watched-by-chip-badge")).toBeNull();
+  });
+
+  it("keeps the badge when a quiet check follows an unseen finding", () => {
+    window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: false, seenAt: null }));
+    const view = renderChip(surfaceModel({ watchers: [link({
+      latest: { outcome: "finding", at: NOW, text: "A risk" },
+      latestFindingAt: NOW,
+    })] }));
+    expect(document.querySelector(".watched-by-chip-badge")).toHaveTextContent("New finding");
+    // 45 s later the next check answers SILENT: `latest` moves on, the finding stays unseen.
+    view.rerender(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link({
+        latest: { outcome: "silent", at: "2026-10-19T10:42:45.000Z", text: "" },
+        latestFindingAt: NOW,
+      })] })}
+      >
+        <WatchedByChip conversationId={WATCHED_ID} />
+      </WatcherContext.Provider>,
+    );
+    expect(document.querySelector(".watched-by-chip-badge")).toHaveTextContent("New finding");
+  });
+
+  it("announces a new finding next to the chip only while the dock is collapsed", () => {
+    window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: false, seenAt: null }));
+    const region = () => document.querySelector<HTMLElement>('.watched-by-chip + [role="status"]')!;
+    const model = (latestFindingAt: string | null) => surfaceModel({ watchers: [link({ latestFindingAt })] });
+    const view = renderChip(model(null));
+    expect(region()).toHaveAttribute("aria-live", "polite");
+    expect(region()).toHaveClass("visually-hidden");
+    expect(region()).toBeEmptyDOMElement();
+    const rerender = (latestFindingAt: string | null) => view.rerender(
+      <WatcherContext.Provider value={model(latestFindingAt)}><WatchedByChip conversationId={WATCHED_ID} /></WatcherContext.Provider>,
+    );
+    rerender(NOW);
+    expect(region()).toHaveTextContent(/^New finding$/u);
+    rerender("2026-10-19T10:50:00.000Z");
+    expect(region()).toHaveTextContent(/^New finding\.$/u);
+    // With the dock open its own live region speaks; the chip stays quiet.
+    fireEvent.click(screen.getByRole("button", { name: /Watched by/u }));
+    expect(region()).toBeEmptyDOMElement();
+    rerender("2026-10-19T10:55:00.000Z");
+    expect(region()).toBeEmptyDOMElement();
+  });
+
+  it("refreshes the badge when another window marks the finding seen", () => {
+    window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: false, seenAt: null }));
+    renderChip(surfaceModel({ watchers: [link({ latestFindingAt: NOW })] }));
+    expect(document.querySelector(".watched-by-chip-badge")).not.toBeNull();
+    const key = watcherDockStorageKey(WATCHED_ID);
+    const value = JSON.stringify({ open: true, seenAt: NOW });
+    window.localStorage.setItem(key, value);
+    act(() => { window.dispatchEvent(new StorageEvent("storage", { key, newValue: value })); });
+    expect(document.querySelector(".watched-by-chip-badge")).toBeNull();
   });
 
   it("says when the watcher is paused", () => {
@@ -60,10 +113,10 @@ describe("WatchedByChip", () => {
     expect(screen.getByRole("button", { name: /Paused/u })).toBeInTheDocument();
   });
 
-  it("offers only Open in main window in a detached chat window", () => {
+  it("offers only Return to main window in a detached chat window", () => {
     const openInMainWindow = vi.fn();
     renderChip(surfaceModel({ surface: "detached", openInMainWindow, openAttachDialog: null }));
-    const chip = screen.getByRole("button", { name: /Watched by .*Open in main window/u });
+    const chip = screen.getByRole("button", { name: /Watched by .*Return to main window/u });
     expect(chip).not.toHaveAttribute("aria-expanded");
     expect(chip).not.toHaveAttribute("aria-controls");
     fireEvent.click(chip);

@@ -311,7 +311,7 @@ export function ConversationActionsMenu({
             else watcherSurface.openAttachDialog?.(conversation.id, conversationTrigger());
           }}
         >
-          <Eye size={14} />{watcherEntry.kind === "show" ? "Show watcher" : "Add a watcher…"}
+          <Eye size={14} />{watcherEntry.kind === "show" || (watcherEntry.kind === "unavailable" && watcherEntry.link) ? "Show watcher" : "Add a watcher…"}
         </ConversationMenuItem>
       )}
       {activeRun && thread.needsAttention && runAttention?.canAcknowledge && (

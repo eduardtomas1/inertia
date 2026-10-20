@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { groupWatcherFeed } from "@shared/watcher-feed";
 import type { WatcherDeliveryMode, WatcherFeedItem } from "@shared/watcher";
@@ -13,6 +13,7 @@ export interface WatcherFeedProps {
   feed: WatcherFeedState;
   actions: WatcherActions | null;
   headingId: string;
+  linkId: string;
   projectRoot: string;
   projectId: string;
   watchedConversationId: string;
@@ -28,6 +29,24 @@ function failureText(error: unknown): string {
 }
 
 /**
+ * Feed entries whose entrance already played, across remounts and collapses:
+ * a card or receipt animates in once, never again when the dock reopens or
+ * the user returns to the chat.
+ */
+const enteredEntries = new Set<string>();
+const MAX_ENTERED_ENTRIES = 2_000;
+
+function markEntered(key: string): void {
+  if (enteredEntries.size >= MAX_ENTERED_ENTRIES) enteredEntries.clear();
+  enteredEntries.add(key);
+}
+
+/** Test seam: lets every entry animate again. */
+export function resetWatcherFeedMotion(): void {
+  enteredEntries.clear();
+}
+
+/**
  * Findings and receipts, newest first. Findings are cards the user sends or
  * dismisses; quiet checks fold into receipts. Focus follows the action: to the
  * card's own status after Send, to the next card (or the heading) after
@@ -37,6 +56,7 @@ export function WatcherFeed({
   feed,
   actions,
   headingId,
+  linkId,
   projectRoot,
   projectId,
   watchedConversationId,
@@ -76,6 +96,20 @@ export function WatcherFeed({
     if (!target) return;
     if (focusTarget(target)) pendingFocus.current = null;
   });
+
+  // The runtime's word wins: once the feed shows a note queued or sent (for
+  // example after an ambiguous timeout), drop the local failure and its id.
+  useEffect(() => {
+    const settled = feed.items.filter(({ wakeId, delivery }) =>
+      failures.has(wakeId) && (delivery?.state === "queued" || delivery?.state === "sent"));
+    if (settled.length === 0) return;
+    for (const { wakeId } of settled) deliveryIds.current.delete(wakeId);
+    setFailures((current) => {
+      const next = new Map(current);
+      for (const { wakeId } of settled) next.delete(wakeId);
+      return next;
+    });
+  }, [failures, feed.items]);
 
   const setSendingFor = (wakeId: string, value: boolean): void => {
     setSending((current) => {
@@ -161,14 +195,20 @@ export function WatcherFeed({
       )}
       {groups.length > 0 && (
         <ol className="watcher-feed-list" aria-label="Watcher findings">
-          {groups.map((group, index) => (
+          {groups.map((group, index) => {
+            const motionKey = `${linkId}:${group.key}`;
+            const enter = !enteredEntries.has(motionKey);
+            const onEntered = (): void => markEntered(motionKey);
+            return (
             <li key={group.key} className="watcher-feed-entry" data-kind={group.kind === "receipts" ? "receipts" : group.item.outcome === "finding" ? "finding" : "notice"}>
               {group.kind === "receipts" ? (
-                <WatcherReceiptGroup group={group} motionIndex={index} />
+                <WatcherReceiptGroup group={group} motionIndex={index} enter={enter} onEntered={onEntered} />
               ) : group.item.outcome === "finding" && group.item.finding !== null ? (
                 <WatcherFindingCard
                   item={group.item}
                   motionIndex={index}
+                  enter={enter}
+                  onEntered={onEntered}
                   projectRoot={projectRoot}
                   projectId={projectId}
                   watchedConversationId={watchedConversationId}
@@ -183,18 +223,19 @@ export function WatcherFeed({
                   cardRef={registerCard}
                 />
               ) : (
-                <WatcherNoticeLine item={group.item} motionIndex={index} />
+                <WatcherNoticeLine item={group.item} motionIndex={index} enter={enter} onEntered={onEntered} />
               )}
             </li>
-          ))}
+            );
+          })}
         </ol>
       )}
       {feed.hasMore && (
         <button
           type="button"
           className="watcher-feed-more"
-          disabled={feed.loadingMore}
-          onClick={feed.loadMore}
+          aria-disabled={feed.loadingMore || undefined}
+          onClick={() => { if (!feed.loadingMore) feed.loadMore(); }}
         >
           {feed.loadingMore ? "Loading earlier checks…" : "Show earlier checks"}
         </button>

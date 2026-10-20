@@ -68,6 +68,7 @@ import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { WatcherWorkRow } from "./sidebar/WatcherWorkRow";
 import { nestWatcherThreads } from "../utils/watcherSidebar";
+import { watcherPresetName } from "../utils/watcherLinks";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
@@ -760,8 +761,15 @@ function SidebarView({
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
+    const watcherLink = nestedWork.topLevelWatchers.get(conversation.id);
+    const watcherParent = watcherLink?.watchedConversationId
+      ? conversations.find(({ id }) => id === watcherLink.watchedConversationId)
+      : undefined;
     const accessibleContext = [
       conversation.title,
+      watcherLink
+        ? `Watcher · ${watcherPresetName(watcherLink.preset)}${watcherParent ? `, watching ${watcherParent.title}` : ""}`
+        : null,
       providerLabel,
       projectLabel,
       repositoryLabel ? `Repository ${repositoryLabel}` : null,
@@ -834,6 +842,7 @@ function SidebarView({
             <span className="activity-thread-topline">
               <span className="activity-thread-provider" aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
               <span className="activity-thread-title">{conversation.title}</span>
+              {watcherLink && <span className="thread-watcher-mark" aria-hidden="true">Watcher</span>}
               {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
@@ -881,14 +890,31 @@ function SidebarView({
       return activityRow(item.conversation, item.position, item.sectionId);
     }
     if (item.kind === "watcher") {
-      const model = threadViewsById.get(item.conversation.id);
+      const watcher = item.conversation;
+      const model = threadViewsById.get(watcher.id);
+      const isDetached = detachedConversationIds.has(watcher.id);
       return (
         <WatcherWorkRow
-          conversation={item.conversation}
+          conversation={watcher}
           parentTitle={threadViewsById.get(item.parentId)?.conversation.title ?? "this chat"}
-          link={watcherLinks?.find(({ watcherConversationId }) => watcherConversationId === item.conversation.id)}
-          active={snapshot?.activeConversationId === item.conversation.id && view === "workspace"}
+          link={watcherLinks?.find(({ watcherConversationId }) => watcherConversationId === watcher.id)}
+          active={snapshot?.activeConversationId === watcher.id && view === "workspace"}
           statusLabel={statusLabels[model?.status ?? "idle"]}
+          menu={{
+            open: conversationMenu === watcher.id,
+            actions: conversationMenu === watcher.id ? conversationActions(watcher) : null,
+            renameForm: renaming === watcher.id ? renameForm(watcher) : null,
+            triggerRef: (node) => setMenuTrigger(watcher.id, node),
+            onOpen: (anchor) => {
+              preview.close();
+              setMenuAnchor(anchor);
+              setInitialSubmenu(undefined);
+              if (conversationMenu !== watcher.id) toggleMenu(watcher.id);
+            },
+            onPointerDown: view === "workspace" && !isDetached && watcher.archivedAt === null
+              ? (event) => startChatDrag(event, { conversationId: watcher.id, title: watcher.title }, preview.close)
+              : undefined,
+          }}
           onActivate={activateConversation}
         />
       );

@@ -1783,4 +1783,72 @@ describe("compact Work sidebar", () => {
       .toEqual(["Watcher · Reviewer · Refactor parser", "Refactor parser", "Docs"]);
     expect(stream.querySelector(".activity-thread.is-watcher")).toBeNull();
   });
+
+  it("gives a nested watcher the same thread actions as other rows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12, 30));
+    const watched = conversation(WATCHED_ID, "Refactor parser", new Date(2026, 7, 11, 11));
+    const watcher = conversation(WATCHER_ID, "Watcher · Reviewer · Refactor parser", new Date(2026, 7, 11, 12));
+    const view = renderSidebar([watched, watcher]);
+    view.rerenderSnapshot({ ...snapshot([watched, watcher]), watchers: [link({ projectId: project.id })] });
+    const nested = screen.getByRole("button", { name: /^Watcher · Reviewer, watching Refactor parser/u });
+    expect(nested).toHaveAttribute("aria-haspopup", "menu");
+    expect(nested).toHaveAccessibleDescription("Right-click or press Shift+F10 for thread actions.");
+    fireEvent.keyDown(nested, { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu", { name: "Thread actions for Watcher · Reviewer · Refactor parser" });
+    expect(within(menu).getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+    expect(nested).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0]!, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: /Thread actions for Watcher/u })).not.toBeInTheDocument();
+    fireEvent.contextMenu(nested);
+    expect(screen.getByRole("menu", { name: "Thread actions for Watcher · Reviewer · Refactor parser" })).toBeInTheDocument();
+  });
+
+  it("keeps the watcher marker when the watched chat is archived", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12, 30));
+    const watched = conversation(WATCHED_ID, "Refactor parser", new Date(2026, 7, 11, 11), {
+      archivedAt: new Date(2026, 7, 11, 12).toISOString(),
+    });
+    const watcher = conversation(WATCHER_ID, "Watcher · Reviewer · Refactor parser", new Date(2026, 7, 11, 12));
+    const view = renderSidebar([watched, watcher]);
+    view.rerenderSnapshot({ ...snapshot([watched, watcher]), watchers: [link({
+      projectId: project.id,
+      status: "paused",
+      pauseReason: "watched-archived",
+    })] });
+    const row = screen.getByRole("button", { name: /^Watcher · Reviewer · Refactor parser, Watcher · Reviewer, watching Refactor parser,/u });
+    expect(row.querySelector(".thread-watcher-mark")).toHaveTextContent("Watcher");
+  });
+
+  it("lists a watcher running its final check while its chat sits in a collapsed Done section", () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 7, 11, 12, 30);
+    vi.setSystemTime(now);
+    const watched = conversation(WATCHED_ID, "Refactor parser", new Date(2026, 7, 11, 11), {
+      settledAt: new Date(2026, 7, 11, 12).toISOString(),
+    });
+    const watcher = conversation(WATCHER_ID, "Watcher · Reviewer · Refactor parser", now, { status: "running" });
+    const runs: WorkspaceRun[] = [{
+      id: "run-watcher",
+      kind: "agent",
+      projectId: project.id,
+      conversationId: WATCHER_ID,
+      actionId: null,
+      label: watcher.title,
+      detail: null,
+      status: "running",
+      attentionState: "acknowledged",
+      canStop: true,
+      port: null,
+      startedAt: now.toISOString(),
+      finishedAt: null,
+    }];
+    const view = renderSidebar([watched, watcher], vi.fn(), runs);
+    view.rerenderSnapshot({ ...snapshot([watched, watcher], runs), watchers: [link({ projectId: project.id, status: "waking" })] });
+    expect(screen.getByRole("button", { name: /^Done/u })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /^Refactor parser,/u })).not.toBeInTheDocument();
+    const row = screen.getByRole("button", { name: /^Watcher · Reviewer · Refactor parser, Watcher · Reviewer, watching Refactor parser,/u });
+    expect(row.querySelector(".thread-watcher-mark")).not.toBeNull();
+  });
 });

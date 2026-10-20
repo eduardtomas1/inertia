@@ -7,6 +7,7 @@ import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, type WatcherLinkView } from "../../src/shared/watcher";
 import { WatcherAttachDialog } from "../../src/renderer/src/components/watcher/WatcherAttachDialog";
+import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { WATCHED_ID, link, payloadOf, project, recordingRequest, shell } from "./watcher-fixtures";
 
 const ready = (id: ProviderId, label: string, overrides: Partial<ProviderInfo> = {}): ProviderInfo => ({
@@ -115,7 +116,8 @@ describe("WatcherAttachDialog", () => {
     expect(within(dialog).getByRole("spinbutton", { name: /Checks per turn/u })).toHaveValue(12);
     expect(within(dialog).getByRole("spinbutton", { name: /Cooldown between checks/u })).toHaveValue(45);
     expect(within(dialog).getByRole("switch", { name: /Review the last turn now/u })).toBeDisabled();
-    expect(dialog).toHaveTextContent("The watcher is read-only: it can't edit files, run commands or tests, or send anything without you.");
+    // Stated up front, in the dialog's description, not below the fold.
+    expect(dialog).toHaveAccessibleDescription(/It can't edit files, run commands or tests, or send anything without you\./u);
     expect(within(dialog).getByText("What is shared with the watcher?")).toBeInTheDocument();
   });
 
@@ -201,5 +203,56 @@ describe("WatcherAttachDialog", () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
+  });
+
+  it("restores a cleared budget field to its default, not its minimum", async () => {
+    const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+    const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
+    const checks = within(dialog).getByRole("spinbutton", { name: /Checks per turn/u });
+    fireEvent.change(checks, { target: { value: "30" } });
+    fireEvent.change(checks, { target: { value: "" } });
+    fireEvent.blur(checks);
+    expect(checks).toHaveValue(12);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ budgets: { wakesPerWatchedTurn: 12 } });
+  });
+
+  it("retries an ambiguous attach with the same link id and closes when the link appears", async () => {
+    const recorded = recordingRequest(() => {
+      throw new RuntimeCommandError("The local service did not answer in time.", "ambiguous");
+    });
+    const onAttached = vi.fn();
+    const value = snapshot([ready("codex", "Codex")]);
+    const view = render(<Harness value={value} request={recorded.request} onAttached={onAttached} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add a watcher…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a watcher" });
+    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    fireEvent.click(attach);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("did not answer in time");
+    fireEvent.click(attach);
+    await waitFor(() => expect(recorded.commands).toHaveLength(2));
+    const [first, second] = recorded.commands.map((command) => payloadOf(command).linkId);
+    expect(first).toEqual(second);
+    expect(onAttached).not.toHaveBeenCalled();
+    // The first attach did land: its link reaches the shell, and the dialog closes.
+    const created = link({ id: first as string });
+    view.rerender(<Harness value={{ ...value, watchers: [created] }} request={recorded.request} onAttached={onAttached} />);
+    await waitFor(() => expect(onAttached).toHaveBeenCalledWith(created));
+    expect(onAttached).toHaveBeenCalledOnce();
+  });
+
+  it("starts over with a new link id after a definite failure", async () => {
+    const recorded = recordingRequest(() => {
+      throw new RuntimeCommandError("This chat already has a watcher.", "rejected");
+    });
+    const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request: recorded.request });
+    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    fireEvent.click(attach);
+    await within(dialog).findByRole("alert");
+    fireEvent.click(attach);
+    await waitFor(() => expect(recorded.commands).toHaveLength(2));
+    const [first, second] = recorded.commands.map((command) => payloadOf(command).linkId);
+    expect(first).not.toEqual(second);
   });
 });

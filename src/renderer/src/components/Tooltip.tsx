@@ -130,6 +130,9 @@ export function useTooltip<T extends HTMLElement>(
       onKeyDown: (event) => {
         handlers.onKeyDown?.(event);
         if (event.key !== "Escape" || !openRef.current) return;
+        // The first Escape only closes the tooltip; surfaces that collapse on
+        // Escape (the watcher dock) skip a handled event.
+        event.preventDefault();
         close();
       },
     },

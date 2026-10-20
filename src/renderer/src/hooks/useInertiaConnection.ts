@@ -23,7 +23,7 @@ import {
   applyConversationShellEvent,
   applyWatcherLinkEvent,
 } from "../utils/runtimeSnapshotProjection";
-import { publishWatcherLive } from "../utils/watcherLiveStore";
+import { clearWatcherLive, publishWatcherLive } from "../utils/watcherLiveStore";
 import {
   publishesWorkspaceGitCompletion,
   runtimeCommandPolicy,
@@ -216,6 +216,8 @@ export function useInertiaConnection(): InertiaConnection {
                   || event.type === "watcher.link.removed"
                 ) {
                   const linkEvent = event;
+                  if (linkEvent.type === "watcher.link.removed") clearWatcherLive(linkEvent.linkId);
+                  else if (linkEvent.link.status !== "waking") clearWatcherLive(linkEvent.link.id);
                   setSnapshot((current) => current
                     ? applyWatcherLinkEvent(current, linkEvent)
                     : current);

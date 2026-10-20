@@ -1,12 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  Ellipsis,
-  MessagesSquare,
-  PanelRightClose,
-  Pause,
-  Play,
-  RefreshCw,
-} from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Ellipsis, PanelRightClose } from "lucide-react";
 
 import type { ConversationShell } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
@@ -34,6 +27,8 @@ export interface WatcherBarProps {
   headingId: string;
   actions: WatcherActions | null;
   privateConnectConfigured: boolean;
+  /** Why Resume would be refused right now, or null when it can resume. */
+  resumeBlocked: string | null;
   onCollapse: () => void;
   onOpenWatcherChat: (() => void) | null;
   onResumeRequest: () => void;
@@ -46,30 +41,37 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The watcher could not be updated.";
 }
 
-/** Announces transitions only: never timer ticks or repeated states. */
+const QUIET_OUTCOMES = new Set(["silent", "finding"]);
+
+/**
+ * Announces what needs attention only: a new finding, a check that failed
+ * and a pause. Routine checks ("checking", "nothing to report") stay silent,
+ * so a busy turn does not produce two dozen announcements.
+ */
 function useTransitionAnnouncement(link: WatcherLinkView): string {
   const [announcement, setAnnouncement] = useState("");
-  const previous = useRef({
-    status: link.status,
-    reason: link.pauseReason,
-    latestAt: link.latest?.at ?? null,
-  });
+  const latestFindingAt = link.latestFindingAt ?? null;
   const latestAt = link.latest?.at ?? null;
   const outcome = link.latest?.outcome ?? null;
+  const previous = useRef({ status: link.status, reason: link.pauseReason, latestAt, latestFindingAt });
   useEffect(() => {
     const prior = previous.current;
-    previous.current = { status: link.status, reason: link.pauseReason, latestAt };
+    previous.current = { status: link.status, reason: link.pauseReason, latestAt, latestFindingAt };
     const parts: string[] = [];
-    if (latestAt !== prior.latestAt && outcome !== null) {
-      parts.push(outcome === "finding" ? "New finding" : outcome === "silent" ? "Nothing to report" : watcherOutcomeText(outcome));
+    if (latestFindingAt !== null && latestFindingAt !== prior.latestFindingAt) parts.push("New finding");
+    if (latestAt !== prior.latestAt && outcome !== null && !QUIET_OUTCOMES.has(outcome)) {
+      parts.push(watcherOutcomeText(outcome));
     }
-    if (link.status === "waking" && prior.status !== "waking") parts.push("Watcher checking");
     if (link.status === "paused" && (prior.status !== "paused" || prior.reason !== link.pauseReason)) {
       parts.push(watcherPauseAnnouncement(link.pauseReason));
     }
     if (parts.length > 0) setAnnouncement(parts.join(". "));
-  }, [latestAt, link.pauseReason, link.status, outcome]);
+  }, [latestAt, latestFindingAt, link.pauseReason, link.status, outcome]);
   return announcement;
+}
+
+function counterText(count: number): string {
+  return count.toLocaleString(INTERFACE_LOCALE);
 }
 
 export function WatcherBar({
@@ -80,6 +82,7 @@ export function WatcherBar({
   headingId,
   actions,
   privateConnectConfigured,
+  resumeBlocked,
   onCollapse,
   onOpenWatcherChat,
   onResumeRequest,
@@ -87,10 +90,14 @@ export function WatcherBar({
 }: WatcherBarProps): React.JSX.Element {
   const [pending, setPending] = useState<Pending>(null);
   const [confirmingStop, setConfirmingStop] = useState(false);
-  const mounted = useRef(true);
+  const mounted = useRef(false);
   const keepWatchingRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Set in the effect body too: StrictMode runs the cleanup once at mount.
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
     if (confirmingStop) keepWatchingRef.current?.focus({ preventScroll: true });
   }, [confirmingStop]);
@@ -100,7 +107,9 @@ export function WatcherBar({
   const latestTurn = watcher?.latestTurn ?? null;
   const turnRunning = latestTurn !== null && !isAgentTurnTerminalStatus(latestTurn.status);
   const startedAt = waking && turnRunning ? latestTurn.startedAt ?? latestTurn.requestedAt : null;
-  const liveForTurn = live && (latestTurn === null || live.turnId === latestTurn.id) ? live : null;
+  // The runtime drops a link's phase when its check ends; the turn id guards
+  // a late tick from the previous check until the new turn reaches the shell.
+  const liveForTurn = waking && live && (latestTurn === null || live.turnId === latestTurn.id) ? live : null;
   const paused = link.status === "paused";
   const run = (name: Exclude<Pending, null>, operation: () => Promise<unknown>): void => {
     if (pending) return;
@@ -117,55 +126,32 @@ export function WatcherBar({
       : link.status === "idle"
         ? "Waiting for the main chat"
         : link.lastWakeAt
-          ? `Watching · last check ${watcherClockTime(link.lastWakeAt)}`
-          : "Watching for activity";
+          ? `Last check ${watcherClockTime(link.lastWakeAt)}`
+          : "Waiting for activity";
   const counters = link.counters;
+  const allowance = link.budgets.wakesPerWatchedTurn;
+  const checksLeft = Math.min(allowance, Math.max(0, counters.wakeAllowance - counters.wakesThisTurn));
   const effort = watcher?.reasoningEffort?.trim();
   const title = watched?.title ?? "this chat";
-  const summary = `Watcher for ${title}: ${agentLabel}, ${watcherPresetName(link.preset)}`;
+  const preset = watcherPresetName(link.preset);
+  const summary = `Watcher for ${title}: ${agentLabel}, ${preset}`;
+  // Pending actions keep focus: aria-disabled, never disabled, while busy.
+  const toggleUnavailable = !actions || pending !== null || (paused && resumeBlocked !== null);
+  const checkUnavailable = !actions || pending !== null || waking || paused;
+  const restoreMoreFocus = (): void => {
+    moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+  };
   return (
     <div className="watcher-bar" role="group" aria-label={summary}>
       <div className="watcher-bar-identity">
         <span className="watcher-bar-mark" aria-hidden="true">
           <ProviderBrandIcon providerId={watcher?.providerId} decorative size={16} />
         </span>
-        <div className="watcher-bar-heading">
-          <h2 id={headingId} tabIndex={-1}>
-            <span className="watcher-bar-heading-prefix">Watching</span> <span className="watcher-bar-title">{title}</span>
-          </h2>
-          <p className="watcher-bar-route">
-            {agentLabel}
-            {effort ? ` · ${effort}` : ""}
-            {" · "}
-            {watcherPresetName(link.preset)}
-          </p>
-        </div>
+        <h2 id={headingId} tabIndex={-1} title={title}>
+          <span className="visually-hidden">Watching </span>
+          <span className="watcher-bar-title">{title}</span>
+        </h2>
         <div className="watcher-bar-actions">
-          {paused ? (
-            <IconButton label="Resume" disabled={!actions || pending !== null} onClick={onResumeRequest}>
-              <Play size={16} aria-hidden="true" />
-            </IconButton>
-          ) : (
-            <IconButton
-              label="Pause"
-              disabled={!actions || pending !== null}
-              onClick={() => { if (actions) run("pause", actions.pause); }}
-            >
-              <Pause size={16} aria-hidden="true" />
-            </IconButton>
-          )}
-          <IconButton
-            label="Check now"
-            disabled={!actions || pending !== null || waking || paused}
-            onClick={() => { if (actions) run("wake", actions.wake); }}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-          </IconButton>
-          {onOpenWatcherChat && (
-            <IconButton label="Open watcher chat" onClick={onOpenWatcherChat}>
-              <MessagesSquare size={16} aria-hidden="true" />
-            </IconButton>
-          )}
           <div ref={moreRef}>
             <WatcherMenu
               label="More watcher actions"
@@ -176,14 +162,28 @@ export function WatcherBar({
             >
               {(close) => (
                 <>
+                  {onOpenWatcherChat && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      tabIndex={-1}
+                      onClick={() => {
+                        close(false);
+                        onOpenWatcherChat();
+                      }}
+                    >
+                      Open watcher chat
+                    </button>
+                  )}
                   {privateConnectConfigured && (
                     <button
                       type="button"
                       role="menuitemcheckbox"
                       tabIndex={-1}
                       aria-checked={link.privateConnect === "hidden"}
-                      disabled={pending !== null}
+                      aria-disabled={pending !== null || undefined}
                       onClick={() => {
+                        if (pending !== null) return;
                         close();
                         if (actions) {
                           run("visibility", () => actions.update({
@@ -200,8 +200,9 @@ export function WatcherBar({
                     role="menuitem"
                     tabIndex={-1}
                     className="is-danger"
-                    disabled={pending !== null}
+                    aria-disabled={pending !== null || undefined}
                     onClick={() => {
+                      if (pending !== null) return;
                       close(false);
                       setConfirmingStop(true);
                     }}
@@ -217,15 +218,46 @@ export function WatcherBar({
           </IconButton>
         </div>
       </div>
-      <div className="watcher-bar-status">
-        <p className="watcher-bar-phase" data-phase={waking ? "waking" : link.status}>
-          <span className="watcher-bar-phase-text">{phase}</span>
-          <WatcherElapsed startedAt={startedAt} />
+      <div className="watcher-bar-details">
+        <p className="watcher-bar-route">
+          Watching · {agentLabel}{effort ? ` · ${effort}` : ""} · {preset}
         </p>
+        <div className="watcher-bar-status">
+          <p className="watcher-bar-phase" data-phase={waking ? "waking" : link.status}>
+            <span className="watcher-bar-phase-text">{phase}</span>
+            <WatcherElapsed startedAt={startedAt} />
+          </p>
+          <div className="watcher-bar-controls">
+            <button
+              type="button"
+              className="watcher-bar-text-button"
+              aria-disabled={toggleUnavailable || undefined}
+              title={paused && resumeBlocked ? resumeBlocked : undefined}
+              onClick={() => {
+                if (toggleUnavailable || !actions) return;
+                if (paused) onResumeRequest();
+                else run("pause", actions.pause);
+              }}
+            >
+              {paused ? "Resume" : "Pause"}
+            </button>
+            <button
+              type="button"
+              className="watcher-bar-text-button"
+              aria-disabled={checkUnavailable || undefined}
+              onClick={() => {
+                if (checkUnavailable || !actions) return;
+                run("wake", actions.wake);
+              }}
+            >
+              Check now
+            </button>
+          </div>
+        </div>
         <p className="watcher-bar-counters">
-          <span>Checks {counters.wakesThisTurn} / {link.budgets.wakesPerWatchedTurn}</span>
-          <span>{counters.eventsSeen.toLocaleString(INTERFACE_LOCALE)} seen</span>
-          <span>{counters.eventsPending.toLocaleString(INTERFACE_LOCALE)} pending</span>
+          <span>{counterText(checksLeft)} of {counterText(allowance)} checks left this turn</span>
+          <span>{counterText(counters.eventsSeen)} {counters.eventsSeen === 1 ? "event" : "events"} seen</span>
+          <span>{counterText(counters.eventsPending)} waiting</span>
         </p>
         {link.quietSince && (
           <p className="watcher-bar-quiet">Main chat quiet since {watcherClockTime(link.quietSince)}</p>
@@ -241,7 +273,7 @@ export function WatcherBar({
             event.preventDefault();
             event.stopPropagation();
             setConfirmingStop(false);
-            moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+            restoreMoreFocus();
           }}
         >
           <p>Stop watching? Any running check stops and the watcher becomes an ordinary chat.</p>
@@ -252,7 +284,7 @@ export function WatcherBar({
               className="secondary-button"
               onClick={() => {
                 setConfirmingStop(false);
-                moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+                restoreMoreFocus();
               }}
             >
               Keep watching
@@ -260,10 +292,10 @@ export function WatcherBar({
             <button
               type="button"
               className="secondary-button is-danger"
-              disabled={!actions || pending !== null}
-              onClick={() => { if (actions) run("detach", actions.detach); }}
+              aria-disabled={!actions || pending !== null || undefined}
+              onClick={() => { if (actions && pending === null) run("detach", actions.detach); }}
             >
-              Stop watching
+              {pending === "detach" ? "Stopping…" : "Stop watching"}
             </button>
           </div>
         </div>

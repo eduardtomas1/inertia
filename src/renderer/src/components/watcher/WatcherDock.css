@@ -3,12 +3,9 @@
  * EASE is cubic-bezier(0.23, 1, 0.32, 1). */
 
 /* Placement: a flex sibling after the chat column. In a split pane the pane
- * becomes a two-column grid while a dock is present, tools stay below. */
-.workspace-body:has(> .watcher-dock-frame),
-.conversation-pane-workspace:has(> .watcher-dock-frame) {
-  container: watcher-host / inline-size;
-}
-
+ * becomes a two-column grid while a dock is present, tools stay below. The
+ * component decides inline or sheet (host width minus dock width under
+ * 360 px) and marks the frame `.is-sheet`. */
 .conversation-pane-workspace:has(> .watcher-dock-frame:not([hidden])) {
   position: relative;
   display: grid;
@@ -34,6 +31,10 @@
 /* Grid rows ignore flex bases: give the tools handle its 7px track. */
 .conversation-pane-workspace:has(> .watcher-dock-frame:not([hidden])) > .workspace-tools-resize-handle {
   height: 7px;
+}
+
+.workspace-body:has(> .watcher-dock-frame.is-sheet:not([hidden])) {
+  position: relative;
 }
 
 .watcher-dock-frame {
@@ -70,35 +71,51 @@
   box-shadow: inset 1px 0 0 var(--line-soft);
 }
 
-/* Narrow hosts: the dock floats over the chat as a sheet. */
-@container watcher-host (max-width: 640px) {
-  .watcher-dock-frame {
-    position: absolute;
-    z-index: 24;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(var(--watcher-dock-width, 340px), calc(100% - 24px));
-    border-radius: var(--radius-md) 0 0 var(--radius-md);
-    box-shadow: var(--shadow-overlay);
-  }
-
-  /* An absolute grid child is sized by its grid area; the auto dock column
-   * is empty here, so span the pane's chat row instead. */
-  .conversation-pane-workspace > .watcher-dock-frame {
-    grid-column: 1 / -1;
-  }
-
-  .watcher-dock {
-    box-shadow: none;
-  }
+/* Narrow hosts: the dock floats over the chat as a sheet that stops above
+ * the composer (its bottom offset is set inline), over a scrim. */
+.watcher-dock-frame.is-sheet {
+  position: absolute;
+  z-index: 24;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(var(--watcher-dock-width, 340px), calc(100% - 24px));
+  border-radius: 0 0 0 var(--radius-md);
+  box-shadow: var(--shadow-overlay);
 }
 
-/* Bar */
+/* An absolute grid child is sized by its grid area; the auto dock column
+ * is empty here, so span the pane's chat row instead. */
+.conversation-pane-workspace > .watcher-dock-frame.is-sheet,
+.conversation-pane-workspace > .watcher-dock-scrim {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.watcher-dock-frame.is-sheet > .watcher-dock {
+  box-shadow: none;
+}
+
+.watcher-dock-scrim {
+  position: absolute;
+  z-index: 23;
+  top: 0;
+  right: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--backdrop) 40%, transparent);
+}
+
+.watcher-dock-scrim[data-state="closing"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Bar: identity row (mark, title, More, Collapse), then the route line,
+ * the status row with its text actions, and the counters. */
 .watcher-bar {
   display: grid;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: 6px;
   padding: 12px 10px 10px 14px;
   border-bottom: 1px solid var(--line-soft);
 }
@@ -107,7 +124,7 @@
   display: grid;
   min-width: 0;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: 10px;
 }
 
@@ -120,16 +137,8 @@
   background: var(--fill);
 }
 
-.watcher-bar-heading {
-  display: grid;
+.watcher-bar-identity h2 {
   min-width: 0;
-  gap: 1px;
-}
-
-.watcher-bar-heading h2 {
-  display: flex;
-  min-width: 0;
-  gap: 4px;
   margin: 0;
   color: var(--text);
   font-size: var(--text-sm);
@@ -137,23 +146,24 @@
   line-height: var(--leading-chrome);
 }
 
-.watcher-bar-heading h2:focus-visible {
+.watcher-bar-identity h2:focus-visible {
   border-radius: var(--radius-xs);
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
-.watcher-bar-heading-prefix {
-  flex: none;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.watcher-bar-title,
-.watcher-bar-route {
+.watcher-bar-title {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.watcher-bar-details {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding-left: 38px;
 }
 
 .watcher-bar-route,
@@ -165,11 +175,17 @@
   line-height: var(--leading-chrome);
 }
 
+.watcher-bar-route {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .watcher-bar-actions {
   display: flex;
   align-items: center;
   gap: 0;
-  margin: -2px -2px 0 0;
+  margin: 0 -2px 0 0;
 }
 
 .watcher-bar-actions .icon-button {
@@ -178,9 +194,47 @@
 }
 
 .watcher-bar-status {
-  display: grid;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.watcher-bar-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
   gap: 2px;
-  padding-left: 38px;
+  margin-right: -2px;
+}
+
+.watcher-bar-text-button {
+  min-height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.watcher-bar-text-button:hover:not([aria-disabled="true"]) {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.watcher-bar-text-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.watcher-bar-text-button[aria-disabled="true"] {
+  color: var(--text-faint);
+  cursor: default;
 }
 
 .watcher-bar-phase {
@@ -236,15 +290,20 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Wraps between items, with each separator kept at the end of a line. */
 .watcher-bar-counters {
   display: flex;
   flex-wrap: wrap;
-  column-gap: 0;
+  column-gap: 6px;
   font-variant-numeric: tabular-nums;
 }
 
-.watcher-bar-counters > span + span::before {
-  padding: 0 6px;
+.watcher-bar-counters > span {
+  white-space: nowrap;
+}
+
+.watcher-bar-counters > span:not(:last-child)::after {
+  padding-left: 6px;
   color: var(--text-faint);
   content: "·";
 }
@@ -333,6 +392,10 @@
 .watcher-notice.is-danger .watcher-confirm {
   justify-self: stretch;
   background: var(--surface-raised);
+}
+
+.watcher-notice-blocked {
+  color: var(--text);
 }
 
 .watcher-notice.is-quiet {
@@ -428,15 +491,20 @@
   background: var(--fill);
 }
 
+/* Raised against the dock in both themes: the strong surface plus a line. */
 .watcher-finding {
   display: grid;
   min-width: 0;
   gap: 8px;
   padding: 11px 12px 12px;
   border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line-soft);
-  animation: watcher-enter 400ms var(--watcher-ease) both;
+  background: var(--surface-strong);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* Entrances play once (the component drops `data-enter` when they end). */
+.watcher-finding[data-enter] {
+  animation: watcher-enter 400ms var(--watcher-ease) backwards;
   animation-delay: calc(var(--motion-index, 0) * 100ms);
 }
 
@@ -447,6 +515,13 @@
   gap: 8px;
 }
 
+.watcher-finding-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+}
+
 .watcher-finding-header h3 {
   margin: 0;
   color: var(--text);
@@ -454,8 +529,15 @@
   font-weight: 600;
 }
 
-.watcher-finding-meta {
+.watcher-finding-heading time {
   color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.watcher-finding-meta {
+  flex: none;
+  color: var(--text-faint);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
@@ -494,8 +576,6 @@
 }
 
 .watcher-finding-status {
-  display: grid;
-  gap: 2px;
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -519,8 +599,13 @@
   min-height: var(--control-height-small);
 }
 
-.watcher-deliver-send.primary-button {
+.watcher-deliver:not(.is-single) .watcher-deliver-send.primary-button {
   border-radius: var(--radius-xs) 0 0 var(--radius-xs);
+}
+
+.watcher-deliver .primary-button[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .watcher-deliver-more.primary-button {
@@ -534,10 +619,20 @@
   min-height: var(--control-height-small);
 }
 
+.watcher-finding-actions > .secondary-button[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .watcher-deliver-menu.conversation-menu {
   right: auto;
   left: 0;
   width: 248px;
+}
+
+/* Rendered in the body at fixed coordinates, so the feed can't clip it. */
+.watcher-menu.is-floating {
+  z-index: 60;
 }
 
 .watcher-deliver-menu button > span {
@@ -556,7 +651,10 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-chrome);
-  animation: watcher-enter 450ms var(--watcher-ease) both;
+}
+
+.watcher-receipt[data-enter] {
+  animation: watcher-enter 450ms var(--watcher-ease) backwards;
   animation-delay: calc(var(--motion-index, 0) * 80ms);
 }
 
@@ -571,8 +669,29 @@
 }
 
 .watcher-receipt > summary {
-  cursor: default;
+  cursor: pointer;
   list-style: none;
+}
+
+.watcher-receipt > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.watcher-receipt-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.watcher-receipt-chevron {
+  flex: none;
+  align-self: center;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--watcher-ease);
+}
+
+.watcher-receipt[open] > summary .watcher-receipt-chevron {
+  transform: rotate(90deg);
 }
 
 .watcher-receipt > summary::-webkit-details-marker {
@@ -654,47 +773,65 @@
   }
 }
 
-/* Open and close: width plus opacity/transform, 300 ms. */
-.watcher-dock-frame[data-state="open"] {
-  animation: watcher-dock-open var(--dur-slow) var(--watcher-ease) both;
+/* Open and close animate only on the user's action (`data-motion`), with
+ * transform and opacity: the chat column never re-lays out per frame. */
+.watcher-dock-frame[data-motion][data-state="open"] > .watcher-dock {
+  animation: watcher-dock-in var(--dur-slow) var(--watcher-ease) backwards;
 }
 
 .watcher-dock-frame[data-state="closing"] {
-  animation: watcher-dock-close var(--dur-slow) var(--watcher-ease) both;
   pointer-events: none;
 }
 
-@keyframes watcher-dock-open {
+.watcher-dock-frame[data-motion][data-state="closing"] > .watcher-dock {
+  animation: watcher-dock-out var(--dur-slow) var(--watcher-ease) forwards;
+}
+
+.watcher-dock-scrim[data-motion][data-state="open"] {
+  animation: watcher-fade-in var(--dur-slow) var(--watcher-ease) backwards;
+}
+
+.watcher-dock-scrim[data-motion][data-state="closing"] {
+  animation: watcher-fade-out var(--dur-slow) var(--watcher-ease) forwards;
+}
+
+@keyframes watcher-dock-in {
   from {
-    width: 0;
-    flex-basis: 0;
     opacity: 0;
-  }
-}
-
-@keyframes watcher-dock-close {
-  to {
-    width: 0;
-    flex-basis: 0;
-    opacity: 0;
-  }
-}
-
-.watcher-dock-frame[data-state="open"] > .watcher-dock {
-  animation: watcher-dock-slide var(--dur-slow) var(--watcher-ease) both;
-}
-
-@keyframes watcher-dock-slide {
-  from {
     transform: translateX(16px);
+  }
+}
+
+@keyframes watcher-dock-out {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes watcher-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes watcher-fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .watcher-dock-frame,
   .watcher-dock-frame > .watcher-dock,
+  .watcher-dock-scrim,
   .watcher-finding,
   .watcher-receipt,
+  .watcher-receipt-chevron,
   .watcher-bar-phase[data-phase="waking"] .watcher-bar-phase-text {
     animation: none !important;
   }
@@ -702,5 +839,9 @@
   .watcher-bar-phase[data-phase="waking"] .watcher-bar-phase-text {
     -webkit-mask-image: none;
     mask-image: none;
+  }
+
+  .watcher-receipt-chevron {
+    transition: none;
   }
 }

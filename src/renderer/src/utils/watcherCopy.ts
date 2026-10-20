@@ -72,19 +72,43 @@ export function watcherPhaseText(phase: WatcherLivePhase, label: string | null):
   return label?.trim() || PHASE_TEXT[phase];
 }
 
+/** A runtime detail as a clause: no trailing period, sentence case folded. */
+function detailClause(detail: string | null): string | null {
+  const text = detail?.trim().replace(/\.$/u, "").trim();
+  if (!text) return null;
+  const [first = "", second = ""] = text;
+  return second && second === second.toLocaleLowerCase(INTERFACE_LOCALE)
+    ? first.toLocaleLowerCase(INTERFACE_LOCALE) + text.slice(1)
+    : text;
+}
+
+/**
+ * One status line for a finding's delivery, built from its state, mode and
+ * time. The runtime's detail replaces the default explanation only when it
+ * explains something the state does not (a fallback, a later dispatch or a
+ * failure reason), and is dropped when it merely repeats the line.
+ */
 export function watcherDeliveryText(delivery: WatcherDelivery, watchedRunning: boolean): string {
-  if (delivery.state === "queued") {
-    return watchedRunning || delivery.mode === "steer"
-      ? "Queued · sends after the current turn"
-      : "Queued · sends when the main chat is free";
-  }
-  if (delivery.state === "sent") {
-    return delivery.mode === "steer"
-      ? "Sent · delivered into the running turn"
-      : "Sent · started the main chat's next turn";
-  }
-  if (delivery.state === "failed") return "Not sent";
-  return "Dismissed";
+  const time = watcherClockTime(delivery.at);
+  const head = delivery.state === "queued"
+    ? "Queued"
+    : delivery.state === "sent"
+      ? time ? `Sent ${time}` : "Sent"
+      : delivery.state === "failed"
+        ? "Not sent"
+        : "Dismissed";
+  const fallback = delivery.state === "queued"
+    ? watchedRunning || delivery.mode === "steer" ? "sends after the current turn" : "sends when the main chat is free"
+    : delivery.state === "sent"
+      ? delivery.mode === "steer" ? "into the running turn" : "started the main chat's next turn"
+      : null;
+  const clause = detailClause(delivery.detail);
+  const repeats = clause !== null && (
+    clause === fallback
+    || /^(queued|sent|steered|not sent|dismissed)\b/iu.test(clause)
+  );
+  const explanation = clause !== null && !repeats ? clause : fallback;
+  return explanation ? `${head} · ${explanation}` : head;
 }
 
 export function watcherClockTime(value: string | null): string {

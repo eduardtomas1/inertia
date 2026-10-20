@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { TriangleAlert } from "lucide-react";
 
 import type { WatcherLinkView } from "@shared/watcher";
@@ -10,6 +10,8 @@ export interface WatcherNoticesProps {
   customBackend: boolean;
   confirmingResume: boolean;
   resuming: boolean;
+  /** Why Resume would be refused right now; the notice says so instead of offering it. */
+  resumeBlocked: string | null;
   onResumeRequest: () => void;
   onConfirmResume: () => void;
   onCancelResume: () => void;
@@ -18,7 +20,8 @@ export interface WatcherNoticesProps {
 /**
  * Pause and guard notices under the bar. Only the write-detected banner is an
  * alert: it lists the unexplained paths and asks before resuming, because a
- * resume there means "these were my edits".
+ * resume there means "these were my edits". The confirmation focuses Cancel,
+ * the safe choice, and cancelling returns focus to "Resume…".
  */
 export function WatcherNotices({
   link,
@@ -26,19 +29,44 @@ export function WatcherNotices({
   customBackend,
   confirmingResume,
   resuming,
+  resumeBlocked,
   onResumeRequest,
   onConfirmResume,
   onCancelResume,
 }: WatcherNoticesProps): React.JSX.Element | null {
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const requestRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(confirmingResume);
   useEffect(() => {
-    if (confirmingResume) confirmRef.current?.focus({ preventScroll: true });
+    if (confirmingResume) cancelRef.current?.focus({ preventScroll: true });
+  }, [confirmingResume]);
+  useLayoutEffect(() => {
+    const ended = wasConfirming.current && !confirmingResume;
+    wasConfirming.current = confirmingResume;
+    if (!ended) return;
+    const active = document.activeElement;
+    if (requestRef.current && (active === null || active === document.body || !active.isConnected)) {
+      requestRef.current.focus({ preventScroll: true });
+    }
   }, [confirmingResume]);
   // A pause the user chose needs no banner: the bar already says Paused and
   // offers Resume. Every other pause explains itself here.
   const paused = link.status === "paused" && link.pauseReason !== "user";
   const writeDetected = paused && link.pauseReason === "write-detected";
   if (!paused && !customBackend) return null;
+  const resumeButton = (label: string) => resumeBlocked ? (
+    <p className="watcher-notice-blocked">{resumeBlocked}</p>
+  ) : (
+    <button
+      ref={requestRef}
+      type="button"
+      className="secondary-button"
+      aria-disabled={resuming || undefined}
+      onClick={() => { if (!resuming) onResumeRequest(); }}
+    >
+      {label}
+    </button>
+  );
   return (
     <div className="watcher-notices">
       {writeDetected ? (
@@ -67,25 +95,24 @@ export function WatcherNotices({
             >
               <p>If you edited these files yourself, resume.</p>
               <div className="watcher-confirm-actions">
-                <button type="button" className="secondary-button" onClick={onCancelResume}>Cancel</button>
-                <button ref={confirmRef} type="button" className="primary-button" disabled={resuming} onClick={onConfirmResume}>
-                  Resume
+                <button ref={cancelRef} type="button" className="secondary-button" onClick={onCancelResume}>Cancel</button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  aria-disabled={resuming || undefined}
+                  onClick={() => { if (!resuming) onConfirmResume(); }}
+                >
+                  {resuming ? "Resuming…" : "Resume"}
                 </button>
               </div>
             </div>
-          ) : (
-            <button type="button" className="secondary-button" disabled={resuming} onClick={onResumeRequest}>
-              Resume…
-            </button>
-          )}
+          ) : resumeButton("Resume…")}
         </div>
       ) : paused ? (
         <div className="watcher-notice">
           <p className="watcher-notice-title">Paused</p>
           <p>{watcherPauseText(link.pauseReason, link.pauseDetail)}</p>
-          <button type="button" className="secondary-button" disabled={resuming} onClick={onResumeRequest}>
-            Resume
-          </button>
+          {resumeButton("Resume")}
         </div>
       ) : null}
       {customBackend && (

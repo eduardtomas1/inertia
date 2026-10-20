@@ -4,6 +4,7 @@ import type {
   ConversationShell,
   ModelBackendProfileView,
   Project,
+  ProviderInfo,
   ServerEvent,
 } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
@@ -19,12 +20,16 @@ import type { WatcherLinkIndex } from "../../utils/watcherLinks";
 export interface WatcherSurfaceModel {
   surface: "main" | "detached";
   links: WatcherLinkIndex;
+  /** Only the chats in a watcher link (watched or watcher), stable while they don't change. */
   conversations: readonly ConversationShell[];
   projects: readonly Project[];
+  providers: readonly ProviderInfo[];
   backendProfiles: readonly ModelBackendProfileView[];
   /** Provider display names: configured identity labels over provider labels. */
   providerLabels: ProviderIdentityLabels;
   primaryConversationId: string | null;
+  /** Chats open in their own window, whose dock this window can't show. */
+  detachedConversationIds: ReadonlySet<string>;
   online: boolean;
   request: ((command: CommandWithoutId) => Promise<ServerEvent>) | null;
   openAttachDialog: ((watchedId: string, returnFocusTo?: HTMLElement | null) => void) | null;

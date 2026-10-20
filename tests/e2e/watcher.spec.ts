@@ -21,6 +21,8 @@ const FINDING = "Empty lines lost their test: parseLine now returns early for an
 const MAIN_ANSWER = "The parser is tidier and the existing tests pass.";
 const NOTE_ANSWER = "Restored the empty-line test in tests/parser.test.ts.";
 const DISMISSED = "The diff stat lists only src/parser.ts.";
+const FOLLOW_UP = "Add a changelog line for the parser fix.";
+const AUTO_FINDING = "The changelog line names the lexer, but the fix is in src/parser.ts.";
 
 const watcherAppServer = `
 const fs = require("node:fs");
@@ -199,6 +201,16 @@ test.describe("watcher on the fake Codex route", () => {
     await app.page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   };
+  const readMenuNote = async (pattern: RegExp): Promise<string> => {
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    const menu = app.page.getByRole("menu", { name: "More watcher actions" });
+    const note = menu.getByRole("menuitem", { name: pattern });
+    await expect(note).toBeVisible();
+    const text = await note.textContent();
+    await app.page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    return text ?? "";
+  };
   const sidebar = (): Locator => app.page.getByRole("complementary", { name: "Project navigation", exact: true });
   const watchedRow = (): Locator => sidebar().locator("button.activity-thread-select").filter({ hasText: WATCHED_TITLE });
 
@@ -371,6 +383,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(bubble).toContainText("Empty lines lost their test:");
     // The divider carries the attribution; the bubble only marks the origin.
     await expect(bubble.locator(".message-watcher-origin")).toHaveText("From watcher");
+    await capture(info, "main-chat-note-light");
     await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · [^·]+$/u);
     await expect(finding.locator(".watcher-finding-meta")).toHaveText(/^Check \d+ · \d{1,2}:\d{2}\s[AP]M$/u);
     // Both turns settle, and the final checks of both (one per watched turn)
@@ -384,8 +397,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(feedEntries().nth(2)).toHaveAttribute("data-kind", "receipts");
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await expect(dock().locator(".watcher-notice-line")).toHaveCount(0);
-    await expect(finding.locator(".watcher-finding-resolved")).toHaveText(/^Resolved in check \d+$/u);
-    await capture(info, "main-chat-note-light");
+    await expect(finding.locator(".watcher-finding-resolved")).toHaveText(`Resolved in check ${Number(findingCheck) + 1}`);
     await capture(info, "dock-resolved-light");
     expect(app.rendererErrors).toEqual([]);
   });
@@ -447,15 +459,14 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(handle()).toHaveAccessibleName("Open watcher");
     await capture(info, "dock-handle-light");
 
-    const before = sentFrames.length;
     await page.keyboard.press("Enter");
     await expect(dock()).toBeVisible();
     await expect(handle()).toHaveCount(0);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
     await expect(dock().getByRole("article", { name: FINDING })).toBeVisible();
-    // Opening the dock reads the feed by request and never subscribes to the
-    // watcher conversation's detail.
-    await expect.poll(() => sentFrames.length).toBeGreaterThanOrEqual(before);
+    // The dock reads its feed by request and never subscribes to the watcher
+    // conversation's detail.
+    expect(sentFrames.some((frame) => frame.includes('"watcher.feed.get"'))).toBe(true);
     expect(subscribed()).toEqual([]);
 
     // Escape from a control inside the dock collapses it too.
@@ -469,7 +480,22 @@ test.describe("watcher on the fake Codex route", () => {
     expect(app.rendererErrors).toEqual([]);
   });
 
-  test("turns on automatic sending from the dock menu", async ({ browserName: _browserName }, info) => {
+  test("reviews the last turn without spending one of the turn's checks", async ({ browserName: _browserName }) => {
+    const page = app.page;
+    const checksLeft = /^\d+ of 30 checks left this turn$/u;
+    const before = await readMenuNote(checksLeft);
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    await page.getByRole("menu", { name: "More watcher actions" }).getByRole("menuitem", { name: "Review the last turn" }).click();
+    await expect(phase()).toHaveAttribute("data-phase", "waking");
+    await queueWatcherReply("SILENT");
+    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 3 times · .+ · nothing to report/u);
+    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    await expect(dock().locator(".watcher-dock-error")).toHaveCount(0);
+    expect(await readMenuNote(checksLeft)).toBe(before);
+    expect(app.rendererErrors).toEqual([]);
+  });
+
+  test("sends a finding to the main chat on its own once automatic sending is on", async ({ browserName: _browserName }, info) => {
     const page = app.page;
     await dock().getByRole("button", { name: "More watcher actions" }).click();
     const menu = page.getByRole("menu", { name: "More watcher actions" });
@@ -480,18 +506,33 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(menu).toHaveCount(0);
     await expect(phase()).toHaveText(/ · Reviewer · Sends findings automatically$/u);
     await capture(info, "dock-auto-send-light");
-    await dock().getByRole("button", { name: "More watcher actions" }).click();
-    await expect(menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" })).toHaveAttribute("aria-checked", "true");
-    await menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" }).click();
-    await expect(phase()).toHaveText(/ · Reviewer · Watching$/u);
+
+    await queueWatcherReply(AUTO_FINDING);
+    await queueWatcherReply("SILENT");
+    const composer = page.getByRole("region", { name: "Message composer" });
+    await composer.getByRole("textbox", { name: "Message" }).fill(FOLLOW_UP);
+    await composer.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByText(FOLLOW_UP, { exact: true }).first()).toBeVisible();
+
+    const card = dock().getByRole("article", { name: AUTO_FINDING });
+    await expect(card).toBeVisible();
+    await expect(card.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
+    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · [^·]+$/u);
+    await expect(page.getByRole("separator", { name: /^Note from watcher · Reviewer · /u })).toHaveCount(2);
+    await expect(page.getByLabel("Note from watcher", { exact: true })).toHaveCount(2);
+    await expect(page.getByLabel("Note from watcher", { exact: true }).last()).toContainText(AUTO_FINDING);
+    await expect(page.getByText(NOTE_ANSWER, { exact: true })).toHaveCount(2);
+    const autoCheck = Number((await card.locator(".watcher-finding-meta").textContent())?.match(/^Check (\d+)/u)?.[1]);
+    await expect.poll(() => dock().locator(".watcher-check-title").evaluateAll((titles, label) => titles.filter((title) =>
+      (title.textContent ?? "").replace(title.querySelector("time")?.textContent ?? "", "").trim() === label).length,
+    `Check ${autoCheck + 1}`)).toBe(1);
+    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    await capture(info, "dock-auto-sent-light");
 
     await dock().getByRole("button", { name: "More watcher actions" }).click();
-    await menu.getByRole("menuitem", { name: "Review the last turn" }).click();
-    await expect(phase()).toHaveAttribute("data-phase", "waking");
-    await queueWatcherReply("SILENT");
-    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 3 times · .+ · nothing to report/u);
-    await expect(phase()).not.toHaveAttribute("data-phase", "waking");
-    await expect(dock().locator(".watcher-dock-error")).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await toggle.click();
+    await expect(phase()).toHaveText(/ · Reviewer · Watching$/u);
     expect(app.rendererErrors).toEqual([]);
   });
 

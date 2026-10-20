@@ -6,7 +6,7 @@ import type { WatcherActions } from "../../hooks/useWatcherActions";
 import type { WatcherFeedState } from "../../hooks/useWatcherFeed";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import { LoadingMark } from "../ui";
-import { WatcherFindingCard } from "./WatcherFindingCard";
+import { WatcherFindingCard, type WatcherFindingAction, type WatcherFindingFailure } from "./WatcherFindingCard";
 import { WatcherNoticeLine, WatcherReceiptGroup } from "./WatcherReceiptGroup";
 
 export interface WatcherFeedProps {
@@ -83,8 +83,8 @@ export function WatcherFeed({
   steerable,
   online,
 }: WatcherFeedProps): React.JSX.Element {
-  const [sending, setSending] = useState<ReadonlySet<string>>(() => new Set());
-  const [failures, setFailures] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [pending, setPending] = useState<ReadonlyMap<string, WatcherFindingAction>>(() => new Map());
+  const [failures, setFailures] = useState<ReadonlyMap<string, WatcherFindingFailure>>(() => new Map());
   const deliveryIds = useRef(new Map<string, string>());
   const statusNodes = useRef(new Map<string, HTMLParagraphElement>());
   const cardNodes = useRef(new Map<string, HTMLElement>());
@@ -130,29 +130,29 @@ export function WatcherFeed({
     });
   }, [failures, feed.items]);
 
-  const setSendingFor = (wakeId: string, value: boolean): void => {
-    setSending((current) => {
-      const next = new Set(current);
-      if (value) next.add(wakeId);
+  const setPendingFor = (wakeId: string, action: WatcherFindingAction | null): void => {
+    setPending((current) => {
+      const next = new Map(current);
+      if (action) next.set(wakeId, action);
       else next.delete(wakeId);
       return next;
     });
   };
-  const setFailureFor = (wakeId: string, message: string | null): void => {
+  const setFailureFor = (wakeId: string, failure: WatcherFindingFailure | null): void => {
     setFailures((current) => {
-      if (!message && !current.has(wakeId)) return current;
+      if (!failure && !current.has(wakeId)) return current;
       const next = new Map(current);
-      if (message) next.set(wakeId, message);
+      if (failure) next.set(wakeId, failure);
       else next.delete(wakeId);
       return next;
     });
   };
 
   const deliver = (item: WatcherFeedItem, mode: WatcherDeliveryMode): void => {
-    if (!actions || sending.has(item.wakeId)) return;
+    if (!actions || pending.has(item.wakeId)) return;
     const deliveryId = deliveryIds.current.get(item.wakeId) ?? crypto.randomUUID();
     deliveryIds.current.set(item.wakeId, deliveryId);
-    setSendingFor(item.wakeId, true);
+    setPendingFor(item.wakeId, "send");
     setFailureFor(item.wakeId, null);
     pendingFocus.current = { kind: "status", wakeId: item.wakeId };
     focusTarget(pendingFocus.current);
@@ -163,26 +163,29 @@ export function WatcherFeed({
       // An ambiguous timeout keeps the same delivery id so a retry cannot
       // deliver the note twice; a refused or unsent request starts over.
       if (runtimeCommandDelivery(error) !== "ambiguous") deliveryIds.current.delete(item.wakeId);
-      setFailureFor(item.wakeId, failureText(error));
+      setFailureFor(item.wakeId, { action: "send", message: failureText(error) });
     }).finally(() => {
-      setSendingFor(item.wakeId, false);
+      setPendingFor(item.wakeId, null);
     });
   };
 
   const dismiss = (item: WatcherFeedItem): void => {
-    if (!actions || sending.has(item.wakeId)) return;
+    if (!actions || pending.has(item.wakeId)) return;
     const index = findingIds.indexOf(item.wakeId);
     const nextId = findingIds[index + 1] ?? null;
-    setSendingFor(item.wakeId, true);
+    setPendingFor(item.wakeId, "dismiss");
     setFailureFor(item.wakeId, null);
     void actions.dismiss(item.wakeId).then((result) => {
       pendingFocus.current = nextId ? { kind: "card", wakeId: nextId } : { kind: "heading" };
       feed.applyDelivery(item.wakeId, result.delivery);
     }, (error: unknown) => {
-      setFailureFor(item.wakeId, error instanceof Error ? error.message : "The finding could not be dismissed.");
+      setFailureFor(item.wakeId, {
+        action: "dismiss",
+        message: error instanceof Error ? error.message : "The finding could not be dismissed.",
+      });
       pendingFocus.current = { kind: "status", wakeId: item.wakeId };
     }).finally(() => {
-      setSendingFor(item.wakeId, false);
+      setPendingFor(item.wakeId, null);
     });
   };
 
@@ -230,7 +233,7 @@ export function WatcherFeed({
                   watchedConversationId={watchedConversationId}
                   watchedRunning={watchedRunning}
                   steerable={steerable}
-                  sending={sending.has(group.item.wakeId)}
+                  pending={pending.get(group.item.wakeId) ?? null}
                   failure={failures.get(group.item.wakeId) ?? null}
                   online={online && actions !== null}
                   onDeliver={deliver}

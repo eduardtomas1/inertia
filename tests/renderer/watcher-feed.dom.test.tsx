@@ -244,6 +244,27 @@ describe("WatcherFeed", () => {
     expect(within(card).queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
+  it("words a pending or failed Dismiss as a dismissal, never as a send", async () => {
+    let refuse: (error: Error) => void = () => undefined;
+    const runtime = recordingRequest((command) => {
+      if (command.type === "watcher.feed.get") {
+        return { kind: "watcher.feed", linkId: LINK_ID, feedRevision: 1, items: [finding(4, "Risky rename.")], next: null };
+      }
+      if (command.type === "watcher.note.dismiss") {
+        return new Promise((_resolve, reject) => { refuse = reject; });
+      }
+      throw new Error(`Unexpected command ${command.type}`);
+    });
+    render(<FeedHarness runtime={runtime} />);
+    const card = await screen.findByRole("article");
+    fireEvent.click(within(card).getByRole("button", { name: "Dismiss" }));
+    expect(within(card).getByRole("status")).toHaveTextContent(/^Dismissing…$/u);
+    await act(async () => { refuse(new Error("The finding could not be dismissed.")); });
+    await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(/^The finding could not be dismissed\.$/u));
+    expect(within(card).getByRole("status")).toHaveAttribute("data-state", "failed");
+    expect(within(card).getByRole("status")).toHaveFocus();
+  });
+
   it("plays a card's entrance once, not again after a remount", async () => {
     const first = renderFeed([finding(4, "A risk.")]);
     const card = await screen.findByRole("article");

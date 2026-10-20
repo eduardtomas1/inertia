@@ -91,7 +91,7 @@ describe("watcher chunks that fail to load", () => {
           watchedConversationId={WATCHED_ID}
           watchedRunning={false}
           steerable={false}
-          sending={false}
+          pending={null}
           failure={null}
           online
           onDeliver={vi.fn()}

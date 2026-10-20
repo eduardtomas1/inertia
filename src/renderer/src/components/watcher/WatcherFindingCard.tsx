@@ -19,10 +19,16 @@ const loadFindingMarkdown = createSurfaceLoader(async () => ({
  */
 function findingStatus(
   delivery: WatcherFeedItem["delivery"],
-  { sending, failure, watchedRunning }: { sending: boolean; failure: string | null; watchedRunning: boolean },
+  { pending, failure, watchedRunning }: {
+    pending: WatcherFindingAction | null;
+    failure: WatcherFindingFailure | null;
+    watchedRunning: boolean;
+  },
 ): string {
-  if (sending) return "Sending…";
-  if (failure && (delivery === null || delivery.state === "failed")) return `Not sent · ${failure}`;
+  if (pending) return pending === "dismiss" ? "Dismissing…" : "Sending…";
+  if (failure && (delivery === null || delivery.state === "failed")) {
+    return failure.action === "dismiss" ? failure.message : `Not sent · ${failure.message}`;
+  }
   if (!delivery) return "";
   return watcherDeliveryText(delivery, watchedRunning);
 }
@@ -32,6 +38,13 @@ function splitFinding(finding: string): { title: string; body: string } {
   const first = lines[0] ?? "";
   const title = first.replace(/^\s*(?:#{1,6}\s+|[-*+>]\s+)/u, "").replaceAll("**", "").replaceAll("`", "").trim();
   return { title, body: lines.slice(1).join("\n").trim() };
+}
+
+export type WatcherFindingAction = "send" | "dismiss";
+
+export interface WatcherFindingFailure {
+  action: WatcherFindingAction;
+  message: string;
 }
 
 export interface WatcherFindingCardProps {
@@ -45,8 +58,8 @@ export interface WatcherFindingCardProps {
   watchedConversationId: string;
   watchedRunning: boolean;
   steerable: boolean;
-  sending: boolean;
-  failure: string | null;
+  pending: WatcherFindingAction | null;
+  failure: WatcherFindingFailure | null;
   online: boolean;
   onDeliver: (item: WatcherFeedItem, mode: WatcherDeliveryMode) => void;
   onDismiss: (item: WatcherFeedItem) => void;
@@ -82,7 +95,7 @@ export function WatcherFindingCard({
   watchedConversationId,
   watchedRunning,
   steerable,
-  sending,
+  pending,
   failure,
   online,
   onDeliver,
@@ -93,7 +106,8 @@ export function WatcherFindingCard({
   const titleId = useId();
   const delivery = item.delivery;
   const deliverable = delivery === null || delivery.state === "failed";
-  const status = findingStatus(delivery, { sending, failure, watchedRunning });
+  const sending = pending !== null;
+  const status = findingStatus(delivery, { pending, failure, watchedRunning });
   const statusState = sending
     ? "sending"
     : failure && (delivery === null || delivery.state === "failed") ? "failed" : delivery?.state ?? "none";

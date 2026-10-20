@@ -487,6 +487,7 @@ export class WatcherWakeRunner {
         finding,
         finding === null ? null : turn.terminalAssistantMessageId,
         now,
+        violations.filter(({ kind }) => kind === "command-attempt").length,
       );
       settled = true;
       pause = guard?.state === "changed"

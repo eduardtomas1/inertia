@@ -56,7 +56,7 @@ const link: WatcherLinkView = {
   pauseDetail: null,
   detachedReason: null,
   watchedTurnId: "turn-1",
-  counters: { wakesThisTurn: 1, wakeAllowance: 12, wakesTotal: 3, eventsSeen: 9, eventsPending: 2 },
+  counters: { wakesThisTurn: 1, wakeAllowance: 30, wakesTotal: 3, eventsSeen: 9, eventsPending: 2 },
   lastWakeAt: at,
   quietSince: null,
   feedRevision: 4,
@@ -110,15 +110,17 @@ describe("watcher shared contracts", () => {
 
   it("ships the documented budget defaults and clamps out-of-range values", () => {
     expect(DEFAULT_WATCHER_BUDGETS).toEqual({
-      wakesPerWatchedTurn: 12, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4,
+      wakesPerWatchedTurn: 30, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4,
     });
+    expect(watcherBudgetsSchema.safeParse({ ...DEFAULT_WATCHER_BUDGETS, wakesPerWatchedTurn: 100 }).success).toBe(true);
+    expect(clampWatcherBudgets({ wakesPerWatchedTurn: 1_000 }).wakesPerWatchedTurn).toBe(100);
     expect(watcherBudgetsSchema.safeParse(DEFAULT_WATCHER_BUDGETS).success).toBe(true);
     expect(clampWatcherBudgets()).toEqual(DEFAULT_WATCHER_BUDGETS);
     expect(clampWatcherBudgets({
       wakesPerWatchedTurn: 1, cooldownSeconds: 10_000, digestKiB: 6.9, contextReadsPerWake: Number.NaN,
     })).toEqual({ wakesPerWatchedTurn: 2, cooldownSeconds: 600, digestKiB: 6, contextReadsPerWake: 4 });
     for (const invalid of [
-      { ...DEFAULT_WATCHER_BUDGETS, wakesPerWatchedTurn: 41 },
+      { ...DEFAULT_WATCHER_BUDGETS, wakesPerWatchedTurn: 101 },
       { ...DEFAULT_WATCHER_BUDGETS, cooldownSeconds: 14 },
       { ...DEFAULT_WATCHER_BUDGETS, digestKiB: 49 },
       { ...DEFAULT_WATCHER_BUDGETS, contextReadsPerWake: 9 },
@@ -129,7 +131,7 @@ describe("watcher shared contracts", () => {
 
   it("keeps link views coherent with their status", () => {
     expect(watcherLinkViewSchema.safeParse(link).success).toBe(true);
-    expect(watcherLinkViewSchema.safeParse({ ...link, status: "paused", pauseReason: "wake-budget", pauseDetail: "12 of 12" }).success).toBe(true);
+    expect(watcherLinkViewSchema.safeParse({ ...link, status: "paused", pauseReason: "wake-budget", pauseDetail: "30 of 30" }).success).toBe(true);
     expect(watcherLinkViewSchema.safeParse({
       ...link, status: "detached", detachedReason: "watched-deleted", watchedConversationId: null,
     }).success).toBe(true);
@@ -190,7 +192,7 @@ describe("watcher shared contracts", () => {
           wakesThisTurn: Number.MAX_SAFE_INTEGER, wakeAllowance: Number.MAX_SAFE_INTEGER, wakesTotal: Number.MAX_SAFE_INTEGER,
           eventsSeen: Number.MAX_SAFE_INTEGER, eventsPending: Number.MAX_SAFE_INTEGER,
         },
-        budgets: { wakesPerWatchedTurn: 40, cooldownSeconds: 600, digestKiB: 48, contextReadsPerWake: 8 },
+        budgets: { wakesPerWatchedTurn: 100, cooldownSeconds: 600, digestKiB: 48, contextReadsPerWake: 8 },
         latest: { outcome: "permission-declined", at: "2030-01-01T00:00:00.000+00:00", text: wide(MAX_WATCHER_HEADLINE_CHARS) },
         latestFindingAt: "2030-01-01T00:00:00.000+00:00",
         lastWakeAt: "2030-01-01T00:00:00.000+00:00",

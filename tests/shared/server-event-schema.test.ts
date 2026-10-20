@@ -1991,9 +1991,9 @@ describe("server event remaining discriminant and identity boundary", () => {
       id: "44444444-4444-4444-8444-444444444444", watcherConversationId: watcherId, watchedConversationId: watchedId,
       projectId, preset: "reviewer", instructions: "", privateConnect: "inherit", status: "watching",
       sharing: { brief: true, activities: true, changedFiles: true, partialReplies: false },
-      budgets: { wakesPerWatchedTurn: 12, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4 },
+      budgets: { wakesPerWatchedTurn: 30, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4 },
       pauseReason: null, pauseDetail: null, detachedReason: null, watchedTurnId: null,
-      counters: { wakesThisTurn: 0, wakeAllowance: 12, wakesTotal: 0, eventsSeen: 0, eventsPending: 0 },
+      counters: { wakesThisTurn: 0, wakeAllowance: 30, wakesTotal: 0, eventsSeen: 0, eventsPending: 0 },
       lastWakeAt: null, quietSince: null, feedRevision: 0, latest: null, latestFindingAt: null, createdAt: checkedAt, updatedAt: checkedAt,
     };
     const shells = [watcherId, watchedId].map((id) => ({ ...conversationShell, id, projectId }));

@@ -194,7 +194,7 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
       await watcherRunning(f, watcherId);
       await f.finishTurn(watcherId, "SILENT");
       expect(f.watchers.coordinator.feed(link.id).items.map(({ trigger }) => trigger)).toEqual(["manual", "initial"]);
-      expect(f.linkView(link.id).counters).toMatchObject({ wakesThisTurn: 0, wakesTotal: 2, wakeAllowance: 12 });
+      expect(f.linkView(link.id).counters).toMatchObject({ wakesThisTurn: 0, wakesTotal: 2, wakeAllowance: 30 });
     } finally {
       await f.close();
     }

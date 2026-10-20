@@ -144,7 +144,7 @@ describe("watcher link repository", () => {
     expect(store.conversationTitleLocked(conversation.id)).toBe(true);
     expect(link).toMatchObject({
       watcherConversationId: conversation.id, watchedConversationId: watched.id, projectId,
-      status: "watching", counters: { wakeAllowance: 12, wakesThisTurn: 0 }, feedRevision: 0, latest: null,
+      status: "watching", counters: { wakeAllowance: 30, wakesThisTurn: 0 }, feedRevision: 0, latest: null,
     });
     expect(store.watcherLinks.findByWatcher(conversation.id)?.id).toBe(link.id);
     expect(store.watcherLinks.findActiveByWatched(watched.id)?.id).toBe(link.id);
@@ -213,8 +213,8 @@ describe("watcher link repository", () => {
     expect(links.transition(link.id, ["paused"], { status: "watching" }, tick())).toBeNull();
     expect(links.transition(link.id, ["watching"], { status: "waking" }, tick())?.status).toBe("waking");
     expect(links.transition(link.id, ["watching"], { status: "waking" }, tick())).toBeNull();
-    const paused = links.transition(link.id, ["waking"], { status: "paused", reason: "wake-budget", detail: "12 of 12 checks used\0" }, tick());
-    expect(paused).toMatchObject({ status: "paused", pauseReason: "wake-budget", pauseDetail: "12 of 12 checks used" });
+    const paused = links.transition(link.id, ["waking"], { status: "paused", reason: "wake-budget", detail: "30 of 30 checks used\0" }, tick());
+    expect(paused).toMatchObject({ status: "paused", pauseReason: "wake-budget", pauseDetail: "30 of 30 checks used" });
     const resumed = links.transition(link.id, ["paused"], { status: "watching" }, tick());
     expect(resumed).toMatchObject({ status: "watching", pauseReason: null, pauseDetail: null });
     expect(links.transition(link.id, ["watching", "paused"], { status: "detached", reason: "user" }, tick())?.status).toBe("detached");
@@ -301,7 +301,7 @@ describe("watcher link repository", () => {
     links.transition(link.id, ["watching"], { status: "paused", reason: "wake-budget", detail: "Used its checks." }, tick());
     expect(links.beginWatchedTurn(link.id, "turn-1", tick())).toMatchObject({ status: "paused", pauseReason: "wake-budget" });
     expect(links.beginWatchedTurn(link.id, "turn-2", tick())).toMatchObject({
-      status: "watching", pauseReason: null, pauseDetail: null, counters: { wakeAllowance: 12, wakesThisTurn: 0 },
+      status: "watching", pauseReason: null, pauseDetail: null, counters: { wakeAllowance: 30, wakesThisTurn: 0 },
     });
     const user = attach(chat("User pause")).link;
     links.beginWatchedTurn(user.id, "turn-1", tick());

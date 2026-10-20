@@ -154,7 +154,7 @@ export const watcherSharingSchema = z.strictObject({
 });
 
 export const WATCHER_BUDGET_LIMITS = {
-  wakesPerWatchedTurn: { min: 2, max: 40, default: 12 },
+  wakesPerWatchedTurn: { min: 2, max: 100, default: 30 },
   cooldownSeconds: { min: 15, max: 600, default: 45 },
   digestKiB: { min: 4, max: 48, default: 24 },
   contextReadsPerWake: { min: 0, max: 8, default: 4 },

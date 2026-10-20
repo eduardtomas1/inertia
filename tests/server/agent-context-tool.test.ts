@@ -660,7 +660,7 @@ describe("inertia_request_context for a watcher", () => {
         preset: "reviewer",
         instructions: "",
         sharing,
-        budgets: { wakesPerWatchedTurn: 12, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake },
+        budgets: { wakesPerWatchedTurn: 30, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake },
         privateConnect: "inherit",
       },
       conversation: {

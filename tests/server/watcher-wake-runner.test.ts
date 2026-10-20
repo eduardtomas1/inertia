@@ -1,4 +1,9 @@
+import { randomUUID } from "node:crypto";
+
+import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ClientCommand } from "../../src/shared/contracts";
 
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import { WATCHER_ROUTE_RETRY_LIMIT } from "../../src/server/runtime/watcher/watcher-wake-runner";
@@ -103,7 +108,7 @@ describe("watcher wake runner", () => {
       await f.finishTurn(watcherId, "- The parser drops the last token in src/parser.ts:42.");
       const afterFinding = f.store.watcherLinks.get(link.id)!;
       expect(afterFinding.latest).toMatchObject({ outcome: "finding", text: "- The parser drops the last token in src/parser.ts:42." });
-      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", finding: "- The parser drops the last token in src/parser.ts:42." });
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", finding: "- The parser drops the last token in src/parser.ts:42.", delivery: null });
 
       watcherId = await wakeOnce(f, link.id);
       await f.finishTurn(watcherId, null, "failed", { reason: "provider-error", message: "Provider failed." });
@@ -460,6 +465,71 @@ describe("watcher wake runner", () => {
       expect(feed(f, link.id)[0]).toMatchObject({ sequence: 2, outcome: "silent", finding: null });
       expect(feed(f, link.id)[1]).toMatchObject({ sequence: 1, resolvedBySequence: 2 });
       expect(f.store.watcherLinks.get(link.id)!.counters.findingsTotal).toBe(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("queues an automatic watcher's finding behind the running turn without steering", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ delivery: "auto" });
+      await f.startWatchedTurn();
+      const watcherId = await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "- The parser drops the last token.");
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", delivery: { mode: "queue", state: "queued" } });
+      expect(f.store.queuedMessages.list(f.watched.id)).toMatchObject([{ content: "- The parser drops the last token." }]);
+      expect(f.provider.steerCalls).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("starts the idle main chat's next turn with an automatic final finding, but never auto-sends from that turn", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ delivery: "auto" });
+      const watcherId = link.watcherConversationId;
+      const finalPass = async (reply: string) => {
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+        await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+        await f.finishTurn(watcherId, reply);
+      };
+      await f.startWatchedTurn();
+      await f.finishTurn(f.watched.id, "Done.");
+      await finalPass("- The parser drops the last token.");
+      await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
+      expect(f.provider.input(f.watched.id).prompt).toContain("[inertia-watcher-note]");
+      expect(feed(f, link.id)[0]).toMatchObject({ delivery: { mode: "queue", state: "sent" } });
+
+      await f.finishTurn(f.watched.id, "Fixed.");
+      await finalPass("- The fix misses the empty input.");
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "finding", finding: "- The fix misses the empty input.", delivery: null });
+      expect(f.provider.runs.has(f.watched.id)).toBe(false);
+      expect(f.store.queuedMessages.list(f.watched.id)).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("leaves an automatic finding for a manual send when the main chat's queue is full", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ delivery: "auto" });
+      await f.startWatchedTurn();
+      for (const content of ["One", "Two", "Three"]) {
+        await f.queue.handler(null as unknown as WebSocket, {
+          type: "message.queue.enqueue", requestId: randomUUID(),
+          payload: { conversationId: f.watched.id, id: randomUUID(), content, attachments: [] },
+        } as ClientCommand);
+      }
+      const watcherId = await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "- The parser drops the last token.");
+      expect(feed(f, link.id)[0]).toMatchObject({
+        outcome: "finding",
+        delivery: { mode: "queue", state: "failed", detail: expect.stringContaining("queue is full") },
+      });
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
     } finally {
       await f.close();
     }

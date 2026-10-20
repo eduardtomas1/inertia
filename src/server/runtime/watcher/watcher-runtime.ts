@@ -179,6 +179,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     publish,
     refreshConversation: (conversationId) => dependencies.broadcastConversationShell?.(conversationId),
     ...(dependencies.turnDiff ? { turnDiff: dependencies.turnDiff } : {}),
+    delivery: () => delivery,
     now,
     id,
   });

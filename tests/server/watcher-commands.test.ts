@@ -94,6 +94,8 @@ describe("watcher commands", () => {
         .toMatchObject({ kind: "watcher.link", link: { delivery: "auto", instructions: "Shorter." } });
       expect(f.store.watcherLinks.get(linkId)?.delivery).toBe("auto");
       await expect(f.command("watcher.update", { linkId, delivery: "steer" })).rejects.toThrow("The watcher request was invalid.");
+      expect(result(await f.command("watcher.update", { linkId, delivery: "manual" })))
+        .toMatchObject({ kind: "watcher.link", link: { delivery: "manual" } });
       expect(result(await f.command("watcher.pause", { linkId }))).toMatchObject({ link: { status: "paused" } });
       expect(result(await f.command("watcher.resume", { linkId }))).toMatchObject({ link: { status: "watching" } });
 

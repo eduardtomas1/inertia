@@ -13,6 +13,7 @@ import type { ReadOnlyWatcherViolation } from "../turns/turn-controller-types";
 import { publicRuntimeError } from "../../runtime-errors";
 import { isHeld } from "../update-hold";
 import type { WatcherCheckoutGuard, WatcherGuardOutcome, WatcherGuardWindow } from "./watcher-checkout-guard";
+import type { WatcherDeliveryService } from "./watcher-delivery";
 import { buildWatcherDigest, type WatcherDigest, type WatcherOpenReply } from "./watcher-digest";
 import { watcherInstruction } from "./watcher-instructions";
 import type { WatcherLiveProjection } from "./watcher-live-projection";
@@ -64,6 +65,7 @@ export interface WatcherWakeRunnerDependencies {
   /** Refreshes the watcher chat's shell row after a check settles. */
   refreshConversation?(conversationId: string): void;
   turnDiff?(turnId: string): Promise<WatcherTurnDiffSnapshot>;
+  delivery?(): Pick<WatcherDeliveryService, "deliver">;
   now(): string;
   id(): string;
 }
@@ -445,6 +447,7 @@ export class WatcherWakeRunner {
     let pause: WatcherTransition | null = null;
     let settled = false;
     let continues = false;
+    let found = false;
     try {
       this.#deps.live.end(linkId);
       let guard: WatcherGuardOutcome | null = null;
@@ -485,7 +488,7 @@ export class WatcherWakeRunner {
         continues = this.#advance(linkId, running, now) && running.digest.stats.moreFollows && advanced(running)
           && !running.lastFinalPage;
       }
-      store.watcherLinks.settleWake(
+      const record = store.watcherLinks.settleWake(
         wake.wakeId,
         outcome,
         guard ? { state: guard.state, paths: guard.paths } : null,
@@ -495,6 +498,7 @@ export class WatcherWakeRunner {
         violations.filter(({ kind }) => kind === "command-attempt").length,
       );
       settled = true;
+      found = record?.outcome === "finding";
       pause = guard?.state === "changed"
         ? { status: "paused", reason: "write-detected", detail: guard.pauseDetail }
         : running?.pause
@@ -545,7 +549,25 @@ export class WatcherWakeRunner {
         // Publishing is best effort; the next snapshot carries the state.
       }
     }
+    if (found) this.#autoDeliver(linkId, wake.wakeId, wake.watchedTurnId);
     return true;
+  }
+
+  #autoDeliver(linkId: string, wakeId: string, watchedTurnId: string | null): void {
+    const { store } = this.#deps;
+    const delivery = this.#deps.delivery?.();
+    if (!delivery || store.watcherLinks.get(linkId)?.delivery !== "auto") return;
+    const startedBy = watchedTurnId === null ? null : this.#turnUserMessage(watchedTurnId);
+    if (startedBy === null || store.watcherLinks.digest.isForwardedWatcherNote(startedBy)) return;
+    void delivery.deliver(linkId, wakeId, "queue", this.#deps.id()).catch(() => undefined);
+  }
+
+  #turnUserMessage(turnId: string): string | null {
+    try {
+      return this.#deps.store.agentTurn(turnId).userMessageId;
+    } catch {
+      return null;
+    }
   }
 
   /**

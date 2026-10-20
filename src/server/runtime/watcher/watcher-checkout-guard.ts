@@ -12,6 +12,7 @@ import {
   type CheckoutFingerprint,
   type CheckoutFingerprintOptions,
 } from "../../git/checkout-fingerprint";
+import { classifyReadOnlyCommand, type ReadOnlyCommandContext } from "./read-only-commands";
 
 export const WATCHER_GUARD_DEADLINE_MS = 10_000;
 const MAX_ATTRIBUTION_ACTIVITIES = 200;
@@ -82,10 +83,13 @@ export function watcherAttributionForm(value: string, platform: NodeJS.Platform)
   return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
 }
 
-export function watcherActivityMayWrite(activity: Pick<AgentActivity, "kind" | "title">): boolean {
+export function watcherActivityMayWrite(
+  activity: Pick<AgentActivity, "kind" | "title">,
+  context: ReadOnlyCommandContext,
+): boolean {
   const title = activity.title.replace(/^Interrupted · /u, "");
-  return activity.kind === "command"
-    || activityExecutionCategory({ kind: activity.kind, title, status: "running" }) === "coding";
+  if (activity.kind === "command") return !classifyReadOnlyCommand(title, context).allowed;
+  return activityExecutionCategory({ kind: activity.kind, title, status: "running" }) === "coding";
 }
 
 /** Activities that may have touched files: tool or file work, never reasoning or status lines. */
@@ -291,7 +295,8 @@ export class WatcherCheckoutGuard {
       });
       if (!diff.headChanged && unexplained.length === 0) return { state: "clean", paths: [], pauseDetail: null };
       const paths = unexplained.slice(0, MAX_WATCHER_GUARD_PATHS);
-      if (window.commandSeen || window.busy || !own.some(watcherActivityMayWrite)) {
+      const context: ReadOnlyCommandContext = { cwd: window.checkoutPath, windows: this.#platform === "win32" };
+      if (window.commandSeen || window.busy || !own.some((activity) => watcherActivityMayWrite(activity, context))) {
         return { state: "inconclusive", paths, pauseDetail: null };
       }
       return { state: "changed", paths, pauseDetail: pauseDetail(paths, unexplained.length, diff.headChanged) };

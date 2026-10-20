@@ -35,7 +35,7 @@ async function check(
   f: WatcherFixture,
   linkId: string,
   during: (watcherId: string) => void,
-  watcherActivity: boolean | "command" | "edit" = true,
+  watcherActivity: boolean | { command: string } | "edit" = true,
   reply = "SILENT",
 ) {
   const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
@@ -47,8 +47,8 @@ async function check(
   if (watcherActivity) {
     f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `w-${++sequence}` });
   }
-  if (watcherActivity === "command") {
-    f.provider.emit(watcherConversationId, { type: "activity", kind: "command", phase: "completed", label: "cat src/a.ts", activityId: `w-${++sequence}` });
+  if (typeof watcherActivity === "object") {
+    f.provider.emit(watcherConversationId, { type: "activity", kind: "command", phase: "completed", label: watcherActivity.command, activityId: `w-${++sequence}` });
   }
   if (watcherActivity === "edit") {
     f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "started", label: "Edit", detail: "src/a.ts", activityId: `w-${++sequence}` });
@@ -92,7 +92,7 @@ describe("watcher checkout guard", () => {
       await f.startWatchedTurn();
       const item = await check(f, link.id, () => {
         f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Edit", detail: reported, activityId: `e-${++sequence}` });
-      }, "command");
+      }, { command: "npm run format" });
       expect(item.guardState).toBe(state);
       expect(f.store.watcherLinks.get(link.id)!.status).toBe(state === "clean" ? "watching" : "paused");
     } finally {
@@ -132,7 +132,7 @@ describe("watcher checkout guard", () => {
     try {
       const link = await f.attach();
       await f.startWatchedTurn();
-      const item = await check(f, link.id, () => undefined, "command");
+      const item = await check(f, link.id, () => undefined, { command: "npm run format" });
       expect(item).toMatchObject({ outcome: "write-detected", guardState: "changed" });
       expect([...item.guardPaths].sort()).toEqual(["docs/x.md", "src/new.ts"]);
       const paused = f.store.watcherLinks.get(link.id)!;
@@ -157,6 +157,25 @@ describe("watcher checkout guard", () => {
       expect(item).toMatchObject({ outcome: "finding", finding: "The parser drops empty tokens.", guardState: "inconclusive" });
       expect([...item.guardPaths].sort()).toEqual(["src/b.ts", "src/new.ts"]);
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", pauseReason: null });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("keeps watching when files change during a check whose own commands were all read-only", async () => {
+    let root = "";
+    const f = await createWatcherFixture({
+      captureFingerprint: fingerprints(() => root, { "src/b.ts": "1" }, { "src/b.ts": "2" }, { "src/b.ts": "2" }, { "src/b.ts": "3" }),
+    });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const read = await check(f, link.id, () => undefined, { command: "git diff --stat" }, "The parser drops empty tokens.");
+      expect(read).toMatchObject({ outcome: "finding", guardState: "inconclusive", guardPaths: ["src/b.ts"] });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", pauseReason: null });
+      const unknown = await check(f, link.id, () => undefined, { command: "cat src/a.ts > src/b.ts" });
+      expect(unknown).toMatchObject({ outcome: "write-detected", guardState: "changed" });
     } finally {
       await f.close();
     }

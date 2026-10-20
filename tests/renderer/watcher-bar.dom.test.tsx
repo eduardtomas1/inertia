@@ -87,6 +87,11 @@ describe("WatcherBar", () => {
     expect(liveRegion()).toBeEmptyDOMElement();
   });
 
+  it("shows an idle link as Watching, with no state the runtime never reaches", () => {
+    render(bar(link({ status: "idle" })));
+    expect(document.querySelector(".watcher-bar-state")).toHaveTextContent(/^Team Codex · fixture-model · Reviewer · Watching$/u);
+  });
+
   it("keeps one primary text action beside the title, with the rest and the numbers in More", async () => {
     render(bar(link({ quietSince: "2026-10-19T10:50:00.000Z" }), undefined, undefined, { privateConnectConfigured: true, usageTokens: 48_200 }));
     const actions = document.querySelector<HTMLElement>(".watcher-bar-actions")!;

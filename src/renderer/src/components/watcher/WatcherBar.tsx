@@ -82,7 +82,6 @@ function counterText(count: number): string {
 function stateText(link: WatcherLinkView, live: string | null): string {
   if (link.status === "waking") return live ?? "Checking…";
   if (link.status === "paused") return "Paused";
-  if (link.status === "idle") return "Waiting for the next event";
   return link.delivery === "auto" ? "Sends findings automatically" : "Watching";
 }
 

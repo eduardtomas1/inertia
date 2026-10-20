@@ -1,4 +1,5 @@
 import type { AgentActivity, AgentPlan, AgentTurn } from "../../../shared/contracts";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import {
   MAX_WATCHER_PENDING_RUNNING_IDS,
   watcherReplaceLineSeparators,
@@ -29,12 +30,20 @@ const MAX_REPLY_BYTES = 2 * 1_024;
 /** Bytes held back for the header, pointer and the hard-cap marker. */
 const FRAME_RESERVE_BYTES = 1_024;
 const HARD_CAP_MARKER = "\n\n[This check was cut at its size limit by Inertia.]";
+const EARLIER_TEXT_MARKER = "[… earlier text left out by Inertia]";
 const RELEVANT_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
 
 export type WatcherDigestReader = Pick<
   WatcherDigestSource,
-  "turn" | "latestTurn" | "activitiesAfter" | "activitiesByIds" | "assistantMessagesAfter" | "plan" | "messageText" | "files"
+  | "turn" | "latestTurn" | "activitiesAfter" | "activitiesByIds" | "assistantMessagesAfter" | "messageTextAfter" | "plan"
+  | "messageText" | "files"
 >;
+
+/** The newest reply of a running watched turn, which may still be streaming, and how much of it a check quoted. */
+export interface WatcherOpenReply {
+  messageId: string;
+  bytes: number;
+}
 
 export interface WatcherDigestLink {
   id: string;
@@ -67,6 +76,8 @@ export interface WatcherDigestOptions {
    * Defaults to the cursor's turn, then the latest turn.
    */
   turnId?: string;
+  /** The reply an earlier check of this turn read while it may still have been streaming. */
+  openReply?: WatcherOpenReply | null;
 }
 
 export interface WatcherDigestStats {
@@ -90,7 +101,17 @@ export interface WatcherDigest {
   pendingRunningIds: string[];
   /** Stable key of the watched turn's current plan, or null without one. */
   planKey: string | null;
+  /** The reply the cursor stays before because it may still grow; the next check quotes only what it adds. */
+  openReply: WatcherOpenReply | null;
   stats: WatcherDigestStats;
+}
+
+interface DigestReply {
+  createdAt: string;
+  content: string;
+  truncated: boolean;
+  /** The rest of a reply an earlier check quoted while it streamed. */
+  continued?: boolean;
 }
 
 const UTF8 = new TextEncoder();
@@ -255,8 +276,17 @@ function briefSection(source: WatcherDigestReader, turn: AgentTurn, budget: numb
   };
 }
 
+/** The newest bytes of a reply's new part, starting at a whole word. */
+function newestText(value: string, maximumBytes: number): { text: string; cut: boolean } {
+  const encoded = Buffer.from(value, "utf8");
+  if (encoded.length <= maximumBytes) return { text: value, cut: false };
+  let start = encoded.length - Math.max(0, maximumBytes);
+  while (start < encoded.length && (encoded[start]! & 0xc0) === 0x80) start += 1;
+  return { text: encoded.subarray(start).toString("utf8").replace(/^\S*\s*/u, ""), cut: true };
+}
+
 function repliesSection(
-  replies: ReadonlyArray<{ createdAt: string; content: string; truncated: boolean }>,
+  replies: readonly DigestReply[],
   final: boolean,
   budget: number,
 ): Section | null {
@@ -269,12 +299,18 @@ function repliesSection(
   let index = visible.length - 1;
   for (; index >= 0; index -= 1) {
     const reply = visible[index]!;
-    const lead = `${clock(reply.createdAt)}:`;
-    const room = Math.min(MAX_REPLY_BYTES, remaining - bytes(lead) - 32);
+    const lead = `${clock(reply.createdAt)}${reply.continued ? " (continued)" : ""}:`;
+    const reserve = reply.continued ? bytes(EARLIER_TEXT_MARKER) + 1 : 0;
+    const room = Math.min(MAX_REPLY_BYTES, remaining - bytes(lead) - reserve - 32);
     if (room < 64) break;
-    const body = bounded(reply.content.trim(), room);
-    const cut = body.truncated || reply.truncated;
-    const text = `${lead}\n${quote(shortened(body.text, cut))}`;
+    const newest = reply.continued ? newestText(reply.content.trim(), room) : null;
+    const body = bounded(newest?.text ?? reply.content.trim(), room);
+    const startCut = newest !== null && (newest.cut || reply.truncated);
+    const cut = body.truncated || reply.truncated || startCut;
+    const quoted = newest
+      ? `${startCut ? `${EARLIER_TEXT_MARKER}\n` : ""}${shortened(body.text, body.truncated)}`
+      : shortened(body.text, cut);
+    const text = `${lead}\n${quote(quoted)}`;
     if (bytes(text) + 2 > remaining) break;
     remaining -= bytes(text) + 2;
     if (cut) truncated += 1;
@@ -361,9 +397,20 @@ export function buildWatcherDigest(
     planChanged || firstWake || options.sessionFresh || (options.final && options.previousPlanKey === undefined)
   );
 
-  const replies = sharing.partialReplies
+  const read = sharing.partialReplies
     ? source.assistantMessagesAfter(watchedId, turn.id, base.messageAt, MAX_WATCHER_DIGEST_MESSAGES, MAX_REPLY_BYTES * 2)
     : [];
+  const quotedBefore = options.openReply ?? null;
+  const replies = read.flatMap((reply): DigestReply[] => {
+    if (quotedBefore?.messageId !== reply.id || reply.bytes < quotedBefore.bytes) return [reply];
+    if (reply.bytes === quotedBefore.bytes) return [];
+    const rest = source.messageTextAfter(reply.id, quotedBefore.bytes, MAX_REPLY_BYTES);
+    return [{ createdAt: reply.createdAt, content: rest.content, truncated: rest.truncated, continued: true }];
+  });
+  const streaming = !isAgentTurnTerminalStatus(turn.status) && read.length < MAX_WATCHER_DIGEST_MESSAGES
+    ? read.at(-1) ?? null
+    : null;
+  const lastClosed = streaming ? read.at(-2) : read.at(-1);
   const showBrief = sharing.brief && (firstWake || options.sessionFresh);
   const somethingNew = settled.length > 0 || replies.length > 0 || planChanged || (firstWake && (showBrief || showPlan));
   if (!somethingNew && !options.final) return null;
@@ -412,7 +459,7 @@ export function buildWatcherDigest(
     turnId: turn.id,
     activityAt: last?.createdAt ?? base.activityAt,
     activityId: last?.id ?? base.activityId,
-    messageAt: replies.at(-1)?.createdAt ?? base.messageAt,
+    messageAt: lastClosed?.createdAt ?? base.messageAt,
     pendingRunningIds,
   };
   return {
@@ -421,6 +468,7 @@ export function buildWatcherDigest(
     cursor,
     pendingRunningIds,
     planKey,
+    openReply: streaming ? { messageId: streaming.id, bytes: streaming.bytes } : null,
     stats: { eventsCovered, itemsTruncated, itemsOmitted, bytes: bytes(content), commandsRun, moreFollows },
   };
 }

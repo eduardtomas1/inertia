@@ -439,3 +439,88 @@ describe("watcher check dispatch and settlement", () => {
     }
   });
 });
+
+describe("watcher checks of a reply that is still streaming", () => {
+  it("sends the rest of a reply a check read while it streamed, and not its start again", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      watchedActivity(f, "Read src/a.ts");
+      f.provider.emit(f.watched.id, { type: "text", text: "HEAD-OF-ANSWER " });
+      f.turnTimers.advance(5_000);
+      await f.flush();
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+      await watcherRunning(f, watcherId);
+      expect(digestOf(f.provider.input(watcherId).prompt)).toContain("HEAD-OF-ANSWER");
+      await f.finishTurn(watcherId, "SILENT");
+
+      await f.finishTurn(f.watched.id, "TAIL-OF-ANSWER");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await watcherRunning(f, watcherId);
+      const final = digestOf(f.provider.input(watcherId).prompt);
+      expect(final).toContain("Final check for this turn");
+      expect(final).toContain("TAIL-OF-ANSWER");
+      expect(final).not.toContain("HEAD-OF-ANSWER");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("quotes the newest part of a streamed reply that grew past one quote", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      watchedActivity(f, "Read src/a.ts");
+      f.provider.emit(f.watched.id, { type: "text", text: "HEAD-OF-ANSWER " });
+      f.turnTimers.advance(5_000);
+      await f.flush();
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+      await watcherRunning(f, watcherId);
+      await f.finishTurn(watcherId, "SILENT");
+
+      for (let part = 0; part < 4; part += 1) {
+        f.provider.emit(f.watched.id, { type: "text", text: `${"évidence ".repeat(200)}\n` });
+        f.turnTimers.advance(5_000);
+        await f.flush();
+      }
+      await f.finishTurn(f.watched.id, "TAIL-OF-ANSWER");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await watcherRunning(f, watcherId);
+      const final = digestOf(f.provider.input(watcherId).prompt);
+      expect(final).toContain("(continued):\n> [… earlier text left out by Inertia]\n> évidence");
+      expect(final).toContain("TAIL-OF-ANSWER");
+      expect(final).not.toContain("HEAD-OF-ANSWER");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("does not quote a streaming reply again when it did not grow between checks", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      watchedActivity(f, "Read src/a.ts");
+      f.provider.emit(f.watched.id, { type: "text", text: "HEAD-OF-ANSWER " });
+      f.turnTimers.advance(5_000);
+      await f.flush();
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+      await watcherRunning(f, watcherId);
+      await f.finishTurn(watcherId, "SILENT");
+
+      watchedActivity(f, "Read src/b.ts");
+      await f.advance(10 * 60_000);
+      await watcherRunning(f, watcherId);
+      const second = digestOf(f.provider.input(watcherId).prompt);
+      expect(second).toContain("Read src/b.ts");
+      expect(second).not.toContain("HEAD-OF-ANSWER");
+    } finally {
+      await f.close();
+    }
+  });
+});

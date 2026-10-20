@@ -12,7 +12,7 @@ import type { ReadOnlyWatcherViolation } from "../turns/turn-controller-types";
 import { publicRuntimeError } from "../../runtime-errors";
 import { isHeld } from "../update-hold";
 import type { WatcherCheckoutGuard, WatcherGuardOutcome, WatcherGuardWindow } from "./watcher-checkout-guard";
-import { buildWatcherDigest, type WatcherDigest } from "./watcher-digest";
+import { buildWatcherDigest, type WatcherDigest, type WatcherOpenReply } from "./watcher-digest";
 import { watcherInstruction } from "./watcher-instructions";
 import type { WatcherLiveProjection } from "./watcher-live-projection";
 import { classifyWatcherReply, findingPreview } from "./watcher-outcome";
@@ -114,6 +114,8 @@ export class WatcherWakeRunner {
   readonly #dispatchFailures = new Map<string, number>();
   /** Coverage of a watched turn whose final pass is still due after the next turn began. */
   readonly #priorCursors = new Map<string, WatcherCursor>();
+  /** The possibly still streaming reply the link's last check quoted, and its watched turn. */
+  readonly #openReplies = new Map<string, WatcherOpenReply & { turnId: string }>();
 
   constructor(dependencies: WatcherWakeRunnerDependencies) {
     this.#deps = dependencies;
@@ -130,6 +132,7 @@ export class WatcherWakeRunner {
     this.#routeFailures.delete(linkId);
     this.#dispatchFailures.delete(linkId);
     this.#priorCursors.delete(linkId);
+    this.#openReplies.delete(linkId);
   }
 
   /** A resumed link starts its route and dispatch retries afresh. */
@@ -202,6 +205,7 @@ export class WatcherWakeRunner {
         sequence: claimed.counters.wakesTotal + 1,
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),
+        openReply: this.#openReplies.get(linkId) ?? null,
       });
       if (!digest) return release("skipped");
       window = await this.#deps.guard.before(watcher.id);
@@ -491,11 +495,14 @@ export class WatcherWakeRunner {
       linkId, digest.cursor, digest.stats.eventsCovered, now, running.start.turnId,
     );
     if (!link) return false;
-    if (link.cursor.turnId === digest.turnId) return true;
-    if (link.finalPassTurnId === digest.turnId) return false;
-    const prior = this.#priorCursors.get(linkId);
-    if (prior && prior.turnId !== digest.turnId) return false;
-    this.#priorCursors.set(linkId, digest.cursor);
+    if (link.cursor.turnId !== digest.turnId) {
+      if (link.finalPassTurnId === digest.turnId) return false;
+      const prior = this.#priorCursors.get(linkId);
+      if (prior && prior.turnId !== digest.turnId) return false;
+      this.#priorCursors.set(linkId, digest.cursor);
+    }
+    if (digest.openReply) this.#openReplies.set(linkId, { ...digest.openReply, turnId: digest.turnId });
+    else if (this.#openReplies.get(linkId)?.turnId === digest.turnId) this.#openReplies.delete(linkId);
     return true;
   }
 
@@ -506,5 +513,6 @@ export class WatcherWakeRunner {
     this.#routeFailures.clear();
     this.#dispatchFailures.clear();
     this.#priorCursors.clear();
+    this.#openReplies.clear();
   }
 }

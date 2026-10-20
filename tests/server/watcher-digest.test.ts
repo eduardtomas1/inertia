@@ -86,8 +86,15 @@ class FakeSource implements WatcherDigestReader {
       .slice(0, limit)
       .map((reply) => {
         const truncated = bytes(reply.content) > maximumBytes;
-        return { ...reply, content: truncated ? reply.content.slice(0, maximumBytes) : reply.content, truncated };
+        return { ...reply, content: truncated ? reply.content.slice(0, maximumBytes) : reply.content, truncated, bytes: bytes(reply.content) };
       });
+  }
+  messageTextAfter(messageId: string, offsetBytes: number, maximumBytes: number) {
+    this.calls.push(`messageTextAfter:${messageId}`);
+    const whole = Buffer.from(this.replies.find(({ id }) => id === messageId)?.content ?? "", "utf8");
+    const rest = whole.subarray(offsetBytes);
+    const kept = rest.subarray(Math.max(0, rest.length - maximumBytes));
+    return { content: kept.toString("utf8"), truncated: kept.length < rest.length, bytes: whole.length };
   }
   plan() {
     this.calls.push("plan");
@@ -370,16 +377,54 @@ describe("buildWatcherDigest", () => {
 
   it("shares partial replies only when allowed and advances the message cursor", () => {
     const source = new FakeSource();
-    source.replies = [{ id: "m1", createdAt: at(5), content: "I'll add the limiter first." }];
+    source.replies = [
+      { id: "m1", createdAt: at(5), content: "I'll add the limiter first." },
+      { id: "m2", createdAt: at(6), content: "Now the tests." },
+    ];
     const shared = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
     expect(shared.content).toContain("## Assistant replies so far — quoted evidence\n10:00:05:\n> I'll add the limiter first.");
     expect(shared.cursor.messageAt).toBe(at(5));
+    expect(shared.openReply).toEqual({ messageId: "m2", bytes: bytes("Now the tests.") });
 
     source.calls = [];
     const hidden = buildWatcherDigest(source, link({ cursor: seenCursor(0), sharing: { partialReplies: false } }), options())
       ?? null;
     expect(hidden).toBeNull();
     expect(source.calls).not.toContain("assistantMessagesAfter");
+  });
+
+  it("keeps the cursor before a reply that may still stream and quotes only what it adds", () => {
+    const source = new FakeSource();
+    source.replies = [{ id: "m1", createdAt: at(5), content: "HEAD-OF-ANSWER" }];
+    const first = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
+    expect(first.content).toContain("> HEAD-OF-ANSWER");
+    expect(first.cursor.messageAt).toBeNull();
+    expect(first.openReply).toEqual({ messageId: "m1", bytes: bytes("HEAD-OF-ANSWER") });
+
+    const unchanged = link({ cursor: { ...seenCursor(0), messageAt: first.cursor.messageAt } });
+    expect(buildWatcherDigest(source, unchanged, options({ openReply: first.openReply }))).toBeNull();
+
+    source.replies[0]!.content = "HEAD-OF-ANSWER and TAIL-OF-ANSWER";
+    source.turns = [turn({ status: "completed" })];
+    const final = buildWatcherDigest(source, unchanged, options({ final: true, openReply: first.openReply }))!;
+    expect(final.content).toContain("10:00:05 (continued):\n> and TAIL-OF-ANSWER");
+    expect(final.content).not.toContain("HEAD-OF-ANSWER");
+    expect(final.cursor.messageAt).toBe(at(5));
+    expect(final.openReply).toBeNull();
+  });
+
+  it("marks a streamed reply whose new part is longer than one reply quote", () => {
+    const source = new FakeSource();
+    source.replies = [{ id: "m1", createdAt: at(5), content: `HEAD ${"middle ".repeat(1_000)}TAIL-OF-ANSWER` }];
+    const digest = buildWatcherDigest(
+      source,
+      link({ cursor: seenCursor(0) }),
+      options({ openReply: { messageId: "m1", bytes: bytes("HEAD ") } }),
+    )!;
+    expect(digest.content).toContain("10:00:05 (continued):\n> [… earlier text left out by Inertia]\n> ");
+    expect(digest.content).toContain("TAIL-OF-ANSWER");
+    expect(digest.content).not.toContain("HEAD");
+    expect(digest.stats.itemsTruncated).toBe(1);
   });
 
   it("hides activity details and the plan when activities are not shared", () => {

@@ -26,6 +26,8 @@ export interface WatcherDigestMessage {
   createdAt: string;
   content: string;
   truncated: boolean;
+  /** The whole message's UTF-8 length when it was read. */
+  bytes: number;
 }
 
 export interface WatcherDigestSourceContext {
@@ -36,6 +38,10 @@ export interface WatcherDigestSourceContext {
 const ACTIVITY_COLUMNS = `id, conversation_id, run_id, turn_id, kind, title,
   substr(detail, 1, ${MAX_WATCHER_ACTIVITY_DETAIL_CHARS}) AS detail, status, created_at`;
 const USAGE_LIMITED_SQL = "EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id)";
+const MESSAGE_BYTES_SQL = `length(CAST(messages.content AS BLOB)) + COALESCE((
+  SELECT SUM(length(CAST(chunks.content AS BLOB))) FROM message_content_chunks AS chunks
+  WHERE chunks.message_id = messages.id
+), 0)`;
 
 function boundedLimit(limit: number, maximum: number): number {
   return Number.isSafeInteger(limit) ? Math.min(maximum, Math.max(0, limit)) : 0;
@@ -112,17 +118,59 @@ export class WatcherDigestSource {
     const bounded = boundedLimit(limit, MAX_WATCHER_DIGEST_MESSAGES);
     if (bounded === 0) return [];
     const rows = cachedStatement(this.context.database, `
-      SELECT id, created_at FROM messages
+      SELECT id, created_at, ${MESSAGE_BYTES_SQL} AS bytes FROM messages
       WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant'
         AND (? IS NULL OR created_at > ?)
       ORDER BY created_at ASC, id ASC LIMIT ?
-    `).all(conversationId, turnId, after, after, bounded) as Array<{ id: string; created_at: string }>;
+    `).all(conversationId, turnId, after, after, bounded) as Array<{ id: string; created_at: string; bytes: number }>;
     const reads = this.context.turnReads();
     return rows.map((row) => ({
       id: row.id,
       createdAt: row.created_at,
       ...reads.messageText(row.id, Math.max(0, Math.trunc(maximumBytes))),
+      bytes: row.bytes,
     }));
+  }
+
+  /**
+   * The part of a message after its first `offsetBytes` UTF-8 bytes, keeping
+   * only the newest `maximumBytes` of it; `truncated` when its start was left out.
+   */
+  messageTextAfter(messageId: string, offsetBytes: number, maximumBytes: number): {
+    content: string;
+    truncated: boolean;
+    bytes: number;
+  } {
+    const database = this.context.database;
+    const total = cachedStatement(database, `SELECT ${MESSAGE_BYTES_SQL} AS bytes FROM messages WHERE id = ?`)
+      .get(messageId) as { bytes: number } | undefined;
+    const bytes = total?.bytes ?? 0;
+    const remainder = Math.max(0, bytes - Math.max(0, Math.trunc(offsetBytes)));
+    const wanted = Math.min(remainder, Math.max(0, Math.trunc(maximumBytes)));
+    if (wanted === 0) return { content: "", truncated: remainder > 0, bytes };
+    const parts: Buffer[] = [];
+    let read = 0;
+    const chunks = cachedStatement(database, `
+      SELECT substr(CAST(content AS BLOB), -?) AS content
+      FROM message_content_chunks WHERE message_id = ? ORDER BY sequence DESC LIMIT ?
+    `).iterate(wanted, messageId, wanted) as Iterable<{ content: Buffer }>;
+    for (const chunk of chunks) {
+      parts.unshift(chunk.content);
+      read += chunk.content.length;
+      if (read >= wanted) break;
+    }
+    if (read < wanted) {
+      const head = cachedStatement(database, `
+        SELECT COALESCE(substr(CAST(content AS BLOB), -?), X'') AS content FROM messages WHERE id = ?
+      `).get(wanted - read, messageId) as { content: Buffer } | undefined;
+      if (head) parts.unshift(head.content);
+    }
+    const joined = Buffer.concat(parts);
+    let start = Math.max(0, joined.length - wanted);
+    while (start < joined.length && (joined[start]! & 0xc0) === 0x80) start += 1;
+    const content = joined.subarray(start).toString("utf8");
+    const truncated = remainder > wanted;
+    return { content: truncated ? content.replace(/^\S*\s*/u, "") : content, truncated, bytes };
   }
 
   /**

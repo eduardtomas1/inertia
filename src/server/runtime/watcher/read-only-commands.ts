@@ -24,6 +24,7 @@ const SHELL_SYNTAX = "The command uses shell syntax that watchers cannot run.";
 const UNSAFE_OPTION = "The command uses an option that can write or run another program.";
 const OUTSIDE = "The command reads outside the workspace.";
 const ENVIRONMENT_FILE = "The command reads an environment file.";
+const OPTION_GLOB = "The command uses a glob that could expand to an option.";
 const UNIQ_GLOB = "uniq cannot take a glob, because a second matched file would become its output.";
 
 const UNQUOTED_REJECTED = new Set([";", "&", "<", ">", "(", ")", "{", "}", "$", "\\"]);
@@ -97,6 +98,7 @@ function classifySegment(words: readonly Word[], context: ReadOnlyCommandContext
   }
   const rule = PROGRAMS[program]!;
   for (const word of rest) {
+    if (globShapesOption(word)) return refuse(OPTION_GLOB);
     const problem = pathProblem(word, context, program !== "git");
     if (problem) return refuse(problem);
   }
@@ -207,6 +209,13 @@ function pathCandidates(value: string): string[] {
   if (value.startsWith("-") && colon >= 0) candidates.push(value.slice(colon + 1));
   if (/^-[^-]/u.test(value) && value.length > 2) candidates.push(value.slice(2));
   return candidates;
+}
+
+function globShapesOption(word: Word): boolean {
+  if (word.glob[0]) return true;
+  if (!/^[-+]/u.test(word.value)) return false;
+  const equals = word.value.indexOf("=");
+  return word.glob.slice(0, equals < 0 ? undefined : equals).includes(true);
 }
 
 function globReachesParent(word: Word, separators: RegExp): boolean {

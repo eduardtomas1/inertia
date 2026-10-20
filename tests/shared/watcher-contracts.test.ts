@@ -84,6 +84,7 @@ const feedItem: WatcherFeedItem = {
   createdAt: at,
   settledAt: at,
   resolvedBySequence: null,
+  commandsDeclined: 0,
 };
 const note = {
   linkId: link.id,
@@ -256,6 +257,13 @@ describe("watcher shared contracts", () => {
     expect(watcherFeedItemSchema.parse(feedItem)).not.toHaveProperty("commandsRun");
     for (const commandsRun of [0, -1, 1.5, 10_001, "2"]) {
       expect(watcherFeedItemSchema.safeParse({ ...feedItem, commandsRun }).success).toBe(false);
+    }
+  });
+
+  it("carries the count of command requests a check had declined", () => {
+    expect(watcherFeedItemSchema.parse({ ...feedItem, commandsDeclined: 2 }).commandsDeclined).toBe(2);
+    for (const commandsDeclined of [undefined, -1, 1.5, "2"]) {
+      expect(watcherFeedItemSchema.safeParse({ ...feedItem, commandsDeclined }).success).toBe(false);
     }
   });
 

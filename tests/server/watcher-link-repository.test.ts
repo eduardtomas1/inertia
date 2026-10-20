@@ -356,6 +356,29 @@ describe("watcher link repository", () => {
     expect(store.shellSnapshot().watchers?.[0]?.counters.findingsTotal).toBe(2);
   });
 
+  it("records how many command requests a check declined, zero unless told", () => {
+    const links = store.watcherLinks;
+    const { link } = attach(chat());
+    const settle = (declined?: number) => {
+      links.transition(link.id, ["watching"], { status: "waking" }, tick());
+      const wake = links.createWake({
+        id: randomUUID(), linkId: link.id, watchedTurnId: null, trigger: "activity",
+        eventsCovered: 1, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 128,
+      }, tick())!;
+      expect(wake.commandsDeclined).toBe(0);
+      const settled = links.settleWake(wake.wakeId, "command-attempt", null, null, null, tick(), declined);
+      links.transition(link.id, ["waking"], { status: "watching" }, tick());
+      return settled?.commandsDeclined;
+    };
+    expect(settle()).toBe(0);
+    expect(settle(3)).toBe(3);
+    expect(settle(-2)).toBe(0);
+    expect(settle(Number.NaN)).toBe(0);
+    expect(links.feed(link.id)?.items.map(({ commandsDeclined }) => commandsDeclined)).toEqual([0, 0, 3, 0]);
+    expect(() => raw((database) => database.prepare("UPDATE watcher_wakes SET commands_declined = -1").run()))
+      .toThrow(/CHECK constraint failed/u);
+  });
+
   it("marks a settled finding resolved by a later check of the same link, once", () => {
     const links = store.watcherLinks;
     const { link } = attach(chat());

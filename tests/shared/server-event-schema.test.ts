@@ -2028,7 +2028,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     const item = {
       wakeId: "66666666-6666-4666-8666-666666666666", sequence: 1, watcherTurnId: "turn-1", watchedTurnId: null,
       trigger: "manual", outcome: "silent", state: "settled", eventsCovered: 0, itemsTruncated: 0, itemsOmitted: 0,
-      guardState: null, guardPaths: [], finding: null, delivery: null, createdAt: checkedAt, settledAt: checkedAt, resolvedBySequence: null,
+      guardState: null, guardPaths: [], finding: null, delivery: null, createdAt: checkedAt, settledAt: checkedAt, resolvedBySequence: null, commandsDeclined: 0,
     };
     expect(parseServerEvent(event({ kind: "watcher.link", link }))).toBeTruthy();
     expect(parseServerEvent(event({ kind: "watcher.feed", linkId: link.id, feedRevision: 1, items: [item], next: null }))).toBeTruthy();

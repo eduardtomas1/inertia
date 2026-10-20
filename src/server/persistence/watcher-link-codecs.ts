@@ -99,6 +99,7 @@ export interface WatcherWakeRow {
   created_at: string;
   settled_at: string | null;
   resolved_by_sequence: number | null;
+  commands_declined: number;
 }
 
 /** Where the watcher's coverage of the watched turn stands. */
@@ -307,6 +308,7 @@ export function watcherWakeFromRow(row: WatcherWakeRow): WatcherWakeRecord {
     createdAt: row.created_at,
     settledAt: row.settled_at,
     resolvedBySequence: row.resolved_by_sequence,
+    commandsDeclined: row.commands_declined,
     linkId: row.link_id,
     digestBytes: row.digest_bytes,
     findingMessageId: row.finding_message_id,

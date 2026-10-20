@@ -120,6 +120,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "created_at",
     "settled_at",
     "resolved_by_sequence",
+    "commands_declined",
   ]],
 ];
 

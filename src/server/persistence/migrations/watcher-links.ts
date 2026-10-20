@@ -143,6 +143,7 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       delivered_at TEXT CHECK (delivered_at IS NULL OR length(delivered_at) BETWEEN 20 AND 40),
       created_at TEXT NOT NULL CHECK (length(created_at) BETWEEN 20 AND 40),
       settled_at TEXT CHECK (settled_at IS NULL OR length(settled_at) BETWEEN 20 AND 40),
+      commands_declined INTEGER NOT NULL DEFAULT 0 CHECK (commands_declined >= 0),
       resolved_by_sequence INTEGER CHECK (
         resolved_by_sequence IS NULL OR (outcome = 'finding' AND resolved_by_sequence > sequence)
       ),

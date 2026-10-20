@@ -33,6 +33,7 @@ function item(
     createdAt: `2026-10-19T10:${minute}:00.000Z`,
     settledAt: settledState ? `2026-10-19T10:${minute}:30.000Z` : null,
     resolvedBySequence: null,
+    commandsDeclined: 0,
     ...extra,
   };
 }

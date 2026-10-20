@@ -559,13 +559,14 @@ export class WatcherLinkRepository {
     findingPreview: string | null,
     findingMessageId: string | null,
     now: string,
+    commandsDeclined = 0,
   ): WatcherWakeRecord | null {
     const at = requireTimestamp(now, "Watcher check settlement time");
     return this.database.transaction(() => {
       const changed = this.database.prepare(`
         UPDATE watcher_wakes
         SET state = 'settled', outcome = ?, guard_state = ?, guard_paths_json = ?,
-            finding_preview = ?, finding_message_id = ?, settled_at = ?
+            finding_preview = ?, finding_message_id = ?, settled_at = ?, commands_declined = ?
         WHERE id = ? AND state IN ${ACTIVE_WAKE_STATES_SQL}
       `).run(
         outcome,
@@ -574,6 +575,7 @@ export class WatcherLinkRepository {
         findingPreview === null ? null : truncateUtf8Bytes(findingPreview, MAX_WATCHER_FINDING_BYTES),
         findingMessageId,
         at,
+        boundedCount(commandsDeclined),
         wakeId,
       ).changes;
       if (changed !== 1) return null;

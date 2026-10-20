@@ -50,7 +50,7 @@ export interface WatcherWakeRunnerDependencies {
   route(selection: ModelSelection): Promise<WatcherRouteReadiness>;
   guard: Pick<WatcherCheckoutGuard, "before">;
   live: Pick<WatcherLiveProjection, "begin" | "end">;
-  scheduler(): Pick<WatcherWakeScheduler, "wakeFinished" | "pause" | "resume">;
+  scheduler(): Pick<WatcherWakeScheduler, "wakeFinished" | "pause" | "resume" | "continueWake" | "pendingEvents">;
   /** Republishes the link (`watcher.link.updated`). */
   publish(linkId: string): void;
   /** Refreshes the watcher chat's shell row after a check settles. */
@@ -65,8 +65,10 @@ interface RunningWake {
   watcherConversationId: string;
   window: WatcherGuardWindow;
   digest: WatcherDigest;
-  /** The stored cursor turn the digest was built from; the cursor moves only while it still holds. */
-  expectedTurnId: string | null;
+  /** The cursor the digest was built from; the stored cursor moves only while its turn still holds. */
+  start: WatcherCursor;
+  /** The final pass's turn, or null for a mid-turn check. */
+  finalTurnId: string | null;
   restore: WatcherTransition;
   violations: ReadOnlyWatcherViolation[];
   pause: WatcherTransition | null;
@@ -81,6 +83,13 @@ export function conversationOrNull(
   } catch {
     return null;
   }
+}
+
+/** The check read past where it started; a continuation that did not would read the same page again. */
+function advanced({ start, digest }: Pick<RunningWake, "start" | "digest">): boolean {
+  return digest.cursor.turnId !== start.turnId
+    || digest.cursor.activityAt !== start.activityAt
+    || digest.cursor.activityId !== start.activityId;
 }
 
 const VIOLATION_OUTCOMES: ReadonlyArray<[ReadOnlyWatcherViolation["kind"][], WatcherWakeOutcome]> = [
@@ -237,13 +246,11 @@ export class WatcherWakeRunner {
       }
       this.#dispatchFailures.delete(linkId);
       store.watcherLinks.attachWakeTurn(wake.wakeId, queuedTurnId, this.#deps.now());
-      if (finalTurnId !== null) {
-        store.watcherLinks.markFinalPass(linkId, finalTurnId, this.#deps.now());
-        if (this.#priorCursors.get(linkId)?.turnId === finalTurnId) this.#priorCursors.delete(linkId);
-      }
+      // A final pass that read a full page is marked done only once its last page settles.
+      if (finalTurnId !== null && !digest.stats.moreFollows) this.#finalPassDone(linkId, finalTurnId);
       this.#running.set(queuedTurnId, {
         linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest,
-        expectedTurnId: cursor.turnId, restore, violations: [], pause: null,
+        start: cursor, finalTurnId, restore, violations: [], pause: null,
       });
       if (!staleTurn) this.#planKeys.set(linkId, digest.planKey);
       this.#deps.live.begin(linkId, watcher.id, queuedTurnId);
@@ -312,6 +319,11 @@ export class WatcherWakeRunner {
     return true;
   }
 
+  #finalPassDone(linkId: string, turnId: string): void {
+    this.#deps.store.watcherLinks.markFinalPass(linkId, turnId, this.#deps.now());
+    if (this.#priorCursors.get(linkId)?.turnId === turnId) this.#priorCursors.delete(linkId);
+  }
+
   /**
    * Ends the `waking` claim. A final pass made while paused for the wake
    * budget returns to that pause, unless the watched chat started its next
@@ -375,6 +387,7 @@ export class WatcherWakeRunner {
     const linkId = wake.linkId;
     let pause: WatcherTransition | null = null;
     let settled = false;
+    let continues = false;
     try {
       this.#deps.live.end(linkId);
       let guard: WatcherGuardOutcome | null = null;
@@ -409,7 +422,9 @@ export class WatcherWakeRunner {
         finding = null;
       }
       const now = this.#deps.now();
-      if (running && (outcome === "silent" || outcome === "finding")) this.#advance(linkId, running, now);
+      if (running && (outcome === "silent" || outcome === "finding")) {
+        continues = this.#advance(linkId, running, now) && running.digest.stats.moreFollows && advanced(running);
+      }
       store.watcherLinks.settleWake(
         wake.wakeId,
         outcome,
@@ -433,6 +448,18 @@ export class WatcherWakeRunner {
         }
       }
       const scheduler = this.#deps.scheduler();
+      const finalTurnId = running?.finalTurnId ?? null;
+      try {
+        if (continues && !pause) {
+          // More of the same watched turn waits: check it without waiting for new events.
+          scheduler.continueWake(linkId, finalTurnId);
+          store.watcherLinks.notePendingEvents(linkId, scheduler.pendingEvents(linkId), now);
+        } else if (finalTurnId !== null && running?.digest.stats.moreFollows) {
+          this.#finalPassDone(linkId, finalTurnId);
+        }
+      } catch {
+        // A continuation that could not be queued leaves the rest to the next check.
+      }
       try {
         if (pause) {
           store.watcherLinks.transition(linkId, ["waking"], pause, now);
@@ -458,16 +485,21 @@ export class WatcherWakeRunner {
   /**
    * Moves the link's coverage after a silent or finding check. A check of a
    * turn the link no longer follows keeps that turn's coverage for its final
-   * pass instead of rewinding the cursor.
+   * pass instead of rewinding the cursor. True when the check's coverage was
+   * kept, in the stored cursor or for that final pass.
    */
-  #advance(linkId: string, running: RunningWake, now: string): void {
+  #advance(linkId: string, running: RunningWake, now: string): boolean {
     const { digest } = running;
     const link = this.#deps.store.watcherLinks.advanceCursor(
-      linkId, digest.cursor, digest.stats.eventsCovered, now, running.expectedTurnId,
+      linkId, digest.cursor, digest.stats.eventsCovered, now, running.start.turnId,
     );
-    if (!link || link.cursor.turnId === digest.turnId || link.finalPassTurnId === digest.turnId) return;
+    if (!link) return false;
+    if (link.cursor.turnId === digest.turnId) return true;
+    if (link.finalPassTurnId === digest.turnId) return false;
     const prior = this.#priorCursors.get(linkId);
-    if (!prior || prior.turnId === digest.turnId) this.#priorCursors.set(linkId, digest.cursor);
+    if (prior && prior.turnId !== digest.turnId) return false;
+    this.#priorCursors.set(linkId, digest.cursor);
+    return true;
   }
 
   dispose(): void {

@@ -76,6 +76,11 @@ export interface WatcherDigestStats {
   bytes: number;
   /** Settled command activities of the watched chat this check covers. */
   commandsRun: number;
+  /**
+   * The check read as many activities as one check may: more may follow, and
+   * a continuation check of the same watched turn reviews them.
+   */
+  moreFollows: boolean;
 }
 
 export interface WatcherDigest {
@@ -416,6 +421,6 @@ export function buildWatcherDigest(
     cursor,
     pendingRunningIds,
     planKey,
-    stats: { eventsCovered, itemsTruncated, itemsOmitted, bytes: bytes(content), commandsRun },
+    stats: { eventsCovered, itemsTruncated, itemsOmitted, bytes: bytes(content), commandsRun, moreFollows },
   };
 }

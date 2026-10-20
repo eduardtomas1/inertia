@@ -434,6 +434,21 @@ describe("buildWatcherDigest", () => {
     const digest = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
     expect(digest.content).toContain("More activity followed; the next check covers it.");
     expect(digest.cursor.activityId).toBe("act-0200");
+    expect(digest.stats.moreFollows).toBe(true);
+  });
+
+  it("flags a continuation once a check reads a full page of activities, and not below it", () => {
+    const read = (count: number) => {
+      const source = new FakeSource();
+      source.activities = Array.from({ length: count }, (_, index) => activity(index + 1, { detail: null }));
+      return buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
+    };
+    const full = read(200);
+    expect(full.stats).toMatchObject({ moreFollows: true, eventsCovered: 200 });
+    expect(full.content).toContain("More activity followed; the next check covers it.");
+    const partial = read(199);
+    expect(partial.stats).toMatchObject({ moreFollows: false, eventsCovered: 199 });
+    expect(partial.content).not.toContain("More activity followed");
   });
 
   it("neutralizes and flattens the watched title in the header", () => {

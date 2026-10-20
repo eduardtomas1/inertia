@@ -164,6 +164,44 @@ describe("WatcherWakeScheduler", () => {
     expect(wakes[1]!.at).toBe(endedAt + COOLDOWN_MS);
   });
 
+  it("runs a mid-turn continuation after the cooldown, within the allowance, and retries it when transient", () => {
+    let allowance = 3;
+    const attempts: WatcherWakeAttempt[] = ["started", "transient", "started"];
+    const { scheduler, timers, wakes, exhausted } = harness({ attempt: () => attempts.shift() ?? "started", allowance: () => allowance });
+    scheduler.observe(LINK, started());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.continueWake(LINK, null);
+    scheduler.wakeFinished(LINK);
+    const endedAt = timers.now;
+    expect(scheduler.pendingEvents(LINK)).toBe(0);
+    timers.advance(COOLDOWN_MS - 1);
+    expect(wakes).toHaveLength(1);
+    timers.advance(1);
+    expect(wakes[1]).toMatchObject({ trigger: "activity", at: endedAt + COOLDOWN_MS, context: { final: false, events: 0 } });
+    timers.advance(WATCHER_RETRY_BASE_MS);
+    expect(wakes).toHaveLength(3);
+    allowance = 1;
+    scheduler.continueWake(LINK, null);
+    scheduler.wakeFinished(LINK);
+    timers.advance(10 * 60_000);
+    expect(wakes).toHaveLength(3);
+    expect(exhausted).toHaveLength(1);
+  });
+
+  it("queues another final pass of the same turn as a continuation, even after the turn's final pass ran", () => {
+    const { scheduler, timers, wakes } = harness({ allowance: () => 1 });
+    scheduler.onWatchedTurnSettled(LINK, "turn-1");
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.continueWake(LINK, "turn-1");
+    scheduler.wakeFinished(LINK);
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    expect(wakes.map(({ trigger, context }) => [trigger, context.watchedTurnId])).toEqual([["turn-end", "turn-1"], ["turn-end", "turn-1"]]);
+    scheduler.wakeFinished(LINK);
+    scheduler.onWatchedTurnSettled(LINK, "turn-1");
+    timers.advance(10 * 60_000);
+    expect(wakes).toHaveLength(2);
+  });
+
   it("uses the settle delay when it ends after the cooldown", () => {
     const { scheduler, timers, wakes } = harness();
     scheduler.observe(LINK, settled());

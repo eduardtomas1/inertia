@@ -224,6 +224,136 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
   });
 });
 
+/** Settled watched activities, all before any check reads them. */
+function watchedActivities(f: WatcherFixture, count: number): void {
+  for (let index = 0; index < count; index += 1) watchedActivity(f, `Read src/page-${index}.ts`);
+}
+
+/** Waits for the watcher's `count`-th check input and returns its digest and check record. */
+async function check(f: WatcherFixture, watcherId: string, count: number) {
+  await vi.waitFor(() => { if (watcherInputs(f, watcherId).length < count) throw new Error("check not started"); });
+  const input = watcherInputs(f, watcherId)[count - 1]!;
+  return { digest: digestOf(input.prompt), wake: f.store.watcherLinks.wakeForTurn(input.turnId)! };
+}
+
+const MORE_FOLLOWS = "More activity followed; the next check covers it.";
+
+describe("watcher checks past the per-check activity cap", () => {
+  it("drains 450 settled activities in three checks without new watched events, after the cooldown", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const cooldownMs = link.budgets.cooldownSeconds * 1_000;
+      await f.startWatchedTurn();
+      watchedActivities(f, 450);
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      const first = await check(f, watcherId, 1);
+      expect(first.digest).toContain(MORE_FOLLOWS);
+      expect(first.digest).toContain("Read src/page-198.ts");
+      expect(first.digest).not.toContain("Read src/page-200.ts");
+      await f.finishTurn(watcherId, "SILENT");
+      const afterFirst = f.linkView(link.id);
+      expect(afterFirst.cursor.activityId).not.toBeNull();
+      expect(afterFirst.counters.eventsPending).toBe(0);
+
+      // The continuation is an automatic check: it waits out the cooldown.
+      await f.advance(cooldownMs - 1);
+      expect(watcherInputs(f, watcherId)).toHaveLength(1);
+      await f.advance(1);
+      const second = await check(f, watcherId, 2);
+      expect(second.wake).toMatchObject({ trigger: "activity", watchedTurnId: afterFirst.cursor.turnId });
+      expect(second.digest).toContain(MORE_FOLLOWS);
+      expect(second.digest).toContain("Read src/page-200.ts");
+      expect(second.digest).not.toContain("Read src/page-198.ts");
+      await f.finishTurn(watcherId, "SILENT");
+      const afterSecond = f.linkView(link.id);
+      expect(afterSecond.cursor.activityAt! > afterFirst.cursor.activityAt!).toBe(true);
+      expect(afterSecond.counters.eventsPending).toBe(0);
+
+      await f.advance(cooldownMs);
+      const third = await check(f, watcherId, 3);
+      expect(third.digest).not.toContain(MORE_FOLLOWS);
+      expect(third.digest).toContain("Read src/page-449.ts");
+      await f.finishTurn(watcherId, "SILENT");
+      const drained = f.linkView(link.id);
+      expect(drained.cursor.activityAt! > afterSecond.cursor.activityAt!).toBe(true);
+      expect(drained.counters).toMatchObject({ eventsSeen: 450, eventsPending: 0, wakesThisTurn: 3, wakesTotal: 3 });
+
+      await f.advance(30 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(3);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("follows a final pass that hit the cap with more final passes and marks it done after the last page", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const turn = await f.startWatchedTurn();
+      watchedActivities(f, 450);
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      for (const [index, more] of [[1, true], [2, true], [3, false]] as const) {
+        const page = await check(f, watcherId, index);
+        expect(page.wake).toMatchObject({ trigger: "turn-end", watchedTurnId: turn.id });
+        expect(page.digest).toContain("Final check for this turn");
+        expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
+        expect(f.linkView(link.id).finalPassTurnId).toBe(more ? null : turn.id);
+        await f.finishTurn(watcherId, "SILENT");
+        expect(f.linkView(link.id).counters.eventsPending).toBe(0);
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      }
+      expect(f.linkView(link.id)).toMatchObject({
+        status: "watching", finalPassTurnId: turn.id, counters: { eventsSeen: 450, eventsPending: 0 },
+      });
+      await f.advance(30 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(3);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("spends one unit of the allowance per continuation and leaves the rest to the final pass at the budget", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ budgets: { wakesPerWatchedTurn: 2, cooldownSeconds: 15, digestKiB: 24, contextReadsPerWake: 4 } });
+      const watcherId = link.watcherConversationId;
+      const turn = await f.startWatchedTurn();
+      watchedActivities(f, 450);
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      expect((await check(f, watcherId, 1)).digest).toContain(MORE_FOLLOWS);
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.linkView(link.id).counters).toMatchObject({ wakesThisTurn: 1, wakeAllowance: 2 });
+
+      // The last unit is the final pass's: the continuation stops at the budget like any mid-turn check.
+      await f.advance(10 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(1);
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "wake-budget", finalPassTurnId: null });
+
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      for (const [index, more] of [[2, true], [3, false]] as const) {
+        const page = await check(f, watcherId, index);
+        expect(page.wake).toMatchObject({ trigger: "turn-end", watchedTurnId: turn.id });
+        expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
+        await f.finishTurn(watcherId, "SILENT");
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      }
+      expect(f.linkView(link.id)).toMatchObject({
+        status: "paused", pauseReason: "wake-budget", finalPassTurnId: turn.id,
+        counters: { eventsSeen: 450, eventsPending: 0 },
+      });
+      await f.advance(30 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(3);
+    } finally {
+      await f.close();
+    }
+  });
+});
+
 describe("watcher check dispatch and settlement", () => {
   it("pauses after three consecutive dispatch failures instead of retrying forever", async () => {
     const f = await createWatcherFixture();

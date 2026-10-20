@@ -168,6 +168,35 @@ describe("watcher note delivery", () => {
     }
   });
 
+  it("falls back from Steer when the turn ended first: queued while the chat still runs, or as the idle chat's next turn", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Keep going");
+      const admission = vi.spyOn(f.controller, "acquireFollowUpAdmission").mockReturnValueOnce(null);
+      await expect(deliver(f, link.id, wakeId, "steer")).resolves.toMatchObject({
+        result: { delivery: { mode: "queue", state: "queued", detail: WATCHER_DELIVERY_DETAIL.turnEnded } },
+      });
+      admission.mockRestore();
+      expect(f.provider.steerCalls).toEqual([]);
+    } finally {
+      await f.close();
+    }
+    const idle = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(idle);
+      vi.spyOn(idle.controller, "isActive").mockImplementationOnce(() => true);
+      vi.spyOn(idle.controller, "acquireFollowUpAdmission").mockReturnValueOnce(null);
+      await expect(deliver(idle, link.id, wakeId, "steer")).resolves.toMatchObject({
+        result: { delivery: { mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.turnEnded } },
+      });
+      await vi.waitFor(() => { if (!idle.provider.runs.has(idle.watched.id)) throw new Error("note turn not started"); });
+      expect(idle.provider.input(idle.watched.id).prompt).toContain(FINDING);
+    } finally {
+      await idle.close();
+    }
+  });
+
   it("reports a full queue, replays a repeated delivery id and refuses a second send", async () => {
     const f = await createWatcherFixture();
     try {

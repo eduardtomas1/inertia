@@ -412,10 +412,10 @@ export class WatcherWakeRunner {
         if (outcome === "finding") finding = findingPreview(text);
       }
       const violations = running?.violations ?? [];
-      const stopped = violations.some((violation) => violation.stopped);
+      const stopped = violations.some((violation) => violation.stopped) || (running?.pause ?? null) !== null;
       const override = VIOLATION_OUTCOMES.find(([kinds]) =>
         violations.some((violation) => kinds.includes(violation.kind)))?.[1];
-      if (override && (stopped || outcome !== "finding")) {
+      if (override && stopped) {
         outcome = override;
         finding = null;
       }

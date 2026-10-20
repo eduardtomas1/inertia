@@ -211,7 +211,7 @@ describe("watcher wake runner", () => {
       f.provider.emit(watcherId, { type: "approval", request: approval("write-1", "file-change") });
       expect(f.provider.approvals).toContainEqual({ conversationId: watcherId, requestId: "write-1", decision: "deny" });
       await f.finishTurn(watcherId, "SILENT");
-      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "write-attempt" });
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "silent" });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", writeAttemptsThisTurn: 1 });
 
       watcherId = await wakeOnce(f, link.id);
@@ -220,6 +220,25 @@ describe("watcher wake runner", () => {
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "write-attempt" });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "write-attempts" });
       expect(f.store.agentTurn(feed(f, link.id)[0]!.watcherTurnId!).status).toBe("failed");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("reports write-attempt for a check the runner stopped at the second write attempt of the watched turn", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      let watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, { type: "approval", request: approval("write-1", "file-change") });
+      await f.finishTurn(watcherId, "SILENT");
+      watcherId = await wakeOnce(f, link.id);
+      f.provider.emit(watcherId, { type: "approval", request: approval("write-2", "file-change") });
+      await f.flush();
+      expect(f.provider.cancelled).toContain(watcherId);
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "write-attempt" });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "write-attempts" });
     } finally {
       await f.close();
     }
@@ -243,7 +262,7 @@ describe("watcher wake runner", () => {
     }
   });
 
-  it("maps a denied command to command-attempt and a question to permission-declined, and counts commands run", async () => {
+  it("keeps a check that continued after a declined command quiet, maps a question to permission-declined, and counts commands run", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach();
@@ -252,7 +271,7 @@ describe("watcher wake runner", () => {
       f.provider.emit(watcherId, { type: "activity", kind: "command", phase: "completed", label: "rg parser", activityId: "rg-1" });
       f.provider.emit(watcherId, { type: "approval", request: approval("cmd-1", "command") });
       await f.finishTurn(watcherId, "SILENT");
-      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "command-attempt", commandsRun: 1 });
+      expect(feed(f, link.id)[0]).toMatchObject({ outcome: "silent", commandsRun: 1 });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", commandAttemptsThisTurn: 1 });
 
       watcherId = await wakeOnce(f, link.id);

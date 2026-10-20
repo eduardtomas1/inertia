@@ -18,7 +18,8 @@ measurement and is not part of this capture.
 
 The chat's actions offer **Add a watcher…** while its turn runs. The dialog
 offers only ready routes on watcher agents, defaults to **Reviewer** and says in
-its description, above the fold, that the watcher is read-only. Under what the
+its description, above the fold, that the watcher reads and reports: it may run
+read-only commands and never edits files or changes the workspace. Under what the
 watcher sees, two plain switches: **Send findings to the main chat
 automatically** (off by default, with one line on what it does) and **Review
 the last turn now**. **Budgets** stays folded at the end.
@@ -60,7 +61,8 @@ line one weight heavier as the title.
 
 **Send** queued the note while the turn ran (**Queued · sends after the current
 turn**). When the turn ended, the note started the next turn under a **Note from
-watcher · Reviewer · Codex** divider, the bubble itself says only **From
+watcher · Reviewer · Codex** divider (with the watcher's provider mark beside
+its agent, like the context handoff divider), the bubble itself says only **From
 watcher**, and the main agent replied. The card's single status line now reads
 **Sent <time> · after the turn ended**, and the final checks of both turns fold
 into a new receipt above the sent card.
@@ -69,8 +71,8 @@ into a new receipt above the sent card.
 
 ## The menu and automatic sending
 
-**More** holds Pause, Open watcher chat, **Send findings automatically**,
-Collapse and Stop watching…, then the muted numbers: checks left this turn,
+**More** holds Pause, **Review the last turn**, Open watcher chat, **Send
+findings automatically**, Collapse and Stop watching…, then the muted numbers: checks left this turn,
 events seen, events waiting, the last check and, once known, **Used <n>
 tokens**. With automatic sending on, the bar's state word reads **Sends
 findings automatically**.
@@ -104,13 +106,20 @@ it. It takes no fifth pane.
 
 ![Four split panes with the watcher sheet in the primary pane](split-panes-with-dock-light.png)
 
+## A resolved finding
+
+The final check of the watched turn answered `SILENT` with a closing
+**Resolved: check 4** line, so the sent card now shows a muted **Resolved in
+check 5** line. A resolved finding stays sendable and dismissible and moves
+below any open finding. The scenario then asks for **Review the last turn**
+from the menu, which runs one more quiet check.
+
+![The sent finding marked Resolved in check 5](dock-resolved-light.png)
+
 ## Not captured here
 
-A finding that a later check reported as resolved shows a muted **Resolved in
-check N** line and moves below the open findings; the runtime that records the
-resolution lands separately, so this run has no resolved finding to show. The
-usage line needs a provider that reports token use, which the fake app server
-does not.
+The usage line needs a provider that reports token use, which the fake app
+server does not.
 
 ## Animation
 

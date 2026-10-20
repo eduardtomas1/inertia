@@ -37,7 +37,8 @@ const STDERR_REDIRECTS = ["2>/dev/null", "2>&1"];
 const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
 const ENVIRONMENT_FILE_NAME = /\.env(?:$|\.)/iu;
 
-const GIT_UNSAFE_LONG = ["output", "ext-diff", "textconv", "open-files-in-pager", "exec", "upload-pack", "receive-pack", "filters"];
+const GIT_UNSAFE_LONG = ["output", "ext-diff", "textconv", "open-files-in-pager", "exec", "upload-pack", "receive-pack", "filters", "show-signature"];
+const GIT_SIGNATURE_FORMAT = /%G|%\(signature/u;
 const GIT_READ_SUBCOMMANDS = new Set(["diff", "log", "show", "status", "blame", "grep", "ls-files", "rev-parse", "shortlog", "describe"]);
 const GIT_BRANCH_FLAGS = new Set(["--list", "-l", "-a", "--all", "-r", "--remotes", "--show-current", "-v", "-vv", "--verbose", "--no-color", "--no-abbrev"]);
 const GIT_TAG_FLAGS = new Set(["--list", "-l", "-n", "--no-column", "--ignore-case", "-i"]);
@@ -52,7 +53,7 @@ const UNIQ_VALUE_OPTIONS = new Set(["-f", "-s", "-w", "--skip-fields", "--skip-c
 
 const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   git: gitRule,
-  rg: optionRule({ long: ["pre", "pre-glob", "hostname-bin"] }),
+  rg: optionRule({ short: "z", long: ["pre", "pre-glob", "hostname-bin", "search-zip"] }),
   grep: noRule,
   egrep: noRule,
   fgrep: noRule,
@@ -62,9 +63,9 @@ const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   ls: noRule,
   find: findRule,
   wc: noRule,
-  diff: noRule,
+  diff: optionRule({ short: "l", long: ["paginate"] }),
   stat: noRule,
-  file: optionRule({ short: "C", long: ["compile"] }),
+  file: optionRule({ short: "CzZ", long: ["compile", "uncompress", "uncompress-noreport"] }),
   tree: optionRule({ short: "oR", long: ["output"] }),
   pwd: noRule,
   which: noRule,
@@ -274,7 +275,7 @@ function gitRule(args: readonly string[]): string | null {
   const rest = args.slice(index + 1);
   if (subcommand === undefined) return "git needs a read-only subcommand.";
   const unsafe = { long: GIT_UNSAFE_LONG, ...(subcommand === "grep" ? { short: "O" } : {}) };
-  if (rest.some((arg) => unsafeOption(arg, unsafe))) return UNSAFE_OPTION;
+  if (rest.some((arg) => unsafeOption(arg, unsafe) || GIT_SIGNATURE_FORMAT.test(arg))) return UNSAFE_OPTION;
   const refused = `git ${/^[a-z-]{1,32}$/u.test(subcommand) ? subcommand : "with this subcommand"} is not a read-only command watchers can run.`;
   if (GIT_READ_SUBCOMMANDS.has(subcommand)) return null;
   if (subcommand === "branch") return gitListing(rest, GIT_BRANCH_FLAGS, false) ? null : refused;

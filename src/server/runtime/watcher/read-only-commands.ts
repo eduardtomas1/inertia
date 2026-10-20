@@ -242,7 +242,7 @@ function unsafeOption(arg: string, unsafe: { short?: string; long?: readonly str
     const name = arg.slice(2).split("=", 1)[0]!;
     return name.length > 0 && (unsafe.long ?? []).some((option) => option.startsWith(name));
   }
-  return /^-[^-]/u.test(arg) && [...arg.slice(1)].some((flag) => unsafe.short?.includes(flag));
+  return /^-[^-]/u.test(arg) && [...(unsafe.short ?? "")].some((flag) => arg.slice(1).includes(flag));
 }
 
 function gitRule(args: readonly string[]): string | null {

@@ -256,24 +256,47 @@ letter. That keeps cmd.exe expansion, PowerShell provider paths such as `env:`,
 and Windows PowerShell's legacy argument passing, which can split an argument
 that contains a quote or ends in a backslash, out. OpenCode's shell can be PowerShell on any
 platform, so OpenCode watchers also refuse unquoted commas, which PowerShell
-turns into separate arguments. A pipe is allowed only when every segment is. The programs are read-only `git` subcommands (only
-`-C`, `--no-pager` and `-c core.pager=cat` as global options; `--output`,
-`--ext-diff`, `--textconv`, `git grep -O` and their abbreviations refused),
-`rg` without `--pre` or `--hostname-bin`, `grep`, `cat`, `head`, `tail`
-without follow, `ls`, `find` without `-exec`, `-ok`, `-delete` or `-fprint`
-forms, `wc`, `diff`, `stat`, `file` without `-C`, `tree` without `-o` or `-R`,
-`sort` without `-o`, `-T` or `--compress-program`, `uniq` with at most one
-file, `cut`, `nl`, `tr`, `column`, `jq` without environment access, `pwd`,
-`which` and `echo`. An argument that is absolute, starts with `~` or contains a
-`..` segment must stay inside the workspace, and `.env` files are refused. A command is capped at 4,096
-characters and 256 arguments. An allowed command runs without an approval and
-counts towards the receipt's command count; a declined one is a
-`command-attempt`. Known limits: containment is lexical, so a symbolic link
-inside the workspace can lead outside it; programs still honor their own
-configuration (a `diff.external`, textconv or `core.fsmonitor` command in Git
-config, `RIPGREP_CONFIG_PATH`, or aliases a provider's shell loads), which only
-someone who can already write that configuration can set; and a recursive
-search can still read ignored files such as `.env`.
+turns into separate arguments, and an unquoted `@` at the start of a word,
+which PowerShell treats as splatting. A pipe is allowed only when every
+segment is. A word whose first character is an unquoted glob, or an option
+word with a glob before any `=`, is refused, because the shell could expand it
+into an option-shaped file name; `./*.ts`, `src/*.ts` and `--include=*.ts` are
+allowed. The programs are read-only `git` subcommands (only `-C`,
+`--no-pager`, `--no-optional-locks` and `-c core.pager=cat` as global options;
+`--output`, `--ext-diff`, `--textconv`, `--show-signature`, the `%G` and
+`%(signature)` format placeholders, `git grep -O`, `--no-index`, `--untracked`
+and `--no-exclude-standard` and their abbreviations refused), `rg` without
+`--pre`, `--hostname-bin`, `-z`/`--search-zip`, `--hidden`/`-.`,
+`-u`/`--unrestricted` or any `--no-ignore` option, `grep`, `egrep` and `fgrep`
+without recursion (`-r`, `-R`, `-d`, `--directories`), `cat` (without
+PowerShell's `-Wait`), `head`, `tail` without follow (including the obsolete
+`+Nf` form), `ls`, `find` without `-exec`, `-ok`, `-delete` or `-fprint` forms,
+`wc`, `diff` without `-r` or `-l`, `stat`, `file` without `-C`, `-z` or `-Z`,
+`tree` without `-o` or `-R`, `sort` without `-o`, `-T` or
+`--compress-program`, `uniq` with at most one file and no glob, `cut`, `nl`,
+`tr`, `column`, `jq` without environment access, program files, modules or
+extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`, `import`,
+`include`, `modulemeta`), `pwd`, `which` and `echo`. An argument that is
+absolute, starts with `~` or contains a `..` segment must stay inside the
+workspace, and so must every suffix of a short-option bundle after its first
+letter, so `grep -nf/etc/passwd` and also `grep -nfsrc/patterns` are refused
+while `grep -nf src/patterns` is allowed. `.env`, `*.env` and `*.env.*` names
+are refused in any letter case, wherever they appear in an argument, so a
+search pattern such as `process.env.API_URL` is refused too. A command is
+capped at 4,096 characters and 256 arguments. An allowed command runs without
+an approval and counts towards the receipt's command count; a declined one is a
+`command-attempt`. Claude and OpenCode watcher runs set
+`GIT_OPTIONAL_LOCKS=0`, so `git status` leaves `.git/index` alone; `git diff`
+and `git describe --dirty` still refresh the index after a file's timestamps
+change (measured with Git 2.54) and can hold `index.lock` for that moment.
+Known limits: containment is lexical, so a symbolic link inside the workspace
+can lead outside it; a search reads any workspace file its pattern reaches
+except files that Git's or rg's ignore rules skip, so a tracked or unignored
+secret file can be read; programs still honor their own configuration (a
+`diff.external`, textconv, `core.fsmonitor`, `gpg.program` or
+`log.showSignature` setting in Git config, `RIPGREP_CONFIG_PATH`, jq's
+`~/.jq`, or aliases and functions that OpenCode's shell loads), which only
+someone who can already write that configuration can set.
 
 ### Why an allowlist and not a capability id
 

@@ -72,6 +72,7 @@ export interface WatcherWakeRunnerDependencies {
   publish(linkId: string): void;
   /** Refreshes the watcher chat's shell row after a check settles. */
   refreshConversation?(conversationId: string): void;
+  detailChanged?(conversationId: string): void;
   turnDiff?(turnId: string): Promise<WatcherTurnDiffSnapshot>;
   delivery?(): Pick<WatcherDeliveryService, "deliver">;
   now(): string;
@@ -326,7 +327,9 @@ export class WatcherWakeRunner {
         throw error;
       }
       this.#dispatchFailures.delete(linkId);
-      store.watcherLinks.attachWakeTurn(wake.wakeId, queuedTurnId, this.#deps.now());
+      if (store.watcherLinks.attachWakeTurn(wake.wakeId, queuedTurnId, this.#deps.now())) {
+        this.#deps.detailChanged?.(watcher.id);
+      }
       this.#running.set(queuedTurnId, {
         linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest,
         start: cursor, finalTurnId, finalPage, request, requestPage, lastPage, restore, violations: [], pause: null,
@@ -593,6 +596,7 @@ export class WatcherWakeRunner {
       try {
         this.#deps.publish(linkId);
         this.#deps.refreshConversation?.(turn.conversationId);
+        this.#deps.detailChanged?.(turn.conversationId);
       } catch {
         // Publishing is best effort; the next snapshot carries the state.
       }

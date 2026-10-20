@@ -77,6 +77,34 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("invalidates the open watcher chat's detail once when a check starts and once when it settles, never the watched chat's", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      const seen: Array<{ conversationId: string; check: string }> = [];
+      const push = f.events.push.bind(f.events);
+      f.events.push = (...events) => {
+        for (const event of events) {
+          if (event.type === "conversation.detail.invalidated") {
+            seen.push({ conversationId: event.conversationId, check: feed(f, link.id)[0]?.state ?? "none" });
+          }
+        }
+        return push(...events);
+      };
+      await wakeOnce(f, link.id);
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({ state: "running" });
+      expect(seen).toEqual([{ conversationId: watcherId, check: "running" }]);
+      await f.finishTurn(watcherId, "SILENT");
+      expect(feed(f, link.id)[0]).toMatchObject({ state: "settled", outcome: "silent" });
+      expect(seen.filter(({ check }) => check === "settled")).toEqual([{ conversationId: watcherId, check: "settled" }]);
+      expect(seen.some(({ conversationId }) => conversationId === f.watched.id)).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("records a silent receipt, advances the cursor and leaves no checkpoint, artifact or new title", async () => {
     const f = await createWatcherFixture();
     try {

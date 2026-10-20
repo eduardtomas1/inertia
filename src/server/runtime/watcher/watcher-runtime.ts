@@ -180,6 +180,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     scheduler: () => wakeScheduler,
     publish,
     refreshConversation: (conversationId) => dependencies.broadcastConversationShell?.(conversationId),
+    detailChanged: (conversationId) => dependencies.broadcast({ type: "conversation.detail.invalidated", conversationId }),
     ...(dependencies.turnDiff ? { turnDiff: dependencies.turnDiff } : {}),
     delivery: () => delivery,
     now,

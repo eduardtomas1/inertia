@@ -1,15 +1,17 @@
-import { lstat, readlink } from "node:fs/promises";
-import { join } from "node:path";
+import { lstat, readlink, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
-import { mayBeInsideGitRepository, repositoryRoot } from "./paths";
+import { isContained, mayBeInsideGitRepository, repositoryRoot } from "./paths";
 import { runGitInspection } from "./runner";
 import { GitError, isGitProcessTreeTerminationFailure } from "./types";
 
 /**
- * A read-only fingerprint of a checkout's HEAD, index and dirty worktree,
- * used to notice writes nobody accounts for. It never writes into the
- * repository: no checkpoint refs, no `write-tree`, no index refresh, and no
- * repository filter or hook ever runs.
+ * A read-only fingerprint of a checkout's HEAD, its branch, the index and the
+ * dirty worktree, including the dirty worktrees of the submodules listed in
+ * `.gitmodules`, used to notice writes nobody accounts for. It never writes
+ * into the repository: no checkpoint refs, no `write-tree`, no index refresh,
+ * and no repository filter or hook ever runs. Ignored files, `.git` internals
+ * and submodules nested inside submodules are outside it.
  */
 export const MAX_CHECKOUT_FINGERPRINT_PATHS = 2_000;
 export const MAX_CHECKOUT_FINGERPRINT_BYTES = 64 * 1024 * 1024;
@@ -17,12 +19,16 @@ export const MAX_CHECKOUT_FINGERPRINT_BYTES = 64 * 1024 * 1024;
 const MAX_HASH_ARGUMENT_CHARS = 24_000;
 const MAX_STATUS_BYTES = 4 * 1024 * 1024;
 const MAX_CONFIG_BYTES = 1024 * 1024;
+const MAX_SUBMODULES = 16;
+const MAX_GITMODULES_BYTES = 64 * 1024;
 const FILTER_SETTING = /^filter\.(.+)\.(?:clean|smudge|process|required)$/su;
 
 export interface CapturedCheckoutFingerprint {
   state: "captured";
   root: string;
   head: string | null;
+  /** The branch HEAD names, or null when HEAD is detached. */
+  branch: string | null;
   /** Repository-relative path to an opaque state descriptor; clean paths are absent. */
   entries: ReadonlyMap<string, string>;
 }
@@ -70,19 +76,75 @@ async function filterDriverNames(root: string, options: CheckoutFingerprintOptio
   return [...names];
 }
 
-async function headOid(root: string, options: CheckoutFingerprintOptions): Promise<string | null> {
+/** One line of Git output, or null when Git reports that there is none. */
+async function optionalLine(
+  root: string,
+  args: readonly string[],
+  options: CheckoutFingerprintOptions,
+): Promise<string | null> {
   try {
-    const result = await runGitInspection(
-      root,
-      ["rev-parse", "--verify", "-q", "HEAD"],
-      inspection(options, "Unable to read the checkout's HEAD.", 256),
-    );
+    const result = await runGitInspection(root, args, inspection(options, "Unable to read the checkout's HEAD.", 1024));
     return result.stdout.toString("utf8").trim() || null;
   } catch (error) {
     if (error instanceof GitError && error.code !== "timeout" && !isGitProcessTreeTerminationFailure(error)) {
       return null;
     }
     throw error;
+  }
+}
+
+/** Submodule paths from `.gitmodules` that resolve inside the checkout, at most `MAX_SUBMODULES`. */
+async function submodulePaths(root: string, options: CheckoutFingerprintOptions): Promise<string[]> {
+  let output: string;
+  try {
+    const result = await runGitInspection(
+      root,
+      ["config", "-z", "--file", ".gitmodules", "--get-regexp", "^submodule\\..*\\.path$"],
+      inspection(options, "Unable to read the submodule list.", MAX_GITMODULES_BYTES),
+    );
+    output = result.stdout.toString("utf8");
+  } catch (error) {
+    if (error instanceof GitError && error.code === "output-limit") throw new FingerprintLimit("The submodule list is too large.");
+    if (error instanceof GitError && error.code !== "timeout" && !isGitProcessTreeTerminationFailure(error)) return [];
+    throw error;
+  }
+  const paths = new Set<string>();
+  for (const record of output.split("\0")) {
+    const path = record.slice(record.indexOf("\n") + 1);
+    if (!record.includes("\n") || path.length === 0) continue;
+    const absolute = resolve(root, path);
+    if (absolute !== root && isContained(root, absolute)) paths.add(path.replace(/\/+$/u, ""));
+  }
+  if (paths.size > MAX_SUBMODULES) throw new FingerprintLimit(`More than ${MAX_SUBMODULES} submodules.`);
+  return [...paths];
+}
+
+/**
+ * Folds each initialized submodule's own fingerprint into `entries`: its
+ * dirty paths under the submodule's path, and its HEAD and branch on the
+ * submodule's own entry. A submodule that resolves outside the checkout is
+ * skipped.
+ */
+async function addSubmoduleEntries(
+  root: string,
+  entries: Map<string, string>,
+  options: CheckoutFingerprintOptions,
+  hashed: { bytes: number },
+): Promise<void> {
+  for (const path of await submodulePaths(root, options)) {
+    const absolute = join(root, path);
+    if (!await lstat(join(absolute, ".git")).catch(() => null)) continue;
+    const canonical = await realpath(absolute).catch(() => null);
+    if (canonical === null || canonical === root || !isContained(root, canonical)) continue;
+    const submodule = await captureRepository(canonical, options, false, hashed);
+    if (submodule.state === "truncated") throw new FingerprintLimit(submodule.reason);
+    const own = entries.get(path) ?? "clean";
+    if (submodule.state !== "captured" || submodule.root !== canonical) {
+      entries.set(path, `${own}|unavailable`);
+      continue;
+    }
+    entries.set(path, `${own}|${submodule.head ?? ""}@${submodule.branch ?? ""}`);
+    for (const [child, descriptor] of submodule.entries) entries.set(`${path}/${child}`, descriptor);
   }
 }
 
@@ -139,10 +201,10 @@ async function worktreeDigests(
   root: string,
   entries: readonly StatusEntry[],
   options: CheckoutFingerprintOptions,
+  hashed: { bytes: number },
 ): Promise<Map<string, string>> {
   const digests = new Map<string, string>();
   const regular: string[] = [];
-  let bytes = 0;
   for (const entry of entries) {
     if (!entry.worktree) continue;
     if (entry.deleted) {
@@ -155,8 +217,8 @@ async function worktreeDigests(
     else if (info.isSymbolicLink()) digests.set(entry.path, `link:${await readlink(absolute).catch(() => "?")}`);
     else if (!info.isFile()) digests.set(entry.path, info.isDirectory() ? "directory" : "special");
     else {
-      bytes += info.size;
-      if (bytes > MAX_CHECKOUT_FINGERPRINT_BYTES) throw new FingerprintLimit("The changed files are too large to fingerprint.");
+      hashed.bytes += info.size;
+      if (hashed.bytes > MAX_CHECKOUT_FINGERPRINT_BYTES) throw new FingerprintLimit("The changed files are too large to fingerprint.");
       regular.push(entry.path);
     }
   }
@@ -179,6 +241,15 @@ export async function captureCheckoutFingerprint(
   checkoutPath: string,
   options: CheckoutFingerprintOptions,
 ): Promise<CheckoutFingerprint> {
+  return await captureRepository(checkoutPath, options, true, { bytes: 0 });
+}
+
+async function captureRepository(
+  checkoutPath: string,
+  options: CheckoutFingerprintOptions,
+  followSubmodules: boolean,
+  hashed: { bytes: number },
+): Promise<CheckoutFingerprint> {
   const pathOptions = { deadlineAt: options.deadlineAt, signal: options.signal };
   if (!await mayBeInsideGitRepository(checkoutPath, pathOptions)) {
     return { state: "unavailable", reason: "This checkout is not a Git repository." };
@@ -187,7 +258,8 @@ export async function captureCheckoutFingerprint(
   try {
     root = await repositoryRoot(checkoutPath, pathOptions);
     const disabledFilterDrivers = await filterDriverNames(root, options);
-    const head = await headOid(root, options);
+    const head = await optionalLine(root, ["rev-parse", "--verify", "-q", "HEAD"], options);
+    const branch = await optionalLine(root, ["symbolic-ref", "-q", "HEAD"], options);
     const status = await runGitInspection(
       root,
       ["status", "--porcelain=v2", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=dirty"],
@@ -202,16 +274,16 @@ export async function captureCheckoutFingerprint(
     if (entries.length > MAX_CHECKOUT_FINGERPRINT_PATHS) {
       throw new FingerprintLimit(`More than ${MAX_CHECKOUT_FINGERPRINT_PATHS} paths changed.`);
     }
-    const digests = await worktreeDigests(root, entries, options);
-    return {
-      state: "captured",
-      root,
-      head,
-      entries: new Map(entries.map((entry) => [
-        entry.path,
-        `${entry.descriptor}|${digests.get(entry.path) ?? "index"}`,
-      ])),
-    };
+    const digests = await worktreeDigests(root, entries, options, hashed);
+    const fingerprint = new Map(entries.map((entry) => [
+      entry.path,
+      `${entry.descriptor}|${digests.get(entry.path) ?? "index"}`,
+    ]));
+    if (followSubmodules) await addSubmoduleEntries(root, fingerprint, options, hashed);
+    if (fingerprint.size > MAX_CHECKOUT_FINGERPRINT_PATHS) {
+      throw new FingerprintLimit(`More than ${MAX_CHECKOUT_FINGERPRINT_PATHS} paths changed.`);
+    }
+    return { state: "captured", root, head, branch, entries: fingerprint };
   } catch (error) {
     if (error instanceof FingerprintLimit && root !== null) {
       return { state: "truncated", root, reason: error.message };
@@ -236,7 +308,7 @@ export function diffCheckoutFingerprints(
     if (!before.entries.has(path)) changed.add(path);
   }
   return {
-    headChanged: before.head !== after.head,
+    headChanged: before.head !== after.head || before.branch !== after.branch,
     changedPaths: [...changed].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)),
   };
 }

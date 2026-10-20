@@ -280,12 +280,18 @@ Each layer works on its own; none relies on the model following instructions.
 4. **Git fingerprint backstop.** `src/server/git/checkout-fingerprint.ts`
    fingerprints the checkout before and after each check through
    `runGitInspection` (`--no-optional-locks`, `core.fsmonitor=false`):
-   `rev-parse --verify HEAD`, a bounded
+   `rev-parse --verify HEAD`, `symbolic-ref -q HEAD` (so a branch switch at
+   the same commit counts as a HEAD move), a bounded
    `status --porcelain=v2 -z --untracked-files=all --no-renames`, and
    `hash-object --no-filters` for changed and untracked paths, batched to at
    most 24 K characters of arguments for Windows. `--no-filters` keeps
-   repository clean filters from running. More than 2,000 paths or 64 MiB
-   marks the fingerprint truncated. A changed path is *explained* when another
+   repository clean filters from running. Each initialized submodule that
+   `.gitmodules` lists inside the checkout (at most 16) is fingerprinted the
+   same way with its own filters disabled, so uncommitted edits inside it
+   count. Ignored files, `.git` internals such as hooks, config and other
+   refs, and submodules nested inside submodules are not fingerprinted. More
+   than 2,000 paths or 64 MiB of hashed bytes in all marks the fingerprint
+   truncated. A changed path is *explained* when another
    turn active on the same checkout reported it in a file activity during the
    window. The result is *inconclusive*, and does not pause, when another
    active turn ran a command, a workspace or source-control run was active, a

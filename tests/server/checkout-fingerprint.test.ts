@@ -89,6 +89,63 @@ describe("checkout fingerprint", () => {
     expect(diffCheckoutFingerprints(after, committed)).toMatchObject({ headChanged: true, changedPaths: ["b.txt"] });
   });
 
+  it("detects a branch switch at the same commit", async () => {
+    const root = repository();
+    const before = captured(await capture(root));
+    git(root, "switch", "-q", "-c", "elsewhere");
+    const after = captured(await capture(root));
+    expect(after.head).toBe(before.head);
+    expect(diffCheckoutFingerprints(before, after)).toEqual({ headChanged: true, changedPaths: [] });
+  });
+
+  it("detects uncommitted edits inside a submodule and ignores submodule paths outside the checkout", async () => {
+    const root = repository();
+    const sub = join(root, "vendor", "lib");
+    mkdirSync(sub, { recursive: true });
+    git(sub, "init", "-q");
+    git(sub, "config", "user.email", "fingerprint@example.invalid");
+    git(sub, "config", "user.name", "Fingerprint");
+    git(sub, "config", "commit.gpgsign", "false");
+    writeFileSync(join(sub, "lib.txt"), "lib\n");
+    git(sub, "add", "lib.txt");
+    git(sub, "commit", "-q", "-m", "lib");
+    const outside = join(root, "..", "outside");
+    mkdirSync(outside);
+    git(outside, "init", "-q");
+    writeFileSync(join(outside, "secret.txt"), "outside\n");
+    writeFileSync(join(root, ".gitmodules"), [
+      "[submodule \"lib\"]", "\tpath = vendor/lib", "\turl = ./vendor/lib",
+      "[submodule \"escape\"]", "\tpath = ../outside", "\turl = ../outside",
+    ].join("\n") + "\n");
+    git(root, "add", ".gitmodules", "vendor/lib");
+    git(root, "commit", "-q", "-m", "submodule");
+
+    const clean = captured(await capture(root));
+    expect([...clean.entries.keys()].some((path) => path.includes("outside") || path.includes("secret"))).toBe(false);
+    writeFileSync(join(sub, "lib.txt"), "lib edited\n");
+    const dirty = captured(await capture(root));
+    expect(diffCheckoutFingerprints(clean, dirty)).toEqual({ headChanged: false, changedPaths: ["vendor/lib/lib.txt"] });
+    writeFileSync(join(sub, "lib.txt"), "lib edited again\n");
+    const again = captured(await capture(root));
+    expect(diffCheckoutFingerprints(dirty, again)).toEqual({ headChanged: false, changedPaths: ["vendor/lib/lib.txt"] });
+    writeFileSync(join(outside, "secret.txt"), "changed outside\n");
+    expect(diffCheckoutFingerprints(again, captured(await capture(root))).changedPaths).toEqual([]);
+
+    const marker = join(root, "..", "submodule-filter-ran");
+    const script = join(root, "..", "submodule-filter.cjs");
+    writeFileSync(script, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran"); process.stdin.pipe(process.stdout);`);
+    const quoted = (value: string) => `"${value.replaceAll("\\", "/")}"`;
+    git(sub, "config", "filter.submarker.clean", `${quoted(process.execPath)} ${quoted(script)}`);
+    git(sub, "config", "filter.submarker.required", "true");
+    writeFileSync(join(sub, ".git", "info", "attributes"), "*.txt filter=submarker\n");
+    writeFileSync(join(sub, "lib.txt"), "LIB\n");
+    ageForward(join(sub, "lib.txt"));
+    captured(await capture(root));
+    expect(existsSync(marker)).toBe(false);
+    git(sub, "status", "--porcelain");
+    expect(existsSync(marker)).toBe(true);
+  });
+
   it("never refreshes the index or runs a configured clean filter", async () => {
     const root = repository();
     const marker = join(root, "..", "clean-filter-ran");

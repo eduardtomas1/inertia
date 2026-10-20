@@ -27,7 +27,7 @@ function fingerprints(root: () => string, ...states: Array<Record<string, string
     const next = queue.length > 1 ? queue.shift()! : queue[0]!;
     return next === null
       ? { state: "unavailable", reason: "Not a repository." }
-      : { state: "captured", root: root(), head: "abc123", entries: new Map(Object.entries(next)) };
+      : { state: "captured", root: root(), head: "abc123", branch: "refs/heads/main", entries: new Map(Object.entries(next)) };
   };
 }
 

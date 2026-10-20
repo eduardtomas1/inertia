@@ -18,12 +18,13 @@ interface Word {
   glob: boolean[];
 }
 
-type ProgramRule = (args: readonly string[]) => string | null;
+type ProgramRule = (args: readonly string[], globbed: readonly boolean[]) => string | null;
 
 const SHELL_SYNTAX = "The command uses shell syntax that watchers cannot run.";
 const UNSAFE_OPTION = "The command uses an option that can write or run another program.";
 const OUTSIDE = "The command reads outside the workspace.";
 const ENVIRONMENT_FILE = "The command reads an environment file.";
+const UNIQ_GLOB = "uniq cannot take a glob, because a second matched file would become its output.";
 
 const UNQUOTED_REJECTED = new Set([";", "&", "<", ">", "(", ")", "{", "}", "$", "\\"]);
 const WORD_START_REJECTED = new Set(["#", "~", "="]);
@@ -99,7 +100,7 @@ function classifySegment(words: readonly Word[], context: ReadOnlyCommandContext
     const problem = pathProblem(word, context, program !== "git");
     if (problem) return refuse(problem);
   }
-  const problem = rule(rest.map(({ value }) => value));
+  const problem = rule(rest.map(({ value }) => value), rest.map(({ glob }) => glob.includes(true)));
   return problem ? refuse(problem) : { allowed: true, program };
 }
 
@@ -289,7 +290,8 @@ function findRule(args: readonly string[]): string | null {
   return args.some((arg) => FIND_UNSAFE.has(arg) || arg.startsWith("-fprint")) ? UNSAFE_OPTION : null;
 }
 
-function uniqRule(args: readonly string[]): string | null {
+function uniqRule(args: readonly string[], globbed: readonly boolean[]): string | null {
+  if (globbed.includes(true)) return UNIQ_GLOB;
   let positionals = 0;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;

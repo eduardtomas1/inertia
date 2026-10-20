@@ -1,6 +1,7 @@
 import type { AgentActivity, AgentPlan, AgentTurn } from "../../../shared/contracts";
 import {
   MAX_WATCHER_PENDING_RUNNING_IDS,
+  watcherReplaceLineSeparators,
   type WatcherBudgets,
   type WatcherCounters,
   type WatcherSharing,
@@ -60,6 +61,12 @@ export interface WatcherDigestOptions {
    * shown on the first check of a turn, on a fresh session and on the final pass.
    */
   previousPlanKey?: string | null;
+  /**
+   * The watched turn to digest. The final pass names its own turn, so a pass
+   * that runs after the next turn began still reviews the turn that ended.
+   * Defaults to the cursor's turn, then the latest turn.
+   */
+  turnId?: string;
 }
 
 export interface WatcherDigestStats {
@@ -91,8 +98,9 @@ function clipCodeUnits(value: string, maximum: number): string {
   return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
 }
 
+/** NUL becomes U+FFFD and every line break, including U+0085, U+2028 and U+2029, becomes `\n`. */
 function sanitize(value: string): string {
-  return value.replaceAll("\0", "�").replace(/\r\n?/gu, "\n");
+  return watcherReplaceLineSeparators(value.replaceAll("\0", "�").replace(/\r\n?/gu, "\n"), "\n");
 }
 
 /** Neutralizes, then clips by characters and bytes; prefixes of neutralized text stay neutralized. */
@@ -110,13 +118,13 @@ function singleLine(value: string, maximumChars: number): string {
   let flattened = "";
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0;
-    flattened += code < 0x20 || code === 0x7f ? " " : character;
+    flattened += code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029 ? " " : character;
   }
   return bounded(flattened.replace(/\s+/gu, " ").trim(), maximumChars * 4, maximumChars).text;
 }
 
 function quote(text: string, indent = ""): string {
-  return text.split("\n").map((line) => `${indent}> ${line}`).join("\n");
+  return sanitize(text).split("\n").map((line) => `${indent}> ${line}`).join("\n");
 }
 
 function shortened(text: string, truncated: boolean): string {
@@ -309,8 +317,9 @@ export function buildWatcherDigest(
 ): WatcherDigest | null {
   const watchedId = link.watchedConversationId;
   if (!watchedId) return null;
-  const turn = (link.cursor.turnId ? source.turn(watchedId, link.cursor.turnId) : null)
-    ?? source.latestTurn(watchedId);
+  const turn = options.turnId !== undefined
+    ? source.turn(watchedId, options.turnId)
+    : (link.cursor.turnId ? source.turn(watchedId, link.cursor.turnId) : null) ?? source.latestTurn(watchedId);
   if (!turn) return null;
   const sameTurn = link.cursor.turnId === turn.id;
   const base: WatcherCursor = sameTurn

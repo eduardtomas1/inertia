@@ -1,4 +1,4 @@
-import type { AgentActivity, AgentTurnStatus } from "../../../shared/contracts";
+import type { AgentTurnStatus } from "../../../shared/contracts";
 import {
   MAX_WATCHER_FINDING_BYTES,
   MAX_WATCHER_NOTE_CHARS,
@@ -71,13 +71,4 @@ export function findingPreview(text: string): string {
   const chars = clipCodeUnits(trimmed, MAX_WATCHER_NOTE_CHARS - SHORTENED_MARKER.length);
   const bounded = truncateUtf8(chars, MAX_WATCHER_FINDING_BYTES - SHORTENED_MARKER.length).text;
   return `${bounded.trimEnd()}${SHORTENED_MARKER}`;
-}
-
-/**
- * Settled command activities of one watcher turn, for the receipt's
- * "ran N read-only commands" line.
- */
-export function watcherCommandsRun(activities: readonly AgentActivity[], turnId: string): number {
-  return activities.filter((activity) =>
-    activity.turnId === turnId && activity.kind === "command" && activity.status !== "running").length;
 }

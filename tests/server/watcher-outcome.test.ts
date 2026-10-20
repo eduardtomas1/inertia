@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentActivity } from "../../src/shared/contracts";
 import { MAX_WATCHER_FINDING_BYTES, MAX_WATCHER_NOTE_CHARS } from "../../src/shared/watcher";
 import {
   classifyWatcherReply,
   findingPreview,
-  watcherCommandsRun,
 } from "../../src/server/runtime/watcher/watcher-outcome";
 
 describe("classifyWatcherReply", () => {
@@ -73,21 +71,5 @@ describe("findingPreview", () => {
 
   it("replaces NUL bytes", () => {
     expect(findingPreview("a\0b")).toBe("a�b");
-  });
-});
-
-describe("watcherCommandsRun", () => {
-  const activity = (id: string, kind: AgentActivity["kind"], status: AgentActivity["status"], turnId = "t1"): AgentActivity => ({
-    id, conversationId: "c", runId: "r", turnId, kind, title: id, detail: null, status, createdAt: "2026-10-19T10:00:00.000Z",
-  });
-
-  it("counts settled command activities of the watcher turn only", () => {
-    expect(watcherCommandsRun([
-      activity("a", "command", "completed"),
-      activity("b", "command", "failed"),
-      activity("c", "command", "running"),
-      activity("d", "tool", "completed"),
-      activity("e", "command", "completed", "other"),
-    ], "t1")).toBe(2);
   });
 });

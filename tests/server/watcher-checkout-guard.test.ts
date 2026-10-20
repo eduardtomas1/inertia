@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
+import { watcherAttributionForm } from "../../src/server/runtime/watcher/watcher-checkout-guard";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
@@ -66,6 +67,35 @@ describe("watcher checkout guard", () => {
     } finally {
       await f.close();
     }
+  });
+
+  it.each([
+    ["darwin", "Src/App.tsx", "src/App.tsx", "clean"],
+    ["win32", "SRC\\APP.TSX", "src/App.tsx", "clean"],
+    ["darwin", "src/Cafe\u0301.ts", "src/Caf\u00e9.ts", "clean"],
+    ["linux", "src/Cafe\u0301.ts", "src/Caf\u00e9.ts", "clean"],
+    ["linux", "Src/App.tsx", "src/App.tsx", "changed"],
+  ] as const)("on %s, attributes %s reported by another turn to Git's %s: %s", async (platform, reported, changed, state) => {
+    let root = "";
+    const f = await createWatcherFixture({ platform, captureFingerprint: fingerprints(() => root, {}, { [changed]: "1" }) });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const item = await check(f, link.id, () => {
+        f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Edit", detail: reported, activityId: `e-${++sequence}` });
+      });
+      expect(item.guardState).toBe(state);
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe(state === "clean" ? "watching" : "paused");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("compares paths in NFC everywhere and folds case only on case-insensitive platforms", () => {
+    expect(watcherAttributionForm("Src\\Cafe\u0301.ts", "darwin")).toBe("src/caf\u00e9.ts");
+    expect(watcherAttributionForm("Src\\Cafe\u0301.ts", "win32")).toBe("src/caf\u00e9.ts");
+    expect(watcherAttributionForm("Src\\Cafe\u0301.ts", "linux")).toBe("Src/Caf\u00e9.ts");
   });
 
   it("marks the window inconclusive when another turn ran a command, without pausing", async () => {

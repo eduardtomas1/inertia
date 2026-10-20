@@ -35,6 +35,25 @@ const TURN_ABOUT = "One turn of an Inertia chat, in order: the user's request, t
 
 type JsonEntry = Record<string, unknown>;
 
+/**
+ * What a reader may see of a chat. A watcher's sharing toggles map here, so
+ * the context tool never shows more than the watcher's checks would.
+ */
+export interface AgentContextShare {
+  /** The user's requests and follow-ups, with their attachments. */
+  requests: boolean;
+  /** Commands, tool calls and errors. */
+  activities: boolean;
+  /** The agent's messages and the pages it showed. */
+  answers: boolean;
+  /** The files the turn changed. */
+  files: boolean;
+}
+
+export const FULL_AGENT_CONTEXT_SHARE: Readonly<AgentContextShare> = Object.freeze({
+  requests: true, activities: true, answers: true, files: true,
+});
+
 export interface AgentContextImageNote {
   name: string;
   included: boolean;
@@ -90,8 +109,10 @@ export function agentContextTurnList(
     limit: number;
     cursor?: string;
     route?: ContinuationRouteFilter;
+    share?: AgentContextShare;
   },
 ): JsonEntry {
+  const share = input.share ?? FULL_AGENT_CONTEXT_SHARE;
   const rows = reads.turns(input.conversationId, input.limit + 1, input.cursor, input.route);
   const withheldTurns = input.route ? reads.withheldTurnCount(input.conversationId, input.route) : 0;
   const result: JsonEntry = {
@@ -106,7 +127,7 @@ export function agentContextTurnList(
   for (const [index, row] of rows.entries()) {
     const entry = {
       turnId: row.id,
-      request: requestLine(row.requestHead),
+      ...(share.requests ? { request: requestLine(row.requestHead) } : {}),
       status: turnStatus(row.status),
       provider: row.providerId,
       model: row.model,
@@ -224,11 +245,18 @@ export function agentContextTurnPage(
     turn: ConversationContextTurnRow;
     cursor?: string;
     images?: readonly AgentContextImageNote[];
+    share?: AgentContextShare;
   },
 ): JsonEntry {
   const { turn } = input;
-  const { entries: rows, recordsOmitted } = reads.entries(input.conversationId, turn);
-  const files = reads.files(turn.id);
+  const share = input.share ?? FULL_AGENT_CONTEXT_SHARE;
+  const { entries: allRows, recordsOmitted } = reads.entries(input.conversationId, turn);
+  const rows = allRows.filter((row) => {
+    if (row.kind === "activity") return share.activities;
+    if (row.kind === "page") return share.answers;
+    return row.role === "assistant" ? share.answers : share.requests;
+  });
+  const files = share.files ? reads.files(turn.id) : [];
   const entryCount = rows.length + (files.length > 0 ? 1 : 0);
   const start = parseCursor(input.cursor, Math.max(entryCount, 1));
   const result: JsonEntry = {

@@ -15,6 +15,7 @@ import type { ProviderHostToolBridge } from "../../provider/contracts";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeCommandHandler } from "../commands/command-router";
 import type { TurnInteractionCommandDependencies } from "../commands/turn-interaction-commands";
+import { RuntimeRequestError } from "../../runtime-errors";
 import { createWatcherCommandHandler } from "../commands/watcher-commands";
 import type { HiddenProviderInstruction } from "../turns/request-context";
 import type { TurnController } from "../turns/turn-controller";
@@ -42,6 +43,7 @@ export { createWatcherTurnPolicy, type WatcherTurnPolicy } from "./watcher-turn-
 export const WATCHER_OUTPUT_RECORD_MS = 15_000;
 /** Pending-event counts are republished at most this often per link. */
 export const WATCHER_PENDING_PUBLISH_MS = 1_000;
+export const WATCHER_DELETE_REFUSAL = "Stop the watcher's current check before deleting this chat.";
 export const WATCHER_BUDGET_PAUSE_DETAIL =
   "The watcher used its checks for this turn. It still makes its final check when the turn ends.";
 
@@ -70,6 +72,8 @@ export interface WatcherRuntimeDependencies {
   id?: () => string;
   captureFingerprint?: (path: string, options: CheckoutFingerprintOptions) => Promise<CheckoutFingerprint>;
   signal?: AbortSignal;
+  /** The platform whose path rules the checkout guard applies; defaults to the running one. */
+  platform?: NodeJS.Platform;
   /** Test-only overrides of the wake scheduler's timing. */
   wakeTiming?: Pick<
     WatcherWakeSchedulerDependencies,
@@ -87,7 +91,13 @@ export interface WatcherRuntime {
   watcherPolicy: WatcherTurnPolicy;
   /** The Private Connect parent of an attached watcher conversation. */
   watcherParent(conversationId: string): { watchedConversationId: string | null; privateConnect: WatcherPrivateConnect } | null;
-  onWatchedArchived(conversationId: string): void;
+  /** A chat was archived: the watcher of an archived chat pauses, and so does a watcher whose own chat was archived. */
+  onConversationArchived(conversationId: string): void;
+  /**
+   * Refuses, before any side effect, to delete a chat whose watcher is in the
+   * middle of a check. The delete trigger stays as the backstop.
+   */
+  assertConversationDeletable(conversationId: string): void;
   /**
    * Call before deleting a chat; call the result once the delete committed.
    * Links the chat watched or ran are forgotten and broadcast as removed, so
@@ -150,6 +160,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     clock,
     ...(dependencies.captureFingerprint ? { capture: dependencies.captureFingerprint } : {}),
     ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    ...(dependencies.platform ? { platform: dependencies.platform } : {}),
   });
   const live = new WatcherLiveProjection({ scheduler: timers, clock, broadcast: (event) => dependencies.broadcast(event) });
   let coordinator: WatcherLinkCoordinator;
@@ -199,6 +210,9 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
       wakeScheduler.pause(linkId, { finalPass: true });
       publish(linkId);
     },
+    onPendingChanged: (linkId) => {
+      if (store.watcherLinks.notePendingEvents(linkId, wakeScheduler.pendingEvents(linkId), now())) publish(linkId);
+    },
     cooldownMs: (linkId) => (store.watcherLinks.get(linkId)?.budgets.cooldownSeconds ?? 45) * 1_000,
     onError: () => undefined,
   });
@@ -243,6 +257,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     turns,
     interaction: () => dependencies.interaction,
     queue: () => dependencies.queuedMessages,
+    providerLabels: () => Object.fromEntries(dependencies.providerInfo().map(({ id, label }) => [id, label])),
     now,
     changed: publish,
   });
@@ -258,10 +273,17 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
 
   const observeWatched = (linkId: string, event: RuntimeMutationEvent): void => {
     if (event.type === "agent.started") {
+      const prior = store.watcherLinks.get(linkId);
+      if (prior) runner.watchedTurnChanging(prior, event.turnId);
       const begun = store.watcherLinks.beginWatchedTurn(linkId, event.turnId, now());
       if (!begun) {
         forget(linkId);
         return;
+      }
+      if (prior?.status === "paused" && prior.pauseReason === "wake-budget" && begun.status === "watching") {
+        // The wake budget is per watched turn: the new turn brings a fresh one.
+        runner.resumed(linkId);
+        wakeScheduler.resume(linkId);
       }
       publish(linkId);
     }
@@ -287,7 +309,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
       try {
         guard.observe(event);
         if (event.type === "conversation.message.persisted" && event.message.role === "user" && event.message.watcherNote) {
-          delivery.noteDelivered(event.message.watcherNote, event.message.id);
+          delivery.noteDelivered(event.message.watcherNote, event.message);
           return;
         }
         const conversationId = eventConversationId(event);
@@ -306,7 +328,14 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     async onTurnSettled(turn) {
       if (disposed) return;
       policy.forgetTurn(turn.id);
-      if (await runner.settle(turn)) return;
+      let settledCheck: boolean;
+      try {
+        settledCheck = await runner.settle(turn);
+      } catch {
+        // The runner already released the link and failed the check.
+        return;
+      }
+      if (settledCheck) return;
       const watcherLink = index.forWatcher(turn.conversationId);
       if (watcherLink !== null) {
         wakeScheduler.poke(watcherLink);
@@ -323,12 +352,19 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     isWatcherConversation: (conversationId) => policy.isWatcherConversation(conversationId),
     watcherPolicy: policy,
     watcherParent(conversationId) {
-      const link = store.watcherLinks.findByWatcher(conversationId);
-      return link && link.status !== "detached"
-        ? { watchedConversationId: link.watchedConversationId, privateConnect: link.privateConnect }
-        : null;
+      // Asked once per chat of every Private Connect shell: only attached
+      // watcher chats reach the one indexed row read.
+      if (disposed || index.forWatcher(conversationId) === null) return null;
+      return store.watcherLinks.parentForWatcher(conversationId);
     },
-    onWatchedArchived: (conversationId) => coordinator.onWatchedArchived(conversationId),
+    onConversationArchived: (conversationId) => coordinator.onConversationArchived(conversationId),
+    assertConversationDeletable(conversationId) {
+      const link = store.watcherLinks.findActiveByWatched(conversationId);
+      if (!link) return;
+      if (turns.isActive(link.watcherConversationId) || store.watcherLinks.watcherTurnActiveFor(conversationId)) {
+        throw new RuntimeRequestError(WATCHER_DELETE_REFUSAL);
+      }
+    },
     beforeConversationDelete(conversationId) {
       const linkIds = disposed ? [] : coordinator.linksTouching(conversationId);
       return () => {

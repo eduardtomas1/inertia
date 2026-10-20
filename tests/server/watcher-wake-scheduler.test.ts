@@ -368,6 +368,42 @@ describe("WatcherWakeScheduler", () => {
     expect(wakes.map(({ trigger }) => trigger)).toEqual(["activity", "turn-end"]);
   });
 
+  it("keeps an ended turn's final pass when the next turn starts and ends before it ran", () => {
+    const { scheduler, timers, wakes } = harness();
+    scheduler.observe(LINK, started("turn-1"));
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    expect(wakes).toHaveLength(1);
+    scheduler.onWatchedTurnSettled(LINK, "turn-1");
+    scheduler.observe(LINK, started("turn-2"));
+    scheduler.onWatchedTurnSettled(LINK, "turn-2");
+    scheduler.wakeFinished(LINK);
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    expect(wakes.filter(({ trigger }) => trigger === "turn-end").map(({ context }) => context.watchedTurnId))
+      .toEqual(["turn-1", "turn-2"]);
+  });
+
+  it("reports pending-count changes when a wake consumes events and when a retry puts them back", () => {
+    const attempts: WatcherWakeAttempt[] = ["transient", "started"];
+    const timers = new ClockedScheduler();
+    const changes: number[] = [];
+    const scheduler: WatcherWakeScheduler = new WatcherWakeScheduler({
+      scheduler: timers,
+      clock: () => timers.now,
+      onWake: () => attempts.shift() ?? "started",
+      onQuiet: () => undefined,
+      isBusy: () => false,
+      allowance: () => 12,
+      onPendingChanged: (linkId) => changes.push(scheduler.pendingEvents(linkId)),
+    });
+    scheduler.observe(LINK, settled());
+    scheduler.observe(LINK, settled());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    timers.advance(WATCHER_RETRY_BASE_MS);
+    expect(changes).toEqual([0, 2, 0]);
+  });
+
   it("drops events a skipped wake covered without cooling down", () => {
     const { scheduler, timers, wakes } = harness({ attempt: () => "skipped" });
     scheduler.observe(LINK, settled());

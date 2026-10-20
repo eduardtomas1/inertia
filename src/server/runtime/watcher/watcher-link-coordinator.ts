@@ -11,22 +11,22 @@ import {
   type WatcherStatus,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
-import { watcherLinkView } from "../../persistence/watcher-link-codecs";
+import { watcherLinkDetailView, watcherLinkView } from "../../persistence/watcher-link-codecs";
 import {
   WatcherPolicyError,
   type WatcherFeedPage,
   type WatcherLinkRecord,
+  type WatcherTransition,
 } from "../../persistence/watcher-link-repository";
 import { normalizeIdentityPath } from "../../project-identity";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TurnController } from "../turns/turn-controller";
-import { watcherCommandsRun } from "./watcher-outcome";
 import type { WatcherRouteReadiness } from "./watcher-route";
 import { conversationOrNull } from "./watcher-wake-runner";
 import type { WatcherWakeScheduler } from "./watcher-wake-scheduler";
 
 export const MAX_WATCHER_TITLE_CHARS = 120;
-const MAX_FEED_ACTIVITIES = 200;
+export const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher's own chat was archived. Unarchive it to resume the watcher.";
 const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "idle", "paused"];
 
 export interface WatcherFeedResult {
@@ -123,7 +123,10 @@ export class WatcherLinkCoordinator {
     this.#deps = dependencies;
   }
 
-  /** Broadcasts the link's current state; detached links leave the shell. */
+  /**
+   * Broadcasts the link's shell view; detached links leave the shell. Returns
+   * the command-result view, which also carries the user's instructions.
+   */
   publish(linkId: string): WatcherLinkView | null {
     const link = this.#deps.store.watcherLinks.get(linkId);
     if (!link) {
@@ -131,16 +134,16 @@ export class WatcherLinkCoordinator {
       this.#deps.broadcast({ type: "watcher.link.removed", linkId });
       return null;
     }
-    const view = watcherLinkView(link);
     if (link.status === "detached") {
       this.#deps.index.untrack(linkId);
       this.#deps.broadcast({ type: "watcher.link.removed", linkId });
-      return view;
+      return watcherLinkDetailView(link);
     }
+    const view = watcherLinkView(link);
     if (watcherLinkViewSchema.safeParse(view).success) {
       this.#deps.broadcast({ type: "watcher.link.updated", link: view });
     }
-    return view;
+    return watcherLinkDetailView(link);
   }
 
   async attach(payload: WatcherAttachPayload): Promise<WatcherLinkView> {
@@ -148,7 +151,7 @@ export class WatcherLinkCoordinator {
     const existing = store.watcherLinks.get(payload.linkId);
     if (existing) {
       if (existing.watchedConversationId === payload.watchedConversationId && existing.status !== "detached") {
-        return watcherLinkView(existing);
+        return watcherLinkDetailView(existing);
       }
       throw new RuntimeRequestError("This watcher already exists.");
     }
@@ -216,11 +219,16 @@ export class WatcherLinkCoordinator {
     this.#deps.index.track(link);
     this.#deps.scheduler.track(link.id, { watchedTurnId: latest?.id ?? null, watchedRunning: running });
     if (payload.initialReview && latest && (latest.status === "completed" || running)) {
-      if (!running) store.watcherLinks.beginWatchedTurn(link.id, latest.id, this.#deps.now());
+      if (!running) {
+        store.watcherLinks.beginWatchedTurn(link.id, latest.id, this.#deps.now());
+        // The turn ended before the watcher existed: the initial review covers
+        // it, so no restart may schedule a final check for it later.
+        store.watcherLinks.markFinalPass(link.id, latest.id, this.#deps.now());
+      }
       this.#deps.scheduler.requestWake(link.id, "initial");
     }
     this.#deps.broadcastSnapshot();
-    return this.publish(link.id) ?? watcherLinkView(link);
+    return this.publish(link.id) ?? watcherLinkDetailView(link);
   }
 
   update(payload: WatcherUpdatePayload): WatcherLinkView {
@@ -232,24 +240,24 @@ export class WatcherLinkCoordinator {
       throw policyError(error);
     }
     if (!updated) throw new RuntimeRequestError("This watcher is no longer attached.");
-    return this.publish(linkId) ?? watcherLinkView(updated);
+    return this.publish(linkId) ?? watcherLinkDetailView(updated);
   }
 
   pause(linkId: string): WatcherLinkView {
     const link = this.#require(linkId);
-    if (link.status === "paused") return watcherLinkView(link);
+    if (link.status === "paused") return watcherLinkDetailView(link);
     const paused = this.#deps.store.watcherLinks.transition(
       linkId, ["watching", "waking", "idle"], { status: "paused", reason: "user" }, this.#deps.now(),
     );
     if (!paused) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
     this.#deps.scheduler.pause(linkId);
-    return this.publish(linkId) ?? watcherLinkView(paused);
+    return this.publish(linkId) ?? watcherLinkDetailView(paused);
   }
 
   async resume(linkId: string): Promise<WatcherLinkView> {
     const { store } = this.#deps;
     const link = this.#require(linkId);
-    if (link.status !== "paused") return watcherLinkView(link);
+    if (link.status !== "paused") return watcherLinkDetailView(link);
     if (link.pauseReason === "usage-limit" || link.pauseReason === "route-unavailable") {
       const watcher = store.conversation(link.watcherConversationId);
       const route = await this.#deps.route(watcher.modelSelection);
@@ -259,13 +267,16 @@ export class WatcherLinkCoordinator {
       && conversationOrNull(store, link.watchedConversationId)?.archivedAt !== null) {
       throw new RuntimeRequestError("Unarchive the watched chat before resuming its watcher.");
     }
+    if ((conversationOrNull(store, link.watcherConversationId)?.archivedAt ?? null) !== null) {
+      throw new RuntimeRequestError("Unarchive the watcher chat before resuming it.");
+    }
     const resumed = store.watcherLinks.transition(linkId, ["paused"], { status: "watching" }, this.#deps.now());
     if (!resumed) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
     const remaining = resumed.counters.wakeAllowance - resumed.counters.wakesThisTurn;
     const grant = resumed.budgets.wakesPerWatchedTurn - remaining;
     if (grant > 0) store.watcherLinks.grantWakes(linkId, grant, this.#deps.now());
     this.#deps.scheduler.resume(linkId);
-    return this.publish(linkId) ?? watcherLinkView(resumed);
+    return this.publish(linkId) ?? watcherLinkDetailView(resumed);
   }
 
   wake(linkId: string): WatcherLinkView {
@@ -273,14 +284,14 @@ export class WatcherLinkCoordinator {
     if (link.status === "paused") throw new RuntimeRequestError("Resume the watcher before asking it to check.");
     if (link.status === "waking") throw new RuntimeRequestError("The watcher is already checking.");
     this.#deps.scheduler.requestWake(linkId, "manual");
-    return watcherLinkView(link);
+    return watcherLinkDetailView(link);
   }
 
   detach(linkId: string): WatcherLinkView {
     const { store } = this.#deps;
     const link = store.watcherLinks.get(linkId);
     if (!link) throw new RuntimeRequestError("This watcher no longer exists.");
-    if (link.status === "detached") return watcherLinkView(link);
+    if (link.status === "detached") return watcherLinkDetailView(link);
     if (this.#deps.turns.isActive(link.watcherConversationId)) this.#deps.turns.cancel(link.watcherConversationId);
     const detached = store.watcherLinks.transition(linkId, ATTACHED, { status: "detached", reason: "user" }, this.#deps.now());
     if (!detached) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
@@ -288,7 +299,7 @@ export class WatcherLinkCoordinator {
     this.#deps.forgetLink(linkId);
     this.#deps.index.untrack(linkId);
     this.#deps.broadcastSnapshot();
-    return this.publish(linkId) ?? watcherLinkView(detached);
+    return this.publish(linkId) ?? watcherLinkDetailView(detached);
   }
 
   feed(linkId: string, beforeSequence?: number): WatcherFeedResult {
@@ -296,13 +307,12 @@ export class WatcherLinkCoordinator {
     const page = store.watcherLinks.feed(linkId, beforeSequence);
     if (!page) throw new RuntimeRequestError("This watcher no longer exists.");
     const link = store.watcherLinks.get(linkId);
+    const turnIds = page.items.flatMap((item) =>
+      item.watcherTurnId !== null && item.state === "settled" ? [item.watcherTurnId] : []);
+    const counts = link ? store.watcherLinks.digest.settledCommandCounts(link.watcherConversationId, turnIds) : new Map<string, number>();
     const items = page.items.map((item) => {
-      if (!link || item.watcherTurnId === null || item.state !== "settled") return item;
-      const activities = store.watcherLinks.digest.activitiesAfter(
-        link.watcherConversationId, item.watcherTurnId, { at: null, id: null }, MAX_FEED_ACTIVITIES,
-      );
-      const commandsRun = watcherCommandsRun(activities, item.watcherTurnId);
-      return commandsRun > 0 ? { ...item, commandsRun } : item;
+      const commandsRun = item.watcherTurnId !== null && item.state === "settled" ? counts.get(item.watcherTurnId) ?? 0 : 0;
+      return commandsRun > 0 ? { ...item, commandsRun: Math.min(commandsRun, 10_000) } : item;
     });
     return { kind: "watcher.feed", linkId, feedRevision: page.feedRevision, items, next: page.next };
   }
@@ -322,13 +332,25 @@ export class WatcherLinkCoordinator {
     return [...ids];
   }
 
-  /** The watched chat was archived: its watcher pauses until the user resumes it. */
-  onWatchedArchived(conversationId: string): void {
-    const link = this.#deps.store.watcherLinks.findActiveByWatched(conversationId);
-    if (!link || link.status === "paused") return;
-    const paused = this.#deps.store.watcherLinks.transition(
-      link.id, ["watching", "waking", "idle"], { status: "paused", reason: "watched-archived" }, this.#deps.now(),
-    );
+  /**
+   * A chat was archived. The watcher of an archived chat pauses with
+   * `watched-archived`; a watcher whose own chat was archived pauses too,
+   * so no check keeps running in a chat the user put away. Both wait for the
+   * user to unarchive and resume.
+   */
+  onConversationArchived(conversationId: string): void {
+    const { watcherLinks } = this.#deps.store;
+    const watched = watcherLinks.findActiveByWatched(conversationId);
+    if (watched) this.#pauseForArchive(watched, { status: "paused", reason: "watched-archived" });
+    const watcher = watcherLinks.findByWatcher(conversationId);
+    if (watcher && watcher.status !== "detached") {
+      this.#pauseForArchive(watcher, { status: "paused", reason: "user", detail: WATCHER_CHAT_ARCHIVED_DETAIL });
+    }
+  }
+
+  #pauseForArchive(link: WatcherLinkRecord, pause: Extract<WatcherTransition, { status: "paused" }>): void {
+    if (link.status === "paused") return;
+    const paused = this.#deps.store.watcherLinks.transition(link.id, ["watching", "waking", "idle"], pause, this.#deps.now());
     if (!paused) return;
     this.#deps.scheduler.pause(link.id);
     this.publish(link.id);

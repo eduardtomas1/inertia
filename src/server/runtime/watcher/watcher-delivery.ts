@@ -1,11 +1,12 @@
 import type WebSocket from "ws";
 
-import type { ServerEvent } from "../../../shared/contracts";
+import type { ChatMessage, ServerEvent } from "../../../shared/contracts";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import type { MessageQueueResult } from "../../../shared/queued-messages";
+import { watcherAgentLabel } from "../../../shared/watcher-agent-label";
 import {
-  MAX_WATCHER_LABEL_CHARS,
   MAX_WATCHER_NOTE_CHARS,
+  watcherReplaceLineSeparators,
   type WatcherDelivery,
   type WatcherDeliveryMode,
   type WatcherNoteAttribution,
@@ -22,25 +23,28 @@ import type { TurnController } from "../turns/turn-controller";
 import { neutralizeUntrustedAgentText } from "../untrusted-agent-text";
 import { watcherNoteDelivery, watcherSteerContent } from "./watcher-note-instruction";
 
+/**
+ * `delivery.detail` explains only what state and mode do not: a fallback
+ * from Steer, a queued note that went out later, or why it was not sent. The
+ * plain queued, sent and steered outcomes carry no detail. Each fixed detail
+ * is a lowercase fragment the renderer appends to its own status line.
+ */
 export const WATCHER_DELIVERY_DETAIL = Object.freeze({
-  sent: "Sent · started the main chat's next turn",
-  queued: "Queued · sends after the current turn",
-  steered: "Steered into the running turn",
-  turnEnded: "The main chat's turn ended before the note arrived, so it was queued.",
-  turnEndedSent: "The main chat's turn ended before the note arrived, so it started the next turn.",
-  refused: "The agent did not take the note mid-turn, so it was queued.",
-  refusedSent: "The agent did not take the note mid-turn, so it started the next turn.",
-  idle: "The main chat was not running, so the note started its next turn.",
-  idleQueued: "The main chat was not running, so the note was queued.",
+  turnEnded: "the turn ended before the note arrived",
+  refused: "the agent didn't take the note mid-turn",
+  idle: "the main chat wasn't running",
+  dispatchedLater: "after the turn ended",
+  steeredFromQueue: "into the running turn",
+  removed: "it was removed from the main chat's queue",
 });
 
 type QueueReason = "queue" | "steer-idle" | "turn-ended" | "refused";
 
-const QUEUE_DETAILS: Readonly<Record<QueueReason, { now: string; later: string }>> = Object.freeze({
-  queue: { now: WATCHER_DELIVERY_DETAIL.sent, later: WATCHER_DELIVERY_DETAIL.queued },
-  "steer-idle": { now: WATCHER_DELIVERY_DETAIL.idle, later: WATCHER_DELIVERY_DETAIL.idleQueued },
-  "turn-ended": { now: WATCHER_DELIVERY_DETAIL.turnEndedSent, later: WATCHER_DELIVERY_DETAIL.turnEnded },
-  refused: { now: WATCHER_DELIVERY_DETAIL.refusedSent, later: WATCHER_DELIVERY_DETAIL.refused },
+const QUEUE_DETAILS: Readonly<Record<QueueReason, string | null>> = Object.freeze({
+  queue: null,
+  "steer-idle": WATCHER_DELIVERY_DETAIL.idle,
+  "turn-ended": WATCHER_DELIVERY_DETAIL.turnEnded,
+  refused: WATCHER_DELIVERY_DETAIL.refused,
 });
 
 export interface WatcherDeliveryResult {
@@ -58,6 +62,8 @@ export interface WatcherNoteQueue {
     content: string;
     watcherNote: WatcherNoteAttribution;
   }): MessageQueueResult;
+  /** Removes a waiting or blocked watcher note before the finding is sent again. */
+  withdrawWatcherNote?(conversationId: string, id: string): boolean;
 }
 
 export interface WatcherDeliveryDependencies {
@@ -66,12 +72,12 @@ export interface WatcherDeliveryDependencies {
   /** The same server-side dependencies the message commands use. */
   interaction(): TurnInteractionCommandDependencies | undefined;
   queue(): WatcherNoteQueue | undefined;
+  /** Provider labels keyed by provider id: the runtime's provider labels under the user's identity labels. */
+  providerLabels(): Readonly<Record<string, string | undefined>>;
   now(): string;
   /** The link's feed changed; republish it. */
   changed(linkId: string): void;
 }
-
-const PROVIDER_LABEL_SEPARATOR = " · ";
 
 function clipCodeUnits(value: string, maximum: number): string {
   if (value.length <= maximum) return value;
@@ -79,30 +85,29 @@ function clipCodeUnits(value: string, maximum: number): string {
   return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
 }
 
-function singleLine(value: string): string {
-  let flattened = "";
-  for (const character of value) {
-    const code = character.codePointAt(0) ?? 0;
-    flattened += code < 0x20 || code === 0x7f ? " " : character;
-  }
-  return flattened.replace(/\s+/gu, " ").trim();
-}
-
-/** The watcher's provider identity label plus model, on one line of at most 80 characters. */
-export function watcherLabel(store: Pick<RuntimeStore, "conversation" | "shellSnapshot">, watcherConversationId: string): string {
+/**
+ * The watcher's agent as the note attribution names it: the shared
+ * `watcherAgentLabel`, fed with the same provider labels the renderer's dock
+ * uses (runtime provider labels under the user's identity labels), so the
+ * note divider and the dock read the same.
+ */
+export function watcherLabel(
+  store: Pick<RuntimeStore, "conversation" | "shellSnapshot">,
+  watcherConversationId: string,
+  providerLabels: Readonly<Record<string, string | undefined>> = {},
+): string {
   const conversation = store.conversation(watcherConversationId);
-  const labels = store.shellSnapshot().settings.providerIdentityLabels ?? {};
-  const provider = labels[conversation.providerId] ?? PROVIDER_INFO[conversation.providerId]?.name ?? "Watcher";
-  const selection = conversation.modelSelection;
-  const model = selection.alias
-    ?? (selection.modelId === "provider-default" ? "Default model" : selection.modelId);
-  const label = singleLine(`${provider}${PROVIDER_LABEL_SEPARATOR}${model}`);
-  return clipCodeUnits(label, MAX_WATCHER_LABEL_CHARS).trim() || "Watcher";
+  const labels = {
+    ...Object.fromEntries(Object.entries(PROVIDER_INFO).map(([id, info]) => [id, info.name])),
+    ...providerLabels,
+    ...store.shellSnapshot().settings.providerIdentityLabels,
+  };
+  return watcherAgentLabel(conversation, labels);
 }
 
 /** The neutralized note text the user forwards, capped at `MAX_WATCHER_NOTE_CHARS`. */
 export function watcherNoteText(finding: string): string {
-  const normalized = finding.replaceAll("\0", "�").replace(/\r\n?/gu, "\n").trim();
+  const normalized = watcherReplaceLineSeparators(finding.replaceAll("\0", "�").replace(/\r\n?/gu, "\n"), "\n").trim();
   return clipCodeUnits(neutralizeUntrustedAgentText(normalized), MAX_WATCHER_NOTE_CHARS).trimEnd();
 }
 
@@ -143,7 +148,8 @@ export class WatcherDeliveryService {
   }
 
   dismiss(linkId: string, wakeId: string): WatcherDeliveryResult {
-    const { wake } = this.#finding(linkId, wakeId);
+    const found = this.#finding(linkId, wakeId);
+    const wake = this.#reconcileQueued(found.link, found.wake);
     if (wake.delivery?.state === "dismissed") return this.#result(linkId, wake);
     if (wake.delivery?.state === "sent" || wake.delivery?.state === "queued") {
       throw new RuntimeRequestError("This finding was already sent to the main chat.");
@@ -155,17 +161,78 @@ export class WatcherDeliveryService {
     return this.#result(linkId, dismissed);
   }
 
-  /** A forwarded note reached the watched chat as a user message; marks a queued delivery sent. */
-  noteDelivered(attribution: WatcherNoteAttribution, messageId: string): void {
+  /**
+   * A forwarded note reached the watched chat as a user message. A queued
+   * note, or one that failed in the queue and was then sent from it, is
+   * marked sent: "after the turn ended" when it started a turn, or "into the
+   * running turn" when it was sent into one. Notes this service is sending
+   * right now record their own result.
+   */
+  noteDelivered(attribution: WatcherNoteAttribution, message: Pick<ChatMessage, "id" | "turnId">): void {
+    if (this.#inFlight.has(attribution.wakeId)) return;
+    const wake = this.#deps.store.watcherLinks.getWake(attribution.wakeId);
+    if (!wake || wake.linkId !== attribution.linkId || !wake.delivery) return;
+    const { state, mode } = wake.delivery;
+    if (state !== "queued" && !(state === "failed" && mode === "queue")) return;
+    const updated = this.#deps.store.watcherLinks.setDelivery(wake.wakeId, {
+      mode: mode ?? attribution.delivery,
+      state: "sent",
+      detail: this.#startedTurn(message) ? WATCHER_DELIVERY_DETAIL.dispatchedLater : WATCHER_DELIVERY_DETAIL.steeredFromQueue,
+      deliveredMessageId: message.id,
+    }, this.#deps.now());
+    if (updated) this.#deps.changed(attribution.linkId);
+  }
+
+  /**
+   * A queued note left the main chat's queue without being sent: the user
+   * removed it, a route change blocked it, or its dispatch failed. The
+   * finding becomes `failed` with the reason, so it can be sent again or
+   * dismissed.
+   */
+  noteUndelivered(attribution: WatcherNoteAttribution, reason: string): void {
     const wake = this.#deps.store.watcherLinks.getWake(attribution.wakeId);
     if (!wake || wake.linkId !== attribution.linkId || wake.delivery?.state !== "queued") return;
     const updated = this.#deps.store.watcherLinks.setDelivery(wake.wakeId, {
-      mode: wake.delivery.mode ?? attribution.delivery,
-      state: "sent",
-      detail: wake.delivery.detail,
-      deliveredMessageId: messageId,
+      mode: wake.delivery.mode ?? "queue",
+      state: "failed",
+      detail: reason.trim() || WATCHER_DELIVERY_DETAIL.removed,
     }, this.#deps.now());
     if (updated) this.#deps.changed(attribution.linkId);
+  }
+
+  #startedTurn(message: Pick<ChatMessage, "id" | "turnId">): boolean {
+    if (message.turnId === null) return true;
+    try {
+      return this.#deps.store.agentTurn(message.turnId).userMessageId === message.id;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * A finding still recorded as queued whose queue entry is gone, blocked or
+   * already accepted is brought up to date before the user acts on it. This
+   * covers paths that bypass `noteUndelivered`, such as a restart.
+   */
+  #reconcileQueued(link: WatcherLinkRecord, wake: WatcherWakeRecord): WatcherWakeRecord {
+    if (wake.delivery?.state !== "queued" || wake.queuedMessageId === null || link.watchedConversationId === null) return wake;
+    const entry = this.#deps.store.queuedMessages.get(link.watchedConversationId, wake.queuedMessageId);
+    let update: Parameters<RuntimeStore["watcherLinks"]["setDelivery"]>[1] | null = null;
+    if (!entry || entry.state === "cancelled") {
+      update = { mode: "queue", state: "failed", detail: WATCHER_DELIVERY_DETAIL.removed };
+    } else if (entry.state === "blocked") {
+      update = { mode: "queue", state: "failed", detail: entry.error ?? WATCHER_DELIVERY_DETAIL.removed };
+    } else if (entry.state === "accepted") {
+      update = {
+        mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.dispatchedLater,
+        ...(entry.userMessageId ? { deliveredMessageId: entry.userMessageId } : {}),
+      };
+    }
+    if (!update) return wake;
+    const updated = this.#deps.store.watcherLinks.setDelivery(wake.wakeId, update, this.#deps.now());
+    if (!updated) return wake;
+    this.#deps.changed(link.id);
+    return updated;
   }
 
   #replay(linkId: string, wakeId: string, deliveryId: string): WatcherDeliveryResult {
@@ -198,7 +265,9 @@ export class WatcherDeliveryService {
     mode: WatcherDeliveryMode,
     deliveryId: string,
   ): Promise<WatcherDeliveryResult> {
-    const { link, wake } = this.#finding(linkId, wakeId);
+    const found = this.#finding(linkId, wakeId);
+    const { link } = found;
+    const wake = this.#reconcileQueued(link, found.wake);
     if (wake.delivery?.state === "sent" || wake.delivery?.state === "queued") {
       if (wake.deliveryId === deliveryId) return this.#result(linkId, wake);
       throw new RuntimeRequestError("This finding was already sent to the main chat.");
@@ -212,12 +281,17 @@ export class WatcherDeliveryService {
     if (watched.archivedAt !== null) throw new RuntimeRequestError("Unarchive the main chat before sending a note to it.");
     const note = watcherNoteText(wake.finding!);
     if (note.length === 0) throw new RuntimeRequestError("This finding has no text to send.");
+    if (wake.delivery?.state === "failed" && wake.queuedMessageId !== null && wake.queuedMessageId !== deliveryId) {
+      // A note blocked in the queue is withdrawn so sending again never forwards it twice.
+      this.#deps.queue()?.withdrawWatcherNote?.(watchedId, wake.queuedMessageId);
+    }
+    const label = watcherLabel(this.#deps.store, link.watcherConversationId, this.#deps.providerLabels());
     const attribution = (delivery: WatcherDeliveryMode): WatcherNoteAttribution => ({
       linkId,
       wakeId,
       watcherConversationId: link.watcherConversationId,
       preset: link.preset,
-      watcherLabel: watcherLabel(this.#deps.store, link.watcherConversationId),
+      watcherLabel: label,
       delivery,
     });
 
@@ -260,7 +334,7 @@ export class WatcherDeliveryService {
     }
     if (outcome.kind === "accepted") {
       return { kind: "done", result: this.#record(linkId, wakeId, {
-        mode: "steer", state: "sent", detail: WATCHER_DELIVERY_DETAIL.steered,
+        mode: "steer", state: "sent", detail: null,
         deliveryId, deliveredMessageId: outcome.message.id,
       }) };
     }
@@ -281,10 +355,10 @@ export class WatcherDeliveryService {
     deliveryId: string,
     reason: QueueReason,
   ): Promise<WatcherDeliveryResult> {
-    const details = QUEUE_DETAILS[reason];
+    const detail = QUEUE_DETAILS[reason];
     const queuedAhead = this.#deps.store.queuedMessages.list(watchedId).length > 0;
     if (!this.#deps.turns.isActive(watchedId) && !queuedAhead) {
-      const started = await this.#sendNow(linkId, wakeId, watchedId, note, attribution, deliveryId, details.now);
+      const started = await this.#sendNow(linkId, wakeId, watchedId, note, attribution, deliveryId, detail);
       if (started) return started;
     }
     const queue = this.#deps.queue();
@@ -300,7 +374,7 @@ export class WatcherDeliveryService {
     const recorded = current?.delivery?.state === "sent"
       ? this.#result(linkId, current)
       : this.#record(linkId, wakeId, {
-          mode: "queue", state: "queued", detail: details.later, deliveryId, queuedMessageId: deliveryId,
+          mode: "queue", state: "queued", detail, deliveryId, queuedMessageId: deliveryId,
         });
     return { ...recorded, queue: result };
   }
@@ -313,7 +387,7 @@ export class WatcherDeliveryService {
     note: string,
     attribution: WatcherNoteAttribution,
     deliveryId: string,
-    detail: string,
+    detail: string | null,
   ): Promise<WatcherDeliveryResult | null> {
     const interaction = this.#deps.interaction();
     if (!interaction) throw new RuntimeRequestError("The main chat cannot start a turn right now.");

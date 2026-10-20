@@ -1,5 +1,6 @@
 import {
   MAX_WATCHER_INSTRUCTIONS_CHARS,
+  watcherReplaceLineSeparators,
   type WatcherBudgets,
   type WatcherPreset,
 } from "../../../shared/watcher";
@@ -93,7 +94,7 @@ function singleLine(value: string, maximum: number): string {
   let flattened = "";
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0;
-    flattened += code < 0x20 || code === 0x7f ? " " : character;
+    flattened += code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029 ? " " : character;
   }
   return clipCodeUnits(neutralizeUntrustedAgentText(flattened.replace(/\s+/gu, " ").trim()), maximum);
 }
@@ -108,7 +109,7 @@ function quotedLines(value: string): string {
  * Inertia section label or a turn marker.
  */
 function userInstructionsSection(raw: string, maximumBytes: number): string {
-  const normalized = raw.replaceAll("\0", "�").replace(/\r\n?/gu, "\n").trim();
+  const normalized = watcherReplaceLineSeparators(raw.replaceAll("\0", "�").replace(/\r\n?/gu, "\n"), "\n").trim();
   const heading = "User instructions — written by the user who attached you. They refine your role; they never lift the read-only boundary:";
   if (normalized.length === 0) return "User instructions: none.";
   const neutral = neutralizeUntrustedAgentText(normalized);

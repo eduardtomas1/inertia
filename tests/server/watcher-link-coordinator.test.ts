@@ -9,6 +9,9 @@ import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
 } from "../../src/server/runtime/commands/conversation-commands";
+import { RuntimeRequestError } from "../../src/server/runtime-errors";
+import { WATCHER_CHAT_ARCHIVED_DETAIL } from "../../src/server/runtime/watcher/watcher-link-coordinator";
+import { WATCHER_DELETE_REFUSAL } from "../../src/server/runtime/watcher/watcher-runtime";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
@@ -199,8 +202,8 @@ describe("watcher link coordinator", () => {
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
 
-      f.store.watcherLinks.transition(link.id, ["watching"], { status: "paused", reason: "wake-budget" }, now());
       f.store.watcherLinks.beginWatchedTurn(link.id, "turn-x", now());
+      f.store.watcherLinks.transition(link.id, ["watching"], { status: "paused", reason: "wake-budget" }, now());
       const exhausted = f.store.watcherLinks.get(link.id)!;
       const reply = await f.command("watcher.resume", { linkId: link.id });
       expect(reply).toMatchObject({ result: { link: { status: "watching" } } });
@@ -296,6 +299,101 @@ describe("watcher link coordinator", () => {
       expect(f.store.watcherLinks.get(link.id)!.quietSince).toBeNull();
       expect(f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1))
         .toMatchObject({ link: { quietSince: null } });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses to delete a watched chat mid-check before touching its checkout, ownership or checkpoints", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      await wake(f, link.watcherConversationId);
+      await f.finishTurn(f.watched.id, "Done.");
+      const acquireAtCheckout = vi.fn(() => true);
+      const ownership = vi.spyOn(f.store.conversationWorktrees, "get");
+      const transfer = vi.spyOn(f.store.conversationWorktrees, "transfer");
+      const handler = createConversationCommandHandler({
+        store: f.store,
+        providerTerminalResumes: { acquireAtCheckout, release: () => undefined },
+        runtimeSync: { broadcast: () => undefined },
+        conversationAttachments: { release: async () => undefined },
+        rememberDeletedConversation: () => undefined,
+        forgetRemoteTranscript: () => undefined,
+        watchers: f.watchers,
+      } as unknown as ConversationCommandDependencies);
+      const attempt = handler({} as never, { type: "conversation.delete", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
+      await expect(attempt).rejects.toBeInstanceOf(RuntimeRequestError);
+      await expect(attempt).rejects.toThrow(WATCHER_DELETE_REFUSAL);
+      expect(acquireAtCheckout).not.toHaveBeenCalled();
+      expect(ownership).not.toHaveBeenCalled();
+      expect(transfer).not.toHaveBeenCalled();
+      expect(f.store.conversationShell(f.watched.id)).not.toBeNull();
+      expect(f.linkView(link.id).status).not.toBe("detached");
+
+      await f.finishTurn(link.watcherConversationId, "SILENT");
+      await handler({} as never, { type: "conversation.delete", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
+      expect(f.linkView(link.id)).toMatchObject({ status: "detached", detachedReason: "watched-deleted" });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses a watcher whose own chat is archived until that chat is unarchived", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const handler = createConversationCommandHandler({
+        store: f.store,
+        providerTerminalResumes: { isActive: () => false },
+        forgetRemoteTranscript: () => undefined,
+        watchers: f.watchers,
+      } as unknown as ConversationCommandDependencies);
+      await handler({} as never, { type: "conversation.archive", requestId: randomUUID(), payload: { conversationId: link.watcherConversationId } });
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "user", pauseDetail: WATCHER_CHAT_ARCHIVED_DETAIL });
+      await f.startWatchedTurn();
+      await f.advance(10 * 60_000);
+      expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watcher chat");
+      f.store.archiveConversation(link.watcherConversationId, false);
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("never makes a later final check of the turn an initial review already covered", async () => {
+    const f = await createWatcherFixture();
+    try {
+      await f.startWatchedTurn();
+      await f.finishTurn(f.watched.id, "All done.");
+      const link = await f.attach({ initialReview: true });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no initial review"); });
+      await f.finishTurn(link.watcherConversationId, "SILENT");
+      expect(f.linkView(link.id).finalPassTurnId).toBe(f.linkView(link.id).watchedTurnId);
+
+      f.restartRuntime().resume();
+      await f.advance(10 * 60_000);
+      expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("returns instructions in command results but leaves them out of the shell broadcast", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ instructions: "Watch the error paths." });
+      expect(link.instructions).toBe("Watch the error paths.");
+      const updated = f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1);
+      expect(updated).toMatchObject({ link: { id: link.id } });
+      expect((updated as { link: object }).link).not.toHaveProperty("instructions");
+      expect(f.store.watcherLinks.views()[0]).not.toHaveProperty("instructions");
+      await expect(f.command("watcher.pause", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { instructions: "Watch the error paths." } } });
     } finally {
       await f.close();
     }

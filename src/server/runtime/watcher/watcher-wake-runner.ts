@@ -6,9 +6,10 @@ import {
   type WatcherWakeTrigger,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
-import type { WatcherTransition } from "../../persistence/watcher-link-repository";
+import type { WatcherCursor, WatcherLinkRecord, WatcherTransition } from "../../persistence/watcher-link-repository";
 import type { TurnController } from "../turns/turn-controller";
 import type { ReadOnlyWatcherViolation } from "../turns/turn-controller-types";
+import { publicRuntimeError } from "../../runtime-errors";
 import { isHeld } from "../update-hold";
 import type { WatcherCheckoutGuard, WatcherGuardOutcome, WatcherGuardWindow } from "./watcher-checkout-guard";
 import { buildWatcherDigest, type WatcherDigest } from "./watcher-digest";
@@ -25,10 +26,17 @@ export const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit files tw
  * the scheduler's backoff before the link pauses with `route-unavailable`.
  */
 export const WATCHER_ROUTE_RETRY_LIMIT = 3;
+/** Consecutive checks that fail to dispatch before the link pauses with `route-unavailable`. */
+export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
 
 export function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
   return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()} `
     + "Check Settings → Agents; it can resume once the route is ready.";
+}
+
+export function watcherDispatchFailedDetail(message: string): string {
+  return `The watcher's checks could not start ${WATCHER_DISPATCH_FAILURE_LIMIT} times in a row: ${message.trim()} `
+    + "It can resume once the watcher chat can run again.";
 }
 
 /** Room for a finding preview plus its trailing marker. */
@@ -42,7 +50,7 @@ export interface WatcherWakeRunnerDependencies {
   route(selection: ModelSelection): Promise<WatcherRouteReadiness>;
   guard: Pick<WatcherCheckoutGuard, "before">;
   live: Pick<WatcherLiveProjection, "begin" | "end">;
-  scheduler(): Pick<WatcherWakeScheduler, "wakeFinished" | "pause">;
+  scheduler(): Pick<WatcherWakeScheduler, "wakeFinished" | "pause" | "resume">;
   /** Republishes the link (`watcher.link.updated`). */
   publish(linkId: string): void;
   /** Refreshes the watcher chat's shell row after a check settles. */
@@ -57,6 +65,8 @@ interface RunningWake {
   watcherConversationId: string;
   window: WatcherGuardWindow;
   digest: WatcherDigest;
+  /** The stored cursor turn the digest was built from; the cursor moves only while it still holds. */
+  expectedTurnId: string | null;
   restore: WatcherTransition;
   violations: ReadOnlyWatcherViolation[];
   pause: WatcherTransition | null;
@@ -92,6 +102,9 @@ export class WatcherWakeRunner {
   readonly #running = new Map<string, RunningWake>();
   readonly #planKeys = new Map<string, string | null>();
   readonly #routeFailures = new Map<string, number>();
+  readonly #dispatchFailures = new Map<string, number>();
+  /** Coverage of a watched turn whose final pass is still due after the next turn began. */
+  readonly #priorCursors = new Map<string, WatcherCursor>();
 
   constructor(dependencies: WatcherWakeRunnerDependencies) {
     this.#deps = dependencies;
@@ -106,11 +119,25 @@ export class WatcherWakeRunner {
   forget(linkId: string): void {
     this.#planKeys.delete(linkId);
     this.#routeFailures.delete(linkId);
+    this.#dispatchFailures.delete(linkId);
+    this.#priorCursors.delete(linkId);
   }
 
-  /** A resumed link starts its route retries afresh. */
+  /** A resumed link starts its route and dispatch retries afresh. */
   resumed(linkId: string): void {
     this.#routeFailures.delete(linkId);
+    this.#dispatchFailures.delete(linkId);
+  }
+
+  /**
+   * The watched chat started a new turn. Keeps how far the previous turn was
+   * covered when its final pass has not run yet, so that pass reviews only
+   * what is new in that turn.
+   */
+  watchedTurnChanging(link: Pick<WatcherLinkRecord, "id" | "cursor" | "finalPassTurnId">, nextTurnId: string): void {
+    const { cursor } = link;
+    if (cursor.turnId === null || cursor.turnId === nextTurnId || link.finalPassTurnId === cursor.turnId) return;
+    this.#priorCursors.set(link.id, cursor);
   }
 
   async run(linkId: string, trigger: WatcherWakeTrigger, context: WatcherWakeContext): Promise<WatcherWakeAttempt> {
@@ -139,7 +166,8 @@ export class WatcherWakeRunner {
       ? { status: "paused", reason: "wake-budget", detail: link.pauseDetail }
       : { status: "watching" };
     const release = (attempt: WatcherWakeAttempt): WatcherWakeAttempt => {
-      if (store.watcherLinks.transition(linkId, ["waking"], restore, this.#deps.now())) this.#deps.publish(linkId);
+      const checkTurnId = context.final ? context.watchedTurnId : claimed.cursor.turnId;
+      if (this.#release(linkId, restore, checkTurnId)) this.#deps.publish(linkId);
       return attempt;
     };
     let window: WatcherGuardWindow | null = null;
@@ -147,17 +175,32 @@ export class WatcherWakeRunner {
       if (context.final && context.watchedTurnId !== null && claimed.finalPassTurnId === context.watchedTurnId) {
         return release("skipped");
       }
-      const previousPlanKey = this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
-      const digest = buildWatcherDigest(store.watcherLinks.digest, claimed, {
+      // The final pass reviews its own turn, even when the next one already began.
+      const finalTurnId = context.final ? context.watchedTurnId : null;
+      const staleTurn = finalTurnId !== null && claimed.cursor.turnId !== null && claimed.cursor.turnId !== finalTurnId;
+      const prior = this.#priorCursors.get(linkId);
+      const cursor: WatcherCursor = !staleTurn
+        ? claimed.cursor
+        : prior?.turnId === finalTurnId
+          ? prior
+          : { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
+      const previousPlanKey = !staleTurn && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
+      const digest = buildWatcherDigest(store.watcherLinks.digest, { ...claimed, cursor }, {
         final: context.final,
         sessionFresh: watcher.providerSessionId === null,
         now: this.#deps.now(),
         watchedTitle: watched.title,
         sequence: claimed.counters.wakesTotal + 1,
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
+        ...(finalTurnId === null ? {} : { turnId: finalTurnId }),
       });
       if (!digest) return release("skipped");
       window = await this.#deps.guard.before(watcher.id);
+      // The guard can take seconds; the user may have started a watcher-chat turn meanwhile.
+      if (turns.isActive(watcher.id) || turns.isClosing()) {
+        window.dispose();
+        return release("transient");
+      }
       const wake = store.watcherLinks.createWake({
         id: this.#deps.id(),
         linkId,
@@ -188,17 +231,21 @@ export class WatcherWakeRunner {
       } catch (error) {
         window.dispose();
         store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, null, this.#deps.now());
+        if (this.#dispatchFailed(linkId, error)) return "skipped";
         release("transient");
         throw error;
       }
+      this.#dispatchFailures.delete(linkId);
       store.watcherLinks.attachWakeTurn(wake.wakeId, queuedTurnId, this.#deps.now());
-      if (context.final && context.watchedTurnId !== null) {
-        store.watcherLinks.markFinalPass(linkId, context.watchedTurnId, this.#deps.now());
+      if (finalTurnId !== null) {
+        store.watcherLinks.markFinalPass(linkId, finalTurnId, this.#deps.now());
+        if (this.#priorCursors.get(linkId)?.turnId === finalTurnId) this.#priorCursors.delete(linkId);
       }
       this.#running.set(queuedTurnId, {
-        linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest, restore, violations: [], pause: null,
+        linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest,
+        expectedTurnId: cursor.turnId, restore, violations: [], pause: null,
       });
-      this.#planKeys.set(linkId, digest.planKey);
+      if (!staleTurn) this.#planKeys.set(linkId, digest.planKey);
       this.#deps.live.begin(linkId, watcher.id, queuedTurnId);
       this.#deps.publish(linkId);
       if (!turns.start(queuedTurnId) && !turns.isClosing()) {
@@ -242,6 +289,46 @@ export class WatcherWakeRunner {
   }
 
   /**
+   * Counts a check that failed to dispatch. The limit-th consecutive failure
+   * pauses the link with `route-unavailable` instead of retrying forever;
+   * returns true when it paused.
+   */
+  #dispatchFailed(linkId: string, error: unknown): boolean {
+    const failures = (this.#dispatchFailures.get(linkId) ?? 0) + 1;
+    if (failures < WATCHER_DISPATCH_FAILURE_LIMIT) {
+      this.#dispatchFailures.set(linkId, failures);
+      return false;
+    }
+    this.#dispatchFailures.delete(linkId);
+    const paused = this.#deps.store.watcherLinks.transition(
+      linkId,
+      ["waking"],
+      { status: "paused", reason: "route-unavailable", detail: watcherDispatchFailedDetail(publicRuntimeError(error)) },
+      this.#deps.now(),
+    );
+    if (!paused) return false;
+    this.#deps.scheduler().pause(linkId);
+    this.#deps.publish(linkId);
+    return true;
+  }
+
+  /**
+   * Ends the `waking` claim. A final pass made while paused for the wake
+   * budget returns to that pause, unless the watched chat started its next
+   * turn meanwhile: the budget is per turn, so the link watches again.
+   */
+  #release(linkId: string, restore: WatcherTransition, checkTurnId: string | null): boolean {
+    const { store } = this.#deps;
+    const budgetPause = restore.status === "paused" && restore.reason === "wake-budget";
+    const current = budgetPause ? store.watcherLinks.get(linkId) : null;
+    const nextTurn = current !== null && current.cursor.turnId !== null && current.cursor.turnId !== checkTurnId;
+    const target: WatcherTransition = nextTurn ? { status: "watching" } : restore;
+    if (!store.watcherLinks.transition(linkId, ["waking"], target, this.#deps.now())) return false;
+    if (nextTurn) this.#deps.scheduler().resume(linkId);
+    return true;
+  }
+
+  /**
    * Records a read-only violation of a watcher turn. A second write attempt
    * in the same watched turn pauses the link and stops the check.
    */
@@ -270,7 +357,11 @@ export class WatcherWakeRunner {
     }
   }
 
-  /** Settles the check a watcher turn ran; false when the turn ran no check. */
+  /**
+   * Settles the check a watcher turn ran; false when the turn ran no check.
+   * Whatever fails while settling, the `waking` claim is released and the
+   * scheduler hears `wakeFinished`, so a link never stays wedged.
+   */
   async settle(turn: AgentTurn): Promise<boolean> {
     const { store } = this.#deps;
     const wake = store.watcherLinks.wakeForTurn(turn.id);
@@ -282,62 +373,101 @@ export class WatcherWakeRunner {
     }
     this.#running.delete(turn.id);
     const linkId = wake.linkId;
-    this.#deps.live.end(linkId);
-    let guard: WatcherGuardOutcome | null = null;
+    let pause: WatcherTransition | null = null;
+    let settled = false;
     try {
-      guard = running ? await running.window.after(turn.id) : null;
-    } catch {
-      guard = { state: "unavailable", paths: [], pauseDetail: null };
+      this.#deps.live.end(linkId);
+      let guard: WatcherGuardOutcome | null = null;
+      try {
+        guard = running ? await running.window.after(turn.id) : null;
+      } catch {
+        guard = { state: "unavailable", paths: [], pauseDetail: null };
+      }
+      const usageLimited = turn.usageLimited === true || store.limitResets.usageLimited(turn.id);
+      let outcome: WatcherWakeOutcome;
+      let finding: string | null = null;
+      if (turn.status === "cancelled") outcome = "cancelled";
+      else if (usageLimited) outcome = "usage-limited";
+      else if (turn.status !== "completed") outcome = "failed";
+      else {
+        const text = turn.terminalAssistantMessageId
+          ? store.watcherLinks.digest.messageText(turn.terminalAssistantMessageId, MAX_REPLY_READ_BYTES).content
+          : "";
+        outcome = classifyWatcherReply(text, turn.status);
+        if (outcome === "finding") finding = findingPreview(text);
+      }
+      const violations = running?.violations ?? [];
+      const stopped = violations.some((violation) => violation.stopped);
+      const override = VIOLATION_OUTCOMES.find(([kinds]) =>
+        violations.some((violation) => kinds.includes(violation.kind)))?.[1];
+      if (override && (stopped || outcome !== "finding")) {
+        outcome = override;
+        finding = null;
+      }
+      if (guard?.state === "changed") {
+        outcome = "write-detected";
+        finding = null;
+      }
+      const now = this.#deps.now();
+      if (running && (outcome === "silent" || outcome === "finding")) this.#advance(linkId, running, now);
+      store.watcherLinks.settleWake(
+        wake.wakeId,
+        outcome,
+        guard ? { state: guard.state, paths: guard.paths } : null,
+        finding,
+        finding === null ? null : turn.terminalAssistantMessageId,
+        now,
+      );
+      settled = true;
+      pause = guard?.state === "changed"
+        ? { status: "paused", reason: "write-detected", detail: guard.pauseDetail }
+        : running?.pause
+          ?? (usageLimited ? { status: "paused", reason: "usage-limit", detail: WATCHER_USAGE_LIMIT_DETAIL } : null);
+    } finally {
+      const now = this.#deps.now();
+      if (!settled) {
+        try {
+          store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, null, now);
+        } catch {
+          // Restart recovery fails a check that stayed unsettled.
+        }
+      }
+      const scheduler = this.#deps.scheduler();
+      try {
+        if (pause) {
+          store.watcherLinks.transition(linkId, ["waking"], pause, now);
+          scheduler.pause(linkId);
+        } else {
+          this.#release(linkId, running?.restore ?? { status: "watching" }, running?.digest.turnId ?? wake.watchedTurnId);
+        }
+      } catch {
+        // The claim is released below whatever the transition did.
+      } finally {
+        scheduler.wakeFinished(linkId);
+      }
+      try {
+        this.#deps.publish(linkId);
+        this.#deps.refreshConversation?.(turn.conversationId);
+      } catch {
+        // Publishing is best effort; the next snapshot carries the state.
+      }
     }
-    const usageLimited = turn.usageLimited === true || store.limitResets.usageLimited(turn.id);
-    let outcome: WatcherWakeOutcome;
-    let finding: string | null = null;
-    if (turn.status === "cancelled") outcome = "cancelled";
-    else if (usageLimited) outcome = "usage-limited";
-    else if (turn.status !== "completed") outcome = "failed";
-    else {
-      const text = turn.terminalAssistantMessageId
-        ? store.watcherLinks.digest.messageText(turn.terminalAssistantMessageId, MAX_REPLY_READ_BYTES).content
-        : "";
-      outcome = classifyWatcherReply(text, turn.status);
-      if (outcome === "finding") finding = findingPreview(text);
-    }
-    const violations = running?.violations ?? [];
-    const stopped = violations.some((violation) => violation.stopped);
-    const override = VIOLATION_OUTCOMES.find(([kinds]) =>
-      violations.some((violation) => kinds.includes(violation.kind)))?.[1];
-    if (override && (stopped || outcome !== "finding")) {
-      outcome = override;
-      finding = null;
-    }
-    if (guard?.state === "changed") {
-      outcome = "write-detected";
-      finding = null;
-    }
-    const now = this.#deps.now();
-    if (running && (outcome === "silent" || outcome === "finding")) {
-      store.watcherLinks.advanceCursor(linkId, running.digest.cursor, running.digest.stats.eventsCovered, now);
-    }
-    store.watcherLinks.settleWake(
-      wake.wakeId,
-      outcome,
-      guard ? { state: guard.state, paths: guard.paths } : null,
-      finding,
-      finding === null ? null : turn.terminalAssistantMessageId,
-      now,
-    );
-    const pause: WatcherTransition | null = guard?.state === "changed"
-      ? { status: "paused", reason: "write-detected", detail: guard.pauseDetail }
-      : running?.pause
-        ?? (usageLimited ? { status: "paused", reason: "usage-limit", detail: WATCHER_USAGE_LIMIT_DETAIL } : null);
-    const next = pause ?? running?.restore ?? { status: "watching" };
-    store.watcherLinks.transition(linkId, ["waking"], next, now);
-    const scheduler = this.#deps.scheduler();
-    if (pause) scheduler.pause(linkId);
-    scheduler.wakeFinished(linkId);
-    this.#deps.publish(linkId);
-    this.#deps.refreshConversation?.(turn.conversationId);
     return true;
+  }
+
+  /**
+   * Moves the link's coverage after a silent or finding check. A check of a
+   * turn the link no longer follows keeps that turn's coverage for its final
+   * pass instead of rewinding the cursor.
+   */
+  #advance(linkId: string, running: RunningWake, now: string): void {
+    const { digest } = running;
+    const link = this.#deps.store.watcherLinks.advanceCursor(
+      linkId, digest.cursor, digest.stats.eventsCovered, now, running.expectedTurnId,
+    );
+    if (!link || link.cursor.turnId === digest.turnId || link.finalPassTurnId === digest.turnId) return;
+    const prior = this.#priorCursors.get(linkId);
+    if (!prior || prior.turnId === digest.turnId) this.#priorCursors.set(linkId, digest.cursor);
   }
 
   dispose(): void {
@@ -345,5 +475,7 @@ export class WatcherWakeRunner {
     this.#running.clear();
     this.#planKeys.clear();
     this.#routeFailures.clear();
+    this.#dispatchFailures.clear();
+    this.#priorCursors.clear();
   }
 }

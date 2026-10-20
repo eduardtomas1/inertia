@@ -46,6 +46,8 @@ export interface WatcherCheckoutGuardDependencies {
   clock?: () => number;
   deadlineMs?: number;
   signal?: AbortSignal;
+  /** Decides path folding for attribution; defaults to the running platform. */
+  platform?: NodeJS.Platform;
 }
 
 interface OpenWindow {
@@ -65,6 +67,18 @@ const UNAVAILABLE: CheckoutFingerprint = { state: "unavailable", reason: "The ch
 
 function attributionText(activity: Pick<AgentActivity, "title" | "detail">): string {
   return `${activity.title}\n${activity.detail ?? ""}`.slice(0, MAX_ATTRIBUTION_TEXT_CHARS).replaceAll("\\", "/");
+}
+
+/**
+ * The form a path and the activity texts are compared in. Git reports NFC
+ * paths (with `core.precomposeunicode`) while an agent may print NFD, so both
+ * sides are NFC. Windows and macOS file systems are case-insensitive by
+ * default, so there the comparison also folds case: an edit of `Src/App.tsx`
+ * explains Git's `src/App.tsx`.
+ */
+export function watcherAttributionForm(value: string, platform: NodeJS.Platform): string {
+  const normalized = value.replaceAll("\\", "/").normalize("NFC");
+  return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
 }
 
 /** Activities that may have touched files: tool or file work, never reasoning or status lines. */
@@ -96,12 +110,14 @@ export class WatcherCheckoutGuard {
   readonly #capture: NonNullable<WatcherCheckoutGuardDependencies["capture"]>;
   readonly #clock: () => number;
   readonly #deadlineMs: number;
+  readonly #platform: NodeJS.Platform;
 
   constructor(dependencies: WatcherCheckoutGuardDependencies) {
     this.#deps = dependencies;
     this.#capture = dependencies.capture ?? captureCheckoutFingerprint;
     this.#clock = dependencies.clock ?? Date.now;
     this.#deadlineMs = dependencies.deadlineMs ?? WATCHER_GUARD_DEADLINE_MS;
+    this.#platform = dependencies.platform ?? process.platform;
   }
 
   /** Opens a window and starts the before-fingerprint; resolves once it is taken. */
@@ -260,9 +276,10 @@ export class WatcherCheckoutGuard {
       if (!diff.headChanged && diff.changedPaths.length === 0) return { state: "clean", paths: [], pauseDetail: null };
       const endedAt = new Date(this.#clock()).toISOString();
       this.#attributeFromStore(window, endedAt);
+      const texts = window.texts.map((text) => watcherAttributionForm(text, this.#platform));
       const unexplained = diff.changedPaths.filter((path) => {
-        const normalized = path.replaceAll("\\", "/");
-        return !window.texts.some((text) => text.includes(normalized));
+        const normalized = watcherAttributionForm(path, this.#platform);
+        return !texts.some((text) => text.includes(normalized));
       });
       if (!diff.headChanged && unexplained.length === 0) return { state: "clean", paths: [], pauseDetail: null };
       const paths = unexplained.slice(0, MAX_WATCHER_GUARD_PATHS);

@@ -631,11 +631,27 @@ describe("inertia_request_context", () => {
 });
 
 describe("inertia_request_context for a watcher", () => {
-  async function watcherFixture(contextReadsPerWake = 4) {
+  async function watcherFixture(
+    contextReadsPerWake = 4,
+    sharing = { brief: true, activities: true, changedFiles: true, partialReplies: true },
+  ) {
     const context = await fixture({ watcherPolicy: true });
     const { begin, settle, store, project, target } = context;
     const watchedTurn = begin(target, "Refactor the export writer.", { endpointIdentity: "watched-endpoint" });
+    store.addActivity({
+      conversationId: target.id, runId: watchedTurn.runId, turnId: watchedTurn.id, kind: "command",
+      title: "WATCHED-COMMAND", detail: "Command:\nnpm test\n\nOutput:\nok", status: "completed", createdAt: tick(),
+    });
     store.createMessage(target.id, "WATCHED-ANSWER", "assistant", [], watchedTurn.id, tick());
+    const artifactAt = tick();
+    store.createTurnGitArtifact({ turnId: watchedTurn.id, status: "pending", createdAt: artifactAt });
+    store.completeTurnGitArtifact(watchedTurn.id, {
+      files: [{
+        path: "src/export/WATCHED-FILE.ts", previousPath: null, status: "modified", insertions: 1, deletions: 0,
+        binary: false, untracked: false, staged: false, unstaged: true, indexStatus: ".", worktreeStatus: "M",
+      }],
+      insertions: 1, deletions: 0, status: "ready", completeness: "complete", updatedAt: artifactAt,
+    });
     settle(watchedTurn.id);
     const { link, conversation: watcher } = store.watcherLinks.createWithConversation({
       link: {
@@ -643,7 +659,7 @@ describe("inertia_request_context for a watcher", () => {
         watchedConversationId: target.id,
         preset: "reviewer",
         instructions: "",
-        sharing: { brief: true, activities: true, changedFiles: true, partialReplies: true },
+        sharing,
         budgets: { wakesPerWatchedTurn: 12, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake },
         privateConnect: "inherit",
       },
@@ -677,6 +693,35 @@ describe("inertia_request_context for a watcher", () => {
       expect(store.conversationDetail(watcher.id)?.contextReads).toEqual([
         expect.objectContaining({ sourceConversationId: target.id, access: "watched", targetTurnId: watcherTurn.id }),
       ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("never shows the watcher more of the watched chat than its sharing settings allow", async () => {
+    const everything = await watcherFixture();
+    try {
+      const read = await everything.bridgeFor(everything.watcherTurn).invoke(call({ turnId: everything.watchedTurn.id }));
+      for (const marker of ["Refactor the export writer.", "WATCHED-COMMAND", "WATCHED-ANSWER", "WATCHED-FILE"]) {
+        expect(read.text).toContain(marker);
+      }
+    } finally {
+      everything.store.close();
+    }
+    const nothing = await watcherFixture(4, { brief: false, activities: false, changedFiles: false, partialReplies: false });
+    const { bridgeFor, store, watchedTurn, watcherTurn } = nothing;
+    try {
+      const bridge = bridgeFor(watcherTurn);
+      const list = await bridge.invoke(call({}));
+      expect(list.success).toBe(true);
+      expect(list.text).not.toContain("Refactor the export writer.");
+      expect(parsed(list).turns[0]).not.toHaveProperty("request");
+      const read = await bridge.invoke(call({ turnId: watchedTurn.id }));
+      expect(read.success).toBe(true);
+      for (const marker of ["Refactor the export writer.", "WATCHED-COMMAND", "WATCHED-ANSWER", "WATCHED-FILE"]) {
+        expect(read.text).not.toContain(marker);
+      }
+      expect(parsed(read).entries).toEqual([]);
     } finally {
       store.close();
     }

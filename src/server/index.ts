@@ -720,6 +720,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+    onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
   });
   queuedMessages.start();
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,

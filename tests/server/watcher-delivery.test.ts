@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ClientCommand } from "../../src/shared/contracts";
 import { MAX_WATCHER_NOTE_CHARS } from "../../src/shared/watcher";
+import { watcherAgentLabel } from "../../src/shared/watcher-agent-label";
 import { WATCHER_DELIVERY_DETAIL, watcherNoteText } from "../../src/server/runtime/watcher/watcher-delivery";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
@@ -57,7 +58,7 @@ describe("watcher note delivery", () => {
       const reply = await deliver(f, link.id, wakeId, "queue");
       expect(reply).toMatchObject({
         type: "request.result",
-        result: { kind: "watcher.delivery", linkId: link.id, wakeId, delivery: { mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.sent } },
+        result: { kind: "watcher.delivery", linkId: link.id, wakeId, delivery: { mode: "queue", state: "sent", detail: null } },
       });
       await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
       const prompt = f.provider.input(f.watched.id).prompt;
@@ -69,7 +70,10 @@ describe("watcher note delivery", () => {
         content: FINDING,
         watcherNote: { linkId: link.id, wakeId, watcherConversationId: link.watcherConversationId, preset: "reviewer", delivery: "queue" },
       });
-      expect(message!.watcherNote!.watcherLabel).toContain("Codex");
+      // The note names the agent exactly as the dock does: provider label, then the model.
+      const watcher = f.store.conversation(link.watcherConversationId);
+      expect(message!.watcherNote!.watcherLabel).toBe("codex · gpt-test");
+      expect(message!.watcherNote!.watcherLabel).toBe(watcherAgentLabel(watcher, { codex: "codex" }));
     } finally {
       await f.close();
     }
@@ -83,7 +87,7 @@ describe("watcher note delivery", () => {
       const userId = await enqueueUserMessage(f, "My own follow-up.");
       const deliveryId = randomUUID();
       const reply = await deliver(f, link.id, wakeId, "queue", deliveryId);
-      expect(reply).toMatchObject({ result: { delivery: { mode: "queue", state: "queued", detail: WATCHER_DELIVERY_DETAIL.queued } } });
+      expect(reply).toMatchObject({ result: { delivery: { mode: "queue", state: "queued", detail: null } } });
       if (reply.type !== "request.result" || reply.result.kind !== "watcher.delivery") throw new Error("unexpected reply");
       expect(reply.result.queue?.entries.map(({ id }) => id)).toEqual([userId, deliveryId]);
 
@@ -95,7 +99,9 @@ describe("watcher note delivery", () => {
       expect(f.provider.input(f.watched.id).prompt).toContain("[inertia-watcher-note]");
       await f.flush();
       expect(noteMessages(f)).toHaveLength(1);
-      expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({ mode: "queue", state: "sent" });
+      expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({
+        mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.dispatchedLater,
+      });
     } finally {
       await f.close();
     }
@@ -108,7 +114,7 @@ describe("watcher note delivery", () => {
         const { link, wakeId } = await finding(f);
         await f.startWatchedTurn("Keep going");
         const reply = await deliver(f, link.id, wakeId, "steer");
-        expect(reply).toMatchObject({ result: { delivery: { mode: "steer", state: "sent", detail: WATCHER_DELIVERY_DETAIL.steered } } });
+        expect(reply).toMatchObject({ result: { delivery: { mode: "steer", state: "sent", detail: null } } });
         const [steer] = f.provider.steerCalls;
         expect(steer!.content.startsWith(FINDING)).toBe(true);
         expect(steer!.content).toContain("[inertia-watcher-note]");
@@ -159,6 +165,66 @@ describe("watcher note delivery", () => {
       expect(f.store.queuedMessages.list(f.watched.id).filter(({ id }) => id === deliveryId)).toHaveLength(1);
       await expect(deliver(f, link.id, wakeId, "queue")).rejects.toThrow("already sent");
       await expect(f.command("watcher.note.dismiss", { linkId: link.id, wakeId })).rejects.toThrow("already sent");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("marks a queued note that the user removed as not sent, so it can be sent again or dismissed", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Busy");
+      const deliveryId = randomUUID();
+      await deliver(f, link.id, wakeId, "queue", deliveryId);
+      await f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.remove", requestId: randomUUID(), payload: { conversationId: f.watched.id, id: deliveryId },
+      } as ClientCommand);
+      expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({
+        mode: "queue", state: "failed", detail: WATCHER_DELIVERY_DETAIL.removed,
+      });
+      const resent = await deliver(f, link.id, wakeId, "queue");
+      expect(resent).toMatchObject({ result: { delivery: { state: "queued", detail: null } } });
+      expect(f.store.queuedMessages.list(f.watched.id).filter(({ watcherNote }) => watcherNote)).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("marks a queued note blocked by a route change as not sent and withdraws it before sending again", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Busy");
+      const deliveryId = randomUUID();
+      await deliver(f, link.id, wakeId, "queue", deliveryId);
+      f.store.updateConversation(f.watched.id, { reasoningEffort: "low" });
+      await f.finishTurn(f.watched.id, "Done.");
+      await vi.waitFor(() => {
+        if (f.store.queuedMessages.get(f.watched.id, deliveryId)?.state !== "blocked") throw new Error("not blocked");
+      });
+      const failed = f.watchers.coordinator.feed(link.id).items[0]!.delivery;
+      expect(failed).toMatchObject({ mode: "queue", state: "failed" });
+      expect(failed!.detail).toContain("model, access or workspace changed");
+      await expect(f.command("watcher.note.dismiss", { linkId: link.id, wakeId })).resolves.toMatchObject({
+        result: { delivery: { state: "dismissed" } },
+      });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("reconciles a queued finding whose queue entry disappeared without notice", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Busy");
+      const deliveryId = randomUUID();
+      await deliver(f, link.id, wakeId, "queue", deliveryId);
+      // A path that bypasses the runtime, for example a repair after a restart.
+      f.store.queuedMessages.cancel(f.watched.id, deliveryId);
+      const reply = await f.command("watcher.note.dismiss", { linkId: link.id, wakeId });
+      expect(reply).toMatchObject({ result: { delivery: { mode: null, state: "dismissed" } } });
     } finally {
       await f.close();
     }

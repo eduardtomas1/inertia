@@ -108,9 +108,11 @@ export interface ConversationCommandDependencies {
     DuoLaunchCoordinator,
     "reconcileConversationDeletion"
   >;
-  /** Pauses the watcher of an archived chat and publishes the links a deleted chat took part in. */
+  /** Pauses watchers of archived chats, guards deletes and publishes the links a deleted chat took part in. */
   watchers?: {
-    onWatchedArchived(conversationId: string): void;
+    onConversationArchived(conversationId: string): void;
+    /** Throws a user-facing error when the chat's watcher is mid-check; runs before any delete side effect. */
+    assertConversationDeletable?(conversationId: string): void;
     /** Captures the watcher links a chat takes part in; the result publishes them after the delete. */
     beforeConversationDelete?(conversationId: string): () => void;
   };
@@ -560,7 +562,7 @@ export function createConversationCommandHandler(
           true,
         );
         dependencies.forgetRemoteTranscript(command.payload.conversationId);
-        dependencies.watchers?.onWatchedArchived(command.payload.conversationId);
+        dependencies.watchers?.onConversationArchived(command.payload.conversationId);
         return "mutation";
       case "conversation.unarchive":
         dependencies.store.archiveConversation(
@@ -598,6 +600,7 @@ export function createConversationCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        dependencies.watchers?.assertConversationDeletable?.(conversation.id);
         if (dependencies.store.contextPackets.hasDraftForTargetWithoutMessages(conversation.id)) {
           throw new RuntimeRequestError(
             "A new chat continues from this one. Send its first message or remove the context first.",

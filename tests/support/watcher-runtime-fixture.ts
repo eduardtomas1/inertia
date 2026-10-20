@@ -190,6 +190,8 @@ export interface WatcherFixtureOptions {
   captureFingerprint?: (path: string, options: CheckoutFingerprintOptions) => Promise<CheckoutFingerprint>;
   providerInfo?: () => ProviderInfo[];
   readiness?: (selection: ModelSelection) => Promise<{ ready: boolean; message: string | null } | null>;
+  /** The platform whose path rules the checkout guard applies. */
+  platform?: NodeJS.Platform;
 }
 
 export async function createWatcherFixture(options: WatcherFixtureOptions = {}) {
@@ -287,6 +289,7 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
       void task.finally(() => tasks.delete(task)).catch(() => undefined);
       return task;
     },
+    onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
   });
   const capture = vi.fn(options.captureFingerprint
     ?? (async (_path: string, _options: CheckoutFingerprintOptions) => ({ state: "unavailable", reason: "Not a repository." } as CheckoutFingerprint)));
@@ -305,6 +308,7 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     scheduler: timers,
     clock: () => timers.now,
     captureFingerprint: (path, captureOptions) => capture(path, captureOptions),
+    ...(options.platform ? { platform: options.platform } : {}),
   });
   watchers = buildRuntime();
 

@@ -46,6 +46,11 @@ export interface WatcherWakeSchedulerDependencies {
   allowance(linkId: string): number;
   /** Mid-turn wakes ran out; called once per watched turn until `resume`. */
   onBudgetExhausted?(linkId: string): void;
+  /**
+   * The pending-event count changed outside `observe`: a wake consumed it, or
+   * a transient attempt put it back. The scheduler is its only source.
+   */
+  onPendingChanged?(linkId: string): void;
   cooldownMs?(linkId: string): number;
   onError?(linkId: string, error: unknown): void;
   settleDelayMs?: number;
@@ -68,6 +73,9 @@ type RequestTrigger = Extract<WatcherWakeTrigger, "manual" | "initial">;
 
 const TRIGGER_RANK: Readonly<Record<ActivityTrigger, number>> = { plan: 1, activity: 2, error: 3 };
 const SETTLED_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
+/** Final passes kept per link: the ended turn's and the one after it. */
+const MAX_PENDING_FINALS = 2;
+const MAX_DONE_FINALS = 4;
 const OUTPUT_EVENTS: ReadonlySet<RuntimeMutationEvent["type"]> = new Set([
   "agent.started", "agent.text", "agent.text.replaced", "agent.reasoning", "agent.commentary.persisted",
   "agent.activity", "agent.plan.updated", "agent.subagent.updated",
@@ -78,8 +86,9 @@ interface LinkState {
   firstPendingAt: number | null;
   trigger: ActivityTrigger | null;
   request: RequestTrigger | null;
-  final: { turnId: string; requestedAt: number } | null;
-  finalDoneTurnId: string | null;
+  /** Final passes still due, oldest first; a new watched turn never erases one. */
+  finals: FinalPass[];
+  finalDoneTurnIds: string[];
   watchedTurnId: string | null;
   watchedRunning: boolean;
   lastWakeEndAt: number | null;
@@ -95,13 +104,18 @@ interface LinkState {
   budgetNotified: boolean;
 }
 
+interface FinalPass {
+  turnId: string;
+  requestedAt: number;
+}
+
 interface Consumed {
   kind: "final" | "request" | "pending";
   pending: number;
   firstPendingAt: number | null;
   trigger: ActivityTrigger | null;
   request: RequestTrigger | null;
-  final: LinkState["final"];
+  final: FinalPass | null;
 }
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
@@ -194,8 +208,9 @@ export class WatcherWakeScheduler {
       state.watchedRunning = false;
       this.#stopStall(state);
     }
-    if (state.finalDoneTurnId === turnId || state.final?.turnId === turnId) return;
-    state.final = { turnId, requestedAt: this.#deps.clock() };
+    if (state.finalDoneTurnIds.includes(turnId) || state.finals.some((final) => final.turnId === turnId)) return;
+    state.finals.push({ turnId, requestedAt: this.#deps.clock() });
+    if (state.finals.length > MAX_PENDING_FINALS) state.finals.splice(0, state.finals.length - MAX_PENDING_FINALS);
     this.#schedule(linkId, state);
   }
 
@@ -277,8 +292,8 @@ export class WatcherWakeScheduler {
         firstPendingAt: null,
         trigger: null,
         request: null,
-        final: null,
-        finalDoneTurnId: null,
+        finals: [],
+        finalDoneTurnIds: [],
         watchedTurnId: null,
         watchedRunning: false,
         lastWakeEndAt: null,
@@ -307,8 +322,9 @@ export class WatcherWakeScheduler {
 
   /** The next wake to run and when it is due, ignoring busy and deferral. */
   #next(linkId: string, state: LinkState): { kind: Consumed["kind"]; at: number } | null {
-    if (state.final && (!state.paused || state.paused.finalPass)) {
-      return { kind: "final", at: Math.max(state.final.requestedAt + this.#settleDelayMs, state.retryAt ?? 0) };
+    const final = state.finals[0];
+    if (final && (!state.paused || state.paused.finalPass)) {
+      return { kind: "final", at: Math.max(final.requestedAt + this.#settleDelayMs, state.retryAt ?? 0) };
     }
     if (state.paused) return null;
     if (state.request) return { kind: "request", at: Math.max(this.#deps.clock(), state.retryAt ?? 0) };
@@ -361,31 +377,33 @@ export class WatcherWakeScheduler {
   }
 
   #run(linkId: string, state: LinkState, kind: Consumed["kind"]): void {
+    const final = kind === "final" ? state.finals.shift() ?? null : null;
     const consumed: Consumed = {
       kind,
       pending: state.pending,
       firstPendingAt: state.firstPendingAt,
       trigger: state.trigger,
       request: state.request,
-      final: state.final,
+      final,
     };
     const trigger: WatcherWakeTrigger = kind === "final"
       ? "turn-end"
       : kind === "request" ? state.request ?? "manual" : state.trigger ?? "activity";
     const context: WatcherWakeContext = {
       final: kind === "final",
-      watchedTurnId: kind === "final" ? state.final?.turnId ?? null : state.watchedTurnId,
+      watchedTurnId: kind === "final" ? final?.turnId ?? null : state.watchedTurnId,
       events: state.pending,
     };
     state.pending = 0;
     state.firstPendingAt = null;
     state.trigger = null;
     state.request = null;
-    if (kind === "final") {
-      state.finalDoneTurnId = state.final?.turnId ?? null;
-      state.final = null;
+    if (final) {
+      state.finalDoneTurnIds.push(final.turnId);
+      if (state.finalDoneTurnIds.length > MAX_DONE_FINALS) state.finalDoneTurnIds.shift();
     }
     state.inFlight = true;
+    if (consumed.pending > 0) this.#deps.onPendingChanged?.(linkId);
     let result: WatcherWakeAttempt | Promise<WatcherWakeAttempt>;
     try {
       result = this.#deps.onWake(linkId, trigger, context);
@@ -427,10 +445,12 @@ export class WatcherWakeScheduler {
         state.trigger = consumed.trigger;
       }
       state.request ??= consumed.request;
-      if (consumed.kind === "final" && !state.final) {
-        state.final = consumed.final;
-        state.finalDoneTurnId = null;
+      const final = consumed.final;
+      if (final && !state.finals.some(({ turnId }) => turnId === final.turnId)) {
+        state.finals.unshift(final);
+        state.finalDoneTurnIds = state.finalDoneTurnIds.filter((turnId) => turnId !== final.turnId);
       }
+      if (consumed.pending > 0) this.#deps.onPendingChanged?.(linkId);
       state.retryAttempt += 1;
       const delay = Math.min(this.#retryMaxMs, this.#retryBaseMs * 2 ** (state.retryAttempt - 1));
       state.retryAt = this.#deps.clock() + delay;

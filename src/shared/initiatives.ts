@@ -551,11 +551,16 @@ export function normalizedInitiativeNoteTitle(title: string): string {
 }
 
 /** Stable note order: creation time, then identity. */
+/**
+ * Creation order. Notes created in the same millisecond keep the order they
+ * arrived in (the repository lists them by rowid and the sort is stable), so
+ * the notes index is the same text wherever it is built.
+ */
 export function compareInitiativeNotes(
-  left: Pick<InitiativeNote, "createdAt" | "id">,
-  right: Pick<InitiativeNote, "createdAt" | "id">,
+  left: Pick<InitiativeNote, "createdAt">,
+  right: Pick<InitiativeNote, "createdAt">,
 ): number {
-  return compareInitiatives(left, right);
+  return left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : 0;
 }
 
 /** The first non-blank line of a note body, bounded for the notes index. */

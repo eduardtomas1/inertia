@@ -13,6 +13,7 @@ import type { TurnInitiativeContextRecord } from "../../src/server/persistence/t
 import { publicRuntimeError } from "../../src/server/runtime-errors";
 import { chatMessageSchema } from "../../src/shared/contracts/chat-message-schema";
 import {
+  initiativeNotesIndex,
   INITIATIVE_BRIEF_CONFLICT_MESSAGE,
   INITIATIVE_NOTE_CONFLICT_MESSAGE,
   initiativeContextReceiptText,
@@ -284,6 +285,21 @@ describe("initiative notes", () => {
       raw.close();
     }
     expect(store.initiatives.notes.get(proposal.id)?.kind).toBe("decision");
+  });
+
+  it("keeps notes created in the same millisecond in creation order", async () => {
+    const { store, initiative } = await openStore();
+    const frozen = "2026-10-19T10:00:00.000Z";
+    const notes = new InitiativeNoteRepository(
+      (store as unknown as { database: Database.Database }).database,
+      () => frozen,
+    );
+    const titles = ["Database", "Payments", "Analytics", "Billing", "Checkout"];
+    for (const title of titles) notes.create({ initiativeId: initiative.id, title, body: `${title} body`, provenance: "user" });
+    expect(notes.list(initiative.id).map(({ title }) => title)).toEqual(titles);
+    expect(notes.accepted(initiative.id).map(({ title }) => title)).toEqual(titles);
+    expect(initiativeNotesIndex(notes.accepted(initiative.id)).split("\n"))
+      .toEqual(titles.map((title) => `- ${title}: ${title} body`));
   });
 
   it("prunes the oldest rejected notes beyond the kept number", async () => {

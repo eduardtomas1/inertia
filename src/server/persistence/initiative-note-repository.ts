@@ -105,7 +105,7 @@ export class InitiativeNoteRepository {
       SELECT ${NOTE_COLUMNS}
       FROM initiative_notes
       WHERE initiative_id = ? ${includeRejected ? "" : "AND state <> 'rejected'"}
-      ORDER BY created_at ASC, id ASC
+      ORDER BY created_at ASC, rowid ASC
     `).all(initiativeId) as InitiativeNoteRow[];
     const notes: InitiativeNote[] = [];
     for (const row of rows) {

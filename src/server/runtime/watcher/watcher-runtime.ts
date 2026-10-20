@@ -47,7 +47,7 @@ export const WATCHER_OUTPUT_RECORD_MS = 15_000;
 export const WATCHER_PENDING_PUBLISH_MS = 1_000;
 export const WATCHER_DELETE_REFUSAL = "Stop the watcher's current check before deleting this chat.";
 export const WATCHER_BUDGET_PAUSE_DETAIL =
-  "The watcher used its checks for this turn. It still makes its final check when the turn ends.";
+  "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.";
 
 export type WatcherRuntimeTurns = Pick<
   TurnController,

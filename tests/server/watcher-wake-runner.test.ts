@@ -259,7 +259,11 @@ describe("watcher wake runner", () => {
       await f.finishTurn(watcherId, "SILENT");
       watchedActivity(f, "Read src/b.ts");
       await f.advance(10 * 60_000);
-      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "wake-budget" });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({
+        status: "paused",
+        pauseReason: "wake-budget",
+        pauseDetail: "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.",
+      });
       expect(f.provider.runs.has(watcherId)).toBe(false);
 
       await f.finishTurn(f.watched.id, "Done.");

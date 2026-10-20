@@ -5,6 +5,7 @@ import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import { createSurfaceLoader } from "../../utils/surfaceLoader";
 import { watcherClockTime, watcherDeliveryText } from "../../utils/watcherCopy";
 import { WatcherDeliverButton } from "./WatcherDeliverButton";
+import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
 
 // The existing deferred Markdown renderer; the card shows plain text until
 // it arrives, so a finding is readable even if that chunk is still loading.
@@ -46,6 +47,24 @@ export interface WatcherFindingCardProps {
   cardRef: (wakeId: string, node: HTMLElement | null) => void;
 }
 
+function FindingMarkdown({ finding, projectRoot, projectId, conversationId }: {
+  finding: string;
+  projectRoot: string;
+  projectId: string;
+  conversationId: string;
+}): React.JSX.Element {
+  const Markdown = useLoadedSurface(loadFindingMarkdown, true);
+  return Markdown ? (
+    <Markdown
+      content={finding}
+      projectRoot={projectRoot}
+      projectId={projectId}
+      conversationId={conversationId}
+      defaultCodeWrap
+    />
+  ) : <p className="watcher-finding-plain">{finding}</p>;
+}
+
 export function WatcherFindingCard({
   item,
   motionIndex,
@@ -65,7 +84,6 @@ export function WatcherFindingCard({
   cardRef,
 }: WatcherFindingCardProps): React.JSX.Element {
   const titleId = useId();
-  const Markdown = useLoadedSurface(loadFindingMarkdown, true);
   const delivery = item.delivery;
   const deliverable = delivery === null || delivery.state === "failed";
   const status = findingStatus(delivery, { sending, failure, watchedRunning });
@@ -99,15 +117,14 @@ export function WatcherFindingCard({
         <span className="watcher-finding-meta">Check {item.sequence}</span>
       </header>
       <div className="watcher-finding-body">
-        {Markdown ? (
-          <Markdown
-            content={finding}
+        <WatcherErrorBoundary fallback={<p className="watcher-finding-plain">{finding}</p>}>
+          <FindingMarkdown
+            finding={finding}
             projectRoot={projectRoot}
             projectId={projectId}
             conversationId={watchedConversationId}
-            defaultCodeWrap
           />
-        ) : <p className="watcher-finding-plain">{finding}</p>}
+        </WatcherErrorBoundary>
       </div>
       {deliverable && (
         <div className="watcher-finding-actions">

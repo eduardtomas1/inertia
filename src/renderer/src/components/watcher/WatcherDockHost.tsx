@@ -2,7 +2,9 @@ import { useRef } from "react";
 
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import { useWatcherDock } from "../../hooks/useWatcherDock";
+import type { WatcherDockProps } from "./WatcherDock";
 import { useWatcherSurface } from "./watcherContext";
+import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
 import { loadWatcherDock } from "./watcherLoaders";
 
 /**
@@ -19,7 +21,15 @@ export function WatcherDockHost({ watchedId }: { watchedId: string | null }): Re
   const activatedRef = useRef<string | null>(null);
   if (link && dock.open) activatedRef.current = watchedId;
   const activated = link !== null && activatedRef.current === watchedId;
-  const WatcherDock = useLoadedSurface(loadWatcherDock, activated);
-  if (!surface || !link || !watchedId || !activated || !WatcherDock) return null;
-  return <WatcherDock key={watchedId} watchedId={watchedId} link={link} surface={surface} dock={dock} />;
+  if (!surface || !link || !watchedId || !activated) return null;
+  return (
+    <WatcherErrorBoundary key={watchedId} fallback={null} resetKey={dock.motion}>
+      <LoadedWatcherDock watchedId={watchedId} link={link} surface={surface} dock={dock} />
+    </WatcherErrorBoundary>
+  );
+}
+
+function LoadedWatcherDock(props: WatcherDockProps): React.JSX.Element | null {
+  const WatcherDock = useLoadedSurface(loadWatcherDock, true);
+  return WatcherDock ? <WatcherDock {...props} /> : null;
 }

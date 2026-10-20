@@ -3609,6 +3609,11 @@ button.header-breadcrumb-project:hover {
   display: none;
 }
 
+.composer-run-lock {
+  color: var(--text-muted);
+  cursor: default;
+}
+
 .composer-pill:not(:disabled):hover {
   color: var(--text-muted);
   background: var(--fill);

@@ -31,9 +31,11 @@ import { useWatcherFeed } from "../../hooks/useWatcherFeed";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
 import { watcherPauseText } from "../../utils/watcherCopy";
 import { watcherAgentLabel } from "@shared/watcher-agent-label";
+import { watcherFindingsTotal } from "../../utils/watcherLinks";
 import { PaneResizeHandle } from "../PaneResizeHandle";
 import { escapeClosedTooltip } from "../Tooltip";
 import { WatcherBar } from "./WatcherBar";
+import { watcherHandleFor } from "./WatcherDockHandle";
 import {
   watcherDockHeadingId,
   watcherDockId,
@@ -150,17 +152,6 @@ function useComposerClearance(frameRef: RefObject<HTMLDivElement | null>, active
   return clearance;
 }
 
-function focusChip(watchedId: string): void {
-  const chip = [...document.querySelectorAll<HTMLElement>("[data-watcher-chip]")]
-    .find((candidate) => candidate.dataset.watcherChip === watchedId);
-  chip?.focus({ preventScroll: true });
-}
-
-function isChipOf(target: EventTarget | null, watchedId: string): boolean {
-  return target instanceof Element
-    && target.closest<HTMLElement>("[data-watcher-chip]")?.dataset.watcherChip === watchedId;
-}
-
 /** Why the runtime would refuse Resume now, so the dock can say so instead. */
 function resumeBlockedReason(
   link: WatcherLinkView,
@@ -266,10 +257,11 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   }, [errorToken, watchedId]);
 
   const latestFindingAt = link.latestFindingAt ?? null;
+  const findingsTotal = watcherFindingsTotal(link);
   const { markSeen } = dock;
   useEffect(() => {
-    if (dock.open && visible && latestFindingAt) markSeen(latestFindingAt);
-  }, [dock.open, latestFindingAt, markSeen, visible]);
+    if (dock.open && visible && latestFindingAt) markSeen(latestFindingAt, findingsTotal);
+  }, [dock.open, findingsTotal, latestFindingAt, markSeen, visible]);
 
   useEffect(() => {
     if (link.status !== "paused") setConfirmingResume(false);
@@ -285,7 +277,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     }
   }, [headingId, link.status]);
 
-  // Stop watching unmounts the dock and the chip: never leave focus on the
+  // Stop watching unmounts the dock and the handle: never leave focus on the
   // page body. Layout cleanup runs while the dock is still in the document.
   useLayoutEffect(() => {
     const frame = frameRef.current;
@@ -305,10 +297,10 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
 
   const collapse = useCallback((): void => {
     dock.setOpen(false);
-    focusChip(watchedId);
+    window.requestAnimationFrame(() => watcherHandleFor(watchedId)?.focus({ preventScroll: true }));
   }, [dock, watchedId]);
 
-  // A sheet collapses on any press outside it (the scrim focuses the chip).
+  // A sheet collapses on any press outside it (the scrim focuses the handle).
   const sheetOpen = sheet && dock.open;
   const { setOpen } = dock;
   useEffect(() => {
@@ -316,7 +308,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     const dismiss = (event: PointerEvent): void => {
       const target = event.target;
       if (target instanceof Node && frameRef.current?.contains(target)) return;
-      if (isChipOf(target, watchedId)) return;
       if (target instanceof Element && target.closest(".watcher-dock-scrim")) return;
       // Menus and dialogs portalled to the body belong to whatever opened them.
       if (target instanceof Element && target.closest('[role="menu"], [role="dialog"]')) return;
@@ -324,7 +315,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     };
     document.addEventListener("pointerdown", dismiss, true);
     return () => document.removeEventListener("pointerdown", dismiss, true);
-  }, [setOpen, sheetOpen, watchedId]);
+  }, [setOpen, sheetOpen]);
 
   const resume = (): void => {
     if (!actions || resuming) return;

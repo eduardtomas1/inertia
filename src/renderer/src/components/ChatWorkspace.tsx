@@ -98,7 +98,6 @@ import type {
   ResponseTimelineProps,
 } from "./response-timeline/types";
 import { IconButton, LoadingMark } from "./ui";
-import { WatchedByChip } from "./watcher/WatchedByChip";
 import type { WatcherWakeSummary } from "@shared/watcher";
 import { loadResponseTimeline } from "./chatSurfaceLoaders";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
@@ -1047,7 +1046,6 @@ export function ChatWorkspace({
       {showJump && <div className="timeline-follow-controls"><IconButton label="Jump to latest" onClick={() => scrollToLatest("auto")}><ArrowDown size={16} /></IconButton></div>}
 
       <div ref={composerRegionRef} className="composer-region">
-        <WatchedByChip conversationId={conversation.id} />
         {pendingInputRequest && (
           <div
             className="pending-input-notice"

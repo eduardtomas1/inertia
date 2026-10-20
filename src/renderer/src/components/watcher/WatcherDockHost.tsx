@@ -3,14 +3,15 @@ import { useRef } from "react";
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import { useWatcherDock } from "../../hooks/useWatcherDock";
 import type { WatcherDockProps } from "./WatcherDock";
+import { WatcherDockHandle } from "./WatcherDockHandle";
 import { useWatcherSurface } from "./watcherContext";
 import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
 import { loadWatcherDock } from "./watcherLoaders";
 
 /**
- * Eager placeholder beside a chat. It renders nothing until the chat has a
- * watcher and its dock has been opened once, then keeps the lazy dock mounted
- * so collapsing and reopening animate instead of reloading.
+ * Eager placeholder beside a chat. While the chat has a watcher it shows the
+ * collapsed handle or the dock; the lazy dock mounts when it first opens and
+ * stays mounted so collapsing and reopening animate instead of reloading.
  */
 export function WatcherDockHost({ watchedId }: { watchedId: string | null }): React.JSX.Element | null {
   const surface = useWatcherSurface();
@@ -21,11 +22,25 @@ export function WatcherDockHost({ watchedId }: { watchedId: string | null }): Re
   const activatedRef = useRef<string | null>(null);
   if (link && dock.open) activatedRef.current = watchedId;
   const activated = link !== null && activatedRef.current === watchedId;
-  if (!surface || !link || !watchedId || !activated) return null;
+  if (!surface || !link || !watchedId) return null;
+  const watcher = surface.conversations.find(({ id }) => id === link.watcherConversationId);
   return (
-    <WatcherErrorBoundary key={watchedId} fallback={null} resetKey={dock.motion}>
-      <LoadedWatcherDock watchedId={watchedId} link={link} surface={surface} dock={dock} />
-    </WatcherErrorBoundary>
+    <>
+      {!dock.open && (
+        <WatcherDockHandle
+          watchedId={watchedId}
+          link={link}
+          providerId={watcher?.providerId}
+          dock={dock}
+          controlsDock={activated}
+        />
+      )}
+      {activated && (
+        <WatcherErrorBoundary key={watchedId} fallback={null} resetKey={dock.motion}>
+          <LoadedWatcherDock watchedId={watchedId} link={link} surface={surface} dock={dock} />
+        </WatcherErrorBoundary>
+      )}
+    </>
   );
 }
 

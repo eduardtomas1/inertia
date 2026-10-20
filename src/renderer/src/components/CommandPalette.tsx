@@ -71,7 +71,7 @@ function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations:
   const { link } = entry;
   const request = surface.request;
   return [
-    { ...base, id: "action:show-watcher", label: "Show watcher", run: () => surface.showWatcher(watched.id) },
+    { ...base, id: "action:show-watcher", label: "Open watcher", run: () => surface.showWatcher(watched.id) },
     ...(link.status !== "paused" && request ? [{
       ...base,
       id: "action:pause-watcher",

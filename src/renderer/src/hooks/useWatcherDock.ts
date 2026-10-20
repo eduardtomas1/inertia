@@ -4,7 +4,7 @@ import { layoutStorage } from "../utils/layoutStorage";
 
 /**
  * Per watched chat: whether its dock is open and the newest finding already
- * seen. The composer chip and the dock read the same record, so they always
+ * seen. The collapsed handle and the dock read the same record, so they always
  * agree. Eager and deliberately small; the dock itself is lazy.
  *
  * The persisted `open` is the inline preference. When the dock has to float
@@ -14,6 +14,7 @@ import { layoutStorage } from "../utils/layoutStorage";
 export interface WatcherDockRecord {
   open: boolean;
   seenAt: string | null;
+  seenFindings: number | null;
 }
 
 export type WatcherDockPresentation = "inline" | "sheet";
@@ -22,6 +23,7 @@ export interface WatcherDockState {
   /** Whether the dock is shown in its current presentation. */
   open: boolean;
   seenAt: string | null;
+  seenFindings: number | null;
   presentation: WatcherDockPresentation;
   /** Moves each time the user opens or collapses the dock; motion follows it. */
   motion: number;
@@ -29,12 +31,14 @@ export interface WatcherDockState {
 
 export interface WatcherDockController extends WatcherDockState {
   setOpen: (open: boolean, options?: { focusHeading?: boolean }) => void;
-  markSeen: (at: string) => void;
+  markSeen: (at: string, findings: number | null) => void;
 }
 
 const STORAGE_PREFIX = "inertia:layout:watcher-dock:";
-const CLOSED_STATE: WatcherDockState = Object.freeze({ open: false, seenAt: null, presentation: "inline", motion: 0 });
-const OPEN_RECORD: WatcherDockRecord = Object.freeze({ open: true, seenAt: null });
+const CLOSED_STATE: WatcherDockState = Object.freeze({
+  open: false, seenAt: null, seenFindings: null, presentation: "inline", motion: 0,
+});
+const OPEN_RECORD: WatcherDockRecord = Object.freeze({ open: true, seenAt: null, seenFindings: null });
 const records = new Map<string, WatcherDockRecord>();
 const presentations = new Map<string, WatcherDockPresentation>();
 const sheetOpen = new Map<string, boolean>();
@@ -70,7 +74,13 @@ export function readWatcherDock(watchedId: string): WatcherDockRecord {
     record = OPEN_RECORD;
     try {
       const stored = JSON.parse(layoutStorage.getItem(watcherDockStorageKey(watchedId)) ?? "null") as Partial<WatcherDockRecord> | null;
-      if (stored) record = { open: stored.open !== false, seenAt: typeof stored.seenAt === "string" ? stored.seenAt : null };
+      if (stored) {
+        record = {
+          open: stored.open !== false,
+          seenAt: typeof stored.seenAt === "string" ? stored.seenAt : null,
+          seenFindings: typeof stored.seenFindings === "number" ? stored.seenFindings : null,
+        };
+      }
     } catch {
       // Layout preferences are optional; fall back to an open dock.
     }
@@ -87,6 +97,7 @@ function readState(watchedId: string): WatcherDockState {
   const state: WatcherDockState = {
     open: presentation === "sheet" ? sheetOpen.get(watchedId) === true : record.open,
     seenAt: record.seenAt,
+    seenFindings: record.seenFindings,
     presentation,
     motion: motions.get(watchedId) ?? 0,
   };
@@ -136,7 +147,7 @@ export function setWatcherDockOpen(
 /**
  * The dock reports how it is presented, once it has measured its host. A
  * sheet starts collapsed unless the user asked for the dock a moment ago (the
- * chip or Show watcher mounted it straight into a sheet). Leaving an open
+ * handle or Open watcher mounted it straight into a sheet). Leaving an open
  * sheet keeps the dock open inline. Layout moves no motion token.
  */
 export function setWatcherDockPresentation(watchedId: string, presentation: WatcherDockPresentation): void {
@@ -229,10 +240,10 @@ export function useWatcherDock(watchedId: string | null): WatcherDockController 
   const setOpen = useCallback((open: boolean, options?: { focusHeading?: boolean }) => {
     if (watchedId) setWatcherDockOpen(watchedId, open, options);
   }, [watchedId]);
-  const markSeen = useCallback((at: string) => {
+  const markSeen = useCallback((at: string, findings: number | null) => {
     const current = watchedId ? readWatcherDock(watchedId) : null;
-    if (watchedId && current && (current.seenAt === null || current.seenAt < at)) {
-      writeWatcherDock(watchedId, { ...current, seenAt: at });
+    if (watchedId && current && (current.seenAt === null || current.seenAt < at || current.seenFindings !== findings)) {
+      writeWatcherDock(watchedId, { ...current, seenAt: at, seenFindings: findings });
     }
   }, [watchedId]);
   return useMemo(() => ({ ...state, setOpen, markSeen }), [markSeen, setOpen, state]);

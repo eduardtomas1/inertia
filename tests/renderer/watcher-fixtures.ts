@@ -216,7 +216,6 @@ export function surfaceModel(
     openAttachDialog: vi.fn(),
     showWatcher: vi.fn(),
     openWatcherChat: vi.fn(),
-    openInMainWindow: null,
     ...rest,
   };
 }

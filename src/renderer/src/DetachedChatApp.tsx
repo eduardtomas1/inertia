@@ -492,15 +492,12 @@ export default function DetachedChatApp({
     conversation
     && (!detailState || detailState.state === "loading"),
   );
-  // A detached window shows only the chip; its action returns the chat to the
-  // main window, where the dock lives.
   const watchers = useWatcherSurfaceController({
     snapshot: connection.snapshot,
     surface: "detached",
     online: connection.status === "online",
     request: null,
     primaryConversationId: conversationId,
-    openInMainWindow: dockInMain,
   });
   const contextHandoffPending = projection.pendingInputs.some(
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,

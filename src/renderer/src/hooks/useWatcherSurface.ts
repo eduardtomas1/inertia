@@ -32,7 +32,7 @@ const NO_IDS: ReadonlySet<string> = new Set();
 /**
  * Only the chats that take part in a watcher link (watched or watcher), and
  * the same array while none of those shells changed: the context value then
- * stays put when unrelated chats update, so chips and composers don't re-render.
+ * stays put when unrelated chats update, so handles and composers don't re-render.
  */
 function useLinkedConversations(
   conversations: AppSnapshot["conversations"],
@@ -55,8 +55,8 @@ function useLinkedConversations(
 
 /**
  * Builds the window's watcher model from the shell snapshot. Main windows can
- * attach, show and open watchers; a detached chat window only shows the chip
- * and sends the user back to the main window.
+ * attach, show and open watchers; a detached chat window only locks a watcher
+ * chat's run settings.
  */
 export function useWatcherSurfaceController({
   snapshot,
@@ -68,7 +68,6 @@ export function useWatcherSurfaceController({
   detachedConversationIds = NO_IDS,
   selectConversation,
   openConversationInSplit,
-  openInMainWindow,
 }: {
   snapshot: AppSnapshot | null;
   surface: WatcherSurfaceModel["surface"];
@@ -80,7 +79,6 @@ export function useWatcherSurfaceController({
   detachedConversationIds?: ReadonlySet<string>;
   selectConversation?: (conversation: Conversation) => void;
   openConversationInSplit?: (conversation: Conversation) => void;
-  openInMainWindow?: () => void;
 }): WatcherSurfaceController {
   const links = useWatcherLinks(snapshot);
   const conversations = snapshot?.conversations ?? NO_CONVERSATIONS;
@@ -111,7 +109,6 @@ export function useWatcherSurfaceController({
       const watcher = conversations.find(({ id }) => id === watcherConversationId);
       if (watcher) openConversationInSplit?.(watcher);
     },
-    openInMainWindow: (): void => openInMainWindow?.(),
   });
   const close = useCallback(() => setTarget(null), []);
   const { reveal } = actions;
@@ -120,7 +117,6 @@ export function useWatcherSurfaceController({
     if (link.watchedConversationId) reveal(link.watchedConversationId);
   }, [reveal]);
   const canOpenWatcherChat = main && Boolean(openConversationInSplit);
-  const canOpenMainWindow = Boolean(openInMainWindow);
   const providers = snapshot?.providers;
   const identityLabels = snapshot?.settings.providerIdentityLabels;
   const providerLabels = useMemo<ProviderIdentityLabels>(() => ({
@@ -145,9 +141,8 @@ export function useWatcherSurfaceController({
     openAttachDialog: main ? actions.openAttachDialog : null,
     showWatcher: actions.reveal,
     openWatcherChat: canOpenWatcherChat ? actions.openWatcherChat : null,
-    openInMainWindow: canOpenMainWindow ? actions.openInMainWindow : null,
   }), [
-    actions, backendProfiles, canOpenMainWindow, canOpenWatcherChat, detachedConversationIds, kind,
+    actions, backendProfiles, canOpenWatcherChat, detachedConversationIds, kind,
     linkedConversations, links, main, online, primaryConversationId, projects, providerInfo, providerLabels, request,
   ]);
   return useMemo(() => ({ surface, attach: { target, close, attached } }), [attached, close, surface, target]);

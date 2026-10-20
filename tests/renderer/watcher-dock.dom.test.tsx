@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WatcherFeedItem, WatcherLinkView } from "../../src/shared/watcher";
-import { WatchedByChip } from "../../src/renderer/src/components/watcher/WatchedByChip";
 import { WatcherDockHost } from "../../src/renderer/src/components/watcher/WatcherDockHost";
 import { WatcherContext, type WatcherSurfaceModel } from "../../src/renderer/src/components/watcher/watcherContext";
 import { loadWatcherDock } from "../../src/renderer/src/components/watcher/watcherLoaders";
@@ -13,6 +13,7 @@ import {
   readWatcherDock,
   reportWatcherDockError,
   resetWatcherDockStore,
+  setWatcherDockOpen,
   watcherDockStorageKey,
 } from "../../src/renderer/src/hooks/useWatcherDock";
 import {
@@ -45,16 +46,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-function Dock({ model, watchedId = WATCHED_ID, width = 1200, attached = true, pane = false }: {
+function Dock({ model, watchedId = WATCHED_ID, width = 1200, pane = false }: {
   model: WatcherSurfaceModel;
   watchedId?: string;
   width?: number;
-  attached?: boolean;
   pane?: boolean;
 }) {
   const composer = (
     <div className="composer-region">
-      {attached && <WatchedByChip conversationId={watchedId} />}
       <textarea aria-label="Message" />
     </div>
   );
@@ -82,7 +81,7 @@ function setup(options: { link?: WatcherLinkView; width?: number; strict?: boole
   const runtime = watcherRuntime({ link: () => current, feed: options.feed });
   const model = (next: WatcherLinkView | null) => surfaceModel({ watchers: next ? [next] : [], request: runtime.request });
   const tree = (next: WatcherLinkView | null) => {
-    const dockTree = <Dock model={model(next)} width={options.width} attached={next !== null} pane={options.pane} />;
+    const dockTree = <Dock model={model(next)} width={options.width} pane={options.pane} />;
     return options.strict ? <StrictMode>{dockTree}</StrictMode> : dockTree;
   };
   const view = render(tree(current));
@@ -97,15 +96,46 @@ function setup(options: { link?: WatcherLinkView; width?: number; strict?: boole
 }
 
 const dock = () => screen.findByRole("complementary", { name: "Watching Refactor parser" });
+const handle = () => screen.getByRole("button", { name: /^Open watcher/u });
 
 describe("WatcherDock", () => {
-  it("is an aside named by its heading and controlled by the chip", async () => {
+  it("is an aside named by its heading, with no handle while it is open", async () => {
     setup();
     const aside = await dock();
-    const chip = screen.getByRole("button", { name: /Watched by/u });
-    expect(chip).toHaveAttribute("aria-controls", aside.id);
-    expect(chip).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByRole("button", { name: /^Open watcher/u })).not.toBeInTheDocument();
     expect(within(aside).getByRole("heading", { name: "Watching Refactor parser" })).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("leaves a handle in the dock's place when collapsed, which opens it again", async () => {
+    setup();
+    const aside = await dock();
+    fireEvent.click(within(aside).getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Collapse" }));
+    expect(handle()).toHaveAttribute("aria-controls", aside.id);
+    expect(handle()).toHaveAttribute("aria-expanded", "false");
+    expect(handle().closest(".watcher-dock-handle")?.parentElement).toHaveClass("workspace-body");
+    const user = userEvent.setup();
+    handle().focus();
+    await user.keyboard("{Enter}");
+    expect(readWatcherDock(WATCHED_ID).open).toBe(true);
+    await waitFor(() => expect(within(aside).getByRole("heading", { name: "Watching Refactor parser" })).toHaveFocus());
+  });
+
+  it("shows unseen findings on the handle as plain text and announces a new one", async () => {
+    window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: false, seenAt: null }));
+    const { update } = setup();
+    expect(handle()).toHaveAccessibleName("Open watcher");
+    expect(document.querySelector(".watcher-dock-handle-new")).toBeNull();
+    update(link({ latestFindingAt: NOW }));
+    expect(handle()).toHaveAccessibleName("Open watcher, new");
+    expect(document.querySelector('.watcher-dock-handle [role="status"]')).toHaveTextContent(/^New finding$/u);
+    update(link({
+      latestFindingAt: "2026-10-19T10:50:00.000Z",
+      counters: { ...link().counters, findingsTotal: 2 } as WatcherLinkView["counters"],
+    }));
+    expect(document.querySelector(".watcher-dock-handle-new")).toHaveTextContent(/^2 new$/u);
+    expect(handle()).toHaveAccessibleName("Open watcher, 2 new");
+    expect(document.querySelector('.watcher-dock-handle [role="status"]')).toHaveTextContent(/^New finding\.$/u);
   });
 
   it("persists collapse per watched chat", async () => {
@@ -118,18 +148,17 @@ describe("WatcherDock", () => {
     expect(window.localStorage.getItem(watcherDockStorageKey(OTHER_WATCHED_ID))).toBeNull();
     expect(readWatcherDock(OTHER_WATCHED_ID).open).toBe(true);
     await waitFor(() => expect(document.querySelector(".watcher-dock-frame")).toHaveAttribute("hidden"));
-    expect(screen.getByRole("button", { name: /Watched by/u })).toHaveAttribute("aria-expanded", "false");
+    expect(handle()).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("collapses on Escape and returns focus to the chip", async () => {
+  it("collapses on Escape and returns focus to the handle", async () => {
     setup();
     const aside = await dock();
     const check = within(aside).getByRole("button", { name: "Check now" });
     check.focus();
     fireEvent.keyDown(check, { key: "Escape" });
-    const chip = screen.getByRole("button", { name: /Watched by/u });
-    expect(chip).toHaveFocus();
-    expect(chip).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(handle()).toHaveFocus());
+    expect(readWatcherDock(WATCHED_ID).open).toBe(false);
   });
 
   it("leaves Escape to an open menu before collapsing", async () => {
@@ -149,12 +178,11 @@ describe("WatcherDock", () => {
       await dock();
       const frame = document.querySelector(".watcher-dock-frame")!;
       expect(frame).not.toHaveAttribute("data-motion");
-      const chip = screen.getByRole("button", { name: /Watched by/u });
-      fireEvent.click(chip);
+      act(() => setWatcherDockOpen(WATCHED_ID, false));
       expect(frame).toHaveAttribute("data-state", "closing");
       expect(frame).toHaveAttribute("data-motion", "animate");
       await waitFor(() => expect(frame).toHaveAttribute("hidden"));
-      fireEvent.click(chip);
+      fireEvent.click(handle());
       expect(frame).toHaveAttribute("data-state", "open");
       expect(frame).toHaveAttribute("data-motion", "animate");
     } finally {
@@ -194,36 +222,33 @@ describe("WatcherDock", () => {
     setup({ width: 500 });
     await waitFor(() => expect(document.querySelector(".watcher-dock-frame")).toHaveAttribute("data-presentation", "sheet"));
     const frame = document.querySelector(".watcher-dock-frame")!;
-    const chip = screen.getByRole("button", { name: /Watched by/u });
     expect(frame).toHaveAttribute("hidden");
-    expect(chip).toHaveAttribute("aria-expanded", "false");
+    expect(handle()).toHaveAttribute("aria-expanded", "false");
     // The inline preference is untouched: a sheet's collapse is layout, not a choice.
     expect(readWatcherDock(WATCHED_ID).open).toBe(true);
-    fireEvent.click(chip);
+    fireEvent.click(handle());
     expect(await dock()).toBeVisible();
-    expect(chip).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByRole("button", { name: /^Open watcher/u })).not.toBeInTheDocument();
     expect(document.querySelector(".watcher-dock-scrim")).not.toBeNull();
-    // Pressing inside the sheet or on its chip keeps it open.
+    // Pressing inside the sheet keeps it open.
     fireEvent.pointerDown(within(await dock()).getByRole("heading", { name: "Watching Refactor parser" }));
-    expect(chip).toHaveAttribute("aria-expanded", "true");
+    expect(readWatcherDock(WATCHED_ID).open).toBe(true);
     fireEvent.pointerDown(screen.getByRole("textbox", { name: "Message" }));
-    expect(chip).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(chip);
-    expect(chip).toHaveAttribute("aria-expanded", "true");
+    expect(handle()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(handle());
+    expect(screen.queryByRole("button", { name: /^Open watcher/u })).not.toBeInTheDocument();
     fireEvent.pointerDown(document.querySelector(".watcher-dock-scrim")!);
-    expect(chip).toHaveAttribute("aria-expanded", "false");
-    expect(chip).toHaveFocus();
+    await waitFor(() => expect(handle()).toHaveFocus());
   });
 
   it("opens a sheet the user asks for before the dock has ever mounted", async () => {
     window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: false, seenAt: null }));
     setup({ width: 500 });
     expect(document.querySelector(".watcher-dock-frame")).toBeNull();
-    const chip = screen.getByRole("button", { name: /Watched by/u });
-    fireEvent.click(chip);
+    fireEvent.click(handle());
     expect(await dock()).toBeVisible();
     expect(document.querySelector(".watcher-dock-frame")).toHaveAttribute("data-presentation", "sheet");
-    expect(chip).toHaveAttribute("aria-expanded", "true");
+    expect(readWatcherDock(WATCHED_ID).open).toBe(true);
   });
 
   it("stops a sheet above the composer, so the composer stays usable", async () => {
@@ -237,7 +262,7 @@ describe("WatcherDock", () => {
     };
     try {
       setup({ width: 500 });
-      fireEvent.click(await screen.findByRole("button", { name: /Watched by/u, expanded: false }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Open watcher/u, expanded: false }));
       await dock();
       const frame = document.querySelector<HTMLElement>(".watcher-dock-frame")!;
       await waitFor(() => expect(frame.style.bottom).toBe("148px"));
@@ -258,7 +283,7 @@ describe("WatcherDock", () => {
     };
     try {
       setup({ width: 500, pane: true });
-      fireEvent.click(await screen.findByRole("button", { name: /Watched by/u, expanded: false }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Open watcher/u, expanded: false }));
       await dock();
       const frame = document.querySelector<HTMLElement>(".watcher-dock-frame")!;
       await waitFor(() => expect(frame.style.bottom).toBe("158px"));
@@ -302,7 +327,7 @@ describe("WatcherDock", () => {
     expect(readWatcherDock(WATCHED_ID).open).toBe(false);
   });
 
-  it("moves focus to the composer when Stop watching removes the dock and chip", async () => {
+  it("moves focus to the composer when Stop watching removes the dock", async () => {
     const { update } = setup();
     const aside = await dock();
     fireEvent.click(within(aside).getByRole("button", { name: "More watcher actions" }));
@@ -310,7 +335,7 @@ describe("WatcherDock", () => {
     const stop = within(aside).getByRole("button", { name: "Stop watching" });
     stop.focus();
     fireEvent.click(stop);
-    // The link detaches: the shell drops it, so dock and chip unmount.
+    // The link detaches: the shell drops it, so the dock unmounts.
     update(null);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);

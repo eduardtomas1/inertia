@@ -35,7 +35,6 @@ export interface WatcherSurfaceModel {
   openAttachDialog: ((watchedId: string, returnFocusTo?: HTMLElement | null) => void) | null;
   showWatcher: (watchedId: string) => void;
   openWatcherChat: ((watcherConversationId: string) => void) | null;
-  openInMainWindow: (() => void) | null;
 }
 
 export const WatcherContext = createContext<WatcherSurfaceModel | null>(null);

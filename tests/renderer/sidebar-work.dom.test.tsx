@@ -16,6 +16,8 @@ import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 import { WATCHED_ID, WATCHER_ID, link } from "./watcher-fixtures";
+import type { WatcherLinkView } from "../../src/shared/watcher";
+import { resetWatcherDockStore, watcherDockStorageKey } from "../../src/renderer/src/hooks/useWatcherDock";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -1802,6 +1804,24 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("menu", { name: /Thread actions for Watcher/u })).not.toBeInTheDocument();
     fireEvent.contextMenu(nested);
     expect(screen.getByRole("menu", { name: "Thread actions for Watcher · Reviewer · Refactor parser" })).toBeInTheDocument();
+  });
+
+  it("shows a nested watcher's unseen findings as plain text", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12, 30));
+    resetWatcherDockStore();
+    window.localStorage.removeItem(watcherDockStorageKey(WATCHED_ID));
+    const watched = conversation(WATCHED_ID, "Refactor parser", new Date(2026, 7, 11, 11));
+    const watcher = conversation(WATCHER_ID, "Watcher · Reviewer · Refactor parser", new Date(2026, 7, 11, 12));
+    const view = renderSidebar([watched, watcher]);
+    view.rerenderSnapshot({ ...snapshot([watched, watcher]), watchers: [link({
+      projectId: project.id,
+      latestFindingAt: new Date(2026, 7, 11, 12).toISOString(),
+      counters: { ...link().counters, findingsTotal: 2 } as WatcherLinkView["counters"],
+    })] });
+    const row = screen.getByRole("button", { name: /^Watcher · Reviewer, watching Refactor parser, 2 new,/u });
+    expect(row.querySelector(".watcher-work-row-new")).toHaveTextContent(/^2 new$/u);
+    resetWatcherDockStore();
   });
 
   it("returns focus to a nested watcher row after renaming it from the keyboard", () => {

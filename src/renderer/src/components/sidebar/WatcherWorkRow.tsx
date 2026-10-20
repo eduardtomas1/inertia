@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import type { Conversation } from "@shared/contracts";
 import type { WatcherLinkView } from "@shared/watcher";
-import { watcherPresetName } from "../../utils/watcherLinks";
+import { useWatcherDock } from "../../hooks/useWatcherDock";
+import { watcherPresetName, watcherUnseenText } from "../../utils/watcherLinks";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 
 function watcherRowState(link: WatcherLinkView | undefined): string | null {
@@ -49,6 +50,8 @@ export function WatcherWorkRow({
 }): React.JSX.Element {
   const name = link ? `Watcher · ${watcherPresetName(link.preset)}` : conversation.title;
   const state = watcherRowState(link);
+  const dock = useWatcherDock(link?.watchedConversationId ?? null);
+  const unseen = link ? watcherUnseenText(link, dock) : null;
   return (
     <div
       className={clsx("activity-thread is-watcher", active && "is-active", menu.open && "has-open-menu")}
@@ -69,7 +72,7 @@ export function WatcherWorkRow({
           data-sidebar-nav
           data-work-focus-id={`watcher:${conversation.id}`}
           aria-current={active ? "page" : undefined}
-          aria-label={[`${name}, watching ${parentTitle}`, state ?? statusLabel].join(", ")}
+          aria-label={[`${name}, watching ${parentTitle}`, unseen, state ?? statusLabel].filter(Boolean).join(", ")}
           aria-description="Right-click or press Shift+F10 for thread actions."
           aria-haspopup="menu"
           aria-expanded={menu.open}
@@ -90,6 +93,7 @@ export function WatcherWorkRow({
               <ProviderBrandIcon providerId={conversation.providerId} decorative size={14} />
             </span>
             <span className="watcher-work-row-title">{name}</span>
+            {unseen && <span className="watcher-work-row-new">{unseen}</span>}
             {state && <span className="watcher-work-row-state">{state}</span>}
           </span>
         </button>

@@ -518,6 +518,11 @@
   color: var(--text);
 }
 
+.watcher-work-row-new {
+  flex: none;
+  color: var(--text-muted);
+}
+
 .watcher-work-row-state {
   flex: none;
   color: var(--text-faint);

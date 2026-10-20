@@ -77,7 +77,7 @@ describe("watcher surface controller", () => {
     expect(result.current.surface.conversations[0]?.status).toBe("running");
   });
 
-  it("offers Show watcher as unavailable for a detached chat and leaves no focus request", () => {
+  it("offers Open watcher as unavailable for a detached chat and leaves no focus request", () => {
     const selectConversation = vi.fn();
     const { result } = renderHook(() => useWatcherSurfaceController({
       snapshot: snapshot(),

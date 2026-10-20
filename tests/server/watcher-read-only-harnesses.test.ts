@@ -96,6 +96,7 @@ interface WatcherHarnessRuntime {
   violations: ReadOnlyWatcherViolation[];
   startCheck(): AgentTurn;
   settled(turnId: string): Promise<AgentTurn>;
+  /** The watcher chat's activities, sorted with `byActivity`. */
   activities(): Array<{ kind: string; status: string; title: string }>;
 }
 
@@ -203,8 +204,15 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
       await waitFor("the provider run to release its owner", () => !manager.isRunning(watcher.id), 10_000);
       return store.agentTurn(turnId);
     },
-    activities: () => store.conversationDetail(watcher.id)!.activities.map(({ kind, status, title }) => ({ kind, status, title })),
+    // Activities that settle in the same millisecond have no stable order.
+    activities: () => store.conversationDetail(watcher.id)!.activities
+      .map(({ kind, status, title }) => ({ kind, status, title }))
+      .sort(byActivity),
   };
+}
+
+function byActivity(left: { kind: string; status: string; title: string }, right: typeof left): number {
+  return `${left.title}\0${left.status}\0${left.kind}`.localeCompare(`${right.title}\0${right.status}\0${right.kind}`);
 }
 
 function expectWatcherRunInput(input: ProviderRunInput | undefined, providerId: ProviderId): void {
@@ -349,7 +357,7 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
       { kind: "tool", status: "completed", title: "Read" },
       { kind: "tool", status: "completed", title: "Grep" },
       { kind: "status", status: "completed", title: "Needed permission: Claude wants to use Write — declined (watchers are read-only)" },
-    ]);
+    ].sort(byActivity));
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
     expect(before.status).toBe("");
@@ -502,9 +510,9 @@ describe("watcher turns on the Codex app-server harness", () => {
       { kind: "command", status: "completed", title: "Command" },
       { kind: "status", status: "completed", title: "Needed permission: Approve command — declined (watchers are read-only)" },
       { kind: "command", status: "failed", title: "Command" },
-    ]);
+    ].sort(byActivity));
     const commands = runtime.store.conversationDetail(runtime.watcherId)!.activities.filter(({ kind }) => kind === "command");
-    expect(commands.map(({ status, detail }) => ({ status, detail }))).toEqual([
+    expect(commands.map(({ status, detail }) => ({ status, detail })).sort((left, right) => left.status.localeCompare(right.status))).toEqual([
       { status: "completed", detail: `Command:\ncat src/parser.ts\n\nOutput:\n${PARSER_SOURCE.trimEnd()}` },
       { status: "failed", detail: "Command:\ntee src/parser.ts" },
     ]);
@@ -759,7 +767,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { kind: "tool", status: "completed", title: "src" },
       { kind: "tool", status: "failed", title: "edit" },
       { kind: "command", status: "failed", title: "bash" },
-    ]);
+    ].sort(byActivity));
     expect(runtime.violations).toEqual([]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
     expect(turn).toMatchObject({ status: "completed" });

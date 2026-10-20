@@ -9,7 +9,8 @@
     "renderer: eager wiring is the link index, the per-chat dock record, the chip, the dock and attach hosts, the live-phase store, the timeline divider and check model and the composer lock; the dock UI and the attach dialog stay in WatcherDock-* and WatcherAttachDialog-*.",
     "entryCss grows by 70 bytes and stays within its existing ceiling.",
     "Small changes on unrelated deferred chunks are import metadata for helpers (dialog shell, elapsed timing) that Rollup now shares with the watcher chunks.",
-    "After merging v0.0.73 (e165a0a), mergedMainBaselineBytes is that revision and mergedBytes the merged branch, built from the same package-lock. Only deferredTasksViewJavaScript needed more room: v0.0.73 measures exactly its 21,126-byte budget and the Work tab nesting adds 6 bytes."
+    "After merging v0.0.73 (e165a0a), mergedMainBaselineBytes is that revision and mergedBytes the merged branch, built from the same package-lock. Only deferredTasksViewJavaScript needed more room: v0.0.73 measures exactly its 21,126-byte budget and the Work tab nesting adds 6 bytes.",
+    "Review fixes: reviewFixBaselineBytes is c17cbf0 (before the server and renderer review fixes) and reviewFixBytes the branch after both, built from the same package-lock. The dock grows by 5,898 bytes (sheet presentation with scrim and composer clearance, user-only motion, focus restoration, Resume refusal reasons, the floating send menu, one-time card entrances); the attach dialog by 958 bytes (link id reuse across ambiguous timeouts). First-load routes grow by 2,660 (workbench) and 2,625 (detached chat) bytes for the dock record's sheet and storage handling, the chip's collapsed live region, the stable linked-chat list and the shared schema-free agent label. The thread actions menu no longer pulls the watcher schema chunk. Budgets were raised by exactly the bytes they were exceeded."
   ],
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
@@ -20,7 +21,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 1163,
       "mergedBytes": 1163,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 1163,
+      "reviewFixBytes": 1163,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredUsageLimitsJavaScript": {
       "preFoundationBytes": 21747,
@@ -30,7 +34,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 21769,
       "mergedBytes": 21769,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 21769,
+      "reviewFixBytes": 21769,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredWatcherDockJavaScript": {
       "preFoundationBytes": null,
@@ -40,7 +47,10 @@
       "deltaFromPreFoundationBytes": 31907,
       "mergedMainBaselineBytes": null,
       "mergedBytes": 31953,
-      "deltaFromMergedMainBaselineBytes": 31953
+      "deltaFromMergedMainBaselineBytes": 31953,
+      "reviewFixBaselineBytes": 31967,
+      "reviewFixBytes": 37865,
+      "deltaFromReviewFixBaselineBytes": 5898
     },
     "deferredWatcherAttachJavaScript": {
       "preFoundationBytes": null,
@@ -50,7 +60,10 @@
       "deltaFromPreFoundationBytes": 18711,
       "mergedMainBaselineBytes": null,
       "mergedBytes": 18747,
-      "deltaFromMergedMainBaselineBytes": 18747
+      "deltaFromMergedMainBaselineBytes": 18747,
+      "reviewFixBaselineBytes": 18747,
+      "reviewFixBytes": 19705,
+      "deltaFromReviewFixBaselineBytes": 958
     },
     "deferredWelcomeGuideJavaScript": {
       "preFoundationBytes": 37212,
@@ -60,7 +73,10 @@
       "deltaFromPreFoundationBytes": 244,
       "mergedMainBaselineBytes": 38023,
       "mergedBytes": 38267,
-      "deltaFromMergedMainBaselineBytes": 244
+      "deltaFromMergedMainBaselineBytes": 244,
+      "reviewFixBaselineBytes": 38267,
+      "reviewFixBytes": 38267,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredWorkingOrbJavaScript": {
       "preFoundationBytes": 21807,
@@ -70,7 +86,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 21829,
       "mergedBytes": 21829,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 21829,
+      "reviewFixBytes": 21829,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredSnapshotSettingsJavaScript": {
       "preFoundationBytes": 4032,
@@ -80,7 +99,10 @@
       "deltaFromPreFoundationBytes": 22,
       "mergedMainBaselineBytes": 4054,
       "mergedBytes": 4076,
-      "deltaFromMergedMainBaselineBytes": 22
+      "deltaFromMergedMainBaselineBytes": 22,
+      "reviewFixBaselineBytes": 4076,
+      "reviewFixBytes": 4076,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredSnapshotControlJavaScript": {
       "preFoundationBytes": 6867,
@@ -90,7 +112,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 6889,
       "mergedBytes": 6889,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 6889,
+      "reviewFixBytes": 6889,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredAttachmentStorageSettingsJavaScript": {
       "preFoundationBytes": 5308,
@@ -100,7 +125,10 @@
       "deltaFromPreFoundationBytes": 22,
       "mergedMainBaselineBytes": 5330,
       "mergedBytes": 5352,
-      "deltaFromMergedMainBaselineBytes": 22
+      "deltaFromMergedMainBaselineBytes": 22,
+      "reviewFixBaselineBytes": 5352,
+      "reviewFixBytes": 5352,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredBackgroundTasksJavaScript": {
       "preFoundationBytes": 19386,
@@ -110,7 +138,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 19408,
       "mergedBytes": 19408,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 19408,
+      "reviewFixBytes": 19408,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredTasksViewJavaScript": {
       "preFoundationBytes": 21109,
@@ -120,7 +151,10 @@
       "deltaFromPreFoundationBytes": -9,
       "mergedMainBaselineBytes": 21126,
       "mergedBytes": 21132,
-      "deltaFromMergedMainBaselineBytes": 6
+      "deltaFromMergedMainBaselineBytes": 6,
+      "reviewFixBaselineBytes": 21132,
+      "reviewFixBytes": 21132,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredProjectSettingsJavaScript": {
       "preFoundationBytes": 17087,
@@ -130,7 +164,10 @@
       "deltaFromPreFoundationBytes": 22,
       "mergedMainBaselineBytes": 17133,
       "mergedBytes": 17155,
-      "deltaFromMergedMainBaselineBytes": 22
+      "deltaFromMergedMainBaselineBytes": 22,
+      "reviewFixBaselineBytes": 17155,
+      "reviewFixBytes": 17155,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredCliConversationImportJavaScript": {
       "preFoundationBytes": 9623,
@@ -140,7 +177,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 9645,
       "mergedBytes": 9645,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 9645,
+      "reviewFixBytes": 9645,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredReviewNoteJavaScript": {
       "preFoundationBytes": 1475,
@@ -150,7 +190,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 1497,
       "mergedBytes": 1497,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 1497,
+      "reviewFixBytes": 1497,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredThreadActionsJavaScript": {
       "preFoundationBytes": 8196,
@@ -160,7 +203,10 @@
       "deltaFromPreFoundationBytes": 598,
       "mergedMainBaselineBytes": 8249,
       "mergedBytes": 8847,
-      "deltaFromMergedMainBaselineBytes": 598
+      "deltaFromMergedMainBaselineBytes": 598,
+      "reviewFixBaselineBytes": 8847,
+      "reviewFixBytes": 8859,
+      "deltaFromReviewFixBaselineBytes": 12
     },
     "deferredProjectCustomizeJavaScript": {
       "preFoundationBytes": 11993,
@@ -170,7 +216,10 @@
       "deltaFromPreFoundationBytes": 1,
       "mergedMainBaselineBytes": 12015,
       "mergedBytes": 12016,
-      "deltaFromMergedMainBaselineBytes": 1
+      "deltaFromMergedMainBaselineBytes": 1,
+      "reviewFixBaselineBytes": 12016,
+      "reviewFixBytes": 12016,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredProjectColorContrastJavaScript": {
       "preFoundationBytes": 1802,
@@ -180,7 +229,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 1824,
       "mergedBytes": 1824,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 1824,
+      "reviewFixBytes": 1824,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredDiagnosticsJavaScript": {
       "preFoundationBytes": 18404,
@@ -190,7 +242,10 @@
       "deltaFromPreFoundationBytes": 22,
       "mergedMainBaselineBytes": 18426,
       "mergedBytes": 18448,
-      "deltaFromMergedMainBaselineBytes": 22
+      "deltaFromMergedMainBaselineBytes": 22,
+      "reviewFixBaselineBytes": 18448,
+      "reviewFixBytes": 18448,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredDiagnosticCatalogJavaScript": {
       "preFoundationBytes": 9980,
@@ -200,7 +255,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 9980,
       "mergedBytes": 9980,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 9980,
+      "reviewFixBytes": 9980,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredIssueReportJavaScript": {
       "preFoundationBytes": 13348,
@@ -210,7 +268,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 13370,
       "mergedBytes": 13370,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 13370,
+      "reviewFixBytes": 13370,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "mascotFirstLoadJavaScript": {
       "preFoundationBytes": 11506,
@@ -220,7 +281,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 11506,
       "mergedBytes": 11506,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 11506,
+      "reviewFixBytes": 11506,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "mascotJavaScript": {
       "preFoundationBytes": 11506,
@@ -230,7 +294,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 11506,
       "mergedBytes": 11506,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 11506,
+      "reviewFixBytes": 11506,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "mascotSettingsJavaScript": {
       "preFoundationBytes": 7473,
@@ -240,7 +307,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 7495,
       "mergedBytes": 7495,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 7495,
+      "reviewFixBytes": 7495,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "entryJavaScript": {
       "preFoundationBytes": 222492,
@@ -250,7 +320,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 222556,
       "mergedBytes": 222556,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 222556,
+      "reviewFixBytes": 222556,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "mainWorkbenchFirstLoadJavaScript": {
       "preFoundationBytes": 878750,
@@ -260,7 +333,10 @@
       "deltaFromPreFoundationBytes": 9280,
       "mergedMainBaselineBytes": 889926,
       "mergedBytes": 899206,
-      "deltaFromMergedMainBaselineBytes": 9280
+      "deltaFromMergedMainBaselineBytes": 9280,
+      "reviewFixBaselineBytes": 899206,
+      "reviewFixBytes": 901866,
+      "deltaFromReviewFixBaselineBytes": 2660
     },
     "detachedChatFirstLoadJavaScript": {
       "preFoundationBytes": 672293,
@@ -270,7 +346,10 @@
       "deltaFromPreFoundationBytes": 7716,
       "mergedMainBaselineBytes": 681993,
       "mergedBytes": 689703,
-      "deltaFromMergedMainBaselineBytes": 7710
+      "deltaFromMergedMainBaselineBytes": 7710,
+      "reviewFixBaselineBytes": 689703,
+      "reviewFixBytes": 692328,
+      "deltaFromReviewFixBaselineBytes": 2625
     },
     "entryCss": {
       "preFoundationBytes": 241072,
@@ -280,7 +359,10 @@
       "deltaFromPreFoundationBytes": 70,
       "mergedMainBaselineBytes": 240972,
       "mergedBytes": 241042,
-      "deltaFromMergedMainBaselineBytes": 70
+      "deltaFromMergedMainBaselineBytes": 70,
+      "reviewFixBaselineBytes": 241042,
+      "reviewFixBytes": 241042,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "colorThemesCss": {
       "preFoundationBytes": 8675,
@@ -290,7 +372,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 8675,
       "mergedBytes": 8675,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 8675,
+      "reviewFixBytes": 8675,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "detachedChatCss": {
       "preFoundationBytes": 3069,
@@ -300,7 +385,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 3069,
       "mergedBytes": 3069,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 3069,
+      "reviewFixBytes": 3069,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "settingsJavaScript": {
       "preFoundationBytes": 77802,
@@ -310,7 +398,10 @@
       "deltaFromPreFoundationBytes": -479,
       "mergedMainBaselineBytes": 77970,
       "mergedBytes": 77501,
-      "deltaFromMergedMainBaselineBytes": -469
+      "deltaFromMergedMainBaselineBytes": -469,
+      "reviewFixBaselineBytes": 77501,
+      "reviewFixBytes": 77501,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "filesFirstLoadJavaScript": {
       "preFoundationBytes": 110836,
@@ -320,7 +411,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 110882,
       "mergedBytes": 110882,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 110882,
+      "reviewFixBytes": 110882,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredMarkdownJavaScript": {
       "preFoundationBytes": 434721,
@@ -330,7 +424,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 434721,
       "mergedBytes": 434721,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 434721,
+      "reviewFixBytes": 434721,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "transcriptJavaScript": {
       "preFoundationBytes": 567967,
@@ -340,7 +437,10 @@
       "deltaFromPreFoundationBytes": 4174,
       "mergedMainBaselineBytes": 573513,
       "mergedBytes": 577687,
-      "deltaFromMergedMainBaselineBytes": 4174
+      "deltaFromMergedMainBaselineBytes": 4174,
+      "reviewFixBaselineBytes": 577687,
+      "reviewFixBytes": 578020,
+      "deltaFromReviewFixBaselineBytes": 333
     },
     "deferredFailureDiagnosticsJavaScript": {
       "preFoundationBytes": 5749,
@@ -350,7 +450,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 5766,
       "mergedBytes": 5771,
-      "deltaFromMergedMainBaselineBytes": 5
+      "deltaFromMergedMainBaselineBytes": 5,
+      "reviewFixBaselineBytes": 5771,
+      "reviewFixBytes": 5771,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredAttachmentPreviewJavaScript": {
       "preFoundationBytes": 17794,
@@ -360,7 +463,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 17839,
       "mergedBytes": 17839,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 17839,
+      "reviewFixBytes": 17839,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredPreviewJavaScript": {
       "preFoundationBytes": 7613,
@@ -370,7 +476,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 7653,
       "mergedBytes": 7653,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 7653,
+      "reviewFixBytes": 7653,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredBrowserEvidenceJavaScript": {
       "preFoundationBytes": 3431,
@@ -380,7 +489,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 3453,
       "mergedBytes": 3453,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 3453,
+      "reviewFixBytes": 3453,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredSpreadsheetJavaScript": {
       "preFoundationBytes": 487396,
@@ -390,7 +502,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 487396,
       "mergedBytes": 487396,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 487396,
+      "reviewFixBytes": 487396,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredDiscordSettingsJavaScript": {
       "preFoundationBytes": 7891,
@@ -400,7 +515,10 @@
       "deltaFromPreFoundationBytes": 27,
       "mergedMainBaselineBytes": 7913,
       "mergedBytes": 7940,
-      "deltaFromMergedMainBaselineBytes": 27
+      "deltaFromMergedMainBaselineBytes": 27,
+      "reviewFixBaselineBytes": 7940,
+      "reviewFixBytes": 7940,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredCanaryRollbackJavaScript": {
       "preFoundationBytes": 2232,
@@ -410,7 +528,10 @@
       "deltaFromPreFoundationBytes": 22,
       "mergedMainBaselineBytes": 2254,
       "mergedBytes": 2276,
-      "deltaFromMergedMainBaselineBytes": 22
+      "deltaFromMergedMainBaselineBytes": 22,
+      "reviewFixBaselineBytes": 2276,
+      "reviewFixBytes": 2276,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredLifecycleIntegritySettingsJavaScript": {
       "preFoundationBytes": 2573,
@@ -420,7 +541,10 @@
       "deltaFromPreFoundationBytes": 22,
       "mergedMainBaselineBytes": 2595,
       "mergedBytes": 2617,
-      "deltaFromMergedMainBaselineBytes": 22
+      "deltaFromMergedMainBaselineBytes": 22,
+      "reviewFixBaselineBytes": 2617,
+      "reviewFixBytes": 2617,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredSidebarUpdateControlJavaScript": {
       "preFoundationBytes": 15797,
@@ -430,7 +554,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 15842,
       "mergedBytes": 15842,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 15842,
+      "reviewFixBytes": 15842,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredProviderAuthJavaScript": {
       "preFoundationBytes": 11182,
@@ -440,7 +567,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 11204,
       "mergedBytes": 11204,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 11204,
+      "reviewFixBytes": 11204,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredProviderMaintenanceJavaScript": {
       "preFoundationBytes": 4388,
@@ -450,7 +580,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 4410,
       "mergedBytes": 4410,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 4410,
+      "reviewFixBytes": 4410,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredComposerQueueJavaScript": {
       "preFoundationBytes": 12974,
@@ -460,7 +593,10 @@
       "deltaFromPreFoundationBytes": 111,
       "mergedMainBaselineBytes": 13029,
       "mergedBytes": 13140,
-      "deltaFromMergedMainBaselineBytes": 111
+      "deltaFromMergedMainBaselineBytes": 111,
+      "reviewFixBaselineBytes": 13140,
+      "reviewFixBytes": 13140,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredTerminalJavaScript": {
       "preFoundationBytes": 27107,
@@ -470,7 +606,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 27152,
       "mergedBytes": 27152,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 27152,
+      "reviewFixBytes": 27152,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredGitMenusJavaScript": {
       "preFoundationBytes": 8073,
@@ -480,7 +619,10 @@
       "deltaFromPreFoundationBytes": 2,
       "mergedMainBaselineBytes": 8117,
       "mergedBytes": 8119,
-      "deltaFromMergedMainBaselineBytes": 2
+      "deltaFromMergedMainBaselineBytes": 2,
+      "reviewFixBaselineBytes": 8119,
+      "reviewFixBytes": 8119,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredWorkspaceHeaderActionsJavaScript": {
       "preFoundationBytes": 20768,
@@ -490,7 +632,10 @@
       "deltaFromPreFoundationBytes": 1,
       "mergedMainBaselineBytes": 20817,
       "mergedBytes": 20818,
-      "deltaFromMergedMainBaselineBytes": 1
+      "deltaFromMergedMainBaselineBytes": 1,
+      "reviewFixBaselineBytes": 20818,
+      "reviewFixBytes": 20818,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "detachedChatJavaScript": {
       "preFoundationBytes": 11123,
@@ -500,7 +645,10 @@
       "deltaFromPreFoundationBytes": 239,
       "mergedMainBaselineBytes": 11145,
       "mergedBytes": 11384,
-      "deltaFromMergedMainBaselineBytes": 239
+      "deltaFromMergedMainBaselineBytes": 239,
+      "reviewFixBaselineBytes": 11384,
+      "reviewFixBytes": 11384,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "preMergeConfidenceJavaScript": {
       "preFoundationBytes": 27428,
@@ -510,7 +658,10 @@
       "deltaFromPreFoundationBytes": 1,
       "mergedMainBaselineBytes": 27472,
       "mergedBytes": 27473,
-      "deltaFromMergedMainBaselineBytes": 1
+      "deltaFromMergedMainBaselineBytes": 1,
+      "reviewFixBaselineBytes": 27473,
+      "reviewFixBytes": 27473,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "morphiconsJavaScript": {
       "preFoundationBytes": 15829,
@@ -520,7 +671,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 20685,
       "mergedBytes": 20685,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 20685,
+      "reviewFixBytes": 20685,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "morphingIconFeedbackJavaScript": {
       "preFoundationBytes": 3913,
@@ -530,7 +684,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 3948,
       "mergedBytes": 3948,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 3948,
+      "reviewFixBytes": 3948,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "coreJavaScript": {
       "preFoundationBytes": 2302269,
@@ -540,7 +697,10 @@
       "deltaFromPreFoundationBytes": 12984,
       "mergedMainBaselineBytes": 2315854,
       "mergedBytes": 2328833,
-      "deltaFromMergedMainBaselineBytes": 12979
+      "deltaFromMergedMainBaselineBytes": 12979,
+      "reviewFixBaselineBytes": 2328833,
+      "reviewFixBytes": 2333005,
+      "deltaFromReviewFixBaselineBytes": 4172
     },
     "deferredPdfJavaScript": {
       "preFoundationBytes": 437503,
@@ -550,7 +710,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 437503,
       "mergedBytes": 437503,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 437503,
+      "reviewFixBytes": 437503,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredPdfWorker": {
       "preFoundationBytes": 1264342,
@@ -560,7 +723,10 @@
       "deltaFromPreFoundationBytes": 0,
       "mergedMainBaselineBytes": 1264342,
       "mergedBytes": 1264342,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 1264342,
+      "reviewFixBytes": 1264342,
+      "deltaFromReviewFixBaselineBytes": 0
     },
     "deferredIconRegionJavaScript": {
       "preFoundationBytes": null,
@@ -570,7 +736,11 @@
       "deltaFromPreFoundationBytes": null,
       "mergedMainBaselineBytes": 12995,
       "mergedBytes": 12995,
-      "deltaFromMergedMainBaselineBytes": 0
+      "deltaFromMergedMainBaselineBytes": 0,
+      "reviewFixBaselineBytes": 12995,
+      "reviewFixBytes": 12995,
+      "deltaFromReviewFixBaselineBytes": 0
     }
-  }
+  },
+  "reviewFixBaseline": "c17cbf0"
 }

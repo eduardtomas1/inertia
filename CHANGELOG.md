@@ -18,36 +18,40 @@ The useful changes in each Inertia release, in plain language.
   the last turn**, **Open watcher chat**, **Send findings automatically**,
   **Collapse** and **Stop watching…**, then the checks left this turn, the
   events seen and waiting, the last check and the tokens the watcher has used.
-  A collapsed dock leaves a slim handle at the chat's edge that shows new
-  findings, and the **Work** tab nests the watcher under its chat.
+  A collapsed dock leaves a slim handle at the chat's edge, and the **Work**
+  tab nests the watcher under its chat; both show how many findings are new.
 - The watcher checks when a turn starts or ends, a file change finishes, the
   plan changes or an error occurs, and after several finished tool calls or
   commands, never on streaming text. It waits at least 45 seconds between
   checks by default, and longer late in a long turn so its checks, 30 per
   turn by default, last the whole turn. Quiet checks fold into one receipt,
   such as **Checked 3 times · 9:04–9:12 PM · nothing to report**, and send no
-  notifications or sounds.
+  notifications or sounds. **Check now** runs even when nothing is new.
+  Inertia keeps the newest 500 checks of each watcher.
 - The final check of a turn includes the turn's unified diff, or the changed
-  paths when the diff is unavailable. Each check reminds the watcher of its
-  earlier findings in the same turn, and a finding that a later check reports
-  fixed shows **Resolved in check *N***.
+  paths when the diff is unavailable, and says so when Inertia couldn't
+  capture the turn's changes. Each check reminds the watcher of its earlier
+  findings in the same turn, and a finding that a later check reports fixed
+  shows **Resolved in check *N***.
 - A finding stays in the dock until you choose **Send** or **Dismiss**.
   **Send** queues the note for the main chat's next turn, after your own
   queued messages; **Steer now** delivers it into a running Claude Code, Codex
   or OpenCode turn. The main chat shows a **Note from watcher** divider, and
   the note is never presented as your words.
 - **Send findings automatically**, off by default, sends each finding as soon
-  as its check ends, the same way as **Send**. It never steers a running turn,
-  and a finding from a turn that a watcher note started waits for you.
+  as its check ends, the same way as **Send**, and the main agent is told that
+  you didn't choose to send it. It never steers a running turn, and a finding
+  from a turn that a watcher note started waits for you.
 - The watcher stays read-only: it runs in Plan mode with Supervised access
-  that can't be changed, its approval requests are declined automatically, an
-  attempt to edit a file stops the check and a second attempt in a turn
-  pauses it. On Claude Code and OpenCode it runs commands from a read-only
-  allowlist, such as `git diff`, `rg` and `cat`, without asking and declines
-  any other command; Codex keeps its own read-only sandbox. If files change
-  during a check in which the watcher started an edit or ran a command outside
-  the allowlist, and no running agent accounts for them, the watcher pauses
-  and lists the paths.
+  that can't be changed, and its approval requests are declined automatically.
+  A started edit stops the check, and a second edit attempt in a turn pauses
+  the watcher. On Claude Code and OpenCode it runs commands from a read-only
+  allowlist, such as `git diff`, `rg` and `cat`, without asking, and Inertia
+  declines any other command that reaches it; Claude Code also runs the
+  commands its own plan mode treats as read-only, and Codex keeps its own
+  read-only sandbox. If files change during a check in which the watcher
+  started an edit or ran a command outside the allowlist, and no running agent
+  accounts for them, the watcher pauses and lists the paths.
 - Each check uses the watcher's own account. When its checks for a turn run
   out, the watcher pauses and still makes a final check when the turn ends;
   when its account reaches a usage limit, it pauses without affecting the

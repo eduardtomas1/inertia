@@ -8,7 +8,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
-import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../src/shared/watcher";
+import {
+  DEFAULT_WATCHER_BUDGETS,
+  DEFAULT_WATCHER_SHARING,
+  MAX_WATCHER_LABEL_CHARS,
+  watcherNoteAttributionSchema,
+} from "../../src/shared/watcher";
 
 const fixture = resolve(import.meta.dirname, "..", "fixtures", "database", "v0.0.6.sqlite");
 const directories: string[] = [];
@@ -135,6 +140,14 @@ describe("watcher link migration", () => {
       expect(() => setNote.run("[]", userMessageId)).toThrow(/CHECK constraint failed/u);
       expect(() => setNote.run(JSON.stringify({ ...note, watcherLabel: "x".repeat(1_100) }), userMessageId))
         .toThrow(/CHECK constraint failed/u);
+      for (const watcherLabel of ["界".repeat(MAX_WATCHER_LABEL_CHARS), "\"".repeat(MAX_WATCHER_LABEL_CHARS)]) {
+        const widest = watcherNoteAttributionSchema.parse({
+          ...note, preset: "scope-guard", delivery: "steer", providerId: "antigravity", watcherLabel,
+        });
+        expect(Buffer.byteLength(JSON.stringify(widest), "utf8")).toBeLessThan(1_024);
+        expect(() => setNote.run(JSON.stringify(widest), userMessageId)).not.toThrow();
+        expect(() => migrated.prepare("UPDATE queued_messages SET watcher_note_json = ?").run(JSON.stringify(widest))).not.toThrow();
+      }
       const setQueuedNote = migrated.prepare("UPDATE queued_messages SET watcher_note_json = ?");
       expect(() => setQueuedNote.run(JSON.stringify(note))).not.toThrow();
       expect(() => setQueuedNote.run("{")).toThrow(/CHECK constraint failed/u);

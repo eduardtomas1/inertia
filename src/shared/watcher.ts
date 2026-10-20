@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { providerIdSchema } from "./contracts/client-command/common";
+
 /**
  * Reviewed allowlist of harnesses that can host a read-only watcher. This is
  * deliberately separate from provider capability ids: adding a capability id
@@ -188,6 +190,7 @@ export const watcherNoteAttributionSchema = z.strictObject({
   preset: watcherPresetSchema,
   watcherLabel: watcherLabelSchema,
   delivery: watcherDeliveryModeSchema,
+  providerId: providerIdSchema.optional(),
 });
 
 export const watcherFeedHeadlineSchema = z.strictObject({

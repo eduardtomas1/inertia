@@ -286,6 +286,7 @@ export class WatcherDeliveryService {
       this.#deps.queue()?.withdrawWatcherNote?.(watchedId, wake.queuedMessageId);
     }
     const label = watcherLabel(this.#deps.store, link.watcherConversationId, this.#deps.providerLabels());
+    const { providerId } = this.#deps.store.conversation(link.watcherConversationId);
     const attribution = (delivery: WatcherDeliveryMode): WatcherNoteAttribution => ({
       linkId,
       wakeId,
@@ -293,6 +294,7 @@ export class WatcherDeliveryService {
       preset: link.preset,
       watcherLabel: label,
       delivery,
+      providerId,
     });
 
     if (mode === "steer") {

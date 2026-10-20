@@ -76,6 +76,7 @@ describe("watcher note delivery", () => {
       const watcher = f.store.conversation(link.watcherConversationId);
       expect(message!.watcherNote!.watcherLabel).toBe("codex · gpt-test");
       expect(message!.watcherNote!.watcherLabel).toBe(watcherAgentLabel(watcher, { codex: "codex" }));
+      expect(message!.watcherNote!.providerId).toBe("codex");
     } finally {
       await f.close();
     }
@@ -92,6 +93,7 @@ describe("watcher note delivery", () => {
       expect(reply).toMatchObject({ result: { delivery: { mode: "queue", state: "queued", detail: null } } });
       if (reply.type !== "request.result" || reply.result.kind !== "watcher.delivery") throw new Error("unexpected reply");
       expect(reply.result.queue?.entries.map(({ id }) => id)).toEqual([userId, deliveryId]);
+      expect(f.store.queuedMessages.list(f.watched.id).find(({ id }) => id === deliveryId)?.watcherNote?.providerId).toBe("codex");
 
       await f.finishTurn(f.watched.id, "Second done.");
       await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("user message not dispatched"); });
@@ -135,7 +137,7 @@ describe("watcher note delivery", () => {
         const [steer] = f.provider.steerCalls;
         expect(steer!.content.startsWith(FINDING)).toBe(true);
         expect(steer!.content).toContain("[inertia-watcher-note]");
-        expect(noteMessages(f)).toMatchObject([{ content: FINDING, watcherNote: { delivery: "steer" } }]);
+        expect(noteMessages(f)).toMatchObject([{ content: FINDING, watcherNote: { delivery: "steer", providerId: "codex" } }]);
       } finally {
         await f.close();
       }

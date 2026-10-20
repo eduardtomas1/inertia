@@ -274,7 +274,12 @@ describe("watcher shared contracts", () => {
 
   it("accepts only bounded, single-line watcher note attribution", () => {
     expect(watcherNoteAttributionSchema.safeParse(note).success).toBe(true);
+    expect(watcherNoteAttributionSchema.parse({ ...note, providerId: "antigravity" }).providerId).toBe("antigravity");
+    expect(watcherNoteAttributionSchema.parse(note)).not.toHaveProperty("providerId");
     for (const invalid of [
+      { ...note, providerId: "gpt" },
+      { ...note, providerId: "" },
+      { ...note, providerId: null },
       { ...note, watcherLabel: "" },
       { ...note, watcherLabel: "x".repeat(81) },
       { ...note, watcherLabel: "two\nlines" },

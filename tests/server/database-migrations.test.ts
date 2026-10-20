@@ -2188,7 +2188,6 @@ describe("runtime migration catalog", () => {
       { name: "watcher_links_active_limit" },
       { name: "watcher_links_detached_final" },
       { name: "watcher_links_watched_delete" },
-      { name: "watcher_wakes_retention" },
     ]);
     for (const table of ["messages", "queued_messages"]) {
       expect((migrated.prepare(`PRAGMA table_info(${table})`).all() as Array<{

@@ -196,10 +196,6 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "old.status = 'detached' and new.status <> 'detached'",
       "raise(abort,",
     ]],
-    [99, "watcher_wakes_retention", [
-      "after insert on watcher_wakes",
-      "delete from watcher_wakes where link_id = new.link_id and sequence <= new.sequence - 500",
-    ]],
     [99, "watcher_links_watched_delete", [
       "before delete on conversations",
       "raise(abort,",

@@ -156,7 +156,6 @@ describe("watcher link migration", () => {
           { name: "watcher_links_active_limit" },
           { name: "watcher_links_detached_final" },
           { name: "watcher_links_watched_delete" },
-          { name: "watcher_wakes_retention" },
         ]);
     } finally {
       migrated.close();

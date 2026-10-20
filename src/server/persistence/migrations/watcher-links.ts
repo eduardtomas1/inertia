@@ -228,12 +228,6 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       BEGIN
         SELECT RAISE(ABORT, 'A detached watcher cannot be attached again.');
       END;
-    CREATE TRIGGER watcher_wakes_retention
-      AFTER INSERT ON watcher_wakes
-      BEGIN
-        DELETE FROM watcher_wakes
-        WHERE link_id = NEW.link_id AND sequence <= NEW.sequence - 500;
-      END;
     CREATE TRIGGER watcher_links_watched_delete
       BEFORE DELETE ON conversations
       BEGIN

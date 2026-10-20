@@ -604,19 +604,27 @@ describe("watcher link repository", () => {
     expect(links.setDelivery(other.wakeId, { mode: null, state: "dismissed" }, tick())?.delivery).toMatchObject({ mode: null, state: "dismissed" });
   });
 
-  it("keeps only the newest 500 checks per link", () => {
+  it("keeps only the newest 500 checks per link and drains an older backlog a few checks at a time", () => {
     const { link } = attach(chat());
+    const kept = () => raw((database) => database.prepare(
+      "SELECT COUNT(*) AS count, MIN(sequence) AS oldest FROM watcher_wakes WHERE link_id = ?",
+    ).get(link.id));
     raw((database) => {
       const insert = database.prepare(`
         INSERT INTO watcher_wakes (id, link_id, sequence, trigger, state, outcome, created_at, settled_at)
         VALUES (?, ?, ?, 'activity', 'settled', 'silent', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
       `);
       database.transaction(() => {
-        for (let sequence = 1; sequence <= 502; sequence += 1) insert.run(randomUUID(), link.id, sequence);
+        for (let sequence = 1; sequence <= 506; sequence += 1) insert.run(randomUUID(), link.id, sequence);
       })();
-      expect(database.prepare("SELECT COUNT(*) AS count, MIN(sequence) AS oldest FROM watcher_wakes WHERE link_id = ?").get(link.id))
-        .toEqual({ count: 500, oldest: 3 });
     });
+    expect(kept()).toEqual({ count: 506, oldest: 1 });
+    expect(check(link.id).sequence).toBe(507);
+    expect(kept()).toEqual({ count: 503, oldest: 5 });
+    check(link.id);
+    expect(kept()).toEqual({ count: 500, oldest: 9 });
+    check(link.id);
+    expect(kept()).toEqual({ count: 500, oldest: 10 });
   });
 
   it("prunes a retired check's transcript with the check and keeps its watcher turn and usage", () => {
@@ -671,10 +679,11 @@ describe("watcher link repository", () => {
     expect(store.watcherLinks.usageTotals(link.id)).toEqual({ totalTokens: 502_000 });
   });
 
-  it("keeps a retired check's watcher turn that a provider run still owns", () => {
+  it("keeps a check whose watcher turn still runs or a provider run still owns until it can retire with its transcript", () => {
     const { link, conversation } = attach(chat());
     const first = beginTurn(conversation, "Check 1");
     settleTurn(first.id);
+    const second = beginTurn(conversation, "Check 2");
     raw((database) => {
       database.prepare(`
         INSERT INTO provider_run_ownership (turn_id, conversation_id, run_id, runtime_generation_id, system_boot_id, created_at)
@@ -685,16 +694,28 @@ describe("watcher link repository", () => {
         VALUES (?, ?, ?, 1, 'activity', 'settled', 'silent', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
       `).run(randomUUID(), link.id, first.id);
       database.prepare(`
+        INSERT INTO watcher_wakes (id, link_id, watcher_turn_id, sequence, trigger, state, outcome, created_at, settled_at)
+        VALUES (?, ?, ?, 2, 'activity', 'settled', 'silent', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
+      `).run(randomUUID(), link.id, second.id);
+      database.prepare(`
         INSERT INTO watcher_wakes (id, link_id, sequence, trigger, state, outcome, created_at, settled_at)
         VALUES (?, ?, 500, 'activity', 'settled', 'silent', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
       `).run(randomUUID(), link.id);
     });
-    expect(store.watcherLinks.transition(link.id, ["watching"], { status: "waking" }, tick())).not.toBeNull();
-    expect(store.watcherLinks.createWake({
-      id: randomUUID(), linkId: link.id, watchedTurnId: null, trigger: "activity",
-      eventsCovered: 1, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 512,
-    }, tick())?.sequence).toBe(501);
-    expect(store.agentTurn(first.id).id).toBe(first.id);
+    const messages = (turnId: string) => raw((database) => (database.prepare(
+      "SELECT COUNT(*) AS count FROM messages WHERE turn_id = ?",
+    ).get(turnId) as { count: number }).count);
+    expect(check(link.id).sequence).toBe(501);
+    expect(check(link.id).sequence).toBe(502);
+    expect(new Set(store.watcherLinks.wakeSummaries(conversation.id).map(({ turnId }) => turnId))).toEqual(new Set([first.id, second.id]));
+    expect([messages(first.id), messages(second.id)]).toEqual([1, 1]);
+
+    settleTurn(second.id);
+    raw((database) => database.prepare("DELETE FROM provider_run_ownership WHERE turn_id = ?").run(first.id));
+    check(link.id);
+    expect(store.watcherLinks.wakeSummaries(conversation.id)).toEqual([]);
+    expect([messages(first.id), messages(second.id)]).toEqual([0, 0]);
+    expect([store.agentTurn(first.id).id, store.agentTurn(second.id).id]).toEqual([first.id, second.id]);
   });
 
   it("detaches links when the watched chat is deleted and keeps their history", () => {

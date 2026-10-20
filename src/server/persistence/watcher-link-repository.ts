@@ -824,9 +824,11 @@ export class WatcherLinkRepository {
       JOIN watcher_links AS link ON link.id = wake.link_id
       LEFT JOIN agent_turns AS turn ON turn.id = wake.watcher_turn_id
         AND turn.conversation_id = link.watcher_conversation_id
-        AND turn.status IN ${TERMINAL_TURN_STATUSES_SQL}
-        AND NOT EXISTS (SELECT 1 FROM provider_run_ownership AS owner WHERE owner.turn_id = turn.id)
       WHERE wake.link_id = ? AND wake.sequence <= ?
+        AND (turn.id IS NULL OR (
+          turn.status IN ${TERMINAL_TURN_STATUSES_SQL}
+          AND NOT EXISTS (SELECT 1 FROM provider_run_ownership AS owner WHERE owner.turn_id = turn.id)
+        ))
       ORDER BY wake.sequence ASC LIMIT ?
     `).all(linkId, through, MAX_RETIRED_WAKES_PER_CHECK) as { id: string; turn_id: string | null; conversation_id: string | null }[];
     for (const wake of retired) {

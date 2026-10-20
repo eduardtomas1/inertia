@@ -6,7 +6,10 @@ import type { DatabaseMigrationDefinition } from "./catalog";
  * context kind.
  *
  * The note CHECKs mirror `src/shared/initiatives.ts`: titles count characters
- * like initiative names, bodies count UTF-8 bytes. `notes_revision` moves only
+ * like initiative names, bodies count UTF-8 bytes, and only an agent's
+ * proposal records a `kind`. Triggers keep at most 64 accepted notes, 16
+ * proposals waiting for review and 5 of those from one chat per initiative;
+ * rejected notes are pruned by the runtime. `notes_revision` moves only
  * when the set or content of accepted notes changes; `brief_updated_at` records
  * the last brief edit.
  *
@@ -33,7 +36,7 @@ export const initiativeNotesMigration: DatabaseMigrationDefinition = {
     // Kept inside `up` so the lineage digest covers it. The column guards
     // follow the catalog's convention (as migration 99 does): restoring a
     // backup replays migrations over a schema that may already have them.
-    const columns = (table: "initiatives" | "messages") => database
+    const columns = (table: "initiatives" | "initiative_notes" | "messages") => database
       .prepare(`PRAGMA table_info(${table})`)
       .all() as Array<{ name: string; type: string; notnull: number }>;
     const initiativeColumns = columns("initiatives");
@@ -51,6 +54,9 @@ export const initiativeNotesMigration: DatabaseMigrationDefinition = {
           CHECK (brief_updated_at IS NULL OR length(brief_updated_at) BETWEEN 20 AND 40);
       `);
     }
+    // What an agent said its proposal records; user notes have none.
+    const NOTE_KIND_COLUMN = `kind TEXT
+          CHECK (kind IS NULL OR (provenance = 'agent' AND kind IN ('fact', 'decision', 'constraint')))`;
     database.exec(`
       CREATE TABLE IF NOT EXISTS initiative_notes (
         id TEXT PRIMARY KEY CHECK (length(id) = 36),
@@ -73,21 +79,60 @@ export const initiativeNotesMigration: DatabaseMigrationDefinition = {
           CHECK (source_conversation_id IS NULL OR length(source_conversation_id) BETWEEN 1 AND 200),
         revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
         created_at TEXT NOT NULL CHECK (length(created_at) BETWEEN 20 AND 40),
-        updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 40)
+        updated_at TEXT NOT NULL CHECK (length(updated_at) BETWEEN 20 AND 40),
+        ${NOTE_KIND_COLUMN}
       );
+    `);
+    if (!columns("initiative_notes").some(({ name }) => name === "kind")) {
+      database.exec(`ALTER TABLE initiative_notes ADD COLUMN ${NOTE_KIND_COLUMN};`);
+    }
+    // Accepted notes, proposals waiting for review (per initiative and per
+    // proposing chat) and rejected notes have separate limits. Accepted notes
+    // are limited both when inserted and when a proposal is accepted.
+    database.exec(`
       CREATE INDEX IF NOT EXISTS initiative_notes_state_idx
         ON initiative_notes(initiative_id, state);
       CREATE INDEX IF NOT EXISTS initiative_notes_source_idx
         ON initiative_notes(source_conversation_id);
       CREATE TRIGGER IF NOT EXISTS initiative_notes_count_limit
         BEFORE INSERT ON initiative_notes
-        WHEN NEW.state IN ('accepted', 'proposed')
+        WHEN NEW.state = 'accepted'
           AND (
             SELECT COUNT(*) FROM initiative_notes
-            WHERE initiative_id = NEW.initiative_id AND state IN ('accepted', 'proposed')
+            WHERE initiative_id = NEW.initiative_id AND state = 'accepted'
           ) >= 64
         BEGIN
           SELECT RAISE(ABORT, 'initiative note count limit exceeded');
+        END;
+      CREATE TRIGGER IF NOT EXISTS initiative_notes_accept_limit
+        BEFORE UPDATE OF state ON initiative_notes
+        WHEN NEW.state = 'accepted' AND OLD.state <> 'accepted'
+          AND (
+            SELECT COUNT(*) FROM initiative_notes
+            WHERE initiative_id = NEW.initiative_id AND state = 'accepted'
+          ) >= 64
+        BEGIN
+          SELECT RAISE(ABORT, 'initiative note count limit exceeded');
+        END;
+      CREATE TRIGGER IF NOT EXISTS initiative_notes_proposal_limit
+        BEFORE INSERT ON initiative_notes
+        WHEN NEW.state = 'proposed'
+          AND (
+            (
+              SELECT COUNT(*) FROM initiative_notes
+              WHERE initiative_id = NEW.initiative_id AND state = 'proposed'
+            ) >= 16
+            OR (
+              NEW.source_conversation_id IS NOT NULL
+              AND (
+                SELECT COUNT(*) FROM initiative_notes
+                WHERE initiative_id = NEW.initiative_id AND state = 'proposed'
+                  AND source_conversation_id = NEW.source_conversation_id
+              ) >= 5
+            )
+          )
+        BEGIN
+          SELECT RAISE(ABORT, 'initiative note proposal limit exceeded');
         END;
 
       CREATE TABLE IF NOT EXISTS initiative_context_deliveries (

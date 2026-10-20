@@ -18,7 +18,7 @@ function frontendPack() {
   });
   return {
     revision: registry.manifest().packs.find(({ id }) => id === "inertia.frontend-workbench")!.revision,
-    text: registry.instructions().find(({ label }) => label === "inertia-frontend-workbench")!.text,
+    text: registry.allInstructions().find(({ label }) => label === "inertia-frontend-workbench")!.text,
   };
 }
 

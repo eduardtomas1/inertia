@@ -157,6 +157,12 @@ describe("initiative notes migration", () => {
         ALTER TABLE initiatives ADD COLUMN notes_revision INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE initiatives ADD COLUMN brief_updated_at TEXT;
         ALTER TABLE messages ADD COLUMN initiative_context_json TEXT;
+        -- A notes table from before proposals recorded their kind.
+        CREATE TABLE initiative_notes (
+          id TEXT PRIMARY KEY, initiative_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+          provenance TEXT NOT NULL, state TEXT NOT NULL, source_conversation_id TEXT,
+          revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
       `);
     } finally {
       prepared.close();
@@ -169,21 +175,33 @@ describe("initiative notes migration", () => {
         .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
       expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'initiative_notes'").get())
         .toEqual({ name: "initiative_notes" });
+      expect((migrated.prepare("PRAGMA table_info(initiative_notes)").all() as Array<{ name: string }>).map(({ name }) => name))
+        .toContain("kind");
     } finally {
       migrated.close();
     }
   });
 
-  it("treats a schema 100 database without the notes trigger as inconsistent", async () => {
+  it("treats a schema 100 database without any of the notes triggers as inconsistent", async () => {
     const { databasePath, workspacePath } = await schema99Database();
     const store = new RuntimeStore(databasePath, workspacePath, { recoverInterruptedRuns: false });
     store.close();
     const database = new Database(databasePath);
     try {
       expect(countLimitTriggersAreValid(database, 100)).toBe(true);
-      database.exec("DROP TRIGGER initiative_notes_count_limit");
-      expect(countLimitTriggersAreValid(database, 100)).toBe(false);
-      expect(countLimitTriggersAreValid(database, 99)).toBe(true);
+      for (const trigger of [
+        "initiative_notes_count_limit",
+        "initiative_notes_accept_limit",
+        "initiative_notes_proposal_limit",
+      ]) {
+        const { sql } = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+          .get(trigger) as { sql: string };
+        database.exec(`DROP TRIGGER ${trigger}`);
+        expect(countLimitTriggersAreValid(database, 100), trigger).toBe(false);
+        expect(countLimitTriggersAreValid(database, 99)).toBe(true);
+        database.exec(sql);
+        expect(countLimitTriggersAreValid(database, 100)).toBe(true);
+      }
     } finally {
       database.close();
     }

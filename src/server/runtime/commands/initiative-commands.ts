@@ -114,7 +114,8 @@ export function createInitiativeCommandHandler(
           result: {
             kind: "initiative.notes",
             initiativeId,
-            notes: dependencies.store.initiatives.notes.list(initiativeId),
+            // Rejected notes are listed too, so the page can show and delete them.
+            notes: dependencies.store.initiatives.notes.list(initiativeId, { includeRejected: true }),
           },
         });
         return "handled";

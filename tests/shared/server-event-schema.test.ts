@@ -2022,20 +2022,33 @@ describe("server event remaining discriminant and identity boundary", () => {
       provenance: "user",
       state: "accepted",
       sourceConversationId: null,
+      kind: null,
       revision: 1,
       createdAt: checkedAt,
       updatedAt: checkedAt,
     };
     const notes = (value: unknown, id = initiativeId) => parseServerEvent(event({ kind: "initiative.notes", initiativeId: id, notes: value }));
-    expect(notes([note, { ...note, id: "77777777-7777-4777-8777-777777777777", provenance: "agent", state: "proposed" }])).toBeTruthy();
+    expect(notes([note, {
+      ...note, id: "77777777-7777-4777-8777-777777777777", provenance: "agent", state: "proposed", kind: "decision",
+    }])).toBeTruthy();
     expect(notes([])).toBeTruthy();
+    // Rejected notes are listed for the page's Rejected list, within the kept bound.
+    const rejectedNote = (index: number) => ({
+      ...note, id: `${String(index).padStart(8, "0")}-7777-4777-8777-777777777777`, provenance: "agent", state: "rejected",
+    });
+    expect(notes([note, rejectedNote(0)])).toBeTruthy();
+    expect(notes(Array.from({ length: 64 }, (_, index) => rejectedNote(index)))).toBeTruthy();
     for (const invalid of [
       [note, { ...note }],
-      [{ ...note, state: "rejected" }],
+      Array.from({ length: 65 }, (_, index) => rejectedNote(index)),
       [{ ...note, initiativeId: "55555555-5555-4555-8555-555555555555" }],
       [{ ...note, title: "a\nb" }],
       [{ ...note, body: "😀".repeat(513) }],
       [{ ...note, provenance: "system" }],
+      // Only an agent's proposal records a kind, one of the known kinds.
+      [{ ...note, kind: "fact" }],
+      [{ ...note, provenance: "agent", state: "proposed", kind: "progress" }],
+      [(({ kind: _kind, ...withoutKind }) => withoutKind)(note)],
       Array.from({ length: 65 }, (_, index) => ({ ...note, id: `${String(index).padStart(8, "0")}-6666-4666-8666-666666666666` })),
       { length: 0 },
     ]) expect(() => notes(invalid)).toThrow("Malformed server event");
@@ -2058,6 +2071,31 @@ describe("server event remaining discriminant and identity boundary", () => {
       { ...receipt, turnId: null },
       { ...receipt, initiativeContext: { ...receipt.initiativeContext, brief: null, notes: null } },
       { ...receipt, initiativeContext: { ...receipt.initiativeContext, brief: { revision: 3, change: "rewritten" } } },
+    ]) expect(() => parseServerEvent({ type: "conversation.message.persisted", message: invalid })).toThrow("Malformed server event");
+
+    // An agent's note proposal leaves a receipt that names the note and nothing else.
+    const proposal = {
+      ...receipt,
+      content: "Proposed an initiative note: Cache order totals",
+      initiativeContext: {
+        initiativeId,
+        brief: null,
+        notes: null,
+        proposal: { noteId: note.id, kind: "decision" },
+      },
+    };
+    expect(parseServerEvent({ type: "conversation.message.persisted", message: proposal })).toBeTruthy();
+    expect(parseServerEvent({
+      type: "conversation.message.persisted",
+      message: { ...proposal, initiativeContext: { ...proposal.initiativeContext, proposal: { noteId: note.id, kind: null } } },
+    })).toBeTruthy();
+    for (const invalid of [
+      { ...proposal, initiativeContext: { ...proposal.initiativeContext, initiativeId: null } },
+      { ...proposal, initiativeContext: { ...proposal.initiativeContext, brief: { revision: 3, change: "shared" } } },
+      { ...proposal, initiativeContext: { ...proposal.initiativeContext, left: true } },
+      { ...proposal, initiativeContext: { ...proposal.initiativeContext, proposal: { noteId: "note-1", kind: null } } },
+      { ...proposal, initiativeContext: { ...proposal.initiativeContext, proposal: { noteId: note.id, kind: "chatter" } } },
+      { ...proposal, initiativeContext: { ...proposal.initiativeContext, proposal: { noteId: note.id } } },
     ]) expect(() => parseServerEvent({ type: "conversation.message.persisted", message: invalid })).toThrow("Malformed server event");
   });
   it("rejects mismatched and duplicate event-local identities", () => {

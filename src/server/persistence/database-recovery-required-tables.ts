@@ -79,6 +79,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "revision",
     "created_at",
     "updated_at",
+    "kind",
   ]],
   [100, "initiative_context_deliveries", [
     "id",

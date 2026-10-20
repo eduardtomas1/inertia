@@ -157,7 +157,10 @@ written in the same transaction as the turn, replaced if the turn restarts on
 a fresh provider session, and withdrawn if the turn never reached its
 provider. A compaction receipt, or a compaction the provider records on its
 own, makes the next turn share the brief and notes again; see
-`docs/HARNESS_CAPABILITIES.md`.
+`docs/HARNESS_CAPABILITIES.md`. A note the turn's agent proposes to the
+initiative leaves the same kind of receipt with the turn's activity instead,
+**Proposed an initiative note: <title>**; it records something the agent did,
+so it stays when the request's own receipt is replaced or withdrawn.
 
 ## T3 Code reference and adaptation
 

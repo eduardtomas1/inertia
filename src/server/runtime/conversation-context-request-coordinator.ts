@@ -2,6 +2,7 @@ import type {
   AgentInputRequest,
   RuntimeMutationEvent,
 } from "../../shared/contracts";
+import { isInitiativeName } from "../../shared/initiatives";
 import {
   deletePendingInteraction,
   registerPendingInteraction,
@@ -81,6 +82,8 @@ export class ConversationContextRequestCoordinator {
     scope: ConversationContextAuthorizationScope;
     providerId: AgentInputRequest["providerId"];
     requestedSourceConversationId: string | null;
+    /** Names the initiative an initiative tool asked within; shown on the card. */
+    initiativeName?: string;
     createdAt: string;
     signal: AbortSignal;
   }): Promise<ConversationContextSelectionOutcome> {
@@ -111,6 +114,9 @@ export class ConversationContextRequestCoordinator {
         targetConversationId: input.scope.targetConversationId,
         targetTurnId: input.scope.targetTurnId,
         requestedSourceConversationId: input.requestedSourceConversationId,
+        ...(isInitiativeName(input.initiativeName) && input.requestedSourceConversationId !== null
+          ? { initiativeName: input.initiativeName }
+          : {}),
         createdAt: input.createdAt,
         expiresAt: new Date(
           (Number.isFinite(createdMs) ? createdMs : Date.now()) + timeoutMs,

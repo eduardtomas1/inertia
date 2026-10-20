@@ -424,6 +424,55 @@ describe("Quiet Ledger user request layer", () => {
     expect(renderRequest("Continue.")).not.toContain("Shared initiative context");
   });
 
+  it("shows a note the agent proposed with the turn's activity, not under the request", () => {
+    const proposal: ChatMessage = {
+      id: "proposal-1",
+      conversationId,
+      turnId: "turn-1",
+      role: "system",
+      content: "Proposed an initiative note: Cache order totals",
+      attachments: [],
+      createdAt: "2026-07-23T10:00:01.000Z",
+      initiativeContext: {
+        initiativeId: "44444444-4444-4444-8444-444444444444",
+        brief: null,
+        notes: null,
+        proposal: { noteId: "55555555-5555-4555-8555-555555555555", kind: "decision" },
+      },
+    };
+    const answer: ChatMessage = {
+      id: "answer-1", conversationId, turnId: "turn-1", role: "assistant",
+      content: "Done.", attachments: [], createdAt: "2026-07-23T10:00:02.000Z",
+    };
+    const html = renderRequest("Remember the totals rule.", { messages: [proposal] });
+    const requestStart = html.indexOf('aria-label="Your request"');
+    const request = html.slice(requestStart, html.indexOf("</article>", requestStart));
+    expect(request).not.toContain("Proposed an initiative note");
+    expect(html).toContain('aria-label="Proposed initiative notes"');
+    expect(html).toContain("<strong>Initiative note · Decision</strong>");
+    expect(html).toContain("Proposed an initiative note: Cache order totals");
+    expect(html).not.toContain('aria-label="Agent system notice"');
+    expect(html).not.toContain('aria-label="Shared initiative context"');
+
+    const [item] = buildResponseTimeline({
+      turns: [{ ...turn(), terminalAssistantMessageId: answer.id }],
+      messages: [message("Remember the totals rule."), proposal, answer],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    });
+    if (item?.kind !== "turn") throw new Error("Expected a turn.");
+    expect(item.turn.initiativeNoteProposals).toEqual([proposal]);
+    expect(item.turn.initiativeContextReceipts).toEqual([]);
+    expect(item.turn.systemMessages).toEqual([]);
+    expect(shouldConsolidateSettledWorkIntoRunDetails(item.turn)).toBe(true);
+    // Without a kind the row says only that it is an initiative note.
+    const plain = renderRequest("Remember.", {
+      messages: [{ ...proposal, initiativeContext: { ...proposal.initiativeContext!, proposal: { noteId: "55555555-5555-4555-8555-555555555555", kind: null } } }],
+    });
+    expect(plain).toContain("<strong>Initiative note</strong>");
+  });
+
   it("describes every session recovery outcome without overstating it", () => {
     expect(sessionRecoveryDetail({ continuationReasonCode: "same-continuation", sessionRecovery: null })).toBeNull();
     expect(sessionRecoveryDetail({ sessionRecovery: undefined })).toBeNull();

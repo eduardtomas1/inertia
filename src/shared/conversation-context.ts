@@ -114,6 +114,11 @@ export interface AgentConversationContextRequest {
   targetConversationId: string;
   targetTurnId: string;
   requestedSourceConversationId: string | null;
+  /**
+   * Set when the agent asked through its initiative's tools for another chat
+   * in the same initiative: the initiative's name, so the card can say why.
+   */
+  initiativeName?: string;
   createdAt: string;
   expiresAt: string;
 }

@@ -151,7 +151,7 @@ describe("inertia_render_html definition", () => {
         toolNames: ["inertia_render_html"],
         evaluation: expect.objectContaining({ evidenceKinds: ["host-tool-result"] }),
       });
-      expect(registry.instructions().map(({ label }) => label)).not.toContain("inertia-visual-replies");
+      expect(registry.allInstructions().map(({ label }) => label)).not.toContain("inertia-visual-replies");
       expect(registry.bridgeFor({ conversation: {}, turn: {} } as never).definitions.map(({ name }) => name))
         .toContain("inertia_render_html");
     }

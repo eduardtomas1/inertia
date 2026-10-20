@@ -1,6 +1,7 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
 import { HtmlRenderRepository } from "./persistence/html-render-repository";
+import { InitiativeNoteProposalRepository } from "./persistence/initiative-note-proposal-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -362,6 +363,7 @@ export class RuntimeStore {
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
   get initiatives() { return this.snapshotRepository.initiatives; }
+  get initiativeNoteProposals() { return new InitiativeNoteProposalRepository(this.database, this); }
   initiativePreferencesFor(conversation: { initiativeId?: string | null }) { return this.initiatives.preferencesFor(conversation.initiativeId); }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
 

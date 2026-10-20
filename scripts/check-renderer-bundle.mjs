@@ -87,7 +87,11 @@ const budgets = {
   // Lowering a starred model's access to the limit and refusing Antigravity
   // under a Supervised limit in the composer add 206 bytes over aa173691
   // (900,929 -> 901,135).
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 5_612 + 2_543 + 87 + 2_761 + 206,
+  // Agent note proposals in the turn timeline, the initiative named on the
+  // context approval card and the shared Work status add 468 bytes over
+  // 80fc8520 (901,135 -> 901,603 on Linux x64). The proposal helpers live
+  // apart from the initiative schemas, which stay deferred.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 5_612 + 2_543 + 87 + 2_761 + 206 + 468,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -102,7 +106,9 @@ const budgets = {
   // (685,664 -> 686,505 on Linux x64). The window's own access limit, its
   // Antigravity refusal and the starred-model clamp add 659 bytes over
   // aa173691 (-> 687,164); the limit helpers load without new-chat defaults.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 766 + 2_818 + 87 + 841 + 659,
+  // Agent note proposals in the timeline and the initiative named on the
+  // context approval card add 468 bytes over 80fc8520 (-> 687,632).
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 766 + 2_818 + 87 + 841 + 659 + 468,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The composer initiative chip adds 593 bytes over b4c53d4a (240,972 ->
@@ -224,7 +230,13 @@ const budgets = {
   // rows and the Settings rows they share with the Settings page, which Rollup
   // now splits into shared deferred chunks. Existing headroom is unchanged.
   // The access-limit fixes add 446 core bytes over aa173691 (-> 2,373,818).
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 30_023 + 13_707 + 1_236 + 12_552 + 446,
+  // Agent note proposals add 3,378 core bytes over 80fc8520 (-> 2,377,196 on
+  // Linux x64), mostly the deferred proposal source and Rejected list on the
+  // Initiatives page and the proposal contract. Existing headroom is unchanged.
+  // The note Unicode rules, the proposal kind label and per-state note bounds
+  // add 802 core bytes over 2aa2e9a5 (-> 2,377,998 on Linux x64), all in the
+  // deferred Initiatives page and shared initiative contract.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 30_023 + 13_707 + 1_236 + 12_552 + 446 + 3_378 + 802,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

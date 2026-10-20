@@ -113,6 +113,8 @@ describe("neutralizeUntrustedAgentText", () => {
       "build-mode",
       "inertia-orchestration",
       "inertia-frontend-workbench",
+      "inertia-initiatives",
+      "initiative-context",
       "read-only-diff-review",
       "selected-diff-revision-scope",
     ]) {

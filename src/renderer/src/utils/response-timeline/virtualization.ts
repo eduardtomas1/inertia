@@ -598,7 +598,9 @@ function estimateTurnRowSize(
       total + estimateInputRequestHeight(request, answerColumns), 0);
 
   const systemHeight = turn.systemMessages.reduce((total, message) =>
-    total + 35 + estimatedWrappedLines(message.content, answerColumns) * 20, 0);
+    total + 35 + estimatedWrappedLines(message.content, answerColumns) * 20, 0)
+    // One receipt row per note the agent proposed to its initiative.
+    + turn.initiativeNoteProposals.length * 34;
   // Frames are sized in CSS pixels, so they stay outside the typography scale.
   const htmlRenderHeight = turn.htmlRenders.reduce((total, message, index) =>
     total + (message.htmlRender?.height ?? 0) + (index > 0 ? 12 : 0), 0);

@@ -1,9 +1,11 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import clsx from "clsx";
-import type { Initiative, InitiativeNote } from "@shared/contracts";
+import type { Conversation, Initiative, InitiativeNote } from "@shared/contracts";
 import {
+  INITIATIVE_NOTE_KIND_LABELS,
   initiativeNoteExcerpt,
+  initiativeNoteTextProblem,
   MAX_INITIATIVE_BRIEF_BYTES,
   MAX_INITIATIVE_NOTE_BODY_BYTES,
   MAX_INITIATIVE_NOTE_TITLE_CHARS,
@@ -304,7 +306,7 @@ function NoteForm({
         aria-label="Note title"
         placeholder="Title"
         autoComplete="off"
-        aria-invalid={noteTitleTooLong(title) || undefined}
+        aria-invalid={noteTitleTooLong(title) || initiativeNoteTextProblem(title) !== null || undefined}
         aria-describedby={problem ? problemId : undefined}
         value={value.title}
         onChange={(event) => {
@@ -355,6 +357,11 @@ function noteFormProblem(title: string, body: string): { field: "title" | "body"
   if (noteTitleTooLong(title)) {
     return { field: "title", message: `Note titles are limited to ${MAX_INITIATIVE_NOTE_TITLE_CHARS} characters.` };
   }
+  // The runtime refuses these too; say so before sending.
+  const titleProblem = initiativeNoteTextProblem(title);
+  if (titleProblem) return { field: "title", message: titleProblem };
+  const bodyProblem = initiativeNoteTextProblem(body);
+  if (bodyProblem) return { field: "body", message: bodyProblem };
   if (utf8ByteLength(body) > MAX_INITIATIVE_NOTE_BODY_BYTES) {
     return {
       field: "body",
@@ -370,6 +377,51 @@ function ProvenanceBadge({ note }: { note: InitiativeNote }): React.JSX.Element 
     <span className="initiative-note-provenance" data-provenance={note.provenance}>
       {note.provenance === "agent" ? "Agent" : "You"}
     </span>
+  );
+}
+
+/**
+ * Note text can be written in any script. `dir="auto"` gives each title and
+ * body its own direction, and the stylesheet isolates it, so it never reorders
+ * the labels and buttons around it.
+ */
+function NoteTitle({ note }: { note: InitiativeNote }): React.JSX.Element {
+  return <span className="initiative-note-title" dir="auto">{note.title}</span>;
+}
+
+/** What an agent said its proposal records: a fact, a decision or a constraint. */
+function KindLabel({ note }: { note: InitiativeNote }): React.JSX.Element | null {
+  return note.kind ? <span className="initiative-note-kind">{INITIATIVE_NOTE_KIND_LABELS[note.kind]}</span> : null;
+}
+
+/** The chat an agent proposed a note from; choosing it opens that chat. */
+function NoteSource({
+  note,
+  conversation,
+  onOpenConversation,
+}: {
+  note: InitiativeNote;
+  conversation: Conversation | null;
+  onOpenConversation(conversation: Conversation): void;
+}): React.JSX.Element | null {
+  if (note.provenance !== "agent") return null;
+  if (!conversation) {
+    return (
+      <span className="initiative-note-source">
+        {note.sourceConversationId === null ? "From a deleted chat" : "From a chat that is no longer available"}
+      </span>
+    );
+  }
+  return (
+    // The visible text is the button's name; the title says what it does.
+    <button
+      type="button"
+      className="text-button initiative-note-source"
+      title={`Open the chat that proposed “${note.title}”`}
+      onClick={() => onOpenConversation(conversation)}
+    >
+      From <bdi>{conversation.title}</bdi>
+    </button>
   );
 }
 
@@ -391,16 +443,28 @@ export function InitiativeNotes({
   initiative,
   offline,
   confirmDestructiveActions,
+  conversations,
   loadNotes,
   onCommand,
+  onOpenConversation,
 }: {
   initiative: Initiative;
   offline: boolean;
   confirmDestructiveActions: boolean;
+  /** Every chat in the snapshot, to name and open the chat a proposal came from. */
+  conversations: readonly Conversation[];
   loadNotes(initiativeId: string): Promise<InitiativeNote[] | null>;
   /** Resolves true when the runtime applied the change. */
   onCommand(command: InitiativeNoteCommand): Promise<boolean>;
+  onOpenConversation(conversation: Conversation): void;
 }): React.JSX.Element {
+  const conversationsById = useMemo(
+    () => new Map(conversations.map((conversation) => [conversation.id, conversation])),
+    [conversations],
+  );
+  const sourceOf = (note: InitiativeNote): Conversation | null => note.sourceConversationId
+    ? conversationsById.get(note.sourceConversationId) ?? null
+    : null;
   const [notes, setNotes] = useState<InitiativeNote[] | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [editing, setEditing] = useState<{ id: string; mode: "edit" | "accept" } | null>(null);
@@ -469,7 +533,9 @@ export function InitiativeNotes({
   };
   const accepted = notes?.filter(({ state }) => state === "accepted") ?? [];
   const proposed = notes?.filter(({ state }) => state === "proposed") ?? [];
-  const full = accepted.length + proposed.length >= MAX_INITIATIVE_NOTES;
+  const rejected = notes?.filter(({ state }) => state === "rejected") ?? [];
+  // Proposals have their own limit; accepting one beyond this is refused with a reason.
+  const full = accepted.length >= MAX_INITIATIVE_NOTES;
   const closeAdd = (): void => {
     pendingFocus.current = "add";
     setAdding(false);
@@ -505,9 +571,11 @@ export function InitiativeNotes({
                 ) : (
                   <>
                     <div className="initiative-note-text">
-                      <span className="initiative-note-title">{note.title}</span>
+                      <NoteTitle note={note} />
                       <ProvenanceBadge note={note} />
-                      {note.body && <p className="initiative-note-body">{note.body}</p>}
+                      <KindLabel note={note} />
+                      <NoteSource note={note} conversation={sourceOf(note)} onOpenConversation={onOpenConversation} />
+                      {note.body && <p className="initiative-note-body" dir="auto">{note.body}</p>}
                     </div>
                     <div className="initiative-note-actions" role="group" aria-label={`Review ${note.title}`}>
                       <button
@@ -578,10 +646,10 @@ export function InitiativeNotes({
               ) : (
                 <>
                   <div className="initiative-note-text">
-                    <span className="initiative-note-title">{note.title}</span>
+                    <NoteTitle note={note} />
                     <ProvenanceBadge note={note} />
                     {note.body && (
-                      <p className="initiative-note-excerpt" title={note.body}>{initiativeNoteExcerpt(note.body)}</p>
+                      <p className="initiative-note-excerpt" dir="auto" title={note.body}>{initiativeNoteExcerpt(note.body)}</p>
                     )}
                   </div>
                   <div className="initiative-note-actions" role="group" aria-label={`Note ${note.title}`}>
@@ -614,6 +682,43 @@ export function InitiativeNotes({
             </li>
           ))}
         </ul>
+      )}
+      {rejected.length > 0 && (
+        <details className="initiative-note-rejected">
+          <summary data-note-focus="rejected">
+            Rejected <span className="initiative-note-rejected-count">{rejected.length}</span>
+          </summary>
+          <p className="initiative-memory-hint">
+            Agents cannot propose these titles again. Delete one to allow it.
+          </p>
+          <ul aria-label="Rejected notes">
+            {rejected.map((note) => (
+              <li key={note.id} className="initiative-note">
+                <div className="initiative-note-text">
+                  <NoteTitle note={note} />
+                  <ProvenanceBadge note={note} />
+                  <NoteSource note={note} conversation={sourceOf(note)} onOpenConversation={onOpenConversation} />
+                </div>
+                <div className="initiative-note-actions" role="group" aria-label={`Rejected note ${note.title}`}>
+                  <button
+                    type="button"
+                    className="text-button is-danger"
+                    aria-label={`Delete ${note.title}`}
+                    disabled={offline}
+                    onClick={() => {
+                      if (confirmDestructiveActions && !window.confirm(`Delete the rejected note “${note.title}”?`)) return;
+                      // The disclosure goes away with its last note; Add note is then the next stop.
+                      pendingFocus.current = rejected.length > 1 ? "rejected" : "add";
+                      void run({ type: "initiative.note.delete", payload: { id: note.id } });
+                    }}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {adding ? (
         <NoteForm

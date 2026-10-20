@@ -125,6 +125,7 @@ export class RecoveryRepository {
       this.database.prepare(`
         DELETE FROM messages
         WHERE turn_id = @turnId AND role = 'system' AND initiative_context_json IS NOT NULL
+          AND json_extract(initiative_context_json, '$.proposal') IS NULL
           AND EXISTS (SELECT 1 FROM agent_turns WHERE id = @turnId AND started_at IS NULL)
       `),
     ];

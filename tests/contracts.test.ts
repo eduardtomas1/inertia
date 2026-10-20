@@ -121,6 +121,28 @@ describe("conversation context contract boundary", () => {
       },
     };
     expect(serverEventSchema.safeParse(contextRequest).success).toBe(true);
+    // An initiative tool's request names its initiative, only for a named chat.
+    const sourceConversationId = crypto.randomUUID();
+    const initiativeRequest = (initiativeName: unknown, requested: string | null = sourceConversationId) => ({
+      ...contextRequest,
+      request: {
+        ...contextRequest.request,
+        conversationContextRequest: {
+          ...contextRequest.request.conversationContextRequest,
+          requestedSourceConversationId: requested,
+          initiativeName,
+        },
+      },
+    });
+    expect(serverEventSchema.safeParse(initiativeRequest("Checkout redesign")).success).toBe(true);
+    for (const invalid of [
+      initiativeRequest("Checkout redesign", null),
+      initiativeRequest(""),
+      initiativeRequest(" padded "),
+      initiativeRequest("two\nlines"),
+      initiativeRequest("x".repeat(121)),
+      initiativeRequest(7),
+    ]) expect(serverEventSchema.safeParse(invalid).success).toBe(false);
     expect(serverEventSchema.safeParse({
       ...contextRequest,
       request: {

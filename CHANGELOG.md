@@ -33,9 +33,24 @@ The useful changes in each Inertia release, in plain language.
   material no longer applies. A receipt under the message says what was
   shared, for example "Shared the initiative brief (revision 3) and 5 notes
   with the agent."; a message that never reached the agent leaves none. Notes
-  show who wrote them; agents cannot write notes yet, and the
-  review strip for their future proposals is already in place. A chat's
-  composer names its initiative and opens it in one click.
+  show who wrote them. A chat's composer names its initiative and opens it in
+  one click.
+- **Agents in an initiative** can see it, read it and suggest notes for it.
+  With the initiative tools (Codex, Claude, Cursor, Kimi and OpenCode; not
+  Antigravity or custom backends), an agent sees the initiative's brief revision, its notes and
+  its other chats with their status, reads a whole note, and reads another of
+  its chats after you approve it on the usual card, which now names the
+  initiative. It can also propose a note: proposals wait under **Needs
+  review** on the Initiatives page, marked **Agent** with the chat they came
+  from, and reach other chats only once you accept them; the chat shows
+  "Proposed an initiative note: …". Instruction-like text in a proposal is
+  escaped, titles with invisible, text-direction or separator characters are
+  refused, a title the initiative already has or that you rejected is not
+  proposed again, and one reply can propose at most five notes. At most 16
+  proposals, 5 from one chat, wait for review at a time, and they count toward
+  an initiative's 64 notes only once you accept them. Rejected notes are kept
+  in a **Rejected** list, where you can delete them. Notes in any script keep
+  their own text direction on the page.
 - **Tools & defaults** on the Initiatives page set what every chat in an
   initiative shares, each falling back to the chat's project and then
   Settings, with a hint saying where an inherited value comes from: a default

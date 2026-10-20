@@ -649,7 +649,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
+      harnessInstructionsForTurn: ({ conversation }) => agentThreads?.manager.capabilityInstructions(conversation) ?? [],
       hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));

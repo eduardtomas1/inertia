@@ -4,6 +4,15 @@ import { ACCESS_MODES } from "./access-modes";
 import { modelSelectionSchema, type ModelSelection } from "./model-routing";
 import { PROJECT_COLOR_NAMES, type ProjectColorName } from "./project-colors";
 import { isValidClaudeTurnBudgetUsd } from "./claude-turn-budget";
+import { INITIATIVE_NOTE_KINDS, type InitiativeNoteKind } from "./initiative-note-proposals";
+
+export {
+  INITIATIVE_NOTE_KIND_LABELS,
+  INITIATIVE_NOTE_KINDS,
+  initiativeNoteProposalReceiptText,
+  isInitiativeNoteProposalReceipt,
+  type InitiativeNoteKind,
+} from "./initiative-note-proposals";
 
 /**
  * An Initiative is a named group of chats across any projects, including chats
@@ -19,8 +28,15 @@ export const MAX_INITIATIVE_NAME_CHARS = 120;
  * (`length(CAST(brief AS BLOB))`), because later phases budget prompt bytes.
  */
 export const MAX_INITIATIVE_BRIEF_BYTES = 8_192;
-/** Accepted and proposed notes per initiative; rejected notes are not counted. */
+/**
+ * Accepted notes per initiative. Agent proposals have their own limits below
+ * and count here only once the user accepts them; rejected notes never count.
+ */
 export const MAX_INITIATIVE_NOTES = 64;
+/** Agent proposals waiting for the user's review in one initiative. */
+export const MAX_PENDING_INITIATIVE_NOTE_PROPOSALS = 16;
+/** Agent proposals waiting for review that one chat of an initiative proposed. */
+export const MAX_PENDING_INITIATIVE_NOTE_PROPOSALS_PER_CHAT = 5;
 /** Rejected notes kept per initiative for their provenance; older ones are pruned. */
 export const MAX_REJECTED_INITIATIVE_NOTES = 64;
 /** Counted in code points, like initiative names. */
@@ -35,6 +51,8 @@ export const MAX_INITIATIVE_NOTE_INDEX_EXCERPT_CHARS = 160;
 /** Who wrote a note. Agents can only propose; the user accepts. */
 export const NOTE_PROVENANCES = ["user", "agent"] as const;
 export const NOTE_STATES = ["proposed", "accepted", "rejected"] as const;
+/** Notes one agent turn may propose; further proposals in that turn are refused. */
+export const MAX_INITIATIVE_NOTE_PROPOSALS_PER_TURN = 5;
 
 export const INITIATIVE_STATUSES = ["active", "done", "archived"] as const;
 
@@ -65,6 +83,63 @@ export const INITIATIVE_STATUS_LABELS: Readonly<Record<InitiativeStatus, string>
  * and no leading or trailing space (SQLite `trim()` strips only spaces).
  */
 const SINGLE_LINE_FORBIDDEN = /[\0\t\n\r]/u;
+
+/*
+ * Unicode that would make a note read differently than it is stored. Refused
+ * where text enters (the user's commands and the agent tool), never in the
+ * stored schemas, so a row the database holds always parses.
+ */
+
+/**
+ * Bidirectional embedding, override and isolate controls (U+202A–U+202E,
+ * U+2066–U+2069): they reorder how the text around them is displayed.
+ */
+const BIDI_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/u;
+/** Line and paragraph separators (U+2028, U+2029) break a line without a newline. */
+const UNICODE_SEPARATORS = /[\p{Zl}\p{Zp}]/u;
+/**
+ * Agent titles also refuse C0 and C1 controls and every format character,
+ * which covers zero-width spaces and joiners as well as the bidi controls.
+ */
+const AGENT_TITLE_FORBIDDEN = /[\u0000-\u001f\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/u;
+/** Characters that display as nothing, such as zero-width or filler characters. */
+const DEFAULT_IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
+const LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
+
+const DIRECTION_CONTROL_MESSAGE = "Remove the text-direction control characters.";
+const SEPARATOR_MESSAGE = "Use ordinary line breaks instead of Unicode line or paragraph separators.";
+
+/**
+ * Why the user's note title or text cannot be saved as typed, or null. Only
+ * the characters that change how a note reads are refused; titles otherwise
+ * stay as permissive as the stored rule.
+ */
+export function initiativeNoteTextProblem(value: string): string | null {
+  if (BIDI_CONTROLS.test(value)) return DIRECTION_CONTROL_MESSAGE;
+  if (UNICODE_SEPARATORS.test(value)) return SEPARATOR_MESSAGE;
+  return null;
+}
+
+/**
+ * Why an agent's proposed title is refused, or null: one line of visible
+ * text, without control, format or separator characters, with at least one
+ * letter or digit that is not invisible.
+ */
+export function agentInitiativeNoteTitleProblem(value: string): string | null {
+  if (AGENT_TITLE_FORBIDDEN.test(value)) {
+    return "Use one line of plain text without control, invisible formatting, text-direction or separator characters.";
+  }
+  if (!LETTER_OR_NUMBER.test(value.replace(DEFAULT_IGNORABLE, ""))) {
+    return "Use at least one visible letter or digit.";
+  }
+  return null;
+}
+
+/** Why an agent's proposed note text is refused, or null. Other text is neutralised, not refused. */
+export function agentInitiativeNoteBodyProblem(value: string): string | null {
+  if (value.includes("\0")) return "Remove NUL characters.";
+  return initiativeNoteTextProblem(value);
+}
 
 function storedSingleLine(value: string, maximum: number): boolean {
   const length = [...value].length;
@@ -290,7 +365,7 @@ export const initiativeSchema = z.object({
   /** Moves whenever the set or content of accepted notes changes. */
   notesRevision: z.number().int().min(0),
   /** Agent proposals waiting for the user; they are never shared with agents. */
-  proposedNoteCount: z.number().int().min(0).max(MAX_INITIATIVE_NOTES),
+  proposedNoteCount: z.number().int().min(0).max(MAX_PENDING_INITIATIVE_NOTE_PROPOSALS),
   // The SQL column allows 0 (its default); new rows start at 1.
   revision: z.number().int().min(0),
   createdAt: timestampSchema,
@@ -377,8 +452,21 @@ export const initiativeNoteTitleSchema = z.string().refine(
   "Note titles need 1 to 120 characters on one line, without tabs.",
 );
 
-/** A title as typed: surrounding whitespace is dropped, then the stored rule applies. */
-export const initiativeNoteTitleInputSchema = z.string().trim().pipe(initiativeNoteTitleSchema);
+/** Refuses, with its own message, the characters `initiativeNoteTextProblem` names. */
+function withoutTextProblems<T extends z.ZodType<string>>(schema: T) {
+  return schema.superRefine((value, context) => {
+    const problem = initiativeNoteTextProblem(value);
+    if (problem) context.addIssue({ code: "custom", message: problem });
+  });
+}
+
+/**
+ * A title as typed: surrounding whitespace is dropped, then the stored rule
+ * applies, and text-direction controls and Unicode separators are refused.
+ */
+export const initiativeNoteTitleInputSchema = withoutTextProblems(
+  z.string().trim().pipe(initiativeNoteTitleSchema),
+);
 
 /** A note body as stored; mirrors the SQL CHECK, counting UTF-8 bytes. May be empty. */
 export const initiativeNoteBodySchema = z.string()
@@ -387,6 +475,9 @@ export const initiativeNoteBodySchema = z.string()
     (value) => utf8ByteLength(value) <= MAX_INITIATIVE_NOTE_BODY_BYTES,
     `Notes are limited to ${MAX_INITIATIVE_NOTE_BODY_BYTES} bytes.`,
   );
+
+/** A note body as typed: the stored rule, without text-direction controls or Unicode separators. */
+export const initiativeNoteBodyInputSchema = withoutTextProblems(initiativeNoteBodySchema);
 
 export const initiativeNoteSchema = z.object({
   id: z.string().uuid(),
@@ -397,24 +488,56 @@ export const initiativeNoteSchema = z.object({
   state: initiativeNoteStateSchema,
   /** The chat an agent proposed it from; null for user notes or once that chat is deleted. */
   sourceConversationId: z.string().min(1).max(200).nullable(),
+  /** What an agent said its proposal records; null for user notes and unlabelled proposals. */
+  kind: z.enum(INITIATIVE_NOTE_KINDS).nullable(),
   revision: z.number().int().min(0),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
-}).strict();
+}).strict().refine(
+  ({ provenance, kind }) => provenance === "agent" || kind === null,
+  "Only an agent's proposal records a kind.",
+);
 
 export type InitiativeNote = z.infer<typeof initiativeNoteSchema>;
 
-/** A notes read result: one initiative's accepted notes and proposals, each unique. */
+const MAX_NOTES_BY_STATE: Readonly<Record<InitiativeNoteState, number>> = {
+  accepted: MAX_INITIATIVE_NOTES,
+  proposed: MAX_PENDING_INITIATIVE_NOTE_PROPOSALS,
+  rejected: MAX_REJECTED_INITIATIVE_NOTES,
+};
+
+/**
+ * A notes read result: one initiative's notes, each unique, within the bounds
+ * the store keeps (accepted notes, proposals waiting for review, and the
+ * rejected ones kept for their provenance).
+ */
 export function isInitiativeNotesResult(value: Record<string, unknown>): boolean {
   const { initiativeId, notes } = value;
-  if (typeof initiativeId !== "string" || !Array.isArray(notes) || notes.length > MAX_INITIATIVE_NOTES) return false;
+  if (
+    typeof initiativeId !== "string"
+    || !Array.isArray(notes)
+    || notes.length > MAX_INITIATIVE_NOTES + MAX_PENDING_INITIATIVE_NOTE_PROPOSALS + MAX_REJECTED_INITIATIVE_NOTES
+  ) return false;
   const ids = new Set<string>();
+  const counts: Record<InitiativeNoteState, number> = { accepted: 0, proposed: 0, rejected: 0 };
   for (const entry of notes as unknown[]) {
     const parsed = initiativeNoteSchema.safeParse(entry);
-    if (!parsed.success || parsed.data.initiativeId !== initiativeId || parsed.data.state === "rejected") return false;
+    if (!parsed.success || parsed.data.initiativeId !== initiativeId) return false;
+    counts[parsed.data.state] += 1;
     ids.add(parsed.data.id);
   }
-  return ids.size === notes.length;
+  return ids.size === notes.length
+    && NOTE_STATES.every((state) => counts[state] <= MAX_NOTES_BY_STATE[state]);
+}
+
+/**
+ * The form two note titles are compared in to find a repeated proposal:
+ * invisible characters removed, then compatibility-normalised, whitespace
+ * collapsed, trimmed and case-folded, so a title with a zero-width or filler
+ * character still matches the one it imitates.
+ */
+export function normalizedInitiativeNoteTitle(title: string): string {
+  return title.replace(DEFAULT_IGNORABLE, "").normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
 /** Stable note order: creation time, then identity. */
@@ -494,6 +617,12 @@ export interface InitiativeContextReceipt {
   notes: { revision: number; count: number; change: InitiativeContextChange } | null;
   /** Set when the turn told the agent that the chat left the initiative it last heard about. */
   left?: true;
+  /**
+   * Set instead of shared material when the turn's agent proposed a note to
+   * its initiative. The note waits for the user's review on the Initiative
+   * page; this receipt only records the proposal in the proposing chat.
+   */
+  proposal?: { noteId: string; kind: InitiativeNoteKind | null };
 }
 
 export const MAX_INITIATIVE_CONTEXT_RECEIPT_JSON_BYTES = 512;
@@ -511,17 +640,26 @@ export const initiativeContextReceiptSchema = z.object({
     change: z.enum(INITIATIVE_CONTEXT_CHANGES),
   }).strict().nullable(),
   left: z.literal(true).optional(),
+  proposal: z.object({
+    noteId: z.string().uuid(),
+    kind: z.enum(INITIATIVE_NOTE_KINDS).nullable(),
+  }).strict().optional(),
 }).strict().refine(
-  ({ brief, notes, left }) => brief !== null || notes !== null || left === true,
-  "An initiative context receipt must describe a brief, notes or leaving an initiative.",
+  ({ brief, notes, left, proposal }) => brief !== null || notes !== null || left === true || proposal !== undefined,
+  "An initiative context receipt must describe a brief, notes, leaving an initiative or a proposal.",
 ).refine(
   ({ initiativeId, brief, notes }) => initiativeId !== null || (brief === null && notes === null),
   "Shared initiative material must name its initiative.",
+).refine(
+  ({ initiativeId, brief, notes, left, proposal }) => proposal === undefined
+    || (initiativeId !== null && brief === null && notes === null && left === undefined),
+  "A note proposal receipt names its initiative and nothing else.",
 );
 
 export function isInitiativeContextReceipt(value: unknown): value is InitiativeContextReceipt {
   return initiativeContextReceiptSchema.safeParse(value).success;
 }
+
 
 function sharedMaterialText(receipt: Pick<InitiativeContextReceipt, "brief" | "notes">): string | null {
   const { brief, notes } = receipt;

@@ -373,9 +373,12 @@ export class TurnLedgerRepository {
     record: TurnInitiativeContextRecord | null,
     at: string,
   ): ChatMessage | undefined {
+    // A note proposal's receipt records what the agent did during the turn,
+    // not what the request carried, so it stays.
     this.context.database.prepare(`
       DELETE FROM messages
       WHERE turn_id = ? AND role = 'system' AND initiative_context_json IS NOT NULL
+        AND json_extract(initiative_context_json, '$.proposal') IS NULL
     `).run(turn.id);
     if (!record) {
       clearInitiativeContextDelivery(this.context.database, turn.id);

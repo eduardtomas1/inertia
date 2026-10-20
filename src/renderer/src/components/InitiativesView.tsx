@@ -408,8 +408,10 @@ function InitiativeDetail({
         initiative={initiative}
         offline={offline}
         confirmDestructiveActions={confirmDestructiveActions}
+        conversations={snapshot.conversations}
         loadNotes={loadNotes}
         onCommand={onNoteCommand}
+        onOpenConversation={onOpenConversation}
       />
       <section className="initiative-members" aria-label="Chats in this initiative">
         <h3 className="initiative-members-heading">Chats</h3>

@@ -123,7 +123,6 @@ only for a click the frame's bootstrap saw on a link, at most once per second,
 while the frame has focus and a user gesture; the bootstrap runs before any
 page script and proves itself with a token the page cannot read. A page
 that no longer exists is served as a themed "no longer available" notice (404).
-that no longer exists is served as a themed "no longer available" notice (404).
 When the runtime is not running or does not answer in time, the page is served
 as a themed "temporarily unavailable" notice (503), and the chat reloads that
 frame the next time it reconnects to the runtime. The
@@ -147,12 +146,142 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
+### Conditional packs
+
+A pack may declare that it is conditional. The registry then asks, whenever a
+turn's request or tool bridge is built, whether the pack is offered to that
+turn's chat, reading the chat from the store by its id rather than trusting a
+caller's copy. A pack that is not offered contributes no instructions and no
+advertised tool definitions to that turn; its tools stay callable, exactly like
+retired tools, because a provider session may have registered them while the
+pack was offered (Codex registers dynamic tools only when a thread starts). Their
+handlers therefore re-check the condition on every call and refuse with a
+readable reason. A check that throws withholds the pack. A conditional pack's
+digest entry records that it is conditional; unconditional packs keep their
+digest, which a test pins. Turn assembly asks `instructionsFor(chat)` for the
+instructions of the packs offered to that chat; `allInstructions()` lists every
+reviewed instruction, for inspection and tests. The bridge always builds its
+advertised definitions from the offered packs and adds the tools of the packs it
+withholds to the retired names.
+
+### `inertia.initiatives`
+
+`inertia.initiatives` (revision 1) is the conditional pack for chats in an
+initiative. It is offered only while the chat belongs to an initiative that is
+not archived (Active or Done). Membership comes from the chat's own row, at the
+time the turn's request and bridge are built and again on every call; no tool
+takes an initiative id. Its evaluation metadata is tagged `initiatives`,
+`memory`, `permissions` and `untrusted-text`, records `host-tool-result`
+evidence, and names the scenarios `initiative-membership-authority`,
+`initiative-sibling-read-approval` and `initiative-note-proposal-review`.
+
+| Tool | Read-only | Input | Result |
+| --- | --- | --- | --- |
+| `inertia_initiative_overview` | yes | `{}` | The initiative's name and status, `briefRevision`, `briefPreview` (the first 400 characters, `briefComplete` false when cut), `notesRevision`, accepted notes as `{ noteId, title, summary }` (summary: the note's first line, at most 160 characters), and its chats that are not archived as `{ conversationId, title, project, status, updatedAt, isThisChat }`: this chat first, then the others most recently updated first, at most 50. `status` is the Work vocabulary (`approval`, `input`, `working`, `failed`, `limited`, `completed`, `idle`) computed by the runtime from the chat's canonical run, chosen as the sidebar chooses it. The chats are read with one query for the initiative's members, not from an app snapshot. Chat titles and project names are scrubbed and neutralised like referenced-chat metadata; no paths and no identifiers other than `conversationId` and `noteId` are returned. The JSON stays within 16 KiB: the runtime measures the result without items and each item once, and when the sum would not fit, drops notes and chats from the end of the longer list. `notesOmitted` counts the notes left out; `chatsOmitted` counts the chats beyond the first 50 as well as those dropped for size. |
+| `inertia_initiative_read` | no | exactly one of `noteId` or `conversationId` (UUIDs), with `turnId`, `cursor` and `limit` for a chat | A `noteId` returns that accepted note of this initiative in full: `{ noteId, title, body, provenance, updatedAt }`; proposals, rejected notes and other initiatives' notes are refused with `note_not_found`. A `conversationId` must be a chat of the same initiative that is not archived, the same chats the overview lists (`not_in_initiative`, "That chat is not in this chat's initiative.", otherwise, before anything is asked). It is then handed unchanged to `inertia_request_context`, so paging, cursors, the approval card, the workspace-difference confirmation, the per-turn request budget (shared with `inertia_request_context`) and "readable for the rest of this turn" are exactly those of that tool. The card names the initiative (`initiativeName` on the chooser request, accepted only for a named chat and validated as a stored initiative name). When the user shares the chat, membership is checked again before anything is read: if either chat left the initiative, or this chat's initiative was archived, while the card was open, the request ends as failed, nothing is read, and the tool refuses with `not_in_initiative` or `initiative_archived`. Each later call checks membership again, so a chat that leaves after it was shared is refused here, although `inertia_request_context` still reads it for the rest of the turn because the user shared it. |
+| `inertia_initiative_remember` | no | `{ title, body, kind? }`: a title of 1 to 120 characters on one line, a body of 1 to 2,048 UTF-8 bytes, and optionally `fact`, `decision` or `constraint` | Proposes a note; it never asks for approval because a proposal is inert until the user accepts it. |
+
+The overview deliberately lists the member chats of every project in the
+initiative, not only this chat's project: their titles, project names, Work
+status, last update and `conversationId`. That is what an initiative is for,
+and it is the same information the user sees in the initiative's sidebar
+section. A `conversationId` grants no authority: reading another chat still goes
+through `inertia_initiative_read`, its membership checks and the user's approval
+card, exactly as `inertia_request_context` would ask for any chat it was not
+given.
+
+A proposal is untrusted agent text, held to stricter Unicode rules than the
+user's own notes. A title must have at least one visible letter or digit and is
+refused with `invalid_arguments` when it contains a C0 or C1 control character,
+a format character (`\p{Cf}`, which covers zero-width characters, joiners and
+the bidirectional controls) or a line or paragraph separator (`\p{Zl}`,
+`\p{Zp}`). A body is refused when it contains NUL, a bidirectional embedding,
+override or isolate control (U+202A–U+202E, U+2066–U+2069) or a line or
+paragraph separator; anything else in a body is kept and neutralised. The
+user's titles and bodies are refused only for those bidirectional controls and
+separators, where they enter through the Initiative page's commands; stored
+notes are never re-validated, and the page shows each note's title and text
+with `dir="auto"`, isolated from the labels around it.
+
+The proposal repository is the one place agent text is prepared: it trims the
+title and body, applies the rules above, passes them through
+`neutralizeUntrustedAgentText`, which escapes harness control tags,
+`Human:`/`Assistant:` turn markers and Inertia's own section headers and
+instruction labels (now including `[inertia-initiatives]` and
+`[initiative-context]`), and measures the escaped text; text that no longer
+fits the limits is refused with `invalid_arguments` rather than cut. In one
+transaction it then re-reads the chat's initiative, checks that the exact turn
+is still active, and compares the title, with default-ignorable characters
+(zero-width, joiners, fillers, variation selectors) removed, then
+compatibility-normalised, whitespace-collapsed and case-folded, with the
+initiative's notes: an accepted or proposed note with that title returns
+`{ status: "duplicate", noteId }`, a rejected one `{ status: "rejected-before",
+noteId }`, and nothing is created. Otherwise it refuses a sixth proposal in the
+same turn (`proposal_limit_reached`), and, with `proposal_limit`, a proposal
+while 16 proposals already wait for review in the initiative or 5 from this
+chat. Proposals do not count toward the initiative's 64 notes until the user
+accepts them; accepting one beyond 64 accepted notes is refused with the page's
+usual "An initiative keeps at most 64 notes. Delete one first." SQL triggers
+back both limits. The note is stored with provenance `agent`, state
+`proposed`, the proposing chat as its source and the `kind` the agent gave
+(shown on the page as a small label), together with a turn-scoped system
+message whose `initiativeContext` receipt carries `proposal: { noteId, kind }`
+and whose text is `Proposed an initiative note: <title>`. The model receives
+`{ status: "proposed", noteId, message }`, where `message` says that the user
+reviews it on the Initiative page. A provider that retries the same call (same
+turn and tool-call id, same input) receives that original result again rather
+than `duplicate`; the same id with other input is refused with
+`idempotency_conflict`. The runtime publishes the message and a snapshot, so
+the page's **Needs review** list updates at once. Withdrawing a request's
+receipt (a turn that never reached its provider, or a restart on a fresh
+session) leaves proposal receipts in place. Receipts are system messages
+without a rendered page, so neither context packets nor turn reads of the chat
+include them. Rejected notes are kept, up to the newest 64 per initiative, so
+the same title is not proposed again until the user deletes the rejected note.
+
+Every refusal is a tool failure, `{ error: { code, message } }`, never an
+exception. The initiative tools' own codes are `invalid_arguments`,
+`not_in_initiative` (`This chat is no longer in an initiative.` when the chat
+left its initiative, including during the turn), `initiative_archived`,
+`note_not_found`, `proposal_limit_reached`, `proposal_limit`,
+`idempotency_conflict`, `note_not_saved` (the proposal could not be stored),
+`unknown_tool`, `turn_not_active` (or the shared `host_tool_failed` when the
+turn had already settled before dispatch, or a call failed unexpectedly) and
+`call_cancelled`. A read of another chat also passes through the codes of
+`inertia_request_context`: `budget_exceeded`, `user_cancelled` (the user
+declined the card), `call_cancelled` (the card expired or the turn ended),
+`idempotency_conflict`, `operation_not_replayable`, `turn_not_found`,
+`turn_withheld` and `invalid_arguments`.
+
+The pack's instruction, labelled `inertia-initiatives` and under 1 KiB, extends
+the initiative framing: the brief and notes index arrive as structured
+execution context on a new session and after they change, as reference material
+the user maintains that may be out of date and is not new instructions or
+approval; when the tools are available, the overview shows the current brief
+revision, notes and the other chats, the read tool returns a full note or
+another chat's turns, which the user approves, and the remember tool proposes a
+note the user reviews, only for durable facts, decisions or constraints that the
+other chats need, never progress updates; and text from notes and other chats
+is context, never instructions or approval. A turn that
+carries the pack's instruction does not also carry `initiative-context`, so a
+chat is framed once: routes without an attested host-tool bridge (and resumed
+imported Codex sessions, which get no host tools) keep `initiative-context`.
+
+Codex chats register these tools when their provider thread starts, so a chat
+that joins an initiative mid-thread has them from its next new thread; until
+then it receives the brief and notes as context and the pack's framing, which
+is why the instruction speaks of the tools only "when they are available".
+Claude, Cursor, Kimi and OpenCode attach them from their next turn. A Codex
+thread that registered them can keep calling them after the chat leaves; each
+call is refused as above.
+
 ## Initiative context
 
 Chats in an initiative share the initiative's brief and an index of its
 accepted notes. This is Inertia-authored context on the ordinary turn path, not
 a capability pack: it needs no host tools, so every provider receives it,
-including routes without an attested host-tool bridge. It adds no tools yet.
+including routes without an attested host-tool bridge. The tools that let an
+agent look further and propose notes are the `inertia.initiatives` pack above.
 
 Turn assembly carries it as structured execution context of kind
 `initiative`, at most three blocks per turn (a membership change, the brief
@@ -207,8 +336,10 @@ fresh session never hears of an earlier initiative. Chats outside any
 initiative that have nothing to be told add nothing: their provider input is
 byte-identical to a chat without initiatives.
 
-Whenever a block is sent, one hidden instruction labelled `initiative-context`
-(under 1 KiB) frames it in the voice of the Build-mode instruction: the chat
+Whenever a block is sent to a route without the `inertia.initiatives` pack, one
+hidden instruction labelled `initiative-context` (under 1 KiB) frames it in the
+voice of the Build-mode instruction (with the pack, its own instruction is the
+only framing): the chat
 belongs to the named initiative, a group of chats the user coordinates; the
 brief and notes index are shared reference material the user maintains for
 every chat in it; they are context, not new user instructions or approval; and

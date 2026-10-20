@@ -1,6 +1,7 @@
 import { lazy, Suspense, useLayoutEffect, useMemo, useState } from "react";
 import { Flag, MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
+import { INITIATIVE_NOTE_KIND_LABELS } from "@shared/initiative-note-proposals";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
@@ -403,6 +404,22 @@ export function AgentExecutionLayer({
           <div className="message-body">{message.content}</div>
         </article>
       ))}
+      {turn.initiativeNoteProposals.length > 0 && (
+        <div className="sent-context" aria-label="Proposed initiative notes">
+          {turn.initiativeNoteProposals.map((message) => {
+            const kind = message.initiativeContext?.proposal?.kind ?? null;
+            return (
+              <span key={message.id} data-initiative-context="" data-initiative-proposal="">
+                <Flag size={14} aria-hidden="true" />
+                <span>
+                  <strong>{kind ? `Initiative note · ${INITIATIVE_NOTE_KIND_LABELS[kind]}` : "Initiative note"}</strong>
+                  <small title={message.content}>{message.content}</small>
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

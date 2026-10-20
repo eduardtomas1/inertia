@@ -41,6 +41,7 @@ import {
   sharesInterruptionEndpoint,
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
+import { INITIATIVES_INSTRUCTION_LABEL } from "../initiative-host-tools";
 import { broadcastConversationShell } from "./turn-controller-support";
 import type {
   ActiveTurn,
@@ -270,6 +271,11 @@ export function resolveTurnRequest(
     : resolvedContinuation;
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
+  // A chat that has the initiative tools is framed once, by their pack; the
+  // shorter `initiative-context` framing is only for routes without them.
+  const framedByInitiativeTools = !resumesImportedCodex && capabilityInstructions.some(
+    ({ label }) => label === INITIATIVES_INSTRUCTION_LABEL,
+  );
   const contextPacketIds = request.context?.conversationContextPacketIds ?? [];
   const interruptedTurnId = dependencies.store.turnLedgerRepository
     .runtimeInterruptionSource(conversation.id);
@@ -325,7 +331,9 @@ export function resolveTurnRequest(
       ...(initiative
         ? {
             initiativeContexts: initiative.contexts,
-            internalInstructions: [...assemblyInput.internalInstructions, initiative.instruction],
+            internalInstructions: framedByInitiativeTools
+              ? assemblyInput.internalInstructions
+              : [...assemblyInput.internalInstructions, initiative.instruction],
           }
         : {}),
     }),

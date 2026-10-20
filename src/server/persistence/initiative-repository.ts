@@ -24,6 +24,7 @@ import {
   type InitiativePreferences,
 } from "../../shared/initiatives";
 import { InitiativeContextDeliveryRepository } from "./initiative-context-delivery-repository";
+import { initiativeMemberChats, type InitiativeMemberChat } from "./initiative-member-chats";
 import { InitiativeNoteRepository } from "./initiative-note-repository";
 import { InitiativeRepositoryError } from "./initiative-repository-error";
 import { lowerQueuedMessageAccess } from "./queued-message-repository";
@@ -176,7 +177,7 @@ export function enforceInitiativeAccessLimitForTurn(
 
 export class InitiativeRepository {
   private malformedRowReported = false;
-  /** Notes curated on the Initiative page; agent proposals arrive in a later phase. */
+  /** Notes curated on the Initiative page, and agent proposals waiting for review. */
   readonly notes: InitiativeNoteRepository;
   /** What each chat last received of the brief and notes index. */
   readonly deliveries: InitiativeContextDeliveryRepository;
@@ -390,6 +391,14 @@ export class InitiativeRepository {
         .run(initiativeId);
       this.database.prepare("DELETE FROM initiatives WHERE id = ?").run(initiativeId);
     })();
+  }
+
+  /** See `initiativeMemberChats`: the chats an initiative's agents are shown. */
+  memberChats(initiativeId: string, options: { first: string | null; limit: number }): {
+    chats: InitiativeMemberChat[];
+    total: number;
+  } {
+    return initiativeMemberChats(this.database, initiativeId, options);
   }
 
   /**

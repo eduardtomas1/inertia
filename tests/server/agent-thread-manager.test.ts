@@ -367,11 +367,17 @@ describe("AgentThreadManager", () => {
         definitionDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
         packs: [
           expect.objectContaining({ id: "inertia.frontend-workbench" }),
+          expect.objectContaining({
+            id: "inertia.initiatives",
+            revision: 1,
+            toolNames: ["inertia_initiative_overview", "inertia_initiative_read", "inertia_initiative_remember"],
+          }),
           expect.objectContaining({ id: "inertia.orchestration" }),
           expect.objectContaining({ id: "inertia.visual-replies", revision: 1, toolNames: ["inertia_render_html"] }),
         ],
       });
-      expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
+      // A chat outside any initiative is not offered the initiative pack.
+      expect(manager.capabilityInstructions(source).map(({ label }) => label)).toEqual([
         "inertia-frontend-workbench",
         "inertia-orchestration",
       ]);
@@ -394,6 +400,7 @@ describe("AgentThreadManager", () => {
       } | undefined)?.route;
       expect(route?.properties?.providerId?.enum).toContain("kimi");
       expect(manager.capabilityManifest().packs.map(({ id }) => id)).toEqual([
+        "inertia.initiatives",
         "inertia.orchestration",
         "inertia.visual-replies",
       ]);

@@ -421,6 +421,7 @@ function noteFixture(index: number, overrides: Partial<InitiativeNote> = {}): In
     provenance: "user",
     state: "accepted",
     sourceConversationId: null,
+    kind: null,
     revision: 1,
     createdAt: AT,
     updatedAt: AT,
@@ -786,6 +787,134 @@ describe("Initiative notes", () => {
       },
     }, { passive: true }));
     expect(props.onError).not.toHaveBeenCalled();
+  });
+
+  it("names and opens the chat an agent proposed from, labels its kind, and says when that chat is gone", async () => {
+    const proposals = [
+      noteFixture(3, {
+        title: "Cache totals", provenance: "agent", state: "proposed", sourceConversationId: "working", kind: "decision",
+      }),
+      noteFixture(4, { title: "Orphan idea", provenance: "agent", state: "proposed", sourceConversationId: null }),
+    ];
+    const { props } = renderView({}, () => proposals);
+    const review = await screen.findByRole("region", { name: "Needs review" });
+    // The accessible name is the visible text.
+    const source = within(review).getByRole("button", { name: "From Build the form" });
+    expect(source).toHaveAttribute("title", "Open the chat that proposed “Cache totals”");
+    expect(within(review).getAllByText("Agent")).toHaveLength(2);
+    const cache = within(review).getByRole("group", { name: "Review Cache totals" }).closest("li")!;
+    expect(within(cache).getByText("Decision")).toHaveClass("initiative-note-kind");
+    // A proposal without a kind shows none.
+    const orphan = within(review).getByRole("group", { name: "Review Orphan idea" }).closest("li")!;
+    expect(orphan.querySelector(".initiative-note-kind")).toBeNull();
+    fireEvent.click(source);
+    expect(props.onOpenConversation).toHaveBeenCalledWith(expect.objectContaining({ id: "working" }));
+    expect(within(review).getByText("From a deleted chat")).toBeInTheDocument();
+    // User notes name no source chat.
+    expect(screen.queryByText(/^From /u, { selector: ".initiative-note-list *" })).toBeNull();
+  });
+
+  it("lists rejected notes in a closed disclosure and deletes one after confirmation", async () => {
+    const confirm = vi.fn().mockReturnValue(true);
+    vi.stubGlobal("confirm", confirm);
+    const notes = [
+      noteFixture(1),
+      noteFixture(6, { title: "Drop guest checkout", provenance: "agent", state: "rejected", sourceConversationId: "waiting" }),
+      noteFixture(7, { title: "Use MySQL", provenance: "agent", state: "rejected" }),
+    ];
+    const { props } = renderView({}, () => notes);
+    const notesRegion = await screen.findByRole("region", { name: "Notes" });
+    const disclosure = await within(notesRegion).findByText("Rejected", { exact: false, selector: "summary" });
+    const details = disclosure.closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    expect(disclosure).toHaveTextContent(/^Rejected\s*2$/u);
+    // Rejected notes are neither shared notes nor waiting for review.
+    expect(within(notesRegion).getByRole("list", { name: "Shared notes" })).not.toHaveTextContent("Use MySQL");
+    expect(within(notesRegion).queryByRole("region", { name: "Needs review" })).toBeNull();
+    fireEvent.click(disclosure);
+    expect(details).toHaveAttribute("open");
+    const rejected = within(details).getByRole("list", { name: "Rejected notes" });
+    expect(within(rejected).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(rejected).getByRole("button", { name: "From Approve the plan" })).toBeInTheDocument();
+    fireEvent.click(within(rejected).getByRole("button", { name: "Delete Use MySQL" }));
+    expect(confirm).toHaveBeenCalledWith("Delete the rejected note “Use MySQL”?");
+    await waitFor(() => expect(props.request).toHaveBeenLastCalledWith({
+      type: "initiative.note.delete",
+      payload: { id: notes[2]!.id },
+    }, { passive: true }));
+    // Focus stays in the disclosure rather than falling to the page.
+    await waitFor(() => expect(disclosure).toHaveFocus());
+
+    confirm.mockReturnValue(false);
+    fireEvent.click(within(rejected).getByRole("button", { name: "Delete Drop guest checkout" }));
+    expect(props.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves focus to Add note when the last rejected note is deleted", async () => {
+    let notes = [
+      noteFixture(1),
+      noteFixture(7, { title: "Use MySQL", provenance: "agent", state: "rejected" }),
+    ];
+    const { props } = renderView({ settings: { ...defaultSettings, confirmDestructiveActions: false } }, () => notes);
+    const disclosure = await screen.findByText("Rejected", { exact: false, selector: "summary" });
+    fireEvent.click(disclosure);
+    const remove = within(disclosure.closest("details")!).getByRole("button", { name: "Delete Use MySQL" });
+    remove.focus();
+    notes = [noteFixture(1)];
+    fireEvent.click(remove);
+    await waitFor(() => expect(props.request).toHaveBeenCalledExactlyOnceWith({
+      type: "initiative.note.delete",
+      payload: { id: noteFixture(7).id },
+    }, { passive: true }));
+    await waitFor(() => expect(screen.queryByText("Rejected", { exact: false, selector: "summary" })).toBeNull());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add note" })).toHaveFocus());
+  });
+
+  it("gives note titles and text their own direction, isolated from the labels around them", async () => {
+    renderView({}, () => [
+      noteFixture(1, { title: "קופה", body: "שורה ראשונה\nSecond line" }),
+      noteFixture(3, { title: "Cache totals", body: "Per step.", provenance: "agent", state: "proposed" }),
+      noteFixture(7, { title: "Use MySQL", provenance: "agent", state: "rejected" }),
+    ]);
+    const notes = await screen.findByRole("region", { name: "Notes" });
+    await within(notes).findByText("קופה");
+    const titles = [...notes.querySelectorAll(".initiative-note-title")];
+    expect(titles.map((title) => title.textContent)).toEqual(["Cache totals", "קופה", "Use MySQL"]);
+    for (const element of [...titles, ...notes.querySelectorAll(".initiative-note-excerpt, .initiative-note-body")]) {
+      expect(element).toHaveAttribute("dir", "auto");
+    }
+    expect(notes.querySelectorAll(".initiative-note-excerpt, .initiative-note-body")).toHaveLength(2);
+  });
+
+  it("explains text-direction controls and Unicode separators before saving a note", async () => {
+    const { props } = renderView({}, () => []);
+    fireEvent.click(await screen.findByRole("button", { name: "Add note" }));
+    const form = screen.getByRole("form", { name: "Add note" });
+    const title = within(form).getByRole("textbox", { name: "Note title" });
+    fireEvent.change(title, { target: { value: "Pay\u202eload" } });
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    fireEvent.click(within(form).getByRole("button", { name: "Add note" }));
+    expect(within(form).getByRole("alert")).toHaveTextContent("Remove the text-direction control characters.");
+    fireEvent.change(title, { target: { value: "Payload" } });
+    fireEvent.change(within(form).getByRole("textbox", { name: "Note text" }), { target: { value: "One\u2028two" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add note" }));
+    expect(within(form).getByRole("alert")).toHaveTextContent("Use ordinary line breaks instead of Unicode line or paragraph separators.");
+    expect(props.request).not.toHaveBeenCalled();
+  });
+
+  it("lets the user add notes while proposals wait, up to 64 accepted notes", async () => {
+    const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const accepted = Array.from({ length: 63 }, (_, index) => noteFixture(1, { id: id(index), title: `Note ${index}` }));
+    const pending = Array.from({ length: 5 }, (_, index) => noteFixture(3, {
+      id: id(100 + index), title: `Idea ${index}`, provenance: "agent", state: "proposed",
+    }));
+    const { rerender } = renderView({}, () => [...accepted, ...pending]);
+    await screen.findByRole("region", { name: "Needs review" });
+    expect(screen.getByRole("button", { name: "Add note" })).toBeEnabled();
+    accepted.push(noteFixture(1, { id: id(200), title: "Sixty-fourth" }));
+    rerender({ snapshot: snapshot({ initiatives: [docs, shipped, { ...checkout, notesRevision: 1 }, shelved] }) });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add note" })).toBeDisabled());
+    expect(screen.getByText("An initiative keeps at most 64 notes.")).toBeInTheDocument();
   });
 
   it("reads the notes again when the snapshot's note revisions move and disables changes while offline", async () => {

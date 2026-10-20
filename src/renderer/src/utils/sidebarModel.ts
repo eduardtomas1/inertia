@@ -1,11 +1,13 @@
 import type { Conversation, ConversationLatestTurnSummary, Initiative, WorkspaceRun } from "@shared/contracts";
 import {
+  conversationWorkStatus,
   indexConversationWorkspaceRuns,
   selectConversationWorkspaceRun,
   workspaceRunAttentionView,
+  type ConversationWorkStatus,
 } from "../../../shared/attention";
 
-export type SidebarThreadStatus = "working" | "approval" | "input" | "failed" | "limited" | "completed" | "idle";
+export type SidebarThreadStatus = ConversationWorkStatus;
 type SidebarConversation = Conversation & {
   latestTurn?: Pick<ConversationLatestTurnSummary, "status" | "usageLimited"> | null;
 };
@@ -47,30 +49,7 @@ function sidebarThreadViewForRun(
   run: WorkspaceRun | null,
 ): SidebarThreadView {
   const runAttention = run ? workspaceRunAttentionView(run) : null;
-  const reported: SidebarThreadStatus = run?.status === "waiting"
-    ? conversation.attentionKind === "approval" ? "approval" : "input"
-    : run?.status === "running"
-      ? "working"
-      : run?.status === "failed"
-        ? "failed"
-        : run?.status === "succeeded"
-          ? "completed"
-          : run
-            ? "idle"
-            : conversation.status === "needs-input"
-              ? conversation.attentionKind === "approval" ? "approval" : "input"
-              : conversation.status === "running"
-                ? "working"
-                : conversation.status === "failed"
-                  ? "failed"
-                  : conversation.status === "completed"
-                    ? "completed"
-                    : "idle";
-  const status: SidebarThreadStatus = reported === "failed"
-    && conversation.latestTurn?.status === "failed"
-    && conversation.latestTurn.usageLimited === true
-    ? "limited"
-    : reported;
+  const status = conversationWorkStatus(conversation, run);
   return {
     conversation,
     run,

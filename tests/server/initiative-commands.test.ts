@@ -331,15 +331,21 @@ describe("initiative brief and note commands", () => {
     store.initiatives.notes.resolve(rejected.id, 1, "reject");
 
     const listed = await run("initiative.notes.list", { initiativeId: id });
-    // A read: no snapshot, one result with accepted notes and proposals only.
+    // A read: no snapshot, one result with every note, rejected ones included
+    // so the page can list and delete them.
     expect(listed.order).toEqual(["request.result"]);
     expect(listed.events[0]).toEqual({
       type: "request.result",
       requestId: listed.command.requestId,
-      result: { kind: "initiative.notes", initiativeId: id, notes: store.initiatives.notes.list(id) },
+      result: {
+        kind: "initiative.notes",
+        initiativeId: id,
+        notes: store.initiatives.notes.list(id, { includeRejected: true }),
+      },
     });
     expect(parseServerEvent(listed.events[0])).not.toBeNull();
-    expect((listed.events[0] as { result: { notes: unknown[] } }).result.notes).toHaveLength(2);
+    expect((listed.events[0] as { result: { notes: Array<{ state: string }> } }).result.notes
+      .map(({ state }) => state).sort()).toEqual(["accepted", "proposed", "rejected"]);
 
     await run("initiative.note.update", { id: note!.id, expectedRevision: 1, body: "Use Postgres 16." });
     expect(store.initiatives.notes.get(note!.id)).toMatchObject({ body: "Use Postgres 16.", revision: 2 });

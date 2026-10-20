@@ -4,7 +4,7 @@ import {
   initiativeBriefSchema,
   initiativeColorSchema,
   initiativeNameInputSchema,
-  initiativeNoteBodySchema,
+  initiativeNoteBodyInputSchema,
   initiativeNoteTitleInputSchema,
   initiativePreferencesPatchSchema,
   initiativeStatusSchema,
@@ -74,7 +74,7 @@ export const initiativeCommandSchemas = [
     payload: z.object({
       initiativeId: z.string().uuid(),
       title: initiativeNoteTitleInputSchema,
-      body: initiativeNoteBodySchema,
+      body: initiativeNoteBodyInputSchema,
     }).strict(),
   }).strict(),
   z.object({
@@ -84,7 +84,7 @@ export const initiativeCommandSchemas = [
       id: z.string().uuid(),
       expectedRevision: z.number().int().min(0),
       title: initiativeNoteTitleInputSchema.optional(),
-      body: initiativeNoteBodySchema.optional(),
+      body: initiativeNoteBodyInputSchema.optional(),
     }).strict().refine(
       ({ title, body }) => title !== undefined || body !== undefined,
       "A note update must change its title or body.",
@@ -98,7 +98,7 @@ export const initiativeCommandSchemas = [
       expectedRevision: z.number().int().min(0),
       decision: z.enum(["accept", "reject"]),
       title: initiativeNoteTitleInputSchema.optional(),
-      body: initiativeNoteBodySchema.optional(),
+      body: initiativeNoteBodyInputSchema.optional(),
     }).strict().refine(
       ({ decision, title, body }) => decision === "accept" || (title === undefined && body === undefined),
       "Only an accepted note can be edited.",

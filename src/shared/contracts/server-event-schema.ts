@@ -488,7 +488,10 @@ function inputRequest(value: unknown): boolean {
     || !uniqueRecordField(value.questions as unknown[], "id")) return false;
   const context = value.conversationContextRequest;
   return context === undefined || (recordWithStrings(context, "requestId", "targetConversationId", "targetTurnId", "createdAt", "expiresAt")
-    && nullableStringField(context, "requestedSourceConversationId") && context.requestId === value.id && context.targetConversationId === value.conversationId
+    && nullableStringField(context, "requestedSourceConversationId")
+    && (context.initiativeName === undefined
+      || (isInitiativeName(context.initiativeName) && context.requestedSourceConversationId !== null))
+    && context.requestId === value.id && context.targetConversationId === value.conversationId
     && context.targetTurnId === value.turnId && context.requestedSourceConversationId !== context.targetConversationId
     && Number.isFinite(Date.parse(context.createdAt as string)) && Date.parse(context.expiresAt as string) > Date.parse(context.createdAt as string) && (value.questions as unknown[]).length === 0);
 }
@@ -1090,7 +1093,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
   }
 }
 import { issueReportResult } from "../issue-report";
-import { isInitiativeNotesResult } from "../initiatives";
+import { isInitiativeName, isInitiativeNotesResult } from "../initiatives";
 import { messageQueueResultSchema } from "../queued-messages";
 import { updatesRunResultSchema } from "../updates";
 

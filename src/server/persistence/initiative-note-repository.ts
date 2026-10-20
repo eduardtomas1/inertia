@@ -5,12 +5,13 @@ import type { z } from "zod";
 
 import {
   INITIATIVE_NOTE_CONFLICT_MESSAGE,
-  initiativeNoteBodySchema,
+  initiativeNoteBodyInputSchema,
   initiativeNoteSchema,
   initiativeNoteTitleInputSchema,
   MAX_INITIATIVE_NOTES,
   MAX_REJECTED_INITIATIVE_NOTES,
   type InitiativeNote,
+  type InitiativeNoteKind,
   type InitiativeNoteProvenance,
 } from "../../shared/initiatives";
 import { InitiativeRepositoryError } from "./initiative-repository-error";
@@ -23,6 +24,7 @@ interface InitiativeNoteRow {
   provenance: string;
   state: string;
   source_conversation_id: string | null;
+  kind: string | null;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -36,6 +38,8 @@ export interface InitiativeNoteCreateInput {
   provenance: InitiativeNoteProvenance;
   /** The chat an agent proposed the note from. Ignored for user notes. */
   sourceConversationId?: string | null;
+  /** What an agent said its proposal records. Ignored for user notes. */
+  kind?: InitiativeNoteKind | null;
 }
 
 export interface InitiativeNoteEdits {
@@ -46,11 +50,12 @@ export interface InitiativeNoteEdits {
 export type InitiativeNoteDecision = "accept" | "reject";
 
 const NOTE_COLUMNS = `
-  id, initiative_id, title, body, provenance, state, source_conversation_id,
+  id, initiative_id, title, body, provenance, state, source_conversation_id, kind,
   revision, created_at, updated_at
 `;
 const MISSING_NOTE = "That note no longer exists.";
 const MISSING_INITIATIVE = "That initiative no longer exists.";
+const NOTE_LIMIT_MESSAGE = `An initiative keeps at most ${MAX_INITIATIVE_NOTES} notes. Delete one first.`;
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);
@@ -69,6 +74,7 @@ function noteFromRow(row: InitiativeNoteRow): InitiativeNote | null {
     provenance: row.provenance,
     state: row.state,
     sourceConversationId: row.source_conversation_id,
+    kind: row.kind,
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -125,22 +131,20 @@ export class InitiativeNoteRepository {
     return note;
   }
 
+  /**
+   * Adds a user note, accepted at once, or an agent proposal. Proposals have
+   * their own limits, which the proposal transaction enforces with readable
+   * reasons; the database's triggers are the backstop here.
+   */
   create(input: InitiativeNoteCreateInput): InitiativeNote {
     const title = parse(initiativeNoteTitleInputSchema, input.title);
-    const body = parse(initiativeNoteBodySchema, input.body);
+    const body = parse(initiativeNoteBodyInputSchema, input.body);
     return this.database.transaction(() => {
       if (!this.database.prepare("SELECT 1 FROM initiatives WHERE id = ?").get(input.initiativeId)) {
         throw new InitiativeRepositoryError(MISSING_INITIATIVE);
       }
-      const { count } = this.database.prepare(`
-        SELECT COUNT(*) AS count FROM initiative_notes
-        WHERE initiative_id = ? AND state IN ('accepted', 'proposed')
-      `).get(input.initiativeId) as { count: number };
-      if (count >= MAX_INITIATIVE_NOTES) {
-        throw new InitiativeRepositoryError(
-          `An initiative keeps at most ${MAX_INITIATIVE_NOTES} notes. Delete one first.`,
-        );
-      }
+      const agent = input.provenance === "agent";
+      if (!agent) this.assertRoomForAccepted(input.initiativeId);
       const timestamp = this.now();
       const note = parse(initiativeNoteSchema, {
         id: randomUUID(),
@@ -148,8 +152,9 @@ export class InitiativeNoteRepository {
         title,
         body,
         provenance: input.provenance,
-        state: input.provenance === "user" ? "accepted" : "proposed",
-        sourceConversationId: input.provenance === "agent" ? input.sourceConversationId ?? null : null,
+        state: agent ? "proposed" : "accepted",
+        sourceConversationId: agent ? input.sourceConversationId ?? null : null,
+        kind: agent ? input.kind ?? null : null,
         revision: 1,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -157,7 +162,7 @@ export class InitiativeNoteRepository {
       this.database.prepare(`
         INSERT INTO initiative_notes (${NOTE_COLUMNS})
         VALUES (
-          @id, @initiativeId, @title, @body, @provenance, @state, @sourceConversationId,
+          @id, @initiativeId, @title, @body, @provenance, @state, @sourceConversationId, @kind,
           @revision, @createdAt, @updatedAt
         )
       `).run(note);
@@ -185,8 +190,9 @@ export class InitiativeNoteRepository {
 
   /**
    * Accepts (optionally with edits) or rejects a proposal. Accepting adds it
-   * to what chats receive; rejecting keeps it out, with its provenance. Only
-   * the newest rejected notes are kept, so rejections stay bounded.
+   * to what chats receive, within the accepted-note limit; rejecting keeps it
+   * out, with its provenance. Only the newest rejected notes are kept, so
+   * rejections stay bounded.
    */
   resolve(
     noteId: string,
@@ -203,6 +209,7 @@ export class InitiativeNoteRepository {
       if (existing.state !== "proposed") {
         throw new InitiativeRepositoryError("That note was already reviewed.");
       }
+      if (decision === "accept") this.assertRoomForAccepted(existing.initiativeId);
       const next = this.write(existing, {
         ...patch,
         state: decision === "accept" ? "accepted" : "rejected",
@@ -225,7 +232,7 @@ export class InitiativeNoteRepository {
   private edits(edits: InitiativeNoteEdits): InitiativeNoteEdits {
     return {
       ...(edits.title !== undefined ? { title: parse(initiativeNoteTitleInputSchema, edits.title) } : {}),
-      ...(edits.body !== undefined ? { body: parse(initiativeNoteBodySchema, edits.body) } : {}),
+      ...(edits.body !== undefined ? { body: parse(initiativeNoteBodyInputSchema, edits.body) } : {}),
     };
   }
 
@@ -256,6 +263,14 @@ export class InitiativeNoteRepository {
     `).run(next.title, next.body, next.state, next.revision, next.updatedAt, existing.id, existing.revision);
     if (result.changes !== 1) throw new InitiativeRepositoryError(INITIATIVE_NOTE_CONFLICT_MESSAGE);
     return next;
+  }
+
+  private assertRoomForAccepted(initiativeId: string): void {
+    const { count } = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM initiative_notes
+      WHERE initiative_id = ? AND state = 'accepted'
+    `).get(initiativeId) as { count: number };
+    if (count >= MAX_INITIATIVE_NOTES) throw new InitiativeRepositoryError(NOTE_LIMIT_MESSAGE);
   }
 
   /** The accepted set changed; chats receive the notes index again. */

@@ -1,4 +1,5 @@
 import { isHtmlRenderReference } from "@shared/html-render";
+import { isInitiativeNoteProposalReceipt } from "@shared/initiative-note-proposals";
 import { agentRunStateForTurn, isAgentRunTerminalState } from "@shared/run-state";
 import { isTurnCheckpointUnavailableActivity } from "@shared/turn-checkpoint";
 import type {
@@ -38,6 +39,11 @@ export interface ResponseTurn {
    * describe the request, so they render with it rather than as agent notices.
    */
   initiativeContextReceipts: ChatMessage[];
+  /**
+   * Receipts for notes this turn's agent proposed to its initiative. They
+   * record what the agent did, so they render with the turn's activity.
+   */
+  initiativeNoteProposals: ChatMessage[];
   activities: AgentActivity[];
   reasonings: AgentReasoning[];
   reasoning: AgentReasoning | null;
@@ -273,7 +279,10 @@ function buildTurn(
   // the terminal reason already says so.
   const reachedProvider = !UNREACHED_TERMINAL_REASON.test(agentTurn.terminalReason ?? "");
   const initiativeContextReceipts = scopedMessages.filter(({ role, htmlRender, initiativeContext }) =>
-    reachedProvider && role === "system" && !isHtmlRenderReference(htmlRender) && initiativeContext !== undefined);
+    reachedProvider && role === "system" && !isHtmlRenderReference(htmlRender) && initiativeContext !== undefined
+    && !isInitiativeNoteProposalReceipt(initiativeContext));
+  const initiativeNoteProposals = scopedMessages.filter(({ role, htmlRender, initiativeContext }) =>
+    role === "system" && !isHtmlRenderReference(htmlRender) && isInitiativeNoteProposalReceipt(initiativeContext));
   const systemMessages = scopedMessages.filter(({ role, htmlRender, initiativeContext }) =>
     role === "system" && !isHtmlRenderReference(htmlRender) && initiativeContext === undefined);
   const turnActivities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
@@ -315,6 +324,7 @@ function buildTurn(
     systemMessages,
     htmlRenders,
     initiativeContextReceipts,
+    initiativeNoteProposals,
     activities,
     reasonings,
     reasoning: latestReasoning(reasonings),
@@ -395,6 +405,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     turn.systemMessages.forEach(({ id }) => claimedMessageIds.add(id));
     turn.htmlRenders.forEach(({ id }) => claimedMessageIds.add(id));
     turn.initiativeContextReceipts.forEach(({ id }) => claimedMessageIds.add(id));
+    turn.initiativeNoteProposals.forEach(({ id }) => claimedMessageIds.add(id));
     if (turn.checkpoint) claimedCheckpointIds.add(turn.checkpoint.id);
   }
 
@@ -610,6 +621,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && sameReferences(left.systemMessages, right.systemMessages)
     && sameReferences(left.htmlRenders, right.htmlRenders)
     && sameReferences(left.initiativeContextReceipts, right.initiativeContextReceipts)
+    && sameReferences(left.initiativeNoteProposals, right.initiativeNoteProposals)
     && sameReferences(left.activities, right.activities)
     && sameReferences(left.reasonings, right.reasonings)
     && sameReferences(left.plans, right.plans)

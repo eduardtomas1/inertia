@@ -59,6 +59,11 @@ import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { effectiveBrowserAccess } from "../../shared/initiatives";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
+import {
+  activeInitiativeOf,
+  INITIATIVE_TOOL_NAMES,
+  InitiativeHostTools,
+} from "./initiative-host-tools";
 import { recordManagedTurn, recordQueuedManagedTurn, stopOwnedManagedTurn } from "./managed-turn-ownership";
 import { ManagedMutationQueue } from "./managed-mutation-queue";
 import type { HiddenProviderInstruction } from "./turns/request-context";
@@ -343,6 +348,7 @@ export class AgentThreadManager {
   private readonly capabilities: HarnessCapabilityRegistry;
   private readonly htmlRenders: HtmlRenderHostTool;
   private readonly contextTool: AgentContextTool;
+  private readonly initiativeTools: InitiativeHostTools;
 
   constructor(private readonly dependencies: AgentThreadManagerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
@@ -355,15 +361,41 @@ export class AgentThreadManager {
       now: this.now,
       assertSource: (source) => this.assertSource(source),
     });
+    this.initiativeTools = new InitiativeHostTools({
+      store: dependencies.store,
+      readConversation: async (source, call, options) => await this.contextTool.invoke(source, call, options),
+      broadcast: dependencies.broadcast,
+      broadcastSnapshot: dependencies.broadcastSnapshot,
+    });
     this.capabilities = createInertiaHarnessCapabilities({
       orchestrationTools: TOOL_DEFINITIONS,
       browserEnabled: this.agentBrowser !== undefined,
+      initiativeToolsAvailable: ({ conversation }) => this.initiativeToolsAvailable(conversation.id),
       invoke: async (context, call) => await this.invoke(context, call),
     });
   }
 
-  capabilityInstructions(): readonly HiddenProviderInstruction[] {
-    return this.capabilities.instructions();
+  /**
+   * The reviewed instructions for one chat's turn. Conditional packs, such as
+   * the initiative tools, contribute only when they are offered to that chat.
+   */
+  capabilityInstructions(conversation: Conversation): readonly HiddenProviderInstruction[] {
+    return this.capabilities.instructionsFor({ conversation });
+  }
+
+  /**
+   * Membership is read from the store by chat id whenever a turn's request or
+   * bridge is built, never from the caller's copy of the chat or agent input.
+   */
+  private initiativeToolsAvailable(conversationId: string): boolean {
+    try {
+      return activeInitiativeOf(
+        this.dependencies.store,
+        this.dependencies.store.conversation(conversationId),
+      ) !== null;
+    } catch {
+      return false;
+    }
   }
 
   capabilityManifest(): HarnessCapabilityManifest {
@@ -410,6 +442,7 @@ export class AgentThreadManager {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
+      if (INITIATIVE_TOOL_NAMES.has(call.tool)) return await this.initiativeTools.invoke(source, current, call);
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         const browser = effectiveBrowserAccess(
           this.dependencies.store.initiativePreferencesFor(current),

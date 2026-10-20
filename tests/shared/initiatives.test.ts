@@ -27,12 +27,23 @@ import {
   initiativeNotesIndex,
   initiativeNoteTitleInputSchema,
   isInitiativeContextReceipt,
+  isInitiativeNoteProposalReceipt,
+  isInitiativeNotesResult,
+  initiativeNoteProposalReceiptText,
+  MAX_REJECTED_INITIATIVE_NOTES,
+  normalizedInitiativeNoteTitle,
+  agentInitiativeNoteBodyProblem,
+  agentInitiativeNoteTitleProblem,
+  initiativeNoteBodyInputSchema,
   MAX_INITIATIVE_NOTE_BODY_BYTES,
   MAX_INITIATIVE_NOTES,
   MAX_INITIATIVE_NOTES_INDEX_BYTES,
+  MAX_PENDING_INITIATIVE_NOTE_PROPOSALS,
+  MAX_PENDING_INITIATIVE_NOTE_PROPOSALS_PER_CHAT,
   NOTE_PROVENANCES,
   NOTE_STATES,
   utf8ByteLength,
+  type InitiativeContextReceipt,
   type InitiativeNote,
   type Initiative,
 } from "../../src/shared/initiatives";
@@ -165,6 +176,7 @@ function note(index: number, overrides: Partial<InitiativeNote> = {}): Initiativ
     provenance: "user",
     state: "accepted",
     sourceConversationId: null,
+    kind: null,
     revision: 1,
     createdAt: at,
     updatedAt: at,
@@ -175,6 +187,8 @@ function note(index: number, overrides: Partial<InitiativeNote> = {}): Initiativ
 describe("initiative notes contracts", () => {
   it("pins the note limits, provenances and states", () => {
     expect(MAX_INITIATIVE_NOTES).toBe(64);
+    expect(MAX_PENDING_INITIATIVE_NOTE_PROPOSALS).toBe(16);
+    expect(MAX_PENDING_INITIATIVE_NOTE_PROPOSALS_PER_CHAT).toBe(5);
     expect(MAX_INITIATIVE_NOTE_BODY_BYTES).toBe(2_048);
     expect(MAX_INITIATIVE_NOTES_INDEX_BYTES).toBe(8_192);
     expect(NOTE_PROVENANCES).toEqual(["user", "agent"]);
@@ -195,6 +209,49 @@ describe("initiative notes contracts", () => {
     expect(initiativeNoteSchema.safeParse(note(1, { provenance: "system" as never })).success).toBe(false);
     expect(initiativeNoteSchema.safeParse(note(1, { state: "pending" as never })).success).toBe(false);
     expect(initiativeNoteSchema.safeParse({ ...note(1), extra: true }).success).toBe(false);
+    // Only an agent's proposal records a kind.
+    expect(initiativeNoteSchema.safeParse(note(1, { provenance: "agent", state: "proposed", kind: "decision" })).success)
+      .toBe(true);
+    expect(initiativeNoteSchema.safeParse(note(1, { kind: "decision" })).success).toBe(false);
+    expect(initiativeNoteSchema.safeParse(note(1, { provenance: "agent", kind: "progress" as never })).success).toBe(false);
+  });
+
+  it("refuses text-direction controls and Unicode separators in what the user types, and nothing else new", () => {
+    for (const permissive of ["Ünïcødé 😀", "\u200bzero width", "C1\u0085", "Arabic عربي mixed"]) {
+      expect(initiativeNoteTitleInputSchema.safeParse(permissive).success, JSON.stringify(permissive)).toBe(true);
+    }
+    for (const unsafe of ["\u202eevil", "a\u2066b\u2069", "one\u2028two", "one\u2029two", "\u202aembed"]) {
+      expect(initiativeNoteTitleInputSchema.safeParse(unsafe).success, JSON.stringify(unsafe)).toBe(false);
+      expect(initiativeNoteBodyInputSchema.safeParse(unsafe).success, JSON.stringify(unsafe)).toBe(false);
+    }
+    expect(initiativeNoteTitleInputSchema.safeParse("\u202eevil").error?.issues[0]?.message)
+      .toBe("Remove the text-direction control characters.");
+    expect(initiativeNoteBodyInputSchema.safeParse("Line one\nLine two").success).toBe(true);
+    // The stored rules stay as permissive as the database, so a stored row always parses.
+    expect(initiativeNoteSchema.safeParse(note(1, { title: "\u202etitle", body: "a\u2028b" })).success).toBe(true);
+  });
+
+  it("holds agent titles and bodies to stricter Unicode rules", () => {
+    expect(agentInitiativeNoteTitleProblem("Use Postgres")).toBeNull();
+    expect(agentInitiativeNoteTitleProblem("Ünïcødé 42 😀")).toBeNull();
+    expect(agentInitiativeNoteTitleProblem("42")).toBeNull();
+    for (const refused of [
+      "\u200b\u200b", // zero-width only
+      "\u3164", // a Hangul filler is a letter that shows nothing
+      "\u034f😀", // only invisible and symbol characters
+      "Use\u200bPostgres",
+      "\u202eevil title",
+      "Line\u2028separator",
+      "Para\u2029graph",
+      "C1\u0085control",
+      "C1\u009bcontrol",
+      "Tab\there",
+      "Soft\u00adhyphen",
+    ]) expect(agentInitiativeNoteTitleProblem(refused), JSON.stringify(refused)).not.toBeNull();
+    expect(agentInitiativeNoteBodyProblem("Two\nlines and \u200bzero-width")).toBeNull();
+    for (const refused of ["a\u0000b", "\u202eevil", "x\u2067y\u2069", "one\u2028two", "one\u2029two"]) {
+      expect(agentInitiativeNoteBodyProblem(refused), JSON.stringify(refused)).not.toBeNull();
+    }
   });
 
   it("indexes accepted notes in creation order as one bounded line each", () => {
@@ -290,3 +347,59 @@ describe("initiative notes contracts", () => {
 
 type InitiativeContextReceiptBrief = Parameters<typeof initiativeContextReceiptText>[0]["brief"];
 type InitiativeContextReceiptNotes = Parameters<typeof initiativeContextReceiptText>[0]["notes"];
+
+describe("initiative note proposals contracts", () => {
+  const NOTE = "22222222-2222-4222-8222-222222222222";
+
+  it("compares proposal titles case-, width- and space-insensitively", () => {
+    expect(normalizedInitiativeNoteTitle("  Use   POSTGRES\u00a0now ")).toBe("use postgres now");
+    expect(normalizedInitiativeNoteTitle("Ｕｓｅ Postgres")).toBe(normalizedInitiativeNoteTitle("use postgres"));
+    expect(normalizedInitiativeNoteTitle("Use Postgres")).not.toBe(normalizedInitiativeNoteTitle("Use MySQL"));
+    // Invisible characters cannot make a repeated title look new.
+    for (const variant of ["Use \u200bPostgres", "Use \u034fPostgres", "\ufeffUse Postgres\u2060", "Use\u3164 Postgres"]) {
+      expect(normalizedInitiativeNoteTitle(variant), JSON.stringify(variant)).toBe("use postgres");
+    }
+  });
+
+  it("describes a proposal receipt that names its initiative and note and nothing else", () => {
+    const proposal = { initiativeId: ID, brief: null, notes: null, proposal: { noteId: NOTE, kind: "fact" as const } };
+    expect(isInitiativeContextReceipt(proposal)).toBe(true);
+    expect(isInitiativeNoteProposalReceipt(proposal)).toBe(true);
+    const shared: InitiativeContextReceipt = { initiativeId: ID, brief: { revision: 1, change: "shared" }, notes: null };
+    expect(isInitiativeNoteProposalReceipt(shared)).toBe(false);
+    expect(isInitiativeNoteProposalReceipt(undefined)).toBe(false);
+    expect(JSON.stringify(proposal).length).toBeLessThan(512);
+    for (const invalid of [
+      { ...proposal, initiativeId: null },
+      { ...proposal, left: true },
+      { ...proposal, notes: { revision: 1, count: 1, change: "shared" } },
+      { ...proposal, proposal: { noteId: NOTE, kind: "progress" } },
+      { ...proposal, proposal: { noteId: NOTE, kind: null, extra: 1 } },
+    ]) expect(isInitiativeContextReceipt(invalid)).toBe(false);
+    expect(initiativeNoteProposalReceiptText("Cache totals")).toBe("Proposed an initiative note: Cache totals");
+  });
+
+  it("lists rejected notes in a notes result within the kept bounds", () => {
+    const note = (index: number, state: InitiativeNote["state"]) => ({
+      id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222`,
+      initiativeId: ID,
+      title: `Note ${index}`,
+      body: "",
+      provenance: "agent",
+      state,
+      sourceConversationId: null,
+      kind: null,
+      revision: 1,
+      createdAt: "2026-10-19T12:00:00.000Z",
+      updatedAt: "2026-10-19T12:00:00.000Z",
+    });
+    const kept = Array.from({ length: MAX_INITIATIVE_NOTES }, (_, index) => note(index, "accepted"));
+    const rejected = Array.from({ length: MAX_REJECTED_INITIATIVE_NOTES }, (_, index) => note(1_000 + index, "rejected"));
+    const pending = Array.from({ length: MAX_PENDING_INITIATIVE_NOTE_PROPOSALS }, (_, index) => note(500 + index, "proposed"));
+    // Proposals are bounded on their own, apart from the accepted notes.
+    expect(isInitiativeNotesResult({ initiativeId: ID, notes: [...kept, ...pending, ...rejected] })).toBe(true);
+    expect(isInitiativeNotesResult({ initiativeId: ID, notes: [...kept, note(600, "accepted")] })).toBe(false);
+    expect(isInitiativeNotesResult({ initiativeId: ID, notes: [...pending, note(600, "proposed")] })).toBe(false);
+    expect(isInitiativeNotesResult({ initiativeId: ID, notes: [...rejected, note(2_000, "rejected")] })).toBe(false);
+  });
+});

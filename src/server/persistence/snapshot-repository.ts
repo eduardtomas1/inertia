@@ -66,6 +66,7 @@ import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import { TodoRepository } from "./todo-repository";
 import { InitiativeRepository } from "./initiative-repository";
+import { TURN_USAGE_LIMITED_SQL } from "./initiative-member-chats";
 import { cachedStatement } from "./statement-cache";
 import { withLatestPlanDocument } from "./latest-plan-document";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
@@ -77,7 +78,6 @@ import { agentContextReadSummaries } from "./conversation-context-turn-reads";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number };
-const TURN_USAGE_LIMITED_SQL = "EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id)";
 type ConversationRecords = Pick<ConversationDetail, "usage" | "goals" | "reviewSummaries" | "reviewStates" | "reviewNotes">;
 type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | "attachmentGallery" | keyof ConversationRecords>;
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };

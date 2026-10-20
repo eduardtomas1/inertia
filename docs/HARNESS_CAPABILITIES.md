@@ -332,8 +332,9 @@ Each layer works on its own; none relies on the model following instructions.
    window. The result is *inconclusive*, and does not pause, when another
    active turn ran a command, a workspace or source-control run was active, a
    terminal resume was active, or the watcher's own turn had no activity that
-   could write (no command and no started edit). An inconclusive check keeps
-   its finding and lists its unexplained paths on the feed item. Unexplained
+   could write (no command outside the read-only command allowlist and no
+   started edit; `watcherActivityMayWrite`). An inconclusive check keeps its
+   finding and records its unexplained paths on the feed item (`guardPaths`). Unexplained
    paths in a conclusive window pause the link with `write-detected` and list
    at most 20 paths. A non-repository,
    a timeout or a truncated fingerprint is *unavailable*; the other layers
@@ -372,7 +373,12 @@ digest for each check is the watcher turn's
 visible content (64 KiB turn cap, `digestKiB` default 24), not a hidden
 instruction, and every quoted string passes through
 `boundedUntrustedAgentText`. It honours the link's sharing choices; the
-watched turn's plan is shared under `activities`.
+watched turn's plan is shared under `activities`. With `changedFiles` shared, a
+final pass quotes the turn's unified diff (at most a third of the digest and
+6 KiB per file) and falls back to the changed paths when the diff is
+unavailable. Every check lists up to five of the watcher's earlier findings in
+the same watched turn with their delivery state, and a reply that ends with
+`Resolved: check N` records `resolvedBySequence` on those findings.
 
 ### Pauses and resume
 
@@ -425,8 +431,10 @@ before and after the turn.
 - Claude: the query receives `permissionMode: "plan"`, no setting sources and
   Inertia's `canUseTool`. Read and Grep run without `canUseTool`, as Claude
   Code's plan mode does; a Write permission request is declined as a
-  `write-attempt` and the turn completes. A streamed Edit tool start stops
-  the turn, aborts the query before the edit and releases the run.
+  `write-attempt` and the turn completes. Allowlisted Bash commands, including
+  a pipe, run without an approval, and a command with a redirection is
+  declined as a `command-attempt`. A streamed Edit tool start stops the turn,
+  aborts the query before the edit and releases the run.
 - Codex: `thread/start` and `thread/resume` carry `approvalPolicy: "untrusted"`,
   `sandbox: "read-only"` and a `config` that disables every MCP server
   `config/read` reports, apps, plugins, hooks, subagents and web search, and
@@ -440,7 +448,8 @@ before and after the turn.
   then session rules, last match wins). Under the supervised plan ruleset
   alone, read, glob, grep, list and bash all prompt. A watcher turn sends the
   profile ruleset, reads complete without a prompt, `.env` files are denied,
-  edit and bash are denied and not offered, and the server process exits on
+  edit is denied, an allowlisted bash command is answered `once` and any other
+  is rejected as a `command-attempt`, and the server process exits on
   shutdown. A second case
   gives the agent its own rules that allow everything, edits, shell and
   `external_directory`; the session profile still wins, because OpenCode
@@ -465,8 +474,8 @@ allowlist only together with a portable fixture that proves the layers above.
 
 A custom backend on an allowed harness can be a watcher, but custom backends
 never receive Inertia host tools. Such a watcher reviews only the digest each
-check sends it and cannot read more of the watched chat; the dock states "Can
-read the watched chat: no (custom backend)".
+check sends it and cannot read more of the watched chat; the dock states
+"Custom backend: it sees only what each check sends."
 
 The watched chat can run on any harness and can switch provider mid-chat. The
 digest is provider-agnostic, `"watched"` access applies no route filter, and

@@ -602,6 +602,25 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("reads the Resolved line at the end of a reply longer than the part a finding keeps", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      let watcherId = await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "- The parser drops the last token.");
+      watcherId = await wakeOnce(f, link.id);
+      const long = Array.from({ length: 400 }, (_, index) => `- Line ${index} of a long review of src/parser.ts and its callers.`).join("\n");
+      expect(Buffer.byteLength(long, "utf8")).toBeGreaterThan(20 * 1_024);
+      await f.finishTurn(watcherId, `${long}\nResolved: check 1`);
+      expect(feed(f, link.id)[0]).toMatchObject({ sequence: 2, outcome: "finding" });
+      expect(feed(f, link.id)[0]!.finding).toContain("- Line 0 of a long review");
+      expect(feed(f, link.id)[1]).toMatchObject({ sequence: 1, resolvedBySequence: 2 });
+    } finally {
+      await f.close();
+    }
+  });
+
   it("queues an automatic watcher's finding behind the running turn without steering", async () => {
     const f = await createWatcherFixture();
     try {

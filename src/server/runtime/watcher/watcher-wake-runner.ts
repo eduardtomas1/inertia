@@ -57,6 +57,7 @@ const PROVIDER_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
 
 /** Room for a finding preview plus its trailing marker. */
 const MAX_REPLY_READ_BYTES = MAX_WATCHER_FINDING_BYTES * 2;
+const MAX_RESOLVED_TAIL_BYTES = 2_048;
 
 export type WatcherRunnerTurns = Pick<TurnController, "queue" | "start" | "isActive" | "isClosing" | "cancel" | "failBeforeStart">;
 
@@ -502,9 +503,18 @@ export class WatcherWakeRunner {
       else if (usageLimited) outcome = "usage-limited";
       else if (turn.status !== "completed") outcome = "failed";
       else {
-        const reply = splitWatcherResolvedLine(turn.terminalAssistantMessageId
-          ? store.watcherLinks.digest.messageText(turn.terminalAssistantMessageId, MAX_REPLY_READ_BYTES).content
-          : "");
+        const messageId = turn.terminalAssistantMessageId;
+        const read = messageId
+          ? store.watcherLinks.digest.messageText(messageId, MAX_REPLY_READ_BYTES)
+          : { content: "", truncated: false };
+        const reply = read.truncated && messageId
+          ? {
+              text: read.content.trim(),
+              resolved: splitWatcherResolvedLine(
+                store.watcherLinks.digest.messageTextAfter(messageId, 0, MAX_RESOLVED_TAIL_BYTES).content,
+              ).resolved,
+            }
+          : splitWatcherResolvedLine(read.content);
         resolved = reply.resolved;
         outcome = classifyWatcherReply(reply.text, turn.status);
         if (outcome === "finding") finding = findingPreview(reply.text);

@@ -170,7 +170,10 @@ const budgets = {
   // Main checkout label add 289 bytes (23,858 measured on Linux x64).
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065 + 5_911 + 289,
   deferredCliConversationImportJavaScript: 9_797 + 256,
-  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255,
+  // Merge of main (#635, submenus beside their row) with the tools-offer
+  // branch: longer minified import aliases from the grown shared chunk add
+  // 2 bytes (8,524 measured on Linux x64 against 8,522).
+  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 2,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,

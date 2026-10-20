@@ -40,6 +40,7 @@ async function watcherRuntime(
       return { checkpointId: null, failure: null };
     },
     captureGitBefore: ({ turn }) => { gitBefore.push(turn.id); },
+    harnessInstructionsForTurn: () => [{ label: "inertia-orchestration", text: "Capability pack." }],
     ...hooks,
   });
   const { store } = runtime;
@@ -81,7 +82,7 @@ async function watcherRuntime(
     const queued = runtime.controller.queue({
       conversationId: watcher.id,
       content: "Check 1 for 'Turn conversation'.",
-      authorizedWatcherWakeId: wake.id,
+      authorizedWatcherWakeId: wake.wakeId,
       activateConversation: false,
       turnCheckpoint: true,
     });
@@ -117,7 +118,9 @@ describe("read-only watcher turns", () => {
       })).toThrow("no longer waiting to start");
       const { turn, wake } = runtime.startWake();
       expect(runtime.provider.input).toMatchObject({ interactionMode: "plan", access: "supervised" });
-      expect(runtime.store.watcherLinks.attachWakeTurn(wake.id, turn.id, now())).toBe(true);
+      expect(runtime.provider.input?.prompt).not.toContain("Capability pack.");
+      expect(runtime.store.watcherLinks.attachWakeTurn(wake.wakeId, turn.id, now())).toBe(true);
+      expect(runtime.violations).toEqual([]);
     } finally {
       runtime.store.close();
     }
@@ -179,9 +182,12 @@ describe("read-only watcher turns", () => {
         type: "input",
         request: {
           requestId: "input-1",
-          questions: [{ id: "q", header: "Scope", question: "Which file?", options: [], allowMultiple: false, isOther: false }],
+          questions: [{
+            id: "q", header: "Scope", question: "Which file?", options: [], allowMultiple: false, isOther: false, isSecret: false,
+          }],
+          autoResolutionMs: null,
         },
-      } as ProviderEvent);
+      });
       await flushTurnControllerTestPromises();
       expect(runtime.events.some((event) => event.type === "agent.input.requested")).toBe(false);
       expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
@@ -202,8 +208,8 @@ describe("read-only watcher turns", () => {
       runtime.provider.emit({ ...identity(runtime, runtime.watcher.id), type: "activity", kind: "tool", phase: "started", label });
       await flushTurnControllerTestPromises();
       expect(runtime.store.agentTurn(turn.id)).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
-      expect(runtime.store.conversationDetail(runtime.watcher.id)!.messages.map(({ content }) => content).join("\n"))
-        .toContain(READ_ONLY_WATCHER_STOP_MESSAGE);
+      expect(runtime.store.conversationDetail(runtime.watcher.id)!.activities)
+        .toContainEqual(expect.objectContaining({ kind: "error", title: READ_ONLY_WATCHER_STOP_MESSAGE }));
       expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: label, stopped: true })]);
     } finally {
       runtime.store.close();
@@ -242,6 +248,7 @@ describe("read-only watcher turns", () => {
       runtime.controller.start(ordinary.turn.id);
       await flushTurnControllerTestPromises();
       expect(runtime.checkpoints).toEqual([ordinary.turn.id]);
+      expect(runtime.provider.input?.prompt).toContain("Capability pack.");
     } finally {
       runtime.store.close();
     }
@@ -278,7 +285,7 @@ describe("read-only watcher turns", () => {
     }
   });
 
-  it("guards messages the user types into the watcher once it is detached no longer", async () => {
+  it("treats a detached watcher as an ordinary chat", async () => {
     const runtime = await watcherRuntime();
     try {
       runtime.store.watcherLinks.transition(runtime.link.id, ["watching"], { status: "detached", reason: "user" }, now());

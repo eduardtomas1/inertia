@@ -888,7 +888,7 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       wakeId: "22222222-2222-4222-8222-222222222222",
       watcherConversationId: "33333333-3333-4333-8333-333333333333",
       preset: "reviewer" as const,
-      watcherLabel: "Codex · gpt-test",
+      watcherLabel: "Codex · test route",
       delivery: "queue" as const,
     };
 

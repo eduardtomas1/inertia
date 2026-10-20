@@ -57,6 +57,7 @@ export interface TooltipTriggerHandlers<T extends HTMLElement> {
 export function useTooltip<T extends HTMLElement>(
   triggerRef: RefObject<T | null>,
   handlers: Partial<TooltipTriggerHandlers<T>>,
+  enabled = true,
 ): { open: boolean; layer: HTMLElement | null; handlers: TooltipTriggerHandlers<T>; close: () => void } {
   const [layer, setLayer] = useState<HTMLElement | null>(null);
   const open = layer !== null;
@@ -77,6 +78,7 @@ export function useTooltip<T extends HTMLElement>(
 
   const show = useCallback(() => {
     clearTimer();
+    if (!enabled) return;
     const reveal = () => {
       timer.current = undefined;
       const trigger = triggerRef.current;
@@ -86,9 +88,13 @@ export function useTooltip<T extends HTMLElement>(
     };
     if (Date.now() < warmUntil) reveal();
     else timer.current = window.setTimeout(reveal, TOOLTIP_DELAY_MS);
-  }, [clearTimer, triggerRef]);
+  }, [clearTimer, enabled, triggerRef]);
 
   useEffect(() => clearTimer, [clearTimer]);
+
+  useEffect(() => {
+    if (!enabled) close();
+  }, [close, enabled]);
 
   useEffect(() => {
     trackNavigationKeys(triggerRef.current?.ownerDocument ?? document);

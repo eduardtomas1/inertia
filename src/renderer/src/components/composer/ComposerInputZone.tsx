@@ -200,7 +200,7 @@ export function ComposerInputZone({
         : "Compact this chat's provider context",
       section: "provider",
       action: onCompactCommand,
-      disabled: modeChangesDisabled || compactUnavailableReason !== null,
+      disabled: disabled || running || compactUnavailableReason !== null,
     },
   ] : [];
   const matchingSlashCommands = slashMatch

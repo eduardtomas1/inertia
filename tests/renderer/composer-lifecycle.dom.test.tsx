@@ -974,6 +974,17 @@ describe("composer asynchronous ownership", () => {
     expect(onUpdateConversation).not.toHaveBeenCalled();
   });
 
+  it("keeps /compact available in an attached watcher's composer", async () => {
+    const current = conversation(WATCHER_ID);
+    render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(current)} />
+      </WatcherContext.Provider>,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "/c" } });
+    expect(await screen.findByRole("option", { name: /\/compact/u })).toBeEnabled();
+  });
+
   it("opens goal and folder resume flows directly from slash commands", async () => {
     const current = conversation("08080808-0808-4808-8808-080808080808");
     const onOpenResume = vi.fn();

@@ -1,3 +1,4 @@
+import { modelSelectionIdentityLabel } from "../../../shared/claude-backend-profiles";
 import type { AgentTurn, ModelSelection } from "../../../shared/contracts";
 import {
   MAX_WATCHER_FINDING_BYTES,
@@ -19,6 +20,17 @@ import type { WatcherWakeAttempt, WatcherWakeContext, WatcherWakeScheduler } fro
 
 export const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit. It can resume once its route is ready again.";
 export const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit files twice during one turn of the main chat.";
+/**
+ * Consecutive wakes that may find the watcher's route unready and retry with
+ * the scheduler's backoff before the link pauses with `route-unavailable`.
+ */
+export const WATCHER_ROUTE_RETRY_LIMIT = 3;
+
+export function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
+  return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()} `
+    + "Check Settings → Agents; it can resume once the route is ready.";
+}
+
 /** Room for a finding preview plus its trailing marker. */
 const MAX_REPLY_READ_BYTES = MAX_WATCHER_FINDING_BYTES * 2;
 
@@ -79,6 +91,7 @@ export class WatcherWakeRunner {
   readonly #deps: WatcherWakeRunnerDependencies;
   readonly #running = new Map<string, RunningWake>();
   readonly #planKeys = new Map<string, string | null>();
+  readonly #routeFailures = new Map<string, number>();
 
   constructor(dependencies: WatcherWakeRunnerDependencies) {
     this.#deps = dependencies;
@@ -92,6 +105,12 @@ export class WatcherWakeRunner {
 
   forget(linkId: string): void {
     this.#planKeys.delete(linkId);
+    this.#routeFailures.delete(linkId);
+  }
+
+  /** A resumed link starts its route retries afresh. */
+  resumed(linkId: string): void {
+    this.#routeFailures.delete(linkId);
   }
 
   async run(linkId: string, trigger: WatcherWakeTrigger, context: WatcherWakeContext): Promise<WatcherWakeAttempt> {
@@ -106,7 +125,8 @@ export class WatcherWakeRunner {
     if (!watcher || !watched) return "skipped";
     if (turns.isActive(watcher.id)) return "transient";
     const route = await this.#deps.route(watcher.modelSelection);
-    if (!route.ready) return "transient";
+    if (!route.ready) return this.#routeUnavailable(linkId, watcher.modelSelection, route.message, budgetFinalPass);
+    this.#routeFailures.delete(linkId);
 
     const claimed = store.watcherLinks.transition(
       linkId,
@@ -190,6 +210,35 @@ export class WatcherWakeRunner {
       if (store.watcherLinks.get(linkId)?.status === "waking" && !this.isRunning(linkId)) release("transient");
       throw error;
     }
+  }
+
+  /**
+   * A wake whose route is not ready (the same preflight as attach) retries as
+   * transient up to the limit, then pauses the link with `route-unavailable`.
+   * Resuming that pause requires a ready route.
+   */
+  #routeUnavailable(
+    linkId: string,
+    selection: ModelSelection,
+    message: string,
+    budgetFinalPass: boolean,
+  ): WatcherWakeAttempt {
+    const failures = (this.#routeFailures.get(linkId) ?? 0) + 1;
+    if (failures <= WATCHER_ROUTE_RETRY_LIMIT) {
+      this.#routeFailures.set(linkId, failures);
+      return "transient";
+    }
+    this.#routeFailures.delete(linkId);
+    const paused = this.#deps.store.watcherLinks.transition(
+      linkId,
+      budgetFinalPass ? ["paused"] : ["watching", "idle"],
+      { status: "paused", reason: "route-unavailable", detail: watcherRouteUnavailableDetail(selection, message) },
+      this.#deps.now(),
+    );
+    if (!paused) return "skipped";
+    this.#deps.scheduler().pause(linkId);
+    this.#deps.publish(linkId);
+    return "skipped";
   }
 
   /**
@@ -295,5 +344,6 @@ export class WatcherWakeRunner {
     for (const running of this.#running.values()) running.window.dispose();
     this.#running.clear();
     this.#planKeys.clear();
+    this.#routeFailures.clear();
   }
 }

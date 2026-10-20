@@ -324,7 +324,13 @@ watched turn's plan is shared under `activities`.
 
 ### Pauses and resume
 
-A paused link records its reason. `usage-limit` and `route-unavailable`
+A paused link records its reason. A wake whose route fails the
+`watcherRouteReadiness` preflight (selection, allowlist, backend readiness, a
+runnable provider) retries as transient with the scheduler's backoff at most
+`WATCHER_ROUTE_RETRY_LIMIT` (3) times; the next failure pauses the link with
+`route-unavailable`, a detail that names the route and the readiness message,
+and a `watcher.link.updated` broadcast. A check that starts resets the count.
+`usage-limit` and `route-unavailable`
 resume only once `watcherRouteReadiness` reports the watcher's route ready,
 and `watched-archived` refuses to resume until the watched chat is
 unarchived. Every resume tops the turn's check allowance back up to

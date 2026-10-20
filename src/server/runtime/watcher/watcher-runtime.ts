@@ -225,7 +225,10 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
       },
       requestWake: (linkId, trigger) => wakeScheduler.requestWake(linkId, trigger),
       pause: (linkId, options) => wakeScheduler.pause(linkId, options),
-      resume: (linkId) => wakeScheduler.resume(linkId),
+      resume: (linkId) => {
+        runner.resumed(linkId);
+        wakeScheduler.resume(linkId);
+      },
       forget: (linkId) => wakeScheduler.forget(linkId),
       onWatchedTurnSettled: (linkId, turnId) => wakeScheduler.onWatchedTurnSettled(linkId, turnId),
     },

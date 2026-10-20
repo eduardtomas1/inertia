@@ -155,7 +155,7 @@ The dock says why:
 - you paused it;
 - it used its checks for this turn: choose **Resume**;
 - it reached its account's usage limit: it can resume once its route is ready;
-- its route is unavailable: check **Settings → Agents**; it can resume once the route is ready;
+- its route stayed unavailable through three retries: check **Settings → Agents**; it can resume once the route is ready;
 - it tried to edit a file twice during one turn;
 - files changed that no running agent accounts for (see below);
 - the watched chat was archived: unarchive it, then resume.

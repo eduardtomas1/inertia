@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
-import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
+import { WATCHER_ROUTE_RETRY_LIMIT } from "../../src/server/runtime/watcher/watcher-wake-runner";
+import { WATCHER_RETRY_MAX_MS, WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
   createWatcherFixture,
@@ -223,6 +224,67 @@ describe("watcher wake runner", () => {
       await f.flush();
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "permission-declined" });
       expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("retries an unready route three times, then pauses with route-unavailable until the route is ready", async () => {
+    let ready = true;
+    const readiness = vi.fn(async () => ready ? null : { ready: false, message: "Sign in to continue." });
+    const f = await createWatcherFixture({ readiness });
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await f.startWatchedTurn();
+      const watcherRuns = () => f.provider.inputs.filter((input) => input.conversationId === watcherId).length;
+      const failAttempts = async (attempts: number): Promise<void> => {
+        const before = readiness.mock.calls.length;
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          await f.advance(WATCHER_RETRY_MAX_MS);
+          expect(readiness.mock.calls.length - before).toBe(attempt);
+        }
+      };
+
+      // Three transient retries keep the link watching, and a ready route starts the check.
+      ready = false;
+      watchedActivity(f);
+      await failAttempts(WATCHER_ROUTE_RETRY_LIMIT);
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", pauseReason: null });
+      ready = true;
+      await f.advance(WATCHER_RETRY_MAX_MS);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("watcher not running"); });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(watcherRuns()).toBe(1);
+
+      // The started check reset the count: three more retries, then the fourth failure pauses.
+      ready = false;
+      watchedActivity(f, "Read src/b.ts");
+      await failAttempts(WATCHER_ROUTE_RETRY_LIMIT);
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
+      await failAttempts(1);
+      const paused = f.store.watcherLinks.get(link.id)!;
+      expect(paused).toMatchObject({ status: "paused", pauseReason: "route-unavailable" });
+      expect(paused.pauseDetail).toBe(
+        "The watcher's route (codex-app-server harness · OpenAI · gpt-test) isn't ready: Sign in to continue. "
+        + "Check Settings → Agents; it can resume once the route is ready.",
+      );
+      expect(f.watcherEvents()).toContainEqual({
+        type: "watcher.link.updated",
+        link: expect.objectContaining({ id: link.id, status: "paused", pauseReason: "route-unavailable", pauseDetail: paused.pauseDetail }),
+      });
+
+      // Paused: no further retries, and resume waits for a ready route.
+      const callsWhilePaused = readiness.mock.calls.length;
+      await f.advance(10 * 60_000);
+      expect(readiness.mock.calls.length).toBe(callsWhilePaused);
+      expect(watcherRuns()).toBe(1);
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("route isn't ready");
+      ready = true;
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching", pauseReason: null } } });
+      await wakeOnce(f, link.id);
+      expect(watcherRuns()).toBe(2);
     } finally {
       await f.close();
     }

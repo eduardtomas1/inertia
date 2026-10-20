@@ -1,13 +1,15 @@
 {
   "preFoundationBaseline": "965e960",
   "foundationBaseline": "2c06d75",
+  "mergedMainBaseline": "e165a0a",
   "runtime": "Node 22.22.0, Linux x64",
   "method": "Identical package-lock and installed dependency graph; renderer built with electron-vite (renderer target) on each revision and measured with scripts/check-renderer-bundle.mjs accounting. The watcher dock and attach dialog closures exclude every entry, workbench and detached-chat chunk, and the attach dialog also excludes chunks it shares with the dock.",
   "notes": [
     "foundation: watcher event and result validators join the deferred server-event schema chunk; 841 bytes reach each first-load route.",
     "renderer: eager wiring is the link index, the per-chat dock record, the chip, the dock and attach hosts, the live-phase store, the timeline divider and check model and the composer lock; the dock UI and the attach dialog stay in WatcherDock-* and WatcherAttachDialog-*.",
     "entryCss grows by 70 bytes and stays within its existing ceiling.",
-    "Small changes on unrelated deferred chunks are import metadata for helpers (dialog shell, elapsed timing) that Rollup now shares with the watcher chunks."
+    "Small changes on unrelated deferred chunks are import metadata for helpers (dialog shell, elapsed timing) that Rollup now shares with the watcher chunks.",
+    "After merging v0.0.73 (e165a0a), mergedMainBaselineBytes is that revision and mergedBytes the merged branch, built from the same package-lock. Only deferredTasksViewJavaScript needed more room: v0.0.73 measures exactly its 21,126-byte budget and the Work tab nesting adds 6 bytes."
   ],
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
@@ -15,385 +17,560 @@
       "foundationBytes": 1141,
       "implementationBytes": 1141,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 1163,
+      "mergedBytes": 1163,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredUsageLimitsJavaScript": {
       "preFoundationBytes": 21747,
       "foundationBytes": 21747,
       "implementationBytes": 21747,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 21769,
+      "mergedBytes": 21769,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredWatcherDockJavaScript": {
       "preFoundationBytes": null,
       "foundationBytes": null,
       "implementationBytes": 31907,
       "deltaFromFoundationBytes": 31907,
-      "deltaFromPreFoundationBytes": 31907
+      "deltaFromPreFoundationBytes": 31907,
+      "mergedMainBaselineBytes": null,
+      "mergedBytes": 31953,
+      "deltaFromMergedMainBaselineBytes": 31953
     },
     "deferredWatcherAttachJavaScript": {
       "preFoundationBytes": null,
       "foundationBytes": null,
       "implementationBytes": 18711,
       "deltaFromFoundationBytes": 18711,
-      "deltaFromPreFoundationBytes": 18711
+      "deltaFromPreFoundationBytes": 18711,
+      "mergedMainBaselineBytes": null,
+      "mergedBytes": 18747,
+      "deltaFromMergedMainBaselineBytes": 18747
     },
     "deferredWelcomeGuideJavaScript": {
       "preFoundationBytes": 37212,
       "foundationBytes": 37212,
       "implementationBytes": 37456,
       "deltaFromFoundationBytes": 244,
-      "deltaFromPreFoundationBytes": 244
+      "deltaFromPreFoundationBytes": 244,
+      "mergedMainBaselineBytes": 38023,
+      "mergedBytes": 38267,
+      "deltaFromMergedMainBaselineBytes": 244
     },
     "deferredWorkingOrbJavaScript": {
       "preFoundationBytes": 21807,
       "foundationBytes": 21807,
       "implementationBytes": 21807,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 21829,
+      "mergedBytes": 21829,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredSnapshotSettingsJavaScript": {
       "preFoundationBytes": 4032,
       "foundationBytes": 4032,
       "implementationBytes": 4054,
       "deltaFromFoundationBytes": 22,
-      "deltaFromPreFoundationBytes": 22
+      "deltaFromPreFoundationBytes": 22,
+      "mergedMainBaselineBytes": 4054,
+      "mergedBytes": 4076,
+      "deltaFromMergedMainBaselineBytes": 22
     },
     "deferredSnapshotControlJavaScript": {
       "preFoundationBytes": 6867,
       "foundationBytes": 6867,
       "implementationBytes": 6867,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 6889,
+      "mergedBytes": 6889,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredAttachmentStorageSettingsJavaScript": {
       "preFoundationBytes": 5308,
       "foundationBytes": 5308,
       "implementationBytes": 5330,
       "deltaFromFoundationBytes": 22,
-      "deltaFromPreFoundationBytes": 22
+      "deltaFromPreFoundationBytes": 22,
+      "mergedMainBaselineBytes": 5330,
+      "mergedBytes": 5352,
+      "deltaFromMergedMainBaselineBytes": 22
     },
     "deferredBackgroundTasksJavaScript": {
       "preFoundationBytes": 19386,
       "foundationBytes": 19386,
       "implementationBytes": 19386,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 19408,
+      "mergedBytes": 19408,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredTasksViewJavaScript": {
       "preFoundationBytes": 21109,
       "foundationBytes": 21104,
       "implementationBytes": 21100,
       "deltaFromFoundationBytes": -4,
-      "deltaFromPreFoundationBytes": -9
+      "deltaFromPreFoundationBytes": -9,
+      "mergedMainBaselineBytes": 21126,
+      "mergedBytes": 21132,
+      "deltaFromMergedMainBaselineBytes": 6
     },
     "deferredProjectSettingsJavaScript": {
       "preFoundationBytes": 17087,
       "foundationBytes": 17087,
       "implementationBytes": 17109,
       "deltaFromFoundationBytes": 22,
-      "deltaFromPreFoundationBytes": 22
+      "deltaFromPreFoundationBytes": 22,
+      "mergedMainBaselineBytes": 17133,
+      "mergedBytes": 17155,
+      "deltaFromMergedMainBaselineBytes": 22
     },
     "deferredCliConversationImportJavaScript": {
       "preFoundationBytes": 9623,
       "foundationBytes": 9623,
       "implementationBytes": 9623,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 9645,
+      "mergedBytes": 9645,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredReviewNoteJavaScript": {
       "preFoundationBytes": 1475,
       "foundationBytes": 1475,
       "implementationBytes": 1475,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 1497,
+      "mergedBytes": 1497,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredThreadActionsJavaScript": {
       "preFoundationBytes": 8196,
       "foundationBytes": 8196,
       "implementationBytes": 8794,
       "deltaFromFoundationBytes": 598,
-      "deltaFromPreFoundationBytes": 598
+      "deltaFromPreFoundationBytes": 598,
+      "mergedMainBaselineBytes": 8249,
+      "mergedBytes": 8847,
+      "deltaFromMergedMainBaselineBytes": 598
     },
     "deferredProjectCustomizeJavaScript": {
       "preFoundationBytes": 11993,
       "foundationBytes": 11993,
       "implementationBytes": 11994,
       "deltaFromFoundationBytes": 1,
-      "deltaFromPreFoundationBytes": 1
+      "deltaFromPreFoundationBytes": 1,
+      "mergedMainBaselineBytes": 12015,
+      "mergedBytes": 12016,
+      "deltaFromMergedMainBaselineBytes": 1
     },
     "deferredProjectColorContrastJavaScript": {
       "preFoundationBytes": 1802,
       "foundationBytes": 1802,
       "implementationBytes": 1802,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 1824,
+      "mergedBytes": 1824,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredDiagnosticsJavaScript": {
       "preFoundationBytes": 18404,
       "foundationBytes": 18404,
       "implementationBytes": 18426,
       "deltaFromFoundationBytes": 22,
-      "deltaFromPreFoundationBytes": 22
+      "deltaFromPreFoundationBytes": 22,
+      "mergedMainBaselineBytes": 18426,
+      "mergedBytes": 18448,
+      "deltaFromMergedMainBaselineBytes": 22
     },
     "deferredDiagnosticCatalogJavaScript": {
       "preFoundationBytes": 9980,
       "foundationBytes": 9980,
       "implementationBytes": 9980,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 9980,
+      "mergedBytes": 9980,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredIssueReportJavaScript": {
       "preFoundationBytes": 13348,
       "foundationBytes": 13348,
       "implementationBytes": 13348,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 13370,
+      "mergedBytes": 13370,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "mascotFirstLoadJavaScript": {
       "preFoundationBytes": 11506,
       "foundationBytes": 11506,
       "implementationBytes": 11506,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 11506,
+      "mergedBytes": 11506,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "mascotJavaScript": {
       "preFoundationBytes": 11506,
       "foundationBytes": 11506,
       "implementationBytes": 11506,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 11506,
+      "mergedBytes": 11506,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "mascotSettingsJavaScript": {
       "preFoundationBytes": 7473,
       "foundationBytes": 7473,
       "implementationBytes": 7473,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 7495,
+      "mergedBytes": 7495,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "entryJavaScript": {
       "preFoundationBytes": 222492,
       "foundationBytes": 222492,
       "implementationBytes": 222492,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 222556,
+      "mergedBytes": 222556,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "mainWorkbenchFirstLoadJavaScript": {
       "preFoundationBytes": 878750,
       "foundationBytes": 879591,
       "implementationBytes": 888030,
       "deltaFromFoundationBytes": 8439,
-      "deltaFromPreFoundationBytes": 9280
+      "deltaFromPreFoundationBytes": 9280,
+      "mergedMainBaselineBytes": 889926,
+      "mergedBytes": 899206,
+      "deltaFromMergedMainBaselineBytes": 9280
     },
     "detachedChatFirstLoadJavaScript": {
       "preFoundationBytes": 672293,
       "foundationBytes": 673134,
       "implementationBytes": 680009,
       "deltaFromFoundationBytes": 6875,
-      "deltaFromPreFoundationBytes": 7716
+      "deltaFromPreFoundationBytes": 7716,
+      "mergedMainBaselineBytes": 681993,
+      "mergedBytes": 689703,
+      "deltaFromMergedMainBaselineBytes": 7710
     },
     "entryCss": {
       "preFoundationBytes": 241072,
       "foundationBytes": 241072,
       "implementationBytes": 241142,
       "deltaFromFoundationBytes": 70,
-      "deltaFromPreFoundationBytes": 70
+      "deltaFromPreFoundationBytes": 70,
+      "mergedMainBaselineBytes": 240972,
+      "mergedBytes": 241042,
+      "deltaFromMergedMainBaselineBytes": 70
     },
     "colorThemesCss": {
       "preFoundationBytes": 8675,
       "foundationBytes": 8675,
       "implementationBytes": 8675,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 8675,
+      "mergedBytes": 8675,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "detachedChatCss": {
       "preFoundationBytes": 3069,
       "foundationBytes": 3069,
       "implementationBytes": 3069,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 3069,
+      "mergedBytes": 3069,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "settingsJavaScript": {
       "preFoundationBytes": 77802,
       "foundationBytes": 77802,
       "implementationBytes": 77323,
       "deltaFromFoundationBytes": -479,
-      "deltaFromPreFoundationBytes": -479
+      "deltaFromPreFoundationBytes": -479,
+      "mergedMainBaselineBytes": 77970,
+      "mergedBytes": 77501,
+      "deltaFromMergedMainBaselineBytes": -469
     },
     "filesFirstLoadJavaScript": {
       "preFoundationBytes": 110836,
       "foundationBytes": 110836,
       "implementationBytes": 110836,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 110882,
+      "mergedBytes": 110882,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredMarkdownJavaScript": {
       "preFoundationBytes": 434721,
       "foundationBytes": 434721,
       "implementationBytes": 434721,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 434721,
+      "mergedBytes": 434721,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "transcriptJavaScript": {
       "preFoundationBytes": 567967,
       "foundationBytes": 567399,
       "implementationBytes": 572141,
       "deltaFromFoundationBytes": 4742,
-      "deltaFromPreFoundationBytes": 4174
+      "deltaFromPreFoundationBytes": 4174,
+      "mergedMainBaselineBytes": 573513,
+      "mergedBytes": 577687,
+      "deltaFromMergedMainBaselineBytes": 4174
     },
     "deferredFailureDiagnosticsJavaScript": {
       "preFoundationBytes": 5749,
       "foundationBytes": 5744,
       "implementationBytes": 5749,
       "deltaFromFoundationBytes": 5,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 5766,
+      "mergedBytes": 5771,
+      "deltaFromMergedMainBaselineBytes": 5
     },
     "deferredAttachmentPreviewJavaScript": {
       "preFoundationBytes": 17794,
       "foundationBytes": 17794,
       "implementationBytes": 17794,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 17839,
+      "mergedBytes": 17839,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredPreviewJavaScript": {
       "preFoundationBytes": 7613,
       "foundationBytes": 7613,
       "implementationBytes": 7613,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 7653,
+      "mergedBytes": 7653,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredBrowserEvidenceJavaScript": {
       "preFoundationBytes": 3431,
       "foundationBytes": 3431,
       "implementationBytes": 3431,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 3453,
+      "mergedBytes": 3453,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredSpreadsheetJavaScript": {
       "preFoundationBytes": 487396,
       "foundationBytes": 487396,
       "implementationBytes": 487396,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 487396,
+      "mergedBytes": 487396,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredDiscordSettingsJavaScript": {
       "preFoundationBytes": 7891,
       "foundationBytes": 7891,
       "implementationBytes": 7918,
       "deltaFromFoundationBytes": 27,
-      "deltaFromPreFoundationBytes": 27
+      "deltaFromPreFoundationBytes": 27,
+      "mergedMainBaselineBytes": 7913,
+      "mergedBytes": 7940,
+      "deltaFromMergedMainBaselineBytes": 27
     },
     "deferredCanaryRollbackJavaScript": {
       "preFoundationBytes": 2232,
       "foundationBytes": 2232,
       "implementationBytes": 2254,
       "deltaFromFoundationBytes": 22,
-      "deltaFromPreFoundationBytes": 22
+      "deltaFromPreFoundationBytes": 22,
+      "mergedMainBaselineBytes": 2254,
+      "mergedBytes": 2276,
+      "deltaFromMergedMainBaselineBytes": 22
     },
     "deferredLifecycleIntegritySettingsJavaScript": {
       "preFoundationBytes": 2573,
       "foundationBytes": 2573,
       "implementationBytes": 2595,
       "deltaFromFoundationBytes": 22,
-      "deltaFromPreFoundationBytes": 22
+      "deltaFromPreFoundationBytes": 22,
+      "mergedMainBaselineBytes": 2595,
+      "mergedBytes": 2617,
+      "deltaFromMergedMainBaselineBytes": 22
     },
     "deferredSidebarUpdateControlJavaScript": {
       "preFoundationBytes": 15797,
       "foundationBytes": 15797,
       "implementationBytes": 15797,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 15842,
+      "mergedBytes": 15842,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredProviderAuthJavaScript": {
       "preFoundationBytes": 11182,
       "foundationBytes": 11182,
       "implementationBytes": 11182,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 11204,
+      "mergedBytes": 11204,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredProviderMaintenanceJavaScript": {
       "preFoundationBytes": 4388,
       "foundationBytes": 4388,
       "implementationBytes": 4388,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 4410,
+      "mergedBytes": 4410,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredComposerQueueJavaScript": {
       "preFoundationBytes": 12974,
       "foundationBytes": 12974,
       "implementationBytes": 13085,
       "deltaFromFoundationBytes": 111,
-      "deltaFromPreFoundationBytes": 111
+      "deltaFromPreFoundationBytes": 111,
+      "mergedMainBaselineBytes": 13029,
+      "mergedBytes": 13140,
+      "deltaFromMergedMainBaselineBytes": 111
     },
     "deferredTerminalJavaScript": {
       "preFoundationBytes": 27107,
       "foundationBytes": 27107,
       "implementationBytes": 27107,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 27152,
+      "mergedBytes": 27152,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredGitMenusJavaScript": {
       "preFoundationBytes": 8073,
       "foundationBytes": 8073,
       "implementationBytes": 8075,
       "deltaFromFoundationBytes": 2,
-      "deltaFromPreFoundationBytes": 2
+      "deltaFromPreFoundationBytes": 2,
+      "mergedMainBaselineBytes": 8117,
+      "mergedBytes": 8119,
+      "deltaFromMergedMainBaselineBytes": 2
     },
     "deferredWorkspaceHeaderActionsJavaScript": {
       "preFoundationBytes": 20768,
       "foundationBytes": 20768,
       "implementationBytes": 20769,
       "deltaFromFoundationBytes": 1,
-      "deltaFromPreFoundationBytes": 1
+      "deltaFromPreFoundationBytes": 1,
+      "mergedMainBaselineBytes": 20817,
+      "mergedBytes": 20818,
+      "deltaFromMergedMainBaselineBytes": 1
     },
     "detachedChatJavaScript": {
       "preFoundationBytes": 11123,
       "foundationBytes": 11123,
       "implementationBytes": 11362,
       "deltaFromFoundationBytes": 239,
-      "deltaFromPreFoundationBytes": 239
+      "deltaFromPreFoundationBytes": 239,
+      "mergedMainBaselineBytes": 11145,
+      "mergedBytes": 11384,
+      "deltaFromMergedMainBaselineBytes": 239
     },
     "preMergeConfidenceJavaScript": {
       "preFoundationBytes": 27428,
       "foundationBytes": 27428,
       "implementationBytes": 27429,
       "deltaFromFoundationBytes": 1,
-      "deltaFromPreFoundationBytes": 1
+      "deltaFromPreFoundationBytes": 1,
+      "mergedMainBaselineBytes": 27472,
+      "mergedBytes": 27473,
+      "deltaFromMergedMainBaselineBytes": 1
     },
     "morphiconsJavaScript": {
       "preFoundationBytes": 15829,
       "foundationBytes": 15829,
       "implementationBytes": 15829,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 20685,
+      "mergedBytes": 20685,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "morphingIconFeedbackJavaScript": {
       "preFoundationBytes": 3913,
       "foundationBytes": 3913,
       "implementationBytes": 3913,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 3948,
+      "mergedBytes": 3948,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "coreJavaScript": {
       "preFoundationBytes": 2302269,
       "foundationBytes": 2309519,
       "implementationBytes": 2315253,
       "deltaFromFoundationBytes": 5734,
-      "deltaFromPreFoundationBytes": 12984
+      "deltaFromPreFoundationBytes": 12984,
+      "mergedMainBaselineBytes": 2315854,
+      "mergedBytes": 2328833,
+      "deltaFromMergedMainBaselineBytes": 12979
     },
     "deferredPdfJavaScript": {
       "preFoundationBytes": 437503,
       "foundationBytes": 437503,
       "implementationBytes": 437503,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 437503,
+      "mergedBytes": 437503,
+      "deltaFromMergedMainBaselineBytes": 0
     },
     "deferredPdfWorker": {
       "preFoundationBytes": 1264342,
       "foundationBytes": 1264342,
       "implementationBytes": 1264342,
       "deltaFromFoundationBytes": 0,
-      "deltaFromPreFoundationBytes": 0
+      "deltaFromPreFoundationBytes": 0,
+      "mergedMainBaselineBytes": 1264342,
+      "mergedBytes": 1264342,
+      "deltaFromMergedMainBaselineBytes": 0
+    },
+    "deferredIconRegionJavaScript": {
+      "preFoundationBytes": null,
+      "foundationBytes": null,
+      "implementationBytes": null,
+      "deltaFromFoundationBytes": null,
+      "deltaFromPreFoundationBytes": null,
+      "mergedMainBaselineBytes": 12995,
+      "mergedBytes": 12995,
+      "deltaFromMergedMainBaselineBytes": 0
     }
   }
 }

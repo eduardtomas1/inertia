@@ -399,6 +399,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
             actions={surface.online ? actions : null}
             privateConnectConfigured={privateConnectConfigured}
             resumeBlocked={resumeBlocked}
+            usageTokens={feed.usageTokens}
             onCollapse={collapse}
             onOpenWatcherChat={surface.openWatcherChat
               ? () => surface.openWatcherChat?.(link.watcherConversationId)

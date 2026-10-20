@@ -37,7 +37,7 @@ function bar(
   current: WatcherLinkView,
   runtime = watcherRuntime({ link: () => current }),
   onResumeRequest = vi.fn(),
-  options: { privateConnectConfigured?: boolean; resumeBlocked?: string | null } = {},
+  options: { privateConnectConfigured?: boolean; resumeBlocked?: string | null; usageTokens?: number | null } = {},
 ) {
   return (
     <WatcherBar
@@ -49,6 +49,7 @@ function bar(
       actions={createWatcherActions(runtime.request, current.id)}
       privateConnectConfigured={options.privateConnectConfigured ?? false}
       resumeBlocked={options.resumeBlocked ?? null}
+      usageTokens={options.usageTokens ?? null}
       onCollapse={vi.fn()}
       onOpenWatcherChat={vi.fn()}
       onResumeRequest={onResumeRequest}
@@ -82,7 +83,7 @@ describe("WatcherBar", () => {
   });
 
   it("keeps one primary icon button beside the title, with the rest and the numbers in More", async () => {
-    render(bar(link({ quietSince: "2026-10-19T10:50:00.000Z" }), undefined, undefined, { privateConnectConfigured: true }));
+    render(bar(link({ quietSince: "2026-10-19T10:50:00.000Z" }), undefined, undefined, { privateConnectConfigured: true, usageTokens: 48_200 }));
     const actions = document.querySelector<HTMLElement>(".watcher-bar-actions")!;
     expect(within(actions).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
       .toEqual(["Check now", "More watcher actions"]);
@@ -100,8 +101,17 @@ describe("WatcherBar", () => {
       "2 waiting",
       expect.stringMatching(/^Last check /u),
       expect.stringMatching(/^Main chat quiet since /u),
+      "Used 48.2K tokens",
     ]);
     expect(within(menu).getByRole("menuitem", { name: "2 waiting" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).getByRole("menuitem", { name: "Used 48.2K tokens" })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("shows no usage line until the watcher's token use is known", async () => {
+    render(bar(link(), undefined, undefined, { usageTokens: null }));
+    fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
+    const menu = await screen.findByRole("menu", { name: "More watcher actions" });
+    expect(menu).not.toHaveTextContent(/tokens/u);
   });
 
   it("turns automatic sending on and off from the More menu and says so in the bar", async () => {
@@ -140,6 +150,7 @@ describe("WatcherBar", () => {
         actions={createWatcherActions(watcherRuntime().request, LINK_ID)}
         privateConnectConfigured={false}
         resumeBlocked={null}
+        usageTokens={null}
         onCollapse={onCollapse}
         onOpenWatcherChat={null}
         onResumeRequest={vi.fn()}
@@ -300,6 +311,7 @@ describe("WatcherBar", () => {
         actions={createWatcherActions(request, current.id)}
         privateConnectConfigured={false}
         resumeBlocked={null}
+        usageTokens={null}
         onCollapse={vi.fn()}
         onOpenWatcherChat={null}
         onResumeRequest={vi.fn()}

@@ -74,4 +74,23 @@ describe("useWatcherFeed", () => {
     expect(result.current.items.map(({ sequence }) => sequence)).toEqual([6, 5, 4, 3, 2]);
     expect(result.current.hasMore).toBe(false);
   });
+
+  it("carries the watcher's token use from the newest page, and none while unknown", async () => {
+    const feed = deferredFeed();
+    const actions = feed.actionsFor(LINK_ID);
+    const { result, rerender } = renderHook(({ revision }) => useWatcherFeed(LINK_ID, revision, actions), {
+      initialProps: { revision: 1 },
+    });
+    expect(result.current.usageTokens).toBeNull();
+    await act(async () => {
+      feed.calls[0]!.resolve({ ...feed.page(LINK_ID, [feedItem(2)], 2), usage: { totalTokens: 48_200 } });
+    });
+    expect(result.current.usageTokens).toBe(48_200);
+    act(() => result.current.loadMore());
+    await act(async () => { feed.calls[1]!.resolve(feed.page(LINK_ID, [feedItem(1)])); });
+    expect(result.current.usageTokens).toBe(48_200);
+    rerender({ revision: 2 });
+    await act(async () => { feed.calls[2]!.resolve({ ...feed.page(LINK_ID, [feedItem(2)]), usage: { totalTokens: null } }); });
+    expect(result.current.usageTokens).toBeNull();
+  });
 });

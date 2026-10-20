@@ -11,6 +11,8 @@ export interface WatcherFeedState {
   error: string | null;
   hasMore: boolean;
   loadingMore: boolean;
+  /** The watcher chat's total token use from the newest page, or null while unknown. */
+  usageTokens: number | null;
   loadMore: () => void;
   retry: () => void;
   applyDelivery: (wakeId: string, delivery: WatcherDelivery) => void;
@@ -21,6 +23,7 @@ interface Feed {
   items: WatcherFeedItem[];
   next: WatcherFeedResult["next"];
   pages: number;
+  usageTokens: number | null;
 }
 
 interface HeadState {
@@ -42,6 +45,7 @@ function mergeHead(previous: Feed | null, result: WatcherFeedResult): Feed {
     items: [...result.items, ...(paged ? kept.items.filter(({ sequence }) => sequence < oldestHead) : [])],
     next: paged ? kept.next : result.next,
     pages: kept?.pages ?? 0,
+    usageTokens: result.usage?.totalTokens ?? null,
   };
 }
 
@@ -172,6 +176,7 @@ export function useWatcherFeed(
     error,
     hasMore: next !== null,
     loadingMore,
+    usageTokens: feed?.linkId === linkId ? feed.usageTokens : null,
     loadMore,
     retry,
     applyDelivery,

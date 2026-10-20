@@ -4,6 +4,7 @@ import { Ellipsis, Play, RefreshCw } from "lucide-react";
 import type { ConversationShell } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { WatcherLinkView } from "@shared/watcher";
+import { formatCompact } from "../../lib/compactFormat";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { useWatcherLive } from "../../utils/watcherLiveStore";
 import {
@@ -29,6 +30,8 @@ export interface WatcherBarProps {
   privateConnectConfigured: boolean;
   /** Why Resume would be refused right now, or null when it can resume. */
   resumeBlocked: string | null;
+  /** The watcher chat's total token use, or null while unknown. */
+  usageTokens: number | null;
   onCollapse: () => void;
   onOpenWatcherChat: (() => void) | null;
   onResumeRequest: () => void;
@@ -96,6 +99,7 @@ export function WatcherBar({
   actions,
   privateConnectConfigured,
   resumeBlocked,
+  usageTokens,
   onCollapse,
   onOpenWatcherChat,
   onResumeRequest,
@@ -283,6 +287,7 @@ export function WatcherBar({
                 <MenuNote>{`${counterText(counters.eventsPending)} waiting`}</MenuNote>
                 {link.lastWakeAt && <MenuNote>{`Last check ${watcherClockTime(link.lastWakeAt)}`}</MenuNote>}
                 {link.quietSince && <MenuNote>{`Main chat quiet since ${watcherClockTime(link.quietSince)}`}</MenuNote>}
+                {usageTokens !== null && <MenuNote>{`Used ${formatCompact(usageTokens)} tokens`}</MenuNote>}
               </>
             )}
           </WatcherMenu>

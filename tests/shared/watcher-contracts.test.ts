@@ -267,6 +267,10 @@ describe("watcher shared contracts", () => {
 
   it("carries the count of command requests a check had declined", () => {
     expect(watcherFeedItemSchema.parse({ ...feedItem, commandsDeclined: 2 }).commandsDeclined).toBe(2);
+    expect(watcherFeedItemSchema.parse({ ...feedItem, digestBytes: 24_576 }).digestBytes).toBe(24_576);
+    for (const digestBytes of [-1, 1.5, 65_537, "24"]) {
+      expect(watcherFeedItemSchema.safeParse({ ...feedItem, digestBytes }).success).toBe(false);
+    }
     for (const commandsDeclined of [undefined, -1, 1.5, "2"]) {
       expect(watcherFeedItemSchema.safeParse({ ...feedItem, commandsDeclined }).success).toBe(false);
     }

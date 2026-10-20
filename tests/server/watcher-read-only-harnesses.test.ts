@@ -634,7 +634,7 @@ describe("watcher turns on the Codex app-server harness", () => {
     const codex = codexAppServer(root, repo, "read-then-write");
     const runtime = watcherHarnessRuntime(root, repo, codex.manager, providerNativeModelSelection({ providerId: "codex", modelId: "model-a" }));
     const first = await runtime.settled(runtime.startCheck().id);
-    runtime.store.watcherLinks.settleWake(runtime.store.watcherLinks.wakeForTurn(first.id)!.wakeId, "silent", null, null, null, now());
+    runtime.store.watcherLinks.settleWake(runtime.store.watcherLinks.wakeForTurn(first.id)!.wakeId, "silent", null, null, now());
 
     await runtime.settled(runtime.startCheck().id);
 

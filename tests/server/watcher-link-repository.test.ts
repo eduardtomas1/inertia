@@ -118,7 +118,7 @@ function check(linkId: string, outcome: "silent" | "finding" = "silent", watched
   expect(wake).not.toBeNull();
   const settled = store.watcherLinks.settleWake(
     wake!.wakeId, outcome, { state: "clean", paths: [] },
-    outcome === "finding" ? "The retry loop never backs off." : null, null, tick(),
+    outcome === "finding" ? "The retry loop never backs off." : null, tick(),
   );
   expect(store.watcherLinks.transition(linkId, ["waking"], { status: "watching" }, tick())).not.toBeNull();
   return settled!;
@@ -247,9 +247,8 @@ describe("watcher link repository", () => {
       .toMatchObject({ preset: "scope-guard", instructions: link.instructions, privateConnect: "hidden", budgets: { wakesPerWatchedTurn: 5 } });
     const started = links.beginWatchedTurn(link.id, "turn-1", tick());
     expect(started).toMatchObject({ watchedTurnId: "turn-1", counters: { wakeAllowance: 5, wakesThisTurn: 0 } });
-    expect(links.recordAttempt(link.id, "write")).toBe(1);
-    expect(links.recordAttempt(link.id, "write")).toBe(2);
-    expect(links.recordAttempt(link.id, "command")).toBe(1);
+    expect(links.recordWriteAttempt(link.id)).toBe(1);
+    expect(links.recordWriteAttempt(link.id)).toBe(2);
     expect(links.beginWatchedTurn(link.id, "turn-1", tick())?.writeAttemptsThisTurn).toBe(2);
     const cursor = { turnId: "turn-1", activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-9", messageAt: null, pendingRunningIds: ["a", "a", "b"] };
     expect(links.notePendingEvents(link.id, 7, tick())?.counters.eventsPending).toBe(7);
@@ -259,7 +258,7 @@ describe("watcher link repository", () => {
     expect(advanced).toMatchObject({ cursor: { ...cursor, pendingRunningIds: ["a", "b"] }, counters: { eventsSeen: 4, eventsPending: 7 } });
     expect(links.grantWakes(link.id, 3)?.counters.wakeAllowance).toBe(8);
     expect(links.beginWatchedTurn(link.id, "turn-2", tick())).toMatchObject({
-      writeAttemptsThisTurn: 0, commandAttemptsThisTurn: 0, counters: { wakeAllowance: 5, eventsPending: 7 },
+      writeAttemptsThisTurn: 0, counters: { wakeAllowance: 5, eventsPending: 7 },
       cursor: { turnId: "turn-2", activityAt: null, activityId: null, pendingRunningIds: [] },
     });
     expect(links.markQuiet(link.id, tick())?.quietSince).not.toBeNull();
@@ -310,7 +309,7 @@ describe("watcher link repository", () => {
     const open = (watchedTurnId: string, trigger: "turn-end" | "activity") => {
       links.transition(link.id, ["watching"], { status: "waking" }, tick());
       const wake = links.createWake({ id: randomUUID(), linkId: link.id, watchedTurnId, trigger, eventsCovered: 0, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 0 }, tick())!;
-      links.settleWake(wake.wakeId, "silent", null, null, null, tick());
+      links.settleWake(wake.wakeId, "silent", null, null, tick());
       links.transition(link.id, ["waking"], { status: "watching" }, tick());
     };
     open("turn-1", "turn-end");
@@ -357,7 +356,7 @@ describe("watcher link repository", () => {
     const first = check(link.id, "finding");
     check(link.id, "silent");
     expect(links.get(link.id)?.counters.findingsTotal).toBe(1);
-    expect(links.settleWake(first.wakeId, "finding", null, "Again.", null, tick())).toBeNull();
+    expect(links.settleWake(first.wakeId, "finding", null, "Again.", tick())).toBeNull();
     links.setDelivery(first.wakeId, { mode: null, state: "dismissed" }, tick());
     check(link.id, "finding");
     links.beginWatchedTurn(link.id, "turn-next", tick());
@@ -375,7 +374,7 @@ describe("watcher link repository", () => {
         eventsCovered: 1, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 128,
       }, tick())!;
       expect(wake.commandsDeclined).toBe(0);
-      const settled = links.settleWake(wake.wakeId, "command-attempt", null, null, null, tick(), declined);
+      const settled = links.settleWake(wake.wakeId, "command-attempt", null, null, tick(), declined);
       links.transition(link.id, ["waking"], { status: "watching" }, tick());
       return settled?.commandsDeclined;
     };
@@ -474,7 +473,7 @@ describe("watcher link repository", () => {
       const detail = `${"\u0007\n\u2028\uD800".repeat(100)}${"界".repeat(2_000)}`;
       expect(links.transition(link.id, ["watching"], { status: "paused", reason: "route-unavailable", detail }, tick())?.pauseDetail)
         .toHaveLength(MAX_WATCHER_PAUSE_DETAIL_CHARS);
-      links.recordAttempt(link.id, "write");
+      links.recordWriteAttempt(link.id);
     }
     const views = store.shellSnapshot().watchers ?? [];
     expect(views).toHaveLength(MAX_ACTIVE_WATCHERS);
@@ -547,7 +546,9 @@ describe("watcher link repository", () => {
       .toBeNull();
     links.transition(link.id, ["watching"], { status: "waking" }, tick());
     const wake = links.createWake({ id: randomUUID(), linkId: link.id, watchedTurnId: "turn-9", trigger: "manual", eventsCovered: 3, itemsTruncated: 1, itemsOmitted: 2, digestBytes: 900, consumesAllowance: false }, tick())!;
-    expect(wake).toMatchObject({ sequence: 1, state: "dispatching", watcherTurnId: null, eventsCovered: 3 });
+    expect(wake).toMatchObject({ sequence: 1, state: "dispatching", watcherTurnId: null, eventsCovered: 3, digestBytes: 900 });
+    expect(links.feed(link.id)?.items[0]).toMatchObject({ wakeId: wake.wakeId, digestBytes: 900 });
+    expect(watcherFeedResultSchema.safeParse({ kind: "watcher.feed", ...links.feed(link.id) }).success).toBe(true);
     expect(links.get(link.id)).toMatchObject({ counters: { wakesThisTurn: 0, wakesTotal: 1 }, feedRevision: 1 });
     expect(links.createWake({ id: randomUUID(), linkId: link.id, watchedTurnId: null, trigger: "activity", eventsCovered: 0, itemsTruncated: 0, itemsOmitted: 0, digestBytes: 0 }, tick()))
       .toBeNull();
@@ -563,10 +564,10 @@ describe("watcher link repository", () => {
     expect(() => links.assertWakeTurnAllowed(conversation.id, wake.wakeId)).toThrow(WatcherPolicyError);
     expect(links.wakeForTurn(turn.id)).toMatchObject({ wakeId: wake.wakeId, state: "running", linkId: link.id });
     const guardPaths = Array.from({ length: 30 }, (_, index) => `src/file-${index}.ts`);
-    const settled = links.settleWake(wake.wakeId, "finding", { state: "changed", paths: guardPaths }, "é".repeat(5_000), null, tick())!;
+    const settled = links.settleWake(wake.wakeId, "finding", { state: "changed", paths: guardPaths }, "é".repeat(5_000), tick())!;
     expect(settled.guardPaths).toHaveLength(20);
     expect(Buffer.byteLength(settled.finding!, "utf8")).toBeLessThanOrEqual(8 * 1_024);
-    expect(links.settleWake(wake.wakeId, "silent", null, null, null, tick())).toBeNull();
+    expect(links.settleWake(wake.wakeId, "silent", null, null, tick())).toBeNull();
     expect(links.get(link.id)?.latest).toMatchObject({ outcome: "finding", text: "é".repeat(200) });
     settleTurn(turn.id);
     expect(store.conversationDetail(conversation.id)?.watcherWakes).toEqual([{
@@ -665,7 +666,7 @@ describe("watcher link repository", () => {
           reasoningOutputTokens: null, compactsAutomatically: null, capturedAt: at,
         },
       });
-      store.watcherLinks.settleWake(wake!.wakeId, "silent", null, null, null, tick());
+      store.watcherLinks.settleWake(wake!.wakeId, "silent", null, null, tick());
       expect(store.watcherLinks.transition(link.id, ["waking"], { status: "watching" }, tick())).not.toBeNull();
     }
     const running = beginTurn(conversation, "Still running");

@@ -346,7 +346,7 @@ describe("watcher wake runner", () => {
       f.provider.emit(watcherId, { type: "activity", kind: "command", phase: "failed", label: "npm test", activityId: "npm-1" });
       await f.finishTurn(watcherId, "SILENT");
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "silent", commandsRun: 1, commandsDeclined: 1 });
-      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", commandAttemptsThisTurn: 1 });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching" });
 
       watcherId = await wakeOnce(f, link.id);
       f.provider.emit(watcherId, {

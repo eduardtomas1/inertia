@@ -64,7 +64,6 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       wakes_this_turn INTEGER NOT NULL DEFAULT 0 CHECK (wakes_this_turn >= 0),
       wake_allowance INTEGER NOT NULL DEFAULT 0 CHECK (wake_allowance >= 0),
       write_attempts_this_turn INTEGER NOT NULL DEFAULT 0 CHECK (write_attempts_this_turn >= 0),
-      command_attempts_this_turn INTEGER NOT NULL DEFAULT 0 CHECK (command_attempts_this_turn >= 0),
       wakes_total INTEGER NOT NULL DEFAULT 0 CHECK (wakes_total >= 0),
       events_seen INTEGER NOT NULL DEFAULT 0 CHECK (events_seen >= 0),
       events_pending INTEGER NOT NULL DEFAULT 0 CHECK (events_pending >= 0),
@@ -124,9 +123,6 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       ),
       finding_preview TEXT CHECK (
         finding_preview IS NULL OR length(CAST(finding_preview AS BLOB)) <= 8192
-      ),
-      finding_message_id TEXT CHECK (
-        finding_message_id IS NULL OR length(finding_message_id) BETWEEN 1 AND 200
       ),
       delivery_mode TEXT CHECK (delivery_mode IS NULL OR delivery_mode IN ('queue', 'steer')),
       delivery_state TEXT CHECK (

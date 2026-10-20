@@ -55,7 +55,6 @@ export interface WatcherLinkRow {
   wakes_this_turn: number;
   wake_allowance: number;
   write_attempts_this_turn: number;
-  command_attempts_this_turn: number;
   wakes_total: number;
   events_seen: number;
   events_pending: number;
@@ -89,7 +88,6 @@ export interface WatcherWakeRow {
   guard_state: WatcherGuardState | null;
   guard_paths_json: string;
   finding_preview: string | null;
-  finding_message_id: string | null;
   delivery_mode: WatcherDeliveryMode | null;
   delivery_state: WatcherDeliveryState | null;
   delivery_detail: string | null;
@@ -118,7 +116,6 @@ export interface WatcherLinkRecord extends WatcherLinkView {
   instructions: string;
   cursor: WatcherCursor;
   writeAttemptsThisTurn: number;
-  commandAttemptsThisTurn: number;
   finalPassTurnId: string | null;
   lastWatchedOutputAt: string | null;
 }
@@ -127,7 +124,6 @@ export interface WatcherLinkRecord extends WatcherLinkView {
 export interface WatcherWakeRecord extends WatcherFeedItem {
   linkId: string;
   digestBytes: number;
-  findingMessageId: string | null;
   deliveryId: string | null;
   deliveredMessageId: string | null;
   queuedMessageId: string | null;
@@ -246,7 +242,6 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
       pendingRunningIds: stringArray(row.pending_running_ids_json, MAX_WATCHER_PENDING_RUNNING_IDS),
     },
     writeAttemptsThisTurn: row.write_attempts_this_turn,
-    commandAttemptsThisTurn: row.command_attempts_this_turn,
     finalPassTurnId: row.final_pass_turn_id,
     lastWatchedOutputAt: row.last_watched_output_at,
   };
@@ -257,7 +252,6 @@ function strippedView(record: WatcherLinkRecord): WatcherLinkView & { instructio
   const {
     cursor: _cursor,
     writeAttemptsThisTurn: _writes,
-    commandAttemptsThisTurn: _commands,
     finalPassTurnId: _finalPass,
     lastWatchedOutputAt: _lastOutput,
     ...view
@@ -312,7 +306,6 @@ export function watcherWakeFromRow(row: WatcherWakeRow): WatcherWakeRecord {
     commandsDeclined: row.commands_declined,
     linkId: row.link_id,
     digestBytes: row.digest_bytes,
-    findingMessageId: row.finding_message_id,
     deliveryId: row.delivery_id,
     deliveredMessageId: row.delivered_message_id,
     queuedMessageId: row.queued_message_id,
@@ -322,8 +315,6 @@ export function watcherWakeFromRow(row: WatcherWakeRow): WatcherWakeRecord {
 export function watcherFeedItem(record: WatcherWakeRecord): WatcherFeedItem {
   const {
     linkId: _linkId,
-    digestBytes: _digestBytes,
-    findingMessageId: _findingMessageId,
     deliveryId: _deliveryId,
     deliveredMessageId: _deliveredMessageId,
     queuedMessageId: _queuedMessageId,

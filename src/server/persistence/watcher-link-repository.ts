@@ -389,7 +389,6 @@ export class WatcherLinkRepository {
         SET cursor_turn_id = ?, cursor_activity_at = NULL, cursor_activity_id = NULL,
             cursor_message_at = NULL, pending_running_ids_json = '[]',
             wakes_this_turn = 0, wake_allowance = ?, write_attempts_this_turn = 0,
-            command_attempts_this_turn = 0,
             last_watched_output_at = ?, quiet_since = NULL, updated_at = ?,
             status = CASE WHEN status = 'paused' AND pause_reason = 'wake-budget' THEN 'watching' ELSE status END,
             pause_detail = CASE WHEN status = 'paused' AND pause_reason = 'wake-budget' THEN NULL ELSE pause_detail END,
@@ -488,14 +487,13 @@ export class WatcherLinkRepository {
     return changed === 1 ? this.get(linkId) : null;
   }
 
-  /** Counts a blocked write or denied command in the current watched turn; returns the new count. */
-  recordAttempt(linkId: string, kind: "write" | "command", now = new Date().toISOString()): number {
+  /** Counts a blocked write in the current watched turn; returns the new count. */
+  recordWriteAttempt(linkId: string, now = new Date().toISOString()): number {
     const at = requireTimestamp(now, "Watcher attempt time");
-    const column = kind === "write" ? "write_attempts_this_turn" : "command_attempts_this_turn";
     const row = this.database.prepare(`
-      UPDATE watcher_links SET ${column} = ${column} + 1, updated_at = ?
+      UPDATE watcher_links SET write_attempts_this_turn = write_attempts_this_turn + 1, updated_at = ?
       WHERE id = ? AND status <> 'detached'
-      RETURNING ${column} AS count
+      RETURNING write_attempts_this_turn AS count
     `).get(at, linkId) as { count: number } | undefined;
     return row?.count ?? 0;
   }
@@ -565,7 +563,6 @@ export class WatcherLinkRepository {
     outcome: WatcherWakeOutcome,
     guard: WatcherGuardResult | null,
     findingPreview: string | null,
-    findingMessageId: string | null,
     now: string,
     commandsDeclined = 0,
   ): WatcherWakeRecord | null {
@@ -574,14 +571,13 @@ export class WatcherLinkRepository {
       const changed = this.database.prepare(`
         UPDATE watcher_wakes
         SET state = 'settled', outcome = ?, guard_state = ?, guard_paths_json = ?,
-            finding_preview = ?, finding_message_id = ?, settled_at = ?, commands_declined = ?
+            finding_preview = ?, settled_at = ?, commands_declined = ?
         WHERE id = ? AND state IN ${ACTIVE_WAKE_STATES_SQL}
       `).run(
         outcome,
         guard?.state ?? null,
         boundedGuardPaths(guard?.paths ?? []),
         findingPreview === null ? null : truncateUtf8Bytes(findingPreview, MAX_WATCHER_FINDING_BYTES),
-        findingMessageId,
         at,
         boundedCount(commandsDeclined),
         wakeId,

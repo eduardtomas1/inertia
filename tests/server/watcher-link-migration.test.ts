@@ -192,6 +192,9 @@ describe("watcher link migration", () => {
       expect(columns("watcher_links").get("findings_total")).toEqual({ notnull: 1, dflt_value: "0" });
       expect(rows(migrated, "SELECT findings_total FROM watcher_links")).toEqual([{ findings_total: 0 }]);
       expect(() => migrated.prepare("UPDATE watcher_links SET findings_total = -1").run()).toThrow(/CHECK constraint failed/u);
+      expect(columns("watcher_links").has("command_attempts_this_turn")).toBe(false);
+      expect(columns("watcher_wakes").has("finding_message_id")).toBe(false);
+      expect(columns("watcher_wakes").get("digest_bytes")).toEqual({ notnull: 1, dflt_value: "0" });
     } finally {
       migrated.close();
     }

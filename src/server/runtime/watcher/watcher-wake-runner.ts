@@ -320,7 +320,7 @@ export class WatcherWakeRunner {
         }).turn.id;
       } catch (error) {
         window.dispose();
-        store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, null, this.#deps.now());
+        store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, this.#deps.now());
         if (this.#dispatchFailed(linkId, error)) return "paused";
         release("transient");
         throw error;
@@ -448,10 +448,8 @@ export class WatcherWakeRunner {
     if (!link || link.status === "detached" || link.watcherConversationId !== turn.conversationId) return;
     let pause: WatcherTransition | null = null;
     if (violation.kind === "write-attempt") {
-      const attempts = store.watcherLinks.recordAttempt(link.id, "write", this.#deps.now());
+      const attempts = store.watcherLinks.recordWriteAttempt(link.id, this.#deps.now());
       if (attempts >= 2) pause = { status: "paused", reason: "write-attempts", detail: WATCHER_WRITE_ATTEMPTS_DETAIL };
-    } else if (violation.kind === "command-attempt") {
-      store.watcherLinks.recordAttempt(link.id, "command", this.#deps.now());
     }
     const running = this.#running.get(turn.id);
     if (running) {
@@ -541,7 +539,6 @@ export class WatcherWakeRunner {
         outcome,
         guard ? { state: guard.state, paths: guard.paths } : null,
         finding,
-        finding === null ? null : turn.terminalAssistantMessageId,
         now,
         violations.filter(({ kind }) => kind === "command-attempt").length,
       );
@@ -560,7 +557,7 @@ export class WatcherWakeRunner {
       const now = this.#deps.now();
       if (!settled) {
         try {
-          store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, null, now);
+          store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, now);
         } catch {
           // Restart recovery fails a check that stayed unsettled.
         }

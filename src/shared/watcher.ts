@@ -286,6 +286,7 @@ export const watcherFeedItemSchema = z.strictObject({
   commandsRun: z.number().int().min(1).max(10_000).optional(),
   resolvedBySequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(),
   commandsDeclined: countSchema,
+  digestBytes: z.number().int().min(0).max(65_536).optional(),
 }).superRefine((item, context) => {
   const settled = item.state === "settled";
   if (settled !== (item.outcome !== null) || settled !== (item.settledAt !== null)) {

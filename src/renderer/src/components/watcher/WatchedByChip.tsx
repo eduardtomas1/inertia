@@ -13,8 +13,8 @@ export function WatchedByChip({ conversationId }: { conversationId: string }): R
   const dock = useWatcherDock(link ? conversationId : null);
   if (!surface || !link) return null;
   const label = `Watched by ${watcherAgentLabel(
-    surface.conversations.get(link.watcherConversationId),
-    surface.providerIdentityLabels,
+    surface.conversations.find(({ id }) => id === link.watcherConversationId),
+    surface.providerLabels,
   )} · ${watcherPresetName(link.preset)}`;
   const latest = link.latest;
   const unseen = latest?.outcome === "finding" && (dock.seenAt === null || latest.at > dock.seenAt);

@@ -3,8 +3,7 @@ import { useEffect, useRef } from "react";
 import type { AppSnapshot, ConversationShell } from "@shared/contracts";
 import { completionSoundDue, type CompletionSoundSettings } from "@shared/completion-sound";
 import { playCompletionSound } from "../utils/completionSoundPlayer";
-import { threadNotificationKindFor } from "./useThreadNotifications";
-import { watcherConversationIds } from "../utils/watcherLinks";
+import { threadNotificationKindFor, watcherConversationIds } from "./useThreadNotifications";
 
 export function completedTurnDurationMs(conversation: ConversationShell, observedStart?: number): number | null {
   const turn = conversation.latestTurn;

@@ -1,0 +1,277 @@
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { ProviderInfo } from "../../src/shared/contracts";
+import {
+  createConversationCommandHandler,
+  type ConversationCommandDependencies,
+} from "../../src/server/runtime/commands/conversation-commands";
+import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
+import {
+  cleanupWatcherFixtures,
+  createWatcherFixture,
+  WATCHER_TEST_PROVIDERS,
+  watcherTestSelection,
+  type WatcherFixture,
+} from "../support/watcher-runtime-fixture";
+
+afterEach(cleanupWatcherFixtures);
+
+const now = () => new Date().toISOString();
+let sequence = 0;
+
+async function refused(f: WatcherFixture, overrides: Record<string, unknown>, message: string): Promise<void> {
+  await expect(f.attach(overrides)).rejects.toThrow(message);
+}
+
+async function wake(f: WatcherFixture, watcherId: string): Promise<void> {
+  f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read a.ts", activityId: `a-${++sequence}` });
+  await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+  await vi.waitFor(() => {
+    if (!f.provider.runs.has(watcherId)) throw new Error("watcher not running");
+  });
+}
+
+function notReady(id: ProviderInfo["id"]): () => ProviderInfo[] {
+  return () => WATCHER_TEST_PROVIDERS.map((provider) =>
+    provider.id === id ? { ...provider, canRun: false, statusMessage: "Sign in to continue." } : provider);
+}
+
+describe("watcher link coordinator", () => {
+  it("creates a locked, read-only watcher chat in the watched chat's checkout", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ preset: "scope-guard", modelSelection: watcherTestSelection("claude") });
+      const watcher = f.store.conversation(link.watcherConversationId);
+      expect(watcher).toMatchObject({
+        projectId: f.project.id,
+        providerId: "claude",
+        interactionMode: "plan",
+        accessMode: "supervised",
+        branch: f.watched.branch,
+        worktreePath: f.watched.worktreePath,
+        title: "Watcher · Scope guard · Fix the parser",
+      });
+      expect(f.store.conversationTitleLocked(watcher.id)).toBe(true);
+      expect(f.store.shellSnapshot().activeConversationId).not.toBe(watcher.id);
+      expect(f.watcherEvents()).toContainEqual({ type: "watcher.link.updated", link: expect.objectContaining({ id: link.id }) });
+      await expect(f.attach({ linkId: link.id })).resolves.toMatchObject({ id: link.id });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses scratch projects, archived chats, watchers, duplicates and unready or disallowed routes", async () => {
+    const f = await createWatcherFixture();
+    try {
+      await refused(f, { modelSelection: watcherTestSelection("cursor") }, "can't be a watcher");
+      f.setProviderInfo(notReady("codex"));
+      await refused(f, {}, "Sign in to continue.");
+      f.setProviderInfo(() => WATCHER_TEST_PROVIDERS);
+
+      const link = await f.attach();
+      await refused(f, {}, "already has a watcher");
+      await refused(f, { watchedConversationId: link.watcherConversationId }, "can't watch another watcher");
+
+      const archived = f.store.createConversation(f.project.id, "Old work");
+      f.store.archiveConversation(archived.id, true);
+      await refused(f, { watchedConversationId: archived.id }, "Unarchive this chat");
+
+      const scratchRoot = join(f.directory, "scratch");
+      await mkdir(scratchRoot);
+      const scratch = f.store.createProject("No project", scratchRoot, { workspaceKind: "scratch", activate: false });
+      const chat = f.store.createConversation(scratch.id, "Scratch chat");
+      await refused(f, { watchedConversationId: chat.id }, "needs a chat in a project");
+      expect(f.store.watcherLinks.active()).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("checks that a watched worktree is the checkout it records", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const worktree = join(f.directory, "worktree");
+      await mkdir(worktree);
+      const chat = f.store.createConversation(f.project.id, "Worktree chat", {
+        modelSelection: watcherTestSelection("codex"), worktreePath: worktree, branch: "feature",
+      });
+      const path = vi.spyOn(f.store, "conversationPath").mockReturnValueOnce(join(f.directory, "elsewhere"));
+      await refused(f, { watchedConversationId: chat.id }, "not the checkout it records");
+      path.mockRestore();
+      const link = await f.attach({ watchedConversationId: chat.id });
+      expect(f.store.conversation(link.watcherConversationId)).toMatchObject({ worktreePath: worktree, branch: "feature" });
+      f.store.deleteConversation(link.watcherConversationId);
+      expect(f.store.conversation(chat.id).worktreePath).toBe(worktree);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("detach cancels the running check and returns the watcher chat to an ordinary chat", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      await wake(f, link.watcherConversationId);
+      const turnId = f.provider.input(link.watcherConversationId).turnId;
+      const reply = await f.command("watcher.detach", { linkId: link.id });
+      expect(reply).toMatchObject({ type: "request.result", result: { kind: "watcher.link", link: { status: "detached", detachedReason: "user" } } });
+      await f.flush();
+      expect(f.store.agentTurn(turnId).status).toBe("cancelled");
+      expect(f.store.watcherLinks.wakeForTurn(turnId)).toMatchObject({ state: "settled", outcome: "cancelled" });
+      expect(f.watcherEvents()).toContainEqual({ type: "watcher.link.removed", linkId: link.id });
+      expect(f.watchers.isWatcherConversation(link.watcherConversationId)).toBe(false);
+      expect(f.store.watcherLinks.views()).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses and resumes, gating usage-limit resumes on a ready route and re-granting checks", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await expect(f.command("watcher.pause", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "paused", pauseReason: "user" } } });
+      await expect(f.command("watcher.wake", { linkId: link.id })).rejects.toThrow("Resume the watcher");
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching", pauseReason: null } } });
+
+      f.store.watcherLinks.transition(link.id, ["watching"], { status: "paused", reason: "usage-limit" }, now());
+      f.setProviderInfo(notReady("codex"));
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("route isn't ready");
+      f.setProviderInfo(() => WATCHER_TEST_PROVIDERS);
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+
+      f.store.watcherLinks.transition(link.id, ["watching"], { status: "paused", reason: "write-detected", detail: "src/a.ts" }, now());
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+
+      f.store.watcherLinks.transition(link.id, ["watching"], { status: "paused", reason: "wake-budget" }, now());
+      f.store.watcherLinks.beginWatchedTurn(link.id, "turn-x", now());
+      const exhausted = f.store.watcherLinks.get(link.id)!;
+      const reply = await f.command("watcher.resume", { linkId: link.id });
+      expect(reply).toMatchObject({ result: { link: { status: "watching" } } });
+      const resumed = f.store.watcherLinks.get(link.id)!;
+      expect(resumed.counters.wakeAllowance - resumed.counters.wakesThisTurn)
+        .toBe(exhausted.budgets.wakesPerWatchedTurn);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("keeps following the watched chat after it switches provider", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no final pass"); });
+      await f.finishTurn(link.watcherConversationId, "SILENT");
+
+      f.store.updateConversation(f.watched.id, { providerId: "claude", modelSelection: watcherTestSelection("claude") });
+      const turn = await f.startWatchedTurn("Now on another agent.");
+      expect(f.store.agentTurn(turn.id).harnessId).toBe("claude-agent-sdk");
+      await wake(f, link.watcherConversationId);
+      expect(f.provider.input(link.watcherConversationId).prompt).toContain("Now on another agent.");
+      expect(f.store.watcherLinks.get(link.id)!.watchedTurnId).toBe(turn.id);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("runs exactly one final pass after a restart for a watched turn that ended meanwhile", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      f.watchers.dispose();
+      await f.finishTurn(f.watched.id, "Finished while Inertia was closed.");
+      expect(f.provider.runs.has(link.watcherConversationId)).toBe(false);
+
+      f.restartRuntime().resume();
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no final pass"); });
+      const final = f.provider.input(link.watcherConversationId);
+      expect(f.store.watcherLinks.wakeForTurn(final.turnId)).toMatchObject({ trigger: "turn-end" });
+      expect(final.prompt).toContain("Final check for this turn");
+      await f.finishTurn(link.watcherConversationId, "SILENT");
+
+      f.watchers.resume();
+      f.restartRuntime().resume();
+      await f.advance(10 * 60_000);
+      expect(f.provider.inputs.filter((input) => input.conversationId === link.watcherConversationId)).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("reviews the last completed turn right away when asked, and only then", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const quiet = await f.attach({ initialReview: true });
+      await f.advance(1);
+      expect(f.provider.runs.has(quiet.watcherConversationId)).toBe(false);
+      await f.command("watcher.detach", { linkId: quiet.id });
+
+      await f.startWatchedTurn();
+      await f.finishTurn(f.watched.id, "All done.");
+      const link = await f.attach({ initialReview: true });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(link.watcherConversationId)) throw new Error("no initial review"); });
+      const input = f.provider.input(link.watcherConversationId);
+      expect(f.store.watcherLinks.wakeForTurn(input.turnId)).toMatchObject({ trigger: "initial" });
+      expect(input.prompt).toContain("Fix the parser bug.");
+      await f.finishTurn(link.watcherConversationId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)!.counters).toMatchObject({ wakesTotal: 1, wakesThisTurn: 0 });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("marks the main chat quiet after ten minutes without output and clears it on the next output", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      await f.advance(11 * 60_000);
+      expect(f.store.watcherLinks.get(link.id)!.quietSince).not.toBeNull();
+      expect(f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1))
+        .toMatchObject({ link: { quietSince: expect.any(String) } });
+      f.provider.emit(f.watched.id, { type: "text", text: "Still working." });
+      f.turnTimers.advance(1_000);
+      expect(f.store.watcherLinks.get(link.id)!.quietSince).toBeNull();
+      expect(f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1))
+        .toMatchObject({ link: { quietSince: null } });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses when the watched chat is archived", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const handler = createConversationCommandHandler({
+        store: f.store,
+        providerTerminalResumes: { isActive: () => false },
+        forgetRemoteTranscript: () => undefined,
+        watchers: f.watchers,
+      } as unknown as ConversationCommandDependencies);
+      await handler({} as never, { type: "conversation.archive", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watched chat");
+      f.store.archiveConversation(f.watched.id, false);
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+    } finally {
+      await f.close();
+    }
+  });
+});

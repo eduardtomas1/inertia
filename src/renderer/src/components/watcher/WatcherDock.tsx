@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent,
   type RefObject,
@@ -18,7 +19,8 @@ import { usePrivateConnectState } from "../../hooks/usePrivateConnectState";
 import { useWatcherActions } from "../../hooks/useWatcherActions";
 import {
   consumeWatcherDockFocus,
-  useWatcherDockFocusToken,
+  subscribeWatcherDock,
+  watcherDockFocusToken,
   type WatcherDockController,
 } from "../../hooks/useWatcherDock";
 import { useWatcherFeed } from "../../hooks/useWatcherFeed";
@@ -132,9 +134,9 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
-  const watched = surface.conversations.get(watchedId);
-  const watcher = surface.conversations.get(link.watcherConversationId);
-  const project = watched ? surface.projects.get(watched.projectId) : undefined;
+  const watched = surface.conversations.find(({ id }) => id === watchedId);
+  const watcher = surface.conversations.find(({ id }) => id === link.watcherConversationId);
+  const project = watched ? surface.projects.find(({ id }) => id === watched.projectId) : undefined;
   const watchedRunning = watched?.status === "running" || watched?.status === "needs-input";
   const steerable = steerAvailable(watched?.latestTurn?.harnessId, watched?.status === "running");
   const customBackend = surface.backendProfiles
@@ -144,9 +146,10 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     privateConnect.state?.enabled || (privateConnect.state?.devices.length ?? 0) > 0,
   );
 
-  const focusToken = useWatcherDockFocusToken(watchedId);
+  const readFocusToken = useCallback(() => watcherDockFocusToken(watchedId), [watchedId]);
+  const focusToken = useSyncExternalStore(subscribeWatcherDock, readFocusToken, readFocusToken);
   useEffect(() => {
-    if (!dock.open || !consumeWatcherDockFocus(watchedId, focusToken)) return;
+    if (!dock.open || focusToken === 0 || !consumeWatcherDockFocus(watchedId)) return;
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(headingId)?.focus({ preventScroll: true });
     });
@@ -222,7 +225,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
           link={link}
           watched={watched}
           watcher={watcher}
-          agentLabel={watcherAgentLabel(watcher, surface.providerIdentityLabels)}
+          agentLabel={watcherAgentLabel(watcher, surface.providerLabels)}
           headingId={headingId}
           actions={surface.online ? actions : null}
           privateConnectConfigured={privateConnectConfigured}

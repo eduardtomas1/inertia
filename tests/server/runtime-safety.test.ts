@@ -25,6 +25,7 @@ import {
   runtimeSafetyAllowsCommand,
 } from "../../src/server/runtime/commands/runtime-safety";
 import { startTestRuntime } from "../support/test-runtime";
+import { WATCHER_COMMAND_TYPES } from "../../src/server/runtime/commands/watcher-commands";
 
 describe("runtime recovery safety command boundary", () => {
   it("defaults every command except exact conversation detail reads to denied", () => {
@@ -34,6 +35,11 @@ describe("runtime recovery safety command boundary", () => {
       RUNTIME_COMMAND_TYPES.filter((type) => !runtimeSafetyAllowsCommand(type))
         .length + RUNTIME_SAFETY_READ_COMMAND_TYPES.length,
     );
+  });
+
+  it("refuses every watcher command, reads included, in recovery safety mode", () => {
+    expect(WATCHER_COMMAND_TYPES.filter((type) => RUNTIME_COMMAND_TYPES.includes(type))).toEqual([...WATCHER_COMMAND_TYPES]);
+    expect(WATCHER_COMMAND_TYPES.filter(runtimeSafetyAllowsCommand)).toEqual([]);
   });
 
   it("releases the database when attachment storage cannot open", async () => {

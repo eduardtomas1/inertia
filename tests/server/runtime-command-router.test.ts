@@ -9,6 +9,7 @@ import {
   RUNTIME_COMMAND_TYPES,
   type RuntimeCommandHandler,
 } from "../../src/server/runtime/commands/command-router";
+import { createWatcherCommandHandler } from "../../src/server/runtime/commands/watcher-commands";
 
 function command(type: ClientCommand["type"] = "project.select"): ClientCommand {
   if (type !== "project.select") {
@@ -28,6 +29,15 @@ describe("runtime command router", () => {
     RUNTIME_COMMAND_TYPES,
     handler,
   );
+
+  it("lets the watcher handler own the watcher commands without overlapping any other owner", () => {
+    const watcher = createWatcherCommandHandler({ coordinator: {} as never, delivery: {} as never, send: vi.fn() });
+    expect(watcher.commandTypes).toEqual(RUNTIME_COMMAND_TYPES.filter((type) => type.startsWith("watcher.")));
+    expect(() => createRuntimeCommandExecutor({
+      handlers: [watcher, allCommands(async () => "handled")],
+      broadcastSnapshot: vi.fn(), send: vi.fn(), publicError: () => "hidden",
+    })).toThrow("Runtime command watcher.attach is owned by handlers 0 and 1.");
+  });
 
   it("preserves ambiguous delivery after provider acceptance", async () => {
     const send = vi.fn();

@@ -39,9 +39,11 @@ import {
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
 import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
+import { DialogPresence } from "../DialogPresence";
 import { DialogShell } from "../DialogShell";
 import { ModelChooser } from "../ModelChooser";
 import { LoadingMark, Switch } from "../ui";
+import type { WatcherAttachTarget } from "../../hooks/useWatcherSurface";
 import "./WatcherAttachDialog.css";
 
 export interface WatcherAttachDialogProps {
@@ -49,6 +51,18 @@ export interface WatcherAttachDialogProps {
   settings: AppSettings;
   watchedConversationId: string;
   returnFocusTo?: HTMLElement | null;
+  request: (command: CommandWithoutId) => Promise<ServerEvent>;
+  onClose: () => void;
+  onAttached: (link: WatcherLinkView) => void;
+  onOpenProviderSetup: (providerId: ProviderId) => void;
+  onOpenBackendSetup: (profileId: string) => void;
+}
+
+/** Props of the eager host, passed through to the lazy presence wrapper. */
+export interface WatcherAttachHostProps {
+  target: WatcherAttachTarget | null;
+  snapshot: AppSnapshot | null;
+  settings: AppSettings;
   request: (command: CommandWithoutId) => Promise<ServerEvent>;
   onClose: () => void;
   onAttached: (link: WatcherLinkView) => void;
@@ -487,5 +501,24 @@ export function WatcherAttachDialog({
 
       {error && <p className="watcher-attach-error" role="alert">{error}</p>}
     </DialogShell>
+  );
+}
+
+/** Keeps the dialog mounted through its exit motion after the target clears. */
+export function WatcherAttachPresence({ target, snapshot, ...props }: WatcherAttachHostProps): React.JSX.Element | null {
+  const lastTarget = useRef(target);
+  if (target) lastTarget.current = target;
+  const shown = lastTarget.current;
+  if (!snapshot || !shown) return null;
+  return (
+    <DialogPresence open={target !== null}>
+      <WatcherAttachDialog
+        key={shown.watchedId}
+        snapshot={snapshot}
+        watchedConversationId={shown.watchedId}
+        returnFocusTo={shown.returnFocusTo}
+        {...props}
+      />
+    </DialogPresence>
   );
 }

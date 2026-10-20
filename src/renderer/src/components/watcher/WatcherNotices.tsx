@@ -34,7 +34,9 @@ export function WatcherNotices({
   useEffect(() => {
     if (confirmingResume) confirmRef.current?.focus({ preventScroll: true });
   }, [confirmingResume]);
-  const paused = link.status === "paused";
+  // A pause the user chose needs no banner: the bar already says Paused and
+  // offers Resume. Every other pause explains itself here.
+  const paused = link.status === "paused" && link.pauseReason !== "user";
   const writeDetected = paused && link.pauseReason === "write-detected";
   if (!paused && !customBackend) return null;
   return (

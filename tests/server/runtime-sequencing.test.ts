@@ -358,3 +358,25 @@ describe("runtime sequence helpers", () => {
     )).toEqual({ kind: "invalid" });
   });
 });
+
+describe("watcher event scoping", () => {
+  const LINK = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const watcherEvents: RuntimeMutationEvent[] = [
+    { type: "watcher.link.removed", linkId: LINK },
+    {
+      type: "watcher.live", linkId: LINK, watcherConversationId: CONVERSATION_B, turnId: "turn",
+      phase: "reading", label: "Read src/a.ts", at: "2030-01-01T00:00:00.000Z",
+    },
+  ];
+
+  it("publishes watcher events in shell scope to every subscription", () => {
+    const sequencer = new RuntimeSequencer({ runtimeGeneration: GENERATION });
+    for (const event of watcherEvents) {
+      expect(runtimeMutationScope(event)).toEqual({ kind: "shell" });
+      const frame = sequencer.commit(() => event).event;
+      expect(projectRuntimeFrame(frame, { conversationIds: [] })).toBe(frame);
+    }
+    const replay = sequencer.replay(GENERATION, 0, { conversationIds: [CONVERSATION_A] });
+    expect(replay.kind === "replay" ? replay.frames.map((frame) => frame.type) : []).toEqual(["runtime.event", "runtime.event"]);
+  });
+});

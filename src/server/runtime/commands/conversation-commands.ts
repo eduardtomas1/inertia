@@ -108,6 +108,8 @@ export interface ConversationCommandDependencies {
     DuoLaunchCoordinator,
     "reconcileConversationDeletion"
   >;
+  /** Pauses the watcher of a chat that was just archived. */
+  watchers?: { onWatchedArchived(conversationId: string): void };
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
@@ -554,6 +556,7 @@ export function createConversationCommandHandler(
           true,
         );
         dependencies.forgetRemoteTranscript(command.payload.conversationId);
+        dependencies.watchers?.onWatchedArchived(command.payload.conversationId);
         return "mutation";
       case "conversation.unarchive":
         dependencies.store.archiveConversation(

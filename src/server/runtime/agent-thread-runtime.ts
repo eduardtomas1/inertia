@@ -20,6 +20,7 @@ import {
 import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client";
+import type { AgentContextWatcherPolicy } from "./agent-context-tool";
 
 interface AgentThreadRuntimeDependencies {
   store: RuntimeStore;
@@ -32,6 +33,8 @@ interface AgentThreadRuntimeDependencies {
   pendingInputs: Map<string, AgentInputRequest>;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
+  /** Injected watcher read rules for the context tool. */
+  watcherPolicy?: AgentContextWatcherPolicy;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;

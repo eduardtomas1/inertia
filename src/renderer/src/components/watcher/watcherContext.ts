@@ -19,10 +19,11 @@ import type { WatcherLinkIndex } from "../../utils/watcherLinks";
 export interface WatcherSurfaceModel {
   surface: "main" | "detached";
   links: WatcherLinkIndex;
-  conversations: ReadonlyMap<string, ConversationShell>;
-  projects: ReadonlyMap<string, Project>;
+  conversations: readonly ConversationShell[];
+  projects: readonly Project[];
   backendProfiles: readonly ModelBackendProfileView[];
-  providerIdentityLabels: ProviderIdentityLabels;
+  /** Provider display names: configured identity labels over provider labels. */
+  providerLabels: ProviderIdentityLabels;
   primaryConversationId: string | null;
   online: boolean;
   request: ((command: CommandWithoutId) => Promise<ServerEvent>) | null;

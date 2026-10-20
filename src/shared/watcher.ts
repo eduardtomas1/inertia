@@ -191,6 +191,8 @@ export const watcherFeedItemSchema = z.strictObject({
   delivery: watcherDeliverySchema.nullable(),
   createdAt: timestampSchema,
   settledAt: timestampSchema.nullable(),
+  /** Read-only commands the watcher ran during this check; omitted when none. */
+  commandsRun: z.number().int().min(1).max(10_000).optional(),
 }).superRefine((item, context) => {
   const settled = item.state === "settled";
   if (settled !== (item.outcome !== null) || settled !== (item.settledAt !== null)) {

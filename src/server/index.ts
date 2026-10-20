@@ -79,7 +79,7 @@ import {
 import {
   createDuoCommandHandler,
 } from "./runtime/commands/duo-commands";
-import { createUnavailableWatcherCommandHandler } from "./runtime/commands/watcher-commands";
+import { createWatcherRuntime, createWatcherTurnPolicy, type WatcherRuntime } from "./runtime/watcher/watcher-runtime";
 import {
   createIsolatedReviewCommandHandler,
 } from "./runtime/commands/isolated-review-commands";
@@ -174,6 +174,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
+  let watchers: WatcherRuntime | undefined;
   let closed = false;
   let closing: Promise<void> | null = null;
   const runtimeLifetimeAbort = new AbortController();
@@ -189,6 +190,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     reconcileWorkspaces: () => Promise.all([
       new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined),
       duoLaunchCoordinator.resumeComparisons(),
+      Promise.resolve(watchers?.resume()),
     ]),
     reconcileArtifacts: () => turnGitArtifacts.reconcile(),
     snapshotDigest: () => shellSnapshotDigest(currentSnapshot()),
@@ -381,7 +383,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const cachedProviderMetadata = Object.fromEntries(PROVIDER_IDS.map((providerId) => [providerId, providers.cachedMetadata(providerId)]));
   let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata);
   let providerMaintenance: ProviderMaintenanceController;
-  const runtimeSync = new RuntimeSyncHub<WebSocket>(send);
+  const runtimeSync = new RuntimeSyncHub<WebSocket>(send, undefined, (linkId) => store.watcherLinks.get(linkId));
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
   const deletedConversationIds = new Set<string>();
@@ -466,6 +468,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const detachedChatRuntimeSecurity = createDetachedChatRuntimeSecurity({ websocketPath, store, snapshot: currentSnapshot, pendingApprovals, pendingInputs });
   const broadcast = (event: RuntimeMutationEvent): void => {
     mascotStatus.observe(event);
+    watchers?.observe(event);
     runtimeSync.broadcast(event);
   };
   const broadcastConversationShell = (conversationId: string): void => {
@@ -630,6 +633,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
   let queuedMessages: ReturnType<typeof createQueuedMessageRuntime> | undefined;
+  const watcherPolicy = createWatcherTurnPolicy(store, (input) => agentThreads?.manager.contextOnlyBridgeFor(input));
   turns = new TurnController(
     store,
     providers,
@@ -642,8 +646,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastConversationShell,
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
-      harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
-      hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
+      harnessInstructionsForTurn: (input) => watcherPolicy.harnessInstructionsFor(input) ?? agentThreads?.manager.capabilityInstructions() ?? [],
+      hostToolsForTurn: (input) => watcherPolicy.hostToolsForTurn(input) ?? agentThreads?.manager.bridgeFor(input),
+      onReadOnlyViolation: (turn, violation) => watchers?.onReadOnlyViolation(turn, violation),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));
       },
@@ -674,6 +679,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => conversationTitles.onTurnSettled(settled, settlement),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
+        (settled) => watchers?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
       ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
@@ -688,7 +694,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
     conversationAttachments: initializedConversationAttachments,
-    agentBrowser: options.agentBrowser,
+    agentBrowser: options.agentBrowser, watcherPolicy,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(
@@ -716,6 +722,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
   });
   queuedMessages.start();
+  watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
+    interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send });
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
     dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
   });
@@ -726,7 +734,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
-      createUnavailableWatcherCommandHandler(),
+      watchers.handler,
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,
@@ -750,7 +758,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         backendProfileController,
         workspaceRuns,
         providerTerminalResumes,
-        duoLaunches: duoLaunchCoordinator,
+        duoLaunches: duoLaunchCoordinator, watchers,
         runtimeSync,
         deletedConversationIds,
         dataDirectory,
@@ -953,7 +961,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
     transcriptCache: privateConnectTranscriptCache,
     privateConnectPromptSafety: (conversation) =>
-      privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId),
+      privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId, { watcher: watcherPolicy.isWatcherConversation(conversation.id) }),
+    watcherParent: (conversationId) => watchers?.watcherParent(conversationId) ?? null,
     queuePrompt: (conversationId, content, deviceId) => queuePrivateConnectPrompt({
       store,
       authority: providerTerminalResumes,
@@ -1177,6 +1186,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         projectIdentities.dispose();
         snapshotBroadcasts.close();
         mascotStatus.close();
+        watchers?.dispose();
         secureFileAuthorities.clear();
         try {
           await runRuntimeShutdownPhases({

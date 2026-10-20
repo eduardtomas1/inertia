@@ -15,6 +15,7 @@ import type {
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
+import { WATCHED_ID, WATCHER_ID, link } from "./watcher-fixtures";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 beforeAll(async () => { await loadThreadActions(); });
@@ -1742,5 +1743,44 @@ describe("compact Work sidebar", () => {
     fireEvent.click(newChat, { shiftKey: true });
     expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(project);
     expect(view.onChooseNewChatProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("nests an attached watcher under its chat and includes it in arrow-key order", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12, 30));
+    const watched = conversation(WATCHED_ID, "Refactor parser", new Date(2026, 7, 11, 11));
+    const watcher = conversation(WATCHER_ID, "Watcher · Reviewer · Refactor parser", new Date(2026, 7, 11, 12));
+    const docs = conversation("docs", "Docs", new Date(2026, 7, 11, 10));
+    const onSelectConversation = vi.fn();
+    const view = renderSidebar([watched, watcher, docs], onSelectConversation);
+    view.rerenderSnapshot({ ...snapshot([watched, watcher, docs]), watchers: [link({ projectId: project.id })] });
+    const stream = view.container.querySelector(".activity-thread-stream")!;
+    expect([...stream.querySelectorAll(".activity-thread-title")].map((element) => element.textContent))
+      .toEqual(["Refactor parser", "Docs"]);
+    const nested = screen.getByRole("button", { name: "Watcher · Reviewer, watching Refactor parser, Idle" });
+    const nestedRow = nested.closest(".activity-thread")!;
+    expect(nestedRow).toHaveClass("is-watcher");
+    const rows = [...stream.querySelectorAll(".activity-thread")];
+    expect(rows.indexOf(nestedRow)).toBe(1);
+    const parent = screen.getByRole("button", { name: /^Refactor parser,/u });
+    parent.focus();
+    fireEvent.keyDown(parent, { key: "ArrowDown" });
+    expect(nested).toHaveFocus();
+    fireEvent.keyDown(nested, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Docs,/u })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(nested).toHaveFocus();
+    fireEvent.click(nested);
+    expect(onSelectConversation).toHaveBeenCalledWith(expect.objectContaining({ id: WATCHER_ID }));
+
+    view.rerenderSnapshot({ ...snapshot([watched, watcher, docs]), watchers: [link({
+      projectId: project.id,
+      status: "detached",
+      detachedReason: "user",
+      watchedConversationId: null,
+    })] });
+    expect([...stream.querySelectorAll(".activity-thread-title")].map((element) => element.textContent))
+      .toEqual(["Watcher · Reviewer · Refactor parser", "Refactor parser", "Docs"]);
+    expect(stream.querySelector(".activity-thread.is-watcher")).toBeNull();
   });
 });

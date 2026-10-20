@@ -143,7 +143,7 @@ export function WatcherBar({
         <div className="watcher-bar-actions">
           {paused ? (
             <IconButton label="Resume" disabled={!actions || pending !== null} onClick={onResumeRequest}>
-              <Play size={15} aria-hidden="true" />
+              <Play size={16} aria-hidden="true" />
             </IconButton>
           ) : (
             <IconButton
@@ -151,7 +151,7 @@ export function WatcherBar({
               disabled={!actions || pending !== null}
               onClick={() => { if (actions) run("pause", actions.pause); }}
             >
-              <Pause size={15} aria-hidden="true" />
+              <Pause size={16} aria-hidden="true" />
             </IconButton>
           )}
           <IconButton
@@ -159,17 +159,17 @@ export function WatcherBar({
             disabled={!actions || pending !== null || waking || paused}
             onClick={() => { if (actions) run("wake", actions.wake); }}
           >
-            <RefreshCw size={15} aria-hidden="true" />
+            <RefreshCw size={16} aria-hidden="true" />
           </IconButton>
           {onOpenWatcherChat && (
             <IconButton label="Open watcher chat" onClick={onOpenWatcherChat}>
-              <MessagesSquare size={15} aria-hidden="true" />
+              <MessagesSquare size={16} aria-hidden="true" />
             </IconButton>
           )}
           <div ref={moreRef}>
             <WatcherMenu
               label="More watcher actions"
-              trigger={<Ellipsis size={15} aria-hidden="true" />}
+              trigger={<Ellipsis size={16} aria-hidden="true" />}
               triggerClassName="icon-button"
               menuClassName="watcher-bar-menu"
               disabled={!actions}
@@ -213,7 +213,7 @@ export function WatcherBar({
             </WatcherMenu>
           </div>
           <IconButton label="Collapse" onClick={onCollapse}>
-            <PanelRightClose size={15} aria-hidden="true" />
+            <PanelRightClose size={16} aria-hidden="true" />
           </IconButton>
         </div>
       </div>

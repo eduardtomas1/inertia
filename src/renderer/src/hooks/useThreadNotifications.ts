@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { AppSnapshot, Conversation, ConversationLatestTurnSummary } from "@shared/contracts";
 import type { DesktopNotificationKind } from "@shared/desktop";
-import { watcherConversationIds } from "../utils/watcherLinks";
+import type { WatcherLinkView } from "@shared/watcher";
 
 export function threadNotificationKind(
   previous: Conversation,
@@ -22,6 +22,17 @@ export function threadNotificationKind(
     )
   ) return "completed";
   return null;
+}
+
+/** Attached watcher chats, whose checks never notify, ring or mark unread. */
+export function watcherConversationIds(
+  links: readonly WatcherLinkView[] | undefined,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const link of links ?? []) {
+    if (link.status !== "detached") ids.add(link.watcherConversationId);
+  }
+  return ids;
 }
 
 /**

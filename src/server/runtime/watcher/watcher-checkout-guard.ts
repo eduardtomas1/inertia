@@ -39,7 +39,7 @@ export interface WatcherCheckoutGuardDependencies {
   store: Pick<
     RuntimeStore,
     "conversationPath" | "conversationWork" | "watcherLinks" | "latestAgentTurnForConversation"
-    | "hasActiveWorkspaceRunForConversation"
+    | "workspaceRunsForConversation"
   >;
   turns: { activeConversationIds(): string[] };
   capture?: (path: string, options: CheckoutFingerprintOptions) => Promise<CheckoutFingerprint>;
@@ -158,7 +158,8 @@ export class WatcherCheckoutGuard {
   async #fingerprint(checkoutPath: string): Promise<CheckoutFingerprint> {
     try {
       return await this.#capture(checkoutPath, {
-        deadlineAt: this.#clock() + this.#deadlineMs,
+        // Git deadlines are wall-clock bounds, independent of the injected clock.
+        deadlineAt: Date.now() + this.#deadlineMs,
         ...(this.#deps.signal ? { signal: this.#deps.signal } : {}),
       });
     } catch {
@@ -220,6 +221,16 @@ export class WatcherCheckoutGuard {
     }
   }
 
+  /** A check, service or source-control run of this chat; agent runs are attributed by activity. */
+  #workspaceRunActive(conversationId: string): boolean {
+    try {
+      return this.#deps.store.workspaceRunsForConversation(conversationId).some((run) =>
+        run.kind !== "agent" && (run.status === "running" || run.status === "waiting"));
+    } catch {
+      return true;
+    }
+  }
+
   #activities(conversationId: string, turnId: string): AgentActivity[] {
     try {
       return this.#deps.store.watcherLinks.digest.activitiesAfter(
@@ -265,11 +276,7 @@ export class WatcherCheckoutGuard {
   /** Adds durable activities of every overlapping turn, which covers events missed in memory. */
   #attributeFromStore(window: OpenWindow, endedAt: string): void {
     for (const [conversationId, turnIds] of window.turns) {
-      try {
-        if (this.#deps.store.hasActiveWorkspaceRunForConversation(conversationId)) window.busy = true;
-      } catch {
-        window.busy = true;
-      }
+      if (this.#workspaceRunActive(conversationId)) window.busy = true;
       for (const turnId of turnIds) {
         for (const activity of this.#activities(conversationId, turnId)) {
           if (activity.createdAt > endedAt) continue;

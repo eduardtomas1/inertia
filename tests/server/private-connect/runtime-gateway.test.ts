@@ -21,6 +21,58 @@ afterEach(() => {
 });
 
 describe("Private Connect supervised runtime gateway", () => {
+  it("withholds a hidden watcher's runs and refuses to stop them, even on a project-wide grant", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-watcher-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const watched = store.createConversation(project.id, "Allowed chat");
+    const watcher = store.createConversation(project.id, "Watcher · Reviewer · Allowed chat");
+    const stopRun = vi.fn(() => ({ stopped: true, alreadyStopped: false }));
+    let visibility: "inherit" | "hidden" = "hidden";
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => {
+        const shell = store.shellSnapshot();
+        return {
+          ...shell,
+          runs: [watched.id, watcher.id].map((conversationId, index) => ({
+            id: `run-${index}`, kind: "agent", conversationId, status: "running",
+          })) as unknown as typeof shell.runs,
+        };
+      },
+      conversation: (id) => store.conversationShell(id),
+      detail: (id) => store.conversationDetail(id),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+      stopRun,
+      watcherParent: (id) => id === watcher.id ? { watchedConversationId: watched.id, privateConnect: visibility } : null,
+    });
+    const subject: PrivateConnectRuntimeAuthorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view", "prompt"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const state = async () => {
+      const response = await gateway.request(subject, { type: "state.get", requestId: "33333333-3333-4333-8333-333333333333" });
+      if (!response.ok || response.result.kind !== "state") throw new Error("state unavailable");
+      return response.result.state;
+    };
+    expect((await state()).conversations.map(({ id }) => id)).toEqual([watched.id]);
+    expect((await state()).runs.map(({ conversationId }) => conversationId)).toEqual([watched.id]);
+    expect(await gateway.request(subject, {
+      type: "run.stop", requestId: "33333333-3333-4333-8333-333333333333", conversationId: watcher.id, runId: "run-1",
+    })).toMatchObject({ ok: false, code: "not-found" });
+    expect(stopRun).not.toHaveBeenCalled();
+    visibility = "inherit";
+    expect((await state()).conversations.map(({ id }) => id).sort()).toEqual([watched.id, watcher.id].sort());
+  });
+
   it.each(["input.respond", "run.stop"] as const)("requires runtime mutation authority for %s", async (type) => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-scope-"));
     directories.push(directory);

@@ -7,7 +7,7 @@ export const loadWatcherDock = createSurfaceLoader(async () => ({
 }));
 
 export const loadWatcherAttachDialog = createSurfaceLoader(async () => ({
-  default: (await import("./WatcherAttachDialog")).WatcherAttachDialog,
+  default: (await import("./WatcherAttachDialog")).WatcherAttachPresence,
 }));
 
 export function prefetchWatcherAttachDialog(): void {

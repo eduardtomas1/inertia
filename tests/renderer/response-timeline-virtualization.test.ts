@@ -312,6 +312,75 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(estimateTimelineRenderWeight([handoff])).toBe(1);
   });
 
+  it("names and sizes the watcher note divider and keeps a check's digest out of the row estimate", () => {
+    const forwarded = agentTurn("watcher-note-turn");
+    const note = {
+      linkId: "44444444-4444-4444-8444-444444444444",
+      wakeId: "66666666-6666-4666-8666-000000000004",
+      watcherConversationId: "33333333-3333-4333-8333-333333333333",
+      preset: "scope-guard" as const,
+      watcherLabel: "Team Codex fixture-model",
+      delivery: "queue" as const,
+    };
+    const timeline = buildResponseTimeline({
+      turns: [forwarded],
+      messages: [
+        { ...message("watcher-note-turn-request", "watcher-note-turn", "user", "Two call sites still use the old name."), watcherNote: note },
+        message("watcher-note-turn-answer", "watcher-note-turn", "assistant", "Fixed both."),
+      ],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    });
+    expect(timeline.map(({ kind, id }) => `${kind}:${id}`))
+      .toEqual(["watcher-note:watcher-note:watcher-note-turn", "turn:watcher-note-turn"]);
+    const divider = timeline[0]!;
+    expect(responseTimelineArticleLabel(divider)).toBe("Note from watcher · Scope guard · Team Codex fixture-model");
+    expect(estimateTimelineRowSize(divider)).toBe(64);
+    expect(estimateTimelineRenderWeight([divider])).toBe(1);
+    expect(stabilizeResponseTimeline(buildResponseTimeline({
+      turns: [forwarded],
+      messages: timeline[1]!.kind === "turn"
+        ? [timeline[1]!.turn.userMessage, timeline[1]!.turn.terminalAssistantMessage!]
+        : [],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    }), timeline)).toBe(timeline);
+
+    const digest = "Check 4 · digest line\n".repeat(600);
+    const check = agentTurn("watcher-check-turn");
+    const checkTimeline = buildResponseTimeline({
+      turns: [check],
+      messages: [
+        message("watcher-check-turn-request", "watcher-check-turn", "user", digest),
+        message("watcher-check-turn-answer", "watcher-check-turn", "assistant", "SILENT"),
+      ],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+      watcherWakes: [{
+        wakeId: note.wakeId,
+        turnId: "watcher-check-turn",
+        sequence: 4,
+        trigger: "activity",
+        outcome: "silent",
+        eventsCovered: 9,
+        itemsTruncated: 0,
+        itemsOmitted: 0,
+        guardState: "clean",
+      }],
+    });
+    const checkItem = checkTimeline[0]!;
+    expect(checkItem.kind === "turn" && checkItem.turn.watcherWake?.sequence).toBe(4);
+    expect(responseTimelineArticleLabel(checkItem)).toBe("Turn 1: Check 4 · 9 events");
+    const plain = buildItem({ id: "plain-digest", request: digest, answer: "SILENT" });
+    expect(estimateTimelineRowSize(checkItem)).toBeLessThan(estimateTimelineRowSize(plain));
+    expect(estimateTimelineRenderWeight([checkItem])).toBeLessThan(estimateTimelineRenderWeight([plain]));
+    expect(buildTimelineMinimapMarkers(checkItem.kind === "turn" ? [checkItem.turn] : [])[0]?.label)
+      .toBe("Check 4 · 9 events");
+  });
+
   it("virtualizes short histories with bounded input scans when content is heavy", () => {
     const turns = Array.from({ length: 36 }, (_, index) =>
       agentTurn(`weighted-${index}`));

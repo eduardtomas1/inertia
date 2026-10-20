@@ -55,7 +55,6 @@ import {
 } from "../hooks/useSidebarWorkIndex";
 import {
   groupWorkThreads,
-  nestWatcherThreads,
   nextSidebarNavigationIndex,
   isSidebarNavigationKey,
   sidebarThreadView,
@@ -68,6 +67,7 @@ import { navigateMenuItems } from "../utils/menuKeyboard";
 import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { WatcherWorkRow } from "./sidebar/WatcherWorkRow";
+import { nestWatcherThreads } from "../utils/watcherSidebar";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";

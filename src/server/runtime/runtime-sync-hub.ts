@@ -19,6 +19,7 @@ import {
   projectDetachedChatInputRequest,
   projectDetachedChatSnapshot,
   projectRuntimeFrameForAuthority,
+  type DetachedWatcherLinkLookup,
 } from "./detached-chat-runtime-projection";
 import {
   MAIN_RUNTIME_CLIENT_AUTHORITY,
@@ -67,6 +68,8 @@ export class RuntimeSyncHub<Socket> {
       onSent?: (sent: boolean) => void,
     ) => void,
     private readonly sequencer = new RuntimeSequencer(),
+    /** Resolves both sides of a watcher link for detached-window projection. */
+    private readonly watcherLink?: DetachedWatcherLinkLookup,
   ) {}
 
   get connectionCount(): number {
@@ -161,6 +164,7 @@ export class RuntimeSyncHub<Socket> {
               frame,
               subscription,
               authority,
+              this.watcherLink,
             )
           : frame);
       }
@@ -299,6 +303,7 @@ export class RuntimeSyncHub<Socket> {
         committed.event,
         subscription,
         subscription.authority,
+        this.watcherLink,
       );
       const payload = payloads.get(frame) ?? new SerializedRuntimeEvent(frame);
       payloads.set(frame, payload);

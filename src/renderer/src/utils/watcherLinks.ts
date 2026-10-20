@@ -2,7 +2,6 @@ import type { Conversation } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { WatcherLinkView, WatcherPreset } from "@shared/watcher";
 import { INTERFACE_LOCALE } from "../lib/locale";
-import { agentRequestProviderName } from "./agentInput";
 
 /**
  * Eager watcher lookups. This module deliberately imports only types from
@@ -37,17 +36,6 @@ export function indexWatcherLinks(
   return { byWatched, byWatcher, activeCount: byWatcher.size };
 }
 
-/** Watcher chats whose wakes must stay quiet: no notifications or sounds. */
-export function watcherConversationIds(
-  links: readonly WatcherLinkView[] | undefined,
-): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const link of links ?? []) {
-    if (link.status !== "detached") ids.add(link.watcherConversationId);
-  }
-  return ids;
-}
-
 /**
  * Renderer copy of the preset names. The record type keeps it exhaustive and
  * a unit test keeps it equal to `WATCHER_PRESET_LABELS`.
@@ -62,14 +50,13 @@ export function watcherPresetName(preset: WatcherPreset): string {
   return WATCHER_PRESET_NAMES[preset] ?? preset;
 }
 
-/** The watcher's agent, named with the configured provider identity labels. */
+/** The watcher's agent, named by the provider identity labels and its model. */
 export function watcherAgentLabel(
   conversation: Pick<Conversation, "providerId" | "modelSelection"> | undefined,
   labels: ProviderIdentityLabels | undefined,
 ): string {
   if (!conversation) return "Watcher";
-  const provider = labels?.[conversation.providerId]
-    ?? agentRequestProviderName(conversation.providerId);
+  const provider = labels?.[conversation.providerId] ?? conversation.providerId;
   const selection = conversation.modelSelection;
   const model = selection.alias?.trim()
     || (selection.modelId && selection.modelId !== "provider-default" ? selection.modelId : "");

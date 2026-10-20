@@ -36,10 +36,18 @@ function projectedSettings(settings: AppSettings): AppSettings {
   };
 }
 
-function watcherLinkTouches(link: WatcherLinkView, conversationId: string): boolean {
+function watcherLinkTouches(
+  link: Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId">,
+  conversationId: string,
+): boolean {
   return link.watcherConversationId === conversationId
     || link.watchedConversationId === conversationId;
 }
+
+/** Both sides of a watcher link, looked up when an event names only the link. */
+export type DetachedWatcherLinkLookup = (
+  linkId: string,
+) => Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId"> | null;
 
 /** Removes a foreign conversation identity from host-owned input prompts. */
 export function projectDetachedChatInputRequest(
@@ -105,6 +113,7 @@ export function projectRuntimeFrameForAuthority(
   frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>,
   subscription: RuntimeDetailSubscription,
   authority: RuntimeClientAuthority,
+  watcherLink?: DetachedWatcherLinkLookup,
 ): RuntimeSequencedFrame {
   if (authority.kind === "main") {
     return projectRuntimeFrame(frame, subscription);
@@ -157,10 +166,17 @@ export function projectRuntimeFrameForAuthority(
       return watcherLinkTouches(frame.event.link, authority.conversationId)
         ? frame
         : runtimeCursorFrame(frame);
-    // Neither event names both sides of its link, so a detached window cannot
-    // prove it may see them; it learns about link changes from link updates.
+    // Neither event names both sides of its link, so the link is looked up;
+    // without a lookup, or for an unknown link, the window gets only a cursor.
     case "watcher.link.removed":
-    case "watcher.live":
+    case "watcher.live": {
+      const link = watcherLink?.(frame.event.linkId) ?? null;
+      return link
+        && (frame.event.type !== "watcher.live" || link.watcherConversationId === frame.event.watcherConversationId)
+        && watcherLinkTouches(link, authority.conversationId)
+        ? frame
+        : runtimeCursorFrame(frame);
+    }
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

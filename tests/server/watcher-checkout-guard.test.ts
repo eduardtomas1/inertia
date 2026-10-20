@@ -1,0 +1,142 @@
+import { execFile } from "node:child_process";
+import { readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { CheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
+import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
+import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
+import {
+  cleanupWatcherFixtures,
+  createWatcherFixture,
+  type WatcherFixture,
+} from "../support/watcher-runtime-fixture";
+
+const execFileAsync = promisify(execFile);
+
+afterEach(cleanupWatcherFixtures);
+
+let sequence = 0;
+
+function fingerprints(root: () => string, ...states: Array<Record<string, string> | null>) {
+  const queue = [...states];
+  return async (): Promise<CheckoutFingerprint> => {
+    const next = queue.length > 1 ? queue.shift()! : queue[0]!;
+    return next === null
+      ? { state: "unavailable", reason: "Not a repository." }
+      : { state: "captured", root: root(), head: "abc123", entries: new Map(Object.entries(next)) };
+  };
+}
+
+async function check(
+  f: WatcherFixture,
+  linkId: string,
+  during: (watcherId: string) => void,
+  watcherActivity = true,
+) {
+  const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
+  f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `r-${++sequence}` });
+  await f.advance(WATCHER_SETTLE_DELAY_MS + 60_000);
+  await vi.waitFor(() => {
+    if (!f.provider.runs.has(watcherConversationId)) throw new Error("watcher not running");
+  });
+  if (watcherActivity) {
+    f.provider.emit(watcherConversationId, { type: "activity", kind: "tool", phase: "completed", label: "Read src/a.ts", activityId: `w-${++sequence}` });
+  }
+  during(watcherConversationId);
+  await f.finishTurn(watcherConversationId, "SILENT");
+  return f.watchers.coordinator.feed(linkId).items[0]!;
+}
+
+describe("watcher checkout guard", () => {
+  it("treats a change another turn on the checkout reported as explained", async () => {
+    let root = "";
+    const f = await createWatcherFixture({ captureFingerprint: fingerprints(() => root, { "src/a.ts": "1" }, { "src/a.ts": "2" }) });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const item = await check(f, link.id, () => {
+        f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Edit", detail: "src/a.ts", activityId: `e-${++sequence}` });
+      });
+      expect(item).toMatchObject({ outcome: "silent", guardState: "clean", guardPaths: [] });
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("marks the window inconclusive when another turn ran a command, without pausing", async () => {
+    let root = "";
+    const f = await createWatcherFixture({ captureFingerprint: fingerprints(() => root, {}, { "src/b.ts": "1" }) });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const item = await check(f, link.id, () => {
+        f.provider.emit(f.watched.id, { type: "activity", kind: "command", phase: "completed", label: "npm run format", activityId: `c-${++sequence}` });
+      });
+      expect(item).toMatchObject({ outcome: "silent", guardState: "inconclusive", guardPaths: ["src/b.ts"] });
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses with write-detected and lists unexplained paths", async () => {
+    let root = "";
+    const f = await createWatcherFixture({
+      captureFingerprint: fingerprints(() => root, { "src/a.ts": "1" }, { "src/a.ts": "1", "src/new.ts": "2", "docs/x.md": "3" }),
+    });
+    root = f.workspace;
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      const item = await check(f, link.id, () => undefined);
+      expect(item).toMatchObject({ outcome: "write-detected", guardState: "changed" });
+      expect([...item.guardPaths].sort()).toEqual(["docs/x.md", "src/new.ts"]);
+      const paused = f.store.watcherLinks.get(link.id)!;
+      expect(paused).toMatchObject({ status: "paused", pauseReason: "write-detected" });
+      expect(paused.pauseDetail).toContain("src/new.ts");
+      expect(paused.pauseDetail).toContain("docs/x.md");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("reports unavailable outside a repository and skipped when the check did nothing", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      expect(await check(f, link.id, () => undefined)).toMatchObject({ guardState: "unavailable", outcome: "silent" });
+      expect(await check(f, link.id, () => undefined, false)).toMatchObject({ guardState: "skipped", outcome: "silent" });
+      expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("fingerprints a real repository without writing to it", async () => {
+    const f = await createWatcherFixture({ captureFingerprint: captureCheckoutFingerprint });
+    try {
+      await execFileAsync("git", ["init", "-q", "-b", "main", f.workspace]);
+      await writeFile(join(f.workspace, "a.txt"), "one\n");
+      await execFileAsync("git", ["-C", f.workspace, "add", "a.txt"]);
+      await execFileAsync("git", ["-C", f.workspace, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "init"]);
+      await writeFile(join(f.workspace, "a.txt"), "two\n");
+      const index = await stat(join(f.workspace, ".git", "index"));
+      const refs = await readFile(join(f.workspace, ".git", "HEAD"), "utf8");
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      expect(await check(f, link.id, () => undefined)).toMatchObject({ guardState: "clean", outcome: "silent" });
+      expect((await stat(join(f.workspace, ".git", "index"))).mtimeMs).toBe(index.mtimeMs);
+      expect(await readFile(join(f.workspace, ".git", "HEAD"), "utf8")).toBe(refs);
+      expect((await execFileAsync("git", ["-C", f.workspace, "for-each-ref"])).stdout).not.toContain("inertia");
+    } finally {
+      await f.close();
+    }
+  });
+});

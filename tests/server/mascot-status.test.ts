@@ -5,7 +5,7 @@ import { AGENT_RUN_STATES } from "../../src/shared/run-state";
 import { emptyMascotStatus, MASCOT_CHAT_LIMIT, MASCOT_ROW_LIMIT, parseMascotStatus } from "../../src/shared/mascot";
 import { mascotFeedViolation, parseMascotFeed } from "../../src/shared/mascot-feed";
 import { mascotPublisher, mascotShell as conversation, mascotTestClock } from "../helpers/mascot-fixture";
-import { MascotStatusPublisher } from "../../src/server/runtime/mascot-status";
+import { MascotStatusPublisher, quietWatcherCheck, storeMascotStatus } from "../../src/server/runtime/mascot-status";
 import {
   mascotActivityLine, mascotApprovalLine, mascotCommand, mascotCommentaryLine, mascotPreview, mascotResultLine,
 } from "../../src/server/runtime/mascot-message";
@@ -714,5 +714,53 @@ describe("mascot text bounds", () => {
     expect(parseMascotFeed(JSON.parse(JSON.stringify(feed())) as Record<string, unknown>)).not.toBeNull();
     expect(mascotPreview("\ud83d and \ude00")).toBe("\ufffd and \ufffd");
     expect(mascotPreview(`${" ".repeat(4_095)}😀`)).toBeNull();
+  });
+});
+
+describe("watcher checks and the mascot", () => {
+  it("raises no completion cue for a quiet or still-settling watcher check, but does for a finding", () => {
+    const wakes = new Map<string, { state: string; outcome: string | null }>([
+      ["watcher-turn", { state: "settled", outcome: "silent" }],
+    ]);
+    const publish = vi.fn();
+    const shells = new Map([
+      ["watcher", conversation("watcher", "completed", { turnId: "watcher-turn" })],
+      ["main", conversation("main", "running")],
+    ]);
+    const publisher = new MascotStatusPublisher(
+      publish, (id) => shells.get(id) ?? null, () => null, (task) => task(), mascotTestClock(),
+      (turnId) => quietWatcherCheck({ wakeForTurn: (id) => wakes.get(id) ?? null }, turnId),
+    );
+    publisher.replace([...shells.values()]);
+    expect(publish.mock.lastCall![0].status).toMatchObject({ conversationId: "main", phase: "running" });
+
+    wakes.set("watcher-turn", { state: "running", outcome: null });
+    publisher.update(shells.get("watcher")!);
+    expect(publish.mock.lastCall![0].status.conversationId).toBe("main");
+
+    wakes.set("watcher-turn", { state: "settled", outcome: "finding" });
+    publisher.update(shells.get("watcher")!);
+    expect(publish.mock.lastCall![0].status).toMatchObject({ conversationId: "watcher", phase: "completed" });
+  });
+
+  it("treats ordinary turns and lookup failures as ordinary completions", () => {
+    expect(quietWatcherCheck(undefined, "turn")).toBe(false);
+    expect(quietWatcherCheck({ wakeForTurn: () => null }, "turn")).toBe(false);
+    expect(quietWatcherCheck({ wakeForTurn: () => { throw new Error("closed"); } }, "turn")).toBe(false);
+    const publish = vi.fn();
+    const publisher = storeMascotStatus(publish, () => ({
+      conversationShell: () => null,
+      project: () => ({ name: "Project" }),
+      watcherLinks: { wakeForTurn: (turnId) => turnId === "quiet-turn" ? { state: "settled", outcome: "silent" } : null },
+    }));
+    const recent = { updatedAt: new Date(Date.now() - 1_000).toISOString(), requestedAt: new Date(Date.now() - 5_000).toISOString() };
+    publisher.replace([
+      conversation("quiet", "completed", { ...recent, turnId: "quiet-turn" }),
+      conversation("done", "completed", { ...recent, updatedAt: new Date(Date.now() - 2_000).toISOString() }),
+    ]);
+    return Promise.resolve().then(() => {
+      expect(publish.mock.lastCall![0].status.conversationId).toBe("done");
+      publisher.close();
+    });
   });
 });

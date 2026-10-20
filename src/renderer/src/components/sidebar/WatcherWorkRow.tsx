@@ -52,7 +52,7 @@ export function WatcherWorkRow({
         <span className="watcher-work-row-line">
           <span className="watcher-work-row-branch" aria-hidden="true" />
           <span className="activity-thread-provider" aria-hidden="true">
-            <ProviderBrandIcon providerId={conversation.providerId} decorative size={12} />
+            <ProviderBrandIcon providerId={conversation.providerId} decorative size={14} />
           </span>
           <span className="watcher-work-row-title">{name}</span>
           {state && <span className="watcher-work-row-state">{state}</span>}

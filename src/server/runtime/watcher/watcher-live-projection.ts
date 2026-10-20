@@ -96,7 +96,7 @@ export class WatcherLiveProjection {
   }
 
   dispose(): void {
-    for (const linkId of [...this.#links.keys()]) this.end(linkId);
+    for (const linkId of this.#links.keys()) this.end(linkId);
   }
 
   #offer(linkId: string, phase: WatcherLivePhase, label: string | null): void {

@@ -5,7 +5,12 @@ import {
   activateNotificationConversation,
   formatAppShortcutLabel,
 } from "../../src/renderer/src/components/AppLayout";
-import { threadNotificationKind } from "../../src/renderer/src/hooks/useThreadNotifications";
+import {
+  threadNotificationKind,
+  threadNotificationKindFor,
+  watcherConversationIds,
+} from "../../src/renderer/src/hooks/useThreadNotifications";
+import { link } from "./watcher-fixtures";
 import type { Conversation } from "../../src/shared/contracts";
 import { DESKTOP_NOTIFICATION_COPY, parseDesktopNotificationRequest } from "../../src/shared/desktop";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -164,5 +169,23 @@ describe("thread notifications", () => {
       { ...valid, onlyInBackground: true, title: "secret prompt" },
       { conversationId: valid.conversationId, onlyInBackground: true },
     ]) expect(parseDesktopNotificationRequest(invalid)).toBeNull();
+  });
+
+  it("keeps attached watcher chats quiet and lets detached watchers notify again", () => {
+    const watcher = conversation("completed", { completedAt: "2026-08-09T09:05:00.000Z" });
+    const prior = conversation("running");
+    const attached = link({ watcherConversationId: watcher.id });
+    expect(threadNotificationKind(prior, watcher)).toBe("completed");
+    const quiet = watcherConversationIds([attached]);
+    expect(quiet.has(watcher.id)).toBe(true);
+    expect(threadNotificationKindFor(prior, watcher, quiet)).toBeNull();
+    expect(threadNotificationKindFor(prior, { ...watcher, status: "failed" }, quiet)).toBeNull();
+    const detached = watcherConversationIds([{
+      ...attached,
+      status: "detached",
+      detachedReason: "user",
+      watchedConversationId: null,
+    }]);
+    expect(threadNotificationKindFor(prior, watcher, detached)).toBe("completed");
   });
 });

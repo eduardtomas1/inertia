@@ -23,7 +23,7 @@ export function watcherEntryFor(
   if (conversation.archivedAt !== null) {
     return { kind: "unavailable", reason: "Archived chats can't be watched." };
   }
-  const project = surface.projects.get(conversation.projectId);
+  const project = surface.projects.find(({ id }) => id === conversation.projectId);
   if (!project || project.workspaceKind === "scratch") {
     return { kind: "unavailable", reason: "Chats without a project can't be watched." };
   }

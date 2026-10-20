@@ -45,6 +45,7 @@ const GIT_REF_FILTERS = ["--contains=", "--no-contains=", "--merged=", "--no-mer
 const GIT_CAT_FILE_MODES = new Set(["-p", "-t", "-s"]);
 const GIT_WORKTREE_LIST_FLAGS = new Set(["--porcelain", "-v", "--verbose", "-z"]);
 const FIND_UNSAFE = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls"]);
+const TAIL_OBSOLETE_FOLLOW = /^\+\d*[bcl]?f$/u;
 const UNIQ_VALUE_OPTIONS = new Set(["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"]);
 
 const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
@@ -53,9 +54,9 @@ const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   grep: noRule,
   egrep: noRule,
   fgrep: noRule,
-  cat: noRule,
+  cat: optionRule({ short: "Ww" }),
   head: noRule,
-  tail: optionRule({ short: "fF", long: ["follow"] }),
+  tail: tailRule,
   ls: noRule,
   find: findRule,
   wc: noRule,
@@ -296,6 +297,11 @@ function gitListing(args: readonly string[], flags: ReadonlySet<string>, listReq
       || GIT_REF_FILTERS.some((prefix) => arg.startsWith(prefix))
       || (flags.has("-n") && /^-n\d+$/u.test(arg));
   });
+}
+
+function tailRule(args: readonly string[]): string | null {
+  const follows = args.some((arg) => TAIL_OBSOLETE_FOLLOW.test(arg) || unsafeOption(arg, { short: "fF", long: ["follow"] }));
+  return follows ? UNSAFE_OPTION : null;
 }
 
 function findRule(args: readonly string[]): string | null {

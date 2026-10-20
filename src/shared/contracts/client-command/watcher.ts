@@ -53,7 +53,7 @@ export const watcherCommandSchemas = [
   }),
   z.strictObject({
     ...requestBase,
-    type: z.enum(["watcher.pause", "watcher.resume", "watcher.wake", "watcher.detach"]),
+    type: z.enum(["watcher.pause", "watcher.resume", "watcher.wake", "watcher.review", "watcher.detach"]),
     payload: z.strictObject({ linkId }),
   }),
   z.strictObject({

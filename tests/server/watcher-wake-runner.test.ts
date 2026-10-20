@@ -534,4 +534,43 @@ describe("watcher wake runner", () => {
       await f.close();
     }
   });
+
+  it("reviews the watched chat's last turn again from its start without spending a check", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      await expect(f.command("watcher.review", { linkId: link.id })).rejects.toThrow("no turn to review");
+      const watchedTurn = await f.startWatchedTurn();
+      await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "SILENT");
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      await f.finishTurn(watcherId, "SILENT");
+      const before = f.store.watcherLinks.get(link.id)!;
+
+      await f.command("watcher.review", { linkId: link.id });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no review"); });
+      const review = f.provider.input(watcherId);
+      expect(review.prompt).toContain("# Check 3 for \"Fix the parser\"");
+      expect(review.prompt).toContain("## Brief — quoted evidence\n> Fix the parser bug.");
+      expect(review.prompt).toContain("Read src/parser.ts");
+      expect(f.store.watcherLinks.wakeForTurn(review.turnId)).toMatchObject({ trigger: "initial", watchedTurnId: watchedTurn.id });
+      await expect(f.command("watcher.review", { linkId: link.id })).rejects.toThrow("already checking");
+      await f.finishTurn(watcherId, "SILENT");
+      const after = f.store.watcherLinks.get(link.id)!;
+      expect(after.counters.wakesThisTurn).toBe(before.counters.wakesThisTurn);
+      expect(after.counters.wakeAllowance).toBe(before.counters.wakeAllowance);
+      expect(after.cursor.activityAt).not.toBeNull();
+
+      await f.command("watcher.pause", { linkId: link.id });
+      await expect(f.command("watcher.review", { linkId: link.id })).rejects.toThrow("Resume the watcher");
+      await f.command("watcher.detach", { linkId: link.id });
+      await expect(f.command("watcher.review", { linkId: link.id })).rejects.toThrow("no longer attached");
+    } finally {
+      await f.close();
+    }
+  });
 });

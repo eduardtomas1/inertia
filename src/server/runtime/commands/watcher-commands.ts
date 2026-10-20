@@ -21,6 +21,7 @@ export const WATCHER_COMMAND_TYPES = [
   "watcher.pause",
   "watcher.resume",
   "watcher.wake",
+  "watcher.review",
   "watcher.detach",
   "watcher.feed.get",
   "watcher.note.deliver",
@@ -32,7 +33,7 @@ type WatcherCommand = Extract<ClientCommand, { type: (typeof WATCHER_COMMAND_TYP
 export interface WatcherCommandDependencies {
   coordinator: Pick<
     WatcherLinkCoordinator,
-    "attach" | "update" | "pause" | "resume" | "wake" | "detach" | "feed"
+    "attach" | "update" | "pause" | "resume" | "wake" | "review" | "detach" | "feed"
   >;
   delivery: Pick<WatcherDeliveryService, "deliver" | "dismiss">;
   send(socket: WebSocket, event: ServerEvent): void;
@@ -47,7 +48,7 @@ function parsed<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
 }
 
 /**
- * Owns the nine watcher commands. Payloads are validated again at this
+ * Owns the ten watcher commands. Payloads are validated again at this
  * boundary; every result is one of `watcher.link`, `watcher.feed` or
  * `watcher.delivery`. Note delivery is always an explicit user command.
  */
@@ -68,13 +69,16 @@ export function createWatcherCommandHandler(dependencies: WatcherCommandDependen
       case "watcher.pause":
       case "watcher.resume":
       case "watcher.wake":
+      case "watcher.review":
       case "watcher.detach": {
         const { linkId } = parsed(linkCommandSchema, command).payload;
         const link = command.type === "watcher.pause"
           ? coordinator.pause(linkId)
           : command.type === "watcher.resume"
             ? await coordinator.resume(linkId)
-            : command.type === "watcher.wake" ? coordinator.wake(linkId) : coordinator.detach(linkId);
+            : command.type === "watcher.wake"
+              ? coordinator.wake(linkId)
+              : command.type === "watcher.review" ? coordinator.review(linkId) : coordinator.detach(linkId);
         return reply({ kind: "watcher.link", link });
       }
       case "watcher.feed.get": {

@@ -35,7 +35,7 @@ function result(reply: ServerEvent) {
 }
 
 describe("watcher commands", () => {
-  it("owns exactly the nine watcher commands beside every other owner", async () => {
+  it("owns exactly the ten watcher commands beside every other owner", async () => {
     const handler = createWatcherCommandHandler({
       coordinator: {} as never,
       delivery: {} as never,
@@ -43,7 +43,8 @@ describe("watcher commands", () => {
     });
     const watcherTypes = RUNTIME_COMMAND_TYPES.filter((type) => type.startsWith("watcher."));
     expect([...handler.commandTypes!].sort()).toEqual([...watcherTypes].sort());
-    expect(WATCHER_COMMAND_TYPES).toHaveLength(9);
+    expect(WATCHER_COMMAND_TYPES).toHaveLength(10);
+    expect(WATCHER_COMMAND_TYPES).toContain("watcher.review");
     expect(() => createRuntimeCommandExecutor({
       handlers: [
         handler,
@@ -64,6 +65,8 @@ describe("watcher commands", () => {
         .rejects.toThrow("The watcher request was invalid.");
       await expect(f.command("watcher.feed.get", { linkId: randomUUID(), beforeSequence: 0 })).rejects.toThrow("The watcher request was invalid.");
       await expect(f.command("watcher.pause", { linkId: randomUUID() })).rejects.toThrow("no longer attached");
+      await expect(f.command("watcher.review", { linkId: randomUUID() })).rejects.toThrow("no longer attached");
+      await expect(f.command("watcher.review", { linkId: "not-a-uuid" })).rejects.toThrow("The watcher request was invalid.");
       expect(await f.watchers.handler(null as unknown as WebSocket, {
         type: "project.select", requestId: randomUUID(), payload: { projectId: randomUUID() },
       } as ClientCommand)).toBe("not-handled");
@@ -118,6 +121,7 @@ describe("watcher commands", () => {
       await f.finishTurn(f.watched.id, "Handled the note.");
 
       expect(result(await f.command("watcher.wake", { linkId }))).toMatchObject({ kind: "watcher.link" });
+      expect(result(await f.command("watcher.review", { linkId }))).toMatchObject({ kind: "watcher.link" });
       expect(result(await f.command("watcher.detach", { linkId }))).toMatchObject({ link: { status: "detached" } });
 
       for (const reply of f.sent.filter((event) => event.type === "request.result")) {

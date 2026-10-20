@@ -390,7 +390,7 @@ describe("watcher shared contracts", () => {
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, delivery: "steer" } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, instructions: "x".repeat(2_001) } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, budgets: { digestKiB: 4 } } }).success).toBe(false);
-    for (const type of ["watcher.pause", "watcher.resume", "watcher.wake", "watcher.detach"]) {
+    for (const type of ["watcher.pause", "watcher.resume", "watcher.wake", "watcher.review", "watcher.detach"]) {
       expect(clientCommandSchema.safeParse({ requestId, type, payload: { linkId: link.id } }).success).toBe(true);
       expect(clientCommandSchema.safeParse({ requestId, type, payload: { linkId: link.id, confirm: true } }).success).toBe(false);
     }

@@ -236,7 +236,8 @@ export class WatcherWakeRunner {
         ? claimed.cursor
         : this.#priorCursors.get(linkId, finalTurnId)
           ?? { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
-      const previousPlanKey = !staleTurn && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
+      const review = trigger === "initial";
+      const previousPlanKey = !staleTurn && !review && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
       const remaining = claimed.counters.wakeAllowance - claimed.counters.wakesThisTurn;
       const consumesAllowance = trigger !== "manual" && trigger !== "initial" && remaining > 0;
       const drained = this.#finalPages.get(linkId);
@@ -256,7 +257,7 @@ export class WatcherWakeRunner {
         sequence: claimed.counters.wakesTotal + 1,
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),
-        openReply: this.#openReplies.get(linkId, cursor.turnId) ?? null,
+        openReply: review ? null : this.#openReplies.get(linkId, cursor.turnId) ?? null,
         lastFinalPage,
         contextAccess: route.contextAccess !== false && claimed.budgets.contextReadsPerWake !== 0,
         earlierFindings: digestTurnId === null ? [] : store.watcherLinks.findingsForTurn(linkId, digestTurnId, WATCHER_EARLIER_FINDINGS),

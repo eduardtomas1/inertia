@@ -276,6 +276,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "watcher.pause": shortMutation,
   "watcher.resume": shortMutation,
   "watcher.wake": shortMutation,
+  "watcher.review": shortMutation,
   "watcher.detach": shortMutation,
   "watcher.feed.get": shortRetrySafe,
   "watcher.note.deliver": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },

@@ -297,6 +297,26 @@ export class WatcherLinkCoordinator {
     return this.#detail(link);
   }
 
+  review(linkId: string): WatcherLinkView {
+    const { store } = this.#deps;
+    const link = this.#require(linkId);
+    if (link.status === "paused") throw new RuntimeRequestError("Resume the watcher before asking it to review the last turn.");
+    if (link.status === "waking" || this.#deps.turns.isActive(link.watcherConversationId)) {
+      throw new RuntimeRequestError("The watcher is already checking.");
+    }
+    const latest = link.watchedConversationId === null ? null : store.latestAgentTurnForConversation(link.watchedConversationId);
+    if (!latest) throw new RuntimeRequestError("The watched chat has no turn to review yet.");
+    const now = this.#deps.now();
+    if (link.cursor.turnId !== latest.id) {
+      store.watcherLinks.beginWatchedTurn(linkId, latest.id, now);
+      if (!this.#deps.turns.isActive(link.watchedConversationId!)) store.watcherLinks.markFinalPass(linkId, latest.id, now);
+    }
+    const rewound = store.watcherLinks.rewindCursor(linkId, latest.id, now);
+    if (!rewound) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
+    this.#deps.scheduler.requestWake(linkId, "initial");
+    return this.#detail(this.publish(linkId) ?? rewound);
+  }
+
   detach(linkId: string): WatcherLinkView {
     const { store } = this.#deps;
     const link = store.watcherLinks.get(linkId);

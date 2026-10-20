@@ -682,6 +682,17 @@ export class WatcherLinkRepository {
     })();
   }
 
+  rewindCursor(linkId: string, turnId: string, now: string): WatcherLinkRecord | null {
+    const at = requireTimestamp(now, "Watcher review time");
+    const changed = this.database.prepare(`
+      UPDATE watcher_links
+      SET cursor_activity_at = NULL, cursor_activity_id = NULL, cursor_message_at = NULL,
+          pending_running_ids_json = '[]', updated_at = ?
+      WHERE id = ? AND cursor_turn_id = ? AND status <> 'detached'
+    `).run(at, linkId, turnId).changes;
+    return changed === 1 ? this.get(linkId) : null;
+  }
+
   findingsForTurn(linkId: string, watchedTurnId: string, limit: number): WatcherWakeRecord[] {
     const bounded = Math.min(MAX_WATCHER_FEED_PAGE, Math.max(0, Math.trunc(limit) || 0));
     if (bounded === 0) return [];

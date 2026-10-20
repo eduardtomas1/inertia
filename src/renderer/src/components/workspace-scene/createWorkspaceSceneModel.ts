@@ -163,6 +163,7 @@ export function visibleChatProjection(
       ? projection.usage
       : null,
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
+    watcherWakes: detailOwned ? projection.detail?.watcherWakes : undefined,
     history: projectionOwned ? projection.history : undefined,
   };
 }
@@ -650,6 +651,7 @@ export function createWorkspaceSceneModel({
       promptContext: workspaceTools.pendingDiffContext,
       contextSources: workspaceOptions.contextSources,
       contextPackets: chatProjection.contextPackets,
+      watcherWakes: chatProjection.watcherWakes,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onQueueCommand: actions.runQueueCommand,
       onLimitResetCommand: actions.runLimitResetCommand,

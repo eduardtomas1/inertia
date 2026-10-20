@@ -2,6 +2,8 @@ import type { ResponseTimelineItem } from "../../utils/responseTimeline";
 import { contextCompactionLabel } from "@shared/context-compaction";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { providerHandoffText } from "../../utils/providerHandoff";
+import { watcherEventsText } from "../../utils/watcherLinks";
+import { watcherNoteLabel } from "./WatcherNoteRow";
 
 const TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS = 96;
 
@@ -14,6 +16,9 @@ export function responseTimelineArticleLabel(
   if (item.kind === "compatibility") {
     return "Recovered legacy and orphaned history";
   }
+  if (item.kind === "watcher-note") return watcherNoteLabel(item.note);
+  const wake = item.turn.watcherWake;
+  if (wake) return `Turn ${item.turn.index}: Check ${wake.sequence} · ${watcherEventsText(wake.eventsCovered)}`;
   const request = item.turn.userMessage.content.trim().replace(/\s+/gu, " ");
   const requestLabel = request
     ? request.length > TIMELINE_ARTICLE_REQUEST_LABEL_MAX_CHARS

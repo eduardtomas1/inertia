@@ -22,6 +22,7 @@ import {
   collapsedUserRequestPreview,
   shouldCollapseUserRequest,
 } from "../userRequestPresentation";
+import { watcherEventsText } from "../watcherLinks";
 
 export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 14;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS = 10;
@@ -30,6 +31,10 @@ export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 // Keep long conversations legible without collapsing ten or more turns into
 // each marker. The rail remains bounded and scrollable in shorter viewports.
 export const TIMELINE_MINIMAP_MAX_MARKERS = 40;
+/** The "Note from watcher" divider, sized like the provider handoff divider. */
+export const WATCHER_NOTE_ROW_HEIGHT = 64;
+/** A watcher check's compact "Check N · K events" request row. */
+export const WATCHER_WAKE_REQUEST_HEIGHT = 44;
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing
@@ -50,7 +55,7 @@ export function estimateTimelineItemRenderWeight(
   item: ResponseTimelineItem,
 ): number {
   if (item.kind === "compaction") return 1 + item.message.content.length / 400;
-  if (item.kind === "handoff") return 1;
+  if (item.kind === "handoff" || item.kind === "watcher-note") return 1;
   if (item.kind === "compatibility") {
     const inferredTurnWeight = item.compatibility.inferredTurns.reduce(
       (total, turn) => total + estimateResponseTurnRenderWeight(turn),
@@ -98,7 +103,7 @@ function estimatePlanTextChars(plans: ResponseTurn["plans"]): number {
 function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
   const messageChars = turn.assistantMessages.reduce(
     (total, message) => total + message.content.length,
-    turn.userMessage.content.length
+    (turn.watcherWake ? 0 : turn.userMessage.content.length)
       + turn.followUpMessages.reduce(
         (total, message) => total + message.content.length,
         0,
@@ -509,11 +514,13 @@ function estimateTurnRowSize(
   );
   const attachmentRows = Math.ceil(turn.userMessage.attachments.length / Math.max(1, Math.floor(requestWidth / 180)));
   const requestActionsHeight = turn.userMessage.privateConnectDeviceId
+    || turn.userMessage.watcherNote
     || turn.checkpoint
     || turn.checkpointUnavailableReason !== null
     ? 28
     : 0;
-  const requestHeight = 24
+  // A watcher check renders as one compact row; its digest stays folded.
+  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : 24
     + requestActionsHeight
     + requestLines * 22
     + attachmentRows * 25
@@ -690,6 +697,7 @@ export function estimateTimelineRowSize(
 ): number {
   if (item.kind === "compaction") return 120 + Math.ceil(item.message.content.length / 80) * 20;
   if (item.kind === "handoff") return 64;
+  if (item.kind === "watcher-note") return WATCHER_NOTE_ROW_HEIGHT;
   if (item.kind === "compatibility") {
     const availableWidth = boundedEstimateWidth(options.availableWidth);
     const columns = estimatedTextColumns(Math.min(760, availableWidth - 40), 96);
@@ -726,7 +734,9 @@ export function buildTimelineMinimapMarkers(
   return Array.from({ length: count }, (_, marker) => {
     const index = Math.round(marker * (turns.length - 1) / Math.max(1, count - 1));
     const turn = turns[index]!;
-    const request = turn.userMessage.content.replace(/\s+/gu, " ").trim();
+    const request = turn.watcherWake
+      ? `Check ${turn.watcherWake.sequence} · ${watcherEventsText(turn.watcherWake.eventsCovered)}`
+      : turn.userMessage.content.replace(/\s+/gu, " ").trim();
     return {
       index,
       id: turn.id,

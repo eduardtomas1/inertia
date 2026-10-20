@@ -55,6 +55,7 @@ import {
 } from "../hooks/useSidebarWorkIndex";
 import {
   groupWorkThreads,
+  nestWatcherThreads,
   nextSidebarNavigationIndex,
   isSidebarNavigationKey,
   sidebarThreadView,
@@ -66,6 +67,7 @@ import {
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { WatcherWorkRow } from "./sidebar/WatcherWorkRow";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
@@ -365,9 +367,14 @@ function SidebarView({
     snapshot?.settings.providerIdentityLabels,
     threadViewsById,
   ]);
+  const watcherLinks = snapshot?.watchers;
+  const nestedWork = useMemo(
+    () => nestWatcherThreads(activityThreads, watcherLinks),
+    [activityThreads, watcherLinks],
+  );
   const workSections = useMemo(
-    () => groupWorkThreads(activityThreads, snoozeNow, scratchProjectIds),
-    [activityThreads, snoozeNow, scratchProjectIds],
+    () => groupWorkThreads(nestedWork.threads, snoozeNow, scratchProjectIds),
+    [nestedWork.threads, snoozeNow, scratchProjectIds],
   );
   const workSearchActive = Boolean(query.trim());
   const [
@@ -393,6 +400,7 @@ function SidebarView({
     navigationRef,
     searchActive: workSearchActive,
     sections: workSections,
+    watchersByParent: nestedWork.watchersByParent,
   });
   useLayoutEffect(() => {
     if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
@@ -871,6 +879,19 @@ function SidebarView({
   const renderWorkIndexItem = (item: WorkIndexItem): React.JSX.Element => {
     if (item.kind === "thread") {
       return activityRow(item.conversation, item.position, item.sectionId);
+    }
+    if (item.kind === "watcher") {
+      const model = threadViewsById.get(item.conversation.id);
+      return (
+        <WatcherWorkRow
+          conversation={item.conversation}
+          parentTitle={threadViewsById.get(item.parentId)?.conversation.title ?? "this chat"}
+          link={watcherLinks?.find(({ watcherConversationId }) => watcherConversationId === item.conversation.id)}
+          active={snapshot?.activeConversationId === item.conversation.id && view === "workspace"}
+          statusLabel={statusLabels[model?.status ?? "idle"]}
+          onActivate={activateConversation}
+        />
+      );
     }
     if (item.kind === "show-more") {
       return (

@@ -477,3 +477,52 @@
     background: HighlightText;
   }
 }
+
+/* A watcher nested under its chat: one 34px line plus the row gap (36px). */
+.activity-thread.is-watcher {
+  height: 34px;
+}
+
+.watcher-work-row {
+  padding-left: 18px;
+}
+
+.watcher-work-row-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.watcher-work-row-branch {
+  width: 8px;
+  height: 10px;
+  flex: none;
+  margin-top: -8px;
+  border-bottom: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line-strong);
+  border-bottom-left-radius: 4px;
+}
+
+.watcher-work-row-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-thread.is-watcher.is-active .watcher-work-row-title {
+  color: var(--text);
+}
+
+.watcher-work-row-state {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.activity-thread.is-watcher[data-watcher-status="waking"] .watcher-work-row-state {
+  color: var(--status-working);
+}

@@ -58,9 +58,7 @@ export function watcherTriggerText(trigger: WatcherWakeTrigger): string {
   return TRIGGER_TEXT[trigger];
 }
 
-export function watcherEventsText(count: number): string {
-  return `${count.toLocaleString(INTERFACE_LOCALE)} ${count === 1 ? "event" : "events"}`;
-}
+export { watcherEventsText } from "./watcherLinks";
 
 const PHASE_TEXT: Readonly<Record<WatcherLivePhase, string>> = {
   starting: "Starting the check",

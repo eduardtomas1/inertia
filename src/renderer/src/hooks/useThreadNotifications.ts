@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { AppSnapshot, Conversation, ConversationLatestTurnSummary } from "@shared/contracts";
 import type { DesktopNotificationKind } from "@shared/desktop";
+import { watcherConversationIds } from "../utils/watcherLinks";
 
 export function threadNotificationKind(
   previous: Conversation,
@@ -21,6 +22,19 @@ export function threadNotificationKind(
     )
   ) return "completed";
   return null;
+}
+
+/**
+ * Watcher checks are quiet by design: a watcher chat never notifies. Its
+ * findings surface only as the badge on the watched chat's chip.
+ */
+export function threadNotificationKindFor(
+  previous: Conversation,
+  current: Parameters<typeof threadNotificationKind>[1],
+  quietConversationIds: ReadonlySet<string>,
+): DesktopNotificationKind | null {
+  if (quietConversationIds.has(current.id)) return null;
+  return threadNotificationKind(previous, current);
 }
 
 export function useThreadNotifications(
@@ -76,10 +90,11 @@ export function useThreadNotifications(
     previousRef.current = next;
     if (!previous || !enabled) return;
 
+    const quiet = watcherConversationIds(snapshot.watchers);
     for (const conversation of snapshot.conversations) {
       const prior = previous.get(conversation.id);
       if (!prior) continue;
-      const kind = threadNotificationKind(prior, conversation);
+      const kind = threadNotificationKindFor(prior, conversation, quiet);
       if (!kind) continue;
       if (
         conversation.snoozedUntil

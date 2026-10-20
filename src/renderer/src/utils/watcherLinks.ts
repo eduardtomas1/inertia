@@ -1,6 +1,7 @@
 import type { Conversation } from "@shared/contracts";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { WatcherLinkView, WatcherPreset } from "@shared/watcher";
+import { INTERFACE_LOCALE } from "../lib/locale";
 import { agentRequestProviderName } from "./agentInput";
 
 /**
@@ -73,4 +74,9 @@ export function watcherAgentLabel(
   const model = selection.alias?.trim()
     || (selection.modelId && selection.modelId !== "provider-default" ? selection.modelId : "");
   return model ? `${provider} ${model}` : provider;
+}
+
+/** "1 event" / "9 events"; eager because transcript estimates name checks. */
+export function watcherEventsText(count: number): string {
+  return `${count.toLocaleString(INTERFACE_LOCALE)} ${count === 1 ? "event" : "events"}`;
 }

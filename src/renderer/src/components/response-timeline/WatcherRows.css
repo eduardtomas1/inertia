@@ -1,0 +1,71 @@
+/* A watcher check's request in the watcher's own chat. */
+.response-turn > .watcher-wake-request {
+  display: grid;
+  width: min(100%, var(--transcript-max-width));
+  gap: 4px;
+  margin: 0 0 var(--settled-layer-spacing);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.watcher-wake-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.watcher-wake-row strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.watcher-wake-row > strong ~ span::before {
+  margin-right: 8px;
+  color: var(--text-faint);
+  content: "·";
+}
+
+.watcher-wake-mark {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.watcher-wake-digest > summary {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.watcher-wake-digest > summary:hover {
+  color: var(--text);
+}
+
+.watcher-wake-digest > pre {
+  max-height: 360px;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--fill);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-prose);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The inline tag on a note the watcher forwarded. */
+.message-watcher-origin {
+  color: var(--text-muted);
+}

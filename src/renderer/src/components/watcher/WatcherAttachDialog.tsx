@@ -254,7 +254,11 @@ export function WatcherAttachDialog({
       payload: {
         linkId: crypto.randomUUID(),
         watchedConversationId,
-        modelSelection: cloneSelection(selection),
+        modelSelection: {
+          ...selection,
+          providerOptions: { ...selection.providerOptions },
+          capabilities: selection.capabilities.map((capability) => ({ ...capability })),
+        },
         preset,
         instructions: instructions.trim(),
         sharing,

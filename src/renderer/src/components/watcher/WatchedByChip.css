@@ -1,12 +1,14 @@
-/* Eager: the chip and the nested Work row are the only watcher styles that
+/* Eager: the chip and the locked run pill are the only watcher styles that
  * load before the dock. Everything else lives in the lazy dock chunk. */
+/* Aligned with the composer's left edge above it. */
 .watched-by-chip {
-  display: inline-flex;
-  max-width: 100%;
+  --watched-by-chip-row: min(var(--composer-max-width), calc(100% - 36px));
+  display: flex;
+  width: fit-content;
+  max-width: var(--watched-by-chip-row);
   align-items: center;
-  align-self: flex-start;
   gap: 6px;
-  margin: 0 0 6px 4px;
+  margin: 0 0 6px calc((100% - var(--watched-by-chip-row)) / 2);
   padding: 2px 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -46,4 +48,9 @@
   border-radius: 999px;
   color: var(--accent-text);
   background: var(--accent);
+}
+
+.composer-run-lock {
+  color: var(--text-muted);
+  cursor: default;
 }

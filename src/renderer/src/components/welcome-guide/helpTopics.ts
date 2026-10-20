@@ -228,6 +228,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Duo",
         detail: "Launch two chats in the sidebar sends one brief to two agents. Turn on Add an independent judge to compare both results with a third model.",
       },
+      {
+        name: "Watcher",
+        detail: "Choose Add a watcher… in a chat's actions to attach a read-only Reviewer, Scope guard or Explainer. It follows the chat as it works, keeps its findings in a dock beside it and sends a note only when you choose Send.",
+      },
     ],
     jumps: [],
   },

@@ -6,6 +6,7 @@ import { agentRunStateForTurn } from "@shared/run-state";
 import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
+import { WatcherWakeRequest } from "./WatcherWakeRequest";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { sessionRecoveryDetail } from "../../utils/sessionRecovery";
@@ -115,10 +116,12 @@ export function UserRequestLayer({
     ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
   ) ?? [];
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
+  if (turn.watcherWake) return <WatcherWakeRequest turn={turn} />;
+  const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
-      aria-label="Your request"
+      aria-label={watcherNote ? "Note from watcher" : "Your request"}
       data-request-layout={isDocumentLike ? "document" : "content"}
       data-turn-layer="user-request"
       data-turn-request-context={turn.id}
@@ -127,7 +130,7 @@ export function UserRequestLayer({
       tabIndex={-1}
       {...messageContextMenu(turn.userMessage, turn.userMessage.content)}
     >
-      {(turn.userMessage.privateConnectDeviceId || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
+      {(turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
         <div className="message-meta">
           <MessageOrigin message={turn.userMessage} />
           {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}

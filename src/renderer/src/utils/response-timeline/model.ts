@@ -14,6 +14,7 @@ import type {
   TurnGitArtifact,
   TurnSessionRecovery,
 } from "@shared/contracts";
+import type { WatcherNoteAttribution, WatcherWakeSummary } from "@shared/watcher";
 import { activityNeedsAttention } from "./activity-attention";
 import { providerBackendName } from "../providerBackendName";
 
@@ -51,6 +52,8 @@ export interface ResponseTurn {
   foldableActivities: AgentActivity[];
   /** Set when the previous authoritative turn ran on another provider. */
   providerChanged?: true;
+  /** Set on a watcher chat's check: its request is the digest it was shown. */
+  watcherWake?: WatcherWakeSummary;
 }
 
 /**
@@ -146,6 +149,8 @@ export interface ProviderHandoffItem {
 export type ResponseTimelineItem =
   | { kind: "compaction"; id: string; message: ChatMessage }
   | { kind: "handoff"; id: string; handoff: ProviderHandoffItem }
+  /** Divider before a turn that a forwarded watcher note started. */
+  | { kind: "watcher-note"; id: string; turnId: string; note: WatcherNoteAttribution }
   | { kind: "turn"; id: string; turn: ResponseTurn }
   | {
       kind: "compatibility";
@@ -202,6 +207,7 @@ interface TimelineIndexes {
   checkpointById: Map<string, CheckpointSummary>;
   checkpointsByTurn: Map<string, CheckpointSummary[]>;
   gitArtifactByTurn: Map<string, TurnGitArtifactSummary>;
+  watcherWakeByTurn: Map<string, WatcherWakeSummary>;
 }
 
 function groupByTurn<T extends { turnId: string | null }>(items: T[]): Map<string, T[]> {
@@ -229,6 +235,7 @@ function indexTimeline(input: NormalizedBuildResponseTimelineInput): TimelineInd
     checkpointById: new Map(input.checkpoints.map((checkpoint) => [checkpoint.id, checkpoint])),
     checkpointsByTurn: groupByTurn(input.checkpoints),
     gitArtifactByTurn: new Map(input.gitArtifacts.map((artifact) => [artifact.turnId, artifact])),
+    watcherWakeByTurn: new Map((input.watcherWakes ?? []).map((wake) => [wake.turnId, wake])),
   };
 }
 
@@ -322,6 +329,9 @@ function buildTurn(
       kind === "tool" || kind === "command" || kind === "file").length,
     importantActivities,
     foldableActivities,
+    ...(indexes.watcherWakeByTurn.has(agentTurn.id)
+      ? { watcherWake: indexes.watcherWakeByTurn.get(agentTurn.id)! }
+      : {}),
   };
 }
 
@@ -335,6 +345,8 @@ export interface BuildResponseTimelineInput {
   inputRequests?: AgentInputRequest[];
   checkpoints: CheckpointSummary[];
   gitArtifacts?: TurnGitArtifactSummary[];
+  /** A watcher chat's checks, keyed to the turns that ran them. */
+  watcherWakes?: readonly WatcherWakeSummary[];
 }
 
 /**
@@ -424,8 +436,18 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
           compatibility,
         }]
       : []),
-    ...withProviderHandoffs(ordered),
+    ...withWatcherNotes(withProviderHandoffs(ordered)),
   ];
+}
+
+/** Places a "Note from watcher" divider before each turn a watcher note started. */
+function withWatcherNotes(ordered: ResponseTimelineItem[]): ResponseTimelineItem[] {
+  if (!ordered.some((item) => item.kind === "turn" && item.turn.userMessage.watcherNote)) return ordered;
+  return ordered.flatMap((item): ResponseTimelineItem[] => {
+    const note = item.kind === "turn" ? item.turn.userMessage.watcherNote : undefined;
+    if (item.kind !== "turn" || !note) return [item];
+    return [{ kind: "watcher-note", id: `watcher-note:${item.turn.id}`, turnId: item.turn.id, note }, item];
+  });
 }
 
 function turnModelLabel(turn: AgentTurn): string | null {
@@ -540,9 +562,13 @@ export function updateResponseTimelineForActivityDelta(
     gitArtifacts: input.gitArtifacts?.filter(
       ({ turnId: owner }) => owner === turnId,
     ),
+    watcherWakes: input.watcherWakes?.filter(
+      ({ turnId: owner }) => owner === turnId,
+    ),
   });
-  const rebuilt = scoped.length === 1 && scoped[0]?.kind === "turn"
-    ? scoped[0]
+  const scopedTurns = scoped.filter((item) => item.kind !== "watcher-note");
+  const rebuilt = scopedTurns.length === 1 && scopedTurns[0]?.kind === "turn"
+    ? scopedTurns[0]
     : null;
   if (!rebuilt) return null;
   const replacement: ResponseTimelineItem = {
@@ -570,6 +596,19 @@ function sameReferences<T>(left: T[], right: T[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
+function sameWatcherWake(left: WatcherWakeSummary | undefined, right: WatcherWakeSummary | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.wakeId === right.wakeId
+    && left.sequence === right.sequence
+    && left.trigger === right.trigger
+    && left.outcome === right.outcome
+    && left.eventsCovered === right.eventsCovered
+    && left.itemsTruncated === right.itemsTruncated
+    && left.itemsOmitted === right.itemsOmitted
+    && left.guardState === right.guardState;
+}
+
 function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
   return left.id === right.id
     && left.index === right.index
@@ -584,6 +623,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && left.completedAt === right.completedAt
     && left.isActive === right.isActive
     && left.providerChanged === right.providerChanged
+    && sameWatcherWake(left.watcherWake, right.watcherWake)
     && left.toolCallCount === right.toolCallCount
     && sameReferences(left.followUpMessages, right.followUpMessages)
     && sameReferences(left.assistantMessages, right.assistantMessages)
@@ -660,6 +700,11 @@ export function stabilizeResponseTimeline(
     }
     if (item.kind === "handoff") {
       const stable = prior?.kind === "handoff" && sameHandoff(prior.handoff, item.handoff) ? prior : item;
+      if (stable !== previous[index]) changed = true;
+      return stable;
+    }
+    if (item.kind === "watcher-note") {
+      const stable = prior?.kind === "watcher-note" && prior.note === item.note ? prior : item;
       if (stable !== previous[index]) changed = true;
       return stable;
     }

@@ -40,6 +40,7 @@ import {
 import { LiveElapsed } from "./activity";
 import { ContextCompactionRow, PendingContextCompaction } from "./ContextCompactionRow";
 import { ProviderHandoffRow } from "./ProviderHandoffRow";
+import { WatcherNoteRow } from "./WatcherNoteRow";
 import { responseTimelineArticleLabel } from "./row-label";
 export { responseTimelineArticleLabel } from "./row-label";
 import { CompatibilityTimeline } from "./compatibility";
@@ -324,6 +325,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       inputRequests: props.inputRequests,
       checkpoints: props.checkpoints,
       gitArtifacts: props.gitArtifacts,
+      watcherWakes: props.watcherWakes,
     };
     const previous = previousBuild.current;
     const activityOnly = previous !== null
@@ -334,7 +336,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       && previous.input.approvals === input.approvals
       && previous.input.inputRequests === input.inputRequests
       && previous.input.checkpoints === input.checkpoints
-      && previous.input.gitArtifacts === input.gitArtifacts;
+      && previous.input.gitArtifacts === input.gitArtifacts
+      && previous.input.watcherWakes === input.watcherWakes;
     const incremental = activityOnly
       ? updateResponseTimelineForActivityDelta(
           input,
@@ -354,6 +357,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     props.messages,
     props.plans,
     props.reasonings,
+    props.watcherWakes,
     projectedTurns,
   ]);
   const timeline = useMemo(() => {
@@ -1172,7 +1176,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     : item.kind === "compaction" ? <ContextCompactionRow message={item.message} />
     : item.kind === "handoff" ? (
       <ProviderHandoffRow id={item.id} handoff={item.handoff} providerIdentityLabels={props.providerIdentityLabels} />
-    ) : (
+    ) : item.kind === "watcher-note" ? <WatcherNoteRow id={item.id} note={item.note} /> : (
       <CompatibilityTimeline
         key={props.conversationId}
         compatibility={item.compatibility}

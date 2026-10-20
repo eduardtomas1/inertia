@@ -14,6 +14,7 @@ import {
   Clock,
   Columns2,
   Copy,
+  Eye,
   FolderOpen,
   Hash,
   History,
@@ -33,6 +34,9 @@ import { navigateMenuItems } from "../utils/menuKeyboard";
 import { canOrganizeThread, threadSnoozePresets } from "../../../shared/thread-organization";
 import { ThreadSubmenu } from "./sidebar/ThreadSubmenu";
 import { HintButton } from "./HintButton";
+import { useWatcherSurface } from "./watcher/watcherContext";
+import { watcherEntryFor } from "./watcher/watcherAvailability";
+import { prefetchWatcherAttachDialog } from "./watcher/watcherLoaders";
 import "./sidebar/thread-actions.css";
 
 type DismissReason = "selection" | "context-change";
@@ -198,6 +202,13 @@ export function ConversationActionsMenu({
     && activeConversationId !== conversation.id,
   );
   const itemProps = { onDismiss };
+  const watcherSurface = useWatcherSurface();
+  const watcherEntry = watcherSurface?.openAttachDialog
+    ? watcherEntryFor(watcherSurface, conversation)
+    : null;
+  const conversationTrigger = (): HTMLElement | null => document.querySelector<HTMLElement>(
+    `[aria-controls="conversation-actions-${conversation.id}"]`,
+  );
   const copy = async (text: string): Promise<void> => {
     try {
       if (!await window.inertia.copyText(text)) throw new Error("Clipboard unavailable");
@@ -285,6 +296,22 @@ export function ConversationActionsMenu({
           onActivate={() => onOpenConversationInSplit(conversation)}
         >
           <Columns2 size={14} />Add this chat to split view
+        </ConversationMenuItem>
+      )}
+      {watcherEntry && watcherSurface && (
+        <ConversationMenuItem
+          {...itemProps}
+          disabled={watcherEntry.kind === "unavailable"}
+          hint={watcherEntry.kind === "unavailable" ? watcherEntry.reason : undefined}
+          restoreFocus={false}
+          onFocus={watcherEntry.kind === "attach" ? prefetchWatcherAttachDialog : undefined}
+          onPointerEnter={watcherEntry.kind === "attach" ? prefetchWatcherAttachDialog : undefined}
+          onActivate={() => {
+            if (watcherEntry.kind === "show") watcherSurface.showWatcher(conversation.id);
+            else watcherSurface.openAttachDialog?.(conversation.id, conversationTrigger());
+          }}
+        >
+          <Eye size={14} />{watcherEntry.kind === "show" ? "Show watcher" : "Add a watcher…"}
         </ConversationMenuItem>
       )}
       {activeRun && thread.needsAttention && runAttention?.canAcknowledge && (

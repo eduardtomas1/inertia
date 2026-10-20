@@ -329,6 +329,9 @@ export class WatcherDeliveryService {
         undefined,
         { providerContent: watcherSteerContent(note, attribution), watcherNote: attribution },
       );
+    } catch (error) {
+      if (!(error instanceof RuntimeRequestError) || error.delivery !== "ambiguous") throw error;
+      outcome = { kind: "unconfirmed", message: error.message };
     } finally {
       lease.release();
     }

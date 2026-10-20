@@ -7,6 +7,7 @@ import type { ClientCommand } from "../../src/shared/contracts";
 import { MAX_WATCHER_NOTE_CHARS } from "../../src/shared/watcher";
 import { watcherAgentLabel } from "../../src/shared/watcher-agent-label";
 import { agentContextTurnList, agentContextTurnPage } from "../../src/server/runtime/agent-context-pages";
+import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
 import { WATCHER_DELIVERY_DETAIL, watcherNoteText } from "../../src/server/runtime/watcher/watcher-delivery";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
@@ -103,6 +104,21 @@ describe("watcher note delivery", () => {
       expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({
         mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.dispatchedLater,
       });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("records a Steer whose delivery is unknown while the turn runs as failed, with the reason", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Keep going");
+      vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError(false));
+      const reply = await deliver(f, link.id, wakeId, "steer");
+      const detail = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
+      expect(reply).toMatchObject({ type: "request.result", result: { delivery: { mode: "steer", state: "failed", detail } } });
+      expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({ mode: "steer", state: "failed", detail });
     } finally {
       await f.close();
     }

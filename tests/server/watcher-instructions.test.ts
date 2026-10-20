@@ -47,8 +47,21 @@ describe("watcher instruction", () => {
     expect(text).toContain("User instructions: none.");
     expect(text.trimEnd().endsWith(WATCHER_SILENT_RULE)).toBe(true);
     expect(WATCHER_SILENT_RULE).toBe(
-      "If nothing needs the user's attention, reply with exactly SILENT and nothing else.",
+      "If nothing needs the user's attention, reply with exactly SILENT and nothing else, except the Resolved line when an earlier finding is now fixed.",
     );
+    expect(text).toContain("end your reply with a line `Resolved: check 3, check 5`");
+  });
+
+  it("tells an automatic watcher that Inertia sends its findings to the main chat, as the user chose", () => {
+    const manual = watcherInstruction({ preset: "reviewer", instructions: "", delivery: "manual" }, WATCHED).text;
+    expect(manual).toContain("never send anything on your own; the user decides what reaches the main chat.");
+    const automatic = watcherInstruction({ preset: "reviewer", instructions: "", delivery: "auto" }, WATCHED).text;
+    expect(automatic).toContain("never send anything on your own; the user chose to have Inertia send your findings to the main chat automatically.");
+    expect(automatic).not.toContain("the user decides what reaches the main chat");
+    for (const preset of WATCHER_PRESETS) {
+      const longest = watcherInstruction({ preset, instructions: "語".repeat(5_000), delivery: "auto" }, WATCHED);
+      expect(bytes(longest.text)).toBeLessThanOrEqual(MAX_WATCHER_INSTRUCTION_BYTES);
+    }
   });
 
   it("tells every preset which read-only commands run and that Inertia declines the rest", () => {

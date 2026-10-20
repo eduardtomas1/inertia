@@ -19,6 +19,7 @@ const FINDING = "Empty lines lost their test: parseLine now returns early for an
   + "but the case that covered it was removed from tests/parser.test.ts.";
 const MAIN_ANSWER = "The parser is tidier and the existing tests pass.";
 const NOTE_ANSWER = "Restored the empty-line test in tests/parser.test.ts.";
+const DISMISSED = "The diff stat lists only src/parser.ts.";
 
 const watcherAppServer = `
 const fs = require("node:fs");
@@ -35,6 +36,7 @@ const dataDirectory = path.resolve(process.cwd(), "..", "data");
 const steps = [
   ["main-step-1", "rg -n parseLine src", "src/parser.ts:12:export function parseLine(line) {"],
   ["main-step-2", "git diff --stat", " src/parser.ts | 9 +++------"],
+  ["main-step-2b", "git status --short", " M src/parser.ts"],
   ["main-step-3", "npm test -- parser", "4 passing"],
 ];
 let threadId = "watcher-thread-" + process.pid;
@@ -185,8 +187,17 @@ test.describe("watcher on the fake Codex route", () => {
   }
 
   const dock = (): Locator => app.page.locator("aside.watcher-dock");
-  const chip = (): Locator => app.page.locator(".watched-by-chip");
-  const phase = (): Locator => dock().locator(".watcher-bar-phase");
+  const handle = (): Locator => app.page.getByRole("button", { name: /^Open watcher/u });
+  const phase = (): Locator => dock().locator(".watcher-bar-state");
+  const feedEntries = (): Locator => dock().locator(".watcher-feed-list > li");
+  const expectMenuNote = async (text: string | RegExp): Promise<void> => {
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    const menu = app.page.getByRole("menu", { name: "More watcher actions" });
+    await expect(menu.getByRole("menuitem", { name: text, exact: true })).toBeVisible();
+    await expect(menu.locator(":focus")).toHaveCount(1);
+    await app.page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+  };
   const sidebar = (): Locator => app.page.getByRole("complementary", { name: "Project navigation", exact: true });
   const watchedRow = (): Locator => sidebar().locator("button.activity-thread-select").filter({ hasText: WATCHED_TITLE });
 
@@ -211,7 +222,6 @@ test.describe("watcher on the fake Codex route", () => {
 
     const dialog = page.getByRole("dialog", { name: "Add a watcher" });
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(`follows “${WATCHED_TITLE}”`);
     const presets = dialog.getByRole("radiogroup", { name: "Preset" });
     await expect(presets.getByRole("radio")).toHaveCount(3);
     // The chat's own Codex route is ready, so it is offered and selected.
@@ -220,7 +230,7 @@ test.describe("watcher on the fake Codex route", () => {
     await presets.getByRole("radio", { name: /^Reviewer/u }).click();
     await expect(presets.getByRole("radio", { name: /^Reviewer/u })).toHaveAttribute("aria-checked", "true");
     // The read-only boundary is part of the dialog's description, above the fold.
-    await expect(dialog.getByText(/It can't edit files, run commands or tests, or send anything without you\./u)).toBeVisible();
+    await expect(dialog.getByText("It reads and reports; it never edits files. Codex may run read-only commands.", { exact: true })).toBeVisible();
     const attach = dialog.getByRole("button", { name: "Attach watcher" });
     await expect(attach).toBeEnabled();
     const bounds = await dialog.boundingBox();
@@ -234,8 +244,9 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(dock()).toBeVisible();
     await expect(dock().getByRole("heading", { level: 2 })).toHaveText(`Watching ${WATCHED_TITLE}`);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
-    await expect(dock().locator(".watcher-bar-route")).toHaveText(/^Watching · .+ · Reviewer$/u);
-    await expect(dock().locator(".watcher-bar-counters")).toContainText(/\d+ of 12 checks left this turn/u);
+    await expect(phase()).toHaveText(/^.+ · Reviewer · Watching$/u);
+    await expectMenuNote(/^\d+ of 12 checks left this turn$/u);
+    await expect(dock().getByRole("button", { name: "More watcher actions" })).toBeFocused();
     // Inline beside the chat, not a split pane and not a sheet.
     await expect(page.locator(".watcher-dock-frame")).toHaveAttribute("data-presentation", "inline");
     await expect(page.getByRole("main", { name: "Split conversation workspace" })).toHaveCount(0);
@@ -246,8 +257,9 @@ test.describe("watcher on the fake Codex route", () => {
       const dockBox = await dock().boundingBox();
       return chatBox && dockBox ? Math.round(dockBox.x - (chatBox.x + chatBox.width)) : null;
     }).toBeGreaterThanOrEqual(-1);
-    await expect(chip()).toHaveText(/^Watched by .+ · Reviewer/u);
-    await expect(chip()).toHaveAttribute("aria-expanded", "true");
+    // The open dock replaces its collapsed handle; nothing sits above the composer.
+    await expect(handle()).toHaveCount(0);
+    await expect(page.locator(".composer-region").getByText(/Watched by/u)).toHaveCount(0);
     await expect(dock().getByText(/No checks yet/u)).toBeVisible();
     await capture(info, "gif-02-dock-open");
     expect(app.rendererErrors).toEqual([]);
@@ -264,37 +276,59 @@ test.describe("watcher on the fake Codex route", () => {
 
     await queueWatcherReply("SILENT");
     const receipt = dock().locator(".watcher-receipt:not(.is-notice) summary");
-    await expect(receipt).toHaveText(/^Checked once at .+ · nothing to report/u);
+    await expect(receipt).toHaveText(/^Checked once · .+ · nothing to report/u);
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
 
     // A second quiet check joins the same receipt. "Check now" skips the
     // cooldown once the next settled command is waiting.
     await gate("main-step-2");
-    await expect(dock().locator(".watcher-bar-counters")).toContainText("1 waiting");
+    await expectMenuNote("1 waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply("SILENT");
-    await expect(receipt).toHaveText(/^Checked 2 times( at | · ).+ · nothing to report/u);
+    await expect(receipt).toHaveText(/^Checked 2 times · .+ · nothing to report/u);
     await expect(dock().locator(".watcher-receipt:not(.is-notice)")).toHaveCount(1);
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
-    await expect(dock().locator(".watcher-bar-counters")).toContainText("0 waiting");
+    await expectMenuNote("0 waiting");
     await receipt.click();
     await expect(dock().locator(".watcher-receipt-checks > li")).toHaveCount(2);
     await capture(info, "dock-receipts-light");
     await receipt.click();
-    // Quiet checks add no badge to the chip.
-    await expect(chip().locator(".watched-by-chip-badge")).toHaveCount(0);
+    expect(app.rendererErrors).toEqual([]);
+  });
+
+  test("pauses and resumes from the dock and dismisses a finding", async ({ browserName: _browserName }) => {
+    const page = app.page;
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    await page.getByRole("menu", { name: "More watcher actions" }).getByRole("menuitem", { name: "Pause", exact: true }).click();
+    await expect(phase()).toHaveText(/ · Paused$/u);
+    await expect(dock().getByRole("button", { name: "Check now" })).toHaveCount(0);
+    await dock().getByRole("button", { name: "Resume", exact: true }).click();
+    await expect(phase()).toHaveText(/ · Watching$/u);
+
+    await gate("main-step-2b");
+    await expectMenuNote("1 waiting");
+    await dock().getByRole("button", { name: "Check now" }).click();
+    await expect(phase()).toHaveAttribute("data-phase", "waking");
+    await queueWatcherReply(DISMISSED);
+    const card = dock().getByRole("article", { name: DISMISSED });
+    await expect(card).toBeVisible();
+    await card.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await expect(card).toHaveCount(0);
+    await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
+    await expect(feedEntries()).toHaveCount(1);
+    await expect(feedEntries().first().locator("summary")).toHaveText(/^Checked 2 times · .+ · nothing to report/u);
     expect(app.rendererErrors).toEqual([]);
   });
 
   test("queues a finding and delivers it after the watched turn as a watcher note", async ({ browserName: _browserName }, info) => {
     const page = app.page;
     await gate("main-step-3");
-    await expect(dock().locator(".watcher-bar-counters")).toContainText("1 waiting");
+    await expectMenuNote("1 waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply(FINDING);
-    const finding = dock().getByRole("article", { name: "Finding" });
+    const finding = dock().getByRole("article", { name: FINDING });
     await expect(finding).toBeVisible();
     await expect(finding).toContainText("Empty lines lost their test:");
     await expect(finding.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
@@ -330,15 +364,16 @@ test.describe("watcher on the fake Codex route", () => {
     // The divider carries the attribution; the bubble only marks the origin.
     await expect(bubble.locator(".message-watcher-origin")).toHaveText("From watcher");
     await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · [^·]+$/u);
-    await expect(finding.locator(".watcher-finding-meta")).toHaveText(/^Check \d+$/u);
-    await expect(chip()).toBeVisible();
-    await expect(chip()).toHaveText(/^Watched by .+ · Reviewer/u);
+    await expect(finding.locator(".watcher-finding-meta")).toHaveText(/^Check \d+ · \d{1,2}:\d{2}\s[AP]M$/u);
     // Both turns settle, and the final checks of both (one per watched turn)
-    // fold into one new receipt above the finding.
+    // fold into one new receipt above the finding, newest first.
     await expect(page.locator('.response-turn [data-turn-status="completed"]')).toHaveCount(2);
     await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
-    await expect(dock().locator(".watcher-receipt:not(.is-notice) summary").first())
-      .toHaveText(/^Checked 2 times( at | · ).+ · nothing to report/u);
+    await expect(feedEntries()).toHaveCount(3);
+    await expect(feedEntries().nth(0)).toHaveAttribute("data-kind", "receipts");
+    await expect(feedEntries().nth(0).locator("summary")).toHaveText(/^Checked 2 times · .+ · nothing to report/u);
+    await expect(feedEntries().nth(1)).toHaveAttribute("data-kind", "finding");
+    await expect(feedEntries().nth(2)).toHaveAttribute("data-kind", "receipts");
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await expect(dock().locator(".watcher-notice-line")).toHaveCount(0);
     await capture(info, "main-chat-note-light");
@@ -384,7 +419,7 @@ test.describe("watcher on the fake Codex route", () => {
     expect(app.rendererErrors).toEqual([]);
   });
 
-  test("collapses and reopens the dock from the keyboard without a detail subscription", async ({ browserName: _browserName }) => {
+  test("collapses and reopens the dock from the keyboard without a detail subscription", async ({ browserName: _browserName }, info) => {
     const page = app.page;
     const watcherId = await watcherConversationId();
     const subscribed = (): string[] => sentFrames.filter((frame) =>
@@ -396,15 +431,18 @@ test.describe("watcher on the fake Codex route", () => {
     await dock().getByRole("heading", { level: 2 }).focus();
     await page.keyboard.press("Escape");
     await expect(page.locator(".watcher-dock-frame")).toBeHidden();
-    await expect(chip()).toBeFocused();
-    await expect(chip()).toHaveAttribute("aria-expanded", "false");
+    await expect(handle()).toBeFocused();
+    await expect(handle()).toHaveAttribute("aria-expanded", "false");
+    // A quiet check after the sent finding leaves nothing unseen on the handle.
+    await expect(handle()).toHaveAccessibleName("Open watcher");
+    await capture(info, "dock-handle-light");
 
     const before = sentFrames.length;
     await page.keyboard.press("Enter");
     await expect(dock()).toBeVisible();
-    await expect(chip()).toHaveAttribute("aria-expanded", "true");
+    await expect(handle()).toHaveCount(0);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
-    await expect(dock().getByRole("article", { name: "Finding" })).toBeVisible();
+    await expect(dock().getByRole("article", { name: FINDING })).toBeVisible();
     // Opening the dock reads the feed by request and never subscribes to the
     // watcher conversation's detail.
     await expect.poll(() => sentFrames.length).toBeGreaterThanOrEqual(before);
@@ -414,8 +452,8 @@ test.describe("watcher on the fake Codex route", () => {
     await dock().getByRole("button", { name: "Check now" }).focus();
     await page.keyboard.press("Escape");
     await expect(page.locator(".watcher-dock-frame")).toBeHidden();
-    await expect(chip()).toBeFocused();
-    await page.keyboard.press("Enter");
+    await expect(handle()).toBeFocused();
+    await page.keyboard.press(" ");
     await expect(dock()).toBeVisible();
     expect(subscribed()).toEqual([]);
     expect(app.rendererErrors).toEqual([]);
@@ -438,12 +476,12 @@ test.describe("watcher on the fake Codex route", () => {
     const frame = page.locator(".watcher-dock-frame");
     await expect(frame).toHaveAttribute("data-presentation", "sheet");
     await expect(frame).toBeHidden();
-    await expect(chip()).toHaveAttribute("aria-expanded", "false");
-    await chip().click();
+    await expect(handle()).toHaveAttribute("aria-expanded", "false");
+    await handle().click();
     await expect(dock()).toBeVisible();
     await expect(page.locator(".watcher-dock-scrim")).toBeVisible();
     await expect(dock().getByRole("heading", { level: 2 })).toHaveText(`Watching ${WATCHED_TITLE}`);
-    await expect(dock().getByRole("article", { name: "Finding" })).toBeVisible();
+    await expect(dock().getByRole("article", { name: FINDING })).toBeVisible();
     const pane = page.getByRole("region", { name: `Primary chat: Inertia · ${WATCHED_TITLE}` });
     const paneBox = await pane.boundingBox();
     await expect.poll(async () => (await dock().boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(280);
@@ -466,12 +504,13 @@ test.describe("watcher on the fake Codex route", () => {
     await paneComposer.click();
     await expect(frame).toBeHidden();
     await expect(paneComposer).toBeFocused();
-    await chip().click();
+    await handle().click();
     await expect(dock()).toBeVisible();
-    await dock().getByRole("button", { name: "Collapse" }).click();
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    await page.getByRole("menu", { name: "More watcher actions" }).getByRole("menuitem", { name: "Collapse", exact: true }).click();
     await expect(page.locator(".watcher-dock-frame")).toBeHidden();
-    await expect(chip()).toBeFocused();
-    await chip().click();
+    await expect(handle()).toBeFocused();
+    await handle().click();
     await expect(dock()).toBeVisible();
     await expect(split.getByRole("region", { name: /^(Primary|Second|Third|Fourth) chat: /u })).toHaveCount(4);
     expect(app.rendererErrors).toEqual([]);

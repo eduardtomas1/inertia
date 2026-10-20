@@ -11,7 +11,8 @@
     "Small changes on unrelated deferred chunks are import metadata for helpers (dialog shell, elapsed timing) that Rollup now shares with the watcher chunks.",
     "After merging v0.0.73 (e165a0a), mergedMainBaselineBytes is that revision and mergedBytes the merged branch, built from the same package-lock. Only deferredTasksViewJavaScript needed more room: v0.0.73 measures exactly its 21,126-byte budget and the Work tab nesting adds 6 bytes.",
     "Review fixes: reviewFixBaselineBytes is c17cbf0 (before the server and renderer review fixes) and reviewFixBytes the branch after both, built from the same package-lock. The dock grows by 5,898 bytes (sheet presentation with scrim and composer clearance, user-only motion, focus restoration, Resume refusal reasons, the floating send menu, one-time card entrances); the attach dialog by 958 bytes (link id reuse across ambiguous timeouts). First-load routes grow by 2,660 (workbench) and 2,625 (detached chat) bytes for the dock record's sheet and storage handling, the chip's collapsed live region, the stable linked-chat list and the shared schema-free agent label. The thread actions menu no longer pulls the watcher schema chunk. Budgets were raised by exactly the bytes they were exceeded.",
-    "Wave 2 renderer: wave2BaselineBytes is 872e420bb (wave 1 renderer, scheduler and contract pass) and wave2Bytes the branch after the wave 2 renderer work, both built on macOS with Node 22.23.2 from the same package-lock (sizes are identical on every platform). The dock grows by 975 bytes (resolved findings below open ones, the declined-commands note, the automatic-sending menu item and state word, the usage line); the attach dialog by 536 bytes (the automatic-sending switch). First-load routes and core grow by 35 bytes for the shared Switch's optional description link. The baseline already measured 372 bytes over the attach budget and 28 over the core budget from the contract pass, so those caps were raised by that overshoot plus this growth; the others by exactly this growth."
+    "Wave 2 renderer: wave2BaselineBytes is 872e420bb (wave 1 renderer, scheduler and contract pass) and wave2Bytes the branch after the wave 2 renderer work, both built on macOS with Node 22.23.2 from the same package-lock (sizes are identical on every platform). The dock grows by 975 bytes (resolved findings below open ones, the declined-commands note, the automatic-sending menu item and state word, the usage line); the attach dialog by 536 bytes (the automatic-sending switch). First-load routes and core grow by 35 bytes for the shared Switch's optional description link. The baseline already measured 372 bytes over the attach budget and 28 over the core budget from the contract pass, so those caps were raised by that overshoot plus this growth; the others by exactly this growth.",
+    "Wave 2 follow-up: wave2FollowUpBaselineBytes is 7a8d14930 (the integrated PR head with watcher.review and the note's providerId) and wave2FollowUpBytes the branch after the renderer follow-ups, both built on macOS with Node 22.23.2 from the same package-lock. The dock grows by 240 bytes (Review the last turn), the attach dialog by 22 (the one-sentence read-only line), and the transcript and core by 174 (the provider mark on the Note from watcher divider); transcriptJavaScript stays within its cap. The baseline already measured over budget from the integrated server and contract changes: attach by 55, workbench first load by 34, detached chat first load by 20 and core by 260 bytes; those caps were raised by that overshoot plus this growth, the dock cap by exactly this growth."
   ],
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
@@ -28,7 +29,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 1163,
       "wave2Bytes": 1163,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 1163,
+      "wave2FollowUpBytes": 1163,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredUsageLimitsJavaScript": {
       "preFoundationBytes": 21747,
@@ -44,7 +48,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 21769,
       "wave2Bytes": 21769,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 21769,
+      "wave2FollowUpBytes": 21769,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredWatcherDockJavaScript": {
       "preFoundationBytes": null,
@@ -60,7 +67,10 @@
       "deltaFromReviewFixBaselineBytes": 5898,
       "wave2BaselineBytes": 38208,
       "wave2Bytes": 39183,
-      "deltaFromWave2BaselineBytes": 975
+      "deltaFromWave2BaselineBytes": 975,
+      "wave2FollowUpBaselineBytes": 39183,
+      "wave2FollowUpBytes": 39423,
+      "deltaFromWave2FollowUpBaselineBytes": 240
     },
     "deferredWatcherAttachJavaScript": {
       "preFoundationBytes": null,
@@ -76,7 +86,10 @@
       "deltaFromReviewFixBaselineBytes": 958,
       "wave2BaselineBytes": 18040,
       "wave2Bytes": 18576,
-      "deltaFromWave2BaselineBytes": 536
+      "deltaFromWave2BaselineBytes": 536,
+      "wave2FollowUpBaselineBytes": 18631,
+      "wave2FollowUpBytes": 18653,
+      "deltaFromWave2FollowUpBaselineBytes": 22
     },
     "deferredWelcomeGuideJavaScript": {
       "preFoundationBytes": 37212,
@@ -92,7 +105,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 38267,
       "wave2Bytes": 38267,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 38267,
+      "wave2FollowUpBytes": 38267,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredWorkingOrbJavaScript": {
       "preFoundationBytes": 21807,
@@ -108,7 +124,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 21829,
       "wave2Bytes": 21829,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 21829,
+      "wave2FollowUpBytes": 21829,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredSnapshotSettingsJavaScript": {
       "preFoundationBytes": 4032,
@@ -124,7 +143,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 4076,
       "wave2Bytes": 4076,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 4076,
+      "wave2FollowUpBytes": 4076,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredSnapshotControlJavaScript": {
       "preFoundationBytes": 6867,
@@ -140,7 +162,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 6889,
       "wave2Bytes": 6889,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 6889,
+      "wave2FollowUpBytes": 6889,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredAttachmentStorageSettingsJavaScript": {
       "preFoundationBytes": 5308,
@@ -156,7 +181,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 5352,
       "wave2Bytes": 5352,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 5352,
+      "wave2FollowUpBytes": 5352,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredBackgroundTasksJavaScript": {
       "preFoundationBytes": 19386,
@@ -172,7 +200,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 19408,
       "wave2Bytes": 19408,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 19408,
+      "wave2FollowUpBytes": 19408,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredTasksViewJavaScript": {
       "preFoundationBytes": 21109,
@@ -188,7 +219,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 21132,
       "wave2Bytes": 21132,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 21132,
+      "wave2FollowUpBytes": 21132,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredProjectSettingsJavaScript": {
       "preFoundationBytes": 17087,
@@ -204,7 +238,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 17155,
       "wave2Bytes": 17155,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 17155,
+      "wave2FollowUpBytes": 17155,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredCliConversationImportJavaScript": {
       "preFoundationBytes": 9623,
@@ -220,7 +257,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 9645,
       "wave2Bytes": 9645,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 9645,
+      "wave2FollowUpBytes": 9645,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredReviewNoteJavaScript": {
       "preFoundationBytes": 1475,
@@ -236,7 +276,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 1497,
       "wave2Bytes": 1497,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 1497,
+      "wave2FollowUpBytes": 1497,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredThreadActionsJavaScript": {
       "preFoundationBytes": 8196,
@@ -252,7 +295,10 @@
       "deltaFromReviewFixBaselineBytes": 12,
       "wave2BaselineBytes": 8859,
       "wave2Bytes": 8859,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 8859,
+      "wave2FollowUpBytes": 8859,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredProjectCustomizeJavaScript": {
       "preFoundationBytes": 11993,
@@ -268,7 +314,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 12016,
       "wave2Bytes": 12016,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 12016,
+      "wave2FollowUpBytes": 12016,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredProjectColorContrastJavaScript": {
       "preFoundationBytes": 1802,
@@ -284,7 +333,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 1824,
       "wave2Bytes": 1824,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 1824,
+      "wave2FollowUpBytes": 1824,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredDiagnosticsJavaScript": {
       "preFoundationBytes": 18404,
@@ -300,7 +352,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 18448,
       "wave2Bytes": 18448,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 18448,
+      "wave2FollowUpBytes": 18448,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredDiagnosticCatalogJavaScript": {
       "preFoundationBytes": 9980,
@@ -316,7 +371,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 9980,
       "wave2Bytes": 9980,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 9980,
+      "wave2FollowUpBytes": 9980,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredIssueReportJavaScript": {
       "preFoundationBytes": 13348,
@@ -332,7 +390,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 13370,
       "wave2Bytes": 13370,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 13370,
+      "wave2FollowUpBytes": 13370,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "mascotFirstLoadJavaScript": {
       "preFoundationBytes": 11506,
@@ -348,7 +409,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 11506,
       "wave2Bytes": 11506,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 11506,
+      "wave2FollowUpBytes": 11506,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "mascotJavaScript": {
       "preFoundationBytes": 11506,
@@ -364,7 +428,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 11506,
       "wave2Bytes": 11506,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 11506,
+      "wave2FollowUpBytes": 11506,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "mascotSettingsJavaScript": {
       "preFoundationBytes": 7473,
@@ -380,7 +447,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 7495,
       "wave2Bytes": 7495,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 7495,
+      "wave2FollowUpBytes": 7495,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "entryJavaScript": {
       "preFoundationBytes": 222492,
@@ -396,7 +466,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 222556,
       "wave2Bytes": 222556,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 222556,
+      "wave2FollowUpBytes": 222556,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "mainWorkbenchFirstLoadJavaScript": {
       "preFoundationBytes": 878750,
@@ -412,7 +485,10 @@
       "deltaFromReviewFixBaselineBytes": 2660,
       "wave2BaselineBytes": 902729,
       "wave2Bytes": 902764,
-      "deltaFromWave2BaselineBytes": 35
+      "deltaFromWave2BaselineBytes": 35,
+      "wave2FollowUpBaselineBytes": 902798,
+      "wave2FollowUpBytes": 902798,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "detachedChatFirstLoadJavaScript": {
       "preFoundationBytes": 672293,
@@ -428,7 +504,10 @@
       "deltaFromReviewFixBaselineBytes": 2625,
       "wave2BaselineBytes": 691455,
       "wave2Bytes": 691490,
-      "deltaFromWave2BaselineBytes": 35
+      "deltaFromWave2BaselineBytes": 35,
+      "wave2FollowUpBaselineBytes": 691510,
+      "wave2FollowUpBytes": 691510,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "entryCss": {
       "preFoundationBytes": 241072,
@@ -444,7 +523,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 241100,
       "wave2Bytes": 241100,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 241100,
+      "wave2FollowUpBytes": 241100,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "colorThemesCss": {
       "preFoundationBytes": 8675,
@@ -460,7 +542,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 8675,
       "wave2Bytes": 8675,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 8675,
+      "wave2FollowUpBytes": 8675,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "detachedChatCss": {
       "preFoundationBytes": 3069,
@@ -476,7 +561,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 3069,
       "wave2Bytes": 3069,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 3069,
+      "wave2FollowUpBytes": 3069,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "settingsJavaScript": {
       "preFoundationBytes": 77802,
@@ -492,7 +580,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 77501,
       "wave2Bytes": 77501,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 77501,
+      "wave2FollowUpBytes": 77501,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "filesFirstLoadJavaScript": {
       "preFoundationBytes": 110836,
@@ -508,7 +599,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 110882,
       "wave2Bytes": 110882,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 110882,
+      "wave2FollowUpBytes": 110882,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredMarkdownJavaScript": {
       "preFoundationBytes": 434721,
@@ -524,7 +618,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 434721,
       "wave2Bytes": 434721,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 434721,
+      "wave2FollowUpBytes": 434721,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "transcriptJavaScript": {
       "preFoundationBytes": 567967,
@@ -540,7 +637,10 @@
       "deltaFromReviewFixBaselineBytes": 333,
       "wave2BaselineBytes": 578042,
       "wave2Bytes": 578042,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 578042,
+      "wave2FollowUpBytes": 578216,
+      "deltaFromWave2FollowUpBaselineBytes": 174
     },
     "deferredFailureDiagnosticsJavaScript": {
       "preFoundationBytes": 5749,
@@ -556,7 +656,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 5771,
       "wave2Bytes": 5771,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 5771,
+      "wave2FollowUpBytes": 5771,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredAttachmentPreviewJavaScript": {
       "preFoundationBytes": 17794,
@@ -572,7 +675,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 17839,
       "wave2Bytes": 17839,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 17839,
+      "wave2FollowUpBytes": 17839,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredPreviewJavaScript": {
       "preFoundationBytes": 7613,
@@ -588,7 +694,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 7653,
       "wave2Bytes": 7653,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 7653,
+      "wave2FollowUpBytes": 7653,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredBrowserEvidenceJavaScript": {
       "preFoundationBytes": 3431,
@@ -604,7 +713,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 3453,
       "wave2Bytes": 3453,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 3453,
+      "wave2FollowUpBytes": 3453,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredSpreadsheetJavaScript": {
       "preFoundationBytes": 487396,
@@ -620,7 +732,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 487396,
       "wave2Bytes": 487396,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 487396,
+      "wave2FollowUpBytes": 487396,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredDiscordSettingsJavaScript": {
       "preFoundationBytes": 7891,
@@ -636,7 +751,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 7940,
       "wave2Bytes": 7940,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 7940,
+      "wave2FollowUpBytes": 7940,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredCanaryRollbackJavaScript": {
       "preFoundationBytes": 2232,
@@ -652,7 +770,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 2276,
       "wave2Bytes": 2276,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 2276,
+      "wave2FollowUpBytes": 2276,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredLifecycleIntegritySettingsJavaScript": {
       "preFoundationBytes": 2573,
@@ -668,7 +789,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 2617,
       "wave2Bytes": 2617,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 2617,
+      "wave2FollowUpBytes": 2617,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredSidebarUpdateControlJavaScript": {
       "preFoundationBytes": 15797,
@@ -684,7 +808,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 15842,
       "wave2Bytes": 15842,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 15842,
+      "wave2FollowUpBytes": 15842,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredProviderAuthJavaScript": {
       "preFoundationBytes": 11182,
@@ -700,7 +827,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 11204,
       "wave2Bytes": 11204,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 11204,
+      "wave2FollowUpBytes": 11204,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredProviderMaintenanceJavaScript": {
       "preFoundationBytes": 4388,
@@ -716,7 +846,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 4410,
       "wave2Bytes": 4410,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 4410,
+      "wave2FollowUpBytes": 4410,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredComposerQueueJavaScript": {
       "preFoundationBytes": 12974,
@@ -732,7 +865,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 13140,
       "wave2Bytes": 13140,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 13140,
+      "wave2FollowUpBytes": 13140,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredTerminalJavaScript": {
       "preFoundationBytes": 27107,
@@ -748,7 +884,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 27152,
       "wave2Bytes": 27152,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 27152,
+      "wave2FollowUpBytes": 27152,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredGitMenusJavaScript": {
       "preFoundationBytes": 8073,
@@ -764,7 +903,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 8119,
       "wave2Bytes": 8119,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 8119,
+      "wave2FollowUpBytes": 8119,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredWorkspaceHeaderActionsJavaScript": {
       "preFoundationBytes": 20768,
@@ -780,7 +922,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 20818,
       "wave2Bytes": 20818,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 20818,
+      "wave2FollowUpBytes": 20818,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "detachedChatJavaScript": {
       "preFoundationBytes": 11123,
@@ -796,7 +941,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 11364,
       "wave2Bytes": 11364,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 11364,
+      "wave2FollowUpBytes": 11364,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "preMergeConfidenceJavaScript": {
       "preFoundationBytes": 27428,
@@ -812,7 +960,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 27473,
       "wave2Bytes": 27473,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 27473,
+      "wave2FollowUpBytes": 27473,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "morphiconsJavaScript": {
       "preFoundationBytes": 15829,
@@ -828,7 +979,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 20685,
       "wave2Bytes": 20685,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 20685,
+      "wave2FollowUpBytes": 20685,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "morphingIconFeedbackJavaScript": {
       "preFoundationBytes": 3913,
@@ -844,7 +998,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 3948,
       "wave2Bytes": 3948,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 3948,
+      "wave2FollowUpBytes": 3948,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "coreJavaScript": {
       "preFoundationBytes": 2302269,
@@ -860,7 +1017,10 @@
       "deltaFromReviewFixBaselineBytes": 4172,
       "wave2BaselineBytes": 2334111,
       "wave2Bytes": 2334146,
-      "deltaFromWave2BaselineBytes": 35
+      "deltaFromWave2BaselineBytes": 35,
+      "wave2FollowUpBaselineBytes": 2334406,
+      "wave2FollowUpBytes": 2334580,
+      "deltaFromWave2FollowUpBaselineBytes": 174
     },
     "deferredPdfJavaScript": {
       "preFoundationBytes": 437503,
@@ -876,7 +1036,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 437503,
       "wave2Bytes": 437503,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 437503,
+      "wave2FollowUpBytes": 437503,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredPdfWorker": {
       "preFoundationBytes": 1264342,
@@ -892,7 +1055,10 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 1264342,
       "wave2Bytes": 1264342,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 1264342,
+      "wave2FollowUpBytes": 1264342,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     },
     "deferredIconRegionJavaScript": {
       "preFoundationBytes": null,
@@ -908,9 +1074,13 @@
       "deltaFromReviewFixBaselineBytes": 0,
       "wave2BaselineBytes": 12995,
       "wave2Bytes": 12995,
-      "deltaFromWave2BaselineBytes": 0
+      "deltaFromWave2BaselineBytes": 0,
+      "wave2FollowUpBaselineBytes": 12995,
+      "wave2FollowUpBytes": 12995,
+      "deltaFromWave2FollowUpBaselineBytes": 0
     }
   },
   "reviewFixBaseline": "c17cbf0",
-  "wave2Baseline": "872e420bb"
+  "wave2Baseline": "872e420bb",
+  "wave2FollowUpBaseline": "7a8d14930"
 }

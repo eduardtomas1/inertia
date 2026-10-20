@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { sentConversationContextReferences } from "../../src/server/persistence/conversation-context-packet-repository";
 import {
   allocateConversationContextBudgets,
@@ -545,6 +546,7 @@ describe("conversation context transport version 3", () => {
         ?, ?, created_at, dropped_message_count, 1
       FROM conversation_context_packets WHERE id = ?
     `).run(legacyV1, request.id, randomUUID(), sentV2.id);
+    removeWatcherLinksFromLegacyFixture(database);
     database.prepare("DELETE FROM schema_migrations WHERE version >= 95").run();
     expect(v2Row(database, sentV2.id)).toMatchObject({ version: 2, messages: legacy.packet.messageCount });
     database.close();

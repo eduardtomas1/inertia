@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 
@@ -66,6 +67,7 @@ describe("restart continuation plan migration", () => {
     const chat = chatWithTurn();
     store.close();
     const older = new Database(databasePath);
+    removeWatcherLinksFromLegacyFixture(older);
     older.exec("DROP TABLE conversation_title_locks; DROP TABLE restart_continuation_plans; DELETE FROM schema_migrations WHERE version >= 97;");
     older.close();
     const upgraded = new Database(databasePath);

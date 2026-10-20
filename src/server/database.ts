@@ -1,6 +1,6 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository";
-import { HtmlRenderRepository } from "./persistence/html-render-repository";
+import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
@@ -142,6 +142,7 @@ export class RuntimeStore {
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
   readonly htmlRenders: HtmlRenderRepository;
+  readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
@@ -218,6 +219,7 @@ export class RuntimeStore {
           conversationId, content, "user", attachments, null, undefined, options,
         ),
     });
+    this.watcherLinks = new WatcherLinkRepository({ database: this.database, conversations: this.conversationRepository, turnReads: () => this.contextPackets.turnReads });
     this.conversationWorktrees = new ConversationWorktreeRepository(
       this.database,
       (conversationId) => this.requireConversation(conversationId),
@@ -879,14 +881,14 @@ export class RuntimeStore {
     content: string,
     createdAt?: string,
     acknowledgedAt?: string, attachments: readonly ChatAttachment[] = [],
-    queuedMessageId?: string,
+    queuedMessageId?: string, options: { watcherNote?: CreateMessageOptions["watcherNote"] } = {},
   ): ChatMessage {
     return this.transcriptRepository.createAcknowledgedFollowUpMessage(
       conversationId,
       turnId,
       content,
       createdAt,
-      acknowledgedAt, attachments, queuedMessageId,
+      acknowledgedAt, attachments, queuedMessageId, options,
     );
   }
 

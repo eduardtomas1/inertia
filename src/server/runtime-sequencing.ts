@@ -56,6 +56,9 @@ type ConversationRuntimeMutationEvent = Exclude<
   | { type: "workspace.git.invalidated" }
   | { type: "provider.maintenance.updated" }
   | { type: "provider.maintenance.operation" }
+  | { type: "watcher.link.updated" }
+  | { type: "watcher.link.removed" }
+  | { type: "watcher.live" }
 >;
 
 function detailConversationId(event: ConversationRuntimeMutationEvent): string {
@@ -92,6 +95,9 @@ export function runtimeMutationScope(event: RuntimeMutationEvent): RuntimeEventS
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":
+    case "watcher.link.updated":
+    case "watcher.link.removed":
+    case "watcher.live":
       return { kind: "shell" };
     default:
       return {

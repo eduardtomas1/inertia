@@ -1,4 +1,5 @@
 import { snapshotPromptContext } from "../../../shared/snapshots";
+import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attachment-context";
 import type { ChatAttachment } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
@@ -55,11 +56,7 @@ export class TurnFollowUpCoordinator {
       !active
       || !active.runState.acceptsProviderEvents()
       || !this.options.providers.steer
-      || ![
-        "codex-app-server",
-        "claude-agent-sdk",
-        "opencode-sdk",
-      ].includes(active.turn.harnessId)
+      || !supportsActiveParentFollowUp(active.turn.harnessId)
     ) return null;
     const ready = active.followUpAdmissionTail.catch(() => undefined);
     let releaseAdmission!: () => void;

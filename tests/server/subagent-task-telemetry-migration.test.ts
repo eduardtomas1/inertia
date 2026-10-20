@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 import { subagentTaskTelemetryMigration } from "../../src/server/persistence/migrations/subagent-task-telemetry";
@@ -96,6 +97,7 @@ describe("subagent task telemetry migration", () => {
     const database = new Database(databasePath);
     try {
       migrateRuntimeDatabase(reference, 89);
+      removeWatcherLinksFromLegacyFixture(database);
       for (const column of TELEMETRY_COLUMNS) {
         database.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);
       }

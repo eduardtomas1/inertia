@@ -5,6 +5,7 @@ import type {
   RuntimeSequencedFrame,
 } from "../../shared/contracts";
 import { defaultSettings } from "../../shared/contracts/app";
+import type { WatcherLinkView } from "../../shared/watcher";
 import type { RuntimeDetailSubscription } from "../runtime-sequencing";
 import { projectRuntimeFrame, runtimeCursorFrame } from "../runtime-sequencing";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
@@ -33,6 +34,11 @@ function projectedSettings(settings: AppSettings): AppSettings {
     keybindings: { ...defaultSettings.keybindings },
     workingIndicator: { ...settings.workingIndicator },
   };
+}
+
+function watcherLinkTouches(link: WatcherLinkView, conversationId: string): boolean {
+  return link.watcherConversationId === conversationId
+    || link.watchedConversationId === conversationId;
 }
 
 /** Removes a foreign conversation identity from host-owned input prompts. */
@@ -86,6 +92,9 @@ export function projectDetachedChatSnapshot(
     settings: projectedSettings(snapshot.settings),
     promptPresets: [],
     todos: [],
+    ...(snapshot.watchers ? {
+      watchers: snapshot.watchers.filter((link) => watcherLinkTouches(link, conversationId)),
+    } : {}),
     activeProjectId: project?.id ?? null,
     activeConversationId: conversation?.id ?? null,
     ...(snapshot.sync ? { sync: snapshot.sync } : {}),
@@ -144,6 +153,14 @@ export function projectRuntimeFrameForAuthority(
             event: { ...frame.event, request },
           };
     }
+    case "watcher.link.updated":
+      return watcherLinkTouches(frame.event.link, authority.conversationId)
+        ? frame
+        : runtimeCursorFrame(frame);
+    // Neither event names both sides of its link, so a detached window cannot
+    // prove it may see them; it learns about link changes from link updates.
+    case "watcher.link.removed":
+    case "watcher.live":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import {
   ConversationContextService,
   createConversationContextPacketFromAuthorizedAgent,
@@ -1627,6 +1628,7 @@ describe("conversation context packets", () => {
 
     const database = new Database(databasePath);
     database.pragma("foreign_keys = OFF");
+    removeWatcherLinksFromLegacyFixture(database);
     database.exec("DROP TABLE html_renders; ALTER TABLE messages DROP COLUMN html_render_json; DROP TABLE cli_conversation_imports; DROP INDEX agent_turns_provider_session_before_idx; DROP INDEX agent_turns_provider_session_after_idx; ALTER TABLE agent_turns DROP COLUMN origin; DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; DROP TABLE queued_messages;");
     database.exec("ALTER TABLE agent_thread_operations DROP COLUMN target_turn_id; ALTER TABLE agent_thread_operations DROP COLUMN target_run_id;");
     database.exec(conversationContextWholeChatMigration.up as string);

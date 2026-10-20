@@ -39,6 +39,7 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
+import { watcherLinkCollectionCoherent } from "./watcher-schema";
 
 function exhaustiveOptions<T extends string>(
   options: Record<T, true>,
@@ -258,7 +259,8 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
     && (value.activeConversationId === null
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
     && promptPresetCollectionCoherent(value.promptPresets)
-    && todoCollectionCoherent(value.todos);
+    && todoCollectionCoherent(value.todos)
+    && watcherLinkCollectionCoherent(value.watchers, conversationProjects, projectIds);
 }
 
 export function pullRequestCapabilityStateCoherent(
@@ -339,6 +341,9 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":
+    case "watcher.link.updated":
+    case "watcher.link.removed":
+    case "watcher.live":
       return null;
     case "conversation.detail.invalidated":
     case "agent.started":

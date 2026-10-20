@@ -79,6 +79,7 @@ import {
 import {
   createDuoCommandHandler,
 } from "./runtime/commands/duo-commands";
+import { createUnavailableWatcherCommandHandler } from "./runtime/commands/watcher-commands";
 import {
   createIsolatedReviewCommandHandler,
 } from "./runtime/commands/isolated-review-commands";
@@ -725,6 +726,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ...usageRuntime.handlers,
       createIssueReportCommandHandler({ store, evidence: options.issueEvidence, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({ coordinator: duoLaunchCoordinator, broadcastSnapshot: flushSnapshot, send }),
+      createUnavailableWatcherCommandHandler(),
       createTodoCommandHandler({ ...turnInteractionDependencies, creation: agentThreads.creation, broadcastSnapshot: flushSnapshot }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,

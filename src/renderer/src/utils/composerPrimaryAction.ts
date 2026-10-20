@@ -1,3 +1,5 @@
+import { supportsActiveParentFollowUp } from "@shared/follow-up-steer";
+
 export type ComposerPrimaryActionState =
   | "send-disabled"
   | "send-ready"
@@ -13,11 +15,7 @@ export type ComposerFollowUpState =
   | "ready"
   | "pending";
 
-export function supportsActiveParentFollowUp(harnessId: string | null): boolean {
-  return harnessId === "codex-app-server"
-    || harnessId === "claude-agent-sdk"
-    || harnessId === "opencode-sdk";
-}
+export { supportsActiveParentFollowUp };
 
 export function composerFollowUpState({
   running,

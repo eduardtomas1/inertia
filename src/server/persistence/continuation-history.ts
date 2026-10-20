@@ -51,6 +51,22 @@ function markReferences(
   });
 }
 
+/** Restored history labels forwarded watcher notes so they never read as the user's own words. */
+function markWatcherNotes(
+  database: Database.Database,
+  excerpts: readonly ConversationContextExcerpt[],
+): ConversationContextExcerpt[] {
+  const userMessageIds = excerpts.filter(({ role }) => role === "user").map(({ sourceMessageId }) => sourceMessageId);
+  if (userMessageIds.length === 0) return [...excerpts];
+  const forwarded = new Set((database.prepare(`
+    SELECT id FROM messages
+    WHERE id IN (SELECT value FROM json_each(?)) AND watcher_note_json IS NOT NULL
+  `).all(JSON.stringify(userMessageIds)) as { id: string }[]).map(({ id }) => id));
+  return excerpts.map((excerpt) => forwarded.has(excerpt.sourceMessageId)
+    ? { ...excerpt, content: `[Forwarded watcher note]\n\n${excerpt.content}` }
+    : excerpt);
+}
+
 function sentReferenceBlocks(
   references: readonly SentConversationContextReference[],
   keptMessageIds: ReadonlySet<string>,
@@ -115,7 +131,7 @@ export function readContinuationHistory(
     source.id,
     collected.excerpts.filter(({ role }) => role === "user").map(({ sourceMessageId }) => sourceMessageId),
   );
-  const excerpts = markReferences(collected.excerpts, references);
+  const excerpts = markReferences(markWatcherNotes(database, collected.excerpts), references);
   const withheld = withheldMessageCount > 0 ? { withheldMessageCount } : {};
   if (excerpts.length === 0) {
     return { blocks: [], messageCount: 0, omittedMessageCount: 0, ...withheld };

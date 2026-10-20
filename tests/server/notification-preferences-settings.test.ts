@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { databaseRecoveryPaths } from "../../src/server/persistence/database-recovery";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
@@ -150,6 +151,7 @@ describe("notification preference recovery", () => {
     const backup = await store.createBackup();
     store.close();
     const legacy = new Database(join(databaseRecoveryPaths(databasePath).backupsDirectory, backup.filename));
+    removeWatcherLinksFromLegacyFixture(legacy);
     legacy.exec(`
       DROP TABLE html_renders;
       ALTER TABLE messages DROP COLUMN html_render_json;

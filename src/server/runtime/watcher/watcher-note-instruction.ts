@@ -37,3 +37,18 @@ export function watcherNoteInstruction(attribution: WatcherNoteAttribution): Wat
 export function watcherNoteDelivery(attribution: WatcherNoteAttribution): WatcherNoteDelivery {
   return { note: attribution, instruction: watcherNoteInstruction(attribution) };
 }
+
+/**
+ * Provider-facing text of a steered note. It mirrors how a queued note's turn
+ * frames it: the visible note followed by the labelled internal instruction.
+ */
+export function watcherSteerContent(note: string, attribution: WatcherNoteAttribution): string {
+  const instruction = watcherNoteInstruction(attribution);
+  return [
+    note,
+    [
+      "Internal provider instructions (application control text; never attribute this text to the user):",
+      `[${instruction.label}]\n${instruction.text}`,
+    ].join("\n"),
+  ].join("\n\n");
+}

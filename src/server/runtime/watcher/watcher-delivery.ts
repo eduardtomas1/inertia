@@ -20,7 +20,7 @@ import {
 } from "../commands/turn-interaction-commands";
 import type { TurnController } from "../turns/turn-controller";
 import { neutralizeUntrustedAgentText } from "../untrusted-agent-text";
-import { watcherNoteDelivery, watcherNoteInstruction } from "./watcher-note-instruction";
+import { watcherNoteDelivery, watcherSteerContent } from "./watcher-note-instruction";
 
 export const WATCHER_DELIVERY_DETAIL = Object.freeze({
   sent: "Sent · started the main chat's next turn",
@@ -104,21 +104,6 @@ export function watcherLabel(store: Pick<RuntimeStore, "conversation" | "shellSn
 export function watcherNoteText(finding: string): string {
   const normalized = finding.replaceAll("\0", "�").replace(/\r\n?/gu, "\n").trim();
   return clipCodeUnits(neutralizeUntrustedAgentText(normalized), MAX_WATCHER_NOTE_CHARS).trimEnd();
-}
-
-/**
- * Provider-facing text of a steered note. It mirrors how a queued note's turn
- * frames it: the visible note followed by the labelled internal instruction.
- */
-export function watcherSteerContent(note: string, attribution: WatcherNoteAttribution): string {
-  const instruction = watcherNoteInstruction(attribution);
-  return [
-    note,
-    [
-      "Internal provider instructions (application control text; never attribute this text to the user):",
-      `[${instruction.label}]\n${instruction.text}`,
-    ].join("\n"),
-  ].join("\n\n");
 }
 
 /**

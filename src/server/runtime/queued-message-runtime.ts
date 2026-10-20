@@ -12,7 +12,7 @@ import {
 } from "./commands/message-send-preparation";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
 import type { WatcherNoteAttribution } from "../../shared/watcher";
-import { watcherNoteDelivery } from "./watcher/watcher-note-instruction";
+import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note-instruction";
 
 const ADMISSION_RETRY_MS = 1_000;
 
@@ -23,9 +23,18 @@ function releasesQueue(turn: Pick<AgentTurn, "status" | "terminalReason"> | null
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
   || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
 
+export interface QueuedMessageRuntimeOptions {
+  signal: AbortSignal;
+  track<T>(operation: () => Promise<T>): Promise<T>;
+  /** A queued watcher note was removed or blocked, so it will not be sent as queued. */
+  onWatcherNoteUndelivered?(note: WatcherNoteAttribution, reason: string): void;
+}
+
+export const WATCHER_NOTE_REMOVED_REASON = "it was removed from the main chat's queue";
+
 export function createQueuedMessageRuntime(
   dependencies: TurnInteractionCommandDependencies,
-  options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T> },
+  options: QueuedMessageRuntimeOptions,
 ) {
   const { store, turns, conversationAttachments } = dependencies;
   const running = new Map<string, Promise<void>>();
@@ -45,6 +54,19 @@ export function createQueuedMessageRuntime(
     if (conversation.archivedAt !== null) throw new RuntimeRequestError("Unarchive this chat before changing its queue.");
     return conversation;
   };
+  const undelivered = (entry: { watcherNote?: WatcherNoteAttribution }, reason: string): void => {
+    if (!entry.watcherNote) return;
+    try {
+      options.onWatcherNoteUndelivered?.(entry.watcherNote, reason);
+    } catch {
+      // Watcher bookkeeping never interrupts the queue.
+    }
+  };
+  /** Blocks a queue entry; a blocked watcher note marks its finding as not sent. */
+  const block = (conversationId: string, entry: { id: string; watcherNote?: WatcherNoteAttribution }, reason: string): void => {
+    store.queuedMessages.block(conversationId, entry.id, reason);
+    undelivered(entry, reason);
+  };
   const retryAfterCleanup = (conversationId: string, manualId?: string): void => {
     if (manualId) manualRetries.set(conversationId, manualId);
     void turns.waitForProviderCleanup([conversationId]).then(() => schedule(conversationId)).catch(() => undefined);
@@ -52,7 +74,8 @@ export function createQueuedMessageRuntime(
 
   async function dispatch(conversationId: string, manualId?: string): Promise<void> {
     if (options.signal.aborted || !dependencies.enableProviders || turns.isClosing()) return;
-    const first = store.queuedMessages.list(conversationId)[0];
+    const first = store.queuedMessages.list(conversationId)
+      .find((entry) => entry.id === manualId || entry.state !== "blocked" || !entry.watcherNote);
     const retry = manualRetries.get(conversationId);
     manualRetries.delete(conversationId);
     if (!first || (manualId && first.id !== manualId)) return;
@@ -67,7 +90,7 @@ export function createQueuedMessageRuntime(
     if (conversation.archivedAt !== null) return;
     if (!manual && !releasesQueue(store.latestAgentTurnForConversation(conversationId))) return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
-      store.queuedMessages.block(conversationId, first.id, "This chat's model, access or workspace changed. Remove and queue the message again.");
+      block(conversationId, first, "This chat's model, access or workspace changed. Remove and queue the message again.");
       changed(conversationId);
       return;
     }
@@ -90,7 +113,7 @@ export function createQueuedMessageRuntime(
     } catch (error) {
       if (options.signal.aborted || turns.isClosing()) store.queuedMessages.release(conversationId, first.id);
       else if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId, manualId);
-      else store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
+      else block(conversationId, first, publicRuntimeError(error));
     } finally {
       changed(conversationId);
     }
@@ -239,6 +262,15 @@ export function createQueuedMessageRuntime(
     return result(conversation.id, input.id);
   }
 
+  /** Withdraws a waiting or blocked watcher note, for example before its finding is sent again. */
+  function withdrawWatcherNote(conversationId: string, id: string): boolean {
+    const entry = store.queuedMessages.get(conversationId, id);
+    if (!entry?.watcherNote) return false;
+    const removed = store.queuedMessages.cancel(conversationId, id);
+    if (removed) changed(conversationId);
+    return removed !== null;
+  }
+
   async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
     const { conversationId, id, turnId } = input;
     requireConversation(conversationId);
@@ -260,7 +292,7 @@ export function createQueuedMessageRuntime(
     if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
     if (first.state === "dispatching") return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
-      store.queuedMessages.block(conversationId, first.id, "This chat's model, access or workspace changed. Remove and queue the message again.");
+      block(conversationId, first, "This chat's model, access or workspace changed. Remove and queue the message again.");
       changed(conversationId);
       return;
     }
@@ -288,7 +320,12 @@ export function createQueuedMessageRuntime(
         attachments,
         () => { acknowledged = true; },
         AbortSignal.timeout(Math.max(0, deadline - Date.now())),
-        first.id,
+        {
+          queuedMessageId: first.id,
+          ...(first.watcherNote
+            ? { providerContent: watcherSteerContent(first.content, first.watcherNote), watcherNote: first.watcherNote }
+            : {}),
+        },
       );
       if (steered.kind === "accepted") {
         claimed = false;
@@ -298,7 +335,7 @@ export function createQueuedMessageRuntime(
       }
       if (steered.kind === "unconfirmed") {
         claimed = false;
-        store.queuedMessages.block(conversationId, first.id, steered.message);
+        block(conversationId, first, steered.message);
         return;
       }
       store.queuedMessages.release(conversationId, first.id);
@@ -308,9 +345,9 @@ export function createQueuedMessageRuntime(
     } catch (error) {
       if (claimed) {
         if (acknowledged) {
-          store.queuedMessages.block(conversationId, first.id, "The agent received this message, but Inertia could not record it. Check the chat before sending it again.");
+          block(conversationId, first, "The agent received this message, but Inertia could not record it. Check the chat before sending it again.");
         } else if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") {
-          store.queuedMessages.block(conversationId, first.id, publicRuntimeError(error));
+          block(conversationId, first, publicRuntimeError(error));
         } else {
           store.queuedMessages.release(conversationId, first.id);
         }
@@ -340,6 +377,7 @@ export function createQueuedMessageRuntime(
       requireConversation(conversationId);
       const removed = store.queuedMessages.cancel(conversationId, command.payload.id);
       if (!removed) throw new RuntimeRequestError("This queued message has already been dispatched.");
+      undelivered(removed, WATCHER_NOTE_REMOVED_REASON);
       const candidates = removed.attachments.map(({ id }) => id);
       const referenced = store.referencedAttachmentIds(candidates);
       await conversationAttachments.release(candidates.filter((id) => !referenced.has(id)));
@@ -362,6 +400,7 @@ export function createQueuedMessageRuntime(
     handler,
     turnInteractionHandler: createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps }),
     enqueueWatcherNote,
+    withdrawWatcherNote,
     onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
     start(): void {
       store.queuedMessages.reconcile();

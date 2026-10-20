@@ -923,6 +923,26 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       } finally { await f.close(); }
     });
 
+    it("keeps a queued note's attribution and note instruction when Send now hands it to the running turn", async () => {
+      const f = await fixture();
+      try {
+        const initial = startRunning(f);
+        const noteId = randomUUID();
+        f.queue.enqueueWatcherNote({
+          conversationId: f.conversationId, id: noteId, content: "Check the Windows path handling.", watcherNote: note,
+        });
+        await f.command("message.queue.send", noteId);
+        expect(f.provider.steerCalls).toHaveLength(1);
+        expect(f.provider.steerCalls[0]).toMatch(/^Check the Windows path handling\.\n\n/u);
+        expect(f.provider.steerCalls[0]).toContain("[inertia-watcher-note]");
+        const receipt = f.store.queuedMessages.get(f.conversationId, noteId)!;
+        expect(receipt).toMatchObject({ state: "accepted", turnId: initial.turn.id });
+        expect(f.store.message(receipt.userMessageId!)).toMatchObject({
+          content: "Check the Windows path handling.", watcherNote: note, turnId: initial.turn.id,
+        });
+      } finally { await f.close(); }
+    });
+
     it("names the main chat's full queue", async () => {
       const f = await fixture();
       try {

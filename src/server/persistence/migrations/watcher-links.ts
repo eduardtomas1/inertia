@@ -68,6 +68,7 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       wakes_total INTEGER NOT NULL DEFAULT 0 CHECK (wakes_total >= 0),
       events_seen INTEGER NOT NULL DEFAULT 0 CHECK (events_seen >= 0),
       events_pending INTEGER NOT NULL DEFAULT 0 CHECK (events_pending >= 0),
+      findings_total INTEGER NOT NULL DEFAULT 0 CHECK (findings_total >= 0),
       final_pass_turn_id TEXT CHECK (
         final_pass_turn_id IS NULL OR length(final_pass_turn_id) BETWEEN 1 AND 200
       ),

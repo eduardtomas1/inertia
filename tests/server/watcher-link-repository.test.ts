@@ -341,6 +341,21 @@ describe("watcher link repository", () => {
     expect(watcherLinkViewSchema.safeParse(store.shellSnapshot().watchers?.[0]).success).toBe(true);
   });
 
+  it("counts every settled finding over the link's lifetime, once per check", () => {
+    const { link } = attach(chat());
+    const links = store.watcherLinks;
+    expect(links.get(link.id)?.counters.findingsTotal).toBe(0);
+    const first = check(link.id, "finding");
+    check(link.id, "silent");
+    expect(links.get(link.id)?.counters.findingsTotal).toBe(1);
+    expect(links.settleWake(first.wakeId, "finding", null, "Again.", null, tick())).toBeNull();
+    links.setDelivery(first.wakeId, { mode: null, state: "dismissed" }, tick());
+    check(link.id, "finding");
+    links.beginWatchedTurn(link.id, "turn-next", tick());
+    expect(links.get(link.id)?.counters.findingsTotal).toBe(2);
+    expect(store.shellSnapshot().watchers?.[0]?.counters.findingsTotal).toBe(2);
+  });
+
   it("keeps eight maximal links under the snapshot cap and leaves instructions out of the shell", () => {
     const links = store.watcherLinks;
     expect(() => attach(chat("Bell"), { instructions: "ring\u0007" })).toThrow();

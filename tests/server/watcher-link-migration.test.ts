@@ -150,7 +150,7 @@ describe("watcher link migration", () => {
     }
   });
 
-  it("adds the watcher delivery policy with its default and check in an upgraded database", async () => {
+  it("adds the watcher delivery policy and findings count with their defaults and checks in an upgraded database", async () => {
     const before = await schema98Database();
     const store = new RuntimeStore(before.databasePath, before.workspacePath, { recoverInterruptedRuns: false });
     try {
@@ -176,6 +176,9 @@ describe("watcher link migration", () => {
       expect(() => setDelivery.run("auto")).not.toThrow();
       expect(() => setDelivery.run("steer")).toThrow(/CHECK constraint failed/u);
       expect(() => setDelivery.run(null)).toThrow(/NOT NULL constraint failed/u);
+      expect(columns("watcher_links").get("findings_total")).toEqual({ notnull: 1, dflt_value: "0" });
+      expect(rows(migrated, "SELECT findings_total FROM watcher_links")).toEqual([{ findings_total: 0 }]);
+      expect(() => migrated.prepare("UPDATE watcher_links SET findings_total = -1").run()).toThrow(/CHECK constraint failed/u);
     } finally {
       migrated.close();
     }

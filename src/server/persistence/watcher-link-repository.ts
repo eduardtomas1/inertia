@@ -577,6 +577,12 @@ export class WatcherLinkRepository {
         wakeId,
       ).changes;
       if (changed !== 1) return null;
+      if (outcome === "finding") {
+        this.database.prepare(`
+          UPDATE watcher_links SET findings_total = findings_total + 1
+          WHERE id = (SELECT link_id FROM watcher_wakes WHERE id = ?)
+        `).run(wakeId);
+      }
       this.bumpFeedForWake(wakeId, at);
       return this.getWake(wakeId);
     })();

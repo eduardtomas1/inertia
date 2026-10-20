@@ -58,6 +58,7 @@ export interface WatcherLinkRow {
   wakes_total: number;
   events_seen: number;
   events_pending: number;
+  findings_total: number;
   final_pass_turn_id: string | null;
   last_wake_at: string | null;
   last_watched_output_at: string | null;
@@ -225,6 +226,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
       wakesTotal: row.wakes_total,
       eventsSeen: row.events_seen,
       eventsPending: row.events_pending,
+      findingsTotal: row.findings_total,
     },
     lastWakeAt: row.last_wake_at,
     quietSince: row.quiet_since,

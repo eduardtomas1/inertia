@@ -84,6 +84,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "wakes_total",
     "events_seen",
     "events_pending",
+    "findings_total",
     "final_pass_turn_id",
     "last_wake_at",
     "last_watched_output_at",

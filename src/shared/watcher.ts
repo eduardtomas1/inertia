@@ -202,6 +202,7 @@ export const watcherCountersSchema = z.strictObject({
   wakesTotal: countSchema,
   eventsSeen: countSchema,
   eventsPending: countSchema,
+  findingsTotal: countSchema,
 });
 
 export const watcherLinkViewSchema = z.strictObject({

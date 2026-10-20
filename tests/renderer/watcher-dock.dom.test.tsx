@@ -313,10 +313,10 @@ describe("WatcherDock", () => {
   });
 
   it("keeps the dock open when Escape only closes a tooltip", async () => {
-    setup();
+    setup({ link: link({ status: "paused", pauseReason: "route-unavailable" }) });
     const aside = await dock();
     vi.useFakeTimers();
-    const check = within(aside).getByRole("button", { name: "Check now" });
+    const check = within(aside.querySelector<HTMLElement>(".watcher-bar-actions")!).getByRole("button", { name: "Resume" });
     fireEvent.pointerEnter(check, { pointerType: "mouse" });
     act(() => { vi.advanceTimersByTime(TOOLTIP_DELAY_MS); });
     expect(document.querySelector('[role="tooltip"]')).not.toBeNull();

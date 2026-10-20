@@ -82,11 +82,13 @@ describe("WatcherBar", () => {
     expect(liveRegion()).toBeEmptyDOMElement();
   });
 
-  it("keeps one primary icon button beside the title, with the rest and the numbers in More", async () => {
+  it("keeps one primary text action beside the title, with the rest and the numbers in More", async () => {
     render(bar(link({ quietSince: "2026-10-19T10:50:00.000Z" }), undefined, undefined, { privateConnectConfigured: true, usageTokens: 48_200 }));
     const actions = document.querySelector<HTMLElement>(".watcher-bar-actions")!;
-    expect(within(actions).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
-      .toEqual(["Check now", "More watcher actions"]);
+    const [primary, more] = within(actions).getAllByRole("button");
+    expect(primary).toHaveTextContent(/^Check now$/u);
+    expect(primary).toHaveAccessibleName("Check now");
+    expect(more).toHaveAccessibleName("More watcher actions");
     fireEvent.click(screen.getByRole("button", { name: "More watcher actions" }));
     const menu = await screen.findByRole("menu", { name: "More watcher actions" });
     expect([...menu.querySelectorAll('[role^="menuitem"]')].map((item) => item.textContent)).toEqual([

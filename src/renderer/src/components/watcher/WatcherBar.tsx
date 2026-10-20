@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Ellipsis, Play, RefreshCw } from "lucide-react";
+import { Ellipsis } from "lucide-react";
 
 import type { ConversationShell } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
@@ -170,9 +170,8 @@ export function WatcherBar({
       </div>
       <div className="watcher-bar-actions">
         <TooltipButton
-          tooltip={paused && resumeBlocked ? resumeBlocked : primaryLabel}
-          aria-label={primaryLabel}
-          className="icon-button"
+          tooltip={paused && resumeBlocked ? resumeBlocked : ""}
+          className="watcher-text-button"
           aria-disabled={primaryUnavailable || undefined}
           onClick={() => {
             if (primaryUnavailable || !actions) return;
@@ -180,7 +179,7 @@ export function WatcherBar({
             else run("wake", actions.wake);
           }}
         >
-          {paused ? <Play size={16} aria-hidden="true" /> : <RefreshCw size={16} aria-hidden="true" />}
+          {primaryLabel}
         </TooltipButton>
         <div ref={moreRef}>
           <WatcherMenu

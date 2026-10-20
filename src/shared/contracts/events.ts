@@ -9,6 +9,7 @@ import type {
   WatcherFeedItem,
   WatcherLinkView,
   WatcherLivePhase,
+  WatcherUsage,
 } from "../watcher";
 import type {
   AgentGoal,
@@ -247,6 +248,7 @@ export type ServerEvent =
             /** Newest first, at most one page. */
             items: WatcherFeedItem[];
             next: { beforeSequence: number } | null;
+            usage?: WatcherUsage;
           }
         | {
             kind: "watcher.delivery";

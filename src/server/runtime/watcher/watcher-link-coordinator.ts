@@ -10,6 +10,7 @@ import {
   type WatcherLinkView,
   type WatcherPauseReason,
   type WatcherStatus,
+  type WatcherUsage,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
 import { watcherLinkDetailView, watcherLinkView } from "../../persistence/watcher-link-codecs";
@@ -37,6 +38,7 @@ export interface WatcherFeedResult {
   feedRevision: number;
   items: WatcherFeedItem[];
   next: WatcherFeedPage["next"];
+  usage?: WatcherUsage;
 }
 
 /** In-memory lookup of attached links by either side; the database stays authoritative. */
@@ -322,7 +324,10 @@ export class WatcherLinkCoordinator {
       const commandsRun = item.watcherTurnId !== null && item.state === "settled" ? counts.get(item.watcherTurnId) ?? 0 : 0;
       return commandsRun > 0 ? { ...item, commandsRun: Math.min(commandsRun, 10_000) } : item;
     });
-    return { kind: "watcher.feed", linkId, feedRevision: page.feedRevision, items, next: page.next };
+    return {
+      kind: "watcher.feed", linkId, feedRevision: page.feedRevision, items, next: page.next,
+      usage: store.watcherLinks.usageTotals(linkId),
+    };
   }
 
   /**

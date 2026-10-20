@@ -312,6 +312,8 @@ describe("watcher shared contracts", () => {
     const page = { kind: "watcher.feed", linkId: link.id, feedRevision: 4, items: [feedItem, { ...feedItem, wakeId: uuid("7"), sequence: 2 }], next: { beforeSequence: 2 } };
     expect(watcherFeedResultSchema.safeParse(page).success).toBe(true);
     expect(watcherFeedResultSchema.safeParse({ ...page, items: [], next: null }).success).toBe(true);
+    expect(watcherFeedResultSchema.safeParse({ ...page, usage: { totalTokens: 48_200 } }).success).toBe(true);
+    expect(watcherFeedResultSchema.safeParse({ ...page, usage: { totalTokens: -1 } }).success).toBe(false);
     for (const invalid of [
       { ...page, items: [...page.items].reverse() },
       { ...page, items: [feedItem, feedItem] },

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderInfo } from "../../src/shared/contracts";
 import type { WatcherAttachPayload } from "../../src/shared/contracts/client-command/watcher";
+import { serverEventSchema } from "../../src/shared/contracts/server-event-schema";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, MAX_ACTIVE_WATCHERS } from "../../src/shared/watcher";
 import {
   createConversationCommandHandler,
@@ -507,6 +508,12 @@ describe("watcher link coordinator", () => {
       expect(f.store.watcherLinks.views()[0]).not.toHaveProperty("instructions");
       await expect(f.command("watcher.pause", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { instructions: "Watch the error paths.", usage: { totalTokens: null } } } });
+      const feed = await f.command("watcher.feed.get", { linkId: link.id });
+      expect(feed).toMatchObject({ result: { kind: "watcher.feed", linkId: link.id, usage: { totalTokens: null } } });
+      expect(() => serverEventSchema.parse(feed)).not.toThrow();
+      for (const event of f.watcherEvents()) {
+        if (event.type === "watcher.link.updated") expect(event.link).not.toHaveProperty("usage");
+      }
     } finally {
       await f.close();
     }

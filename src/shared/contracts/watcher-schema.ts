@@ -11,6 +11,7 @@ import {
   watcherLinkViewSchema,
   watcherLinksSerializedBytes,
   watcherLivePhaseSchema,
+  watcherUsageSchema,
   watcherWakeSummarySchema,
   type WatcherLinkView,
 } from "../watcher";
@@ -57,6 +58,7 @@ export const watcherFeedResultSchema = z.strictObject({
   next: z.strictObject({
     beforeSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   }).nullable(),
+  usage: watcherUsageSchema.optional(),
 }).superRefine((result, context) => {
   const ordered = result.items.every((item, index) =>
     index === 0 || item.sequence < result.items[index - 1]!.sequence);

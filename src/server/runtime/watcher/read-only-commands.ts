@@ -38,6 +38,7 @@ const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
 const ENVIRONMENT_FILE_NAME = /\.env(?:$|\.)/iu;
 
 const GIT_UNSAFE_LONG = ["output", "ext-diff", "textconv", "open-files-in-pager", "exec", "upload-pack", "receive-pack", "filters", "show-signature"];
+const GIT_GREP_UNSAFE_LONG = [...GIT_UNSAFE_LONG, "no-index", "no-exclude-standard", "untracked"];
 const GIT_SIGNATURE_FORMAT = /%G|%\(signature/u;
 const GIT_READ_SUBCOMMANDS = new Set(["diff", "log", "show", "status", "blame", "grep", "ls-files", "rev-parse", "shortlog", "describe"]);
 const GIT_BRANCH_FLAGS = new Set(["--list", "-l", "-a", "--all", "-r", "--remotes", "--show-current", "-v", "-vv", "--verbose", "--no-color", "--no-abbrev"]);
@@ -50,20 +51,21 @@ const TAIL_OBSOLETE_FOLLOW = /^\+\d*[bcl]?f$/u;
 const JQ_FILE_OPTIONS = new Set(["--from-file", "--library-path", "--rawfile", "--slurpfile"]);
 const JQ_MODULE = /\b(?:import|include|modulemeta)\b/u;
 const UNIQ_VALUE_OPTIONS = new Set(["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"]);
+const GREP_RULE = optionRule({ short: "rRd", long: ["recursive", "dereference-recursive", "directories"] });
 
 const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   git: gitRule,
-  rg: optionRule({ short: "z", long: ["pre", "pre-glob", "hostname-bin", "search-zip"] }),
-  grep: noRule,
-  egrep: noRule,
-  fgrep: noRule,
+  rg: optionRule({ short: "zu.", long: ["pre", "pre-glob", "hostname-bin", "search-zip", "hidden", "unrestricted", "no-ignore", "no-ignore-dot", "no-ignore-exclude", "no-ignore-files", "no-ignore-global", "no-ignore-parent", "no-ignore-vcs"] }),
+  grep: GREP_RULE,
+  egrep: GREP_RULE,
+  fgrep: GREP_RULE,
   cat: optionRule({ short: "Ww" }),
   head: noRule,
   tail: tailRule,
   ls: noRule,
   find: findRule,
   wc: noRule,
-  diff: optionRule({ short: "l", long: ["paginate"] }),
+  diff: optionRule({ short: "lr", long: ["paginate", "recursive"] }),
   stat: noRule,
   file: optionRule({ short: "CzZ", long: ["compile", "uncompress", "uncompress-noreport"] }),
   tree: optionRule({ short: "oR", long: ["output"] }),
@@ -274,7 +276,7 @@ function gitRule(args: readonly string[]): string | null {
   const subcommand = args[index];
   const rest = args.slice(index + 1);
   if (subcommand === undefined) return "git needs a read-only subcommand.";
-  const unsafe = { long: GIT_UNSAFE_LONG, ...(subcommand === "grep" ? { short: "O" } : {}) };
+  const unsafe = subcommand === "grep" ? { short: "O", long: GIT_GREP_UNSAFE_LONG } : { long: GIT_UNSAFE_LONG };
   if (rest.some((arg) => unsafeOption(arg, unsafe) || GIT_SIGNATURE_FORMAT.test(arg))) return UNSAFE_OPTION;
   const refused = `git ${/^[a-z-]{1,32}$/u.test(subcommand) ? subcommand : "with this subcommand"} is not a read-only command watchers can run.`;
   if (GIT_READ_SUBCOMMANDS.has(subcommand)) return null;

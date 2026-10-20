@@ -619,7 +619,7 @@ describe("watcher link repository", () => {
     });
   });
 
-  it("removes a retired check's watcher turn and its transcript with the check, and nothing else", () => {
+  it("prunes a retired check's transcript with the check and keeps its watcher turn and usage", () => {
     const watched = chat();
     const { link, conversation } = attach(watched);
     const typed = beginTurn(conversation, "What did you see so far?");
@@ -639,7 +639,15 @@ describe("watcher link repository", () => {
       store.createMessage(conversation.id, "SILENT", "assistant", [], turn.id);
       store.addActivity({ conversationId: conversation.id, runId: turn.runId, turnId: turn.id, kind: "command", title: "rg parser", detail: "x", status: "completed" });
       store.createReasoning(conversation.id, turn.runId, turn.id);
-      settleTurn(turn.id);
+      const at = tick();
+      store.settleAgentTurn(turn.id, {
+        status: "completed", terminalReason: "provider-completed", startedAt: at, completedAt: at, updatedAt: at,
+        usageAtCompletion: {
+          usedTokens: null, totalProcessedTokens: 1_000, totalProcessedScope: "run", maxTokens: null,
+          inputTokens: null, cachedInputTokens: null, cacheWriteInputTokens: null, outputTokens: null,
+          reasoningOutputTokens: null, compactsAutomatically: null, capturedAt: at,
+        },
+      });
       store.watcherLinks.settleWake(wake!.wakeId, "silent", null, null, null, tick());
       expect(store.watcherLinks.transition(link.id, ["waking"], { status: "watching" }, tick())).not.toBeNull();
     }
@@ -649,16 +657,18 @@ describe("watcher link repository", () => {
         .get(conversation.id) as { count: number }).count;
       const remaining = (database.prepare("SELECT id FROM agent_turns WHERE conversation_id = ?").all(conversation.id) as { id: string }[])
         .map(({ id }) => id);
-      expect(new Set(remaining)).toEqual(new Set([typed.id, running.id, ...turns.slice(2)]));
+      expect(new Set(remaining)).toEqual(new Set([typed.id, running.id, ...turns]));
       expect(count("messages")).toBe(2 + 500 * 2);
       expect(count("activities")).toBe(500);
       expect(count("agent_reasonings")).toBe(500);
+      expect(database.prepare("SELECT COUNT(*) AS count FROM activities WHERE turn_id IN (?, ?)").get(turns[0], turns[1])).toEqual({ count: 0 });
       expect(database.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND turn_id IS NULL").get(conversation.id))
         .toEqual({ count: 0 });
       expect(database.prepare("SELECT COUNT(*) AS count FROM agent_turns WHERE id = ?").get(watchedTurn.id)).toEqual({ count: 1 });
     });
     const summaries = store.watcherLinks.wakeSummaries(conversation.id);
     expect(new Set(summaries.map(({ turnId }) => turnId))).toEqual(new Set(turns.slice(2)));
+    expect(store.watcherLinks.usageTotals(link.id)).toEqual({ totalTokens: 502_000 });
   });
 
   it("keeps a retired check's watcher turn that a provider run still owns", () => {

@@ -835,7 +835,6 @@ export class WatcherLinkRepository {
       for (const table of ["messages", "activities", "agent_reasonings", "agent_plans"]) {
         this.database.prepare(`DELETE FROM ${table} WHERE conversation_id = ? AND turn_id = ?`).run(wake.conversation_id, wake.turn_id);
       }
-      this.database.prepare("DELETE FROM agent_turns WHERE id = ? AND conversation_id = ?").run(wake.turn_id, wake.conversation_id);
     }
   }
 

@@ -11,6 +11,7 @@ import {
   MAX_WATCHER_PENDING_RUNNING_IDS,
   WATCHER_WAKE_RETENTION,
   watcherBudgetsSchema,
+  watcherDeliveryPolicySchema,
   watcherHarnessAllowed,
   watcherInstructionsSchema,
   watcherPresetSchema,
@@ -18,6 +19,7 @@ import {
   watcherSharingSchema,
   type WatcherBudgets,
   type WatcherDeliveryMode,
+  type WatcherDeliveryPolicy,
   type WatcherDeliveryState,
   type WatcherDetachReason,
   type WatcherFeedItem,
@@ -75,6 +77,7 @@ export interface WatcherLinkDraft {
   sharing: WatcherSharing;
   budgets: WatcherBudgets;
   privateConnect: WatcherPrivateConnect;
+  delivery?: WatcherDeliveryPolicy;
 }
 
 export interface WatcherConversationPlan {
@@ -94,6 +97,7 @@ export interface WatcherSettingsPatch {
   sharing?: WatcherSharing;
   budgets?: WatcherBudgets;
   privateConnect?: WatcherPrivateConnect;
+  delivery?: WatcherDeliveryPolicy;
 }
 
 export interface WatcherWakeDraft {
@@ -202,6 +206,7 @@ export class WatcherLinkRepository {
       sharing: watcherSharingSchema.parse(input.link.sharing),
       budgets: watcherBudgetsSchema.parse(input.link.budgets),
       privateConnect: watcherPrivateConnectSchema.parse(input.link.privateConnect),
+      delivery: watcherDeliveryPolicySchema.parse(input.link.delivery ?? "manual"),
     };
     return this.database.transaction(() => {
       const existing = this.get(input.link.id);
@@ -239,11 +244,11 @@ export class WatcherLinkRepository {
       this.database.prepare(`
         INSERT INTO watcher_links (
           id, watcher_conversation_id, watched_conversation_id, project_id, preset, instructions,
-          sharing_json, budgets_json, private_connect, status, wake_allowance, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'watching', ?, ?, ?)
+          sharing_json, budgets_json, private_connect, delivery, status, wake_allowance, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'watching', ?, ?, ?)
       `).run(
         input.link.id, conversation.id, watched.id, watched.project_id, draft.preset, draft.instructions,
-        JSON.stringify(draft.sharing), JSON.stringify(draft.budgets), draft.privateConnect,
+        JSON.stringify(draft.sharing), JSON.stringify(draft.budgets), draft.privateConnect, draft.delivery,
         draft.budgets.wakesPerWatchedTurn, at, at,
       );
       return { link: this.require(input.link.id), conversation, created: true };
@@ -342,6 +347,7 @@ export class WatcherLinkRepository {
       sharing: patch.sharing === undefined ? null : JSON.stringify(watcherSharingSchema.parse(patch.sharing)),
       budgets: patch.budgets === undefined ? null : JSON.stringify(watcherBudgetsSchema.parse(patch.budgets)),
       privateConnect: patch.privateConnect === undefined ? null : watcherPrivateConnectSchema.parse(patch.privateConnect),
+      delivery: patch.delivery === undefined ? null : watcherDeliveryPolicySchema.parse(patch.delivery),
     };
     const changed = this.database.prepare(`
       UPDATE watcher_links
@@ -350,6 +356,7 @@ export class WatcherLinkRepository {
           sharing_json = COALESCE(@sharing, sharing_json),
           budgets_json = COALESCE(@budgets, budgets_json),
           private_connect = COALESCE(@privateConnect, private_connect),
+          delivery = COALESCE(@delivery, delivery),
           updated_at = @at
       WHERE id = @linkId AND status <> 'detached'
     `).run({ ...values, at, linkId }).changes;

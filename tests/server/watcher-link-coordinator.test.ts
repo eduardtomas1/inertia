@@ -510,6 +510,24 @@ describe("watcher link coordinator", () => {
     }
   });
 
+  it("stores the delivery policy on attach, changes it on update and broadcasts both", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ delivery: "auto" });
+      expect(link.delivery).toBe("auto");
+      expect(f.store.watcherLinks.get(link.id)?.delivery).toBe("auto");
+      const broadcast = () => f.watcherEvents().filter((event) => event.type === "watcher.link.updated").at(-1);
+      expect(broadcast()).toMatchObject({ link: { id: link.id, delivery: "auto" } });
+      await expect(f.command("watcher.update", { linkId: link.id, delivery: "manual" }))
+        .resolves.toMatchObject({ result: { link: { delivery: "manual" } } });
+      expect(broadcast()).toMatchObject({ link: { id: link.id, delivery: "manual" } });
+      f.store.watcherLinks.transition(link.id, ["watching"], { status: "detached", reason: "user" }, now());
+      await expect(f.command("watcher.update", { linkId: link.id, delivery: "auto" })).rejects.toThrow("no longer attached");
+    } finally {
+      await f.close();
+    }
+  });
+
   it("pauses when the watched chat is archived", async () => {
     const f = await createWatcherFixture();
     try {

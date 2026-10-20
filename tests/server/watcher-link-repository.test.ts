@@ -261,6 +261,22 @@ describe("watcher link repository", () => {
     expect(links.markFinalPass(link.id, "turn-2", tick())).toBe(false);
   });
 
+  it("stores a watcher's delivery policy at creation and changes it only while attached", () => {
+    const links = store.watcherLinks;
+    const { link: manual } = attach(chat("Manual"));
+    expect(manual.delivery).toBe("manual");
+    const { link } = attach(chat(), { delivery: "auto" });
+    expect(link.delivery).toBe("auto");
+    expect(store.shellSnapshot().watchers?.find(({ id }) => id === link.id)?.delivery).toBe("auto");
+    expect(links.updateSettings(link.id, { delivery: "manual" }, tick())).toMatchObject({ delivery: "manual", preset: "reviewer" });
+    expect(links.updateSettings(link.id, { preset: "explainer" }, tick())).toMatchObject({ delivery: "manual", preset: "explainer" });
+    expect(() => links.updateSettings(link.id, { delivery: "steer" as never }, tick())).toThrow();
+    expect(() => attach(chat("Bad delivery"), { delivery: "queue" as never })).toThrow();
+    links.transition(link.id, ["watching"], { status: "detached", reason: "user" }, tick());
+    expect(links.updateSettings(link.id, { delivery: "auto" }, tick())).toBeNull();
+    expect(links.get(link.id)?.delivery).toBe("manual");
+  });
+
   it("moves the cursor only while it still follows the check's turn", () => {
     const { link } = attach(chat());
     const links = store.watcherLinks;

@@ -4,6 +4,7 @@ import { modelSelectionSchema } from "../../model-routing";
 import {
   watcherBudgetsSchema,
   watcherDeliveryModeSchema,
+  watcherDeliveryPolicySchema,
   watcherInstructionsSchema,
   watcherPresetSchema,
   watcherPrivateConnectSchema,
@@ -22,6 +23,7 @@ export const watcherAttachPayloadSchema = z.strictObject({
   sharing: watcherSharingSchema,
   budgets: watcherBudgetsSchema,
   privateConnect: watcherPrivateConnectSchema,
+  delivery: watcherDeliveryPolicySchema.optional(),
   initialReview: z.boolean(),
 });
 
@@ -32,6 +34,7 @@ export const watcherUpdatePayloadSchema = z.strictObject({
   sharing: watcherSharingSchema.optional(),
   budgets: watcherBudgetsSchema.optional(),
   privateConnect: watcherPrivateConnectSchema.optional(),
+  delivery: watcherDeliveryPolicySchema.optional(),
 }).refine(
   ({ linkId: _linkId, ...patch }) => Object.values(patch).some((value) => value !== undefined),
   "A watcher update must change at least one setting.",

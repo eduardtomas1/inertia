@@ -196,6 +196,7 @@ export class WatcherLinkCoordinator {
           sharing: payload.sharing,
           budgets: payload.budgets,
           privateConnect: payload.privateConnect,
+          delivery: payload.delivery,
         },
         conversation: {
           projectId: current.projectId,

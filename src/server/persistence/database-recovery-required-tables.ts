@@ -67,6 +67,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "sharing_json",
     "budgets_json",
     "private_connect",
+    "delivery",
     "status",
     "pause_reason",
     "pause_detail",

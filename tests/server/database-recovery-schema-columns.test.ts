@@ -123,6 +123,7 @@ describe("database health check for settings and subagent columns", () => {
     { version: 99, sql: "DROP TABLE watcher_wakes" },
     { version: 99, sql: "ALTER TABLE watcher_links DROP COLUMN events_pending" },
     { version: 99, sql: "ALTER TABLE watcher_wakes DROP COLUMN digest_bytes" },
+    { version: 99, sql: "ALTER TABLE watcher_links DROP COLUMN delivery" },
     { version: 99, sql: "ALTER TABLE messages DROP COLUMN watcher_note_json" },
     { version: 99, sql: "ALTER TABLE queued_messages DROP COLUMN watcher_note_json" },
     { version: 99, sql: "DROP INDEX watcher_links_active_watched_idx" },

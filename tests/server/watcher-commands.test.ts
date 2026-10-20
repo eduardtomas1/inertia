@@ -83,13 +83,17 @@ describe("watcher commands", () => {
         budgets: { wakesPerWatchedTurn: 6, cooldownSeconds: 30, digestKiB: 16, contextReadsPerWake: 2 },
         privateConnect: "hidden", initialReview: false,
       }));
-      expect(attached).toMatchObject({ kind: "watcher.link", link: { preset: "explainer", privateConnect: "hidden", status: "watching" } });
+      expect(attached).toMatchObject({ kind: "watcher.link", link: { preset: "explainer", privateConnect: "hidden", status: "watching", delivery: "manual" } });
       if (attached.kind !== "watcher.link") throw new Error("unexpected");
       const linkId = attached.link.id;
       const watcherId = attached.link.watcherConversationId;
 
       expect(result(await f.command("watcher.update", { linkId, privateConnect: "inherit", instructions: "Shorter." })))
         .toMatchObject({ kind: "watcher.link", link: { privateConnect: "inherit", instructions: "Shorter." } });
+      expect(result(await f.command("watcher.update", { linkId, delivery: "auto" })))
+        .toMatchObject({ kind: "watcher.link", link: { delivery: "auto", instructions: "Shorter." } });
+      expect(f.store.watcherLinks.get(linkId)?.delivery).toBe("auto");
+      await expect(f.command("watcher.update", { linkId, delivery: "steer" })).rejects.toThrow("The watcher request was invalid.");
       expect(result(await f.command("watcher.pause", { linkId }))).toMatchObject({ link: { status: "paused" } });
       expect(result(await f.command("watcher.resume", { linkId }))).toMatchObject({ link: { status: "watching" } });
 

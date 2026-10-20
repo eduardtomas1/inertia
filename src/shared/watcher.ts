@@ -24,6 +24,7 @@ export const WATCHER_WAKE_STATES = ["dispatching", "running", "settled"] as cons
 export const WATCHER_DELIVERY_MODES = ["queue", "steer"] as const;
 export const WATCHER_DELIVERY_STATES = ["queued", "sent", "dismissed", "failed"] as const;
 export const WATCHER_PRIVATE_CONNECT_VISIBILITIES = ["inherit", "hidden"] as const;
+export const WATCHER_DELIVERY_POLICIES = ["manual", "auto"] as const;
 export const WATCHER_LIVE_PHASES = ["starting", "reading", "searching", "thinking", "writing"] as const;
 
 export const WATCHER_PRESET_LABELS: Readonly<Record<(typeof WATCHER_PRESETS)[number], string>> = {
@@ -140,6 +141,7 @@ export const watcherWakeStateSchema = z.enum(WATCHER_WAKE_STATES);
 export const watcherDeliveryModeSchema = z.enum(WATCHER_DELIVERY_MODES);
 export const watcherDeliveryStateSchema = z.enum(WATCHER_DELIVERY_STATES);
 export const watcherPrivateConnectSchema = z.enum(WATCHER_PRIVATE_CONNECT_VISIBILITIES);
+export const watcherDeliveryPolicySchema = z.enum(WATCHER_DELIVERY_POLICIES);
 export const watcherLivePhaseSchema = z.enum(WATCHER_LIVE_PHASES);
 
 export const watcherInstructionsSchema = z.string()
@@ -217,6 +219,7 @@ export const watcherLinkViewSchema = z.strictObject({
   sharing: watcherSharingSchema,
   budgets: watcherBudgetsSchema,
   privateConnect: watcherPrivateConnectSchema,
+  delivery: watcherDeliveryPolicySchema,
   status: watcherStatusSchema,
   pauseReason: watcherPauseReasonSchema.nullable(),
   pauseDetail: z.string().max(MAX_WATCHER_PAUSE_DETAIL_CHARS)
@@ -304,6 +307,7 @@ export type WatcherWakeState = z.infer<typeof watcherWakeStateSchema>;
 export type WatcherDeliveryMode = z.infer<typeof watcherDeliveryModeSchema>;
 export type WatcherDeliveryState = z.infer<typeof watcherDeliveryStateSchema>;
 export type WatcherPrivateConnect = z.infer<typeof watcherPrivateConnectSchema>;
+export type WatcherDeliveryPolicy = z.infer<typeof watcherDeliveryPolicySchema>;
 export type WatcherLivePhase = z.infer<typeof watcherLivePhaseSchema>;
 export type WatcherSharing = z.infer<typeof watcherSharingSchema>;
 export type WatcherBudgets = z.infer<typeof watcherBudgetsSchema>;

@@ -51,6 +51,7 @@ const link: WatcherLinkView = {
   sharing: { ...DEFAULT_WATCHER_SHARING },
   budgets: { ...DEFAULT_WATCHER_BUDGETS },
   privateConnect: "inherit",
+  delivery: "manual",
   status: "watching",
   pauseReason: null,
   pauseDetail: null,
@@ -154,7 +155,10 @@ describe("watcher shared contracts", () => {
       { ...link, latestFindingAt: undefined },
       { ...link, counters: { ...link.counters, eventsPending: -1 } },
       { ...link, filesystemPath: "/private" },
+      { ...link, delivery: "steer" },
+      { ...link, delivery: undefined },
     ]) expect(watcherLinkViewSchema.safeParse(invalid).success).toBe(false);
+    expect(watcherLinkViewSchema.safeParse({ ...link, delivery: "auto" }).success).toBe(true);
   });
 
   it("names the newest undismissed finding apart from the latest check", () => {
@@ -350,6 +354,10 @@ describe("watcher shared contracts", () => {
       },
     };
     expect(clientCommandSchema.safeParse(attach).success).toBe(true);
+    const parsedAttach = clientCommandSchema.parse(attach);
+    expect(parsedAttach.type === "watcher.attach" && parsedAttach.payload.delivery).toBeUndefined();
+    expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, delivery: "auto" } }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, delivery: "steer" } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, instructions: "x".repeat(2_001) } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ ...attach, payload: { ...attach.payload, budgets: { digestKiB: 4 } } }).success).toBe(false);
     for (const type of ["watcher.pause", "watcher.resume", "watcher.wake", "watcher.detach"]) {
@@ -358,6 +366,8 @@ describe("watcher shared contracts", () => {
     }
     expect(clientCommandSchema.safeParse({ requestId, type: "watcher.update", payload: { linkId: link.id, preset: "explainer" } }).success).toBe(true);
     expect(clientCommandSchema.safeParse({ requestId, type: "watcher.update", payload: { linkId: link.id } }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({ requestId, type: "watcher.update", payload: { linkId: link.id, delivery: "auto" } }).success).toBe(true);
+    expect(clientCommandSchema.safeParse({ requestId, type: "watcher.update", payload: { linkId: link.id, delivery: "queue" } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({ requestId, type: "watcher.feed.get", payload: { linkId: link.id, beforeSequence: 5 } }).success).toBe(true);
     expect(clientCommandSchema.safeParse({ requestId, type: "watcher.feed.get", payload: { linkId: link.id, beforeSequence: 0 } }).success).toBe(false);
     expect(clientCommandSchema.safeParse({

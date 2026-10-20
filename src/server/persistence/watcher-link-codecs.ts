@@ -14,6 +14,7 @@ import {
   watcherSharingSchema,
   type WatcherDelivery,
   type WatcherDeliveryMode,
+  type WatcherDeliveryPolicy,
   type WatcherDeliveryState,
   type WatcherDetachReason,
   type WatcherFeedHeadline,
@@ -40,6 +41,7 @@ export interface WatcherLinkRow {
   sharing_json: string;
   budgets_json: string;
   private_connect: WatcherPrivateConnect;
+  delivery: WatcherDeliveryPolicy;
   status: WatcherStatus;
   pause_reason: WatcherPauseReason | null;
   pause_detail: string | null;
@@ -211,6 +213,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
     sharing: sharing.success ? sharing.data : { ...DEFAULT_WATCHER_SHARING },
     budgets: clampWatcherBudgets(typeof budgets === "object" && budgets !== null ? budgets : {}),
     privateConnect: row.private_connect,
+    delivery: row.delivery,
     status: row.status,
     pauseReason: row.pause_reason,
     pauseDetail: row.pause_detail === null ? null : watcherPrintableLineOf(row.pause_detail, MAX_WATCHER_PAUSE_DETAIL_CHARS) || null,

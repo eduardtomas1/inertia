@@ -150,6 +150,37 @@ describe("watcher link migration", () => {
     }
   });
 
+  it("adds the watcher delivery policy with its default and check in an upgraded database", async () => {
+    const before = await schema98Database();
+    const store = new RuntimeStore(before.databasePath, before.workspacePath, { recoverInterruptedRuns: false });
+    try {
+      const project = store.createProject("Upgraded project", before.workspacePath);
+      const watched = store.createConversation(project.id, "Main chat");
+      store.watcherLinks.createWithConversation({
+        link: {
+          id: note.linkId, watchedConversationId: watched.id, preset: "reviewer", instructions: "",
+          sharing: { ...DEFAULT_WATCHER_SHARING }, budgets: { ...DEFAULT_WATCHER_BUDGETS }, privateConnect: "inherit",
+        },
+        conversation: { projectId: project.id, title: "Watcher · Reviewer · Main chat", options: { interactionMode: "plan", accessMode: "supervised" } },
+      }, "2026-10-02T00:00:00.000Z");
+    } finally {
+      store.close();
+    }
+    const migrated = new Database(before.databasePath);
+    try {
+      const columns = (table: string) => new Map((migrated.pragma(`table_info(${table})`) as { name: string; notnull: number; dflt_value: string | null }[])
+        .map(({ name, notnull, dflt_value }) => [name, { notnull, dflt_value }]));
+      expect(columns("watcher_links").get("delivery")).toEqual({ notnull: 1, dflt_value: "'manual'" });
+      expect(rows(migrated, "SELECT delivery FROM watcher_links")).toEqual([{ delivery: "manual" }]);
+      const setDelivery = migrated.prepare("UPDATE watcher_links SET delivery = ?");
+      expect(() => setDelivery.run("auto")).not.toThrow();
+      expect(() => setDelivery.run("steer")).toThrow(/CHECK constraint failed/u);
+      expect(() => setDelivery.run(null)).toThrow(/NOT NULL constraint failed/u);
+    } finally {
+      migrated.close();
+    }
+  });
+
   it("projects stored attribution through the message and queue codecs and drops malformed values", async () => {
     const before = await schema98Database();
     new RuntimeStore(before.databasePath, before.workspacePath, { recoverInterruptedRuns: false }).close();

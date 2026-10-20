@@ -20,7 +20,9 @@ export interface WatcherDockController extends WatcherDockRecord {
 const DEFAULT_RECORD: WatcherDockRecord = Object.freeze({ open: true, seenAt: null });
 const records = new Map<string, WatcherDockRecord>();
 const listeners = new Set<() => void>();
-const focusRequests = new Set<string>();
+const focusTokens = new Map<string, number>();
+const consumedFocusTokens = new Map<string, number>();
+const focusListeners = new Set<() => void>();
 
 export function watcherDockStorageKey(watchedId: string): string {
   return `inertia:layout:watcher-dock:${encodeURIComponent(watchedId)}:v1`;
@@ -67,22 +69,33 @@ export function setWatcherDockOpen(
   open: boolean,
   options: { focusHeading?: boolean } = {},
 ): void {
-  if (open && options.focusHeading) focusRequests.add(watchedId);
-  if (!open) focusRequests.delete(watchedId);
   const current = readWatcherDock(watchedId);
   writeWatcherDock(watchedId, { ...current, open });
-  if (current.open === open && options.focusHeading) {
-    for (const listener of listeners) listener();
-  }
+  if (open && options.focusHeading) requestWatcherDockFocus(watchedId);
 }
 
-/** Returns true once when the dock heading should receive focus. */
-export function takeWatcherDockFocusRequest(watchedId: string): boolean {
-  return focusRequests.delete(watchedId);
+/** Asks the dock to move focus to its heading once it is (or stays) open. */
+export function requestWatcherDockFocus(watchedId: string): void {
+  focusTokens.set(watchedId, (focusTokens.get(watchedId) ?? 0) + 1);
+  for (const listener of focusListeners) listener();
 }
 
-export function hasWatcherDockFocusRequest(watchedId: string): boolean {
-  return focusRequests.has(watchedId);
+function subscribeFocus(listener: () => void): () => void {
+  focusListeners.add(listener);
+  return () => focusListeners.delete(listener);
+}
+
+/** True exactly once per request, so a remounted dock never steals focus. */
+export function consumeWatcherDockFocus(watchedId: string, token: number): boolean {
+  if (token <= (consumedFocusTokens.get(watchedId) ?? 0)) return false;
+  consumedFocusTokens.set(watchedId, token);
+  return true;
+}
+
+/** Changes whenever a focus request arrives for this watched chat. */
+export function useWatcherDockFocusToken(watchedId: string): number {
+  const read = useCallback(() => focusTokens.get(watchedId) ?? 0, [watchedId]);
+  return useSyncExternalStore(subscribeFocus, read, read);
 }
 
 function subscribe(listener: () => void): () => void {
@@ -114,6 +127,7 @@ export function useWatcherDock(watchedId: string | null): WatcherDockController 
 /** Test seam: forget cached records so storage is read again. */
 export function resetWatcherDockStore(): void {
   records.clear();
-  focusRequests.clear();
+  focusTokens.clear();
+  consumedFocusTokens.clear();
   for (const listener of listeners) listener();
 }

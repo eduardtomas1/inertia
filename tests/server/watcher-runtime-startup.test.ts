@@ -3,15 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
 import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../src/shared/watcher";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import { connectRuntime } from "../support/runtime-event-queue";
 import { startTestRuntime } from "../support/test-runtime";
+import { cleanupWatcherFixtures, createWatcherFixture } from "../support/watcher-runtime-fixture";
 
 type Client = Awaited<ReturnType<typeof connectRuntime>>;
 
@@ -21,6 +23,7 @@ const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  await cleanupWatcherFixtures();
 });
 
 async function start(root: string, generation: number): Promise<RunningRuntime> {
@@ -104,5 +107,32 @@ describe("watcher runtime wiring", () => {
       privateConnect: "inherit", initialReview: false,
     })).toMatchObject({ type: "request.error", message: "A watcher can't watch another watcher." });
     reconnected.socket.close();
+  });
+});
+
+describe("watcher final pass recovery", () => {
+  it("runs a final pass again after a restart that interrupted it", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const watchedTurn = await f.startWatchedTurn();
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      expect(f.store.watcherLinks.get(link.id)!.finalPassTurnId).toBeNull();
+
+      f.restartRuntime();
+      await f.finishTurn(watcherId, null, "failed", { reason: "provider-error", message: "Inertia quit during the check." });
+      f.watchers.resume();
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("final pass did not run again"); });
+      const rerun = f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId);
+      expect(rerun).toMatchObject({ trigger: "turn-end", watchedTurnId: watchedTurn.id });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)!.finalPassTurnId).toBe(watchedTurn.id);
+    } finally {
+      await f.close();
+    }
   });
 });

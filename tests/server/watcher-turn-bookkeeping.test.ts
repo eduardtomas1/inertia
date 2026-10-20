@@ -301,7 +301,7 @@ describe("watcher checks past the per-check activity cap", () => {
         expect(page.wake).toMatchObject({ trigger: "turn-end", watchedTurnId: turn.id });
         expect(page.digest).toContain("Final check for this turn");
         expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
-        expect(f.linkView(link.id).finalPassTurnId).toBe(more ? null : turn.id);
+        expect(f.linkView(link.id).finalPassTurnId).toBeNull();
         await f.finishTurn(watcherId, "SILENT");
         expect(f.linkView(link.id).counters.eventsPending).toBe(0);
         await f.advance(WATCHER_SETTLE_DELAY_MS + 1);

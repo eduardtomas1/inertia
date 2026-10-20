@@ -406,6 +406,33 @@ describe("WatcherWakeScheduler", () => {
     expect(wakes.map(({ trigger }) => trigger)).toEqual(["activity", "turn-end"]);
   });
 
+  it("keeps a final pass whose attempt paused the link due until resume", () => {
+    const attempts: WatcherWakeAttempt[] = ["started", "paused", "started"];
+    let paused = false;
+    const { scheduler, timers, wakes } = harness({
+      attempt: () => {
+        const attempt = attempts.shift() ?? "started";
+        if (attempt === "paused") {
+          paused = true;
+          scheduler.pause(LINK);
+        }
+        return attempt;
+      },
+    });
+    scheduler.observe(LINK, started());
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    scheduler.wakeFinished(LINK);
+    scheduler.onWatchedTurnSettled(LINK, "turn-1");
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    expect(paused).toBe(true);
+    timers.advance(10 * 60_000);
+    expect(wakes.map(({ trigger }) => trigger)).toEqual(["activity", "turn-end"]);
+    scheduler.resume(LINK);
+    timers.advance(WATCHER_SETTLE_DELAY_MS);
+    expect(wakes.map(({ trigger, context }) => [trigger, context.watchedTurnId]))
+      .toEqual([["activity", "turn-1"], ["turn-end", "turn-1"], ["turn-end", "turn-1"]]);
+  });
+
   it("keeps an ended turn's final pass when the next turn starts and ends before it ran", () => {
     const { scheduler, timers, wakes } = harness();
     scheduler.observe(LINK, started("turn-1"));

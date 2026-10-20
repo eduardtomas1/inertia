@@ -328,4 +328,31 @@ describe("watcher wake runner", () => {
       await f.close();
     }
   });
+
+  it("keeps the final pass that an unready route paused and runs it after Resume", async () => {
+    let ready = true;
+    const f = await createWatcherFixture({ readiness: async () => ready ? null : { ready: false, message: "Sign in to continue." } });
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const watchedTurn = await f.startWatchedTurn();
+      ready = false;
+      await f.finishTurn(f.watched.id, "Done.");
+      for (let attempt = 0; attempt <= WATCHER_ROUTE_RETRY_LIMIT + 1; attempt += 1) {
+        await f.advance(WATCHER_SETTLE_DELAY_MS + WATCHER_RETRY_MAX_MS);
+      }
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "route-unavailable", finalPassTurnId: null });
+      ready = true;
+      await f.command("watcher.resume", { linkId: link.id });
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({
+        trigger: "turn-end", watchedTurnId: watchedTurn.id,
+      });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", finalPassTurnId: watchedTurn.id });
+    } finally {
+      await f.close();
+    }
+  });
 });

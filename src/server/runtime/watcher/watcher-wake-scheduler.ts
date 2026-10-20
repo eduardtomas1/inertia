@@ -18,8 +18,9 @@ export const WATCHER_RECHECK_MS = 5_000;
  * - `started`: a check began; call `wakeFinished` once it settles.
  * - `skipped`: nothing to check (no new digest, link gone); the events are dropped.
  * - `transient`: the runtime is held, closing or has no route; retried with backoff.
+ * - `paused`: the attempt paused the link; its final pass stays due until `resume`.
  */
-export type WatcherWakeAttempt = "started" | "skipped" | "transient";
+export type WatcherWakeAttempt = "started" | "skipped" | "transient" | "paused";
 
 export interface WatcherWakeContext {
   /** True for the final pass after the watched turn ended. */
@@ -459,6 +460,7 @@ export class WatcherWakeScheduler {
       return;
     }
     state.inFlight = false;
+    if (attempt === "transient" || attempt === "paused") this.#restoreFinal(state, consumed.final);
     if (attempt === "transient") {
       state.pending += consumed.pending;
       if (consumed.firstPendingAt !== null) {
@@ -469,11 +471,6 @@ export class WatcherWakeScheduler {
       }
       state.request ??= consumed.request;
       state.continuation ||= consumed.continuation;
-      const final = consumed.final;
-      if (final && !state.finals.some(({ turnId }) => turnId === final.turnId)) {
-        state.finals.unshift(final);
-        state.finalDoneTurnIds = state.finalDoneTurnIds.filter((turnId) => turnId !== final.turnId);
-      }
       if (consumed.pending > 0) this.#deps.onPendingChanged?.(linkId);
       state.retryAttempt += 1;
       const delay = Math.min(this.#retryMaxMs, this.#retryBaseMs * 2 ** (state.retryAttempt - 1));
@@ -483,6 +480,12 @@ export class WatcherWakeScheduler {
       state.retryAt = null;
     }
     this.#schedule(linkId, state);
+  }
+
+  #restoreFinal(state: LinkState, final: FinalPass | null): void {
+    if (!final || state.finals.some(({ turnId }) => turnId === final.turnId)) return;
+    state.finals.unshift(final);
+    state.finalDoneTurnIds = state.finalDoneTurnIds.filter((turnId) => turnId !== final.turnId);
   }
 
   #startStall(linkId: string, state: LinkState): void {

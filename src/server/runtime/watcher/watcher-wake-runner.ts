@@ -240,14 +240,12 @@ export class WatcherWakeRunner {
       } catch (error) {
         window.dispose();
         store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, null, this.#deps.now());
-        if (this.#dispatchFailed(linkId, error)) return "skipped";
+        if (this.#dispatchFailed(linkId, error)) return "paused";
         release("transient");
         throw error;
       }
       this.#dispatchFailures.delete(linkId);
       store.watcherLinks.attachWakeTurn(wake.wakeId, queuedTurnId, this.#deps.now());
-      // A final pass that read a full page is marked done only once its last page settles.
-      if (finalTurnId !== null && !digest.stats.moreFollows) this.#finalPassDone(linkId, finalTurnId);
       this.#running.set(queuedTurnId, {
         linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest,
         start: cursor, finalTurnId, restore, violations: [], pause: null,
@@ -292,7 +290,7 @@ export class WatcherWakeRunner {
     if (!paused) return "skipped";
     this.#deps.scheduler().pause(linkId);
     this.#deps.publish(linkId);
-    return "skipped";
+    return "paused";
   }
 
   /**
@@ -454,7 +452,7 @@ export class WatcherWakeRunner {
           // More of the same watched turn waits: check it without waiting for new events.
           scheduler.continueWake(linkId, finalTurnId);
           store.watcherLinks.notePendingEvents(linkId, scheduler.pendingEvents(linkId), now);
-        } else if (finalTurnId !== null && running?.digest.stats.moreFollows) {
+        } else if (finalTurnId !== null) {
           this.#finalPassDone(linkId, finalTurnId);
         }
       } catch {

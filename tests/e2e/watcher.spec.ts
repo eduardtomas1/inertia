@@ -267,7 +267,10 @@ test.describe("watcher on the fake Codex route", () => {
 
   test("shows a check in progress and folds quiet checks into one receipt", async ({ browserName: _browserName }, info) => {
     await gate("main-step-1");
-    // The settled command wakes the watcher after the short settle delay.
+    // Settled commands gather before an automatic check, so "Check now"
+    // starts this one as soon as the command is waiting.
+    await expectMenuNote("1 waiting");
+    await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await expect(dock().locator(".watcher-notice-line")).toContainText(/Check 1 · checking now/u);
     await expect(dock().getByRole("button", { name: "Check now" })).toHaveAttribute("aria-disabled", "true");

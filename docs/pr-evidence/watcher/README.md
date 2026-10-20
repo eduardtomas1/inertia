@@ -27,8 +27,9 @@ its description, above the fold, that the watcher is read-only.
 The dock opens beside the chat. Its bar names the chat (read as **Watching
 Parser cleanup**), with only More and Collapse beside the title, the muted line
 **Watching · Codex · Reviewer**, the phase with **Pause** and **Check now**, and
-the counters **N of 12 checks left this turn · K events seen · P waiting**. A
-settled command wakes the watcher; the bar shows the check in progress, and the
+the counters **N of 12 checks left this turn · K events seen · P waiting**. Settled
+commands gather before an automatic check, so **Check now** starts the first one
+once the menu says **1 waiting**; the bar shows the check in progress, and the
 Work tab marks the watcher **Checking**. Two quiet checks (`SILENT`) fold into
 one receipt with a chevron, opened here to list each check.
 

@@ -245,7 +245,8 @@ it is attached.
 is Inertia's own allowlist for Claude and OpenCode watchers; Codex keeps its
 sandboxed known-safe set. It never runs anything. It splits the command with
 quoting rules that hold under POSIX shells, PowerShell and cmd.exe, and
-refuses redirection, chaining, background jobs, command and variable
+refuses redirection (outside Windows a whole `2>/dev/null` or `2>&1` word
+after the program is allowed), chaining, background jobs, command and variable
 substitution, subshells, brace, home and equals expansion, comments,
 backslashes outside single quotes, control characters, Unicode quotes, dashes
 and spaces, PowerShell's `--%`, and unbalanced quotes. On Windows it also

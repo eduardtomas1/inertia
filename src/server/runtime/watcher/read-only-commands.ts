@@ -30,6 +30,7 @@ const WORD_START_REJECTED = new Set(["#", "~", "="]);
 const DOUBLE_QUOTED_REJECTED = new Set(["$", "\\"]);
 const WINDOWS_REJECTED = new Set(["%", "^", "&", "|", "<", ">", "\"", "\\"]);
 const GLOB = new Set(["*", "?", "["]);
+const STDERR_REDIRECTS = ["2>/dev/null", "2>&1"];
 const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
 const ENVIRONMENT_FILE_NAME = /^\.env(?:$|\.)/u;
 
@@ -139,6 +140,14 @@ function tokenize(command: string, windows: boolean, powershell: boolean): Word[
       word = null;
       if (segments.at(-1)!.length === 0) return SHELL_SYNTAX;
       segments.push([]);
+      continue;
+    }
+    const redirect = !windows && !word && segments.at(-1)!.length > 0
+      ? STDERR_REDIRECTS.find((candidate) => characters.slice(index, index + candidate.length).join("") === candidate
+        && /^(?:[ \t|]|$)/u.test(characters[index + candidate.length] ?? ""))
+      : undefined;
+    if (redirect) {
+      index += redirect.length - 1;
       continue;
     }
     if (UNQUOTED_REJECTED.has(character)) return SHELL_SYNTAX;

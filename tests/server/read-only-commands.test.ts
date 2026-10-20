@@ -91,6 +91,9 @@ describe("classifyReadOnlyCommand", () => {
     ["git log --format=%h:%s", "git"],
     ["git log --output-indicator-new=+ -p", "git"],
     ["cut -d, -f1 src/a.csv", "cut"],
+    ["git log --oneline 2>/dev/null", "git"],
+    ["rg parse src 2>&1 | head -20", "rg"],
+    ["git status 2>/dev/null|head", "git"],
   ])("allows %s", (command, program) => {
     expect(allowed(command)).toEqual({ allowed: true, program });
   });
@@ -259,6 +262,13 @@ describe("classifyReadOnlyCommand", () => {
     "git diff\u0085",
     "git diff\u007f",
     "tail -5f src/parser.ts",
+    "2>/dev/null git log",
+    "git log 2>/dev/nullx",
+    "git log 2>/tmp/x",
+    "git log 2> /dev/null",
+    "git log 1>/dev/null",
+    "git log 2>&1x",
+    "git log x2>/dev/null",
     "cat --% %HOME%/.ssh/id_rsa",
     "git blame -L 1,20 src/a.ts --% x",
     "constructor",
@@ -310,6 +320,8 @@ describe("classifyReadOnlyCommand", () => {
       "git log \"a\"\" --output=x \"\"b\"",
       "rg 'a b\\' 'c --output=x d'",
       "git diff ''",
+      "git log 2>/dev/null",
+      "git log 2>&1",
     ]) {
       expect(allowed(command, WINDOWS)).toMatchObject({ allowed: false });
     }

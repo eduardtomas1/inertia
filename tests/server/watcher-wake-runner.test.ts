@@ -736,4 +736,34 @@ describe("watcher wake runner", () => {
       await f.close();
     }
   });
+
+  it("reviews a running watched turn from its start and still makes that turn's final check", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const watchedTurn = await f.startWatchedTurn();
+      await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "SILENT");
+
+      await f.command("watcher.review", { linkId: link.id });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no review"); });
+      const review = f.provider.input(watcherId);
+      expect(review.prompt).toContain("· turn running ·");
+      expect(review.prompt).toContain("Read src/parser.ts");
+      expect(f.store.watcherLinks.wakeForTurn(review.turnId)).toMatchObject({ trigger: "initial", watchedTurnId: watchedTurn.id });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "watching", finalPassTurnId: null });
+
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({ trigger: "turn-end", watchedTurnId: watchedTurn.id });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ finalPassTurnId: watchedTurn.id });
+    } finally {
+      await f.close();
+    }
+  });
 });

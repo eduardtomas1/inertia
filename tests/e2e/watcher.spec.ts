@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
+import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
 // Both the watched chat and its watcher run on the fake Codex app server.
 // Each run spawns its own process, so the test steers it through files in the
@@ -262,6 +263,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(page.locator(".composer-region").getByText(/Watched by/u)).toHaveCount(0);
     await expect(dock().getByText(/No checks yet/u)).toBeVisible();
     await capture(info, "gif-02-dock-open");
+    await capture(info, "dock-empty-light");
     expect(app.rendererErrors).toEqual([]);
   });
 
@@ -459,6 +461,38 @@ test.describe("watcher on the fake Codex route", () => {
     await page.keyboard.press(" ");
     await expect(dock()).toBeVisible();
     expect(subscribed()).toEqual([]);
+    expect(app.rendererErrors).toEqual([]);
+  });
+
+  test("turns on automatic sending from the dock menu", async ({ browserName: _browserName }, info) => {
+    const page = app.page;
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    const menu = page.getByRole("menu", { name: "More watcher actions" });
+    const toggle = menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await capture(info, "dock-menu-light");
+    await toggle.click();
+    await expect(menu).toHaveCount(0);
+    await expect(phase()).toHaveText(/ · Reviewer · Sends findings automatically$/u);
+    await capture(info, "dock-auto-send-light");
+    await dock().getByRole("button", { name: "More watcher actions" }).click();
+    await expect(menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" })).toHaveAttribute("aria-checked", "true");
+    await menu.getByRole("menuitemcheckbox", { name: "Send findings automatically" }).click();
+    await expect(phase()).toHaveText(/ · Reviewer · Watching$/u);
+    expect(app.rendererErrors).toEqual([]);
+  });
+
+  test("sits beside the chat like the right panel's own surfaces", async ({ browserName: _browserName }, info) => {
+    const page = app.page;
+    const tools = await ensureWorkspaceTools(page);
+    await selectWorkspaceTool(tools, "Changes");
+    await expect(tools.locator(".loading-mark")).toHaveCount(0);
+    await capture(info, "compare-changes-light");
+    await selectWorkspaceTool(tools, "Background tasks");
+    await expect(tools.locator(".loading-mark")).toHaveCount(0);
+    await capture(info, "compare-background-tasks-light");
+    await closeWorkspaceTools(page);
+    await expect(dock()).toBeVisible();
     expect(app.rendererErrors).toEqual([]);
   });
 

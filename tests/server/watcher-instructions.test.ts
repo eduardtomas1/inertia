@@ -68,6 +68,9 @@ describe("watcher instruction", () => {
     expect(scopeGuard).toMatch(/drift from the brief or the plan, changes nobody asked for, destructive or risky commands, and scope creep/u);
     expect(explainer).toMatch(/short plain language, what the main agent is doing and why/u);
     expect(explainer).toMatch(/no advice/u);
+    expect(reviewer).toContain("Start each bullet with bug, risk or nit, then name the file, and the line when you know it, that shows the problem, and add one line on why it matters.");
+    expect(scopeGuard).toContain("For each one, quote the sentence of the brief or the plan step it departs from, and name the activity, command or file that shows it.");
+    expect(explainer).toContain("Use at most five sentences.");
     for (const text of texts) {
       expect(text).toContain("one-line verdict");
       expect(text).toContain("If an earlier finding is now fixed, end your reply with a line `Resolved: check 3, check 5` naming those checks; do not repeat findings that are unchanged.");

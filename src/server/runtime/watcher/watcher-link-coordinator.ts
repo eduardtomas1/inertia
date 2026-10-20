@@ -31,6 +31,7 @@ export const MAX_WATCHER_TITLE_CHARS = 120;
 export const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher's own chat was archived. Unarchive it to resume the watcher.";
 const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "idle", "paused"];
 const ARCHIVE_PAUSES: readonly WatcherPauseReason[] = ["watched-archived", "watcher-archived"];
+const ENDED: readonly string[] = ["completed", "failed", "cancelled", "interrupted"];
 
 export interface WatcherFeedResult {
   kind: "watcher.feed";
@@ -414,9 +415,15 @@ export class WatcherLinkCoordinator {
         this.#deps.scheduler.pause(link.id, { finalPass: link.pauseReason === "wake-budget" });
       }
       const turnId = link.cursor.turnId;
-      if (watchedId === null || turnId === null || running || link.finalPassTurnId === turnId) continue;
+      if (watchedId === null || turnId === null || link.finalPassTurnId === turnId) continue;
       const turn = store.watcherLinks.digest.turn(watchedId, turnId);
-      if (!turn || !["completed", "failed", "cancelled", "interrupted"].includes(turn.status)) continue;
+      if (!turn) continue;
+      const previous = store.watcherLinks.digest.turnBefore(watchedId, turn);
+      if (previous && link.finalPassTurnId !== previous.id && ENDED.includes(previous.status)
+        && previous.completedAt !== null && previous.completedAt > link.createdAt) {
+        this.#deps.scheduler.onWatchedTurnSettled(link.id, previous.id);
+      }
+      if (running || !ENDED.includes(turn.status)) continue;
       this.#deps.scheduler.onWatchedTurnSettled(link.id, turnId);
     }
   }

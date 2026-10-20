@@ -91,6 +91,15 @@ export class WatcherDigestSource {
     return row ? agentTurnFromRow(row) : null;
   }
 
+  turnBefore(conversationId: string, turn: Pick<AgentTurn, "id" | "requestedAt">): AgentTurn | null {
+    const row = cachedStatement(this.context.database, `
+      SELECT agent_turns.*, ${USAGE_LIMITED_SQL} AS usage_limited
+      FROM agent_turns WHERE conversation_id = ? AND (requested_at < ? OR (requested_at = ? AND id < ?))
+      ORDER BY requested_at DESC, id DESC LIMIT 1
+    `).get(conversationId, turn.requestedAt, turn.requestedAt, turn.id) as (AgentTurnRow & { usage_limited: number }) | undefined;
+    return row ? agentTurnFromRow(row) : null;
+  }
+
   /** Activities strictly after the cursor, oldest first. */
   activitiesAfter(
     conversationId: string,

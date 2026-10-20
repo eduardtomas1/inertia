@@ -306,6 +306,35 @@ describe("watcher link coordinator", () => {
     }
   });
 
+  it("runs after a restart the final pass of a turn that ended just before the next one began", async () => {
+    const f = await createWatcherFixture();
+    try {
+      await f.startWatchedTurn("Before the watcher");
+      await f.finishTurn(f.watched.id, "Done before the watcher.");
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const first = await f.startWatchedTurn("First task");
+      await f.finishTurn(f.watched.id, "First done.");
+      const second = await f.startWatchedTurn("Second task");
+      f.watchers.dispose();
+      expect(f.provider.runs.has(watcherId)).toBe(false);
+
+      f.restartRuntime().resume();
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId)).toMatchObject({ trigger: "turn-end", watchedTurnId: first.id });
+      await f.finishTurn(watcherId, "SILENT");
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ finalPassTurnId: first.id, watchedTurnId: second.id });
+
+      f.watchers.dispose();
+      f.restartRuntime().resume();
+      await f.advance(10 * 60_000);
+      expect(f.provider.inputs.filter((input) => input.conversationId === watcherId)).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("reviews the last completed turn right away when asked, and only then", async () => {
     const f = await createWatcherFixture();
     try {

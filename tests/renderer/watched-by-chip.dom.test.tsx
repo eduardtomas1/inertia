@@ -34,7 +34,7 @@ describe("WatchedByChip", () => {
 
   it("names the watcher's agent and preset and toggles the dock it controls", () => {
     renderChip(surfaceModel());
-    const chip = screen.getByRole("button", { name: /^Watched by Team Codex · Reviewer$/u });
+    const chip = screen.getByRole("button", { name: /^Watched by Team Codex · fixture-model · Reviewer$/u });
     expect(chip).toHaveAttribute("aria-controls", `watcher-dock-${WATCHED_ID}`);
     expect(chip).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(chip);

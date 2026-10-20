@@ -29,7 +29,7 @@ import {
 } from "../../hooks/useWatcherDock";
 import { useWatcherFeed } from "../../hooks/useWatcherFeed";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
-import { watcherAgentLabel } from "../../utils/watcherLinks";
+import { watcherAgentLabel } from "@shared/watcher-agent-label";
 import { PaneResizeHandle } from "../PaneResizeHandle";
 import { WatcherBar } from "./WatcherBar";
 import {

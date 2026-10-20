@@ -1,5 +1,3 @@
-import type { Conversation } from "@shared/contracts";
-import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { WatcherLinkView, WatcherPreset } from "@shared/watcher";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
@@ -56,22 +54,6 @@ export const WATCHER_PRESET_NAMES: Readonly<Record<WatcherPreset, string>> = {
 export function watcherPresetName(preset: WatcherPreset): string {
   return WATCHER_PRESET_NAMES[preset] ?? preset;
 }
-
-/** The watcher's provider, named by the provider identity labels. */
-export function watcherProviderLabel(
-  conversation: Pick<Conversation, "providerId"> | undefined,
-  labels: ProviderIdentityLabels | undefined,
-): string {
-  if (!conversation) return "Watcher";
-  return labels?.[conversation.providerId] ?? conversation.providerId;
-}
-
-/**
- * The watcher's agent ("Codex", or "Codex · <model>" when a model is chosen),
- * from the same schema-free helper the runtime stamps on forwarded notes, so
- * the dock and the note always name it the same way.
- */
-export { watcherAgentLabel } from "@shared/watcher-agent-label";
 
 /** "1 event" / "9 events"; eager because transcript estimates name checks. */
 export function watcherEventsText(count: number): string {

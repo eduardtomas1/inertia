@@ -11,9 +11,9 @@ import {
   indexWatcherLinks,
   MAX_ACTIVE_WATCHERS,
   WATCHER_PRESET_NAMES,
-  watcherAgentLabel,
   watcherEventsText,
 } from "../../src/renderer/src/utils/watcherLinks";
+import { watcherAgentLabel } from "../../src/shared/watcher-agent-label";
 import { applyWatcherLinkEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
 import {
   OTHER_WATCHED_ID,

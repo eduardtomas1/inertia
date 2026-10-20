@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useWatcherDock } from "../../hooks/useWatcherDock";
-import { watcherPresetName, watcherProviderLabel } from "../../utils/watcherLinks";
+import { watcherAgentLabel } from "@shared/watcher-agent-label";
+import { watcherPresetName } from "../../utils/watcherLinks";
 import { useWatcherSurface, watcherDockId } from "./watcherContext";
 import "./WatchedByChip.css";
 
@@ -38,7 +39,7 @@ export function WatchedByChip({ conversationId }: { conversationId: string }): R
   const latestFindingAt = link?.latestFindingAt ?? null;
   const announcement = useCollapsedFindingAnnouncement(latestFindingAt, dock.open && !detached);
   if (!surface || !link) return null;
-  const label = `Watched by ${watcherProviderLabel(
+  const label = `Watched by ${watcherAgentLabel(
     surface.conversations.find(({ id }) => id === link.watcherConversationId),
     surface.providerLabels,
   )} · ${watcherPresetName(link.preset)}`;

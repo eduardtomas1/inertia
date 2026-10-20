@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AppSnapshot, ProviderId, ProviderInfo } from "../../src/shared/contracts";
+import type { AppSnapshot, ConversationLatestTurnSummary, ProviderId, ProviderInfo } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, type WatcherLinkView } from "../../src/shared/watcher";
@@ -120,6 +120,51 @@ describe("WatcherAttachDialog", () => {
     expect(dialog).toHaveAccessibleDescription("It reads and reports: it may run read-only commands and never edits files or changes the workspace.");
     expect(within(dialog).queryByText("What is shared with the watcher?")).not.toBeInTheDocument();
     expect(dialog.querySelectorAll("small:not([aria-hidden])")).toHaveLength(1);
+  });
+
+  it.each([
+    ["running", true],
+    ["completed", true],
+    ["failed", false],
+    ["cancelled", false],
+  ] as const)("offers Review the last turn now for a %s last turn: %s", async (status, offered) => {
+    const value = snapshot([ready("codex", "Codex")]);
+    const watched = value.conversations[0]!;
+    const latestTurn = {
+      id: "watched-turn",
+      runId: "watched-run",
+      status,
+      providerId: watched.providerId,
+      harnessId: watched.modelSelection.harnessId,
+      backendProfileId: watched.modelSelection.backendProfileId,
+      modelSelection: watched.modelSelection,
+      continuationIdentity: {
+        harnessId: watched.modelSelection.harnessId,
+        backendProfileId: watched.modelSelection.backendProfileId,
+        backendConfigurationRevision: 1,
+        modelIdentity: "fixture-model",
+        endpointIdentity: null,
+      },
+      model: "fixture-model",
+      reasoningEffort: "",
+      requestedAt: "2026-10-19T10:00:00.000Z",
+      startedAt: "2026-10-19T10:00:00.000Z",
+      completedAt: status === "running" ? null : "2026-10-19T10:01:00.000Z",
+      terminalReason: null,
+      updatedAt: "2026-10-19T10:01:00.000Z",
+    } as ConversationLatestTurnSummary;
+    const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+    const { dialog } = await openDialog({ ...value, conversations: [{ ...watched, latestTurn }] }, { request });
+    const review = within(dialog).getByRole("switch", { name: /Review the last turn now/u });
+    if (!offered) {
+      expect(review).toBeDisabled();
+      return;
+    }
+    expect(review).toBeEnabled();
+    fireEvent.click(review);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ initialReview: true });
   });
 
   it("keeps a logical Tab order from preset to Attach", async () => {

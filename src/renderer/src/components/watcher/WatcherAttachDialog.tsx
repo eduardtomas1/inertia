@@ -9,6 +9,7 @@ import type {
   ServerEvent,
 } from "@shared/contracts";
 import { providerIdForHarness } from "@shared/model-routing";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import {
   clampWatcherBudgets,
   DEFAULT_WATCHER_BUDGETS,
@@ -220,7 +221,9 @@ export function WatcherAttachDialog({
   const budgets = clampWatcherBudgets(Object.fromEntries(
     BUDGET_FIELDS.map(({ key }) => [key, budgetDrafts[key].trim() === "" ? undefined : Number(budgetDrafts[key])]),
   ) as Partial<Record<keyof WatcherBudgets, number>>);
-  const hasCompletedTurn = watched?.latestTurn?.status === "completed";
+  const latestStatus = watched?.latestTurn?.status;
+  const hasReviewableTurn = latestStatus === "completed"
+    || (latestStatus !== undefined && !isAgentTurnTerminalStatus(latestStatus));
   const canAttach = Boolean(watched && selection && routeReady && !submitting
     && instructions.length <= MAX_WATCHER_INSTRUCTIONS_CHARS);
 
@@ -310,7 +313,7 @@ export function WatcherAttachDialog({
         budgets,
         privateConnect,
         delivery,
-        initialReview: initialReview && hasCompletedTurn,
+        initialReview: initialReview && hasReviewableTurn,
       },
     }).then((event) => {
       const { result } = resultEvent(event);
@@ -456,8 +459,8 @@ export function WatcherAttachDialog({
       <section className="watcher-attach-section watcher-attach-toggle">
         <Switch
           id="watcher-attach-initial-review"
-          checked={initialReview && hasCompletedTurn}
-          disabled={submitting || !hasCompletedTurn}
+          checked={initialReview && hasReviewableTurn}
+          disabled={submitting || !hasReviewableTurn}
           onChange={setInitialReview}
         />
         <label htmlFor="watcher-attach-initial-review">Review the last turn now</label>

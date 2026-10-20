@@ -825,7 +825,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         turns,
         providers,
         providerTerminalResumes,
-        duoLaunches: duoLaunchCoordinator,
+        duoLaunches: duoLaunchCoordinator, watchers,
         terminals,
         secureFiles,
         secureFileAuthorities,

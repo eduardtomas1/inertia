@@ -12,6 +12,10 @@ import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
 } from "../../src/server/runtime/commands/conversation-commands";
+import {
+  createProjectWorkspaceCommandHandler,
+  type ProjectWorkspaceCommandDependencies,
+} from "../../src/server/runtime/commands/project-workspace-commands";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import { WATCHER_CHAT_ARCHIVED_DETAIL } from "../../src/server/runtime/watcher/watcher-link-coordinator";
 import { WATCHER_DELETE_REFUSAL, WATCHER_PENDING_PUBLISH_MS } from "../../src/server/runtime/watcher/watcher-runtime";
@@ -165,6 +169,37 @@ describe("watcher link coordinator", () => {
       await f.advance(WATCHER_SETTLE_DELAY_MS + 120_000);
       expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
       expect(f.store.watcherLinks.views()).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("forgets and broadcasts the removal of a link whose project is removed", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      f.provider.emit(f.watched.id, { type: "activity", kind: "tool", phase: "completed", label: "Read a.ts", activityId: `a-${++sequence}` });
+      await f.finishTurn(f.watched.id, "Done");
+      expect(f.provider.runs.has(link.watcherConversationId)).toBe(false);
+      const before = f.watcherEvents().length;
+      const handler = createProjectWorkspaceCommandHandler({
+        store: f.store,
+        turns: f.controller,
+        providerTerminalResumes: { isActive: () => false },
+        conversationAttachments: { release: async () => undefined },
+        rememberDeletedConversation: () => undefined,
+        forgetRemoteTranscript: () => undefined,
+        watchers: f.watchers,
+      } as unknown as ProjectWorkspaceCommandDependencies);
+      await handler({} as never, { type: "project.remove", requestId: randomUUID(), payload: { projectId: f.project.id } });
+      expect(f.store.watcherLinks.get(link.id)).toBeNull();
+      expect(f.watcherEvents().slice(before)).toEqual([{
+        type: "watcher.link.removed", linkId: link.id, watcherConversationId: link.watcherConversationId, watchedConversationId: f.watched.id,
+      }]);
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 120_000);
+      expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
+      expect(f.watchers.isWatcherConversation(link.watcherConversationId)).toBe(false);
     } finally {
       await f.close();
     }

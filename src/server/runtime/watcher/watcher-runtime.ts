@@ -12,6 +12,7 @@ import type { WatcherPrivateConnect } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
 import type { CheckoutFingerprint, CheckoutFingerprintOptions } from "../../git/checkout-fingerprint";
 import type { WatcherTurnDiffSnapshot } from "../../persistence/watcher-digest-source";
+import type { WatcherLinkRecord } from "../../persistence/watcher-link-repository";
 import type { ProviderHostToolBridge } from "../../provider/contracts";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeCommandHandler } from "../commands/command-router";
@@ -106,6 +107,7 @@ export interface WatcherRuntime {
    * the renderer does not wait for the next snapshot to drop them.
    */
   beforeConversationDelete(conversationId: string): () => void;
+  beforeProjectRemove(projectId: string): () => void;
   handler: RuntimeCommandHandler;
   coordinator: WatcherLinkCoordinator;
   delivery: WatcherDeliveryService;
@@ -301,6 +303,14 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     if (wakeScheduler.observe(linkId, event)) schedulePendingPublish(linkId);
   };
 
+  const publishRemoved = (links: readonly WatcherLinkRecord[]) => (): void => {
+    if (disposed) return;
+    for (const link of links) {
+      forget(link.id);
+      coordinator.publish(link.id, link);
+    }
+  };
+
   const handler = createWatcherCommandHandler({ coordinator, delivery, send: dependencies.send });
   for (const link of store.watcherLinks.active()) {
     index.track(link);
@@ -381,13 +391,10 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
         const link = store.watcherLinks.get(linkId);
         return link ? [link] : [];
       });
-      return () => {
-        if (disposed) return;
-        for (const link of links) {
-          forget(link.id);
-          coordinator.publish(link.id, link);
-        }
-      };
+      return publishRemoved(links);
+    },
+    beforeProjectRemove(projectId) {
+      return publishRemoved(disposed ? [] : store.watcherLinks.active().filter((link) => link.projectId === projectId));
     },
     handler,
     coordinator,

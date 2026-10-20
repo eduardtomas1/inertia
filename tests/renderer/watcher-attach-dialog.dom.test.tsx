@@ -117,7 +117,7 @@ describe("WatcherAttachDialog", () => {
     expect(within(dialog).getByRole("spinbutton", { name: /Cooldown between checks/u })).toHaveValue(45);
     expect(within(dialog).getByRole("switch", { name: /Review the last turn now/u })).toBeDisabled();
     // Stated up front, in the dialog's description, not below the fold.
-    expect(dialog).toHaveAccessibleDescription("It reads and reports; it never edits files. Codex may run read-only commands.");
+    expect(dialog).toHaveAccessibleDescription("It reads and reports: it may run read-only commands and never edits files or changes the workspace.");
     expect(within(dialog).queryByText("What is shared with the watcher?")).not.toBeInTheDocument();
     expect(dialog.querySelectorAll("small:not([aria-hidden])")).toHaveLength(1);
   });

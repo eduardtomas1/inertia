@@ -231,7 +231,7 @@ test.describe("watcher on the fake Codex route", () => {
     await presets.getByRole("radio", { name: /^Reviewer/u }).click();
     await expect(presets.getByRole("radio", { name: /^Reviewer/u })).toHaveAttribute("aria-checked", "true");
     // The read-only boundary is part of the dialog's description, above the fold.
-    await expect(dialog.getByText("It reads and reports; it never edits files. Codex may run read-only commands.", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("It reads and reports: it may run read-only commands and never edits files or changes the workspace.", { exact: true })).toBeVisible();
     const attach = dialog.getByRole("button", { name: "Attach watcher" });
     await expect(attach).toBeEnabled();
     const bounds = await dialog.boundingBox();

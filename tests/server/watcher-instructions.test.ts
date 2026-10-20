@@ -9,6 +9,7 @@ import {
 } from "../../src/shared/watcher";
 import {
   MAX_WATCHER_INSTRUCTION_BYTES,
+  WATCHER_COMMAND_RULE,
   WATCHER_INSTRUCTION_LABEL,
   WATCHER_PRESET_DESCRIPTIONS,
   WATCHER_SILENT_RULE,
@@ -48,6 +49,14 @@ describe("watcher instruction", () => {
     expect(WATCHER_SILENT_RULE).toBe(
       "If nothing needs the user's attention, reply with exactly SILENT and nothing else.",
     );
+  });
+
+  it("tells every preset which read-only commands run and that Inertia declines the rest", () => {
+    for (const preset of WATCHER_PRESETS) {
+      expect(watcherInstruction({ preset, instructions: "" }, WATCHED).text).toContain(WATCHER_COMMAND_RULE);
+    }
+    expect(WATCHER_COMMAND_RULE).toContain("git diff, git log");
+    expect(WATCHER_COMMAND_RULE).toContain("Inertia declines anything else");
   });
 
   it("carries a distinct body per preset, each with the output format and SILENT rule", () => {

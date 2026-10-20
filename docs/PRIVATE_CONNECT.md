@@ -62,8 +62,8 @@ projects conversations. The device shows the watcher as an ordinary chat
 titled **Watcher · …**.
 
 A Collaborate device can prompt a watcher; those turns keep the watcher's
-read-only policy, and approvals are declined automatically. Sending a watcher
-note to the main chat is available only on the desktop.
+read-only policy, and approvals are declined automatically. Sending or
+dismissing a watcher's finding is available only on the desktop.
 
 Private Connect is deliberately unavailable when Tailscale is missing, signed
 out, disconnected, lacks MagicDNS, reports Funnel, or cannot prove the owned

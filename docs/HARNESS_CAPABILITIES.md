@@ -361,8 +361,11 @@ Each layer works on its own; none relies on the model following instructions.
    active turn ran a command, a workspace or source-control run was active, a
    terminal resume was active, or the watcher's own turn had no activity that
    could write (no command outside the read-only command allowlist and no
-   started edit; `watcherActivityMayWrite`). An inconclusive check keeps its
-   finding and records its unexplained paths on the feed item (`guardPaths`). Unexplained
+   started edit; `watcherActivityMayWrite`, which classifies the command text
+   a harness records in the activity's `Command:` detail, or the title when
+   there is none). An inconclusive check keeps its finding and records its
+   unexplained paths on the feed item (`guardPaths`), which the finding card
+   and the check's receipt line list. Unexplained
    paths in a conclusive window pause the link with `write-detected` and list
    at most 20 paths. A non-repository,
    a timeout or a truncated fingerprint is *unavailable*; the other layers
@@ -386,11 +389,17 @@ no agent messages or pages, and with `changedFiles` off no file lists.
 
 - `inertia-watcher` carries the role and boundary, the preset, the user's
   instructions quoted as user-authored, the output format and the rule to
-  answer exactly `SILENT` when there is nothing to report. It stays under
-  6 KiB, below the 16 KiB per-instruction cap.
+  answer exactly `SILENT` when there is nothing to report, followed only by
+  the `Resolved: check N` line when an earlier finding is now fixed. With
+  automatic sending on, the boundary tells the watcher that the user chose to
+  have Inertia send its findings. It stays under 6 KiB, below the 16 KiB
+  per-instruction cap.
 - `inertia-watcher-note` accompanies a main-chat turn that delivers a watcher
   note, and marks the note as forwarded from the watcher, not written by the
-  user. A steered note carries the same attribution in its provider content.
+  user. A note sent automatically carries `automatic: true` in its
+  attribution, and the instruction then says that the watcher sent it and the
+  user did not choose to send it. A steered note carries the same attribution
+  in its provider content.
 
 Both labels are part of the `INERTIA_SECTION_LABEL` alternation in
 `untrusted-agent-text.ts`, so text from the watched chat or the provider that
@@ -404,8 +413,14 @@ instruction, and every quoted string passes through
 watched turn's plan is shared under `activities`. With `changedFiles` shared, a
 final pass quotes the turn's unified diff (at most a third of the digest and
 6 KiB per file) and falls back to the changed paths when the diff is
-unavailable. Every check lists up to five of the watcher's earlier findings in
-the same watched turn with their delivery state, and a reply that ends with
+unavailable; with neither, it says that Inertia could not capture the turn's
+changes instead of reporting no changed files. A turn that a watcher note
+started is quoted under a heading that says whether the user forwarded the
+note or the watcher sent it automatically. A `manual` or `initial` digest is
+built even when nothing is new, and then says so. Each check records its
+digest's size (`digestBytes`), which the receipt line shows, for example
+`24 KiB sent`. Every check lists up to five of the watcher's earlier findings
+in the same watched turn with their delivery state, and a reply that ends with
 `Resolved: check N` records `resolvedBySequence` on those findings.
 
 ### Pauses and resume
@@ -429,17 +444,38 @@ the turn the digest was built from, so a late check never rewinds coverage.
 resume only once `watcherRouteReadiness` reports the watcher's route ready,
 and no link resumes while its watched chat or its own chat is archived,
 whatever its pause reason. Every resume tops the turn's check allowance back up to
-`wakesPerWatchedTurn`. Deleting the watched chat detaches the link in SQL and
-deleting the watcher chat removes it; the delete command then broadcasts
+`wakesPerWatchedTurn`. A final pass that ends usage-limited stays due, so it
+runs once the link resumes; a failed one is retried at most
+`WATCHER_FINAL_PASS_RETRY_LIMIT` (2) times, and a cancelled one is done. A
+pause or archive that lands while a check is being prepared settles the
+attempt as paused or transient, so a final pass it carried stays due. The
+further pages of a `manual` or `initial` check keep that request's trigger: they
+spend no allowance and stop after `WATCHER_FINAL_PASS_MAX_PAGES` (4) pages.
+After a restart, reconciliation also schedules the final pass of the turn
+before the cursor's turn when that turn ended after the link was created and
+has no recorded final pass. Deleting the watched chat detaches the link in
+SQL and deleting the watcher chat removes it; the delete command then broadcasts
 `watcher.link.removed` for each link the chat took part in. A delete of a
-watched chat whose watcher is mid-check is refused with a request error before
-any side effect (no checkpoint, worktree or ownership change); the
+watched chat whose watcher chat has an unfinished turn (a check, or an answer
+to the user's own message) is refused with a request error before any side
+effect (no checkpoint, worktree or ownership change); the
 `BEFORE DELETE` trigger stays as the backstop. Archiving the watched chat
 pauses its link with `watched-archived`, and archiving the watcher chat itself
 pauses it with `watcher-archived`, from any attached status: either reason
 replaces an earlier pause, and a check that is running is cancelled. An
 archive by an agent's management tool reaches the link through the
-conversation shell update it broadcasts.
+conversation shell update it broadcasts. Attach checks again inside its
+transaction that the watched chat is not archived, so an archive that races
+the attach is refused with "Unarchive this chat before adding a watcher."
+Removing a project cascades its watcher links in SQL; the runtime then
+forgets them and broadcasts `watcher.link.removed` for each.
+
+Each new check retires the link's checks older than its newest
+`WATCHER_WAKE_RETENTION` (500), at most four per check: the wake row and its
+watcher turn's messages, activities, reasoning and plans are deleted, and the
+`agent_turns` row stays, so the watcher's usage totals keep its tokens. A
+check whose turn is unfinished or still owned by a provider run is skipped
+and retired later.
 
 The Git fingerprint backstop compares changed paths with other turns'
 activities in NFC, and folds case on Windows and macOS, whose file systems are

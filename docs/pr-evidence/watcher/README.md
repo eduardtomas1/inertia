@@ -22,7 +22,8 @@ its description, above the fold, that the watcher reads and reports: it may run
 read-only commands and never edits files or changes the workspace. Under what the
 watcher sees, two plain switches: **Send findings to the main chat
 automatically** (off by default, with one line on what it does) and **Review
-the last turn now**. **Budgets** stays folded at the end.
+the last turn now**, which is available because the chat already has a turn,
+here a running one. **Budgets** stays folded at the end.
 
 ![Add a watcher dialog with the Reviewer preset selected](attach-dialog-light.png)
 
@@ -64,8 +65,8 @@ turn**). When the turn ended, the note started the next turn under a **Note from
 watcher · Reviewer · Codex** divider (with the watcher's provider mark beside
 its agent, like the context handoff divider), the bubble itself says only **From
 watcher**, and the main agent replied. The card's single status line now reads
-**Sent <time> · after the turn ended**, and the final checks of both turns fold
-into a new receipt above the sent card.
+**Sent <time> · after the turn ended**, while the bar still shows the turn's
+final check running.
 
 ![Main chat with the Note from watcher divider and the reply](main-chat-note-light.png)
 
@@ -80,6 +81,14 @@ findings automatically**.
 | Menu | Automatic sending on |
 | --- | --- |
 | ![The More menu with Send findings automatically](dock-menu-light.png) | ![The bar reading Codex · Reviewer · Sends findings automatically](dock-auto-send-light.png) |
+
+With automatic sending on, the scenario sends one more message in the main chat.
+The final check of that turn reports a finding, and nobody chooses **Send**:
+the card shows no Send or Dismiss, its status reads **Sent <time> · started
+the main chat's next turn**, and the note appears in the main chat under a
+second **Note from watcher** divider.
+
+![A finding sent automatically, with its note in the main chat](dock-auto-sent-light.png)
 
 ## Collapsed
 
@@ -96,6 +105,15 @@ actions as other rows (right-click or Shift+F10).
 
 ![Watcher · Reviewer nested under Parser cleanup in the Work tab](work-tab-nested-light.png)
 
+## Beside the right panel
+
+With Changes open in the right panel, the chat is too narrow for the dock
+beside it, so the dock becomes a sheet. The sheet opens between the chat and
+the panel, under the header and above the composer, and the panel stays where
+it was.
+
+![The watcher sheet open between the chat and the Changes panel](dock-beside-panel-light.png)
+
 ## Four split panes plus the dock
 
 With four chats in split view, a pane would leave the chat less than 360 px
@@ -110,9 +128,11 @@ it. It takes no fifth pane.
 
 The final check of the watched turn answered `SILENT` with a closing
 **Resolved: check 4** line, so the sent card now shows a muted **Resolved in
-check 5** line. A resolved finding stays sendable and dismissible and moves
-below any open finding. The scenario then asks for **Review the last turn**
-from the menu, which runs one more quiet check.
+check 5** line, and the final checks of both turns fold into a new receipt
+above the sent card. A resolved finding stays sendable and dismissible and
+moves below any open finding. The scenario then asks for **Review the last
+turn** from the menu, which runs one more quiet check and leaves the menu's
+checks-left count unchanged.
 
 ![The sent finding marked Resolved in check 5](dock-resolved-light.png)
 

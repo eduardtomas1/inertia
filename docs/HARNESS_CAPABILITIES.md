@@ -281,8 +281,13 @@ absolute, starts with `~` or contains a `..` segment must stay inside the
 workspace, and so must every suffix of a short-option bundle after its first
 letter, so `grep -nf/etc/passwd` and also `grep -nfsrc/patterns` are refused
 while `grep -nf src/patterns` is allowed. `.env`, `*.env` and `*.env.*` names
-are refused in any letter case, wherever they appear in an argument, so a
-search pattern such as `process.env.API_URL` is refused too. A command is
+are refused in any letter case wherever they appear in an argument, except in
+the search pattern of `rg`, `grep`, `egrep`, `fgrep` and `git grep`: the first
+positional word when no `-e`, `--regexp`, `-f` or `--file` supplies the
+pattern, and every `-e` or `--regexp` value. A pattern such as
+`process.env.API_URL` is therefore allowed, while a path operand or a `-f`
+pattern file with such a name is refused. When an option before the pattern is
+not one the classifier knows, no word is treated as the pattern. A command is
 capped at 4,096 characters and 256 arguments. An allowed command runs without
 an approval and counts towards the receipt's command count; a declined one is a
 `command-attempt`. Claude and OpenCode watcher runs set

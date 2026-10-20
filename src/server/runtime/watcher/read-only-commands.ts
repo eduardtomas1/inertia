@@ -21,6 +21,12 @@ interface Word {
 
 type ProgramRule = (args: readonly string[], globbed: readonly boolean[]) => string | null;
 
+interface SearchSyntax {
+  flags: string;
+  values: string;
+  longFlags: ReadonlySet<string>;
+}
+
 const SHELL_SYNTAX = "The command uses shell syntax that watchers cannot run.";
 const UNSAFE_OPTION = "The command uses an option that can write or run another program.";
 const OUTSIDE = "The command reads outside the workspace.";
@@ -51,6 +57,15 @@ const TAIL_OBSOLETE_FOLLOW = /^\+\d*[bcl]?f$/u;
 const JQ_FILE_OPTIONS = new Set(["--from-file", "--library-path", "--rawfile", "--slurpfile"]);
 const JQ_MODULE = /\b(?:import|include|modulemeta)\b/u;
 const UNIQ_VALUE_OPTIONS = new Set(["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"]);
+const SEARCH_LONG_FLAGS = ["--line-number", "--ignore-case", "--word-regexp", "--fixed-strings", "--count", "--files-with-matches", "--invert-match", "--only-matching"];
+const GREP_SEARCH: SearchSyntax = { flags: "nivwxlcFoqHPIhLaEGs", values: "ABCmdD", longFlags: new Set(SEARCH_LONG_FLAGS) };
+const GIT_GREP_SEARCH: SearchSyntax = { flags: "nivwxlcFoqHPIhLaEGWp", values: "ABCm", longFlags: new Set(SEARCH_LONG_FLAGS) };
+const SEARCH_SYNTAX: Readonly<Record<string, SearchSyntax>> = Object.freeze({
+  rg: { flags: "nivwxlcFoqHPIhLasSUNbp0", values: "ABCmgtTMjErd", longFlags: new Set([...SEARCH_LONG_FLAGS, "--no-heading", "--smart-case"]) },
+  grep: GREP_SEARCH,
+  egrep: GREP_SEARCH,
+  fgrep: GREP_SEARCH,
+});
 const GREP_RULE = optionRule({ short: "rRd", long: ["recursive", "dereference-recursive", "directories"] });
 
 const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
@@ -104,9 +119,10 @@ function classifySegment(words: readonly Word[], context: ReadOnlyCommandContext
     return refuse(`${/^[A-Za-z0-9._-]{1,64}$/u.test(head.value) ? head.value : "This program"} is not a read-only command watchers can run.`);
   }
   const rule = PROGRAMS[program]!;
-  for (const word of rest) {
+  const patterns = searchPatterns(program, rest.map(({ value }) => value));
+  for (const [index, word] of rest.entries()) {
     if (globShapesOption(word)) return refuse(OPTION_GLOB);
-    const problem = pathProblem(word, context, program !== "git");
+    const problem = pathProblem(word, context, program !== "git", patterns.includes(index));
     if (problem) return refuse(problem);
   }
   const problem = rule(rest.map(({ value }) => value), rest.map(({ glob }) => glob.includes(true)));
@@ -190,7 +206,7 @@ function append(word: Word, character: string, glob: boolean): void {
   for (let index = 0; index < character.length; index += 1) word.glob.push(glob);
 }
 
-function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths: boolean): string | null {
+function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths: boolean, pattern: boolean): string | null {
   const paths = context.windows ? win32 : posix;
   const separators = context.windows ? /[\\/]/u : /\//u;
   if (globReachesParent(word, separators)) return OUTSIDE;
@@ -203,7 +219,7 @@ function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths:
       const relative = paths.relative(context.cwd, paths.resolve(context.cwd, candidate));
       if (relative === ".." || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative)) return OUTSIDE;
     }
-    if (candidate.split(/[\\/:]/u).some((segment) => ENVIRONMENT_FILE_NAME.test(segment))) return ENVIRONMENT_FILE;
+    if (!pattern && candidate.split(/[\\/:]/u).some((segment) => ENVIRONMENT_FILE_NAME.test(segment))) return ENVIRONMENT_FILE;
   }
   return null;
 }
@@ -218,6 +234,57 @@ function pathCandidates(value: string): string[] {
     for (let index = 2; index < value.length; index += 1) candidates.push(value.slice(index));
   }
   return candidates;
+}
+
+function searchPatterns(program: string, args: readonly string[]): number[] {
+  if (program !== "git") return Object.hasOwn(SEARCH_SYNTAX, program) ? searchPatternIndexes(args, SEARCH_SYNTAX[program]!) : [];
+  const start = gitSubcommandIndex(args);
+  if (start === null || args[start] !== "grep") return [];
+  return searchPatternIndexes(args.slice(start + 1), GIT_GREP_SEARCH).map((index) => index + start + 1);
+}
+
+function searchPatternIndexes(args: readonly string[], syntax: SearchSyntax): number[] {
+  const patterns: number[] = [];
+  let explicit = false;
+  let first: number | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg === "--") {
+      if (first === undefined && index + 1 < args.length) first = index + 1;
+      break;
+    }
+    if (!arg.startsWith("-") || arg === "-") {
+      first ??= index;
+      continue;
+    }
+    const opening = first === undefined;
+    if (arg.startsWith("--")) {
+      const name = arg.slice(2).split("=", 1)[0]!;
+      const attached = arg.includes("=");
+      if ("file".startsWith(name) || "regexp".startsWith(name)) explicit = true;
+      if (name === "regexp") {
+        if (opening) patterns.push(attached ? index : index + 1);
+        if (!attached) index += 1;
+        continue;
+      }
+      if (attached || syntax.longFlags.has(arg)) continue;
+      return patterns;
+    }
+    for (let letter = 1; letter < arg.length; letter += 1) {
+      const option = arg[letter]!;
+      if (syntax.flags.includes(option)) continue;
+      const attached = letter + 1 < arg.length;
+      if (option === "e" || option === "f") {
+        explicit = true;
+        if (option === "e" && opening) patterns.push(attached ? index : index + 1);
+      } else if (!syntax.values.includes(option)) {
+        return patterns;
+      }
+      if (!attached) index += 1;
+      break;
+    }
+  }
+  return explicit || first === undefined ? patterns : [...patterns, first];
 }
 
 function globShapesOption(word: Word): boolean {
@@ -264,15 +331,21 @@ function unsafeOption(arg: string, unsafe: { short?: string; long?: readonly str
   return /^-[^-]/u.test(arg) && [...(unsafe.short ?? "")].some((flag) => arg.slice(1).includes(flag));
 }
 
-function gitRule(args: readonly string[]): string | null {
+function gitSubcommandIndex(args: readonly string[]): number | null {
   let index = 0;
   while (args[index]?.startsWith("-")) {
     const option = args[index]!;
     if (option === "--no-pager" || option === "--no-optional-locks") index += 1;
     else if (option === "-C" && index + 1 < args.length) index += 2;
     else if (option === "-c" && args[index + 1] === "core.pager=cat") index += 2;
-    else return UNSAFE_OPTION;
+    else return null;
   }
+  return index;
+}
+
+function gitRule(args: readonly string[]): string | null {
+  const index = gitSubcommandIndex(args);
+  if (index === null) return UNSAFE_OPTION;
   const subcommand = args[index];
   const rest = args.slice(index + 1);
   if (subcommand === undefined) return "git needs a read-only subcommand.";

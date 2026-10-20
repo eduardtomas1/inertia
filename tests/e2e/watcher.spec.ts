@@ -447,9 +447,13 @@ test.describe("watcher on the fake Codex route", () => {
     const pane = page.getByRole("region", { name: `Primary chat: Inertia · ${WATCHED_TITLE}` });
     const paneBox = await pane.boundingBox();
     await expect.poll(async () => (await dock().boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(280);
+    // Measured once the opening slide (transform only) has settled.
+    await expect.poll(async () => {
+      const box = await dock().boundingBox();
+      return box ? box.x + box.width : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(paneBox!.x + paneBox!.width + 1);
     const dockBox = await dock().boundingBox();
     expect(dockBox!.x).toBeGreaterThanOrEqual(paneBox!.x);
-    expect(dockBox!.x + dockBox!.width).toBeLessThanOrEqual(paneBox!.x + paneBox!.width + 1);
     // The sheet stops above the pane's composer, which stays usable.
     const paneComposer = pane.getByRole("textbox", { name: "Message" });
     const composerBox = await pane.locator(".composer-region").boundingBox();

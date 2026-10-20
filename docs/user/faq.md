@@ -22,7 +22,11 @@ Yes. Use [split view](working-side-by-side.md), give chats their own windows, or
 
 ## Can a watcher change my files?
 
-No. A [watcher](watcher.md) runs in Plan mode with Supervised access, its approval requests are declined automatically, and an attempt to edit a file stops its check. If files change during a check and no running agent accounts for them, the watcher pauses and lists the paths.
+No. A [watcher](watcher.md) runs in Plan mode with Supervised access, its approval requests are declined automatically, and an attempt to edit a file stops its check. If files change during a check in which the watcher started an edit or ran a command outside its read-only allowlist, and no running agent accounts for them, the watcher pauses and lists the paths.
+
+## Can the watcher run commands?
+
+Only read-only ones. On Claude Code and OpenCode it runs commands from Inertia's read-only allowlist, such as `git diff`, `git log`, `rg` and `cat`, without asking, and any other command is declined. Codex runs its own known-safe read-only commands inside its read-only sandbox. See [Read-only guarantees](watcher.md#read-only-guarantees).
 
 ## Can I use Inertia from another device?
 

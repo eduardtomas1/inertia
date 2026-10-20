@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderInfo } from "../../src/shared/contracts";
+import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, MAX_ACTIVE_WATCHERS } from "../../src/shared/watcher";
 import {
   createConversationCommandHandler,
   type ConversationCommandDependencies,
@@ -359,6 +360,36 @@ describe("watcher link coordinator", () => {
       f.store.archiveConversation(link.watcherConversationId, false);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("answers concurrent attaches with one link id and over the limit with policy errors, never a raw SQLite error", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const payload = {
+        linkId: randomUUID(), watchedConversationId: f.watched.id, modelSelection: watcherTestSelection("codex"),
+        preset: "reviewer" as const, instructions: "", sharing: { ...DEFAULT_WATCHER_SHARING }, budgets: { ...DEFAULT_WATCHER_BUDGETS },
+        privateConnect: "inherit" as const, initialReview: false,
+      };
+      const [first, second] = await Promise.all([f.watchers.coordinator.attach(payload), f.watchers.coordinator.attach(payload)]);
+      expect(second.id).toBe(first.id);
+      expect(f.store.watcherLinks.active()).toHaveLength(1);
+
+      for (let index = 1; index < MAX_ACTIVE_WATCHERS - 1; index += 1) {
+        const watched = f.store.createConversation(f.project.id, `Chat ${index}`, { modelSelection: watcherTestSelection("codex") });
+        await f.watchers.coordinator.attach({ ...payload, linkId: randomUUID(), watchedConversationId: watched.id });
+      }
+      const racers = [0, 1].map((index) =>
+        f.store.createConversation(f.project.id, `Racer ${index}`, { modelSelection: watcherTestSelection("codex") }));
+      const results = await Promise.allSettled(racers.map((watched) =>
+        f.watchers.coordinator.attach({ ...payload, linkId: randomUUID(), watchedConversationId: watched.id })));
+      expect(results.map(({ status }) => status).sort()).toEqual(["fulfilled", "rejected"]);
+      const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected")!;
+      expect(rejected.reason).toBeInstanceOf(RuntimeRequestError);
+      expect(rejected.reason.message).toBe("Inertia already has eight active watchers. Stop one first.");
+      expect(f.store.watcherLinks.active()).toHaveLength(MAX_ACTIVE_WATCHERS);
     } finally {
       await f.close();
     }

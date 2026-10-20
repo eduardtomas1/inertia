@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import type { AccessMode, Conversation, InteractionMode } from "../../shared/contracts";
 import {
+  MAX_ACTIVE_WATCHERS,
   MAX_WATCHER_DELIVERY_DETAIL_CHARS,
   MAX_WATCHER_FEED_PAGE,
   MAX_WATCHER_FINDING_BYTES,
@@ -185,13 +186,15 @@ export class WatcherLinkRepository {
 
   /**
    * Creates the watcher conversation, locks its title and records the link in
-   * one transaction. The active-link limit trigger and the unique watched index
-   * roll the whole creation back.
+   * one transaction. A repeated link id for the same watched chat replays the
+   * attached link with `created: false`; the active-link limit and every
+   * conflict are refused as policy errors inside the transaction, and the
+   * limit trigger and the unique watched index stay as the backstop.
    */
   createWithConversation(
     input: { link: WatcherLinkDraft; conversation: WatcherConversationPlan },
     now: string,
-  ): { link: WatcherLinkRecord; conversation: Conversation } {
+  ): { link: WatcherLinkRecord; conversation: Conversation; created: boolean } {
     const at = requireTimestamp(now, "Watcher creation time");
     const draft = {
       preset: watcherPresetSchema.parse(input.link.preset),
@@ -201,6 +204,13 @@ export class WatcherLinkRepository {
       privateConnect: watcherPrivateConnectSchema.parse(input.link.privateConnect),
     };
     return this.database.transaction(() => {
+      const existing = this.get(input.link.id);
+      if (existing) {
+        if (existing.watchedConversationId !== input.link.watchedConversationId || existing.status === "detached") {
+          throw new WatcherPolicyError("This watcher already exists.");
+        }
+        return { link: existing, conversation: this.context.conversations.get(existing.watcherConversationId), created: false };
+      }
       const watched = this.database.prepare("SELECT id, project_id FROM conversations WHERE id = ?")
         .get(input.link.watchedConversationId) as { id: string; project_id: string } | undefined;
       if (!watched) throw new WatcherPolicyError("The chat to watch no longer exists.");
@@ -213,6 +223,11 @@ export class WatcherLinkRepository {
       }
       if (this.findActiveByWatched(watched.id)) {
         throw new WatcherPolicyError("This chat already has a watcher.");
+      }
+      const { active } = this.database.prepare("SELECT COUNT(*) AS active FROM watcher_links WHERE status <> 'detached'")
+        .get() as { active: number };
+      if (active >= MAX_ACTIVE_WATCHERS) {
+        throw new WatcherPolicyError("Inertia already has eight active watchers. Stop one first.");
       }
       const conversation = this.context.conversations.create(
         input.conversation.projectId,
@@ -231,7 +246,7 @@ export class WatcherLinkRepository {
         JSON.stringify(draft.sharing), JSON.stringify(draft.budgets), draft.privateConnect,
         draft.budgets.wakesPerWatchedTurn, at, at,
       );
-      return { link: this.require(input.link.id), conversation };
+      return { link: this.require(input.link.id), conversation, created: true };
     })();
   }
 

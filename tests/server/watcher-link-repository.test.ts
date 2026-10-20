@@ -170,16 +170,41 @@ describe("watcher link repository", () => {
     expect(conversationCount()).toBe(before + 2);
   });
 
-  it("rolls the watcher chat back when the active-link limit trigger aborts", () => {
+  it("refuses a link over the active limit as a policy error and rolls the watcher chat back", () => {
     const links = Array.from({ length: MAX_ACTIVE_WATCHERS }, (_, index) => attach(chat(`Chat ${index}`)).link);
     const watched = chat("One too many");
     const before = conversationCount();
-    expect(() => attach(watched)).toThrow("watcher count limit exceeded");
+    expect(() => attach(watched)).toThrow(WatcherPolicyError);
     expect(conversationCount()).toBe(before);
     expect(store.watcherLinks.transition(links[0]!.id, ["watching"], { status: "detached", reason: "user" }, tick()))
       .toMatchObject({ status: "detached", detachedReason: "user" });
     expect(attach(watched).link.status).toBe("watching");
     expect(store.shellSnapshot().watchers).toHaveLength(MAX_ACTIVE_WATCHERS);
+  });
+
+  it("replays a repeated link id for the same chat and refuses it for another, inside the transaction", () => {
+    const watched = chat();
+    const first = attach(watched);
+    expect(first.created).toBe(true);
+    const before = conversationCount();
+    const replay = attach(watched, { id: first.link.id });
+    expect(replay).toMatchObject({ created: false, link: { id: first.link.id }, conversation: { id: first.conversation.id } });
+    expect(conversationCount()).toBe(before);
+    expect(() => attach(chat("Other"), { id: first.link.id })).toThrow(WatcherPolicyError);
+  });
+
+  it("keeps the active-limit trigger as a backstop for direct inserts", () => {
+    for (let index = 0; index < MAX_ACTIVE_WATCHERS; index += 1) attach(chat(`Chat ${index}`));
+    const watched = chat("Direct");
+    const watcher = chat("Direct watcher");
+    raw((database) => {
+      expect(() => database.prepare(`
+        INSERT INTO watcher_links (
+          id, watcher_conversation_id, watched_conversation_id, project_id, preset, sharing_json, budgets_json,
+          status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'reviewer', '{}', '{}', 'watching', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z')
+      `).run(randomUUID(), watcher.id, watched.id, projectId)).toThrow("watcher count limit exceeded");
+    });
   });
 
   it("applies status transitions only from the expected states", () => {

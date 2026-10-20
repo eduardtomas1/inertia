@@ -215,6 +215,7 @@ export class WatcherLinkCoordinator {
       throw policyError(error);
     }
     const { link } = created;
+    if (!created.created) return watcherLinkDetailView(link);
     const latest = store.latestAgentTurnForConversation(watched.id);
     const running = this.#deps.turns.isActive(watched.id);
     if (latest && running) store.watcherLinks.beginWatchedTurn(link.id, latest.id, this.#deps.now());

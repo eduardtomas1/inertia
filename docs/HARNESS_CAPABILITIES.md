@@ -230,7 +230,7 @@ through `watcherHarnessAllowed`:
 | --- | --- |
 | `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn, so every command needs approval and is declined. |
 | `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. Watcher threads, started or resumed, also disable the user's MCP servers, apps, plugins, hooks, subagents and web search through the thread's `config`. |
-| `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. With the profile, reads run without a prompt, and edit, shell and every other native tool are denied by OpenCode itself, without an approval. |
+| `opencode-sdk` | Plan mode with the run input `readOnlyProfile: "watcher"`, which `openCodePermissions` maps to the session ruleset `* deny`, then `read`, `glob`, `grep`, `list` and Inertia host tools `allow`, with `read` of `.env`, `*.env` and `*.env.*` denied after the read allow, since OpenCode's own default asks before reading them. The supervised ruleset alone ends in a `* ask` catch-all, so OpenCode would prompt for every read and the watcher would decline it. With the profile, reads run without a prompt, and edit, shell and every other native tool are denied by OpenCode itself, without an approval. |
 
 The gate is checked when a watcher is attached, when every watcher turn is
 prepared (including a message the user types into the watcher chat), and when
@@ -403,8 +403,9 @@ before and after the turn.
 - OpenCode: the scripted server evaluates rules as OpenCode does (agent rules,
   then session rules, last match wins). Under the supervised plan ruleset
   alone, read, glob, grep, list and bash all prompt. A watcher turn sends the
-  profile ruleset, reads complete without a prompt, edit and bash are denied
-  and not offered, and the server process exits on shutdown. A second case
+  profile ruleset, reads complete without a prompt, `.env` files are denied,
+  edit and bash are denied and not offered, and the server process exits on
+  shutdown. A second case
   gives the agent its own rules that allow everything, edits, shell and
   `external_directory`; the session profile still wins, because OpenCode
   merges the agent's ruleset first and the session's after it and takes the

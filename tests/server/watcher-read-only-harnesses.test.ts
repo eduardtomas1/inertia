@@ -792,6 +792,9 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { permission: "glob", pattern: "*", action: "allow" },
       { permission: "grep", pattern: "*", action: "allow" },
       { permission: "list", pattern: "*", action: "allow" },
+      { permission: "read", pattern: ".env", action: "deny" },
+      { permission: "read", pattern: "*.env", action: "deny" },
+      { permission: "read", pattern: "*.env.*", action: "deny" },
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ]);
     expect(capture.offeredTools).toEqual(["read", "glob", "grep", "list"]);
@@ -844,6 +847,16 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     for (const tool of ["read", "glob", "grep", "list", `${INERTIA_HOST_MCP_NAME}_inertia_request_context`]) {
       expect(evaluate(merged, tool, "src/parser.ts")).toBe("allow");
     }
+    const openCodeDefaultReads: PermissionRuleset = [
+      { permission: "read", pattern: "*", action: "allow" },
+      { permission: "read", pattern: "*.env", action: "ask" },
+      { permission: "read", pattern: "*.env.*", action: "ask" },
+    ];
+    for (const path of [".env", "config/.env", "/repo/.env.local", "deploy/production.env"]) {
+      expect(evaluate([...openCodeDefaultReads, ...profile], "read", path)).toBe("deny");
+      expect(evaluate(merged, "read", path)).toBe("deny");
+    }
+    expect(evaluate([...openCodeDefaultReads, ...profile], "read", "src/environment.ts")).toBe("allow");
 
     const root = portableFixtureRoot("watcher opencode permissive agent");
     roots.push(root);

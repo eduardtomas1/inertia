@@ -37,6 +37,8 @@ export interface OpenCodeHostTools {
 
 /** Native OpenCode tools a read-only watcher may run without a prompt. */
 export const OPENCODE_WATCHER_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
+/** Secret files OpenCode itself asks before reading; a watcher, which declines every prompt, is denied them. */
+const OPENCODE_WATCHER_DENIED_READS = [".env", "*.env", "*.env.*"] as const;
 
 export function openCodePermissions(
   access: "full" | "supervised" | "auto-edit",
@@ -50,6 +52,7 @@ export function openCodePermissions(
     return [
       { permission: "*", pattern: "*", action: "deny" },
       ...OPENCODE_WATCHER_READ_TOOLS.map((permission) => ({ permission, pattern: "*", action: "allow" } as const)),
+      ...OPENCODE_WATCHER_DENIED_READS.map((pattern) => ({ permission: "read", pattern, action: "deny" } as const)),
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ];
   }

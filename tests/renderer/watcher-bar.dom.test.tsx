@@ -119,6 +119,29 @@ describe("WatcherBar", () => {
     expect(liveRegion()).toHaveTextContent("Paused: It used its checks for this turn.");
   });
 
+  it("announces a second finding and a repeated failure again", () => {
+    const view = render(bar(link()));
+    const finding = (at: string) => link({ latest: { outcome: "finding", at, text: "A risk" }, latestFindingAt: at });
+    const failed = (at: string) => link({ latest: { outcome: "failed", at, text: "" }, latestFindingAt: "2026-10-19T10:50:00.000Z" });
+    const announced = [
+      finding("2026-10-19T10:44:00.000Z"),
+      { ...finding("2026-10-19T10:44:00.000Z"), status: "waking" as const },
+      finding("2026-10-19T10:50:00.000Z"),
+      failed("2026-10-19T10:51:00.000Z"),
+      failed("2026-10-19T10:52:00.000Z"),
+    ].map((next) => {
+      view.rerender(bar(next));
+      return liveRegion().textContent;
+    });
+    expect(announced[0]).toMatch(/^New finding\.?$/u);
+    expect(announced[1]).toBe(announced[0]);
+    expect(announced[2]).toMatch(/^New finding\.?$/u);
+    expect(announced[2]).not.toBe(announced[1]);
+    expect(announced[3]).toMatch(/^The check failed\.?$/u);
+    expect(announced[4]).toMatch(/^The check failed\.?$/u);
+    expect(announced[4]).not.toBe(announced[3]);
+  });
+
   it("ticks the elapsed time outside React render and outside the live region", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-19T10:42:05.000Z"));

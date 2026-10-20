@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { ChevronRight } from "lucide-react";
 
 import type { WatcherFeedEntry, WatcherReceiptGroup as ReceiptGroup } from "@shared/watcher-feed";
+import { formatBytes } from "../../utils/formatBytes";
 import {
   watcherClockTime,
   watcherEventsText,
@@ -29,6 +30,12 @@ function digestNote(item: WatcherFeedEntry): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+function sentNote(item: WatcherFeedEntry): string | null {
+  return "digestBytes" in item && typeof item.digestBytes === "number" && item.digestBytes > 0
+    ? `${formatBytes(item.digestBytes)} sent`
+    : null;
+}
+
 function commandsNote(count: number | null | undefined): string | null {
   if (typeof count !== "number" || count <= 0) return null;
   return `ran ${count} read-only ${count === 1 ? "command" : "commands"}`;
@@ -52,6 +59,7 @@ export function WatcherCheckLine({ item }: { item: WatcherFeedEntry }): React.JS
     watcherEventsText(item.eventsCovered),
     ...commandNotes(item.commandsRun, item.commandsDeclined),
     digestNote(item),
+    sentNote(item),
     guardNote(item),
   ].filter((note): note is string => Boolean(note));
   return (

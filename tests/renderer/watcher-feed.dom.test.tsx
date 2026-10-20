@@ -134,6 +134,15 @@ describe("WatcherFeed", () => {
     expect(plain.querySelector("details.watcher-finding-paths")).toBeNull();
   });
 
+  it("says how much the check sent to the watcher when the runtime records it", async () => {
+    const sent: WatcherFeedItem & { digestBytes?: number } = { ...feedItem(1), digestBytes: 24 * 1024 };
+    renderFeed([feedItem(2), sent]);
+    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const checks = list.querySelectorAll(".watcher-check-notes");
+    expect(checks[1]).toHaveTextContent(/ · 24 KiB sent$/u);
+    expect(checks[0]).not.toHaveTextContent(/sent/u);
+  });
+
   it("moves focus to the card's own status after Send and reports the queued note", async () => {
     const runtime = renderFeed([finding(4, "Risky rename.")], { running: true });
     const card = await screen.findByRole("article");

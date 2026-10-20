@@ -6,6 +6,8 @@ export interface DatabaseSchemaRequirements {
   tables: DatabaseRequiredTables;
   columns: readonly (readonly [number, string, readonly string[]])[];
   indexes: readonly (readonly [number, string])[];
+  /** Triggers whose whitespace-folded, lowercase SQL must contain every fragment. */
+  triggers: readonly (readonly [number, string, readonly string[]])[];
 }
 
 const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] = [
@@ -177,6 +179,31 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [94, "agent_context_reads_target_idx"],
     [96, "todos_conversation_idx"],
     [99, "watcher_links_active_watched_idx"],
+    [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
+  ],
+  triggers: [
+    [99, "watcher_links_active_limit", [
+      "before insert on watcher_links",
+      "(select count(*) from watcher_links where status <> 'detached') >= 8",
+      "raise(abort,",
+    ]],
+    [99, "watcher_links_detached_final", [
+      "before update of status on watcher_links",
+      "old.status = 'detached' and new.status <> 'detached'",
+      "raise(abort,",
+    ]],
+    [99, "watcher_wakes_retention", [
+      "after insert on watcher_wakes",
+      "delete from watcher_wakes where link_id = new.link_id and sequence <= new.sequence - 500",
+    ]],
+    [99, "watcher_links_watched_delete", [
+      "before delete on conversations",
+      "raise(abort,",
+      "turn.status not in ('completed', 'failed', 'cancelled', 'interrupted')",
+      "update watcher_links",
+      "watched_conversation_id = null",
+      "where watched_conversation_id = old.id",
+    ]],
   ],
 };

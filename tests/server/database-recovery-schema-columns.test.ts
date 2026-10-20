@@ -20,6 +20,12 @@ afterEach(() => {
 
 const notificationColumns = ["quota_warnings_enabled", "quota_warning_threshold", "notify_only_in_background"];
 const telemetryColumns = ["model", "activity", "usage_json", "tool_use_count", "duration_ms"];
+const watcherTriggers = [
+  "watcher_links_active_limit",
+  "watcher_links_detached_final",
+  "watcher_wakes_retention",
+  "watcher_links_watched_delete",
+];
 const contextPacketTriggers = [
   "conversation_context_packets_immutable",
   "conversation_context_packets_consume_once",
@@ -121,6 +127,12 @@ describe("database health check for settings and subagent columns", () => {
     { version: 99, sql: "ALTER TABLE queued_messages DROP COLUMN watcher_note_json" },
     { version: 99, sql: "DROP INDEX watcher_links_active_watched_idx" },
     { version: 99, sql: "DROP INDEX watcher_wakes_link_idx" },
+    { version: 99, sql: "DROP INDEX watcher_links_project_idx" },
+    ...watcherTriggers.map((trigger) => ({ version: 99, sql: `DROP TRIGGER ${trigger}` })),
+    {
+      version: 99,
+      sql: "DROP TRIGGER watcher_wakes_retention; CREATE TRIGGER watcher_wakes_retention AFTER INSERT ON watcher_wakes BEGIN SELECT 1; END",
+    },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
@@ -149,7 +161,7 @@ describe("database health check for settings and subagent columns", () => {
     primary.close();
   });
 
-  it.each(contextPacketTriggers)("rejects a backup missing %s during off-thread validation", async (trigger) => {
+  it.each([...contextPacketTriggers, ...watcherTriggers])("rejects a backup missing %s during off-thread validation", async (trigger) => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-columns-"));
     directories.push(directory);
     const databasePath = join(directory, "inertia.sqlite");

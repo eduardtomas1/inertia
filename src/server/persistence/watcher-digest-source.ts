@@ -26,7 +26,6 @@ export interface WatcherDigestMessage {
   createdAt: string;
   content: string;
   truncated: boolean;
-  /** The whole message's UTF-8 length when it was read. */
   bytes: number;
 }
 
@@ -132,10 +131,6 @@ export class WatcherDigestSource {
     }));
   }
 
-  /**
-   * The part of a message after its first `offsetBytes` UTF-8 bytes, keeping
-   * only the newest `maximumBytes` of it; `truncated` when its start was left out.
-   */
   messageTextAfter(messageId: string, offsetBytes: number, maximumBytes: number): {
     content: string;
     truncated: boolean;
@@ -206,7 +201,6 @@ export class WatcherDigestSource {
     return this.context.turnReads().files(turnId);
   }
 
-  /** The user message is a watcher note the user forwarded, not the user's own words. */
   isForwardedWatcherNote(messageId: string): boolean {
     return cachedStatement(this.context.database, `
       SELECT 1 FROM messages WHERE id = ? AND role = 'user' AND watcher_note_json IS NOT NULL

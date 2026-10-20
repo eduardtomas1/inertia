@@ -150,7 +150,6 @@ export class WatcherWakeRunner {
   readonly #dispatchFailures = new Map<string, number>();
   /** Coverage of a watched turn whose final pass is still due after the next turn began. */
   readonly #priorCursors = new TurnMemory<WatcherCursor>();
-  /** The possibly still streaming reply the link's last check quoted, and its watched turn. */
   readonly #openReplies = new TurnMemory<WatcherOpenReply>();
   readonly #finalPages = new Map<string, { turnId: string; pages: number }>();
 

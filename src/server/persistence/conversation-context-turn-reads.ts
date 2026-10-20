@@ -49,7 +49,6 @@ export interface ConversationContextTurnRow {
 
 export interface ConversationContextTurnListRow extends ConversationContextTurnRow {
   requestHead: Buffer;
-  /** The turn's request is a watcher note the user forwarded. */
   requestWatcherNote: boolean;
 }
 
@@ -60,7 +59,6 @@ export type ConversationContextTurnEntryRow =
       role: "user" | "assistant";
       createdAt: string;
       attachments: ChatAttachment[];
-      /** A watcher note the user forwarded, not the user's own words. */
       watcherNote: boolean;
     }
   | { kind: "page"; id: string; title: string | null; createdAt: string }

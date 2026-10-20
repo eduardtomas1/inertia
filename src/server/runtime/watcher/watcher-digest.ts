@@ -41,7 +41,6 @@ export type WatcherDigestReader = Pick<
   | "messageText" | "files" | "isForwardedWatcherNote"
 >;
 
-/** The newest reply of a running watched turn, which may still be streaming, and how much of it a check quoted. */
 export interface WatcherOpenReply {
   messageId: string;
   bytes: number;
@@ -78,7 +77,6 @@ export interface WatcherDigestOptions {
    * Defaults to the cursor's turn, then the latest turn.
    */
   turnId?: string;
-  /** The reply an earlier check of this turn read while it may still have been streaming. */
   openReply?: WatcherOpenReply | null;
   lastFinalPage?: boolean;
 }
@@ -104,7 +102,6 @@ export interface WatcherDigest {
   pendingRunningIds: string[];
   /** Stable key of the watched turn's current plan, or null without one. */
   planKey: string | null;
-  /** The reply the cursor stays before because it may still grow; the next check quotes only what it adds. */
   openReply: WatcherOpenReply | null;
   stats: WatcherDigestStats;
 }
@@ -113,7 +110,6 @@ interface DigestReply {
   createdAt: string;
   content: string;
   truncated: boolean;
-  /** The rest of a reply an earlier check quoted while it streamed. */
   continued?: boolean;
 }
 
@@ -282,7 +278,6 @@ function briefSection(source: WatcherDigestReader, turn: AgentTurn, budget: numb
   };
 }
 
-/** The newest bytes of a reply's new part, starting at a whole word. */
 function newestText(value: string, maximumBytes: number): { text: string; cut: boolean } {
   const encoded = Buffer.from(value, "utf8");
   if (encoded.length <= maximumBytes) return { text: value, cut: false };

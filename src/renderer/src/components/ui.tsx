@@ -20,6 +20,7 @@ export function Switch({
   checked,
   onChange,
   label,
+  describedBy,
   disabled = false,
   inactive = false,
 }: {
@@ -27,6 +28,7 @@ export function Switch({
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
+  describedBy?: string;
   disabled?: boolean;
   inactive?: boolean;
 }): React.JSX.Element {
@@ -37,6 +39,7 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       aria-disabled={inactive || undefined}
       className="switch-control"
       data-checked={checked}

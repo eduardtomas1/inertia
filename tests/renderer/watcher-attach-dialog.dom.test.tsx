@@ -159,9 +159,25 @@ describe("WatcherAttachDialog", () => {
       sharing: DEFAULT_WATCHER_SHARING,
       budgets: DEFAULT_WATCHER_BUDGETS,
       privateConnect: "inherit",
+      delivery: "manual",
       initialReview: false,
       modelSelection: { harnessId: "codex-app-server" },
     });
+  });
+
+  it("offers automatic sending as a plain switch, off by default, and attaches with the chosen policy", async () => {
+    const request = recordingRequest(() => ({ kind: "watcher.link", link: link() })).request;
+    const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
+    const toggle = within(dialog).getByRole("switch", { name: "Send findings to the main chat automatically" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(toggle).toHaveAccessibleDescription("Each finding is queued as a note from the watcher; your own messages still go first.");
+    const sharing = within(dialog).getByRole("group", { name: "What the watcher sees" });
+    expect(sharing.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
+    await waitFor(() => expect(request).toHaveBeenCalled());
+    expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ delivery: "auto" });
   });
 
   it("lists only routes on agents that can watch, and only ready ones are selectable", async () => {

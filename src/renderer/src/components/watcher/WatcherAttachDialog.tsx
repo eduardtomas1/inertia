@@ -19,6 +19,7 @@ import {
   WATCHER_PRESETS,
   watcherHarnessAllowed,
   type WatcherBudgets,
+  type WatcherDeliveryPolicy,
   type WatcherLinkView,
   type WatcherPreset,
   type WatcherPrivateConnect,
@@ -73,6 +74,7 @@ export interface WatcherAttachHostProps {
 }
 
 export const WATCHER_READ_ONLY_STATEMENT = "It reads and reports; it never edits files. Codex may run read-only commands.";
+const WATCHER_AUTO_SEND_DETAIL = "Each finding is queued as a note from the watcher; your own messages still go first.";
 
 const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string }> = [
   { key: "brief", label: "The brief" },
@@ -188,6 +190,7 @@ export function WatcherAttachDialog({
     contextReadsPerWake: String(DEFAULT_WATCHER_BUDGETS.contextReadsPerWake),
   }));
   const [privateConnect, setPrivateConnect] = useState<WatcherPrivateConnect>("inherit");
+  const [delivery, setDelivery] = useState<WatcherDeliveryPolicy>("manual");
   const [initialReview, setInitialReview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -306,6 +309,7 @@ export function WatcherAttachDialog({
         sharing,
         budgets,
         privateConnect,
+        delivery,
         initialReview: initialReview && hasCompletedTurn,
       },
     }).then((event) => {
@@ -437,6 +441,18 @@ export function WatcherAttachDialog({
         ))}
       </fieldset>
 
+      <section className="watcher-attach-section watcher-attach-toggle">
+        <Switch
+          id="watcher-attach-auto-send"
+          checked={delivery === "auto"}
+          describedBy="watcher-attach-auto-send-detail"
+          disabled={submitting}
+          onChange={(checked) => setDelivery(checked ? "auto" : "manual")}
+        />
+        <label htmlFor="watcher-attach-auto-send">Send findings to the main chat automatically</label>
+        <p id="watcher-attach-auto-send-detail">{WATCHER_AUTO_SEND_DETAIL}</p>
+      </section>
+
       <details className="watcher-attach-section watcher-attach-disclosure">
         <summary>
           Budgets
@@ -485,7 +501,7 @@ export function WatcherAttachDialog({
         </fieldset>
       )}
 
-      <section className="watcher-attach-section watcher-attach-review">
+      <section className="watcher-attach-section watcher-attach-toggle">
         <Switch
           id="watcher-attach-initial-review"
           checked={initialReview && hasCompletedTurn}

@@ -219,6 +219,142 @@ The official `antigravity-acp` server was not used: it can end a turn with
 `end_turn` after an error and has no macOS Intel artifact. See
 [the investigation](STABILIZATION_PROVIDERS_ANTIGRAVITY.md).
 
+## Watcher harness gate
+
+A watcher is a read-only conversation linked to a watched chat (see
+[the user guide](user/watcher.md)). It may run only on a harness in the
+reviewed allowlist `WATCHER_HARNESS_IDS` in `src/shared/watcher.ts`, checked
+through `watcherHarnessAllowed`:
+
+| Harness | Read-only mechanism |
+| --- | --- |
+| `claude-agent-sdk` | `permissionMode: "plan"`. Bash and edit tools reach Inertia's approval broker, which declines them for a watcher turn. |
+| `codex-app-server` | Supervised maps to `approvalPolicy: "untrusted"` with the read-only sandbox. Codex runs its known-safe read commands inside that OS-enforced sandbox without network access; anything else surfaces as an approval, which is declined. |
+| `opencode-sdk` | Plan mode with the supervised permission ruleset. Edit and shell tools surface as approvals, which are declined. Read, glob, grep and list must run without a prompt; where the supervised ruleset would prompt for them, the run carries `readOnlyProfile: "watcher"`, which denies every tool except read, glob, grep, list and Inertia host tools. |
+
+The gate is checked when a watcher is attached, when every watcher turn is
+prepared (including a message the user types into the watcher chat), and when
+`conversation.update` changes the watcher's model. The attach dialog offers
+only ready routes on these harnesses. A watcher can change its model only
+within the allowlist; its interaction mode and access mode cannot change while
+it is attached.
+
+### Why an allowlist and not a capability id
+
+Watcher support is not a `PROVIDER_CAPABILITY_IDS` entry. Adding an id changes
+every harness's capability manifest and therefore its attestation digest.
+`providerContinuationCompatibilityToken` returns that digest as the
+continuation identity, so a new id would make every existing chat lose native
+session resume on upgrade. The allowlist is ordinary reviewed code: admitting
+a harness is a code change that lands with its portable fixture, and it leaves
+manifests and continuation tokens untouched.
+
+### Enforcement layers
+
+Each layer works on its own; none relies on the model following instructions.
+
+1. **Mode and access pinned.** A watcher conversation is created with
+   `interactionMode: "plan"` and `accessMode: "supervised"`. Turn preparation
+   refuses any watcher turn that is not plan, supervised and on an allowed
+   harness, and `conversation.update` refuses mode and access changes.
+   Supervised is the lowest access level, so a watcher never has more access
+   than the chat it watches.
+2. **Fail-closed interactions.** Approval requests are declined through the
+   provider's own deny decision and recorded as a visible activity. No approval
+   card is broadcast, so watcher conversations never have pending approvals. A
+   second declined request in one turn, or a request without a deny option,
+   stops the turn. An input request stops the turn.
+3. **Real-time activity guard.** A started `file` activity, or an activity in
+   the `coding` category, cancels the provider run and settles the turn as
+   failed with "Watchers are read-only. Inertia stopped this check." The
+   outcome is `write-attempt`; a second attempt during the same watched turn
+   pauses the link with `write-attempts`. A started `command` activity does
+   not stop the turn: commands are governed by the provider gates in the table
+   above, and the receipt records how many read-only commands ran. The
+   `command-attempt` outcome is used only for a command approval that was
+   requested and declined.
+4. **Git fingerprint backstop.** `src/server/git/checkout-fingerprint.ts`
+   fingerprints the checkout before and after each check through
+   `runGitInspection` (`--no-optional-locks`, `core.fsmonitor=false`):
+   `rev-parse --verify HEAD`, a bounded
+   `status --porcelain=v2 -z --untracked-files=all --no-renames`, and
+   `hash-object --no-filters` for changed and untracked paths, batched to at
+   most 24 K characters of arguments for Windows. `--no-filters` keeps
+   repository clean filters from running. More than 2,000 paths or 64 MiB
+   marks the fingerprint truncated. A changed path is *explained* when another
+   turn active on the same checkout reported it in a file activity during the
+   window. The result is *inconclusive*, and does not pause, when another
+   active turn ran a command, a workspace or source-control run was active, or
+   a terminal resume was active. Unexplained paths in a conclusive window pause
+   the link with `write-detected` and list at most 20 paths. A non-repository,
+   a timeout or a truncated fingerprint is *unavailable*; the other layers
+   still apply.
+5. **Boundary instruction.** The `inertia-watcher` instruction states that the
+   watcher is read-only.
+
+Watcher turns also skip checkpoints and turn Git artifacts entirely, so they
+never write `refs/inertia/checkpoints/*`, never run `git write-tree`, and never
+offer a Revert that could undo the watched chat's work. Capability-pack
+instructions are not sent and the orchestration and Browser tools are not
+offered. The watcher's only host tool is the context tool, with a fourth access
+kind, `"watched"`, that reads the watched chat without a route filter and
+without the approval chooser, bounded by `contextReadsPerWake` (default 4).
+
+### Hidden instructions and the digest
+
+- `inertia-watcher` carries the role and boundary, the preset, the user's
+  instructions quoted as user-authored, the output format and the rule to
+  answer exactly `SILENT` when there is nothing to report. It stays under
+  6 KiB, below the 16 KiB per-instruction cap.
+- `inertia-watcher-note` accompanies a main-chat turn that delivers a watcher
+  note, and marks the note as forwarded from the watcher, not written by the
+  user. A steered note carries the same attribution in its provider content.
+
+Both labels are part of the `INERTIA_SECTION_LABEL` alternation in
+`untrusted-agent-text.ts`, so text from the watched chat or the provider that
+imitates them is neutralized. The digest for each check is the watcher turn's
+visible content (64 KiB turn cap, `digestKiB` default 24), not a hidden
+instruction, and every quoted string passes through
+`boundedUntrustedAgentText`.
+
+### Fixtures
+
+`tests/server/watcher-read-only-harnesses.test.ts` is a portable suite
+(`// @inertia-test-suite portable`, without an `@inertia-harness` marker,
+because each harness can be registered only once). It drives
+`tests/helpers/claude-harness-fixture.ts`,
+`tests/helpers/codex-app-server-fixture.ts` and
+`tests/helpers/opencode-lifecycle-server.ts` and proves, for each harness, that
+the watcher input maps to plan mode, the read-only sandbox or the deny
+ruleset; that a scripted edit or command attempt becomes an approval or
+activity that is declined or stopped; that the temporary repository has no new
+files and an identical fingerprint; and that cancellation and shutdown are
+clean. For Codex it also proves that the read-only sandbox is requested. For
+OpenCode it proves that read and grep do not prompt, or exercises the
+read-only profile. Run it with `npm run test:portable`. Integration coverage
+lives in `tests/server/watcher-read-only-guard.test.ts` and
+`tests/server/watcher-delivery.test.ts`, which also checks that steering a note
+is refused on Cursor.
+
+### Excluded harnesses and custom backends
+
+`cursor-acp`, `kimi-acp`, `antigravity-cli` and the CLI harnesses
+(`claude-cli`, `codex-cli`, `cursor-cli`, `opencode-cli`) are not in the
+allowlist. Antigravity has no Inertia-mediated approvals or host tools, so a
+watcher there could neither be held read-only by Inertia nor read the watched
+chat. Any of these can still be the watched chat. A harness joins the
+allowlist only together with a portable fixture that proves the layers above.
+
+A custom backend on an allowed harness can be a watcher, but custom backends
+never receive Inertia host tools. Such a watcher reviews only the digest each
+check sends it and cannot read more of the watched chat; the dock states "Can
+read the watched chat: no (custom backend)".
+
+The watched chat can run on any harness and can switch provider mid-chat. The
+digest is provider-agnostic, `"watched"` access applies no route filter, and
+whether a note can be steered into the running turn is recomputed from that
+turn's harness against `STEERABLE_HARNESS_IDS`.
+
 ## What the open-source review changed
 
 The August 2026 review used other projects as evidence and adversarial test

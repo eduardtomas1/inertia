@@ -20,6 +20,10 @@ It lets the agent act without asking, so choose it only for a workspace and task
 
 Yes. Use [split view](working-side-by-side.md), give chats their own windows, or launch a [Duo](duo.md).
 
+## Can a watcher change my files?
+
+No. A [watcher](watcher.md) runs in Plan mode with Supervised access, its approval requests are declined automatically, and an attempt to edit a file stops its check. If files change during a check and no running agent accounts for them, the watcher pauses and lists the paths.
+
 ## Can I use Inertia from another device?
 
 [Private Connect](../PRIVATE_CONNECT.md) gives scoped access from another device over Tailscale while the desktop is online. Read its [security model](../PRIVATE_CONNECT_SECURITY.md) for the boundaries.

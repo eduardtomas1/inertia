@@ -50,6 +50,21 @@ Neither level can approve actions, answer secret input, access files or
 attachments, open a terminal, mutate Git, change providers, create projects or
 conversations, enable Full Access, or execute arbitrary commands.
 
+## Watchers
+
+A [watcher](user/watcher.md) inherits the visibility of the chat it watches: a
+device that can see the watched chat can also see its watcher, unless the
+watcher is set to **Hidden** in its dock menu. A watcher that is set to
+**Hidden** stays off every device, whatever the watched chat's visibility. The
+device grant format does not change; the desktop gateway applies this rule
+when it authorizes and projects conversations. The device shows the watcher as
+an ordinary chat titled **Watcher · …**, and Settings lists it under its chat
+as **Follows *chat title***.
+
+A Collaborate device can prompt a watcher; those turns keep the watcher's
+read-only policy, and approvals are declined automatically. Sending a watcher
+note to the main chat is available only on the desktop.
+
 Private Connect is deliberately unavailable when Tailscale is missing, signed
 out, disconnected, lacks MagicDNS, reports Funnel, or cannot prove the owned
 Serve mapping. It never falls back to LAN, public HTTP, a relay, a VPS,

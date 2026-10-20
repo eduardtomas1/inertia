@@ -74,6 +74,12 @@ import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 
+export const CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS = [
+  "You are a read-only reviewer, not a planner.",
+  "Answer each check directly in your reply.",
+  "Never write or edit a plan file, never call ExitPlanMode and never ask to leave plan mode.",
+].join(" ");
+
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
@@ -397,6 +403,7 @@ function startClaudeRun(
               : options.input.access === "auto-edit"
                 ? "acceptEdits"
                 : "default",
+          ...(options.input.readOnlyProfile === "watcher" ? { planModeInstructions: CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS } : {}),
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool: permissions.canUseTool,
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),

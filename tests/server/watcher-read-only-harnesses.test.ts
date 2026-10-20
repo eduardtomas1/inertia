@@ -15,7 +15,7 @@ import { CODEX_WATCHER_DISABLED_CONFIG_KEYS } from "../../src/server/codex/read-
 import { RuntimeStore } from "../../src/server/database";
 import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { validateProviderRunInput } from "../../src/server/provider/adapters";
-import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
+import { CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS, createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
 import { openCodePermissions } from "../../src/server/provider/opencode-host-tools";
@@ -227,6 +227,7 @@ const CLAUDE_PLAN_MODE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Grep"
 
 interface ClaudeQueryOptions {
   permissionMode?: string;
+  planModeInstructions?: string;
   allowDangerouslySkipPermissions?: boolean;
   settingSources?: unknown;
   canUseTool?: CanUseTool;
@@ -362,6 +363,85 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
     expect(before.status).toBe("");
+  });
+
+  it("runs allowlisted read-only Bash commands without an approval and declines any other command", async () => {
+    const root = portableFixtureRoot("watcher claude bash");
+    roots.push(root);
+    const repo = repository(root, []);
+    const parserPath = join(repo, "src", "parser.ts");
+    const decisions: Record<string, PermissionResult> = {};
+    const outputs: Record<string, string> = {};
+    const { manager, record } = claudeManager(async function* (sdk) {
+      yield claudeSystem("init");
+      for (const [id, command] of [
+        ["toolu-status", "git status --porcelain"],
+        ["toolu-cat", "cat src/parser.ts | head -5"],
+        ["toolu-rewrite", "cat src/parser.ts > src/parser.ts"],
+      ] as const) {
+        const input = { command, description: "Inspect the parser" };
+        yield claudeToolUse(id, "Bash", input);
+        decisions[id] = await sdk.permission("Bash", input, id);
+        const allowed = decisions[id].behavior === "allow";
+        if (allowed && id === "toolu-rewrite") writeFileSync(parserPath, OVERWRITE);
+        outputs[id] = !allowed ? "denied" : id === "toolu-status" ? git(repo, "status", "--porcelain") : readFileSync(parserPath, "utf8");
+        yield claudeToolResult(id, outputs[id], !allowed);
+      }
+      yield claudeText("SILENT");
+      yield claudeSuccessResult("SILENT", "completed");
+    });
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }));
+    const before = await checkoutState(repo);
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expect(record.options[0]).toMatchObject({ permissionMode: "plan", planModeInstructions: CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS });
+    expect(CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS).toContain("ExitPlanMode");
+    expect(decisions["toolu-status"]).toMatchObject({ behavior: "allow" });
+    expect(decisions["toolu-cat"]).toMatchObject({ behavior: "allow" });
+    expect(outputs["toolu-cat"]).toBe(PARSER_SOURCE);
+    expect(decisions["toolu-rewrite"]).toMatchObject({ behavior: "deny", message: "User declined tool execution." });
+    expect(runtime.violations).toEqual([expect.objectContaining({ linkId: runtime.linkId, kind: "command-attempt", stopped: false })]);
+    expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
+    const commands = runtime.store.conversationDetail(runtime.watcherId)!.activities.filter(({ kind }) => kind === "command");
+    expect(commands.map(({ status }) => status).sort()).toEqual(["completed", "completed", "failed"]);
+    expect(runtime.store.watcherLinks.digest.settledCommandCounts(runtime.watcherId, [turn.id]).get(turn.id)).toBe(2);
+    expect(turn).toMatchObject({ status: "completed" });
+    expect(await checkoutState(repo)).toEqual(before);
+  });
+
+  it("asks a Claude chat that is not a watcher for every Bash command and sends no watcher plan instructions", async () => {
+    const root = portableFixtureRoot("claude plan bash");
+    roots.push(root);
+    const repo = repository(root, []);
+    const asked: string[] = [];
+    const { manager, record } = claudeManager(async function* (sdk) {
+      yield claudeSystem("init");
+      const input = { command: "git status --porcelain" };
+      yield claudeToolUse("toolu-status", "Bash", input);
+      const decision = await sdk.permission("Bash", input, "toolu-status");
+      yield claudeToolResult("toolu-status", decision.behavior, decision.behavior !== "allow");
+      yield claudeText("Done.");
+      yield claudeSuccessResult("Done.", "completed");
+    });
+    cleanups.push(() => manager.disposeAll());
+    const result = await manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-plan-bash",
+      cwd: repo,
+      prompt: "Plan the parser fix.",
+      interactionMode: "plan",
+      access: "supervised",
+    }), {
+      onApproval: (event) => {
+        asked.push(event.request.command ?? "");
+        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "deny", { runId: event.runId, turnId: event.turnId })).toBe(true);
+      },
+    });
+
+    expect(result).toMatchObject({ status: "completed" });
+    expect(asked).toEqual(["git status --porcelain"]);
+    expect(record.options[0]).not.toHaveProperty("planModeInstructions");
   });
 
   it("stops a started edit before it runs, cancels the query and shuts down cleanly", async () => {

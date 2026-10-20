@@ -121,6 +121,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 let app!: AppFixture;
 let secretService: LinuxSecretService | undefined;
 
+/**
+ * Opens a chat from the Work list and waits until it is the one on screen.
+ * Typing before the switch has applied lands in the previous chat's composer
+ * and is dropped when the new chat's draft replaces it.
+ */
+async function openMemberChat(title: string): Promise<void> {
+  const page = app.page;
+  await page.locator(".sidebar").getByRole("button", { name: new RegExp(`^${title},`, "u") }).click();
+  await expect(page.getByRole("heading", { name: title, level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Message composer" }).getByRole("textbox").first()).toBeEditable();
+}
+
 test.beforeAll(async () => {
   // MCP secrets go through Electron's real encrypted vault; on headless Linux
   // a private Secret Service provides it.
@@ -273,7 +285,7 @@ test("groups chats under an initiative from the sidebar, the page and the new-ch
 
   // The agent in a member chat proposes a note with the initiative tool. The
   // chat shows the proposal with the reply; the note waits for review.
-  await sidebar.getByRole("button", { name: new RegExp(`^${FIXTURE_CHAT},`, "u") }).click();
+  await openMemberChat(FIXTURE_CHAT);
   const proposingComposer = page.getByRole("region", { name: "Message composer" });
   await proposingComposer.getByRole("textbox").first().fill(REMEMBER_REQUEST);
   await proposingComposer.getByRole("textbox").first().press("Enter");
@@ -323,7 +335,7 @@ test("groups chats under an initiative from the sidebar, the page and the new-ch
 
   // The next message in a member chat carries the brief and the accepted
   // notes, and leaves a receipt in the chat.
-  await sidebar.getByRole("button", { name: new RegExp(`^${FIXTURE_CHAT},`, "u") }).click();
+  await openMemberChat(FIXTURE_CHAT);
   const memberComposer = page.getByRole("region", { name: "Message composer" });
   await expect(memberComposer.getByRole("button", { name: `Open initiative ${INITIATIVE}` })).toBeVisible();
   await memberComposer.getByRole("textbox").first().fill("Add the payment step");

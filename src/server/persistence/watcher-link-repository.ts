@@ -46,6 +46,7 @@ import {
   watcherLinkViews,
   watcherWakeFromRow,
   watcherWakeSummaries,
+  watcherWatchedAccess,
   type WatcherCursor,
   type WatcherLinkRecord,
   type WatcherLinkRow,
@@ -574,15 +575,7 @@ export class WatcherLinkRepository {
 
   /** True while `targetConversationId` is an attached watcher of `sourceConversationId` in one project. */
   watchedAccess(targetConversationId: string, sourceConversationId: string): boolean {
-    return cachedStatement(this.database, `
-      SELECT 1 FROM watcher_links AS link
-      JOIN conversations AS watcher ON watcher.id = link.watcher_conversation_id
-      JOIN conversations AS watched ON watched.id = link.watched_conversation_id
-      WHERE link.watcher_conversation_id = ? AND link.watched_conversation_id = ?
-        AND link.status <> 'detached'
-        AND watcher.project_id = link.project_id AND watched.project_id = link.project_id
-      LIMIT 1
-    `).get(targetConversationId, sourceConversationId) !== undefined;
+    return watcherWatchedAccess(this.database, targetConversationId, sourceConversationId);
   }
 
   /** Attached watchers stay in plan mode, supervised access and an allowed harness. */

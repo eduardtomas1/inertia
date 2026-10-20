@@ -40,6 +40,7 @@ import type { TurnStreamChannel } from "./turn-stream-channel";
 import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
+import type { WatcherNoteAttribution } from "../../../shared/watcher";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -196,8 +197,45 @@ export interface TurnControllerHooks {
    * a newer active turn.
    */
   onTurnSettled?(turn: AgentTurn, settlement: TurnSettledEvidence): void | Promise<void>;
+  /**
+   * A read-only watcher turn tried to write, run a command, ask a question, or
+   * exhausted its permission denials. Called before any stop settles the turn,
+   * so the owner can classify the settlement. Failures are ignored.
+   */
+  onReadOnlyViolation?(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
+}
+
+export type ReadOnlyWatcherViolationKind =
+  | "write-attempt"
+  | "command-attempt"
+  | "input"
+  | "approval-limit";
+
+export interface ReadOnlyWatcherViolation {
+  linkId: string;
+  wakeId: string | null;
+  kind: ReadOnlyWatcherViolationKind;
+  /** Bounded provider-supplied title; untrusted display text. */
+  detail: string;
+  /** True when Inertia stopped the turn because of this violation. */
+  stopped: boolean;
+}
+
+/** Server-only read-only policy for a turn in an attached watcher chat. */
+export interface ReadOnlyWatcherTurn {
+  linkId: string;
+  /** The claimed check, or null for a message the user typed into the watcher. */
+  wakeId: string | null;
+  deniedApprovals: number;
+}
+
+export interface FollowUpSteerOptions {
+  /** Provider-facing text; the persisted message keeps the visible content. */
+  providerContent?: string;
+  /** Server-only attribution for a forwarded watcher note. */
+  watcherNote?: WatcherNoteAttribution;
 }
 
 export interface TurnSettledEvidence {
@@ -213,6 +251,10 @@ export interface QueueTurnRequest {
   privateConnectDeviceId?: string;
   /** Server-only authorization for the exact locked Duo judge dispatch. */
   authorizedDuoComparisonLaunchId?: string;
+  /** Server-only claim on the exact dispatching watcher check this turn runs. */
+  authorizedWatcherWakeId?: string;
+  /** Server-only attribution for a watcher note forwarded into this chat. */
+  watcherNote?: WatcherNoteAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
@@ -352,6 +394,8 @@ export interface ActiveTurn {
   inputIds: Set<string>;
   subagentTelemetry?: TurnSubagentTelemetry;
   onSettled?: QueueTurnRequest["onSettled"];
+  /** Present only for turns in an attached watcher chat. */
+  readOnlyWatcher?: ReadOnlyWatcherTurn;
 }
 
 export interface FollowUpAdmissionLease {

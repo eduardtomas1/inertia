@@ -40,7 +40,7 @@ function image(name: string, bytes: number): ChatAttachment {
   };
 }
 
-async function fixture(options: { providerId?: ProviderId; imageModel?: boolean } = {}) {
+async function fixture(options: { providerId?: ProviderId; imageModel?: boolean; watcherPolicy?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "inertia-agent-context-tool-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -116,7 +116,21 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean 
   };
   const attachmentsById = new Map<string, ChatAttachment>();
   const broadcast = vi.fn();
+  const readsByTurn = new Map<string, number>();
+  const watcherPolicy = {
+    watchedConversationFor: (conversationId: string) => {
+      const link = store.watcherLinks.findByWatcher(conversationId);
+      return link && link.status !== "detached" ? link.watchedConversationId : null;
+    },
+    consumeRead: (turnId: string, budget: number) => {
+      const used = readsByTurn.get(turnId) ?? 0;
+      if (used >= budget) return false;
+      readsByTurn.set(turnId, used + 1);
+      return true;
+    },
+  };
   const manager = new AgentThreadManager({
+    ...(options.watcherPolicy ? { watcherPolicy } : {}),
     store,
     providers: {} as never,
     backendProfileController: {} as never,
@@ -155,6 +169,7 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean 
   return {
     begin,
     bridgeFor,
+    manager,
     broadcast,
     contextRequests,
     otherProject,
@@ -609,6 +624,124 @@ describe("inertia_request_context", () => {
       expect(definition.description).toMatch(/approval/u);
       expect(Object.keys(definition.inputSchema.properties as object).sort())
         .toEqual(["conversationId", "cursor", "limit", "turnId"]);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("inertia_request_context for a watcher", () => {
+  async function watcherFixture(contextReadsPerWake = 4) {
+    const context = await fixture({ watcherPolicy: true });
+    const { begin, settle, store, project, target } = context;
+    const watchedTurn = begin(target, "Refactor the export writer.", { endpointIdentity: "watched-endpoint" });
+    store.createMessage(target.id, "WATCHED-ANSWER", "assistant", [], watchedTurn.id, tick());
+    settle(watchedTurn.id);
+    const { link, conversation: watcher } = store.watcherLinks.createWithConversation({
+      link: {
+        id: randomUUID(),
+        watchedConversationId: target.id,
+        preset: "reviewer",
+        instructions: "",
+        sharing: { brief: true, activities: true, changedFiles: true, partialReplies: true },
+        budgets: { wakesPerWatchedTurn: 12, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake },
+        privateConnect: "inherit",
+      },
+      conversation: {
+        projectId: project.id,
+        title: "Watcher · Reviewer · Current work",
+        options: {
+          modelSelection: providerNativeModelSelection({ providerId: context.providerId, modelId: "model-one" }),
+          interactionMode: "plan",
+          accessMode: "supervised",
+        },
+      },
+    }, tick());
+    const watcherTurn = begin(watcher, "Check 1 for 'Current work'.");
+    return { ...context, link, watcher, watchedTurn, watcherTurn };
+  }
+
+  it("reads the watched chat without a chooser card, defaulting to it, unfiltered by endpoint, and records watched access", async () => {
+    const context = await watcherFixture();
+    const { bridgeFor, pendingInputs, store, target, watcher, watchedTurn, watcherTurn } = context;
+    try {
+      const bridge = bridgeFor(watcherTurn);
+      const list = parsed(await bridge.invoke(call({})));
+      expect(pendingInputs.size).toBe(0);
+      expect(list.chat).toMatchObject({ conversationId: target.id, access: "watched", accessLabel: expect.any(String) });
+      expect(list.withheldTurns).toBeUndefined();
+      expect(list.turns.map(({ turnId }: { turnId: string }) => turnId)).toEqual([watchedTurn.id]);
+
+      const read = parsed(await bridge.invoke(call({ turnId: watchedTurn.id })));
+      expect(read.entries).toContainEqual({ kind: "answer", text: "WATCHED-ANSWER" });
+      expect(store.conversationDetail(watcher.id)?.contextReads).toEqual([
+        expect.objectContaining({ sourceConversationId: target.id, access: "watched", targetTurnId: watcherTurn.id }),
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses any other chat instead of asking the user", async () => {
+    const context = await watcherFixture();
+    const { begin, bridgeFor, pendingInputs, settle, store, watcherTurn } = context;
+    try {
+      const other = store.createConversation(context.project.id, "Unrelated chat", { activate: false });
+      settle(begin(other, "Unrelated request").id);
+      const result = await bridgeFor(watcherTurn).invoke(call({ conversationId: other.id }));
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text).error.code).toBe("not_available_to_watchers");
+      expect(pendingInputs.size).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("enforces the per-check context read budget", async () => {
+    const context = await watcherFixture(2);
+    const { bridgeFor, store, watcherTurn } = context;
+    try {
+      const bridge = bridgeFor(watcherTurn);
+      parsed(await bridge.invoke(call({})));
+      parsed(await bridge.invoke(call({})));
+      const third = await bridge.invoke(call({}));
+      expect(third.success).toBe(false);
+      expect(JSON.parse(third.text).error.code).toBe("budget_exceeded");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("loses watched access once the watcher is detached", async () => {
+    const context = await watcherFixture();
+    const { bridgeFor, contextRequests, link, pendingInputs, store, target, watcher, watcherTurn } = context;
+    try {
+      expect(store.watcherLinks.transition(link.id, ["watching"], { status: "detached", reason: "user" }, tick()))
+        .not.toBeNull();
+      expect(store.contextPackets.turnReads.access({
+        targetConversationId: watcher.id,
+        targetTurnId: watcherTurn.id,
+        targetUserMessageId: watcherTurn.userMessageId,
+        sourceConversationId: target.id,
+      })).toBeNull();
+      const pending = bridgeFor(watcherTurn).invoke(call({ conversationId: target.id }));
+      expect(pendingInputs.size).toBe(1);
+      contextRequests.cancelForTurn(watcher.id, watcherTurn.id);
+      await expect(pending).resolves.toMatchObject({ success: false });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("offers a watcher only the context tool", async () => {
+    const context = await watcherFixture();
+    const { manager, store, watcher, watcherTurn } = context;
+    try {
+      const bridge = manager.contextOnlyBridgeFor({ conversation: store.conversation(watcher.id), turn: watcherTurn });
+      expect(bridge.definitions.map(({ name }) => name)).toEqual(["inertia_request_context"]);
+      const refused = await bridge.invoke({ ...call({}), tool: "inertia_create_conversation" });
+      expect(JSON.parse(refused.text).error.code).toBe("unknown_tool");
+      expect(parsed(await bridge.invoke(call({}))).chat.access).toBe("watched");
     } finally {
       store.close();
     }

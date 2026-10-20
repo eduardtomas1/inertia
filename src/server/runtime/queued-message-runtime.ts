@@ -11,6 +11,8 @@ import {
   awaitMessageSendPreparation, MessageSendPreparationTimeoutError, messageSendPreparationDeadline,
 } from "./commands/message-send-preparation";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
+import type { WatcherNoteAttribution } from "../../shared/watcher";
+import { watcherNoteDelivery } from "./watcher/watcher-note-instruction";
 
 const ADMISSION_RETRY_MS = 1_000;
 
@@ -77,6 +79,7 @@ export function createQueuedMessageRuntime(
     changed(conversationId);
     const handler = createTurnInteractionCommandHandler({
       ...dependencies, queuedMessage: first,
+      ...(first.watcherNote ? { watcherDelivery: watcherNoteDelivery(first.watcherNote) } : {}),
       send: (_socket, _event) => undefined,
     });
     try {
@@ -212,6 +215,30 @@ export function createQueuedMessageRuntime(
     },
   };
 
+  /**
+   * Queues a watcher note the user chose to forward. It waits behind every
+   * user-authored queued message and shares the chat's queue limit.
+   */
+  function enqueueWatcherNote(input: { conversationId: string; id: string; content: string; watcherNote: WatcherNoteAttribution }): MessageQueueResult {
+    const conversation = requireConversation(input.conversationId);
+    if (!dependencies.enableProviders) throw new RuntimeRequestError("Message queues require an available provider runtime.");
+    const content = input.content.trim();
+    if (!content) throw new RuntimeRequestError("The watcher note is empty.");
+    try {
+      store.queuedMessages.add({
+        id: input.id, conversation, content, attachments: [],
+        digest: queuedIntentDigest(content, []), watcherNote: input.watcherNote,
+      });
+    } catch (error) {
+      throw error instanceof QueuedMessageLimitError
+        ? new RuntimeRequestError("The main chat's queue is full. Send or remove a queued message, then try again.")
+        : error;
+    }
+    changed(conversation.id);
+    void schedule(conversation.id).catch(() => undefined);
+    return result(conversation.id, input.id);
+  }
+
   async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
     const { conversationId, id, turnId } = input;
     requireConversation(conversationId);
@@ -334,6 +361,7 @@ export function createQueuedMessageRuntime(
   return {
     handler,
     turnInteractionHandler: createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps }),
+    enqueueWatcherNote,
     onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
     start(): void {
       store.queuedMessages.reconcile();

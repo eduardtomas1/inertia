@@ -8,6 +8,7 @@ import { RuntimeRequestError } from "../../runtime-errors";
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
+  FollowUpSteerOptions,
   FollowUpSteerResult,
   TurnProviderRuntime,
 } from "./turn-controller-types";
@@ -97,13 +98,15 @@ export class TurnFollowUpCoordinator {
     attachments: readonly ChatAttachment[],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
-    queuedMessageId?: string,
+    options: FollowUpSteerOptions = {},
   ): Promise<FollowUpSteerResult> {
     await lease.ready;
     const active = this.owners.get(lease);
     if (active?.runState.awaitingProviderTurn()) await providerTurnStarted(active, signal);
     const current = this.options.activeForConversation(lease.conversationId);
     const followUp = input.content.trim();
+    const providerContent = options.providerContent?.trim() ?? followUp;
+    const messageOptions = options.watcherNote ? [{ watcherNote: options.watcherNote }] as const : [] as const;
     if (
       !active
       || current !== active
@@ -113,6 +116,7 @@ export class TurnFollowUpCoordinator {
     ) return { kind: "turn-ended" };
     if (
       !followUp
+      || !providerContent
       || (input.imagePaths.length > 0 && !lease.supportsImages)
       || !this.options.providers.steer
       || signal?.aborted
@@ -127,7 +131,7 @@ export class TurnFollowUpCoordinator {
     try {
       accepted = await this.options.providers.steer(
         lease.conversationId,
-        { content: [followUp, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
+        { content: [providerContent, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
         { runId: active.turn.runId, turnId: active.turn.id },
       );
     } catch (error) {
@@ -161,7 +165,8 @@ export class TurnFollowUpCoordinator {
           lease.submittedAt,
           this.options.now(),
           attachments,
-          queuedMessageId,
+          options.queuedMessageId,
+          ...messageOptions,
         ),
       };
     }
@@ -173,7 +178,8 @@ export class TurnFollowUpCoordinator {
       laterThan(lease.submittedAt, boundary?.after ?? null),
       this.options.now(),
       attachments,
-      queuedMessageId,
+      options.queuedMessageId,
+      ...messageOptions,
     );
     this.options.answerBoundary?.record(active, message.createdAt, boundary?.deferred ?? false);
     return { kind: "accepted", message };

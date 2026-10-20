@@ -483,6 +483,11 @@ export function createConversationCommandHandler(
             dependencies.store.assertDuoComparisonTurnAllowed(
               conversationId,
             );
+            dependencies.store.watcherLinks.assertRunConfigurationAllowed(conversationId, {
+              interactionMode: update.interactionMode ?? current.interactionMode,
+              accessMode: update.accessMode ?? current.accessMode,
+              harnessId: (canonicalSelection ?? current.modelSelection).harnessId,
+            });
           } catch (error) {
             throw new RuntimeRequestError(
               error instanceof Error

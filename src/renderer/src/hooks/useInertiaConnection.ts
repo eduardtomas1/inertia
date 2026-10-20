@@ -19,7 +19,11 @@ import {
   UNREADABLE_RUNTIME_RESPONSE,
   type PendingConnectionRequest,
 } from "../utils/connectionMessages";
-import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
+import {
+  applyConversationShellEvent,
+  applyWatcherLinkEvent,
+} from "../utils/runtimeSnapshotProjection";
+import { publishWatcherLive } from "../utils/watcherLiveStore";
 import {
   publishesWorkspaceGitCompletion,
   runtimeCommandPolicy,
@@ -207,6 +211,16 @@ export function useInertiaConnection(): InertiaConnection {
                   setSnapshot((current) => current
                     ? applyConversationShellEvent(current, shellEvent)
                     : current);
+                } else if (
+                  event.type === "watcher.link.updated"
+                  || event.type === "watcher.link.removed"
+                ) {
+                  const linkEvent = event;
+                  setSnapshot((current) => current
+                    ? applyWatcherLinkEvent(current, linkEvent)
+                    : current);
+                } else if (event.type === "watcher.live") {
+                  publishWatcherLive(event);
                 }
               } else if (event.type === "runtime.sync.completed") {
                 const decision = projectionRef.current.complete(event.sync);

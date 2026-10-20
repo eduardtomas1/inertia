@@ -289,6 +289,23 @@ export function watcherFeedItem(record: WatcherWakeRecord): WatcherFeedItem {
 }
 
 /** Attached links, oldest first. Detached links leave the shell projection. */
+/** True while `targetConversationId` is an attached watcher of `sourceConversationId` in one project. */
+export function watcherWatchedAccess(
+  database: Database.Database,
+  targetConversationId: string,
+  sourceConversationId: string,
+): boolean {
+  return cachedStatement(database, `
+    SELECT 1 FROM watcher_links AS link
+    JOIN conversations AS watcher ON watcher.id = link.watcher_conversation_id
+    JOIN conversations AS watched ON watched.id = link.watched_conversation_id
+    WHERE link.watcher_conversation_id = ? AND link.watched_conversation_id = ?
+      AND link.status <> 'detached'
+      AND watcher.project_id = link.project_id AND watched.project_id = link.project_id
+    LIMIT 1
+  `).get(targetConversationId, sourceConversationId) !== undefined;
+}
+
 export function activeWatcherLinks(database: Database.Database): WatcherLinkRecord[] {
   return (cachedStatement(database, `${LATEST_WATCHER_WAKE_SQL}
     WHERE link.status <> 'detached' ORDER BY link.created_at ASC, link.id ASC`)

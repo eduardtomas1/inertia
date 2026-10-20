@@ -28,6 +28,7 @@ import type {
 import type { TurnInteractionCoordinator } from "./turn-interaction-coordinator";
 import type { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
+import { isReadOnlyWriteActivity } from "./turn-read-only-watcher";
 
 export interface TurnProviderEventProjectorOptions {
   store: RuntimeStore;
@@ -143,12 +144,16 @@ export class TurnProviderEventProjector {
           agentActivityKind(event),
           agentActivityStatus(event),
         );
-        if (!recorded) break;
-        this.options.hooks.broadcast({
-          type: "agent.activity",
-          activity: recorded.activity,
-        });
-        if (recorded.runsChanged) this.broadcastConversationShell(active);
+        if (recorded) {
+          this.options.hooks.broadcast({
+            type: "agent.activity",
+            activity: recorded.activity,
+          });
+          if (recorded.runsChanged) this.broadcastConversationShell(active);
+        }
+        if (active.readOnlyWatcher && isReadOnlyWriteActivity(event)) {
+          this.options.interactions.stopForReadOnly(active, "write-attempt", event.label);
+        }
         break;
       }
       case "status":
@@ -170,7 +175,8 @@ export class TurnProviderEventProjector {
         break;
       case "approval":
         this.options.activities.flushPending(active);
-        this.options.interactions.openApproval(active, event.request);
+        if (active.readOnlyWatcher) this.options.interactions.denyForReadOnly(active, event.request);
+        else this.options.interactions.openApproval(active, event.request);
         break;
       case "approval-resolved":
         this.options.interactions.resolveApproval(
@@ -181,7 +187,9 @@ export class TurnProviderEventProjector {
         break;
       case "input":
         this.options.activities.flushPending(active);
-        this.options.interactions.openInput(active, event.request);
+        if (active.readOnlyWatcher) {
+          this.options.interactions.stopForReadOnly(active, "input", event.request.questions[0]?.question ?? "A question");
+        } else this.options.interactions.openInput(active, event.request);
         break;
       case "input-resolved":
         this.options.interactions.resolveInput(active, event.requestId);

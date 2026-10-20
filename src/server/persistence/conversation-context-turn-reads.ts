@@ -22,6 +22,7 @@ import {
 } from "./conversation-context-source";
 import { parseTurnGitArtifactFiles } from "./git-artifact-codecs";
 import type { ConversationRow } from "./rows";
+import { watcherWatchedAccess } from "./watcher-link-codecs";
 
 const MAX_TURN_ACTIVITIES = 2_000;
 const MAX_TURN_MESSAGES = 500;
@@ -141,6 +142,7 @@ export class ConversationContextTurnReads {
     const source = this.context.requireConversation(input.sourceConversationId);
     const target = this.context.requireConversation(input.targetConversationId);
     if (source.id === target.id) return "own";
+    if (watcherWatchedAccess(this.context.database, target.id, source.id)) return "watched";
     const sameWorkspace = this.sameWorkspace(source.id, target.id);
     const messageIds = this.resentReferenceMessageIds(
       target.id,

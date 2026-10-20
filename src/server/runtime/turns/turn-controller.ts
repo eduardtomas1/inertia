@@ -28,6 +28,7 @@ import { PROVIDER_INFO } from "../../provider/catalog";
 import type {
   ActiveTurn,
   FollowUpAdmissionLease,
+  FollowUpSteerOptions,
   FollowUpSteerResult,
   ProviderStartAttempt,
   QueuedTurn,
@@ -560,6 +561,7 @@ export class TurnController {
       request.conversationId,
       request.authorizedDuoComparisonLaunchId,
     );
+    this.store.watcherLinks.assertWakeTurnAllowed(request.conversationId, request.authorizedWatcherWakeId);
     if (this.isActive(request.conversationId)) {
       throw new RuntimeRequestError(
         "This conversation already has an active turn.",
@@ -937,7 +939,7 @@ export class TurnController {
     attachments: readonly ChatAttachment[] = [],
     onProviderAcknowledged?: () => void,
     signal?: AbortSignal,
-    queuedMessageId?: string,
+    options?: FollowUpSteerOptions,
   ): Promise<FollowUpSteerResult> {
     return this.followUps.steer(
       lease,
@@ -945,7 +947,7 @@ export class TurnController {
       attachments,
       onProviderAcknowledged,
       signal,
-      queuedMessageId,
+      options,
     );
   }
 

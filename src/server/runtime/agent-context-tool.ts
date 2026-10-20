@@ -84,7 +84,20 @@ export interface AgentContextToolSource {
   turn: AgentTurn;
 }
 
+/**
+ * Injected watcher rules; the tool never imports watcher runtime modules. An
+ * attached watcher reads its watched chat with no approval card, within a
+ * per-check read budget, and never opens the context chooser.
+ */
+export interface AgentContextWatcherPolicy {
+  /** The chat an attached watcher conversation watches, or null. */
+  watchedConversationFor(conversationId: string): string | null;
+  /** Spends one read of this turn's budget; false once the budget is used up. */
+  consumeRead(turnId: string, budget: number): boolean;
+}
+
 export interface AgentContextToolDependencies {
+  watcherPolicy?: AgentContextWatcherPolicy;
   store: RuntimeStore;
   contextRequests: ConversationContextRequestCoordinator;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
@@ -131,8 +144,16 @@ export class AgentContextTool {
     source: AgentContextToolSource,
     call: ProviderHostToolCall,
   ): Promise<ProviderHostToolResult> {
-    const input = inputSchema.parse(call.arguments ?? {});
+    const parsed = inputSchema.parse(call.arguments ?? {});
     const current = this.dependencies.assertSource(source);
+    const watchedConversationId = this.dependencies.watcherPolicy?.watchedConversationFor(current.id) ?? null;
+    if (watchedConversationId !== null) {
+      return await this.readAsWatcher(source, call, current, {
+        ...parsed,
+        conversationId: parsed.conversationId ?? watchedConversationId,
+      });
+    }
+    const input = parsed;
     if (!input.conversationId && (input.turnId || input.cursor || input.limit)) {
       return failure("invalid_arguments", "Pass a conversationId with turnId, cursor, or limit.");
     }
@@ -151,6 +172,43 @@ export class AgentContextTool {
       sourceConversationId: input.conversationId,
     });
     if (!access) return await this.requestApproval(source, call, current, input);
+    return await this.read(source, call, current, access, {
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      cursor: input.cursor,
+      limit: input.limit ?? DEFAULT_AGENT_CONTEXT_TURNS,
+    });
+  }
+
+  /**
+   * Watchers read their watched chat, their own chat and chats already shared
+   * with them. Anything else fails instead of asking the user to choose.
+   */
+  private async readAsWatcher(
+    source: AgentContextToolSource,
+    call: ProviderHostToolCall,
+    current: Conversation,
+    input: z.infer<typeof inputSchema> & { conversationId: string },
+  ): Promise<ProviderHostToolResult> {
+    if (input.turnId && input.limit) {
+      return failure("invalid_arguments", "limit applies to the turn list, not to one turn.");
+    }
+    const access = this.dependencies.store.contextPackets.turnReads.access({
+      targetConversationId: current.id,
+      targetTurnId: source.turn.id,
+      targetUserMessageId: source.turn.userMessageId,
+      sourceConversationId: input.conversationId,
+    });
+    if (!access) {
+      return failure(
+        "not_available_to_watchers",
+        "A watcher reads only the chat it watches. Omit conversationId to read the watched chat.",
+      );
+    }
+    const budget = this.dependencies.store.watcherLinks.findByWatcher(current.id)?.budgets.contextReadsPerWake ?? 0;
+    if (!this.dependencies.watcherPolicy!.consumeRead(source.turn.id, budget)) {
+      return failure("budget_exceeded", `This check already read context ${budget} times.`);
+    }
     return await this.read(source, call, current, access, {
       conversationId: input.conversationId,
       turnId: input.turnId,

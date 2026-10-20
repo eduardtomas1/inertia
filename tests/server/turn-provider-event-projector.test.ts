@@ -381,3 +381,86 @@ describe("TurnProviderEventProjector plan updates", () => {
     }));
   });
 });
+
+describe("TurnProviderEventProjector read-only watcher turns", () => {
+  function watcherProjector(readOnly: boolean) {
+    const interactions = {
+      openApproval: vi.fn(),
+      denyForReadOnly: vi.fn(),
+      openInput: vi.fn(),
+      stopForReadOnly: vi.fn(),
+    };
+    const broadcast = vi.fn();
+    const projector = new TurnProviderEventProjector({
+      store: {} as RuntimeStore,
+      hooks: { broadcast, broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
+      agentPlans: new Map(),
+      streams: { closeAssistantSegment: vi.fn(), flush: vi.fn() } as never,
+      activities: {
+        flushPending: vi.fn(),
+        record: vi.fn(() => ({ activity: { id: "activity-1" }, runsChanged: false })),
+      } as never,
+      interactions: interactions as never,
+      scheduler: defaultTurnScheduler(),
+      now: () => "2030-01-01T00:00:01.000Z",
+      transition: () => false,
+      observeSubagent: () => false,
+    });
+    const active = {
+      conversation: { id: "conversation-1" },
+      turn: { id: "turn-1", runId: "run-1", providerId: "codex" },
+      ...(readOnly ? { readOnlyWatcher: { linkId: "link-1", wakeId: "wake-1", deniedApprovals: 0 } } : {}),
+    } as ActiveTurn;
+    const identity = { providerId: "codex" as const, conversationId: "conversation-1", runId: "run-1", turnId: "turn-1" };
+    const activity = (kind: ProviderActivityEvent["kind"], label: string, phase: ProviderActivityEvent["phase"] = "started") => {
+      projector.project(active, { ...identity, type: "activity", kind, phase, label });
+    };
+    return { active, activity, broadcast, identity, interactions, projector };
+  }
+
+  it("declines approvals and stops on questions without opening a card", () => {
+    const { active, identity, interactions, projector } = watcherProjector(true);
+    const request = {
+      requestId: "approval-1", kind: "command" as const, title: "Run tests",
+      permissionRoots: [], availableDecisions: ["approve" as const, "deny" as const],
+    };
+    projector.project(active, { ...identity, type: "approval", request });
+    projector.project(active, {
+      ...identity,
+      type: "input",
+      request: { requestId: "input-1", questions: [{ id: "q", header: "", question: "Which file?", options: [] }] },
+    } as never);
+
+    expect(interactions.denyForReadOnly).toHaveBeenCalledWith(active, request);
+    expect(interactions.openApproval).not.toHaveBeenCalled();
+    expect(interactions.openInput).not.toHaveBeenCalled();
+    expect(interactions.stopForReadOnly).toHaveBeenCalledWith(active, "input", "Which file?");
+  });
+
+  it("stops on a started write but not on commands, reads or settled writes", () => {
+    const { active, activity, broadcast, interactions } = watcherProjector(true);
+    activity("command", "rg TODO src");
+    activity("tool", "Read src/export.ts");
+    activity("tool", "Edit", "completed");
+    expect(interactions.stopForReadOnly).not.toHaveBeenCalled();
+
+    activity("tool", "File change");
+    activity("tool", "Write");
+    expect(interactions.stopForReadOnly).toHaveBeenNthCalledWith(1, active, "write-attempt", "File change");
+    expect(interactions.stopForReadOnly).toHaveBeenNthCalledWith(2, active, "write-attempt", "Write");
+    expect(broadcast).toHaveBeenCalledWith({ type: "agent.activity", activity: { id: "activity-1" } });
+  });
+
+  it("leaves ordinary turns on the normal approval and activity paths", () => {
+    const { active, activity, identity, interactions, projector } = watcherProjector(false);
+    activity("tool", "Edit");
+    const request = {
+      requestId: "approval-1", kind: "file-change" as const, title: "Edit",
+      permissionRoots: [], availableDecisions: ["approve" as const, "deny" as const],
+    };
+    projector.project(active, { ...identity, type: "approval", request });
+    expect(interactions.openApproval).toHaveBeenCalledWith(active, request);
+    expect(interactions.denyForReadOnly).not.toHaveBeenCalled();
+    expect(interactions.stopForReadOnly).not.toHaveBeenCalled();
+  });
+});

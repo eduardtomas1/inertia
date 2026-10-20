@@ -1,0 +1,49 @@
+/* Eager: the chip and the nested Work row are the only watcher styles that
+ * load before the dock. Everything else lives in the lazy dock chunk. */
+.watched-by-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  margin: 0 0 6px 4px;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-xs);
+  line-height: 20px;
+}
+
+.watched-by-chip:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.watched-by-chip-mark {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.watched-by-chip[data-status="waking"] .watched-by-chip-mark {
+  background: var(--status-working);
+  opacity: 1;
+}
+
+.watched-by-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watched-by-chip-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--accent-text);
+  background: var(--accent);
+}

@@ -18,6 +18,8 @@ import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-co
 import { join } from "node:path";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { hold, release } from "../../src/server/runtime/update-hold";
+import { createTurnInteractionCommandHandler } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { watcherNoteDelivery } from "../../src/server/runtime/watcher/watcher-note-instruction";
 
 afterEach(cleanupTurnControllerTestDirectories);
 async function fixture(
@@ -878,5 +880,71 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
         expect(f.provider.runCount).toBe(1);
       } finally { await f.close(); }
     }
+  });
+
+  describe("forwarded watcher notes", () => {
+    const note = {
+      linkId: "11111111-1111-4111-8111-111111111111",
+      wakeId: "22222222-2222-4222-8222-222222222222",
+      watcherConversationId: "33333333-3333-4333-8333-333333333333",
+      preset: "reviewer" as const,
+      watcherLabel: "Codex · gpt-test",
+      delivery: "queue" as const,
+    };
+
+    it("waits behind user-authored queued messages and dispatches with its attribution and note instruction", async () => {
+      const f = await fixture();
+      try {
+        startRunning(f);
+        const noteId = randomUUID();
+        const receipt = f.queue.enqueueWatcherNote({
+          conversationId: f.conversationId, id: noteId, content: "Check the Windows path handling.", watcherNote: note,
+        });
+        expect(receipt.receipt).toMatchObject({ id: noteId, watcherNote: note });
+        const userId = randomUUID();
+        await f.command("message.queue.enqueue", userId);
+        expect(f.store.queuedMessages.list(f.conversationId).map(({ id }) => id)).toEqual([userId, noteId]);
+
+        f.provider.resolve({ status: "completed", text: "Done" });
+        await f.drain();
+        expect(f.store.queuedMessages.get(f.conversationId, userId)?.state).toBe("accepted");
+        expect(f.store.queuedMessages.get(f.conversationId, noteId)?.state).toBe("waiting");
+        expect(f.provider.input?.prompt).not.toContain("inertia-watcher-note");
+
+        f.provider.resolve({ status: "completed", text: "Done again" });
+        await f.drain();
+        const accepted = f.store.queuedMessages.get(f.conversationId, noteId)!;
+        expect(accepted.state).toBe("accepted");
+        expect(f.store.message(accepted.userMessageId!)).toMatchObject({
+          content: "Check the Windows path handling.", watcherNote: note,
+        });
+        expect(f.provider.input?.prompt).toContain("[inertia-watcher-note]");
+        expect(f.provider.input?.prompt).toContain("read-only watcher");
+      } finally { await f.close(); }
+    });
+
+    it("names the main chat's full queue", async () => {
+      const f = await fixture();
+      try {
+        startRunning(f);
+        for (let index = 0; index < 3; index += 1) await f.command("message.queue.enqueue", randomUUID());
+        expect(() => f.queue.enqueueWatcherNote({
+          conversationId: f.conversationId, id: randomUUID(), content: "One more finding.", watcherNote: note,
+        })).toThrow("The main chat's queue is full");
+      } finally { await f.close(); }
+    });
+
+    it("never turns a watcher delivery into an unattributed steer of a running turn", async () => {
+      const f = await fixture();
+      try {
+        startRunning(f);
+        const handler = createTurnInteractionCommandHandler({ ...f.dependencies, watcherDelivery: watcherNoteDelivery(note) });
+        await expect(handler(null as unknown as WebSocket, {
+          type: "message.send", requestId: randomUUID(),
+          payload: { conversationId: f.conversationId, content: "Finding.", attachments: [], activate: false },
+        })).rejects.toThrow("This chat is busy");
+        expect(f.provider.steerCalls).toEqual([]);
+      } finally { await f.close(); }
+    });
   });
 });

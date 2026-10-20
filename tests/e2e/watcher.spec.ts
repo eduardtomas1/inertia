@@ -501,6 +501,25 @@ test.describe("watcher on the fake Codex route", () => {
     await selectWorkspaceTool(tools, "Changes");
     await expect(tools.locator(".loading-mark")).toHaveCount(0);
     await capture(info, "compare-changes-light");
+    const frame = page.locator(".watcher-dock-frame");
+    await expect(frame).toHaveAttribute("data-presentation", "sheet");
+    const toolsTop = (await tools.boundingBox())!.y;
+    await handle().click();
+    await expect(dock()).toBeVisible();
+    await expect.poll(async () => {
+      const dockBox = await dock().boundingBox();
+      const toolsBox = await tools.boundingBox();
+      return dockBox && toolsBox ? Math.round(toolsBox.x - (dockBox.x + dockBox.width)) : null;
+    }).toBeGreaterThanOrEqual(-1);
+    expect((await tools.boundingBox())!.y).toBe(toolsTop);
+    const header = await page.locator(".workspace-header").boundingBox();
+    expect((await dock().boundingBox())!.y).toBeGreaterThanOrEqual(header!.y + header!.height - 1);
+    const topmost = await dock().evaluate((aside) => {
+      const box = aside.getBoundingClientRect();
+      return aside.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    });
+    expect(topmost).toBe(true);
+    await capture(info, "dock-beside-panel-light");
     await selectWorkspaceTool(tools, "Background tasks");
     await expect(tools.locator(".loading-mark")).toHaveCount(0);
     await capture(info, "compare-background-tasks-light");

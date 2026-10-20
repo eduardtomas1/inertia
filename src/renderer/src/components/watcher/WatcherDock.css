@@ -2,10 +2,6 @@
  * motion constants only (docs/BEAUTIFUL_UI_PRIMITIVES.md); the reference
  * EASE is cubic-bezier(0.23, 1, 0.32, 1). */
 
-.workspace-body:has(> .watcher-dock-frame.is-sheet:not([hidden])) {
-  position: relative;
-}
-
 .watcher-dock-frame {
   --watcher-ease: cubic-bezier(0.23, 1, 0.32, 1);
   position: relative;
@@ -59,6 +55,16 @@
 .conversation-pane-workspace > .watcher-dock-scrim {
   grid-column: 1 / -1;
   grid-row: 1;
+}
+
+.workspace-body > .watcher-dock-frame.is-sheet,
+.workspace-body > .watcher-dock-scrim {
+  top: 48px;
+}
+
+.workspace-body.has-tools > .watcher-dock-frame.is-sheet,
+.workspace-body.has-tools > .watcher-dock-scrim {
+  right: var(--workspace-tools-width);
 }
 
 .watcher-dock-frame.is-sheet > .watcher-dock {

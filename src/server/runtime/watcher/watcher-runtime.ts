@@ -308,6 +308,13 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
       if (disposed || event.type.startsWith("watcher.")) return;
       try {
         guard.observe(event);
+        if (event.type === "conversation.shell.updated") {
+          const { id, archivedAt } = event.conversation;
+          if (archivedAt !== null && (index.forWatched(id) !== null || index.forWatcher(id) !== null)) {
+            coordinator.onConversationArchived(id);
+          }
+          return;
+        }
         if (event.type === "conversation.message.persisted" && event.message.role === "user" && event.message.watcherNote) {
           delivery.noteDelivered(event.message.watcherNote, event.message);
           return;

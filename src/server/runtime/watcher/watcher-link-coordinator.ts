@@ -8,6 +8,7 @@ import {
   watcherLinkViewSchema,
   type WatcherFeedItem,
   type WatcherLinkView,
+  type WatcherPauseReason,
   type WatcherStatus,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
@@ -28,6 +29,7 @@ import type { WatcherWakeScheduler } from "./watcher-wake-scheduler";
 export const MAX_WATCHER_TITLE_CHARS = 120;
 export const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher's own chat was archived. Unarchive it to resume the watcher.";
 const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "idle", "paused"];
+const ARCHIVE_PAUSES: readonly WatcherPauseReason[] = ["watched-archived", "watcher-archived"];
 
 export interface WatcherFeedResult {
   kind: "watcher.feed";
@@ -263,8 +265,8 @@ export class WatcherLinkCoordinator {
       const route = await this.#deps.route(watcher.modelSelection);
       if (!route.ready) throw new RuntimeRequestError(`The watcher's route isn't ready yet. ${route.message}`);
     }
-    if (link.pauseReason === "watched-archived" && link.watchedConversationId !== null
-      && conversationOrNull(store, link.watchedConversationId)?.archivedAt !== null) {
+    if (link.watchedConversationId !== null
+      && (conversationOrNull(store, link.watchedConversationId)?.archivedAt ?? null) !== null) {
       throw new RuntimeRequestError("Unarchive the watched chat before resuming its watcher.");
     }
     if ((conversationOrNull(store, link.watcherConversationId)?.archivedAt ?? null) !== null) {
@@ -334,9 +336,11 @@ export class WatcherLinkCoordinator {
 
   /**
    * A chat was archived. The watcher of an archived chat pauses with
-   * `watched-archived`; a watcher whose own chat was archived pauses too,
-   * so no check keeps running in a chat the user put away. Both wait for the
-   * user to unarchive and resume.
+   * `watched-archived`; a watcher whose own chat was archived pauses with
+   * `watcher-archived`. Either replaces an earlier pause that was not for an
+   * archive and cancels a running check, so no check keeps running in a chat
+   * the user put away. Both wait for the user to unarchive and resume.
+   * Repeating it for a chat that stays archived is a no-op.
    */
   onConversationArchived(conversationId: string): void {
     const { watcherLinks } = this.#deps.store;
@@ -344,15 +348,16 @@ export class WatcherLinkCoordinator {
     if (watched) this.#pauseForArchive(watched, { status: "paused", reason: "watched-archived" });
     const watcher = watcherLinks.findByWatcher(conversationId);
     if (watcher && watcher.status !== "detached") {
-      this.#pauseForArchive(watcher, { status: "paused", reason: "user", detail: WATCHER_CHAT_ARCHIVED_DETAIL });
+      this.#pauseForArchive(watcher, { status: "paused", reason: "watcher-archived", detail: WATCHER_CHAT_ARCHIVED_DETAIL });
     }
   }
 
   #pauseForArchive(link: WatcherLinkRecord, pause: Extract<WatcherTransition, { status: "paused" }>): void {
-    if (link.status === "paused") return;
-    const paused = this.#deps.store.watcherLinks.transition(link.id, ["watching", "waking", "idle"], pause, this.#deps.now());
+    if (link.pauseReason !== null && ARCHIVE_PAUSES.includes(link.pauseReason)) return;
+    const paused = this.#deps.store.watcherLinks.transition(link.id, ATTACHED, pause, this.#deps.now());
     if (!paused) return;
     this.#deps.scheduler.pause(link.id);
+    if (this.#deps.turns.isActive(link.watcherConversationId)) this.#deps.turns.cancel(link.watcherConversationId);
     this.publish(link.id);
   }
 

@@ -37,7 +37,7 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
         CHECK (status IN ('watching', 'waking', 'idle', 'paused', 'detached')),
       pause_reason TEXT CHECK (pause_reason IS NULL OR pause_reason IN (
         'user', 'wake-budget', 'usage-limit', 'write-detected', 'write-attempts',
-        'route-unavailable', 'watched-archived'
+        'route-unavailable', 'watched-archived', 'watcher-archived'
       )),
       pause_detail TEXT CHECK (
         pause_detail IS NULL OR (length(pause_detail) <= 1000 AND instr(pause_detail, char(0)) = 0)

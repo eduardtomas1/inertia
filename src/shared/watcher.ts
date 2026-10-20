@@ -10,7 +10,7 @@ export const WATCHER_PRESETS = ["reviewer", "scope-guard", "explainer"] as const
 export const WATCHER_STATUSES = ["watching", "waking", "idle", "paused", "detached"] as const;
 export const WATCHER_PAUSE_REASONS = [
   "user", "wake-budget", "usage-limit", "write-detected", "write-attempts",
-  "route-unavailable", "watched-archived",
+  "route-unavailable", "watched-archived", "watcher-archived",
 ] as const;
 export const WATCHER_DETACH_REASONS = ["user", "watched-deleted"] as const;
 export const WATCHER_WAKE_TRIGGERS = ["activity", "plan", "error", "turn-end", "manual", "initial"] as const;

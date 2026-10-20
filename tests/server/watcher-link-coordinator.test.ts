@@ -351,7 +351,7 @@ describe("watcher link coordinator", () => {
         watchers: f.watchers,
       } as unknown as ConversationCommandDependencies);
       await handler({} as never, { type: "conversation.archive", requestId: randomUUID(), payload: { conversationId: link.watcherConversationId } });
-      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "user", pauseDetail: WATCHER_CHAT_ARCHIVED_DETAIL });
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watcher-archived", pauseDetail: WATCHER_CHAT_ARCHIVED_DETAIL });
       await f.startWatchedTurn();
       await f.advance(10 * 60_000);
       expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
@@ -359,6 +359,65 @@ describe("watcher link coordinator", () => {
       f.store.archiveConversation(link.watcherConversationId, false);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("cancels a running check when the watcher's own chat is archived", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.startWatchedTurn();
+      await wake(f, link.watcherConversationId);
+      expect(f.linkView(link.id).status).toBe("waking");
+      f.store.archiveConversation(link.watcherConversationId, true);
+      f.watchers.onConversationArchived(link.watcherConversationId);
+      expect(f.provider.cancelled).toContain(link.watcherConversationId);
+      await f.flush();
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watcher-archived" });
+      expect(f.store.watcherLinks.feed(link.id)?.items[0]).toMatchObject({ state: "settled", outcome: "cancelled" });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("records the archive of a watched chat over an earlier pause and refuses to resume until it is unarchived", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.command("watcher.pause", { linkId: link.id });
+      f.store.archiveConversation(f.watched.id, true);
+      f.watchers.onConversationArchived(f.watched.id);
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watched chat");
+      f.store.archiveConversation(f.watched.id, false);
+      await expect(f.command("watcher.resume", { linkId: link.id }))
+        .resolves.toMatchObject({ result: { link: { status: "watching" } } });
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses to resume while the watched chat is archived, whatever the pause reason", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      await f.command("watcher.pause", { linkId: link.id });
+      f.store.archiveConversation(f.watched.id, true);
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watched chat");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("pauses when a shell update reports an archive that bypassed the archive command", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      f.store.archiveConversation(f.watched.id, true);
+      f.watchers.observe({ type: "conversation.shell.updated", conversation: f.store.conversationShell(f.watched.id)!, runs: [] } as never);
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
     } finally {
       await f.close();
     }

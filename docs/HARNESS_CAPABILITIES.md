@@ -348,15 +348,19 @@ spends the next turn's allowance; the cursor update is a compare-and-set on
 the turn the digest was built from, so a late check never rewinds coverage.
 `usage-limit` and `route-unavailable`
 resume only once `watcherRouteReadiness` reports the watcher's route ready,
-and `watched-archived` refuses to resume until the watched chat is
-unarchived. Every resume tops the turn's check allowance back up to
+and no link resumes while its watched chat or its own chat is archived,
+whatever its pause reason. Every resume tops the turn's check allowance back up to
 `wakesPerWatchedTurn`. Deleting the watched chat detaches the link in SQL and
 deleting the watcher chat removes it; the delete command then broadcasts
 `watcher.link.removed` for each link the chat took part in. A delete of a
 watched chat whose watcher is mid-check is refused with a request error before
 any side effect (no checkpoint, worktree or ownership change); the
-`BEFORE DELETE` trigger stays as the backstop. Archiving the watcher chat
-itself pauses its link, and resume waits until it is unarchived.
+`BEFORE DELETE` trigger stays as the backstop. Archiving the watched chat
+pauses its link with `watched-archived`, and archiving the watcher chat itself
+pauses it with `watcher-archived`, from any attached status: either reason
+replaces an earlier pause, and a check that is running is cancelled. An
+archive by an agent's management tool reaches the link through the
+conversation shell update it broadcasts.
 
 The Git fingerprint backstop compares changed paths with other turns'
 activities in NFC, and folds case on Windows and macOS, whose file systems are

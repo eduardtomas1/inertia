@@ -10,6 +10,10 @@ import {
 import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import { INERTIA_VERSION } from "../../shared/version";
 import {
+  codexConfiguredMcpServerNames,
+  codexInitiativeMcpConfig,
+} from "../provider/initiative-mcp-config";
+import {
   CODEX_RPC_TIMEOUT_MS,
   CODEX_CHILD_INTERRUPT_OVERALL_TIMEOUT_MS,
   CODEX_CHILD_INTERRUPT_TIMEOUT_MS,
@@ -906,6 +910,43 @@ interface OpenCodexTurnOptions {
   ) => void;
 }
 
+/**
+ * Config overrides for the initiative's MCP servers. Codex merges overrides
+ * over the user's configuration, so a server the user already configured
+ * under the same name would be merged with the initiative's: `config/read`
+ * names the user's servers first and such a server is left out. When the
+ * user's servers cannot be read, no initiative server is added.
+ */
+async function codexInitiativeMcpOverrides(
+  options: CodexAppServerOptions,
+  request: OpenCodexTurnOptions["request"],
+): Promise<Record<string, Record<string, unknown>>> {
+  const servers = options.mcpServers ?? [];
+  let nativeNames: Set<string> | null;
+  try {
+    nativeNames = codexConfiguredMcpServerNames(
+      await request("config/read", { includeLayers: false, cwd: options.cwd }),
+    );
+  } catch (error) {
+    if (error instanceof CodexErrorResponse) nativeNames = null;
+    else throw error;
+  }
+  if (!nativeNames) {
+    options.onActivity?.(
+      "system",
+      "info",
+      "Initiative MCP servers not added",
+      { detail: "Codex did not report its own MCP servers, so Inertia added none of the initiative's to avoid changing one of them." },
+    );
+    return {};
+  }
+  const translated = codexInitiativeMcpConfig(servers, nativeNames);
+  for (const skipped of translated.skipped) {
+    options.onActivity?.("system", "info", `Initiative MCP server not added · ${skipped.name}`, { detail: skipped.reason });
+  }
+  return translated.value;
+}
+
 export async function openCodexTurn({
   options,
   modelProvider,
@@ -944,6 +985,23 @@ export async function openCodexTurn({
   notify("initialized");
 
   const accessPolicy = codexAccessPolicy(options);
+  const initiativeMcpConfig = options.mcpServers?.length
+    ? await codexInitiativeMcpOverrides(options, request)
+    : {};
+  const config = {
+    ...(modelProvider ? {
+      [`model_providers.${modelProvider.providerId}`]: {
+        name: modelProvider.displayName,
+        base_url: modelProvider.baseUrl,
+        wire_api: "responses",
+        requires_openai_auth: false,
+        ...(modelProvider.credentialEnvironmentKey
+          ? { env_key: modelProvider.credentialEnvironmentKey }
+          : {}),
+      },
+    } : {}),
+    ...initiativeMcpConfig,
+  };
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,
@@ -953,20 +1011,8 @@ export async function openCodexTurn({
     ...(options.serviceTier !== undefined
       ? { serviceTier: options.serviceTier }
       : {}),
-    ...(modelProvider ? {
-      modelProvider: modelProvider.providerId,
-      config: {
-        [`model_providers.${modelProvider.providerId}`]: {
-          name: modelProvider.displayName,
-          base_url: modelProvider.baseUrl,
-          wire_api: "responses",
-          requires_openai_auth: false,
-          ...(modelProvider.credentialEnvironmentKey
-            ? { env_key: modelProvider.credentialEnvironmentKey }
-            : {}),
-        },
-      },
-    } : {}),
+    ...(modelProvider ? { modelProvider: modelProvider.providerId } : {}),
+    ...(Object.keys(config).length > 0 ? { config } : {}),
   };
   let opened: JsonObject;
   if (options.sessionId) {

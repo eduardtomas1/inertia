@@ -18,6 +18,7 @@ import { ModelDefaultSelect } from "../ProjectModelDefault";
 import { SettingRow } from "../settings/SettingsLayout";
 import { SettingTextField } from "../settings/SettingControls";
 import { Switch } from "../ui";
+import { InitiativeMcpServers } from "./InitiativeMcpServers";
 
 export type InitiativeToolsSettings = Pick<
   AppSettings,
@@ -279,6 +280,7 @@ export function InitiativeTools({
           </div>
         </SettingRow>
       </div>
+      <InitiativeMcpServers initiative={initiative} offline={offline} onChange={onChange} />
     </section>
   );
 }

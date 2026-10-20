@@ -70,3 +70,36 @@ describe("scrubCommandSecrets", () => {
     expect(scrubCommandSecrets(command)).toBe(command);
   });
 });
+
+describe("initiative MCP server configuration in provider output", () => {
+  const SECRET = "mcp-fixture-credential-73ab";
+  // How providers echo MCP server configuration back: Codex TOML and JSON
+  // overrides, Claude's --mcp-config JSON, ACP header and env entries, and
+  // plain header lines in errors.
+  const shapes = [
+    `invalid mcp_servers.tracker: http_headers = { Authorization = "${SECRET}" }`,
+    `{"mcp_servers.tracker":{"url":"https://mcp.example.com","http_headers":{"Authorization":"${SECRET}"}}}`,
+    `{"headers":{"X-Tracker-Key":"${SECRET}"}}`,
+    `{"env":{"DOCS_TOKEN":"${SECRET}"}}`,
+    `{"name":"X-Docs-Secret","value":"${SECRET}"} X-Docs-Secret: ${SECRET}`,
+    `request failed: 401 with X-Tracker-Key: ${SECRET}`,
+    `Authorization: 'Token ${SECRET}'`,
+  ];
+
+  it.each(shapes)("scrubs the value from activity detail, commands and issue reports: %s", async (shape) => {
+    const { sanitizeProviderActivityDetail } = await import("../../src/server/provider/activity-detail");
+    const { scrubReportText } = await import("../../src/shared/issue-report-scrub");
+    const { sanitizeRuntimeDiagnosticText } = await import("../../src/main/runtime-diagnostic-records");
+    expect(scrubCommandSecrets(shape)).not.toContain(SECRET);
+    expect(sanitizeProviderActivityDetail(shape) ?? "").not.toContain(SECRET);
+    expect(scrubReportText(shape)).not.toContain(SECRET);
+    expect(sanitizeRuntimeDiagnosticText(shape) ?? "").not.toContain(SECRET);
+  });
+
+  it("keeps ordinary configuration text", () => {
+    expect(scrubCommandSecrets("monkey: banana")).toBe("monkey: banana");
+    expect(scrubCommandSecrets(`{"name":"tracker","url":"https://mcp.example.com/mcp"}`))
+      .toBe(`{"name":"tracker","url":"https://mcp.example.com/mcp"}`);
+    expect(scrubCommandSecrets("X-Team: checkout")).toBe("X-Team: checkout");
+  });
+});

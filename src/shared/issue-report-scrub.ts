@@ -44,6 +44,8 @@ const HOME_RELATIVE_PATH = new RegExp(String.raw`(?<!\w)(?:Users|home)[\\/]${PAT
 
 function scrubOnce(text: string, limit: number): string {
   return redactSecretAssignments(exposeSensitiveJsonKeys(text.slice(0, limit))
+    // ACP's name/value entries for MCP headers and environment variables.
+    .replace(/("name"\s*:\s*"[^"\n]{0,128}(?:authorization|key|token|secret|password)[^"\n]{0,64}"\s*,\s*"value"\s*:\s*)"(?:\\.|[^"\\\n])*"/giu, "$1\"[redacted secret]\"")
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/gu, "[redacted key]")
     .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[baprs])(?:[-_]|- )[A-Za-z0-9_-]+/giu, "[redacted token]")
     .replace(/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted token]")

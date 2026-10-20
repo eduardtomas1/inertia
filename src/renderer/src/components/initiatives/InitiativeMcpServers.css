@@ -1,0 +1,231 @@
+/* Initiative MCP servers: a quiet card below the Tools & defaults rows. */
+.initiative-mcp {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.initiative-mcp-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.initiative-mcp-heading h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: var(--leading-heading);
+}
+
+.initiative-mcp-count,
+.initiative-mcp-support,
+.initiative-mcp-hint,
+.initiative-mcp-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+}
+
+.initiative-mcp-count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.initiative-mcp-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.initiative-mcp-server {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+}
+
+.initiative-mcp-server:hover,
+.initiative-mcp-server:focus-within {
+  background: var(--fill);
+}
+
+.initiative-mcp-server[data-enabled="false"] .initiative-mcp-server-text {
+  opacity: 0.6;
+}
+
+.initiative-mcp-server-text {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.initiative-mcp-server-name {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.initiative-mcp-server-kind {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.initiative-mcp-server-summary {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.initiative-mcp-server-warning,
+.initiative-mcp-problem {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.initiative-mcp-server-actions,
+.initiative-mcp-buttons,
+.initiative-mcp-footer {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.initiative-mcp-buttons {
+  justify-content: flex-end;
+}
+
+.initiative-mcp-confirm {
+  color: var(--text);
+  font-size: var(--text-xs);
+}
+
+.initiative-mcp-form {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+}
+
+.initiative-mcp-fields {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.initiative-mcp-field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.initiative-mcp-field > :is(input, select, textarea) {
+  width: 100%;
+  max-width: none;
+}
+
+.initiative-mcp-args {
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+.initiative-mcp-entries {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.initiative-mcp-entries > legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.initiative-mcp-entries > .text-button {
+  justify-self: start;
+}
+
+.initiative-mcp-entry {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.initiative-mcp-secret-state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.initiative-mcp-secret-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.initiative-mcp-server-actions .text-button.is-danger {
+  color: var(--danger);
+}
+
+@media (max-width: 560px) {
+  .initiative-mcp-entry {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .initiative-mcp-entry > :nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .initiative-mcp :is(button, input, select, textarea) {
+    transition: none;
+  }
+}

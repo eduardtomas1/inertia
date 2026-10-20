@@ -98,6 +98,8 @@ import { createConversationCompactionCommandHandler } from "./runtime/commands/c
 import { createReadCommandHandlers } from "./runtime/commands/read-commands";
 import { createTodoCommandHandler } from "./runtime/commands/todo-commands";
 import { createInitiativeCommandHandler } from "./runtime/commands/initiative-commands";
+import { createInitiativeMcpResolver, retryPendingInitiativeMcpForgets } from "./runtime/initiative-mcp-runtime";
+import { initiativeMcpPendingForgets } from "./runtime/initiative-mcp-pending-forgets";
 import {
   ensureInitiativeSkillsFolder,
   initiativeSkillsFolderPath,
@@ -347,7 +349,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         ? { codex: savedSettings.codexBinaryPath }
         : undefined,
     ...backendProfileController.providerManagerOptions(),
+    // Initiative MCP secrets are read from the vault only here, in memory,
+    // when a provider run starts.
+    resolveInitiativeMcpServers: createInitiativeMcpResolver(options.backendCredentials),
   }, options.agentHarnessRegistry);
+  // Initiative MCP secrets whose removal failed earlier are removed now, in
+  // the background; any that still fail wait for the next start.
+  const mcpPendingForgets = initiativeMcpPendingForgets(dataDirectory);
+  void retryPendingInitiativeMcpForgets(options.backendCredentials, store, mcpPendingForgets).catch(() => undefined);
   backendProfileController.attachProviderManager(providers);
   const maintenanceCleanupAuthorities = !runtimeSafetyLock
     && options.enableProviders !== false
@@ -740,6 +749,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
         validateDefaultModel: (selection) => backendProfileController.validateDefault(selection),
         ensureSkillsFolder: (initiativeId) => { ensureInitiativeSkillsFolder(dataDirectory, initiativeId); },
+        ...(options.backendCredentials ? { mcpSecrets: options.backendCredentials, mcpPendingForgets } : {}),
       }),
       createAgentWorkflowCommandHandler({
         workflows: agentWorkflows, providerTerminalResumes,

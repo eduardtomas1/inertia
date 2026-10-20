@@ -15,6 +15,7 @@ import type {
   ProviderRunFailure,
   ProviderSteerInput,
   ProviderHostToolBridge,
+  ProviderMcpServerInput,
 } from "../provider/contracts";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
 
@@ -51,6 +52,12 @@ export interface CodexAppServerOptions {
   access: "supervised" | "auto-edit" | "full";
   /** Exact-run Inertia tools; advertised only on new provider threads. */
   hostTools?: ProviderHostToolBridge;
+  /**
+   * Resolved initiative MCP servers. Sent as `mcp_servers.<name>` config
+   * overrides on both `thread/start` and `thread/resume`, because Codex keeps
+   * MCP configuration with the session's config, not with the thread.
+   */
+  mcpServers?: readonly ProviderMcpServerInput[];
   /** Test seam that may shorten, but never extend, host-tool approval expiry. */
   hostToolApprovalTimeoutMs?: number;
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */

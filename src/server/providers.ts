@@ -278,6 +278,7 @@ export class ProviderManager {
       harnessRegistry: this.harnessRegistry,
       metadataCache: this.metadataCache,
       resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
+      resolveInitiativeMcpServers: options.resolveInitiativeMcpServers,
       conversationProviderGate: this.conversationProviderGate,
       commandFor: (providerId) => this.commandFor(providerId),
       resolvedCommandFor: (providerId) => this.resolvedCommands.get(providerId),

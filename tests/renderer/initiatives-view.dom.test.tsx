@@ -968,6 +968,21 @@ describe("Initiative tools and defaults", () => {
   const preferencesSent = (props: Pick<ViewProps, "request">) => vi.mocked(props.request).mock.calls
     .map(([command]) => (command as { payload: { preferences?: unknown } }).payload.preferences);
 
+  it("lists the initiative's MCP servers in Tools & defaults and saves a change as a settings change", async () => {
+    const tracker = {
+      id: "99999999-9999-4999-8999-999999999999",
+      name: "tracker",
+      enabled: true,
+      transport: { kind: "http" as const, url: "https://mcp.example.com/mcp", headers: [] },
+    };
+    const { props } = renderView({ snapshot: withPreferences({ mcpServers: [tracker] }) });
+    const card = within(tools().getByRole("region", { name: "MCP servers" }));
+    expect(card.getByText("Works with Codex, Claude, Cursor, Kimi Code, OpenCode. Not available on Antigravity.")).toBeVisible();
+    expect(card.getByText("https://mcp.example.com/mcp")).toBeVisible();
+    fireEvent.click(card.getByRole("switch", { name: "Use tracker" }));
+    await waitFor(() => expect(preferencesSent(props).at(-1)).toEqual({ mcpServers: [{ ...tracker, enabled: false }] }));
+  });
+
   it("says where unset values come from and saves each change as a settings change", async () => {
     const { props, rerender } = renderView({ snapshot: withPreferences({}) });
     const section = tools();

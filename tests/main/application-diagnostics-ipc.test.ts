@@ -8,6 +8,7 @@ import { RuntimeDiagnostics } from "../../src/main/runtime-diagnostics";
 import { registerApplicationDiagnosticsIpc } from "../../src/main/application-diagnostics-ipc";
 import { registerInertiaReleaseIpc } from "../../src/main/inertia-release-ipc";
 import { registerCredentialVaultIpc } from "../../src/main/credential-vault-ipc";
+import type { CredentialVault } from "../../src/main/credential-vault";
 import { DIAGNOSTICS_IPC } from "../../src/shared/application-diagnostics-ipc";
 import { DISCORD_RELEASE_WEBHOOK_PROFILE_ID } from "../../src/shared/backend-credentials";
 
@@ -129,7 +130,7 @@ describe("Discord failure-to-diagnostics integration", () => {
       setForProfile: async () => null, clearForProfile: async () => null,
       stateForProfile: async () => ({ profileId: DISCORD_RELEASE_WEBHOOK_PROFILE_ID, hasSecret: false,
         storage: { available, provider: "unavailable", message: "PRIVATE_VAULT_ERROR" } }),
-    }), h.assertTrusted, (incident) => h.diagnostics.recordIncident(incident));
+    }) as unknown as CredentialVault, h.assertTrusted, (incident) => h.diagnostics.recordIncident(incident));
     const request = { profileId: DISCORD_RELEASE_WEBHOOK_PROFILE_ID };
     const first = await h.invoke("inertia:get-backend-credential-state", request) as { diagnosticId: string };
     expect(first.diagnosticId).toBeTruthy();
@@ -187,7 +188,7 @@ describe("Discord failure-to-diagnostics integration", () => {
     registerCredentialVaultIpc(h.ipcMain, () => ({
       setForProfile: async () => { throw new Error("PRIVATE_WEBHOOK_CONTENT"); },
       clearForProfile: async () => null, stateForProfile: async () => null,
-    }), h.assertTrusted, (incident) => h.diagnostics.recordIncident(incident));
+    }) as unknown as CredentialVault, h.assertTrusted, (incident) => h.diagnostics.recordIncident(incident));
     await expect(h.invoke("inertia:set-backend-credential", {
       profileId: DISCORD_RELEASE_WEBHOOK_PROFILE_ID, secret: "https://discord.com/api/webhooks/123/token",
     })).rejects.toThrow(/Secure webhook storage is unavailable\. \[incident:/u);

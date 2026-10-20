@@ -66,6 +66,9 @@ export function sanitizeRuntimeDiagnosticText(value: unknown): string | undefine
       return `${match.slice(0, separator + 3)}<redacted>@`;
     })
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "<redacted-email>")
+    .replace(/("name"\s*:\s*"[^"]{0,128}(?:authorization|key|token|secret|password)[^"]{0,64}"\s*,\s*"value"\s*:\s*)"[^"]*"/giu, "$1\"<redacted>\"")
+    .replace(/((["'])[A-Za-z0-9_.-]{0,80}(?:authorization|key|token|secret|password)\2\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/giu, "$1<redacted>")
+    .replace(/\b([A-Za-z0-9][A-Za-z0-9-]{0,80}-(?:key|token|secret|password)\s*:\s*)[^\s,;}]+/giu, "$1<redacted>")
     .replace(/\b(api[_ -]?key|authorization|cookie|credential|password|prompt|secret|source|tokens?)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, "$1=<redacted>")
     .replace(/\b[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/gu, "<path>")
     .replace(/(?<![:/])\/(?:[^/\s,;:]+\/)+[^/\s,;:]+/gu, "<path>");

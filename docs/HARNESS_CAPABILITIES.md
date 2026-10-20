@@ -422,6 +422,178 @@ through a second `skills/list` cwd is honoured when a turn invokes it has not
 been checked against Codex, so Codex chats list only their own folder's
 skills.
 
+## Initiative MCP servers
+
+An initiative can declare up to eight MCP servers in
+`preferences.mcpServers`. Every member chat of an initiative that is not
+archived receives the enabled ones on routes whose harness takes external MCP
+configuration: Codex App Server, the Claude Agent SDK, Cursor and Kimi Code
+over ACP, and the OpenCode SDK. Antigravity's headless CLI has no such input
+and receives nothing. This changes a security boundary, so the parts are kept
+small and each is tested on its own.
+
+**Configuration.** A server has an identity, a name (1 to 64 of `A-Z a-z 0-9
+- _`, never one starting with `inertia`, which covers Inertia's own
+`inertia-chat-manager`, and never `codex_apps`, Codex's own apps server), an
+enabled switch and a transport: `http` with an `https://` URL (plain
+`http://` only for `localhost`, `127.0.0.0/8` or `[::1]`, never with
+credentials or a fragment) and up to 16 headers, or `stdio` with a command (an
+absolute path or a bare program name, without quotes or shell syntax), up to
+32 arguments and up to 32 environment variables. Headers the transport owns
+(`Host`, `Content-Type`, `Mcp-Session-Id`, …) are refused, and
+`Authorization`, `Proxy-Authorization` and `Cookie` may only be secret, never
+a plain value. Variables starting with `INERTIA_` are refused, and so are the
+provider sign-in and launch-credential names Inertia itself passes to
+providers (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`ANTHROPIC_FOUNDRY_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CURSOR_API_KEY`,
+`CURSOR_AUTH_TOKEN`, `KIMI_API_KEY`, `OPENCODE_SERVER_PASSWORD`,
+`OPENCODE_SERVER_USERNAME`; see "Stdio environment" below). No field may
+contain NUL, CR or LF; values are bounded and the whole preference record
+stays within its 64 KiB column. The strict schema is
+`src/shared/initiative-mcp.ts`, applied to `initiative.update` and again when
+a stored record is read (a damaged list yields no servers). The form ticks
+**Secret** by itself for names containing `key`, `token`, `secret` or
+`password`; the user can untick it, except for the three credential headers.
+
+**Secrets.** A header or variable holds either a plain `value` or `secret:
+true`. The value of a secret never enters SQLite, the snapshot, the renderer's
+state or a log. It must have at least 8 characters, and so must the
+credential after an authorization scheme (`Bearer`, `Basic`, `Token`, `Bot`,
+`Digest`): exact-value redaction cannot hide anything shorter safely. The
+renderer sends it once through `setInitiativeMcpSecret({ initiativeId,
+serverId, transport, slot, value })`, a main-window-only IPC channel beside the
+backend credential channels; a refused value gets a readable answer that never
+repeats it. Main checks that the slot is a secret entry of that transport,
+stores the value in the credential vault under `secret:mcp:<sha256(initiative,
+server, slot, destination)>` and answers only whether each slot holds a
+secret (`getInitiativeMcpSecretState`, which takes the transport too). The
+slot is `header:<lower-case name>` or `env:<name>`; the destination is the URL
+for HTTP and, for a command, the program, its arguments and the names and
+plain values of its variables. The reference is derived, never stored, so an
+entry can only reach the secret entered for that initiative, server, slot and
+destination, never a backend credential or another server's secret. A server
+whose URL or command changes keeps its identity but simply has no secret any
+more: the form asks for it again, the runtime removes the old destination's
+entries after saving, and before a change that adds slots (a new destination
+included) is saved the runtime clears them through the credential broker (a
+failure refuses the change), so nothing stale is ever inherited. Removed
+slots, removed servers and a deleted initiative are cleared afterwards; a
+removal that fails is tried once more and then kept, as the one-way
+reference only, in `initiative-mcp-pending-forgets.json` in the data folder
+(at most 256), which the runtime retries when it starts, skipping any
+reference a stored initiative uses again. Main bounds what the set channel can
+write: at most eight servers per initiative and 32 references per server,
+counting only references that still hold a secret, for the life of the main
+process.
+
+**Resolution.** Turn preparation adds the unresolved plan
+(`ProviderRunRequest.initiativeMcpServers`: the enabled servers with their
+plain values and secret markers) only for a member chat of a non-archived
+initiative on a supported harness; other chats' requests are unchanged. The
+provider launch step, the same place backend credentials are resolved, reads
+each secret through the credential broker into memory and places the resolved
+`mcpServers` only in the harness's private copy of the request; a request that
+arrives with `mcpServers` already set is refused. A server whose secret is not
+set, cannot be read, or was stored under older rules and is too short to
+redact, is left out and the chat shows "Initiative MCP server not added ·
+<name>" with the reason.
+
+**Redaction.** The run coordinator, and only it, redacts the resolved values:
+each value, and for an authorization value also the credential after its
+scheme word, provided it has at least 8 characters. An exact occurrence is
+replaced by `[secret]`, which is 8 characters long, so redaction never makes
+text longer and every harness output limit still holds afterwards. It
+rewrites only text-bearing fields: assistant and reasoning text, activity
+labels, details and output, status messages, session titles, approval titles,
+details, commands and reasons, question headers, questions and options, plan
+text, goal objectives, subagent text, and the result's text, error and
+failure message and detail, plus an error's message and stack. Object keys,
+identities (conversation, run, turn, session, request, item, activity and
+tool-call ids), enumerations and paths are never touched, so redaction cannot
+break event routing or the run's identity checks. Assistant text and
+reasoning arrive as deltas; each stream goes through a buffered redactor (the
+one ACP uses for its own streams) that holds back text which could still be
+the start of a value until the next delta decides it, so a value split across
+two, three or more deltas is replaced as a whole. Held text is released at a
+text boundary (a boundary or snapshot event, an activity, a plan, an approval
+or a question) and when the run ends; a held fragment that is a significant
+part of a value is replaced rather than released. Tool output deltas
+(`outputDelta`, which only Codex sends) are redacted chunk by chunk; Codex
+releases command output only at line or word breaks, so a value without
+spaces arrives whole. This covers exact values only: a provider that
+transforms a value (base64 or URL encoding, for example) or repeats only part
+of it is not caught, and neither is a value that a harness's own length limit
+cut in two before the coordinator saw it (activity labels and details, and
+the provider's error output in failure details, are bounded in the harness),
+which can leave a fragment of it visible. The shared scrubbers for activity details, commands,
+diagnostics records and issue reports also cover the shapes in which providers
+echo MCP configuration (`Authorization = "…"`, `"X-…-Key": "…"`, ACP
+`{"name": …, "value": …}` entries, `X-…-Token: …` header lines). Resolved
+values are never persisted: `tests/server/initiative-mcp-runtime.test.ts`
+streams a value split across Codex text and reasoning deltas and searches
+every file in the data folder and every published event for it.
+
+**Stdio environment.** A provider starts a stdio server with its own
+environment, which holds the credentials Inertia launched it with. On Claude,
+OpenCode, Cursor and Kimi Code, every initiative stdio server therefore gets
+an empty value for each of Inertia's sign-in names above, `INERTIA_HOST_MCP_TOKEN`
+and `INERTIA_CODEX_BACKEND_TOKEN`, and for every credential-shaped variable
+(`*API_KEY`, `*TOKEN`, `*SECRET`, `*PASSWORD`, `*CREDENTIAL(S)`) in the
+launch environment, ahead of the server's own variables. A variable the
+server sets itself keeps its value. Codex is not given these overrides: how
+Codex builds a stdio server's environment was not verified (see below).
+
+| Harness | Where the servers go | Field names and evidence |
+| --- | --- | --- |
+| Codex App Server | `config["mcp_servers.<name>"]` on `thread/start` **and** `thread/resume` | `url` and `http_headers` for streamable HTTP; `command`, `args` and `env` for stdio. Checked against upstream `openai/codex` (`codex-rs/config/src/mcp_types.rs`, `RawMcpServerConfig`) and its config layering (`codex-rs/config/src/overrides.rs`, `merge.rs`): request overrides form a session-flags layer deep-merged over the user's configuration, so one dotted key adds exactly one server. Inertia already sends `config` on both requests for custom backends, and `thread-title.ts` already uses `config.mcp_servers` on `thread/start`. Codex keeps MCP configuration with the session, not the thread, and loads a resumed thread's configuration with the request's overrides (`thread_processor.rs`), so the servers are sent on resume too; this was read from the upstream source, not run against Codex. Before adding them, `config/read` (as the title generator already does) names the user's own servers: a same-named initiative server is left out, because Codex would merge the two entries, and when Codex cannot report its servers none are added. MCP elicitations from any server are declined, Supervised included. |
+| Claude Agent SDK | `query.setMcpServers({...})` before the prompt is sent | The SDK writes non-SDK servers in the `mcpServers` query option to Claude Code's command line (`--mcp-config`), where any local process could read header and environment values. `setMcpServers` sends them on the SDK's stdin control channel instead; the prompt waits until it returns, so the first request already offers the tools. Inertia's in-process server is named again so it stays attached. `managedSettings.allowedMcpServers` lists exactly the initiative's server names (it stays `[]` otherwise), `strictMcpConfig` is set and `settingSources` stays `[]`, so nothing from the user's Claude settings loads. Tools of these servers go through `canUseTool`: Supervised and Auto-accept edits ask the user, Full access allows them. A server Claude cannot connect is reported from the call's `errors`. |
+| Cursor ACP, Kimi Code ACP | appended after Inertia's host server in `mcpServers` on `session/new`, `session/load` and `session/resume` | The ACP `McpServer` shapes Inertia already uses for its host server: `{ type: "http", name, url, headers: [{ name, value }] }` when the agent reports `mcpCapabilities.http`, otherwise left out with a notice; `{ name, command, args, env: [{ name, value }] }` for stdio. Whether Cursor or Kimi Code replace one of their own servers of the same name is theirs to decide and was not verified; the user documentation asks for distinct names. |
+| OpenCode SDK | `client.mcp.add` after the host server, before the prompt | `McpRemoteConfig` (`url`, `headers`, `oauth: false`) or `McpLocalConfig` (`command: [command, ...args]`, `environment`). `client.mcp.status` names the servers the OpenCode server already has; a same-named initiative server is left out (the same rule as Codex, in one helper), and when the status cannot be read none is added and the turn continues. Each server is disconnected with `client.mcp.disconnect` when the run ends, and the owned `serve --pure` server, with any stdio server it started, stops with the run. Tool calls follow the Supervised `ask` rule like other MCP tools. |
+| Antigravity | nothing | The headless CLI takes no MCP configuration; the page says so. |
+
+Inertia only passes configuration: the provider connects to an HTTP server or
+starts a stdio server itself, as its own child, without a shell, and that
+child ends with the provider's process tree. The portable fixtures check this
+for Codex, Cursor and Kimi Code over ACP, Claude (the installed SDK driving a
+stand-in Claude Code process that starts the servers it is given) and
+OpenCode. Inertia never runs the server or reads its output.
+
+**Provider behaviour not verified.** Real provider CLIs were not run for this
+feature; these points rest on documentation, upstream source or nothing:
+
+- Whether Codex saves `thread/start` or `thread/resume` config overrides,
+  including `http_headers` and `env` values, in its rollout files or its state
+  database.
+- Whether Claude Code writes servers attached with `setMcpServers`, with their
+  header and environment values, into its session transcript.
+- Whether Kimi Code or Cursor save a session's `mcpServers`, with their
+  values, to disk.
+- Whether Claude Code's `managedSettings.allowedMcpServers` and
+  `strictPluginOnlyCustomization: ["mcp"]` admit servers attached with
+  `setMcpServers`.
+- Whether naming Inertia's in-process host server again in `setMcpServers`
+  leaves its host tools working.
+- Whether Cursor and Kimi Code ask permission before an MCP tool call.
+- Whether OpenCode's `mcp.add` stays in memory only, and whether a disabled
+  user server appears in `mcp.status` (if not, a same-named initiative server
+  could replace it).
+- Whether the user's installed Codex version supports streamable HTTP MCP
+  servers.
+- Codex's resume behaviour above, which was read from upstream source, not
+  run, and how Codex builds a stdio server's environment.
+- On Windows, a bare `npx` is `npx.cmd`; a provider that starts commands
+  without a shell may need the command `cmd` with the arguments `/c`, `npx`,
+  ….
+
+The deterministic contract for every harness is
+`tests/server/initiative-mcp-injection.test.ts` (portable): the server in the
+native request, a provider that rejects it, cancellation while it connects,
+no secret in any event or result (including a value split across two and
+three text and reasoning deltas on Codex, Claude and OpenCode), credentials
+blanked in stdio servers' environments, Kimi Code's `session/resume`, Codex
+declining an MCP elicitation in Supervised, a maximal configuration within
+Codex's protocol limits, and stdio servers ending with the provider.
+
 ## Antigravity headless contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider

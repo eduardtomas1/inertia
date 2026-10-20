@@ -29,6 +29,7 @@ export type {
   InitiativePreferencesPatch,
   InitiativeStatus,
 } from "./initiatives";
+export type { InitiativeMcpServer, InitiativeMcpTransport } from "./initiative-mcp";
 export * from "./contracts/agent";
 export * from "./contracts/agent-workflows";
 export * from "./contracts/app";

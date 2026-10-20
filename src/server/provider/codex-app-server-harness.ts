@@ -167,6 +167,7 @@ function startCodexRun(
       goalContinuationExpected:
         options.input.goalContinuationExpected === true,
       ...(options.hostTools ? { hostTools: options.hostTools } : {}),
+      ...(options.input.mcpServers?.length ? { mcpServers: options.input.mcpServers } : {}),
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
       onText: emitter.text,

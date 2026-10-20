@@ -775,6 +775,13 @@ export interface DesktopBridge {
   setBackendCredential: (request: SetBackendCredentialRequest) => Promise<BackendCredentialState>;
   clearBackendCredential: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
   getBackendCredentialState: (request: BackendCredentialProfileRequest) => Promise<BackendCredentialState>;
+  /**
+   * Stores one initiative MCP secret in the privileged credential vault. The
+   * value crosses the bridge once and is never returned; the answer says only
+   * which slots hold a secret.
+   */
+  setInitiativeMcpSecret: (request: SetInitiativeMcpSecretRequest) => Promise<InitiativeMcpSecretState>;
+  getInitiativeMcpSecretState: (request: InitiativeMcpSecretStateRequest) => Promise<InitiativeMcpSecretState>;
   getPrivateConnectState: () => Promise<PrivateConnectStateView>;
   onPrivateConnectState: (listener: (state: PrivateConnectStateView) => void) => () => void;
   setPrivateConnectEnabled: (request: PrivateConnectEnableRequest) => Promise<PrivateConnectStateView>;
@@ -796,3 +803,8 @@ import type {
   BackendCredentialState,
   SetBackendCredentialRequest,
 } from "./backend-credentials";
+import type {
+  InitiativeMcpSecretState,
+  InitiativeMcpSecretStateRequest,
+  SetInitiativeMcpSecretRequest,
+} from "./initiative-mcp";

@@ -1,11 +1,14 @@
 // @inertia-e2e-resource isolated
 import { expect, test, type Locator } from "@playwright/test";
-import { mkdir, readFile } from "node:fs/promises";
+import Database from "better-sqlite3";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
+import { createLinuxSecretService, type LinuxSecretService } from "./support/linux-secret-service";
+import type { InitiativeMcpServer } from "../../src/shared/initiative-mcp";
 
 const FIXED_NOW = Date.parse("2026-10-19T12:00:00.000Z");
 const FIXTURE_CHAT = "initiatives fixture";
@@ -19,6 +22,10 @@ const TURN_LOG = "initiatives-turns.jsonl";
 const TOOL_LOG = "initiatives-tools.jsonl";
 const REMEMBER_REQUEST = "Remember the totals rule";
 const PROPOSAL = "Cache order totals";
+const THREAD_LOG = "initiatives-threads.jsonl";
+const MCP_SECRET = "fixture-tracker-token-5e81d0";
+const WIKI_SECRET = "fixture-wiki-key-2b77c4";
+const MCP_REQUEST = "Check the tracker for checkout bugs";
 
 const initiativesAppServer = `
 const readline = require("node:readline");
@@ -52,7 +59,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: { goal: null } });
     return;
   }
+  if (message.method === "config/read") {
+    send({ id: message.id, result: { config: { model: "fixture", mcp_servers: {} } } });
+    return;
+  }
   if (message.method === "thread/start" || message.method === "thread/resume") {
+    // What the provider received when its session opened, for the MCP assertions.
+    fs.appendFileSync(path.join(__dirname, ${JSON.stringify(THREAD_LOG)}), JSON.stringify({ method: message.method, params: message.params }) + "\\n");
     threadId = message.params.threadId || threadId;
     send({ id: message.id, result: {
       thread: { id: threadId }, cwd: process.cwd(), model: "fixture",
@@ -106,12 +119,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 
 let app!: AppFixture;
+let secretService: LinuxSecretService | undefined;
 
 test.beforeAll(async () => {
+  // MCP secrets go through Electron's real encrypted vault; on headless Linux
+  // a private Secret Service provides it.
+  secretService = await createLinuxSecretService();
   app = await createAppFixture({
     name: "initiatives",
     initialState: "conversation",
     codexAppServerSource: initiativesAppServer,
+    electronMainEntry: secretService?.electronMainEntry,
+    additionalEnvironment: { ...secretService?.environment },
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(
         join(testDirectory, "data", "inertia.sqlite"),
@@ -132,7 +151,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app.close();
+  try { await app.close(); } finally { await secretService?.close(); }
 });
 
 async function evidence(name: string, clip?: Locator): Promise<void> {
@@ -375,5 +394,147 @@ test("keeps member chats at or below the initiative's access limit", async () =>
   await expect(access.getByRole("menuitemradio", { name: /^Auto-accept edits/u })).toBeEnabled();
   await evidence("composer-access-limit");
   await page.keyboard.press("Escape");
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("gives member chats the initiative's MCP servers, with the secret only in the provider's request", async () => {
+  const page = app.page;
+  const sidebar = page.locator(".sidebar");
+  await sidebar.getByRole("button", { name: `Open ${INITIATIVE}` }).click();
+  const detail = page.getByRole("main", { name: "Initiatives" }).getByRole("article", { name: INITIATIVE });
+  const card = detail.getByRole("region", { name: "MCP servers" });
+  await card.scrollIntoViewIfNeeded();
+  await expect(card.getByText("Works with Codex, Claude, Cursor, Kimi Code, OpenCode. Not available on Antigravity.")).toBeVisible();
+
+  // Add an HTTP server with a secret header; the value is typed once.
+  await card.getByRole("button", { name: "Add MCP server" }).click();
+  const form = card.getByRole("form", { name: "Add MCP server" });
+  await expect(form.getByRole("textbox", { name: "Server name" })).toBeFocused();
+  await form.getByRole("textbox", { name: "Server name" }).fill("tracker");
+  await form.getByRole("textbox", { name: "Server URL" }).fill("https://mcp.example.com/mcp");
+  await form.getByRole("button", { name: "Add header" }).click();
+  await form.getByRole("textbox", { name: "Header name" }).fill("Authorization");
+  // Authorization can only be secret: the box is ticked and cannot be unticked.
+  await expect(form.getByRole("checkbox", { name: "Keep Authorization secret" })).toBeChecked();
+  await expect(form.getByRole("checkbox", { name: "Keep Authorization secret" })).toBeDisabled();
+  const secretInput = form.getByLabel("Value of Authorization");
+  await expect(secretInput).toHaveAttribute("type", "password");
+  await secretInput.fill(`Bearer ${MCP_SECRET}`);
+  await form.getByRole("button", { name: "Add server" }).click();
+  await expect(form).toBeHidden();
+  const list = card.getByRole("list", { name: "MCP servers for this initiative" });
+  await expect(list.getByText("https://mcp.example.com/mcp")).toBeVisible();
+  await expect(list.getByText(/Secret not set/u)).toHaveCount(0);
+  await app.expectNoViewportOverflow();
+  await evidence("initiative-mcp-servers", card);
+
+  // The stored secret shows only as Set.
+  await list.getByRole("button", { name: "Edit tracker" }).click();
+  const edit = card.getByRole("form", { name: "Edit tracker" });
+  await expect(edit.getByText("Set", { exact: true })).toBeVisible();
+  await expect(edit.getByLabel("Value of Authorization")).toHaveCount(0);
+  await edit.scrollIntoViewIfNeeded();
+  await evidence("initiative-mcp-server-edit", edit);
+  await edit.getByRole("button", { name: "Cancel" }).click();
+  expect(await page.content()).not.toContain(MCP_SECRET);
+
+  // The member chat's next message carries the server to Codex.
+  await sidebar.getByRole("button", { name: new RegExp(`^${FIXTURE_CHAT},`, "u") }).click();
+  const composer = page.getByRole("region", { name: "Message composer" });
+  await composer.getByRole("textbox").first().fill(MCP_REQUEST);
+  await composer.getByRole("textbox").first().press("Enter");
+  const turnLog = async () => (await readFile(join(app.workspaceDirectory, TURN_LOG), "utf8")).trim().split("\n");
+  await expect.poll(async () => (await turnLog()).some((line) => line.includes(MCP_REQUEST))).toBe(true);
+  const sessions = (await readFile(join(app.workspaceDirectory, THREAD_LOG), "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line) as { method: string; params: { config?: Record<string, unknown> } });
+  const opened = sessions.at(-1)!;
+  expect(["thread/start", "thread/resume"]).toContain(opened.method);
+  expect(opened.params.config?.["mcp_servers.tracker"]).toEqual({
+    url: "https://mcp.example.com/mcp",
+    http_headers: { Authorization: `Bearer ${MCP_SECRET}` },
+  });
+  // Sessions opened before the server existed (including the title
+  // generator's, which turns the user's own servers off) never carried it.
+  for (const { params } of sessions.slice(0, -1)) {
+    expect(params.config ?? {}).not.toHaveProperty(["mcp_servers.tracker"]);
+    expect(JSON.stringify(params)).not.toContain(MCP_SECRET);
+  }
+
+  // The value exists only in that request: not in prompts, tool answers, the
+  // page, the database or any other file Inertia wrote.
+  for (const line of await turnLog()) expect(line).not.toContain(MCP_SECRET);
+  expect(await page.content()).not.toContain(MCP_SECRET);
+  const written = async (directory: string): Promise<string[]> => (await readdir(directory, { withFileTypes: true, recursive: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name))
+    .filter((path) => !path.endsWith(THREAD_LOG));
+  for (const path of await written(app.testDirectory)) {
+    const contents = await readFile(path).catch(() => null);
+    if (contents) expect(contents.includes(MCP_SECRET), path).toBe(false);
+  }
+  await evidence("chat-mcp-turn", page.getByRole("article", { name: "Your request" }).filter({ hasText: MCP_REQUEST }));
+
+  // Removing a server and deleting the initiative take their secrets out of
+  // secure storage. The vault answers "is it set" for the stored server.
+  const storedServer = (name: string): { initiativeId: string; server: InitiativeMcpServer } => {
+    const database = new Database(join(app.testDirectory, "data", "inertia.sqlite"), { readonly: true, fileMustExist: true });
+    try {
+      const rows = database.prepare("SELECT id, preferences_json FROM initiatives").all() as Array<{ id: string; preferences_json: string }>;
+      for (const row of rows) {
+        const server = ((JSON.parse(row.preferences_json) as { mcpServers?: InitiativeMcpServer[] }).mcpServers ?? [])
+          .find((candidate) => candidate.name === name);
+        if (server) return { initiativeId: row.id, server };
+      }
+    } finally {
+      database.close();
+    }
+    throw new Error(`No stored MCP server named ${name}.`);
+  };
+  const secretSet = async (stored: { initiativeId: string; server: InitiativeMcpServer }, slot: string): Promise<boolean> =>
+    await page.evaluate(async ({ initiativeId, server, slot: requested }) => {
+      const state = await window.inertia.getInitiativeMcpSecretState({
+        initiativeId, serverId: server.id, transport: server.transport, slots: [requested],
+      });
+      return state.slots[requested] === true;
+    }, { ...stored, slot });
+  const tracker = storedServer("tracker");
+  expect(await secretSet(tracker, "header:authorization")).toBe(true);
+
+  await sidebar.getByRole("button", { name: `Open ${INITIATIVE}` }).click();
+  await card.scrollIntoViewIfNeeded();
+  await card.getByRole("button", { name: "Remove tracker" }).click();
+  await expect(card.getByRole("button", { name: "Keep" })).toBeFocused();
+  await card.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(card.getByText("No MCP servers.", { exact: false })).toBeVisible();
+  await expect.poll(async () => await secretSet(tracker, "header:authorization")).toBe(false);
+
+  // A server added afterwards goes with the initiative.
+  await card.getByRole("button", { name: "Add MCP server" }).click();
+  const wikiForm = card.getByRole("form", { name: "Add MCP server" });
+  await wikiForm.getByRole("textbox", { name: "Server name" }).fill("wiki");
+  await wikiForm.getByRole("textbox", { name: "Server URL" }).fill("https://wiki.example.com/mcp");
+  await wikiForm.getByRole("button", { name: "Add header" }).click();
+  await wikiForm.getByRole("textbox", { name: "Header name" }).fill("X-Api-Key");
+  // A *-Key header starts out secret.
+  await expect(wikiForm.getByRole("checkbox", { name: "Keep X-Api-Key secret" })).toBeChecked();
+  await wikiForm.getByLabel("Value of X-Api-Key").fill(WIKI_SECRET);
+  await wikiForm.getByRole("button", { name: "Add server" }).click();
+  await expect(wikiForm).toBeHidden();
+  await expect.poll(() => { try { storedServer("wiki"); return true; } catch { return false; } }).toBe(true);
+  const wiki = storedServer("wiki");
+  await expect.poll(async () => await secretSet(wiki, "header:x-api-key")).toBe(true);
+  page.once("dialog", (dialog) => { void dialog.accept(); });
+  await detail.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(sidebar.getByRole("button", { name: `Open ${INITIATIVE}` })).toHaveCount(0);
+  await expect.poll(async () => await secretSet(wiki, "header:x-api-key")).toBe(false);
+
+  // Neither value was ever written in the clear anywhere under the test directory.
+  for (const path of await written(app.testDirectory)) {
+    const contents = await readFile(path).catch(() => null);
+    if (!contents) continue;
+    expect(contents.includes(MCP_SECRET), path).toBe(false);
+    expect(contents.includes(WIKI_SECRET), path).toBe(false);
+  }
+  expect(await page.content()).not.toContain(WIKI_SECRET);
   expect(app.rendererErrors).toEqual([]);
 });

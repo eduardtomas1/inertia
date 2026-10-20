@@ -5,6 +5,7 @@ import { modelSelectionSchema, type ModelSelection } from "./model-routing";
 import { PROJECT_COLOR_NAMES, type ProjectColorName } from "./project-colors";
 import { isValidClaudeTurnBudgetUsd } from "./claude-turn-budget";
 import { INITIATIVE_NOTE_KINDS, type InitiativeNoteKind } from "./initiative-note-proposals";
+import { initiativeMcpServersSchema } from "./initiative-mcp";
 
 export {
   INITIATIVE_NOTE_KIND_LABELS,
@@ -224,6 +225,12 @@ const storedFields = {
   defaultProjectId: preferenceFields.defaultProjectId.nullable().default(null),
   /** When on, Inertia keeps a folder of skills that member chats can invoke. */
   skillsFolder: z.boolean().default(false),
+  /**
+   * MCP servers every member chat's provider session receives where the
+   * provider takes them; see `initiative-mcp.ts`. Secret values are never
+   * stored here, only which entries are secret.
+   */
+  mcpServers: initiativeMcpServersSchema.default([]),
 };
 
 const fitsPreferencesColumn = (value: unknown): boolean =>
@@ -243,6 +250,8 @@ export const initiativePreferencesPatchSchema = z.strictObject({
   claudeMaxBudgetUsd: preferenceFields.claudeMaxBudgetUsd.nullable().optional(),
   defaultProjectId: preferenceFields.defaultProjectId.nullable().optional(),
   skillsFolder: z.boolean().optional(),
+  /** Replaces the whole list; the runtime checks it against the stored one. */
+  mcpServers: initiativeMcpServersSchema.optional(),
 }).refine(
   (patch) => Object.values(patch).some((value) => value !== undefined),
   "Change at least one initiative setting.",
@@ -266,6 +275,7 @@ export function defaultInitiativePreferences(): InitiativePreferences {
     claudeMaxBudgetUsd: null,
     defaultProjectId: null,
     skillsFolder: false,
+    mcpServers: [],
   };
 }
 

@@ -65,6 +65,22 @@ The useful changes in each Inertia release, in plain language.
   its access until it ends (stop it to apply the limit now), a chat waiting to
   resume after a usage limit may then need resuming by hand, and Antigravity
   can't run under a Supervised limit.
+- **MCP servers for an initiative**: in Tools & defaults, add HTTP or
+  command MCP servers that every chat in the initiative gets with its next
+  message, on Codex, Claude, Cursor, Kimi Code and OpenCode (not
+  Antigravity). They are added beside your own provider servers, never in
+  their place. Mark a header or environment variable **Secret** (Inertia
+  ticks it for names such as `Authorization` or `API_TOKEN`; `Authorization`,
+  `Proxy-Authorization` and `Cookie` are always secret) and its value, at
+  least 8 characters, goes to your system's secure storage, is shown
+  afterwards only as **Set**, and is read only when a message starts, for that
+  provider alone. When the provider repeats the exact value in its answer,
+  thinking, tool details or errors, even split across streamed pieces, Inertia
+  shows `[secret]` instead; a changed form of the value (encoded, or only part
+  of it) is not caught. A secret stays with the URL or command it was entered
+  for: change the address and the server asks for it again. Command servers on
+  Claude, Cursor, Kimi Code and OpenCode don't inherit the provider sign-in
+  Inertia passes to the provider.
 
 ## 0.0.73 — 2026-10-19
 

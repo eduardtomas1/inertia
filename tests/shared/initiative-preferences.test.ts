@@ -32,6 +32,7 @@ describe("initiative preferences", () => {
       claudeMaxBudgetUsd: null,
       defaultProjectId: null,
       skillsFolder: false,
+      mcpServers: [],
     });
   });
 

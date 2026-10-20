@@ -50,4 +50,6 @@ export const DESKTOP_IPC = {
   setBackendCredential: "inertia:set-backend-credential",
   clearBackendCredential: "inertia:clear-backend-credential",
   getBackendCredentialState: "inertia:get-backend-credential-state",
+  setInitiativeMcpSecret: "inertia:set-initiative-mcp-secret",
+  getInitiativeMcpSecretState: "inertia:get-initiative-mcp-secret-state",
 } as const;

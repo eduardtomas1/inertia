@@ -42,6 +42,7 @@ import {
 } from "./turn-runtime-interruption-note";
 import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import { INITIATIVES_INSTRUCTION_LABEL } from "../initiative-host-tools";
+import { initiativeMcpServerPlan } from "../initiative-mcp-runtime";
 import { broadcastConversationShell } from "./turn-controller-support";
 import type {
   ActiveTurn,
@@ -450,6 +451,9 @@ export function resolveTurnRequest(
   const initiativeSkillsRoot = request.skills?.some(({ source }) => source === "claude-native")
     ? dependencies.hooks.initiativeSkillsRoot?.(conversation) ?? null
     : null;
+  // The initiative's enabled MCP servers, unresolved: the provider launch step
+  // reads their secrets from the vault just before the harness starts.
+  const initiativeMcpServers = initiativeMcpServerPlan(dependencies.store, conversation, route.harnessId);
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -492,6 +496,7 @@ export function resolveTurnRequest(
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
+    ...(initiativeMcpServers ? { initiativeMcpServers } : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {

@@ -31,8 +31,10 @@ diagnostic bundles. Maintainers may request additional information through the
 private advisory.
 
 Reports involving Inertia's privileged Electron IPC or runtime boundary,
-credential storage, repository containment or reversal, provider adapters, and
-release or update packaging are in scope. Report a vulnerability in an
+credential storage (including initiative MCP server secrets), repository
+containment or reversal, provider adapters (including the MCP server
+configuration Inertia passes to them), and release or update packaging are in
+scope. Report a vulnerability in an
 upstream provider, CLI, SDK, Electron, or other dependency to that project as
 well; notify Inertia privately when its integration increases the impact.
 

@@ -356,6 +356,32 @@ describe("watcher link repository", () => {
     expect(store.shellSnapshot().watchers?.[0]?.counters.findingsTotal).toBe(2);
   });
 
+  it("marks a settled finding resolved by a later check of the same link, once", () => {
+    const links = store.watcherLinks;
+    const { link } = attach(chat());
+    const { link: other } = attach(chat("Other"));
+    const finding = check(link.id, "finding");
+    const quiet = check(link.id, "silent");
+    for (let index = 0; index < 3; index += 1) check(other.id, "silent");
+    const revision = links.get(link.id)!.feedRevision;
+    expect(finding.resolvedBySequence).toBeNull();
+    expect(links.markResolved(finding.wakeId, 3, tick())).toBeNull();
+    expect(links.markResolved(quiet.wakeId, 2, tick())).toBeNull();
+    expect(links.markResolved(finding.wakeId, finding.sequence, tick())).toBeNull();
+    expect(links.markResolved(randomUUID(), quiet.sequence, tick())).toBeNull();
+    expect(links.markResolved(finding.wakeId, 2, tick())).toMatchObject({ wakeId: finding.wakeId, resolvedBySequence: 2 });
+    expect(links.get(link.id)!.feedRevision).toBe(revision + 1);
+    expect(links.feed(link.id)?.items.find(({ wakeId }) => wakeId === finding.wakeId)?.resolvedBySequence).toBe(2);
+    expect(watcherFeedResultSchema.safeParse({ kind: "watcher.feed", ...links.feed(link.id) }).success).toBe(true);
+    const later = check(link.id, "silent");
+    expect(links.markResolved(finding.wakeId, later.sequence, tick())).toBeNull();
+    expect(links.getWake(finding.wakeId)?.resolvedBySequence).toBe(2);
+    expect(() => raw((database) => database.prepare("UPDATE watcher_wakes SET resolved_by_sequence = 1 WHERE id = ?").run(finding.wakeId)))
+      .toThrow(/CHECK constraint failed/u);
+    expect(() => raw((database) => database.prepare("UPDATE watcher_wakes SET resolved_by_sequence = 3 WHERE id = ?").run(quiet.wakeId)))
+      .toThrow(/CHECK constraint failed/u);
+  });
+
   it("keeps eight maximal links under the snapshot cap and leaves instructions out of the shell", () => {
     const links = store.watcherLinks;
     expect(() => attach(chat("Bell"), { instructions: "ring\u0007" })).toThrow();

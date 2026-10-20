@@ -654,6 +654,25 @@ export class WatcherLinkRepository {
     })();
   }
 
+  markResolved(wakeId: string, bySequence: number, now: string): WatcherWakeRecord | null {
+    const at = requireTimestamp(now, "Watcher resolution time");
+    if (!Number.isSafeInteger(bySequence)) return null;
+    return this.database.transaction(() => {
+      const changed = this.database.prepare(`
+        UPDATE watcher_wakes SET resolved_by_sequence = ?
+        WHERE id = ? AND state = 'settled' AND outcome = 'finding'
+          AND resolved_by_sequence IS NULL AND sequence < ?
+          AND EXISTS (
+            SELECT 1 FROM watcher_wakes AS later
+            WHERE later.link_id = watcher_wakes.link_id AND later.sequence = ?
+          )
+      `).run(bySequence, wakeId, bySequence, bySequence).changes;
+      if (changed !== 1) return null;
+      this.bumpFeedForWake(wakeId, at);
+      return this.getWake(wakeId);
+    })();
+  }
+
   wakeSummaries(conversationId: string, turnIds?: readonly string[]): WatcherWakeSummary[] {
     return watcherWakeSummaries(this.database, conversationId, turnIds) ?? [];
   }

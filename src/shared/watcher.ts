@@ -274,6 +274,7 @@ export const watcherFeedItemSchema = z.strictObject({
   settledAt: timestampSchema.nullable(),
   /** Read-only commands the watcher ran during this check; omitted when none. */
   commandsRun: z.number().int().min(1).max(10_000).optional(),
+  resolvedBySequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(),
 }).superRefine((item, context) => {
   const settled = item.state === "settled";
   if (settled !== (item.outcome !== null) || settled !== (item.settledAt !== null)) {
@@ -281,6 +282,9 @@ export const watcherFeedItemSchema = z.strictObject({
   }
   if (item.delivery !== null && item.finding === null) {
     context.addIssue({ code: "custom", message: "Only findings can be delivered or dismissed." });
+  }
+  if (item.resolvedBySequence !== null && (item.outcome !== "finding" || item.resolvedBySequence <= item.sequence)) {
+    context.addIssue({ code: "custom", message: "Only a later check can resolve a finding." });
   }
 });
 

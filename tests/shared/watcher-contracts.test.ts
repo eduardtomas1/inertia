@@ -83,6 +83,7 @@ const feedItem: WatcherFeedItem = {
   delivery: null,
   createdAt: at,
   settledAt: at,
+  resolvedBySequence: null,
 };
 const note = {
   linkId: link.id,
@@ -236,6 +237,17 @@ describe("watcher shared contracts", () => {
       { ...feedItem, delivery: { mode: "steer", state: "dismissed", detail: null, at } },
       { ...feedItem, finding: null, delivery: { mode: "queue", state: "sent", detail: null, at } },
       { ...feedItem, sequence: 0 },
+    ]) expect(watcherFeedItemSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("marks only a finding as resolved, and only by a later check", () => {
+    expect(watcherFeedItemSchema.safeParse({ ...feedItem, resolvedBySequence: 4 }).success).toBe(true);
+    for (const invalid of [
+      { ...feedItem, resolvedBySequence: undefined },
+      { ...feedItem, resolvedBySequence: 3 },
+      { ...feedItem, resolvedBySequence: 2 },
+      { ...feedItem, resolvedBySequence: 4.5 },
+      { ...feedItem, outcome: "silent", finding: null, resolvedBySequence: 4 },
     ]) expect(watcherFeedItemSchema.safeParse(invalid).success).toBe(false);
   });
 

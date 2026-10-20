@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppSnapshot, ProviderId, ProviderInfo } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../src/shared/watcher";
+import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING, type WatcherLinkView } from "../../src/shared/watcher";
 import { WatcherAttachDialog } from "../../src/renderer/src/components/watcher/WatcherAttachDialog";
-import { WATCHED_ID, link, project, recordingRequest, shell } from "./watcher-fixtures";
+import { WATCHED_ID, link, payloadOf, project, recordingRequest, shell } from "./watcher-fixtures";
 
 const ready = (id: ProviderId, label: string, overrides: Partial<ProviderInfo> = {}): ProviderInfo => ({
   id,
@@ -54,7 +54,7 @@ function snapshot(providers: ProviderInfo[], watchedProvider: ProviderId = "code
 
 function Harness({ value, onAttached = vi.fn(), request }: {
   value: AppSnapshot;
-  onAttached?: ReturnType<typeof vi.fn>;
+  onAttached?: (link: WatcherLinkView) => void;
   request?: ReturnType<typeof recordingRequest>["request"];
 }) {
   const [open, setOpen] = useState(false);
@@ -149,7 +149,7 @@ describe("WatcherAttachDialog", () => {
     await waitFor(() => expect(onAttached).toHaveBeenCalledWith(link()));
     const command = request.mock.calls[0]![0];
     expect(command.type).toBe("watcher.attach");
-    expect(command.payload).toMatchObject({
+    expect(payloadOf(command)).toMatchObject({
       watchedConversationId: WATCHED_ID,
       preset: "reviewer",
       instructions: "",

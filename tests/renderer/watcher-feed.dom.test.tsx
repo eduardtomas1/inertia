@@ -14,6 +14,7 @@ import {
   feedItem,
   finding,
   link,
+  payloadOf,
   watcherRuntime,
 } from "./watcher-fixtures";
 
@@ -78,7 +79,7 @@ describe("WatcherFeed", () => {
     await waitFor(() => expect(status).toHaveTextContent("Queued · sends after the current turn"));
     expect(status).toHaveFocus();
     const deliver = runtime.commands.find(({ type }) => type === "watcher.note.deliver");
-    expect(deliver?.payload).toMatchObject({ linkId: LINK_ID, wakeId: finding(4, "").wakeId, mode: "queue" });
+    expect(payloadOf(deliver)).toMatchObject({ linkId: LINK_ID, wakeId: finding(4, "").wakeId, mode: "queue" });
     expect(within(card).queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
@@ -103,7 +104,7 @@ describe("WatcherFeed", () => {
       "Steer nowDelivers the note into the running turn",
     ]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: /Steer now/u }));
-    await waitFor(() => expect(steering.commands.find(({ type }) => type === "watcher.note.deliver")?.payload)
+    await waitFor(() => expect(payloadOf(steering.commands.find(({ type }) => type === "watcher.note.deliver")))
       .toMatchObject({ mode: "steer" }));
   });
 

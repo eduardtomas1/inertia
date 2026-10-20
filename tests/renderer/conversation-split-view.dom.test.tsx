@@ -12,7 +12,7 @@ import { WatcherContext } from "../../src/renderer/src/components/watcher/watche
 import { loadWatcherDock } from "../../src/renderer/src/components/watcher/watcherLoaders";
 import { RuntimeDetailSubscriptions, type RuntimeDetailSubscriptionOwner } from "../../src/renderer/src/utils/runtimeSequencing";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
-import { link as watcherLink, recordingRequest, shell, surfaceModel } from "./watcher-fixtures";
+import { link as watcherLink, payloadOf, recordingRequest, shell, surfaceModel } from "./watcher-fixtures";
 import {
   splitLeaves,
   swapSplitPanes,
@@ -608,7 +608,7 @@ describe("ConversationSplitView", () => {
     }
     await waitFor(() => expect(runtime.commands).toHaveLength(4));
     expect(runtime.commands.every(({ type }) => type === "watcher.feed.get")).toBe(true);
-    expect(new Set(runtime.commands.map(({ payload }) => (payload as { linkId: string }).linkId)))
+    expect(new Set(runtime.commands.map((command) => payloadOf(command).linkId)))
       .toEqual(new Set(links.map(({ id }) => id)));
     expect(JSON.stringify(subscriptions.mountedPanes())).toBe(before);
   });

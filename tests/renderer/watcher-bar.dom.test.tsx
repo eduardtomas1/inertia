@@ -7,7 +7,7 @@ import type { WatcherLinkView } from "../../src/shared/watcher";
 import { WatcherBar } from "../../src/renderer/src/components/watcher/WatcherBar";
 import { createWatcherActions } from "../../src/renderer/src/hooks/useWatcherActions";
 import { publishWatcherLive, resetWatcherLiveStore } from "../../src/renderer/src/utils/watcherLiveStore";
-import { LINK_ID, WATCHED_ID, WATCHER_ID, link, shell, watcherRuntime } from "./watcher-fixtures";
+import { LINK_ID, WATCHED_ID, WATCHER_ID, link, payloadOf, shell, watcherRuntime } from "./watcher-fixtures";
 
 const STARTED = "2026-10-19T10:42:00.000Z";
 
@@ -134,7 +134,7 @@ describe("WatcherBar", () => {
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole("button", { name: "Check now" }));
     await vi.waitFor(() => expect(runtime.commands.map(({ type }) => type)).toEqual(["watcher.pause", "watcher.wake"]));
-    expect(runtime.commands.every(({ payload }) => (payload as { linkId: string }).linkId === LINK_ID)).toBe(true);
+    expect(runtime.commands.every((command) => payloadOf(command).linkId === LINK_ID)).toBe(true);
     view.rerender(bar(link({ status: "paused", pauseReason: "user" }), runtime, onResumeRequest));
     expect(screen.getByRole("button", { name: "Check now" })).toBeDisabled();
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled());

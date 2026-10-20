@@ -8,6 +8,7 @@ import type {
   Conversation,
   ConversationContextPacketSummary,
   ConversationLatestTurnSummary,
+  Initiative,
   MessageSendAcceptance,
   ModelBackendProfileView,
   Project,
@@ -38,6 +39,7 @@ export interface ComposerProps {
   showCheckoutContext?: boolean;
   scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
+  newChatInitiativePicker?: NewChatInitiativePicker;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -124,6 +126,14 @@ export interface NewChatProjectPicker {
   selectedProject: Project;
   disabled: boolean;
   onChange: (project: Project | null) => void;
+}
+
+export interface NewChatInitiativePicker {
+  /** Every initiative; the picker offers only active ones. */
+  initiatives: readonly Initiative[];
+  selectedId: string | null;
+  disabled: boolean;
+  onChange: (initiativeId: string | null) => void;
 }
 
 export interface ComposerQueuedPrompt {

@@ -79,6 +79,7 @@ export const Composer = memo(function Composer({
   showCheckoutContext = true,
   scratchWorkspace = false,
   newChatProjectPicker,
+  newChatInitiativePicker,
   providers,
   actions,
   disabled,
@@ -1118,6 +1119,7 @@ export const Composer = memo(function Composer({
           showCheckoutContext={showCheckoutContext}
           scratchWorkspace={scratchWorkspace}
           newChatProjectPicker={newChatProjectPicker}
+          newChatInitiativePicker={newChatInitiativePicker}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}

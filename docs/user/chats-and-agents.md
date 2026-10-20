@@ -41,6 +41,17 @@ Right-click a chat in the sidebar, or focus it and press Shift+F10 or the Menu k
 - **Copy** its path or thread ID.
 - **Archive** it with **Archive thread**.
 - **Open it in a new window** or **add it to split view**. See [Working side by side](working-side-by-side.md).
+- **Move it to an initiative**, or remove it from one. See [Initiatives](#initiatives).
+
+## Initiatives
+
+An initiative groups chats that belong to one larger piece of work, from any project and from chats without a project. A chat is in at most one initiative, and moving it never changes its project, checkout, agent or session.
+
+- **Create one** from the **Initiatives** page, with **New initiative…** in a chat's **Move to initiative** menu, in the new-chat initiative picker, or in the command palette. Name it and pick a colour.
+- **Move chats in or out** with **Move to initiative** in a chat's actions, or **Move chat to initiative…** in the command palette for the chat you have open. Once you have an initiative, a new chat offers an initiative picker next to the project; **No initiative** is the default. A chat that an agent starts from another chat joins that chat's initiative while the initiative is active.
+- **In Work**, each active initiative is a section at the top, above Recent, with its colour, name and the number of chats in it. It holds the initiative's chats that are in progress: a snoozed chat stays in **Snoozed** and a settled chat in **Done**, exactly as without an initiative. A count in the status colour shows chats waiting on you (approval, input, failed or limited, and not settled), and the working glyph shows that a member chat is running. Choose the header, or press Enter or Space on it, to fold or unfold it; Inertia remembers your choice. Chats outside an initiative stay in Recent, Yesterday and Earlier. The project filter applies inside each section, and a section with no matching chats is hidden.
+- **Done** initiatives fold after Earlier and list all of their chats, snoozed and settled ones included. **Archived** initiatives have no section: their chats return to the usual sections and rejoin the initiative when you unarchive it.
+- **The Initiatives page**, from the **Initiatives** row under Tasks, the arrow on a section header, or an initiative's name in the command palette, lists initiatives as Active, Done and Archived; with none yet, it explains initiatives and offers **New initiative**. Rename an initiative, change its colour, **Mark done**, **Reopen**, **Archive**, **Unarchive** or **Delete** it, and open any of its chats, grouped as Waiting on you, Working, Done and Idle. Deleting an initiative removes only the grouping: its chats, archived ones included, keep their history and leave the initiative.
 
 ## Right-click menus
 

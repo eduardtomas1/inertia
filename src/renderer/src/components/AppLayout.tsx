@@ -58,7 +58,7 @@ import {
 } from "./WorkspaceScene";
 import { SIDEBAR_MIN_WIDTH } from "../hooks/useWorkspaceLayout";
 import type { MultiSpawnController } from "../hooks/useMultiSpawn";
-import type { AppView } from "../appView";
+import { commandPaletteConversation, type AppView } from "../appView";
 import type { UsageViewProps } from "./UsageView";
 import {
   loadCommitDialog,
@@ -66,8 +66,11 @@ import {
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
   loadTasksView,
+  loadInitiativesView,
   loadUsageView,
 } from "./lazySurfaceLoaders";
+import { InitiativeCreateHost } from "./initiatives/InitiativeCreateHost";
+import { requestNewInitiative } from "../utils/initiativeDialog";
 
 const RootCommitDialog = lazy(async () => ({
   default: (await loadCommitDialog()).RootCommitDialog,
@@ -311,6 +314,8 @@ export const AppLayout = memo(function AppLayout({
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
   const UsageView = useLoadedSurface(loadUsageView, view === "usage");
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
+  const InitiativesView = useLoadedSurface(loadInitiativesView, view === "initiatives");
+  const [selectedInitiativeId, setSelectedInitiativeId] = useState<string | null>(null);
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
   const [projectScopeId, setProjectScopeId] = useProjectScope(connection.snapshot);
@@ -465,6 +470,19 @@ export const AppLayout = memo(function AppLayout({
         payload: { projectId: item.id, gitRepositoryLimit },
       }).catch(() => undefined);
     },
+    openInitiative: (initiativeId: string) => {
+      setSelectedInitiativeId(initiativeId);
+      setView("initiatives");
+    },
+    assignConversationInitiative: (thread: Conversation, initiativeId: string | null) => {
+      void actions.run("initiative.assign", {
+        type: "initiative.assign",
+        payload: { conversationId: thread.id, initiativeId },
+      }).catch(() => undefined);
+    },
+    createInitiativeForConversation: (thread: Conversation) => {
+      requestNewInitiative({ conversationId: thread.id });
+    },
     removeProject: (item: Project) => {
       const confirmed = !settings.confirmDestructiveActions
         || window.confirm(
@@ -476,6 +494,21 @@ export const AppLayout = memo(function AppLayout({
           payload: { projectId: item.id },
         }).catch(() => undefined);
       }
+    },
+  });
+  const initiativeActions = useStableActions({
+    request: (command: CommandWithoutId, options?: { passive?: boolean }) => actions.run(command.type, command, { ...options, reportError: false }),
+    openConversation: (thread: Conversation) => {
+      actions.selectConversation(thread);
+      setView("workspace");
+    },
+    createInitiative: () => {
+      requestNewInitiative({
+        onCreated: (initiativeId) => {
+          setSelectedInitiativeId(initiativeId);
+          setView("initiatives");
+        },
+      });
     },
   });
   const tasksActions = useStableActions({
@@ -583,6 +616,9 @@ export const AppLayout = memo(function AppLayout({
         onRestoreConversation: sidebarActions.restoreConversation,
         onSettleConversation: sidebarActions.settleConversation,
         onSnoozeConversation: sidebarActions.snoozeConversation,
+        initiatives: connection.snapshot?.initiatives,
+        onAssignInitiative: sidebarActions.assignConversationInitiative,
+        onCreateInitiative: sidebarActions.createInitiativeForConversation,
       }
     : null;
 
@@ -678,6 +714,9 @@ export const AppLayout = memo(function AppLayout({
             }
             onRemoveProject={sidebarActions.removeProject}
             onUpdateProjectAppearance={sidebarActions.updateProjectAppearance}
+            onOpenInitiative={sidebarActions.openInitiative}
+            onAssignConversationInitiative={sidebarActions.assignConversationInitiative}
+            onCreateInitiativeForConversation={sidebarActions.createInitiativeForConversation}
           />
         </Suspense>
       )}
@@ -834,6 +873,23 @@ export const AppLayout = memo(function AppLayout({
                   <LoadingMark label="Loading tasks" />
                 </div>
               )
+            ) : view === "initiatives" ? (
+              InitiativesView ? (
+                <InitiativesView
+                  snapshot={connection.snapshot}
+                  settings={settings}
+                  status={connection.status}
+                  selectedInitiativeId={selectedInitiativeId}
+                  onSelectInitiative={setSelectedInitiativeId}
+                  request={initiativeActions.request}
+                  onOpenConversation={initiativeActions.openConversation}
+                  onError={setActionError}
+                />
+              ) : (
+                <div className="workspace-tool-loading initiatives-view-loading">
+                  <LoadingMark label="Loading initiatives" />
+                </div>
+              )
             ) : (
               <WorkspaceScene {...scene} />
             )}
@@ -971,7 +1027,13 @@ export const AppLayout = memo(function AppLayout({
         importProject={actions.importProject}
         openSettings={actions.openSettings}
         openTasks={() => setView("tasks")}
+        activeConversation={commandPaletteConversation(view, isServerConversation, conversation)}
+        openInitiative={sidebarActions.openInitiative}
+        createInitiative={initiativeActions.createInitiative}
+        assignConversationInitiative={sidebarActions.assignConversationInitiative}
+        createInitiativeForConversation={sidebarActions.createInitiativeForConversation}
       />
+      <InitiativeCreateHost snapshot={connection.snapshot} run={actions.run} />
       <AppStatusOverlays
         providerAuth={providerAuth}
         appUpdate={appUpdate}

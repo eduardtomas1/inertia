@@ -2,6 +2,28 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+- **Initiatives** group chats from any project, including chats without a
+  project, under one name. Each active initiative is its own section at the
+  top of Work with its colour, the number of chats in it, a count of chats
+  that need you or are working, and a chevron to fold it. Its snoozed and
+  settled chats stay in Snoozed and Done as before, and chats outside an
+  initiative stay in Recent, Yesterday and Earlier. Done initiatives fold
+  after Earlier with all of their chats, and archived ones drop their section
+  while keeping membership.
+- Move a chat with **Move to initiative** in its actions menu or with
+  **Move chat to initiative…** in the command palette, and create an
+  initiative from any of these with **New initiative…**. Once an initiative
+  exists, a new chat offers an initiative picker next to the project. Moving
+  a chat never changes its project, checkout, agent or session. Chats an
+  agent starts from a chat join that chat's initiative while it is active.
+- The **Initiatives** page, always in the sidebar under Tasks, lists every
+  initiative by status. Rename one, pick its colour, mark it done, reopen,
+  archive or delete it, and open its chats, grouped by Waiting on you,
+  Working, Done and Idle. Deleting an initiative keeps its chats and their
+  history.
+
 ## 0.0.73 — 2026-10-19
 
 Open a chat for any folder straight from a terminal, send a queued message

@@ -19,6 +19,7 @@ import {
   AGENT_THREAD_MAX_DEPTH,
   type AgentThreadMutationTool,
 } from "../persistence/agent-thread-management-repository";
+import { InitiativeRepositoryError } from "../persistence/initiative-repository";
 import type {
   ProviderHostToolBridge,
   ProviderHostToolCall,
@@ -28,7 +29,10 @@ import type {
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import type { ProviderManager } from "../providers";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
-import type { ConversationCreationService } from "./conversation-creation-service";
+import type {
+  ConversationCreatePayload,
+  ConversationCreationService,
+} from "./conversation-creation-service";
 import type {
   ConversationContextRequestCoordinator,
 } from "./conversation-context-request-coordinator";
@@ -852,6 +856,35 @@ export class AgentThreadManager {
     }
   }
 
+  /**
+   * A managed child joins its source chat's initiative while that initiative
+   * still takes chats; otherwise it is created without one rather than failing.
+   * Membership is derived here from the source chat, never from agent input.
+   */
+  private inheritedInitiativeId(source: Conversation): string | undefined {
+    return source.initiativeId && this.dependencies.store.initiatives.acceptsChats(source.initiativeId)
+      ? source.initiativeId
+      : undefined;
+  }
+
+  /**
+   * The initiative can stop taking chats between the inheritance read and the
+   * insert, whose atomic re-check then refuses it. Membership is optional for a
+   * managed child, so it is created once more without one. Nothing else has
+   * happened before the insert, so the retry cannot duplicate work.
+   */
+  private async createManagedChild(
+    payload: ConversationCreatePayload,
+    requestId: string,
+  ): Promise<Conversation> {
+    try {
+      return await this.dependencies.creation.create(payload, requestId);
+    } catch (error) {
+      if (!payload.initiativeId || !(error instanceof InitiativeRepositoryError)) throw error;
+      return await this.dependencies.creation.create({ ...payload, initiativeId: undefined }, requestId);
+    }
+  }
+
   private async create(
     source: AgentThreadSource,
     args: unknown,
@@ -894,7 +927,7 @@ export class AgentThreadManager {
       this.now(),
     );
     const route = this.dependencies.providers.resolveModelRoute(selection);
-    const child = await this.dependencies.creation.create({
+    const child = await this.createManagedChild({
       projectId: current.projectId,
       title: input.title,
       providerId: route.providerId,
@@ -912,6 +945,7 @@ export class AgentThreadManager {
       worktreePath: workspace.kind === "reuse-current"
         ? current.worktreePath
         : undefined,
+      initiativeId: this.inheritedInitiativeId(current),
     }, `agent-thread:${operationId}`);
     this.dependencies.store.agentThreadManagement.attachManaged({
       childConversationId: child.id,

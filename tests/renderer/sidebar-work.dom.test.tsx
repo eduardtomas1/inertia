@@ -3,12 +3,16 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadThreadActions } from "../../src/renderer/src/components/sidebar/threadActionLoader";
 
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
+import { InitiativeCreateHost } from "../../src/renderer/src/components/initiatives/InitiativeCreateHost";
+import { loadInitiativeCreateDialog } from "../../src/renderer/src/components/lazySurfaceLoaders";
+import { closeNewInitiativeRequest, requestNewInitiative } from "../../src/renderer/src/utils/initiativeDialog";
 import type { SidebarProps } from "../../src/renderer/src/components/sidebar/SidebarProps";
 import { useProjectScope } from "../../src/renderer/src/hooks/useProjectScope";
 import { currentChatDrag } from "../../src/renderer/src/utils/chatDrag";
 import type {
   AppSnapshot,
   ConversationShell,
+  Initiative,
   Project,
   WorkspaceRun,
 } from "../../src/shared/contracts";
@@ -77,11 +81,13 @@ function snapshot(
   conversations: ConversationShell[],
   runs: WorkspaceRun[] = [],
   projects: Project[] = [project],
+  initiatives?: Initiative[],
 ): AppSnapshot {
   return {
     projects,
     conversations,
     runs,
+    ...(initiatives ? { initiatives } : {}),
     providers: [],
     settings: {
       ...defaultSettings,
@@ -130,7 +136,8 @@ function renderSidebar(
     splitConversationId?: string | null;
     detachedConversationIds?: ReadonlySet<string>;
     dailyWorkOpen?: boolean;
-    view?: "workspace" | "settings" | "usage" | "tasks" | "home";
+    view?: "workspace" | "settings" | "usage" | "tasks" | "initiatives" | "home";
+    initiatives?: Initiative[];
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -171,8 +178,11 @@ function renderSidebar(
     onSetProjectGrouping: vi.fn(),
     onSetProjectGitRepositoryLimit: vi.fn(),
     onRemoveProject: vi.fn(),
+    onOpenInitiative: vi.fn(),
+    onAssignConversationInitiative: vi.fn(),
+    onCreateInitiativeForConversation: vi.fn(),
   };
-  const initialSnapshot = snapshot(conversations, runs, options.projects);
+  const initialSnapshot = snapshot(conversations, runs, options.projects, options.initiatives);
   const view = render(
     <ScopedSidebar
       snapshot={initialSnapshot}
@@ -180,6 +190,9 @@ function renderSidebar(
     />,
   );
   return {
+    onOpenInitiative: sidebarProps.onOpenInitiative,
+    onAssignConversationInitiative: sidebarProps.onAssignConversationInitiative,
+    onCreateInitiativeForConversation: sidebarProps.onCreateInitiativeForConversation,
     onCreateConversation: sidebarProps.onCreateConversation,
     onRenameConversation: sidebarProps.onRenameConversation,
     onRenameProject: sidebarProps.onRenameProject,
@@ -348,11 +361,15 @@ describe("compact Work sidebar", () => {
     expect(tasks.querySelector("span")).toHaveTextContent(/^Tasks$/u);
     expect(tasks.querySelector(".lucide-list-todo")).toHaveAttribute("aria-hidden", "true");
     expect(tasks.previousElementSibling).toBe(primaryRow);
-    expect(tasks.nextElementSibling).toHaveClass("sidebar-search-wrap");
+    // Initiatives always has its row under Tasks, the feature's home.
+    expect(tasks.nextElementSibling).toBe(screen.getByRole("button", { name: "Initiatives" }));
+    expect(tasks.nextElementSibling?.nextElementSibling).toHaveClass("sidebar-search-wrap");
     const order = [...view.container.querySelectorAll<HTMLElement>("button, input")]
       .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim());
     const start = order.indexOf("New chat");
-    expect(order.slice(start, start + 4)).toEqual(["New chat", "Launch two chats", "Tasks", "Search projects and conversations"]);
+    expect(order.slice(start, start + 5)).toEqual([
+      "New chat", "Launch two chats", "Tasks", "Initiatives", "Search projects and conversations",
+    ]);
     expect(tasks).not.toHaveAttribute("aria-current");
     expect(tasks).not.toHaveClass("is-active");
     fireEvent.click(tasks);
@@ -1742,5 +1759,291 @@ describe("compact Work sidebar", () => {
     fireEvent.click(newChat, { shiftKey: true });
     expect(view.onCreateConversation).toHaveBeenCalledExactlyOnceWith(project);
     expect(view.onChooseNewChatProject).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("initiative sections in Work", () => {
+  const ALPHA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const BETA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const GAMMA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  function initiative(id: string, name: string, overrides: Partial<Initiative> = {}): Initiative {
+    return {
+      id,
+      name,
+      color: "teal",
+      status: "active",
+      brief: "",
+      briefRevision: 0,
+      revision: 1,
+      createdAt: new Date(2026, 7, 1, 9).toISOString(),
+      updatedAt: new Date(2026, 7, 1, 9).toISOString(),
+      ...overrides,
+    };
+  }
+
+  function sectionOf(name: RegExp): string | null | undefined {
+    return screen.getByRole("button", { name }).closest("[data-work-section]")?.getAttribute("data-work-section");
+  }
+
+  it("groups member chats under an active initiative above a labelled Recent section", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const now = new Date(2026, 7, 11, 11);
+    const view = renderSidebar([
+      conversation("plain", "Plain chat", now),
+      conversation("member-a", "Design the checkout", now, { initiativeId: ALPHA }),
+      conversation("member-b", "Write checkout tests", new Date(2026, 7, 5, 9), {
+        initiativeId: ALPHA,
+        status: "needs-input",
+        attentionKind: "approval",
+      }),
+    ], vi.fn(), [], { initiatives: [initiative(ALPHA, "Checkout")] });
+
+    const header = screen.getByRole("button", { name: "Checkout initiative, 2 chats, 1 waiting on you" });
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(header.querySelector(".initiative-status-badge")).toHaveAttribute("data-initiative-status", "approval");
+    expect(header.querySelector(".initiative-status-badge")).toHaveTextContent("1");
+    expect(sectionOf(/^Write checkout tests,/)).toBe(`initiative:${ALPHA}`);
+    expect(sectionOf(/^Design the checkout,/)).toBe(`initiative:${ALPHA}`);
+    expect(sectionOf(/^Plain chat,/)).toBe("recent");
+    expect(screen.getByRole("heading", { name: "Recent 1" })).toBeVisible();
+    const rows = screen.getAllByRole("listitem").map((row) => row.querySelector(".activity-thread-title")?.textContent);
+    expect(rows).toEqual(["Write checkout tests", "Design the checkout", "Plain chat"]);
+    // Rows inside an initiative keep their project line.
+    expect(screen.getByRole("button", { name: /^Design the checkout,/ }).querySelector(".activity-thread-projectline"))
+      .toHaveTextContent("acme-monorepo/apps/studio");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Checkout" }));
+    expect(view.onOpenInitiative).toHaveBeenCalledExactlyOnceWith(ALPHA);
+  });
+
+  it("leaves Work unchanged without initiatives and always offers the Initiatives row", () => {
+    const view = renderSidebar([conversation("plain", "Plain chat", new Date())]);
+    expect(screen.queryByRole("heading", { name: /^Recent/ })).not.toBeInTheDocument();
+    expect(document.querySelector(".work-thread-section.is-initiative")).toBeNull();
+    const row = screen.getByRole("button", { name: /^Initiatives$/ });
+    expect(row).toHaveClass("sidebar-primary-action");
+    expect(row.querySelector(".lucide-flag")).toHaveAttribute("aria-hidden", "true");
+    fireEvent.click(row);
+    expect(view.onViewChange).toHaveBeenCalledWith("initiatives");
+  });
+
+  it("places snoozed and settled members of an active initiative in Snoozed and Done and counts only shown chats", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const now = new Date(2026, 7, 11, 11);
+    renderSidebar([
+      conversation("member", "Active member", now, { initiativeId: ALPHA }),
+      conversation("snoozed", "Snoozed member", now, {
+        initiativeId: ALPHA,
+        snoozedUntil: new Date(2026, 7, 12, 9).toISOString(),
+      }),
+      conversation("settled", "Settled member", now, {
+        initiativeId: ALPHA,
+        status: "failed",
+        settledAt: now.toISOString(),
+      }),
+    ], vi.fn(), [], { initiatives: [initiative(ALPHA, "Checkout")] });
+    // The settled failure neither sits in the section nor counts as waiting.
+    const header = screen.getByRole("button", { name: "Checkout initiative, 1 chat" });
+    expect(header.querySelector(".initiative-section-count")).toHaveTextContent("1");
+    expect(header.querySelector(".initiative-status-badge")).toBeNull();
+    expect(sectionOf(/^Active member,/)).toBe(`initiative:${ALPHA}`);
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
+    expect(sectionOf(/^Settled member,/)).toBe("done");
+    fireEvent.click(screen.getByRole("button", { name: /^Snoozed/ }));
+    expect(sectionOf(/^Snoozed member,/)).toBe("snoozed");
+  });
+
+  it("does not rewrite stored section state for snapshots that keep the same initiatives", () => {
+    const chats = [conversation("member", "Member chat", new Date(), { initiativeId: ALPHA })];
+    const initiatives = [initiative(ALPHA, "Checkout")];
+    const setItem = vi.spyOn(window.localStorage, "setItem");
+    try {
+      const view = renderSidebar(chats, vi.fn(), [], { initiatives });
+      const sectionWrites = () => setItem.mock.calls
+        .filter(([key]) => key === SIDEBAR_WORK_SECTIONS_STORAGE_KEY).length;
+      const initialWrites = sectionWrites();
+      expect(initialWrites).toBeGreaterThan(0);
+      view.rerenderSnapshot(snapshot([...chats], [], [project], initiatives.map((entry) => ({ ...entry, revision: 2 }))));
+      view.rerenderSnapshot(snapshot([...chats], [], [project], [...initiatives]));
+      expect(sectionWrites()).toBe(initialWrites);
+      view.rerenderSnapshot(snapshot([...chats], [], [project], [...initiatives, initiative(BETA, "Docs")]));
+      expect(sectionWrites()).toBe(initialWrites + 1);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it("collapses an initiative section and remembers the choice across remounts", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const chats = [conversation("member", "Member chat", new Date(2026, 7, 11, 11), { initiativeId: ALPHA })];
+    const options = { initiatives: [initiative(ALPHA, "Checkout")] };
+    const first = renderSidebar(chats, vi.fn(), [], options);
+    fireEvent.click(screen.getByRole("button", { name: /^Checkout initiative/ }));
+    expect(screen.getByRole("button", { name: /^Checkout initiative/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /^Member chat,/ })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(SIDEBAR_WORK_SECTIONS_STORAGE_KEY)).toBe(`initiative-collapsed:${ALPHA}`);
+    first.unmount();
+
+    renderSidebar(chats, vi.fn(), [], options);
+    expect(screen.getByRole("button", { name: /^Checkout initiative/ })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: /^Checkout initiative/ }));
+    expect(screen.getByRole("button", { name: /^Member chat,/ })).toBeInTheDocument();
+    expect(window.localStorage.getItem(SIDEBAR_WORK_SECTIONS_STORAGE_KEY)).toBe(`initiative:${ALPHA}`);
+  });
+
+  it("navigates initiative headers and member rows with the keyboard like other sections", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const now = new Date(2026, 7, 11, 11);
+    renderSidebar([
+      conversation("plain", "Plain chat", now),
+      conversation("member", "Member chat", now, { initiativeId: ALPHA }),
+      conversation("old", "Old chat", new Date(2026, 7, 1, 9)),
+    ], vi.fn(), [], { initiatives: [initiative(ALPHA, "Checkout")] });
+
+    const header = screen.getByRole("button", { name: /^Checkout initiative/ });
+    header.focus();
+    fireEvent.keyDown(header, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Member chat,/ })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Plain chat,/ })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: "Earlier 1" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "Home" });
+    expect(header).toHaveFocus();
+
+    fireEvent.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(header, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /^Plain chat,/ })).toHaveFocus();
+  });
+
+  it("respects the project filter inside initiative sections", () => {
+    const second = { ...project, id: "project-two", name: "Runtime", path: "/work/runtime" };
+    const now = new Date();
+    const studioMember = conversation("studio-member", "Studio member", now, { initiativeId: ALPHA });
+    const runtimeMember = conversation("runtime-member", "Runtime member", now, { projectId: second.id, initiativeId: ALPHA });
+    const runtimeOnly = conversation("runtime-only", "Runtime only", now, { projectId: second.id, initiativeId: BETA });
+    const initiatives = [initiative(ALPHA, "Checkout"), initiative(BETA, "Docs")];
+    renderSidebar([studioMember, runtimeMember, runtimeOnly], vi.fn(), [], { projects: [project, second], initiatives });
+    expect(screen.getByRole("button", { name: /^Checkout initiative, 2 chats/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Docs initiative, 1 chat/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    fireEvent.click(screen.getByRole("option", { name: /Studio/u }));
+    expect(screen.getByRole("button", { name: /^Checkout initiative, 1 chat/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Studio member,/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Runtime member,/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Docs initiative/ })).not.toBeInTheDocument();
+  });
+
+  it("collapses done initiatives after Earlier and lets archived members fall through", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 11, 12));
+    const now = new Date(2026, 7, 11, 11);
+    const view = renderSidebar([
+      conversation("old", "Old chat", new Date(2026, 7, 1, 9)),
+      conversation("finished", "Finished member", now, { initiativeId: BETA }),
+      conversation("archived-member", "Archived member", now, { initiativeId: GAMMA }),
+      conversation("settled", "Settled chat", now, { settledAt: now.toISOString() }),
+    ], vi.fn(), [], {
+      initiatives: [
+        initiative(BETA, "Shipped", { status: "done" }),
+        initiative(GAMMA, "Shelved", { status: "archived" }),
+      ],
+    });
+    const doneHeader = screen.getByRole("button", { name: "Shipped initiative, 1 chat, Done" });
+    expect(doneHeader).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /^Finished member,/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Shelved initiative/ })).not.toBeInTheDocument();
+    expect(sectionOf(/^Archived member,/)).toBe("recent");
+    const order = [...document.querySelectorAll<HTMLElement>("[data-work-focus-id^='section:']")]
+      .map((node) => node.dataset.workFocusId);
+    expect(order).toEqual(["section:earlier", `section:initiative:${BETA}`, "section:done"]);
+    fireEvent.click(doneHeader);
+    expect(sectionOf(/^Finished member,/)).toBe(`initiative:${BETA}`);
+
+    // Unarchiving restores the grouping because membership was kept.
+    view.rerenderSnapshot(snapshot(
+      [conversation("archived-member", "Archived member", now, { initiativeId: GAMMA })],
+      [],
+      [project],
+      [initiative(GAMMA, "Shelved")],
+    ));
+    expect(sectionOf(/^Archived member,/)).toBe(`initiative:${GAMMA}`);
+  });
+
+  it("moves a chat to an initiative from its actions menu", () => {
+    const view = renderSidebar([
+      conversation("member", "Member chat", new Date(), { initiativeId: ALPHA }),
+      conversation("loose", "Loose chat", new Date()),
+    ], vi.fn(), [], {
+      initiatives: [initiative(ALPHA, "Checkout"), initiative(BETA, "Docs"), initiative(GAMMA, "Old", { status: "done" })],
+    });
+    const row = screen.getByRole("button", { name: /^Loose chat,/ });
+    row.focus();
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu", { name: "Thread actions for Loose chat" });
+    const submenuTrigger = within(menu).getByRole("menuitem", { name: "Move to initiative" });
+    fireEvent.keyDown(submenuTrigger, { key: "ArrowRight" });
+    const submenu = screen.getByRole("menu", { name: "Move to initiative" });
+    expect(within(submenu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Checkout", "Docs", "New initiative…",
+    ]);
+    fireEvent.click(within(submenu).getByRole("menuitem", { name: "Docs" }));
+    expect(view.onAssignConversationInitiative).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: "loose" }),
+      BETA,
+    );
+
+    const member = screen.getByRole("button", { name: /^Member chat,/ });
+    member.focus();
+    fireEvent.keyDown(member, { key: "F10", shiftKey: true });
+    fireEvent.click(within(screen.getByRole("menu", { name: "Thread actions for Member chat" }))
+      .getByRole("menuitem", { name: "Move to initiative" }));
+    const memberSubmenu = screen.getByRole("menu", { name: "Move to initiative" });
+    expect(within(memberSubmenu).queryByRole("menuitem", { name: "Checkout" })).not.toBeInTheDocument();
+    fireEvent.click(within(memberSubmenu).getByRole("menuitem", { name: "Remove from Checkout" }));
+    expect(view.onAssignConversationInitiative).toHaveBeenLastCalledWith(expect.objectContaining({ id: "member" }), null);
+
+    fireEvent.keyDown(member, { key: "F10", shiftKey: true });
+    fireEvent.click(within(screen.getByRole("menu", { name: "Thread actions for Member chat" }))
+      .getByRole("menuitem", { name: "Move to initiative" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Move to initiative" }))
+      .getByRole("menuitem", { name: "New initiative…" }));
+    expect(view.onCreateInitiativeForConversation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "member" }));
+  });
+
+  it("returns focus to the chat row after New initiative from its actions menu", async () => {
+    await loadInitiativeCreateDialog();
+    const chats = [conversation("loose", "Loose chat", new Date())];
+    const view = renderSidebar(chats, vi.fn(), [], { initiatives: [initiative(ALPHA, "Checkout")] });
+    view.onCreateInitiativeForConversation.mockImplementation((chat: { id: string }) => {
+      requestNewInitiative({ conversationId: chat.id });
+    });
+    render(<InitiativeCreateHost snapshot={snapshot(chats, [], [project], [initiative(ALPHA, "Checkout")])} run={vi.fn()} />);
+    try {
+      const row = screen.getByRole("button", { name: /^Loose chat,/ });
+      row.focus();
+      fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+      const menu = screen.getByRole("menu", { name: "Thread actions for Loose chat" });
+      fireEvent.keyDown(within(menu).getByRole("menuitem", { name: "Move to initiative" }), { key: "ArrowRight" });
+      const item = within(screen.getByRole("menu", { name: "Move to initiative" }))
+        .getByRole("menuitem", { name: "New initiative…" });
+      item.focus();
+      fireEvent.click(item);
+      expect(screen.queryByRole("menu", { name: "Thread actions for Loose chat" })).not.toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog", { name: "New initiative" });
+      await waitFor(() => expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveFocus());
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(row).toHaveFocus();
+    } finally {
+      act(() => closeNewInitiativeRequest());
+    }
   });
 });

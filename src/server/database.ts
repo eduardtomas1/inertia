@@ -360,6 +360,7 @@ export class RuntimeStore {
 
   get promptPresets() { return this.snapshotRepository.promptPresets; }
   get todos() { return this.snapshotRepository.todos; }
+  get initiatives() { return this.snapshotRepository.initiatives; }
   get restartContinuations() { return RestartContinuationRepository.for(this.database); }
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {

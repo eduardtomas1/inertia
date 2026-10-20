@@ -48,8 +48,10 @@ import {
 } from "./ComposerSettings";
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import { ProjectPicker } from "./ProjectPicker";
+import { loadInitiativePicker } from "../chatSurfaceLoaders";
+import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import type { ComposerMenuController } from "./useComposerMenus";
-import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
+import type { NewChatInitiativePicker, NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
@@ -155,6 +157,7 @@ export interface ComposerToolbarProps {
   showCheckoutContext: boolean;
   scratchWorkspace?: boolean;
   newChatProjectPicker?: NewChatProjectPicker;
+  newChatInitiativePicker?: NewChatInitiativePicker;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -232,6 +235,7 @@ export function ComposerToolbar({
   showCheckoutContext,
   scratchWorkspace = false,
   newChatProjectPicker,
+  newChatInitiativePicker,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -271,6 +275,7 @@ export function ComposerToolbar({
     handleComposerMenuTriggerKeyDown,
   } = menuController;
   const checkoutModel = useContext(CheckoutBranchControlContext);
+  const InitiativePicker = useLoadedSurface(loadInitiativePicker, Boolean(newChatInitiativePicker));
   const checkoutGitStatus = checkoutModel?.gitStatus ?? null;
   const checkoutStrip = composerCheckoutStrip({
     showCheckoutContext,
@@ -571,7 +576,10 @@ export function ComposerToolbar({
           aria-label="Chat checkout context"
         >
           {checkoutStrip === "branch" ? null : newChatProjectPicker ? (
-            <ProjectPicker picker={newChatProjectPicker} />
+            <div className="composer-new-chat-pickers">
+              <ProjectPicker picker={newChatProjectPicker} />
+              {newChatInitiativePicker && InitiativePicker && <InitiativePicker picker={newChatInitiativePicker} />}
+            </div>
           ) : (
             <span className="composer-checkout-location">
               <FolderGit2 size={14} aria-hidden="true" />

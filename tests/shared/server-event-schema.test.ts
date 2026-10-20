@@ -1968,6 +1968,48 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseServerEvent(event({ kind: "todo.started", conversationId: conversation.id }))).toBeTruthy();
     expect(() => parseServerEvent(event({ kind: "todo.started" }))).toThrow("Malformed server event");
   });
+  it("accepts only unique initiatives that every chat membership resolves to", () => {
+    const initiative = {
+      id: "44444444-4444-4444-8444-444444444444",
+      name: "Checkout redesign",
+      color: "teal",
+      status: "active",
+      brief: "",
+      briefRevision: 0,
+      revision: 1,
+      createdAt: checkedAt,
+      updatedAt: checkedAt,
+    };
+    const other = { ...initiative, id: "55555555-5555-4555-8555-555555555555", name: "Docs", status: "archived" };
+    const member = { ...conversationShell, initiativeId: initiative.id };
+    const parse = (overrides: Record<string, unknown>): unknown => parseServerEvent({
+      type: "snapshot.updated",
+      snapshot: snapshot(overrides),
+    });
+    expect(parse({ initiatives: [initiative, other], conversations: [member] })).toBeTruthy();
+    expect(parse({ initiatives: [], conversations: [{ ...conversationShell, initiativeId: null }] })).toBeTruthy();
+    expect(parse({ conversations: [conversationShell] })).toBeTruthy();
+    for (const invalid of [
+      { initiatives: [initiative, { ...initiative }] },
+      { initiatives: [initiative], conversations: [{ ...member, initiativeId: other.id }] },
+      { conversations: [member] },
+      { initiatives: [], conversations: [member] },
+      { initiatives: [{ ...initiative, color: "#00ff00" }] },
+      { initiatives: [{ ...initiative, status: "paused" }] },
+      { initiatives: [{ ...initiative, name: "" }] },
+      { initiatives: [{ ...initiative, name: "a\nb" }] },
+      { initiatives: [{ ...initiative, revision: -1 }] },
+      { initiatives: [{ ...initiative, name: " padded" }] },
+      { initiatives: [{ ...initiative, name: "tab\there" }] },
+      { initiatives: [{ ...initiative, preferencesJson: "{}" }] },
+      { initiatives: Array.from({ length: 101 }, (_, index) => ({ ...initiative, id: `${String(index).padStart(8, "0")}-4444-4444-8444-444444444444` })) },
+      { initiatives: { length: 0 } },
+      { initiatives: [initiative], conversations: [{ ...member, initiativeId: 7 }] },
+    ]) expect(() => parse(invalid)).toThrow("Malformed server event");
+    expect(parseServerEvent({ type: "conversation.shell.updated", conversation: member, runs: [] })).toBeTruthy();
+    expect(() => parseServerEvent({ type: "conversation.shell.updated", conversation: { ...member, initiativeId: 7 }, runs: [] }))
+      .toThrow("Malformed server event");
+  });
   it("rejects mismatched and duplicate event-local identities", () => {
     const skill = workflow.skills[0]; const attachment = conversationDetail.messages[0].attachments[0];
     const duplicateEvents = [

@@ -899,6 +899,64 @@ describe("AgentThreadManager", () => {
     }
   });
 
+  it("lets a managed child join its source chat's active initiative only", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const initiative = store.initiatives.create({ id: crypto.randomUUID(), name: "Shared goal" }, source.id);
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const create = async (title: string) => {
+        const result = await bridge!.invoke(call("inertia_create_conversation", {
+          title,
+          prompt: "Help with the shared goal.",
+          accessMode: "supervised",
+          workspace: { kind: "project" },
+        }));
+        expect(result.success).toBe(true);
+        return (JSON.parse(result.text) as { conversationId: string }).conversationId;
+      };
+      const joined = await create("Joined helper");
+      expect(store.conversationShell(joined)).toMatchObject({
+        projectId: source.projectId,
+        initiativeId: initiative.id,
+      });
+      store.initiatives.update(initiative.id, 1, { status: "done" });
+      const outside = await create("Late helper");
+      expect(store.conversationShell(outside)?.initiativeId).toBeNull();
+      expect(store.conversationShell(source.id)?.initiativeId).toBe(initiative.id);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still creates the managed child without membership when its initiative closes before the insert", async () => {
+    const { manager, source, sourceTurn, store } = await runtime();
+    try {
+      const initiative = store.initiatives.create({ id: crypto.randomUUID(), name: "Closing" }, source.id);
+      store.initiatives.update(initiative.id, 1, { status: "archived" });
+      // The inheritance read saw an active initiative; the atomic insert
+      // re-check (this harness creates chats with a direct store insert) does not.
+      const acceptsChats = vi.spyOn(store.initiatives, "acceptsChats").mockReturnValueOnce(true);
+      const bridge = manager.bridgeFor({ conversation: source, turn: sourceTurn });
+      const result = await bridge!.invoke(call("inertia_create_conversation", {
+        title: "Raced helper",
+        prompt: "Carry on.",
+        accessMode: "supervised",
+        workspace: { kind: "project" },
+      }));
+      expect(result.success).toBe(true);
+      expect(acceptsChats.mock.calls).toEqual([[initiative.id]]);
+      const childId = (JSON.parse(result.text) as { conversationId: string }).conversationId;
+      expect(store.conversationShell(childId)).toMatchObject({
+        projectId: source.projectId,
+        title: "Raced helper",
+        initiativeId: null,
+      });
+      expect(store.shellSnapshot().conversations.filter(({ title }) => title === "Raced helper")).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
   it("asks to create a chat without a project in its own new folder, never the shared folder", async () => {
     const { manager, project, source, sourceTurn, store } = await runtime(undefined, { scratch: true });
     try {

@@ -31,6 +31,7 @@ import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 import type { Todo } from "../todos";
+import type { Initiative } from "../initiatives";
 
 export type { ProviderId } from "../provider";
 
@@ -276,6 +277,11 @@ export interface Conversation {
   pinnedAt?: string | null;
   /** Optional only for snapshots created before thread organization shipped. */
   snoozedUntil?: string | null;
+  /**
+   * The initiative this chat belongs to, if any. Optional only for snapshots
+   * created before initiatives shipped.
+   */
+  initiativeId?: string | null;
   hasHistory?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -336,6 +342,8 @@ export interface AppSnapshot {
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
   todos?: Todo[];
+  /** Present on authoritative snapshots; optional only for legacy fixtures. */
+  initiatives?: Initiative[];
   activeProjectId: string | null;
   activeConversationId: string | null;
   /** Present on authoritative runtime snapshots; optional for legacy fixtures. */

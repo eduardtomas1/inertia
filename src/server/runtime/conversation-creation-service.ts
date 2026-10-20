@@ -106,6 +106,10 @@ export class ConversationCreationService {
     payload: ConversationCreatePayload,
     requestId: string,
   ): Promise<Conversation> {
+    // Fail before any checkout or folder work; the insert re-checks atomically.
+    if (payload.initiativeId) {
+      this.dependencies.store.initiatives.acceptsChats(payload.initiativeId, { require: true });
+    }
     if (payload.accessMode === undefined) {
       const accessMode = this.dependencies.store.project(payload.projectId).preferences?.defaultAccessMode;
       if (accessMode) payload = { ...payload, accessMode };

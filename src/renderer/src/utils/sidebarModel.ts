@@ -1,4 +1,4 @@
-import type { Conversation, ConversationLatestTurnSummary, WorkspaceRun } from "@shared/contracts";
+import type { Conversation, ConversationLatestTurnSummary, Initiative, WorkspaceRun } from "@shared/contracts";
 import {
   indexConversationWorkspaceRuns,
   selectConversationWorkspaceRun,
@@ -20,14 +20,19 @@ export interface SidebarThreadView {
   settled: boolean;
 }
 
+export type SidebarInitiativeSectionId = `initiative:${string}`;
 export type SidebarWorkSectionId = "recent" | "yesterday" | "earlier" | "done" | "snoozed"
-  | "no-project" | "no-project-done" | "no-project-snoozed";
+  | "no-project" | "no-project-done" | "no-project-snoozed" | SidebarInitiativeSectionId;
+
+export type SidebarInitiative = Pick<Initiative, "id" | "name" | "color" | "status" | "createdAt">;
 
 export interface SidebarWorkSection {
   id: SidebarWorkSectionId;
   label: string;
   threads: SidebarThreadView[];
   totalCount?: number;
+  /** Present only on initiative sections. */
+  initiative?: SidebarInitiative;
 }
 
 export function hasUnreadCompletion(conversation: Conversation, activeConversationId: string | null): boolean {
@@ -172,6 +177,22 @@ function localCalendarDayOffset(value: string, now: number): number {
   return Math.round((currentDay - dateDay) / 86_400_000);
 }
 
+/**
+ * A snoozed chat leaves the active sections until its snooze ends, unless it
+ * needs the user or is working.
+ */
+export function isOrdinarilySnoozedThread(
+  { conversation, needsAttention, status }: SidebarThreadView,
+  now: number,
+): boolean {
+  return Boolean(
+    conversation.snoozedUntil
+    && Date.parse(conversation.snoozedUntil) > now
+    && !needsAttention
+    && status !== "working"
+  );
+}
+
 export function groupWorkThreads(
   threads: readonly SidebarThreadView[],
   now = Date.now(),
@@ -198,16 +219,7 @@ export function groupWorkThreads(
         id: section.id === "done" ? "no-project-done" : "no-project-snoozed",
       }))];
   }
-  const isOrdinarilySnoozed = ({
-    conversation,
-    needsAttention,
-    status,
-  }: SidebarThreadView) => Boolean(
-    conversation.snoozedUntil
-    && Date.parse(conversation.snoozedUntil) > now
-    && !needsAttention
-    && status !== "working"
-  );
+  const isOrdinarilySnoozed = (thread: SidebarThreadView) => isOrdinarilySnoozedThread(thread, now);
   const snoozed = threads.filter(isOrdinarilySnoozed);
   const active = threads.filter((thread) => (
     !thread.settled && !thread.hidden && !isOrdinarilySnoozed(thread)

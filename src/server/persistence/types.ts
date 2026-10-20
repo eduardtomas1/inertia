@@ -58,6 +58,8 @@ export interface NewConversationOptions {
   activate?: boolean;
   branch?: string | null;
   worktreePath?: string | null;
+  /** Joins an active initiative at creation; checked inside the insert transaction. */
+  initiativeId?: string | null;
 }
 
 interface ConversationWorktreeOwnershipBase {

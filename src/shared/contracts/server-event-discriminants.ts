@@ -39,6 +39,7 @@ import {
   todoSchema,
   todosSerializedBytes,
 } from "../todos";
+import { initiativeSchema, MAX_INITIATIVES } from "../initiatives";
 
 function exhaustiveOptions<T extends string>(
   options: Record<T, true>,
@@ -150,6 +151,25 @@ function todoCollectionCoherent(value: unknown): boolean {
     && todosSerializedBytes(todos) <= MAX_TODOS_SERIALIZED_BYTES;
 }
 
+/**
+ * Initiatives are optional only on legacy snapshots, which then carry no
+ * membership. Every chat's initiative reference must resolve in the snapshot.
+ */
+function initiativeCollectionCoherent(
+  value: unknown,
+  conversations: readonly IdentityRecord[],
+): boolean {
+  if (value !== undefined && (!Array.isArray(value) || value.length > MAX_INITIATIVES)) return false;
+  const entries: unknown[] = value ?? [];
+  const parsed = entries.map((entry) => initiativeSchema.safeParse(entry));
+  if (parsed.some((result) => !result.success)) return false;
+  const ids = new Set(parsed.flatMap((result) => result.success ? [result.data.id] : []));
+  return ids.size === entries.length
+    && conversations.every(({ initiativeId }) => initiativeId === undefined
+      || initiativeId === null
+      || (typeof initiativeId === "string" && ids.has(initiativeId)));
+}
+
 const CONVERSATION_DETAIL_SCOPED_COLLECTIONS = [
   "agentTurns", "turnGitArtifacts", "messages", "activities", "subagents",
   "reasonings", "usage", "plans", "goals", "checkpoints", "reviewSummaries",
@@ -258,7 +278,8 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
     && (value.activeConversationId === null
       || conversationProjects.get(value.activeConversationId) === value.activeProjectId)
     && promptPresetCollectionCoherent(value.promptPresets)
-    && todoCollectionCoherent(value.todos);
+    && todoCollectionCoherent(value.todos)
+    && initiativeCollectionCoherent(value.initiatives, conversations);
 }
 
 export function pullRequestCapabilityStateCoherent(

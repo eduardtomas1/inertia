@@ -86,6 +86,10 @@ export function projectDetachedChatSnapshot(
     settings: projectedSettings(snapshot.settings),
     promptPresets: [],
     todos: [],
+    // Only the chat's own initiative, so its membership reference stays coherent.
+    initiatives: (snapshot.initiatives ?? []).filter(
+      ({ id }) => conversation?.initiativeId === id,
+    ),
     activeProjectId: project?.id ?? null,
     activeConversationId: conversation?.id ?? null,
     ...(snapshot.sync ? { sync: snapshot.sync } : {}),

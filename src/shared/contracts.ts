@@ -17,6 +17,12 @@ export type {
   PromptPresetRoute,
 } from "./prompt-presets";
 export type { Todo, TodoDraft, TodoPatch, TodoPriority } from "./todos";
+export type {
+  Initiative,
+  InitiativeColor,
+  InitiativePatch,
+  InitiativeStatus,
+} from "./initiatives";
 export * from "./contracts/agent";
 export * from "./contracts/agent-workflows";
 export * from "./contracts/app";

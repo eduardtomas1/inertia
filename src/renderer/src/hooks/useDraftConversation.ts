@@ -171,6 +171,8 @@ export function useDraftConversation({
         : defaults),
       interactionMode: current.conversation.interactionMode,
       accessMode: explicitAccessRef.current ? current.conversation.accessMode : defaults.accessMode,
+      // Initiative membership is independent of the project choice.
+      ...(current.payload.initiativeId ? { initiativeId: current.payload.initiativeId } : {}),
     };
     // Keep the composer identity (prompt and attachments), but rebuild the
     // project-owned checkout and defaults. Selecting a project is not navigation.
@@ -179,6 +181,19 @@ export function useDraftConversation({
         id: current.conversation.id,
         now: current.conversation.createdAt,
       }),
+      payload,
+      materialized: null,
+    });
+  };
+
+  const changeInitiative = (initiativeId: string | null): void => {
+    const current = draftRef.current;
+    if (!current || current.materialized
+      || (current.payload.initiativeId ?? null) === initiativeId) return;
+    const { initiativeId: _previous, ...rest } = current.payload;
+    const payload = initiativeId ? { ...rest, initiativeId } : rest;
+    replaceDraft({
+      conversation: { ...current.conversation, initiativeId },
       payload,
       materialized: null,
     });
@@ -454,13 +469,19 @@ export function useDraftConversation({
     sendingDraft: DraftConversationState,
     preserveDraftId: boolean,
   ): Promise<string> => {
+    const { initiativeId, ...draftPayload } = sendingDraft.payload;
+    // A saved draft can outlive its initiative; never send a stale membership.
+    const joinsInitiative = Boolean(initiativeId && snapshotRef.current?.initiatives?.some(
+      ({ id, status }) => id === initiativeId && status === "active",
+    ));
     const creation = await run("conversation.create:draft", {
       type: "conversation.create",
       payload: {
         ...withNewConversationModelSelection(
-          sendingDraft.payload,
+          draftPayload,
           sendingDraft.conversation.modelSelection,
         ),
+        ...(joinsInitiative ? { initiativeId } : {}),
         providerId: sendingDraft.conversation.providerId,
         interactionMode: sendingDraft.conversation.interactionMode,
         accessMode: sendingDraft.conversation.accessMode,
@@ -785,6 +806,7 @@ export function useDraftConversation({
     ),
     start,
     changeProject,
+    changeInitiative,
     importProject,
     clear,
     discard,

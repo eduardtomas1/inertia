@@ -1,0 +1,83 @@
+.initiative-dot {
+  --initiative-tint: var(--initiative-tint-light);
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--initiative-tint);
+}
+
+:root[data-theme="dark"] .initiative-dot {
+  --initiative-tint: var(--initiative-tint-dark);
+}
+
+.initiative-status-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  color: var(--status-idle);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.initiative-status-badge[data-initiative-status="approval"] { color: var(--status-approval); }
+.initiative-status-badge[data-initiative-status="input"] { color: var(--status-input); }
+.initiative-status-badge[data-initiative-status="failed"] { color: var(--status-failed); }
+.initiative-status-badge[data-initiative-status="limited"] { color: var(--warning); }
+.initiative-status-badge[data-initiative-status="working"] { color: var(--status-working); }
+
+.initiative-status-badge .agent-pixel-loader {
+  color: currentcolor;
+}
+
+/* Reuses the composer popover surface but is placed by the picker itself. */
+.initiative-picker-menu.composer-popover {
+  position: fixed;
+  z-index: 500;
+  bottom: auto;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  overflow-y: auto;
+}
+
+.initiative-picker-menu > button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.initiative-picker-menu.composer-popover button > :is(.menu-check, .initiative-dot) {
+  flex: 0 0 auto;
+}
+
+.initiative-picker-menu.composer-popover button > .initiative-dot {
+  display: inline-block;
+}
+
+.initiative-picker-menu .menu-check {
+  display: inline-flex;
+  width: 14px;
+  flex: 0 0 auto;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.initiative-picker-menu.composer-popover > button > span:last-child {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Menus and the palette lay out their item spans as flexible text columns. */
+.palette-group button > .initiative-dot,
+.thread-submenu button > .initiative-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-inline: 3px;
+}

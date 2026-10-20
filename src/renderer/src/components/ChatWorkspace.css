@@ -28,6 +28,9 @@
 .composer-project-picker-trigger:hover { background: var(--fill); }
 
 .composer-project-picker-trigger:disabled { opacity: var(--disabled-opacity); }
+.composer-new-chat-pickers { display: flex; min-width: 0; align-items: center; gap: 18px; }
+/* The project choice keeps its width; the initiative label truncates first. */
+.composer-new-chat-pickers > .composer-initiative-picker { max-width: min(220px, 36cqi); flex: 0 100 auto; }
 .conversation-history-controls {
   display: grid;
   justify-items: center;

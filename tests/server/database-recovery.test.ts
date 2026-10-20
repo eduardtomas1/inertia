@@ -30,6 +30,7 @@ import {
   recoverDatabaseOnStartup,
 } from "../../src/server/persistence/database-recovery";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { countLimitTriggersAreValid } from "../../src/server/persistence/count-limit-triggers-schema";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const directories: string[] = [];
@@ -1794,6 +1795,75 @@ describe("database backup and startup recovery", () => {
           SELECT RAISE(ABORT, 'task count limit exceeded');
         END;
     `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
+  it("validates the initiative count limit trigger off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "initiative trigger validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec("DROP TRIGGER initiatives_count_limit;");
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      CREATE TRIGGER initiatives_count_limit
+        BEFORE INSERT ON initiatives
+        WHEN (SELECT COUNT(*) FROM initiatives) >= 100
+        BEGIN
+          SELECT RAISE(ABORT, 'initiative count limit exceeded');
+        END;
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
+  it("requires the initiative trigger from schema 99 by version, not by probing the table", () => {
+    const database = new Database(":memory:");
+    try {
+      database.exec(`
+        CREATE TABLE todos (id TEXT PRIMARY KEY);
+        CREATE TRIGGER todos_count_limit BEFORE INSERT ON todos
+          WHEN (SELECT COUNT(*) FROM todos) >= 500
+          BEGIN SELECT RAISE(ABORT, 'todo count limit exceeded'); END;
+      `);
+      expect(countLimitTriggersAreValid(database, 98)).toBe(true);
+      // A schema 99 database must have the trigger even if the table is gone.
+      expect(countLimitTriggersAreValid(database, 99)).toBe(false);
+      database.exec(`
+        CREATE TABLE initiatives (id TEXT PRIMARY KEY);
+        CREATE TRIGGER initiatives_count_limit BEFORE INSERT ON initiatives
+          WHEN (SELECT COUNT(*) FROM initiatives) >= 100
+          BEGIN SELECT RAISE(ABORT, 'initiative count limit exceeded'); END;
+      `);
+      expect(countLimitTriggersAreValid(database, 99)).toBe(true);
+      database.exec("DROP TRIGGER todos_count_limit;");
+      expect(countLimitTriggersAreValid(database, 99)).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("requires the initiative membership index for backups", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "initiative index validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec("DROP INDEX conversations_initiative_idx;");
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec("CREATE INDEX conversations_initiative_idx ON conversations(initiative_id);");
     await expect(manager.createBackup()).resolves.toMatchObject({
       filename: expect.stringMatching(/\.sqlite$/u),
     });

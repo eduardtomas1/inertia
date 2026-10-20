@@ -44,7 +44,7 @@ import {
   validProviderRunOwnershipSchema,
 } from "./provider-run-ownership-schema";
 import { systemSuspendTimingSchemaIsValid } from "./system-suspend-schema";
-import { todosCountLimitTriggerIsValid } from "./todos-schema";
+import { countLimitTriggersAreValid } from "./count-limit-triggers-schema";
 import { validUsageDashboardIndex } from "./usage-dashboard-index-schema";
 import {
   DATABASE_BACKUP_INTERVAL_MS,
@@ -159,7 +159,7 @@ function validateOpenDatabase(
   usageDashboardIndexIsValid: DatabaseSchemaValidator,
   runStateSchemaIsValid: DatabaseSchemaValidator,
   suspendTimingSchemaIsValid: DatabaseSchemaValidator,
-  todosSchemaIsValid: DatabaseSchemaValidator,
+  countLimitSchemaIsValid: (database: Database.Database, version: number) => boolean,
   contextPacketTriggersAreValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
@@ -425,7 +425,7 @@ function validateOpenDatabase(
   if (version >= 61 && !contextPacketTriggersAreValid(database)) return "inconsistent";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "inconsistent";
   if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "inconsistent";
-  if (version >= 96 && !todosSchemaIsValid(database)) return "inconsistent";
+  if (version >= 96 && !countLimitSchemaIsValid(database, version)) return "inconsistent";
   for (const [introducedAt, index] of schemaRequirements.indexes) {
     if (version >= introducedAt && !database.prepare(
       "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
@@ -454,7 +454,7 @@ function validateDatabase(
       validUsageDashboardIndex,
       authoritativeRunStateSchemaIsValid,
       systemSuspendTimingSchemaIsValid,
-      todosCountLimitTriggerIsValid,
+      countLimitTriggersAreValid,
       contextPacketTriggersAreValid,
     );
   } catch (error) {
@@ -484,7 +484,7 @@ function validateDatabaseOffThread(
     const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()};
     const authoritativeRunStateSchemaIsValid = ${authoritativeRunStateSchemaIsValid.toString()};
     const systemSuspendTimingSchemaIsValid = ${systemSuspendTimingSchemaIsValid.toString()};
-    const todosCountLimitTriggerIsValid = ${todosCountLimitTriggerIsValid.toString()};
+    const countLimitTriggersAreValid = ${countLimitTriggersAreValid.toString()};
     const contextPacketTriggersAreValid = ${contextPacketTriggersAreValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
@@ -501,7 +501,7 @@ function validateDatabaseOffThread(
         validUsageDashboardIndex,
         authoritativeRunStateSchemaIsValid,
         systemSuspendTimingSchemaIsValid,
-        todosCountLimitTriggerIsValid,
+        countLimitTriggersAreValid,
         contextPacketTriggersAreValid,
       );
     } catch {

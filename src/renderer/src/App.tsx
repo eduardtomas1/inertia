@@ -759,6 +759,7 @@ export default function App(): React.JSX.Element {
   const workspaceSceneActions = useStableActions({
       importProject,
       selectGlobalChatProject,
+      selectGlobalChatInitiative: draftConversation.changeInitiative,
       createConversation,
       sendMessage,
       compactConversation: async (instruction?: string) => {

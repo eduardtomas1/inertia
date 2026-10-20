@@ -165,6 +165,21 @@ export function ProjectColorPicker({ value, disabled = false, inactive = false, 
   </div>;
 }
 
+/** Palette-only swatches, shared by surfaces whose colour is a palette name. */
+export function PaletteColorPicker({ label, value, disabled = false, onChange }: {
+  label: string;
+  value: ProjectColorName;
+  disabled?: boolean;
+  onChange: (color: ProjectColorName) => void;
+}): React.JSX.Element {
+  useProjectColorRevision();
+  return <RovingRadioGroup label={label} value={value} disabled={disabled} className="project-swatches" onChange={onChange}
+    options={PROJECT_COLOR_NAMES.map((name): RadioOption<ProjectColorName> => ({
+      id: name, label: PROJECT_COLOR_PALETTE[name].label, style: swatchStyle({ kind: "palette", name }), className: "project-swatch",
+      content: <span className="project-swatch-fill" aria-hidden="true"><Check size={14} /></span>,
+    }))} />;
+}
+
 export function ProjectEmphasisPicker({ value, disabled = false, inactive = false, onChange }: {
   value: ProjectColorEmphasis;
   disabled?: boolean;

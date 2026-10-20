@@ -3,6 +3,7 @@ import type {
   ConversationShell,
   ConversationDetail,
   ConversationContextPacketSummary,
+  Initiative,
   ProviderInfo,
 } from "../../shared/contracts";
 import {
@@ -64,6 +65,7 @@ import {
 import { ConversationHistoryTooLargeError } from "./errors";
 import { PromptPresetRepository } from "./prompt-preset-repository";
 import { TodoRepository } from "./todo-repository";
+import { InitiativeRepository } from "./initiative-repository";
 import { cachedStatement } from "./statement-cache";
 import { withLatestPlanDocument } from "./latest-plan-document";
 import { conversationAttachmentGallery } from "./conversation-attachment-gallery";
@@ -93,20 +95,43 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
   contextPackets(conversationId: string, messageIds?: string[]): ConversationContextPacketSummary[];
 };
 
+/**
+ * Snapshots must stay coherent: a chat can only reference an initiative the
+ * snapshot lists. `InitiativeRepository.list()` skips malformed rows, so their
+ * members are projected without membership instead of failing validation.
+ */
+function withListedInitiatives<T extends { initiativeId?: string | null }>(
+  conversations: T[],
+  initiatives: readonly Initiative[],
+): T[] {
+  const listed = new Set(initiatives.map(({ id }) => id));
+  return conversations.map((conversation) => (
+    conversation.initiativeId && !listed.has(conversation.initiativeId)
+      ? { ...conversation, initiativeId: null }
+      : conversation
+  ));
+}
+
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
   readonly todos: TodoRepository;
+  readonly initiatives: InitiativeRepository;
 
   constructor(private readonly context: SnapshotPersistenceContext) {
     this.promptPresets = new PromptPresetRepository(context.database);
     this.todos = new TodoRepository(context.database);
+    this.initiatives = new InitiativeRepository(context.database);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
     const state = this.state();
+    const initiatives = this.initiatives.list();
     return {
       projects: (this.context.database.prepare("SELECT * FROM projects ORDER BY updated_at DESC, id ASC").all() as ProjectRow[]).map(projectFromRow),
-      conversations: (this.context.database.prepare("SELECT * FROM conversations ORDER BY updated_at DESC, id ASC").all() as ConversationRow[]).map(conversationFromRow),
+      conversations: withListedInitiatives(
+        (this.context.database.prepare("SELECT * FROM conversations ORDER BY updated_at DESC, id ASC").all() as ConversationRow[]).map(conversationFromRow),
+        initiatives,
+      ),
       agentTurns: (this.context.database.prepare("SELECT * FROM agent_turns ORDER BY requested_at ASC, id ASC").all() as AgentTurnRow[]).map(agentTurnFromRow),
       turnGitArtifacts: (this.context.database.prepare(
         "SELECT * FROM turn_git_artifacts ORDER BY created_at ASC, id ASC",
@@ -147,6 +172,7 @@ export class SnapshotRepository {
       providers,
       promptPresets: this.promptPresets.list(),
       todos: this.todos.list(),
+      initiatives,
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -171,23 +197,25 @@ export class SnapshotRepository {
       `).all() as UsageLimitedTurnRow[])
         .map((row) => [row.conversation_id, { turn: agentTurnFromRow(row), usageLimited: row.usage_limited === 1 }] as const),
     );
+    const initiatives = this.initiatives.list();
     return {
       projects: (this.context.database.prepare(
         "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
       ).all() as ProjectRow[]).map(projectFromRow),
-      conversations: (this.context.database.prepare(`
+      conversations: withListedInitiatives((this.context.database.prepare(`
         SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
         FROM conversations ORDER BY updated_at DESC, id ASC
       `).all() as ConversationShellRow[]).map((row) => {
         const latest = latestTurns.get(row.id);
         return conversationShellFromRow(row, latest?.turn ?? null, latest?.usageLimited);
-      }),
+      }), initiatives),
       runs: (this.context.database.prepare(
         "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
       promptPresets: this.promptPresets.list(),
       todos: this.todos.list(),
+      initiatives,
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -210,11 +238,15 @@ export class SnapshotRepository {
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
     `).get(conversationId) as UsageLimitedTurnRow | undefined;
-    return conversationShellFromRow(
+    const shell = conversationShellFromRow(
       row,
       latestTurn ? agentTurnFromRow(latestTurn) : null,
       latestTurn?.usage_limited === 1,
     );
+    // Same projection as the snapshots: never reference an unlisted initiative.
+    return shell.initiativeId && !this.initiatives.get(shell.initiativeId)
+      ? { ...shell, initiativeId: null }
+      : shell;
   }
 
   conversationHistory(conversationId: string, request: ConversationHistoryRequest = {}): ConversationDetail | null {

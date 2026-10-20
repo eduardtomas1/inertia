@@ -92,6 +92,13 @@ export function detachedChatCommandRejection(
     case "conversation.context.load":
     case "conversation.context.remove":
       return REJECTION;
+    // Initiatives organise chats across the whole workspace; a detached chat
+    // window owns only its own conversation.
+    case "initiative.create":
+    case "initiative.update":
+    case "initiative.delete":
+    case "initiative.assign":
+      return REJECTION;
     case "conversation.update":
       return ownsExistingConversation(command.payload.conversationId)
         && onlyKeys(command.payload, [

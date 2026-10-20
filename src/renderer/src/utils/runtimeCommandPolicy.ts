@@ -260,6 +260,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "todo.delete": shortMutation,
   "todo.start": gitMutation,
   "todo.update": shortMutation,
+  "initiative.assign": shortMutation,
+  "initiative.create": shortMutation,
+  "initiative.delete": shortMutation,
+  "initiative.update": shortMutation,
   "updates.finish": shortMutation,
   "updates.run": {
     timeoutMs: UPDATES_RUN_REQUEST_TIMEOUT_MS,

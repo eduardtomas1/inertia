@@ -262,6 +262,7 @@ export function conversationFromRow(row: ConversationRow): Conversation {
     markedUnreadAt: row.marked_unread_at ?? null,
     pinnedAt: row.pinned_at,
     snoozedUntil: row.snoozed_until,
+    initiativeId: row.initiative_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -398,6 +399,7 @@ export function conversationShellFromRow(
     markedUnreadAt: conversation.markedUnreadAt ?? null,
     pinnedAt: conversation.pinnedAt,
     snoozedUntil: conversation.snoozedUntil,
+    initiativeId: conversation.initiativeId ?? null,
     hasHistory: row.has_history === 1,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,

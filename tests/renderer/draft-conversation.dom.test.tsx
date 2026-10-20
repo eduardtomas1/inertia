@@ -564,6 +564,52 @@ describe("useDraftConversation", () => {
     });
   });
 
+  it("carries the chosen initiative through project changes and drops one that stopped taking chats", async () => {
+    const initiativeId = "33333333-3333-4333-8333-333333333333";
+    const secondProject = { ...project, id: "44444444-4444-4444-8444-444444444444", name: "Second" };
+    const initiative = {
+      id: initiativeId, name: "Checkout", color: "teal" as const, status: "active" as const, brief: "",
+      briefRevision: 0, revision: 1, createdAt: now, updatedAt: now,
+    };
+    let currentSnapshot: AppSnapshot = { ...snapshot, projects: [project, secondProject], initiatives: [initiative] };
+    const commands: CommandWithoutId[] = [];
+    const run = vi.fn(async (_key: string, command: CommandWithoutId): Promise<ServerEvent> => {
+      commands.push(command);
+      return { type: "request.result", requestId: "create", result: { kind: "conversation.created", conversationId } };
+    });
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot, settings: defaultSettings, run,
+      sendMessage: vi.fn(async () => null), persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    expect(hook.result.current.conversation?.initiativeId).toBeNull();
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    expect(hook.result.current.conversation?.initiativeId).toBe(initiativeId);
+    act(() => hook.result.current.changeProject(secondProject.id));
+    expect(hook.result.current.conversation).toMatchObject({ projectId: secondProject.id, initiativeId });
+
+    await act(async () => { await hook.result.current.sendFromComposer("Join the initiative.", []); });
+    expect(commands[0]).toMatchObject({
+      type: "conversation.create",
+      payload: { projectId: secondProject.id, initiativeId },
+    });
+
+    act(() => hook.result.current.discard());
+    currentSnapshot = { ...currentSnapshot, initiatives: [{ ...initiative, status: "archived" }] };
+    hook.rerender();
+    act(() => hook.result.current.start(projectId, true));
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    await act(async () => { await hook.result.current.sendFromComposer("Archived meanwhile.", []); });
+    expect(commands[1]).toMatchObject({ type: "conversation.create" });
+    expect(commands[1]?.type === "conversation.create" && "initiativeId" in commands[1].payload).toBe(false);
+
+    act(() => hook.result.current.discard());
+    act(() => hook.result.current.start(projectId, true));
+    act(() => hook.result.current.changeInitiative(initiativeId));
+    act(() => hook.result.current.changeInitiative(null));
+    expect(hook.result.current.conversation?.initiativeId).toBeNull();
+  });
+
   it("keeps a new-project chat local until its first message is sent", async () => {
     const values = new Map<string, string>();
     Object.defineProperty(window, "localStorage", {

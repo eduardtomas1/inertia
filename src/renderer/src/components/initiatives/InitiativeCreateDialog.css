@@ -1,0 +1,7 @@
+.initiative-create-dialog {
+  --dialog-width: 420px;
+}
+
+.initiative-create-color .project-swatches {
+  padding: 2px;
+}

@@ -33,6 +33,12 @@ export const loadUsageView = createSurfaceLoader(async () => ({
 export const loadTasksView = createSurfaceLoader(async () => ({
   default: (await import("./TasksView")).TasksView,
 }));
+export const loadInitiativesView = createSurfaceLoader(async () => ({
+  default: (await import("./InitiativesView")).InitiativesView,
+}));
+export const loadInitiativeCreateDialog = createSurfaceLoader(async () => ({
+  default: (await import("./initiatives/InitiativeCreateDialog")).InitiativeCreateDialog,
+}));
 export const loadWorkspaceTerminal = createSurfaceLoader(async () => ({
   default: (await import("./WorkspaceTerminal")).WorkspaceTerminal,
 }));

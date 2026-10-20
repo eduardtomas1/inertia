@@ -659,6 +659,10 @@ export class DuoLaunchCoordinator {
     if (participants.some(({ projectId }) => this.store.project(projectId).workspaceKind === "scratch")) {
       throw new RuntimeRequestError("Choose a project for each Duo chat and comparison.");
     }
+    // Reject before any worktree exists; the atomic insert checks again.
+    for (const initiativeId of new Set(participants.flatMap(({ initiativeId }) => initiativeId ? [initiativeId] : []))) {
+      this.store.initiatives.acceptsChats(initiativeId, { require: true });
+    }
     // Preflights can own Git or provider resources, so a sibling failure must
     // not return to callers until every concurrent preflight has settled.
     let firstFailure: PromiseRejectedResult | null = null;
@@ -1080,6 +1084,7 @@ export class DuoLaunchCoordinator {
       accessMode: side.payload.accessMode,
       branch: side.branch,
       worktreePath: side.worktreePath,
+      initiativeId: side.payload.initiativeId ?? null,
       activate: false,
     };
   }
@@ -1104,6 +1109,7 @@ export class DuoLaunchCoordinator {
         accessMode: comparison.payload.accessMode,
         branch: null,
         worktreePath: null,
+        initiativeId: comparison.payload.initiativeId ?? null,
         activate: false,
       },
     };

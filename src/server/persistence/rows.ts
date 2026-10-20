@@ -72,6 +72,8 @@ export interface ConversationRow {
   marked_unread_at?: string | null;
   pinned_at: string | null;
   snoozed_until: string | null;
+  /** Absent only on rows read from databases before schema 99. */
+  initiative_id?: string | null;
   created_at: string;
   updated_at: string;
 }

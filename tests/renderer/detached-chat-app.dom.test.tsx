@@ -165,6 +165,7 @@ type ConnectionListener = Parameters<InertiaConnection["subscribe"]>[0];
 function contextInputRequest(
   id: string,
   requestedSource: { conversationId: string; conversationTitle: string } | null,
+  workspaceRelation: "same-workspace" | "different-workspace" = "same-workspace",
 ): AgentInputRequest {
   return {
     id,
@@ -185,7 +186,7 @@ function contextInputRequest(
           projectName: "Source project",
           workspaceLabel: "Project checkout",
           targetWorkspaceLabel: "Project checkout",
-          workspaceRelation: "same-workspace" as const,
+          workspaceRelation,
         },
       } : {}),
       createdAt: now,
@@ -394,6 +395,113 @@ describe("detached chat window", () => {
     const shared = await screen.findByRole("generic", { name: "Shared chat context" });
     expect(shared).toHaveTextContent("Context from Source chat");
     expect(within(shared).queryByRole("button")).toBeNull();
+  });
+
+  describe("named context request card", () => {
+    const sourceConversationId = "63636363-6363-4363-8363-636363636363";
+    const requestId = "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a";
+    const source = { conversationId: sourceConversationId, conversationTitle: "Source chat" };
+
+    async function openCard(
+      requests: AgentInputRequest[],
+    ): Promise<{ live: ReturnType<typeof liveConnection>; card: HTMLElement }> {
+      const live = liveConnection();
+      const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+      render(<DetachedChatApp initialWindowContext={context} />);
+      await screen.findByRole("textbox", { name: "Message" });
+      for (const request of requests) live.emit({ type: "agent.input.requested", request });
+      await act(async () => { await vi.dynamicImportSettled(); });
+      return {
+        live,
+        card: await screen.findByRole("region", { name: "Agent requested chat context" }),
+      };
+    }
+
+    function respondCommands(commands: ClientCommand[]): ClientCommand[] {
+      return commands.filter(({ type }) => type === "conversation.context.agent.respond");
+    }
+
+    it("offers only the named chat, without a chooser", async () => {
+      const { card } = await openCard([contextInputRequest(requestId, source)]);
+      expect(within(card).queryByRole("combobox")).toBeNull();
+      expect(card).toHaveTextContent("Source chat");
+      expect(screen.getAllByRole("region", { name: "Agent requested chat context" })).toHaveLength(1);
+    });
+
+    it("declines the request from the window", async () => {
+      const { card, live } = await openCard([contextInputRequest(requestId, source)]);
+      fireEvent.click(within(card).getByRole("button", { name: "Decline" }));
+      expect(await within(card).findByText("Request declined.")).toBeInTheDocument();
+      expect(respondCommands(live.commands)).toEqual([expect.objectContaining({
+        payload: {
+          decision: "cancel",
+          contextRequestId: requestId,
+          targetConversationId: conversationId,
+        },
+      })]);
+    });
+
+    it("previews the named chat through the request it answers", async () => {
+      const { card, live } = await openCard([contextInputRequest(requestId, source)]);
+      fireEvent.click(within(card).getByRole("button", { name: "Preview" }));
+      await act(async () => { await vi.dynamicImportSettled(); });
+      await waitFor(() => expect(live.commands.filter(({ type }) =>
+        type === "conversation.context.agent.source.load")).toEqual([expect.objectContaining({
+        payload: {
+          contextRequestId: requestId,
+          sourceConversationId,
+          targetConversationId: conversationId,
+        },
+      })]));
+      expect(live.commands.some(({ type }) => type === "conversation.context.source.load")).toBe(false);
+    });
+
+    it("closes when the request ends without an answer", async () => {
+      const { live } = await openCard([contextInputRequest(requestId, source)]);
+      live.emit({
+        type: "agent.input.resolved",
+        conversationId,
+        runId: "detached-run",
+        turnId: "detached-turn",
+        requestId,
+      });
+      expect(screen.queryByRole("region", { name: "Agent requested chat context" })).toBeNull();
+      expect(screen.queryByText("Review this request in the main window.")).toBeNull();
+      expect(respondCommands(live.commands)).toEqual([]);
+    });
+
+    it("shows one card for the named request and the notice for an open one at the same time", async () => {
+      const { card } = await openCard([
+        contextInputRequest("6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b", null),
+        contextInputRequest(requestId, source),
+      ]);
+      expect(screen.getAllByRole("region", { name: "Agent requested chat context" })).toEqual([card]);
+      expect(card).toHaveTextContent("Source chat");
+      expect(screen.getByText("Review this request in the main window.")).toBeInTheDocument();
+    });
+
+    it("asks before sharing a chat from a different workspace", async () => {
+      const { card, live } = await openCard([
+        contextInputRequest(requestId, source, "different-workspace"),
+      ]);
+      const share = within(card).getByRole("button", { name: "Share chat" });
+      expect(share).toBeDisabled();
+      fireEvent.click(within(card).getByRole("checkbox", {
+        name: "Share context across these different workspaces",
+      }));
+      expect(share).toBeEnabled();
+      fireEvent.click(share);
+      expect(await within(card).findByText("Sharing approved.")).toBeInTheDocument();
+      expect(respondCommands(live.commands)).toEqual([expect.objectContaining({
+        payload: {
+          decision: "select",
+          contextRequestId: requestId,
+          sourceConversationId,
+          targetConversationId: conversationId,
+          acknowledgedWorkspaceDifference: true,
+        },
+      })]);
+    });
   });
 
   it("keeps the composer still when an unrelated snapshot update arrives", async () => {

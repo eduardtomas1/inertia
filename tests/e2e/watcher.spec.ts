@@ -561,6 +561,19 @@ test.describe("watcher on the fake Codex route", () => {
     });
     expect(topmost).toBe(true);
     await capture(info, "dock-beside-panel-light");
+    const composer = page.locator(".workspace-chat-column .composer-region");
+    const composerTop = (await composer.boundingBox())!.y;
+    await page.keyboard.press("ControlOrMeta+j");
+    await expect(page.locator(".workspace-chat-column > .terminal-dock")).toBeVisible();
+    await expect.poll(async () => (await composer.boundingBox())!.y).toBeLessThan(composerTop);
+    await expect(dock()).toBeVisible();
+    await expect.poll(async () => {
+      const dockBox = await dock().boundingBox();
+      const composerBox = await composer.boundingBox();
+      return dockBox && composerBox ? dockBox.y + dockBox.height - composerBox.y : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(1);
+    await page.locator("[data-panel-layout-controls]").getByRole("button", { name: /^Toggle terminal/u }).click();
+    await expect(page.locator(".workspace-chat-column > .terminal-dock")).toBeHidden();
     await selectWorkspaceTool(tools, "Background tasks");
     await expect(tools.locator(".loading-mark")).toHaveCount(0);
     await capture(info, "compare-background-tasks-light");

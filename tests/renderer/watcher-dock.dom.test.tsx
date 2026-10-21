@@ -55,8 +55,10 @@ function Dock({ model, watchedId = WATCHED_ID, width = 1200, pane = false }: {
   pane?: boolean;
 }) {
   const composer = (
-    <div className="composer-region">
-      <textarea aria-label="Message" />
+    <div className="chat-workspace">
+      <div className="composer-region">
+        <textarea aria-label="Message" />
+      </div>
     </div>
   );
   return (
@@ -299,6 +301,47 @@ describe("WatcherDock", () => {
       await waitFor(() => expect(frame.style.bottom).toBe("148px"));
       expect(document.querySelector<HTMLElement>(".watcher-dock-scrim")!.style.bottom).toBe("148px");
     } finally {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it("keeps a sheet above the composer when a terminal opens under the chat", async () => {
+    const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 500, width: 500, height: bottom - top, x: 0, y: top, toJSON: () => ({}) });
+    let composerTop = 660;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.classList.contains("workspace-chat-column")) return rect(0, 800) as DOMRect;
+      if (this.classList.contains("composer-region")) return rect(composerTop, composerTop + 140) as DOMRect;
+      return original.call(this);
+    };
+    const observers: { callback: ResizeObserverCallback; targets: Element[] }[] = [];
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      readonly entry: { callback: ResizeObserverCallback; targets: Element[] };
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, targets: [] };
+        observers.push(this.entry);
+      }
+      observe(target: Element) { this.entry.targets.push(target); }
+      unobserve() {}
+      disconnect() { this.entry.targets = []; }
+    } as unknown as typeof ResizeObserver;
+    try {
+      setup({ width: 500 });
+      fireEvent.click(await screen.findByRole("button", { name: /^Open watcher/u, expanded: false }));
+      await dock();
+      const frame = document.querySelector<HTMLElement>(".watcher-dock-frame")!;
+      await waitFor(() => expect(frame.style.bottom).toBe("148px"));
+      composerTop = 400;
+      const workspace = document.querySelector(".chat-workspace")!;
+      act(() => {
+        for (const { callback, targets } of observers) {
+          if (targets.includes(workspace)) callback([], {} as ResizeObserver);
+        }
+      });
+      await waitFor(() => expect(frame.style.bottom).toBe("408px"));
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
       HTMLElement.prototype.getBoundingClientRect = original;
     }
   });

@@ -147,6 +147,8 @@ function useComposerClearance(frameRef: RefObject<HTMLDivElement | null>, active
     const observer = new ResizeObserver(measure);
     observer.observe(chat);
     observer.observe(composer);
+    const workspace = composer.closest(".chat-workspace");
+    if (workspace) observer.observe(workspace);
     return () => observer.disconnect();
   }, [active, frameRef]);
   return clearance;

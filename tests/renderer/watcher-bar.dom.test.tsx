@@ -72,7 +72,7 @@ afterEach(() => {
   resetWatcherLiveStore();
 });
 
-describe("WatcherBar", () => {
+describe("watcher bar", () => {
   it("names the watched chat and keeps the live region separate from the visible status", () => {
     render(bar(link()));
     const heading = screen.getByRole("heading", { name: "Watching Refactor parser" });

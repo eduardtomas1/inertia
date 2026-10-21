@@ -20,10 +20,10 @@ test("opens each thread submenu beside its row and keeps it open while the point
     const submenu = page.getByRole("menu", { name, exact: true });
     await expect(submenu).toBeVisible();
     await expect.poll(() => menu.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
-    const row_ = (await trigger.boundingBox())!;
+    const triggerBox = (await trigger.boundingBox())!;
     const box = (await submenu.boundingBox())!;
-    expect(Math.abs(box.x - (row_.x + row_.width + 4))).toBeLessThan(3);
-    expect(Math.abs(box.y - row_.y)).toBeLessThan(3);
+    expect(Math.abs(box.x - (triggerBox.x + triggerBox.width + 4))).toBeLessThan(3);
+    expect(Math.abs(box.y - triggerBox.y)).toBeLessThan(3);
     await page.mouse.move(box.x + box.width / 2, box.y + 14, { steps: 25 });
     await expect(submenu).toBeVisible();
     await page.keyboard.press("Escape");

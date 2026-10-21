@@ -23,7 +23,7 @@ function deferredFeed() {
   return { calls, actionsFor, page };
 }
 
-describe("useWatcherFeed", () => {
+describe("watcher feed requests", () => {
   it("coalesces rapid revisions into one trailing request for the newest", async () => {
     const feed = deferredFeed();
     const actions = feed.actionsFor(LINK_ID);

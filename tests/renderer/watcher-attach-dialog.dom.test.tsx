@@ -90,7 +90,7 @@ async function openDialog(value: AppSnapshot, options: Parameters<typeof Harness
 
 const TABBABLE = 'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]';
 
-describe("WatcherAttachDialog", () => {
+describe("watcher attach dialog", () => {
   it("starts on the preset group and moves through presets as roving radios", async () => {
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]));
     const group = within(dialog).getByRole("radiogroup", { name: "Preset" });

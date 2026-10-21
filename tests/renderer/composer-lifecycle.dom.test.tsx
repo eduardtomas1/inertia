@@ -974,6 +974,22 @@ describe("composer asynchronous ownership", () => {
     expect(onUpdateConversation).not.toHaveBeenCalled();
   });
 
+  it("names an attached watcher's locked run settings in its composer", () => {
+    const current = conversation(WATCHER_ID);
+    const view = render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(current)} />
+      </WatcherContext.Provider>,
+    );
+    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toHaveTextContent(/^Read-only watcher · Plan · Supervised$/u);
+    view.rerender(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [] })}>
+        <Composer {...composerProps(current)} />
+      </WatcherContext.Provider>,
+    );
+    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toBeNull();
+  });
+
   it("keeps /compact available in an attached watcher's composer", async () => {
     const current = conversation(WATCHER_ID);
     render(

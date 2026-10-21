@@ -25,7 +25,7 @@ import {
 
 const views = (ids: string[]) => ids.map((id) => sidebarThreadView(shell(id, `Chat ${id.slice(0, 4)}`), null));
 
-describe("nestWatcherThreads", () => {
+describe("watcher nesting in the Work tab", () => {
   it("moves an attached watcher under the chat it watches", () => {
     const nested = nestWatcherThreads(views([WATCHED_ID, WATCHER_ID, OTHER_WATCHED_ID]), [link()]);
     expect(nested.threads.map(({ conversation }) => conversation.id)).toEqual([WATCHED_ID, OTHER_WATCHED_ID]);
@@ -61,7 +61,7 @@ describe("nestWatcherThreads", () => {
 });
 
 describe("watcher lookups", () => {
-  it("index attached links by watched and watcher chat, ignoring detached ones", () => {
+  it("indexes attached links by watched and watcher chat, ignoring detached ones", () => {
     const index = indexWatcherLinks([link(), link({
       id: "77777777-7777-4777-8777-777777777777",
       watcherConversationId: "88888888-8888-4888-8888-888888888888",
@@ -91,7 +91,7 @@ describe("watcher lookups", () => {
   });
 });
 
-describe("applyWatcherLinkEvent", () => {
+describe("watcher link events", () => {
   const snapshot = (): AppSnapshot => ({
     projects: [project],
     conversations: [],

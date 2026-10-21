@@ -61,7 +61,7 @@ function renderFeed(items: WatcherFeedItem[], options: { running?: boolean; harn
 
 beforeEach(() => resetWatcherFeedMotion());
 
-describe("WatcherFeed", () => {
+describe("watcher feed", () => {
   it("folds quiet checks into receipts that a finding or failure ends", async () => {
     renderFeed([
       feedItem(6),
@@ -145,7 +145,7 @@ describe("WatcherFeed", () => {
   });
 
   it("says how much the check sent to the watcher when the runtime records it", async () => {
-    const sent: WatcherFeedItem & { digestBytes?: number } = { ...feedItem(1), digestBytes: 24 * 1024 };
+    const sent: WatcherFeedItem = { ...feedItem(1), digestBytes: 24 * 1024 };
     renderFeed([feedItem(2), sent]);
     const list = await screen.findByRole("list", { name: "Watcher checks" });
     const checks = list.querySelectorAll(".watcher-check-notes");

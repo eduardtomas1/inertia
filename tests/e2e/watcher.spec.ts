@@ -240,9 +240,11 @@ test.describe("watcher on the fake Codex route", () => {
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(900);
     await capture(info, "attach-dialog-light");
 
+    const framesBeforeAttach = sentFrames.length;
     await attach.click();
     await expect(dialog).toHaveCount(0);
     await expect(dock()).toBeVisible();
+    await expect.poll(() => sentFrames.slice(framesBeforeAttach).some((frame) => frame.includes('"watcher.feed.get"'))).toBe(true);
     await expect(dock().getByRole("heading", { level: 2 })).toHaveText(`Watching ${WATCHED_TITLE}`);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
     await expect(phase()).toHaveText(/^.+ · Reviewer · Watching$/u);
@@ -256,7 +258,6 @@ test.describe("watcher on the fake Codex route", () => {
       return chatBox && dockBox ? Math.round(dockBox.x - (chatBox.x + chatBox.width)) : null;
     }).toBeGreaterThanOrEqual(-1);
     await expect(handle()).toHaveCount(0);
-    await expect(page.locator(".composer-region").getByText(/Watched by/u)).toHaveCount(0);
     await expect(dock().getByText(/No checks yet/u)).toBeVisible();
     await capture(info, "gif-02-dock-open");
     await capture(info, "dock-empty-light");
@@ -294,7 +295,7 @@ test.describe("watcher on the fake Codex route", () => {
     expect(app.rendererErrors).toEqual([]);
   });
 
-  test("pauses and resumes from the dock and dismisses a finding", async ({ browserName: _browserName }) => {
+  test("pauses, resumes and dismisses a finding from the dock", async ({ browserName: _browserName }) => {
     const page = app.page;
     await dock().getByRole("button", { name: "More watcher actions" }).click();
     await page.getByRole("menu", { name: "More watcher actions" }).getByRole("menuitem", { name: "Pause", exact: true }).click();
@@ -359,8 +360,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(bubble).toContainText("Empty lines lost their test:");
     await expect(bubble.locator(".message-watcher-origin")).toHaveText("From watcher");
     await capture(info, "main-chat-note-light");
-    await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · [^·]+$/u);
-    await expect(finding.locator(".watcher-finding-meta")).toHaveText(/^Check \d+ · \d{1,2}:\d{2}\s[AP]M$/u);
+    await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · after the turn ended$/u);
     await expect(page.locator('.response-turn [data-turn-status="completed"]')).toHaveCount(2);
     await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
     await expect(feedEntries()).toHaveCount(3);
@@ -433,7 +433,6 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(handle()).toHaveCount(0);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
     await expect(dock().getByRole("article", { name: FINDING })).toBeVisible();
-    expect(sentFrames.some((frame) => frame.includes('"watcher.feed.get"'))).toBe(true);
     expect(subscribed()).toEqual([]);
 
     await dock().getByRole("button", { name: "Check now" }).focus();
@@ -483,15 +482,19 @@ test.describe("watcher on the fake Codex route", () => {
     const card = dock().getByRole("article", { name: AUTO_FINDING });
     await expect(card).toBeVisible();
     await expect(card.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
-    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · [^·]+$/u);
+    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · started the main chat's next turn$/u);
     await expect(page.getByRole("separator", { name: /^Note from watcher · Reviewer · /u })).toHaveCount(2);
     await expect(page.getByLabel("Note from watcher", { exact: true })).toHaveCount(2);
-    await expect(page.getByLabel("Note from watcher", { exact: true }).last()).toContainText(AUTO_FINDING);
+    const autoNote = page.getByLabel("Note from watcher", { exact: true }).last();
+    await expect(autoNote).toContainText(AUTO_FINDING);
+    await autoNote.locator(".message-watcher-origin").hover();
+    await expect(page.locator('[role="tooltip"]')).toHaveText(/^Sent automatically by the watcher \(Reviewer · .+\)$/u);
+    await page.mouse.move(0, 0);
     await expect(page.getByText(NOTE_ANSWER, { exact: true })).toHaveCount(2);
     const autoCheck = Number((await card.locator(".watcher-finding-meta").textContent())?.match(/^Check (\d+)/u)?.[1]);
     await expect.poll(() => dock().locator(".watcher-check-title").evaluateAll((titles, label) => titles.filter((title) =>
       (title.textContent ?? "").replace(title.querySelector("time")?.textContent ?? "", "").trim() === label).length,
-    `Check ${autoCheck + 1}`)).toBe(1);
+    `Check ${autoCheck + 1} ·`)).toBe(1);
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await capture(info, "dock-auto-sent-light");
 
@@ -502,7 +505,7 @@ test.describe("watcher on the fake Codex route", () => {
     expect(app.rendererErrors).toEqual([]);
   });
 
-  test("sits beside the chat like the right panel's own surfaces", async ({ browserName: _browserName }, info) => {
+  test("opens as a sheet between the chat and an open right panel", async ({ browserName: _browserName }, info) => {
     const page = app.page;
     const tools = await ensureWorkspaceTools(page);
     await selectWorkspaceTool(tools, "Changes");

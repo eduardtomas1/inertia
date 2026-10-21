@@ -102,7 +102,7 @@ function setup(options: { link?: WatcherLinkView; width?: number; strict?: boole
 const dock = () => screen.findByRole("complementary", { name: "Watching Refactor parser" });
 const handle = () => screen.getByRole("button", { name: /^Open watcher/u });
 
-describe("WatcherDock", () => {
+describe("watcher dock", () => {
   it("is an aside named by its heading, with no handle while it is open", async () => {
     setup();
     const aside = await dock();
@@ -522,6 +522,24 @@ describe("WatcherDock", () => {
       expect(notice.querySelector(".watcher-notice-blocked")?.textContent).not.toMatch(/resume/iu);
     });
   }
+
+  it("says a custom backend sees only what each check sends, and only for a custom backend", async () => {
+    const runtime = watcherRuntime();
+    const watcherShell = shell(WATCHER_ID, "Watcher", {
+      modelSelection: { ...shell(WATCHER_ID, "Watcher").modelSelection, backendProfileId: "custom-profile" },
+    });
+    const profile = { id: "custom-profile", source: "custom" } as WatcherSurfaceModel["backendProfiles"][number];
+    const model = (source: "custom" | "built-in") => surfaceModel({
+      request: runtime.request,
+      shells: [shell(WATCHED_ID, "Refactor parser"), watcherShell],
+      backendProfiles: [{ ...profile, source } as WatcherSurfaceModel["backendProfiles"][number]],
+    });
+    const view = render(<Dock model={model("custom")} />);
+    const notice = (await dock()).querySelector(".watcher-notice.is-quiet");
+    expect(notice).toHaveTextContent(/^Custom backend: it sees only what each check sends\.$/u);
+    view.rerender(<Dock model={model("built-in")} />);
+    expect(document.querySelector(".watcher-notice.is-quiet")).toBeNull();
+  });
 
   it("names each unexplained path once in the write-detected banner", async () => {
     setup({

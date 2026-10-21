@@ -169,7 +169,7 @@ describe("watcher note divider", () => {
     [true, "Sent automatically by the watcher (Reviewer · Team Codex fixture-model)"],
   ])("says who sent the note in its origin tooltip when automatic is %s", (automatic, expected) => {
     vi.useFakeTimers();
-    const attribution: WatcherNoteAttribution & { automatic?: boolean } = { ...note, delivery: "queue", automatic };
+    const attribution: WatcherNoteAttribution = { ...note, delivery: "queue", automatic };
     timeline([forwarded], messages(forwarded, "The rename misses two call sites.", { watcherNote: attribution }));
     fireEvent.pointerEnter(screen.getByText("From watcher"), { pointerType: "mouse" });
     act(() => { vi.advanceTimersByTime(TOOLTIP_DELAY_MS); });

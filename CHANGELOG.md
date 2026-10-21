@@ -6,7 +6,7 @@ The useful changes in each Inertia release, in plain language.
 
 ### Watchers
 
-- Add a read-only second agent beside any chat with **Add a watcher…** in the
+- Add a read-only second agent beside a chat with **Add a watcher…** in the
   chat's actions or on its **Work** tab row, or **Add a watcher** in the
   command palette. Choose a **Reviewer**, **Scope guard** or **Explainer**
   preset, a ready Claude Code, Codex or OpenCode route, optional instructions
@@ -16,8 +16,9 @@ The useful changes in each Inertia release, in plain language.
   shows the agent, the preset and what the watcher is doing, with **Check
   now**, or **Resume** while it is paused. Its menu holds **Pause**, **Review
   the last turn**, **Open watcher chat**, **Send findings automatically**,
-  **Collapse** and **Stop watching…**, then the checks left this turn, the
-  events seen and waiting, the last check and the tokens the watcher has used.
+  **Hide from paired devices** (with Private Connect), **Collapse** and **Stop
+  watching…**, then the checks left this turn, the events waiting, the last
+  check and the tokens the watcher has used.
   A collapsed dock leaves a slim handle at the chat's edge, and the **Work**
   tab nests the watcher under its chat; both show how many findings are new.
 - The watcher checks when a turn starts or ends, a file change finishes, the
@@ -32,7 +33,7 @@ The useful changes in each Inertia release, in plain language.
   paths when the diff is unavailable, and says so when Inertia couldn't
   capture the turn's changes. Each check reminds the watcher of its earlier
   findings in the same turn, and a finding that a later check reports fixed
-  shows **Resolved in check *N***.
+  is marked **resolved in check *N***.
 - A finding stays in the dock until you choose **Send** or **Dismiss**.
   **Send** queues the note for the main chat's next turn, after your own
   queued messages; **Steer now** delivers it into a running Claude Code, Codex
@@ -40,8 +41,9 @@ The useful changes in each Inertia release, in plain language.
   the note is never presented as your words.
 - **Send findings automatically**, off by default, sends each finding as soon
   as its check ends, the same way as **Send**, and the main agent is told that
-  you didn't choose to send it. It never steers a running turn, and a finding
-  from a turn that a watcher note started waits for you.
+  you didn't choose to send it. It never steers a running turn or takes the
+  last place in the main chat's queue, and a finding from a turn that a
+  watcher note started waits for you.
 - The watcher stays read-only: it runs in Plan mode with Supervised access
   that can't be changed, and its approval requests are declined automatically.
   A started edit stops the check, and a second edit attempt in a turn pauses
@@ -59,8 +61,9 @@ The useful changes in each Inertia release, in plain language.
   until that chat is unarchived.
 - On Private Connect, a watcher is visible wherever the chat it watches is,
   unless you hide it from paired devices. Stopping a watcher turns it into an
-  ordinary chat, and deleting the watched chat detaches its watcher. See
+  ordinary chat, and deleting the main chat detaches its watcher. See
   [Watcher](docs/user/watcher.md).
+
 ## 0.0.74 — 2026-10-20
 
 - **Copy** and **Snooze** in a chat's actions menu open right beside their

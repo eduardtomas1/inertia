@@ -5,7 +5,7 @@ import type { BackendProfileController } from "../backends/backend-profile-contr
 import type { TurnProviderRuntime } from "../turns/turn-controller-types";
 import { routeUsesTrustedHostBridge } from "../turns/turn-provider-host-tools";
 
-export interface WatcherRouteDependencies {
+interface WatcherRouteDependencies {
   backendProfiles: Pick<BackendProfileController, "validateSelection" | "readiness">;
   providers: Pick<TurnProviderRuntime, "resolveModelRoute">;
   providerInfo(): readonly ProviderInfo[];

@@ -8,11 +8,11 @@ import {
 import type { DeltaTimerScheduler } from "../turns/turn-stream-coalescer";
 import { neutralizeUntrustedAgentText } from "../untrusted-agent-text";
 
-export const WATCHER_LIVE_INTERVAL_MS = 750;
+const WATCHER_LIVE_INTERVAL_MS = 750;
 
 type WatcherLiveEvent = Extract<RuntimeMutationEvent, { type: "watcher.live" }>;
 
-export interface WatcherLiveProjectionDependencies {
+interface WatcherLiveProjectionDependencies {
   scheduler: DeltaTimerScheduler;
   clock: () => number;
   broadcast(event: WatcherLiveEvent): void;

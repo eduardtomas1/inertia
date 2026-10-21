@@ -23,7 +23,7 @@ function releasesQueue(turn: Pick<AgentTurn, "status" | "terminalReason"> | null
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
   || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
 
-export interface QueuedMessageRuntimeOptions {
+interface QueuedMessageRuntimeOptions {
   signal: AbortSignal;
   track<T>(operation: () => Promise<T>): Promise<T>;
   /** A queued watcher note was removed or blocked, so it will not be sent as queued. */

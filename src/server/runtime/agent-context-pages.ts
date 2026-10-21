@@ -50,7 +50,7 @@ export interface AgentContextShare {
   files: boolean;
 }
 
-export const FULL_AGENT_CONTEXT_SHARE: Readonly<AgentContextShare> = Object.freeze({
+const FULL_AGENT_CONTEXT_SHARE: Readonly<AgentContextShare> = Object.freeze({
   requests: true, activities: true, answers: true, files: true,
 });
 

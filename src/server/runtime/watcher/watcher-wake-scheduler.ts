@@ -67,7 +67,7 @@ export interface WatcherWakeSchedulerDependencies {
   recheckMs?: number;
 }
 
-export interface WatcherTrackOptions {
+interface WatcherTrackOptions {
   watchedTurnId?: string | null;
   watchedRunning?: boolean;
   /** Last watched output in epoch milliseconds; defaults to now. */

@@ -82,7 +82,7 @@ export interface WatcherLinkDraft {
   delivery?: WatcherDeliveryPolicy;
 }
 
-export interface WatcherConversationPlan {
+interface WatcherConversationPlan {
   projectId: string;
   title: string;
   options: NewConversationOptions;
@@ -93,7 +93,7 @@ export type WatcherTransition =
   | { status: "paused"; reason: WatcherPauseReason; detail?: string | null }
   | { status: "detached"; reason: WatcherDetachReason };
 
-export interface WatcherSettingsPatch {
+interface WatcherSettingsPatch {
   preset?: WatcherPreset;
   instructions?: string;
   sharing?: WatcherSharing;
@@ -102,7 +102,7 @@ export interface WatcherSettingsPatch {
   delivery?: WatcherDeliveryPolicy;
 }
 
-export interface WatcherWakeDraft {
+interface WatcherWakeDraft {
   id: string;
   linkId: string;
   watchedTurnId: string | null;
@@ -115,12 +115,12 @@ export interface WatcherWakeDraft {
   consumesAllowance?: boolean;
 }
 
-export interface WatcherGuardResult {
+interface WatcherGuardResult {
   state: WatcherGuardState;
   paths: readonly string[];
 }
 
-export interface WatcherDeliveryUpdate {
+interface WatcherDeliveryUpdate {
   /** Null only when the finding is dismissed. */
   mode: WatcherDeliveryMode | null;
   state: WatcherDeliveryState;
@@ -138,13 +138,13 @@ export interface WatcherFeedPage {
   next: { beforeSequence: number } | null;
 }
 
-export interface WatcherRunConfiguration {
+interface WatcherRunConfiguration {
   interactionMode: InteractionMode;
   accessMode: AccessMode;
   harnessId: string;
 }
 
-export interface WatcherLinkRepositoryContext {
+interface WatcherLinkRepositoryContext {
   database: Database.Database;
   conversations: ConversationRepository;
   turnReads(): Pick<ConversationContextTurnReads, "messageText" | "files">;

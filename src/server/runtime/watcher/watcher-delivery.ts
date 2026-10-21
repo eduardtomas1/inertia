@@ -72,7 +72,7 @@ export interface WatcherNoteQueue {
   withdrawWatcherNote(conversationId: string, id: string): boolean;
 }
 
-export interface WatcherDeliveryDependencies {
+interface WatcherDeliveryDependencies {
   store: RuntimeStore;
   turns: Pick<TurnController, "isActive" | "acquireFollowUpAdmission" | "steer">;
   /** The same server-side dependencies the message commands use. */

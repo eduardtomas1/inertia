@@ -5,7 +5,7 @@ import {
 } from "../../../shared/watcher";
 import { truncateUtf8 } from "../untrusted-agent-text";
 
-export type WatcherReplyClass = "silent" | "finding";
+type WatcherReplyClass = "silent" | "finding";
 
 const SILENT_PATTERN = /^SILENT\.?$/u;
 /** Longer replies cannot be a wrapped `SILENT`, so they skip the unwrap loop. */
@@ -20,7 +20,7 @@ const WRAPPERS: ReadonlyArray<readonly [string, string]> = [
   ["‘", "’"],
 ];
 const SHORTENED_MARKER = "\n\n[Shortened by Inertia.]";
-export const MAX_WATCHER_RESOLVED_CHECKS = 20;
+const MAX_WATCHER_RESOLVED_CHECKS = 20;
 const RESOLVED_LINE_PATTERN = /^resolved: check \d{1,9}(?:, check \d{1,9})*\.?$/iu;
 const MAX_RESOLVED_LINE_CHARS = 400;
 

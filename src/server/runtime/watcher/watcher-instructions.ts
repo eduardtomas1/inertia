@@ -70,19 +70,19 @@ const OUTPUT_FORMAT = [
   "If an earlier finding is now fixed, end your reply with a line `Resolved: check 3, check 5` naming those checks; do not repeat findings that are unchanged.",
 ].join(" ");
 
-export interface WatcherInstructionLink {
+interface WatcherInstructionLink {
   preset: WatcherPreset;
   instructions: string;
   budgets?: Pick<WatcherBudgets, "contextReadsPerWake">;
   delivery?: WatcherDeliveryPolicy;
 }
 
-export interface WatcherInstructionWatched {
+interface WatcherInstructionWatched {
   title: string;
   id: string;
 }
 
-export interface WatcherInstructionOptions {
+interface WatcherInstructionOptions {
   /**
    * False when the watcher's route has no Inertia host tools (custom
    * backends), so it can only review what each check sends.

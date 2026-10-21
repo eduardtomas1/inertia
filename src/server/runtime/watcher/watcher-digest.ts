@@ -28,9 +28,9 @@ import { MAX_WATCHED_TITLE_CHARS } from "./watcher-instructions";
 
 export const WATCHER_DIGEST_BRIEF_MAX_CHARS = 3_000;
 export const WATCHER_DIGEST_FULL_ACTIVITIES = 8;
-export const WATCHER_DIGEST_FULL_ACTIVITY_BYTES = 2 * 1_024;
-export const WATCHER_DIGEST_SHORT_ACTIVITY_CHARS = 240;
-export const WATCHER_DIGEST_MAX_FILES = 200;
+const WATCHER_DIGEST_FULL_ACTIVITY_BYTES = 2 * 1_024;
+const WATCHER_DIGEST_SHORT_ACTIVITY_CHARS = 240;
+const WATCHER_DIGEST_MAX_FILES = 200;
 export const WATCHER_DIGEST_DIFF_FILE_BYTES = 6 * 1_024;
 const MAX_ACTIVITY_TITLE_CHARS = 200;
 const MAX_HEADLINE_CHARS = 200;
@@ -68,12 +68,12 @@ export interface WatcherDigestLink {
   lastWakeAt?: string | null;
 }
 
-export type WatcherEarlierFinding = Pick<
+type WatcherEarlierFinding = Pick<
   WatcherFeedItem,
   "sequence" | "createdAt" | "settledAt" | "finding" | "delivery" | "resolvedBySequence"
 >;
 
-export interface WatcherDigestOptions {
+interface WatcherDigestOptions {
   /** The final pass after the watched turn ended; it is built even with nothing new. */
   final: boolean;
   includeChanges?: boolean;
@@ -104,7 +104,7 @@ export interface WatcherDigestOptions {
   watchedAgent?: string;
 }
 
-export interface WatcherDigestStats {
+interface WatcherDigestStats {
   eventsCovered: number;
   itemsTruncated: number;
   itemsOmitted: number;

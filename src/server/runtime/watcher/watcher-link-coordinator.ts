@@ -94,9 +94,9 @@ export class WatcherLinkIndex {
   }
 }
 
-export type WatcherLinkSides = Pick<WatcherLinkRecord, "watcherConversationId" | "watchedConversationId">;
+type WatcherLinkSides = Pick<WatcherLinkRecord, "watcherConversationId" | "watchedConversationId">;
 
-export interface WatcherLinkCoordinatorDependencies {
+interface WatcherLinkCoordinatorDependencies {
   store: RuntimeStore;
   turns: Pick<TurnController, "isActive" | "cancel">;
   route(selection: ModelSelection): Promise<WatcherRouteReadiness>;
@@ -117,7 +117,7 @@ function clipTitle(value: string): string {
   return `${clipCodeUnits(flattened, MAX_WATCHER_CHAT_TITLE_CHARS - 1).trimEnd()}…`;
 }
 
-export function watcherConversationTitle(preset: WatcherAttachPayload["preset"], watchedTitle: string): string {
+function watcherConversationTitle(preset: WatcherAttachPayload["preset"], watchedTitle: string): string {
   return clipTitle(`Watcher · ${WATCHER_PRESET_LABELS[preset]} · ${watchedTitle.trim() || "Untitled chat"}`);
 }
 

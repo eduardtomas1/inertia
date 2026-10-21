@@ -14,7 +14,7 @@ import {
 } from "../../git/checkout-fingerprint";
 import { classifyReadOnlyCommand, type ReadOnlyCommandContext } from "./read-only-commands";
 
-export const WATCHER_GUARD_DEADLINE_MS = 10_000;
+const WATCHER_GUARD_DEADLINE_MS = 10_000;
 const MAX_ATTRIBUTION_ACTIVITIES = 200;
 const MAX_ATTRIBUTION_TEXT_CHARS = 16_384;
 const MAX_ATTRIBUTION_TEXTS = 2_000;
@@ -37,7 +37,7 @@ export interface WatcherGuardWindow {
   dispose(): void;
 }
 
-export interface WatcherCheckoutGuardDependencies {
+interface WatcherCheckoutGuardDependencies {
   store: Pick<
     RuntimeStore,
     "conversationPath" | "conversationWork" | "watcherLinks" | "latestAgentTurnForConversation"

@@ -15,13 +15,13 @@ export interface WatcherReceiptGroup {
   commandsRun: number | null;
 }
 
-export interface WatcherFeedSingle {
+interface WatcherFeedSingle {
   kind: "item";
   key: string;
   item: WatcherFeedItem;
 }
 
-export type WatcherFeedGroup = WatcherReceiptGroup | WatcherFeedSingle;
+type WatcherFeedGroup = WatcherReceiptGroup | WatcherFeedSingle;
 
 function quiet(item: WatcherFeedItem): boolean {
   return item.state === "settled" && item.outcome === "silent";

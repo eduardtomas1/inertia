@@ -38,9 +38,9 @@ const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit a file twice du
 export const WATCHER_ROUTE_RETRY_LIMIT = 3;
 /** Consecutive checks that fail to dispatch before the link pauses with `route-unavailable`. */
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
-export const WATCHER_MAX_CONTINUATION_PAGES = 4;
+const WATCHER_MAX_CONTINUATION_PAGES = 4;
 export const WATCHER_FINAL_PASS_RETRY_LIMIT = 2;
-export const WATCHER_EARLIER_FINDINGS = 5;
+const WATCHER_EARLIER_FINDINGS = 5;
 
 function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
   return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()}`;
@@ -54,9 +54,9 @@ function watcherDispatchFailedDetail(message: string): string {
 const MAX_REPLY_READ_BYTES = MAX_WATCHER_FINDING_BYTES * 2;
 const MAX_RESOLVED_TAIL_BYTES = 2_048;
 
-export type WatcherRunnerTurns = Pick<TurnController, "queue" | "start" | "isActive" | "isClosing" | "cancel" | "failBeforeStart">;
+type WatcherRunnerTurns = Pick<TurnController, "queue" | "start" | "isActive" | "isClosing" | "cancel" | "failBeforeStart">;
 
-export interface WatcherWakeRunnerDependencies {
+interface WatcherWakeRunnerDependencies {
   store: RuntimeStore;
   turns: WatcherRunnerTurns;
   route(selection: ModelSelection): Promise<WatcherRouteReadiness>;

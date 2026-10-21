@@ -9,12 +9,12 @@ import {
  * the watched chat. It imports nothing from the runtime so the turn command
  * layer can use it without an import cycle.
  */
-export const WATCHER_NOTE_INSTRUCTION_LABEL = "inertia-watcher-note";
+const WATCHER_NOTE_INSTRUCTION_LABEL = "inertia-watcher-note";
 
 const MAX_WATCHER_NOTE_INSTRUCTION_CHARS = 1_500;
 
 /** Structurally a hidden provider instruction. */
-export interface WatcherNoteInstruction {
+interface WatcherNoteInstruction {
   label: typeof WATCHER_NOTE_INSTRUCTION_LABEL;
   text: string;
 }
@@ -24,7 +24,7 @@ export interface WatcherNoteDelivery {
   instruction: WatcherNoteInstruction;
 }
 
-export function watcherNoteInstruction(attribution: WatcherNoteAttribution): WatcherNoteInstruction {
+function watcherNoteInstruction(attribution: WatcherNoteAttribution): WatcherNoteInstruction {
   const note = watcherNoteAttributionSchema.parse(attribution);
   const watcher = `a read-only watcher (${WATCHER_PRESET_LABELS[note.preset]}, ${JSON.stringify(note.watcherLabel)}) that reviews this chat`;
   const text = [

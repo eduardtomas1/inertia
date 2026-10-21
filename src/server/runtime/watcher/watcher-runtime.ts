@@ -38,20 +38,20 @@ import {
 } from "./watcher-wake-scheduler";
 
 /** Watched output is written to the link at most this often; the quiet marker needs no finer grain. */
-export const WATCHER_OUTPUT_RECORD_MS = 15_000;
+const WATCHER_OUTPUT_RECORD_MS = 15_000;
 /** Pending-event counts are republished at most this often per link. */
 export const WATCHER_PENDING_PUBLISH_MS = 1_000;
 const WATCHER_DELETE_REFUSAL = "The watcher is still working. Wait for it to finish or choose Stop watching…, then delete this chat.";
 const WATCHER_BUDGET_PAUSE_DETAIL =
   "The watcher used its checks for this turn. It still makes the final check, and resumes when the next turn starts or when you choose Resume.";
 
-export type WatcherRuntimeTurns = Pick<
+type WatcherRuntimeTurns = Pick<
   TurnController,
   | "queue" | "start" | "isActive" | "isClosing" | "cancel" | "failBeforeStart"
   | "acquireFollowUpAdmission" | "steer" | "activeConversationIds"
 >;
 
-export interface WatcherRuntimeDependencies {
+interface WatcherRuntimeDependencies {
   store: RuntimeStore;
   turns: WatcherRuntimeTurns;
   providers: Pick<TurnProviderRuntime, "resolveModelRoute">;

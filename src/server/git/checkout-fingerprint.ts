@@ -14,7 +14,7 @@ import { GitError, isGitProcessTreeTerminationFailure } from "./types";
  * and submodules nested inside submodules are outside it.
  */
 export const MAX_CHECKOUT_FINGERPRINT_PATHS = 2_000;
-export const MAX_CHECKOUT_FINGERPRINT_BYTES = 64 * 1024 * 1024;
+const MAX_CHECKOUT_FINGERPRINT_BYTES = 64 * 1024 * 1024;
 /** Keeps every hash-object command line well inside the Windows limit. */
 const MAX_HASH_ARGUMENT_CHARS = 24_000;
 const MAX_STATUS_BYTES = 4 * 1024 * 1024;
@@ -42,7 +42,7 @@ export interface CheckoutFingerprintOptions {
   signal?: AbortSignal;
 }
 
-export interface CheckoutFingerprintDiff {
+interface CheckoutFingerprintDiff {
   headChanged: boolean;
   changedPaths: string[];
 }

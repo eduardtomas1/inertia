@@ -1,7 +1,7 @@
 import { posix, win32 } from "node:path";
 
-export const MAX_READ_ONLY_COMMAND_CHARS = 4_096;
-export const MAX_READ_ONLY_COMMAND_ARGUMENTS = 256;
+const MAX_READ_ONLY_COMMAND_CHARS = 4_096;
+const MAX_READ_ONLY_COMMAND_ARGUMENTS = 256;
 const WATCHER_COMMAND_ENVIRONMENT_KEYS = new Set(["GIT_OPTIONAL_LOCKS", "RIPGREP_CONFIG_PATH"]);
 const RIPGREP_NO_CONFIG = " --no-config";
 
@@ -16,7 +16,7 @@ export interface ReadOnlyCommandOperand {
   glob: boolean[];
 }
 
-export type ReadOnlyCommandVerdict =
+type ReadOnlyCommandVerdict =
   | { allowed: true; program: string }
   | { allowed: false; reason: string };
 

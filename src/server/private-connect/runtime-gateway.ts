@@ -701,7 +701,7 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
-export interface PrivateConnectWatcherParent {
+interface PrivateConnectWatcherParent {
   watchedConversationId: string | null;
   privateConnect: WatcherPrivateConnect;
 }

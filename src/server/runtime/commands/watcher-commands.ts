@@ -33,7 +33,7 @@ export const WATCHER_COMMAND_TYPES = [
 
 type WatcherCommand = Extract<ClientCommand, { type: (typeof WATCHER_COMMAND_TYPES)[number] }>;
 
-export interface WatcherCommandDependencies {
+interface WatcherCommandDependencies {
   coordinator: Pick<
     WatcherLinkCoordinator,
     "attach" | "update" | "pause" | "resume" | "wake" | "review" | "detach" | "feed"

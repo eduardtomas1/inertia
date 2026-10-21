@@ -13,9 +13,9 @@ import { cachedStatement } from "./statement-cache";
 
 export const MAX_WATCHER_DIGEST_ACTIVITIES = 200;
 export const MAX_WATCHER_DIGEST_MESSAGES = 20;
-export const MAX_WATCHER_DIGEST_DIFF_FILES = 200;
+const MAX_WATCHER_DIGEST_DIFF_FILES = 200;
 /** Activity details are bounded at the query so a huge tool result never loads whole. */
-export const MAX_WATCHER_ACTIVITY_DETAIL_CHARS = 8_192;
+const MAX_WATCHER_ACTIVITY_DETAIL_CHARS = 8_192;
 
 /** `(created_at, id)` position after the last activity or reply a watcher already saw. */
 export interface WatcherActivityCursor {
@@ -23,7 +23,7 @@ export interface WatcherActivityCursor {
   id: string | null;
 }
 
-export interface WatcherDigestMessage {
+interface WatcherDigestMessage {
   id: string;
   createdAt: string;
   content: string;
@@ -49,7 +49,7 @@ export type WatcherTurnDiffSnapshot = Pick<TurnGitDiffSnapshot, "patch" | "patch
   files: ReadonlyArray<ChangedFile & { binary?: boolean }>;
 };
 
-export interface WatcherDigestSourceContext {
+interface WatcherDigestSourceContext {
   database: Database.Database;
   turnReads(): Pick<ConversationContextTurnReads, "messageText" | "files">;
 }

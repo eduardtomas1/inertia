@@ -172,7 +172,7 @@ function resumeBlockedReason(
       profile: surface.backendProfiles.find(({ id }) => id === watcher.modelSelection.backendProfileId),
       selection: watcher.modelSelection,
     });
-    if (!readiness.ready) return `It can resume once its route is ready. ${readiness.detail}`;
+    if (!readiness.ready) return readiness.detail;
   }
   return null;
 }

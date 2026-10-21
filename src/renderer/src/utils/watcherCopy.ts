@@ -11,7 +11,7 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 export const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = {
   user: "You paused it.",
   "wake-budget": "It used its checks for this turn.",
-  "usage-limit": "Its account reached a usage limit. It can resume once its route is ready.",
+  "usage-limit": "Its account reached a usage limit.",
   "write-detected": "Files changed that no running agent accounts for.",
   "write-attempts": "It tried to edit a file twice during one turn.",
   "route-unavailable": "Its route is unavailable. Check Settings → Agents.",

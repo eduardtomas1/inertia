@@ -4,6 +4,8 @@ import { StrictMode } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WatcherFeedItem, WatcherLinkView } from "../../src/shared/watcher";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { WATCHER_USAGE_LIMIT_DETAIL, watcherRouteUnavailableDetail } from "../../src/server/runtime/watcher/watcher-wake-runner";
 import { WatcherDockHost } from "../../src/renderer/src/components/watcher/WatcherDockHost";
 import { WatcherContext, type WatcherSurfaceModel } from "../../src/renderer/src/components/watcher/watcherContext";
 import { loadWatcherDock } from "../../src/renderer/src/components/watcher/watcherLoaders";
@@ -447,10 +449,23 @@ describe("WatcherDock", () => {
     const aside = await dock();
     const notice = aside.querySelector<HTMLElement>(".watcher-notice")!;
     expect(within(notice).queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
-    expect(within(notice).getByText(/^It can resume once its route is ready\./u)).toBeInTheDocument();
+    expect(notice.querySelector(".watcher-notice-blocked")).not.toBeNull();
     expect(within(aside.querySelector<HTMLElement>(".watcher-bar")!).getByRole("button", { name: "Resume" }))
       .toHaveAttribute("aria-disabled", "true");
   });
+
+  for (const [reason, detail] of [
+    ["usage-limit", WATCHER_USAGE_LIMIT_DETAIL],
+    ["route-unavailable", watcherRouteUnavailableDetail(providerNativeModelSelection({ providerId: "codex" }), "Codex is not signed in.")],
+  ] as const) {
+    it(`says once when a ${reason} pause can resume`, async () => {
+      setup({ link: link({ status: "paused", pauseReason: reason, pauseDetail: detail }) });
+      const notice = (await dock()).querySelector<HTMLElement>(".watcher-notice")!;
+      expect(notice).toHaveTextContent(detail);
+      expect(notice.textContent?.match(/resume once (?:its|the) route is ready/giu)?.length ?? 0).toBeLessThanOrEqual(1);
+      expect(notice.querySelector(".watcher-notice-blocked")?.textContent).not.toMatch(/resume/iu);
+    });
+  }
 
   it("asks before resuming after unexplained changes, focusing Cancel, and keeps focus in the dock", async () => {
     let current = link({ status: "paused", pauseReason: "write-detected" });

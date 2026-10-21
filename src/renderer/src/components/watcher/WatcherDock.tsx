@@ -263,9 +263,10 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     if (dock.open && visible && latestFindingAt) markSeen(latestFindingAt, findingsTotal);
   }, [dock.open, findingsTotal, latestFindingAt, markSeen, visible]);
 
+  const closed = presence === "closed";
   useEffect(() => {
-    if (link.status !== "paused") setConfirmingResume(false);
-  }, [link.status]);
+    if (link.status !== "paused" || closed) setConfirmingResume(false);
+  }, [closed, link.status]);
 
   // After a resume the notice that held focus is gone: focus the heading.
   useLayoutEffect(() => {
@@ -396,6 +397,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
             watcher={watcher}
             agentLabel={watcherAgentLabel(watcher, surface.providerLabels)}
             headingId={headingId}
+            closed={closed}
             actions={surface.online ? actions : null}
             privateConnectConfigured={privateConnectConfigured}
             resumeBlocked={resumeBlocked}

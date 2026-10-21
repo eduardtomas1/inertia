@@ -26,6 +26,7 @@ export interface WatcherBarProps {
   watcher: ConversationShell | undefined;
   agentLabel: string;
   headingId: string;
+  closed: boolean;
   actions: WatcherActions | null;
   privateConnectConfigured: boolean;
   /** Why Resume would be refused right now, or null when it can resume. */
@@ -95,6 +96,7 @@ export function WatcherBar({
   watcher,
   agentLabel,
   headingId,
+  closed,
   actions,
   privateConnectConfigured,
   resumeBlocked,
@@ -117,6 +119,9 @@ export function WatcherBar({
   useEffect(() => {
     if (confirmingStop) keepWatchingRef.current?.focus({ preventScroll: true });
   }, [confirmingStop]);
+  useEffect(() => {
+    if (closed) setConfirmingStop(false);
+  }, [closed]);
   const announcement = useTransitionAnnouncement(link);
   const live = useWatcherLive(link.id);
   const waking = link.status === "waking";

@@ -153,6 +153,22 @@ describe("WatcherDock", () => {
     expect(handle()).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("drops the Stop watching and resume prompts when the dock collapses", async () => {
+    setup({ link: link({ status: "paused", pauseReason: "write-detected" }) });
+    const aside = await dock();
+    fireEvent.click(within(aside).getByRole("button", { name: "Resume…" }));
+    fireEvent.click(within(aside).getByRole("button", { name: "More watcher actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Stop watching…" }));
+    expect(within(aside).getByRole("group", { name: "Confirm resume" })).toBeInTheDocument();
+    expect(within(aside).getByRole("group", { name: "Stop watching" })).toBeInTheDocument();
+    act(() => setWatcherDockOpen(WATCHED_ID, false));
+    await waitFor(() => expect(document.querySelector(".watcher-dock-frame")).toHaveAttribute("hidden"));
+    act(() => setWatcherDockOpen(WATCHED_ID, true));
+    await waitFor(() => expect(document.querySelector(".watcher-dock-frame")).not.toHaveAttribute("hidden"));
+    expect(within(aside).queryByRole("group", { name: "Confirm resume" })).not.toBeInTheDocument();
+    expect(within(aside).queryByRole("group", { name: "Stop watching" })).not.toBeInTheDocument();
+  });
+
   it("collapses on Escape and returns focus to the handle", async () => {
     setup();
     const aside = await dock();

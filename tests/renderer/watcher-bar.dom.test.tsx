@@ -51,6 +51,7 @@ function bar(
       watcher={current.status === "waking" ? runningWatcher() : shell(WATCHER_ID, "Watcher")}
       agentLabel="Team Codex · fixture-model"
       headingId="watcher-heading"
+      closed={false}
       actions={createWatcherActions(runtime.request, current.id)}
       privateConnectConfigured={options.privateConnectConfigured ?? false}
       resumeBlocked={options.resumeBlocked ?? null}
@@ -198,6 +199,7 @@ describe("WatcherBar", () => {
         watcher={shell(WATCHER_ID, "Watcher")}
         agentLabel="Team Codex"
         headingId="watcher-heading"
+        closed={false}
         actions={createWatcherActions(watcherRuntime().request, LINK_ID)}
         privateConnectConfigured={false}
         resumeBlocked={null}
@@ -366,6 +368,7 @@ describe("WatcherBar", () => {
         watcher={shell(WATCHER_ID, "Watcher")}
         agentLabel="Team Codex"
         headingId="watcher-heading"
+        closed={false}
         actions={createWatcherActions(request, current.id)}
         privateConnectConfigured={false}
         resumeBlocked={null}

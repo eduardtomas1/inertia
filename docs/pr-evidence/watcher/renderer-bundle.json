@@ -16,7 +16,8 @@
     "Fix round: fixRoundBaselineBytes is be02d4a7e (the integrated PR head after wave 2) and fixRoundBytes the renderer fix-round branch, both built on macOS with Node 22.23.2 from the same package-lock. The dock grows by 1,017 bytes (per-action Send and Dismiss status, changed files of an inconclusive check, the sent-size note, the runtime's pause words in the announcement); the attach dialog by 38 (Review the last turn now while the turn runs). First-load routes grow by 211 (workbench) and 61 (detached chat) bytes and core by 319 for the dock host's handle fallback, the hint-less tooltip, the automatic note tooltip and /compact in a watcher composer; transcriptJavaScript (+72) and the welcome guide (+45) stay within their caps, and the 22-byte changes on unrelated deferred chunks are shared-helper import metadata. The dock, attach, first-load and core caps were raised by exactly this growth.",
     "Integrated head: the server fix round changed shared contracts after the renderer fix round measured, and the attach dialog closure grew by 76 bytes (18,691 to 18,767) on the combined head 90187d709; its cap was raised by exactly those bytes. Every other measurement stayed within its cap.",
     "CI fix: the More menu owns Escape with a document-level listener while open and focuses its first item once positioned, which adds 183 bytes to the dock closure (40,440 to 40,623); its cap was raised by exactly those bytes.",
-    "Last round: lastRoundBaselineBytes is 8e5f4e897 (the PR head with the Codex finding fixes) and lastRoundBytes the renderer branch after the last bug-fix and polish round, both built on macOS with Node 22.23.2 from the same package-lock. The baseline already measured 58 bytes over the dock cap from the Codex feed fix (cached pages a refreshed newest page no longer reaches). The dock grows by a further 410 bytes (refreshing loaded earlier checks in place, the collapse reset of the Stop watching and resume prompts, the terminal-aware sheet clearance, the extracted menu items and sheet dismissal, the automatic-sending status word); core by 64 (Resume watcher in the command palette, the shared check title, row name and note title). The attach dialog shrinks by 76 bytes (no helper sentence, shared error text), both first-load routes by 28 and the transcript by 55. The dock cap was raised by the overshoot plus the growth, core by exactly its growth, and the attach and both first-load caps lowered by exactly their savings."
+    "Last round: lastRoundBaselineBytes is 8e5f4e897 (the PR head with the Codex finding fixes) and lastRoundBytes the renderer branch after the last bug-fix and polish round, both built on macOS with Node 22.23.2 from the same package-lock. The baseline already measured 58 bytes over the dock cap from the Codex feed fix (cached pages a refreshed newest page no longer reaches). The dock grows by a further 410 bytes (refreshing loaded earlier checks in place, the collapse reset of the Stop watching and resume prompts, the terminal-aware sheet clearance, the extracted menu items and sheet dismissal, the automatic-sending status word); core by 64 (Resume watcher in the command palette, the shared check title, row name and note title). The attach dialog shrinks by 76 bytes (no helper sentence, shared error text), both first-load routes by 28 and the transcript by 55. The dock cap was raised by the overshoot plus the growth, core by exactly its growth, and the attach and both first-load caps lowered by exactly their savings.",
+    "Final head: the server round's shared contract changes and the reconciled pause text grow the dock closure by 58 bytes (41,091 to 41,149) and the attach dialog by 34 (18,691 to 18,725); both caps were raised by exactly those bytes."
   ],
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
@@ -94,7 +95,9 @@
       "deltaFromIntegratedHeadBytes": 183,
       "lastRoundBaselineBytes": 40681,
       "lastRoundBytes": 41091,
-      "deltaFromLastRoundBaselineBytes": 410
+      "deltaFromLastRoundBaselineBytes": 410,
+      "finalHeadBytes": 41149,
+      "deltaFromLastRoundBytes": 58
     },
     "deferredWatcherAttachJavaScript": {
       "preFoundationBytes": null,
@@ -121,7 +124,9 @@
       "deltaFromFixRoundBytes": 76,
       "lastRoundBaselineBytes": 18767,
       "lastRoundBytes": 18691,
-      "deltaFromLastRoundBaselineBytes": -76
+      "deltaFromLastRoundBaselineBytes": -76,
+      "finalHeadBytes": 18725,
+      "deltaFromLastRoundBytes": 34
     },
     "deferredWelcomeGuideJavaScript": {
       "preFoundationBytes": 37212,

@@ -1,3 +1,6 @@
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,6 +9,7 @@ import {
 } from "../../src/server/provider/agent-harness";
 import { ClaudePermissionBroker } from "../../src/server/provider/claude-permission-broker";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
+import { portableFixtureRoot } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 const HOST_TOOL = `mcp__${INERTIA_HOST_MCP_NAME}__inertia_create_conversation`;
@@ -37,13 +41,17 @@ function broker(
   });
 }
 
-function watcherBroker(events: AgentHarnessEvent[], readOnlyProfile: "watcher" | null = "watcher"): ClaudePermissionBroker {
+function watcherBroker(
+  events: AgentHarnessEvent[],
+  readOnlyProfile: "watcher" | null = "watcher",
+  cwd = "/workspace",
+): ClaudePermissionBroker {
   return new ClaudePermissionBroker({
     input: {
       ...nativeProviderRunInput({
         providerId: "claude",
         conversationId: "claude-permission-broker-watcher",
-        cwd: "/workspace",
+        cwd,
         prompt: "Review the work",
         interactionMode: "plan",
         access: "supervised",
@@ -137,6 +145,27 @@ describe("Claude permission broker", () => {
     await expect(watcherBroker(events).canUseTool("Bash", input, callbackOptions()))
       .resolves.toEqual({ behavior: "allow", updatedInput: { command: rewritten, description: "Search the work" } });
     expect(events).toEqual([]);
+  });
+
+  it("declines a watcher command that follows a link out of the workspace without an approval", async () => {
+    const root = portableFixtureRoot("broker watcher link");
+    try {
+      const workspace = join(root, "workspace");
+      mkdirSync(join(workspace, "src"), { recursive: true });
+      mkdirSync(join(root, "outside"));
+      writeFileSync(join(workspace, "src", "parser.ts"), "export {};\n");
+      writeFileSync(join(root, "outside", "secret.txt"), "outside\n");
+      symlinkSync(join(root, "outside"), join(workspace, "linked"), "junction");
+      const events: AgentHarnessEvent[] = [];
+      const readInside = { command: "cat src/parser.ts" };
+      await expect(watcherBroker(events, "watcher", workspace).canUseTool("Bash", readInside, callbackOptions()))
+        .resolves.toEqual({ behavior: "allow", updatedInput: readInside });
+      await expect(watcherBroker(events, "watcher", workspace).canUseTool("Bash", { command: "cat linked/secret.txt" }, callbackOptions()))
+        .resolves.toEqual({ behavior: "deny", message: "The command reads outside the workspace." });
+      expect(events).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it.each([

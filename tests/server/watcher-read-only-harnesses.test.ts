@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { CanUseTool, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -747,7 +747,12 @@ interface OpenCodeCapture {
  * OpenCode does (agent rules, then session rules, last match wins), prompts
  * for `ask`, and writes only when an edit or shell call is allowed.
  */
-function openCodeServer(root: string, repo: string, agentRules: PermissionRuleset = OPENCODE_PLAN_AGENT_RULES) {
+function openCodeServer(
+  root: string,
+  repo: string,
+  agentRules: PermissionRuleset = OPENCODE_PLAN_AGENT_RULES,
+  scriptedCalls: ReadonlyArray<{ tool: string; pattern: string; description?: string }> = OPENCODE_SCRIPTED_CALLS,
+) {
   const command = portableNodeExecutable(root, "opencode");
   const capturePath = join(root, "opencode-capture.json");
   const pidPath = join(root, "opencode.pid");
@@ -760,7 +765,7 @@ const capture = { calls: [], gitOptionalLocks: process.env.GIT_OPTIONAL_LOCKS ??
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(capture));
 const agentRules = ${JSON.stringify(agentRules)};
 const nativeTools = ${JSON.stringify(OPENCODE_NATIVE_TOOLS)};
-const calls = ${JSON.stringify(OPENCODE_SCRIPTED_CALLS)};
+const calls = ${JSON.stringify(scriptedCalls)};
 const target = path.join(process.cwd(), "src", "parser.ts");
 const sessionID = "opencode-watcher-session";
 const session = { id: sessionID, slug: "watcher", projectID: "project", directory: process.cwd(), title: "Watcher", version: "1.18.4", model: { id: "model-a", providerID: "fake" }, time: { created: Date.now(), updated: Date.now() } };
@@ -992,6 +997,35 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     await run.result;
 
     expect(opencode.capture()).toMatchObject({ gitOptionalLocks: "0", ripgrepConfigPath: null });
+    await expectProcessGone(opencode.pid());
+  });
+
+  it("declines a watcher's shell command that follows a link out of the workspace without an approval", async () => {
+    const root = portableFixtureRoot("watcher opencode link");
+    roots.push(root);
+    const repo = repository(root, ["serve", "linked"]);
+    mkdirSync(join(root, "outside"));
+    writeFileSync(join(root, "outside", "secret.txt"), "outside\n");
+    symlinkSync(join(root, "outside"), join(repo, "linked"), "junction");
+    const opencode = openCodeServer(root, repo, OPENCODE_PLAN_AGENT_RULES, [
+      { tool: "bash", pattern: "cat src/parser.ts", description: "Reads the parser" },
+      { tool: "bash", pattern: "cat linked/secret.txt", description: "Reads the linked file" },
+    ]);
+    const runtime = watcherHarnessRuntime(root, repo, opencode.manager, providerNativeModelSelection({ providerId: "opencode", modelId: "fake/model-a" }));
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expect(opencode.capture().calls).toEqual([
+      { tool: "bash", action: "ask", reply: "once" },
+      { tool: "bash", action: "ask", reply: "reject" },
+    ]);
+    expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
+    expect(runtime.activities()).toEqual([
+      { kind: "command", status: "completed", title: "Reads the parser" },
+      { kind: "command", status: "failed", title: "bash" },
+    ].sort(byActivity));
+    expect(turn).toMatchObject({ status: "completed" });
+    await opencode.manager.disposeAll();
     await expectProcessGone(opencode.pid());
   });
 

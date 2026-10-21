@@ -1,6 +1,7 @@
 import type { OpencodeClient, PermissionRuleset } from "@opencode-ai/sdk/v2";
 
-import { classifyReadOnlyCommand } from "../runtime/watcher/read-only-commands";
+import { readOnlyCommandPathProblem } from "../runtime/watcher/read-only-command-paths";
+import { classifyReadOnlyCommand, type ReadOnlyCommandContext } from "../runtime/watcher/read-only-commands";
 import type { ProviderHostToolBridge, ProviderRunInput } from "./contracts";
 import type { AgentApprovalDecision, AgentApprovalRequest } from "./interactions";
 import { INERTIA_HOST_MCP_NAME, openCodeHostMcpConfig } from "./host-tool-mcp-config";
@@ -84,14 +85,31 @@ export function openCodeWatcherCommandAllowed(
   properties: Record<string, unknown>,
   input: Pick<ProviderRunInput, "cwd" | "readOnlyProfile">,
 ): boolean {
+  const command = openCodePermissionCommand(properties);
+  return input.readOnlyProfile === "watcher"
+    && permission === "bash"
+    && command !== undefined
+    && classifyReadOnlyCommand(command, openCodeWatcherCommandContext(input)).allowed;
+}
+
+export async function openCodeWatcherCommandContained(
+  properties: Record<string, unknown>,
+  input: Pick<ProviderRunInput, "cwd">,
+): Promise<boolean> {
+  const command = openCodePermissionCommand(properties);
+  return command !== undefined && await readOnlyCommandPathProblem(command, openCodeWatcherCommandContext(input)) === null;
+}
+
+function openCodePermissionCommand(properties: Record<string, unknown>): string | undefined {
   const metadata = properties.metadata;
   const command = typeof metadata === "object" && metadata !== null
     ? (metadata as Record<string, unknown>).command
     : undefined;
-  return input.readOnlyProfile === "watcher"
-    && permission === "bash"
-    && typeof command === "string"
-    && classifyReadOnlyCommand(command, { cwd: input.cwd, windows: process.platform === "win32", powershell: true }).allowed;
+  return typeof command === "string" ? command : undefined;
+}
+
+function openCodeWatcherCommandContext(input: Pick<ProviderRunInput, "cwd">): ReadOnlyCommandContext {
+  return { cwd: input.cwd, windows: process.platform === "win32", powershell: true };
 }
 
 export function createOpenCodeHostTools(input: {

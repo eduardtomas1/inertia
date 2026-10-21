@@ -266,13 +266,14 @@ allowed. The programs are read-only `git` subcommands (only `-C`,
 `--output`, `--ext-diff`, `--textconv`, `--show-signature`, the `%G` and
 `%(signature)` format placeholders, `git grep -O`, `--no-index`, `--untracked`
 and `--no-exclude-standard` and their abbreviations refused), `rg` without
-`--pre`, `--hostname-bin`, `-z`/`--search-zip`, `--hidden`/`-.`,
+`--pre`, `--hostname-bin`, `-z`/`--search-zip`, `-L`/`--follow`, `--hidden`/`-.`,
 `-u`/`--unrestricted` or any `--no-ignore` option, `grep`, `egrep` and `fgrep`
 without recursion (`-r`, `-R`, `-d`, `--directories`), `cat` (without
 PowerShell's `-Wait`), `head`, `tail` without follow (including the obsolete
-`+Nf` form), `ls`, `find` without `-exec`, `-ok`, `-delete` or `-fprint` forms,
+`+Nf` form), `ls` without `-L`/`--dereference`, `find` without `-L`, `-follow`,
+`-exec`, `-ok`, `-delete` or `-fprint` forms,
 `wc`, `diff` without `-r` or `-l`, `stat`, `file` without `-C`, `-z` or `-Z`,
-`tree` without `-o` or `-R`, `sort` without `-o`, `-T` or
+`tree` without `-o`, `-R` or `-l`, `sort` without `-o`, `-T` or
 `--compress-program`, `uniq` with at most one file and no glob, `cut`, `nl`,
 `tr`, `column`, `jq` without environment access, program files, modules or
 extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`, `import`,
@@ -280,7 +281,14 @@ extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`, `import`,
 absolute, starts with `~` or contains a `..` segment must stay inside the
 workspace, and so must every suffix of a short-option bundle after its first
 letter, so `grep -nf/etc/passwd` and also `grep -nfsrc/patterns` are refused
-while `grep -nf src/patterns` is allowed. `.env`, `*.env` and `*.env.*` names
+while `grep -nf src/patterns` is allowed. Because that check is lexical, Claude's
+broker and OpenCode's permission handler then resolve every argument and
+option value that names an existing path with `realpath`, after expanding its
+wildcards against the directory listing (quoted wildcards too on Windows and
+wherever the shell may be PowerShell), and decline the command without an
+approval when one resolves outside the workspace's own real path, so a
+symbolic link or junction inside the workspace cannot lead a read outside it.
+A command whose wildcards reach more than 4,096 paths is declined. `.env`, `*.env` and `*.env.*` names
 are refused in any letter case wherever they appear in an argument, except in
 the search pattern of `rg`, `grep`, `egrep`, `fgrep` and `git grep`: the first
 positional word when no `-e`, `--regexp`, `-f` or `--file` supplies the
@@ -300,8 +308,8 @@ environment, so a ripgrep configuration file cannot add `--pre` to a plain
 `--no-config` inserted after every `rg`, so a shell startup file that sets the
 variable again is ignored as well. OpenCode's permission reply cannot change
 the command, so OpenCode watchers rely on the environment alone.
-Known limits: containment is lexical, so a symbolic link inside the workspace
-can lead outside it; a search reads any workspace file its pattern reaches
+Known limits: the real-path check runs just before the command does, so a link
+created in between is not seen; a search reads any workspace file its pattern reaches
 except files that Git's or rg's ignore rules skip, so a tracked or unignored
 secret file can be read; programs still honor their own configuration (a
 `diff.external`, textconv, `core.fsmonitor`, `gpg.program` or

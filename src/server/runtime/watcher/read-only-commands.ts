@@ -11,13 +11,16 @@ export interface ReadOnlyCommandContext {
   powershell?: boolean;
 }
 
+export interface ReadOnlyCommandOperand {
+  value: string;
+  glob: boolean[];
+}
+
 export type ReadOnlyCommandVerdict =
   | { allowed: true; program: string }
   | { allowed: false; reason: string };
 
-interface Word {
-  value: string;
-  glob: boolean[];
+interface Word extends ReadOnlyCommandOperand {
   end: number;
 }
 
@@ -31,7 +34,7 @@ interface SearchSyntax {
 
 const SHELL_SYNTAX = "The command uses shell syntax that watchers cannot run.";
 const UNSAFE_OPTION = "The command uses an option that can write or run another program.";
-const OUTSIDE = "The command reads outside the workspace.";
+export const OUTSIDE_WORKSPACE = "The command reads outside the workspace.";
 const ENVIRONMENT_FILE = "The command reads an environment file.";
 const OPTION_GLOB = "The command uses a glob that could expand to an option.";
 const UNIQ_GLOB = "uniq cannot take a glob, because a second matched file would become its output.";
@@ -54,7 +57,7 @@ const GIT_TAG_FLAGS = new Set(["--list", "-l", "-n", "--no-column", "--ignore-ca
 const GIT_REF_FILTERS = ["--contains=", "--no-contains=", "--merged=", "--no-merged=", "--points-at=", "--sort=", "--format="];
 const GIT_CAT_FILE_MODES = new Set(["-p", "-t", "-s"]);
 const GIT_WORKTREE_LIST_FLAGS = new Set(["--porcelain", "-v", "--verbose", "-z"]);
-const FIND_UNSAFE = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls"]);
+const FIND_UNSAFE = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls", "-L", "-follow"]);
 const TAIL_OBSOLETE_FOLLOW = /^\+\d*[bcl]?f$/u;
 const JQ_FILE_OPTIONS = new Set(["--from-file", "--library-path", "--rawfile", "--slurpfile"]);
 const JQ_MODULE = /\b(?:import|include|modulemeta)\b/u;
@@ -72,20 +75,20 @@ const GREP_RULE = optionRule({ short: "rRd", long: ["recursive", "dereference-re
 
 const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   git: gitRule,
-  rg: optionRule({ short: "zu.", long: ["pre", "pre-glob", "hostname-bin", "search-zip", "hidden", "unrestricted", "no-ignore", "no-ignore-dot", "no-ignore-exclude", "no-ignore-files", "no-ignore-global", "no-ignore-parent", "no-ignore-vcs"] }),
+  rg: optionRule({ short: "zu.L", long: ["pre", "pre-glob", "hostname-bin", "search-zip", "follow", "hidden", "unrestricted", "no-ignore", "no-ignore-dot", "no-ignore-exclude", "no-ignore-files", "no-ignore-global", "no-ignore-parent", "no-ignore-vcs"] }),
   grep: GREP_RULE,
   egrep: GREP_RULE,
   fgrep: GREP_RULE,
   cat: optionRule({ short: "Ww" }),
   head: noRule,
   tail: tailRule,
-  ls: noRule,
+  ls: optionRule({ short: "L", long: ["dereference"] }),
   find: findRule,
   wc: noRule,
   diff: optionRule({ short: "lr", long: ["paginate", "recursive"] }),
   stat: noRule,
   file: optionRule({ short: "CzZ", long: ["compile", "uncompress", "uncompress-noreport"] }),
-  tree: optionRule({ short: "oR", long: ["output"] }),
+  tree: optionRule({ short: "oRl", long: ["output"] }),
   pwd: noRule,
   which: noRule,
   echo: noRule,
@@ -120,6 +123,13 @@ export function ripgrepWithoutConfig(command: string, context: ReadOnlyCommandCo
     if (head && programName(head.value) === "rg") characters.splice(head.end, 0, RIPGREP_NO_CONFIG);
   }
   return characters.join("");
+}
+
+export function readOnlyCommandOperands(command: string, context: ReadOnlyCommandContext): ReadOnlyCommandOperand[] {
+  const segments = tokenize(command, context.windows, context.windows || context.powershell === true);
+  if (typeof segments === "string") return [];
+  return segments.flatMap(([, ...rest]) => rest.flatMap(({ value, glob }) =>
+    pathCandidateOffsets(value).map((offset) => ({ value: value.slice(offset), glob: glob.slice(offset) }))));
 }
 
 export function watcherCommandEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -231,15 +241,15 @@ function append(word: Word, character: string, glob: boolean): void {
 function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths: boolean, pattern: boolean): string | null {
   const paths = context.windows ? win32 : posix;
   const separators = context.windows ? /[\\/]/u : /\//u;
-  if (globReachesParent(word, separators)) return OUTSIDE;
+  if (globReachesParent(word, separators)) return OUTSIDE_WORKSPACE;
   for (const candidate of pathCandidates(word.value)) {
-    if (candidate.startsWith("~")) return OUTSIDE;
-    if (context.windows && /^[A-Za-z]:(?![\\/])/u.test(candidate)) return OUTSIDE;
-    if (context.windows && providerPaths && candidate.replace(/^[A-Za-z]:(?=[\\/])/u, "").includes(":")) return OUTSIDE;
+    if (candidate.startsWith("~")) return OUTSIDE_WORKSPACE;
+    if (context.windows && /^[A-Za-z]:(?![\\/])/u.test(candidate)) return OUTSIDE_WORKSPACE;
+    if (context.windows && providerPaths && candidate.replace(/^[A-Za-z]:(?=[\\/])/u, "").includes(":")) return OUTSIDE_WORKSPACE;
     const segments = candidate.split(separators);
     if (paths.isAbsolute(candidate) || segments.includes("..")) {
       const relative = paths.relative(context.cwd, paths.resolve(context.cwd, candidate));
-      if (relative === ".." || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative)) return OUTSIDE;
+      if (relative === ".." || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative)) return OUTSIDE_WORKSPACE;
     }
     if (!pattern && candidate.split(/[\\/:]/u).some((segment) => ENVIRONMENT_FILE_NAME.test(segment))) return ENVIRONMENT_FILE;
   }
@@ -247,15 +257,19 @@ function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths:
 }
 
 function pathCandidates(value: string): string[] {
-  const candidates = [value];
+  return pathCandidateOffsets(value).map((offset) => value.slice(offset));
+}
+
+function pathCandidateOffsets(value: string): number[] {
+  const offsets = [0];
   const equals = value.indexOf("=");
-  if (equals >= 0) candidates.push(value.slice(equals + 1));
+  if (equals >= 0) offsets.push(equals + 1);
   const colon = value.indexOf(":");
-  if (value.startsWith("-") && colon >= 0) candidates.push(value.slice(colon + 1));
+  if (value.startsWith("-") && colon >= 0) offsets.push(colon + 1);
   if (/^-[^-]/u.test(value)) {
-    for (let index = 2; index < value.length; index += 1) candidates.push(value.slice(index));
+    for (let index = 2; index < value.length; index += 1) offsets.push(index);
   }
-  return candidates;
+  return offsets;
 }
 
 function searchPatterns(program: string, args: readonly string[]): number[] {

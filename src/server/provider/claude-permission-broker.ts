@@ -6,7 +6,12 @@ import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { claudeQuestions } from "./claude-questions";
-import { classifyReadOnlyCommand, ripgrepWithoutConfig } from "../runtime/watcher/read-only-commands";
+import { readOnlyCommandPathProblem } from "../runtime/watcher/read-only-command-paths";
+import {
+  classifyReadOnlyCommand,
+  ripgrepWithoutConfig,
+  type ReadOnlyCommandContext,
+} from "../runtime/watcher/read-only-commands";
 import type { ProviderRunInput } from "./contracts";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import type { AgentApprovalDecision, AgentInputRequest, AgentPlanStep } from "./interactions";
@@ -101,7 +106,12 @@ export class ClaudePermissionBroker {
       && callbackOptions.blockedPath === undefined
       ? allowedWatcherCommand(toolInput, input.cwd)
       : null;
-    if (watcherCommand !== null) return { behavior: "allow", updatedInput: { ...toolInput, command: watcherCommand } };
+    if (watcherCommand !== null) {
+      const problem = await readOnlyCommandPathProblem(watcherCommand.command, watcherCommand.context);
+      if (callbackOptions.signal.aborted || this.options.cancelled()) return deny("User cancelled the request.", true);
+      if (problem) return deny(problem);
+      return { behavior: "allow", updatedInput: { ...toolInput, command: ripgrepWithoutConfig(watcherCommand.command, watcherCommand.context) } };
+    }
 
     if (
       (input.access === "full" && input.interactionMode !== "plan")
@@ -205,13 +215,16 @@ export class ClaudePermissionBroker {
   }
 }
 
-function allowedWatcherCommand(toolInput: Record<string, unknown>, cwd: string): string | null {
+function allowedWatcherCommand(
+  toolInput: Record<string, unknown>,
+  cwd: string,
+): { command: string; context: ReadOnlyCommandContext } | null {
   const context = { cwd, windows: process.platform === "win32" };
   return typeof toolInput.command === "string"
     && toolInput.run_in_background !== true
     && toolInput.dangerouslyDisableSandbox !== true
     && classifyReadOnlyCommand(toolInput.command, context).allowed
-    ? ripgrepWithoutConfig(toolInput.command, context)
+    ? { command: toolInput.command, context }
     : null;
 }
 

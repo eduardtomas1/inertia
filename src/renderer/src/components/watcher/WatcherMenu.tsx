@@ -111,12 +111,6 @@ export function WatcherMenu({
       aria-label={label}
       style={floating ? position ?? { position: "fixed", top: 0, left: 0, visibility: "hidden" } : undefined}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          close();
-          return;
-        }
         if (event.key === "Tab") {
           // A floating menu sits at the end of the body: return to the trigger.
           if (floating) {

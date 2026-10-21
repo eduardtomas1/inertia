@@ -22,7 +22,7 @@ const WORK_INDEX_OVERSCAN = 8;
 export const WORK_ROW_HEIGHT = 58;
 export const WORK_ROW_COMPACT_HEIGHT = 50;
 /** A watcher nested under its chat: one compact line. */
-export const WORK_WATCHER_ROW_HEIGHT = 36;
+const WORK_WATCHER_ROW_HEIGHT = 36;
 const WORK_SECTION_HEIGHT = 36;
 const WORK_SHOW_MORE_HEIGHT = 30;
 

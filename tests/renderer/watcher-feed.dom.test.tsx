@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { WatcherFeedItem } from "../../src/shared/watcher";
-import { steerAvailable } from "../../src/shared/watcher-feed";
+import { supportsActiveParentFollowUp } from "../../src/shared/follow-up-steer";
 import { resetWatcherFeedMotion, WatcherFeed } from "../../src/renderer/src/components/watcher/WatcherFeed";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { createWatcherActions } from "../../src/renderer/src/hooks/useWatcherActions";
@@ -46,7 +46,7 @@ function FeedHarness({
         projectId={PROJECT_ID}
         watchedConversationId={WATCHED_ID}
         watchedRunning={running}
-        steerable={steerAvailable(harnessId, running)}
+        steerable={running && supportsActiveParentFollowUp(harnessId)}
         online
       />
     </>

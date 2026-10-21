@@ -8,7 +8,7 @@ import type {
 import { INTERFACE_LOCALE } from "../lib/locale";
 
 /** User-facing watcher copy, shared by the dock and the watcher chat rows. */
-export const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = {
+const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = {
   user: "You paused it.",
   "wake-budget": "It used its checks for this turn.",
   "usage-limit": "Its account reached a usage limit.",
@@ -19,9 +19,8 @@ export const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, stri
   "watcher-archived": "The watcher chat was archived.",
 };
 
-export function watcherPauseText(reason: WatcherPauseReason | null, detail: string | null): string {
-  const base = reason ? WATCHER_PAUSE_REASON_TEXT[reason] : "Paused.";
-  return detail && reason !== "write-detected" ? detail : base;
+export function watcherPauseText(reason: WatcherPauseReason, detail: string | null): string {
+  return detail && reason !== "write-detected" ? detail : WATCHER_PAUSE_REASON_TEXT[reason];
 }
 
 export function watcherPauseAnnouncement(reason: WatcherPauseReason | null, detail: string | null): string {
@@ -38,8 +37,7 @@ const OUTCOME_TEXT: Readonly<Record<Exclude<WatcherWakeOutcome, "silent" | "find
   "write-detected": "Files changed during the check that no running agent accounts for.",
 };
 
-export function watcherOutcomeText(outcome: WatcherWakeOutcome | null): string {
-  if (outcome === null) return "Checking now…";
+export function watcherOutcomeText(outcome: WatcherWakeOutcome): string {
   if (outcome === "silent") return "Nothing to report.";
   if (outcome === "finding") return "Reported a finding.";
   return OUTCOME_TEXT[outcome];
@@ -57,8 +55,6 @@ const TRIGGER_TEXT: Readonly<Record<WatcherWakeTrigger, string>> = {
 export function watcherTriggerText(trigger: WatcherWakeTrigger): string {
   return TRIGGER_TEXT[trigger];
 }
-
-export { watcherEventsText } from "./watcherLinks";
 
 const PHASE_TEXT: Readonly<Record<WatcherLivePhase, string>> = {
   starting: "Starting",

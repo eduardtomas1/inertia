@@ -4,7 +4,7 @@ import { TriangleAlert } from "lucide-react";
 import type { WatcherLinkView } from "@shared/watcher";
 import { watcherPauseText } from "../../utils/watcherCopy";
 
-export interface WatcherNoticesProps {
+interface WatcherNoticesProps {
   link: WatcherLinkView;
   changedPaths: readonly string[];
   customBackend: boolean;
@@ -51,10 +51,11 @@ export function WatcherNotices({
   }, [confirmingResume]);
   // A pause the user chose needs no banner: the bar already says Paused and
   // offers Resume. Every other pause explains itself here.
-  const paused = link.status === "paused" && (link.pauseReason !== "user" || resumeBlocked !== null);
-  const writeDetected = paused && link.pauseReason === "write-detected";
+  const reason = link.status === "paused" ? link.pauseReason : null;
+  const paused = reason !== null && (reason !== "user" || resumeBlocked !== null);
+  const writeDetected = reason === "write-detected";
   if (!paused && !customBackend) return null;
-  const pauseText = watcherPauseText(link.pauseReason, link.pauseDetail);
+  const pauseText = reason === null ? "" : watcherPauseText(reason, link.pauseDetail);
   const resumeButton = (label: string) => resumeBlocked ? (
     <p className="watcher-notice-blocked">{resumeBlocked}</p>
   ) : (

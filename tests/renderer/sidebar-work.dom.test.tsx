@@ -16,7 +16,6 @@ import { defaultSettings } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 import { WATCHED_ID, WATCHER_ID, link } from "./watcher-fixtures";
-import type { WatcherLinkView } from "../../src/shared/watcher";
 import { resetWatcherDockStore, watcherDockStorageKey } from "../../src/renderer/src/hooks/useWatcherDock";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
@@ -1819,7 +1818,7 @@ describe("compact Work sidebar", () => {
     view.rerenderSnapshot({ ...snapshot([watched, watcher]), watchers: [link({
       projectId: project.id,
       latestFindingAt: new Date(2026, 7, 11, 12).toISOString(),
-      counters: { ...link().counters, findingsTotal: 2 } as WatcherLinkView["counters"],
+      counters: { ...link().counters, findingsTotal: 2 },
     })] });
     const row = screen.getByRole("button", { name: /^Watcher · Reviewer, watching Refactor parser, 2 new,/u });
     expect(row.querySelector(".watcher-work-row-new")).toHaveTextContent(/^2 new$/u);

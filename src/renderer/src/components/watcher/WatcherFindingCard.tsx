@@ -49,7 +49,7 @@ export interface WatcherFindingFailure {
   message: string;
 }
 
-export interface WatcherFindingCardProps {
+interface WatcherFindingCardProps {
   item: WatcherFeedItem;
   motionIndex: number;
   /** True until this card's entrance has played once. */

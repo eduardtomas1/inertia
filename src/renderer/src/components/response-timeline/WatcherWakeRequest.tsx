@@ -1,9 +1,9 @@
 import type { ResponseTurn } from "../../utils/response-timeline/model";
 import {
-  watcherEventsText,
   watcherOutcomeText,
   watcherTriggerText,
 } from "../../utils/watcherCopy";
+import { watcherEventsText } from "../../utils/watcherLinks";
 import { useAnchoredDetailsToggle } from "./activity";
 import "./WatcherRows.css";
 

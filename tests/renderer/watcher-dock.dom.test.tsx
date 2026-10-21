@@ -136,7 +136,7 @@ describe("WatcherDock", () => {
     expect(document.querySelector('.watcher-dock-handle [role="status"]')).toHaveTextContent(/^New finding$/u);
     update(link({
       latestFindingAt: "2026-10-19T10:50:00.000Z",
-      counters: { ...link().counters, findingsTotal: 2 } as WatcherLinkView["counters"],
+      counters: { ...link().counters, findingsTotal: 2 },
     }));
     expect(document.querySelector(".watcher-dock-handle-new")).toHaveTextContent(/^2 new$/u);
     expect(handle()).toHaveAccessibleName("Open watcher, 2 new");

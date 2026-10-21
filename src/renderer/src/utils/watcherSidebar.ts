@@ -6,7 +6,7 @@ import type { SidebarThreadView } from "./sidebarModel";
  * the lazy Sidebar chunk needs it.
  */
 
-export interface NestedWatcherThreads {
+interface NestedWatcherThreads {
   /** Top-level threads: every attached watcher whose chat is listed is removed. */
   threads: SidebarThreadView[];
   /** The watcher row to show directly under each watched chat. */

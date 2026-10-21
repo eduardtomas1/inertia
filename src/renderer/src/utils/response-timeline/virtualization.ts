@@ -32,9 +32,9 @@ export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 // each marker. The rail remains bounded and scrollable in shorter viewports.
 export const TIMELINE_MINIMAP_MAX_MARKERS = 40;
 /** The "Note from watcher" divider, sized like the provider handoff divider. */
-export const WATCHER_NOTE_ROW_HEIGHT = 64;
+const WATCHER_NOTE_ROW_HEIGHT = 64;
 /** A watcher check's compact "Check N · K events" request row. */
-export const WATCHER_WAKE_REQUEST_HEIGHT = 44;
+const WATCHER_WAKE_REQUEST_HEIGHT = 44;
 
 /**
  * Row count alone misses short-but-expensive histories. A turn containing

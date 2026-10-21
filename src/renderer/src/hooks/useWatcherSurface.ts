@@ -15,7 +15,7 @@ export interface WatcherAttachTarget {
   returnFocusTo: HTMLElement | null;
 }
 
-export interface WatcherSurfaceController {
+interface WatcherSurfaceController {
   surface: WatcherSurfaceModel;
   attach: {
     target: WatcherAttachTarget | null;

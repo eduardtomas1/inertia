@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { AppSnapshot } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { MAX_ACTIVE_WATCHERS as SHARED_MAX_ACTIVE_WATCHERS, WATCHER_PRESET_LABELS } from "../../src/shared/watcher";
-import { groupWatcherFeed, steerAvailable } from "../../src/shared/watcher-feed";
 import { sidebarThreadView } from "../../src/renderer/src/utils/sidebarModel";
 import { nestWatcherThreads } from "../../src/renderer/src/utils/watcherSidebar";
 import { watcherClockTime, watcherDeliveryText } from "../../src/renderer/src/utils/watcherCopy";
@@ -19,8 +18,6 @@ import {
   OTHER_WATCHED_ID,
   WATCHED_ID,
   WATCHER_ID,
-  feedItem,
-  finding,
   link,
   project,
   shell,
@@ -61,31 +58,6 @@ describe("nestWatcherThreads", () => {
   it("returns the threads unchanged without links", () => {
     const listed = views([WATCHED_ID, WATCHER_ID]);
     expect(nestWatcherThreads(listed, undefined).threads).toEqual(listed);
-  });
-});
-
-describe("steer availability", () => {
-  it("is offered only while the watched turn runs on a steerable harness", () => {
-    expect(steerAvailable("codex-app-server", true)).toBe(true);
-    expect(steerAvailable("opencode-sdk", true)).toBe(true);
-    expect(steerAvailable("codex-app-server", false)).toBe(false);
-    expect(steerAvailable("cursor-acp", true)).toBe(false);
-    expect(steerAvailable(null, true)).toBe(false);
-  });
-});
-
-describe("feed grouping", () => {
-  it("folds consecutive quiet checks and lets findings and notices end a receipt", () => {
-    const groups = groupWatcherFeed([
-      feedItem(6),
-      feedItem(5),
-      finding(4, "The parser drops the trailing token."),
-      feedItem(3),
-      feedItem(2, { outcome: "failed" }),
-      feedItem(1),
-    ]);
-    expect(groups.map((group) => group.kind === "receipts" ? `receipts:${group.count}` : group.item.outcome))
-      .toEqual(["receipts:2", "finding", "receipts:1", "failed", "receipts:1"]);
   });
 });
 

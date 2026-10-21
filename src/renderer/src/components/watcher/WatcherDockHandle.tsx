@@ -38,7 +38,7 @@ export function WatcherDockHandle({ watchedId, link, providerId, dock, controlsD
   dock: WatcherDockController;
   controlsDock: boolean;
 }): React.JSX.Element {
-  const announcement = useCollapsedFindingAnnouncement(link.latestFindingAt ?? null);
+  const announcement = useCollapsedFindingAnnouncement(link.latestFindingAt);
   const unseen = watcherUnseenText(link, dock);
   return (
     <div className="watcher-dock-handle">

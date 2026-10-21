@@ -49,7 +49,7 @@ import { LoadingMark, Switch } from "../ui";
 import type { WatcherAttachTarget } from "../../hooks/useWatcherSurface";
 import "./WatcherAttachDialog.css";
 
-export interface WatcherAttachDialogProps {
+interface WatcherAttachDialogProps {
   snapshot: AppSnapshot;
   settings: AppSettings;
   watchedConversationId: string;
@@ -74,7 +74,7 @@ export interface WatcherAttachHostProps {
   onOpenBackendSetup: (profileId: string) => void;
 }
 
-export const WATCHER_READ_ONLY_STATEMENT = "It reads and reports: it may run read-only commands and never edits files or changes the workspace.";
+const WATCHER_READ_ONLY_STATEMENT = "It reads and reports: it may run read-only commands and never edits files or changes the workspace.";
 const WATCHER_AUTO_SEND_DETAIL = "Each finding is queued as a note from the watcher; your own messages still go first.";
 
 const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string }> = [

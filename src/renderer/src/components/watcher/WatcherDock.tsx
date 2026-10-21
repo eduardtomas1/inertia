@@ -11,7 +11,7 @@ import {
 } from "react";
 import clsx from "clsx";
 
-import { steerAvailable } from "@shared/watcher-feed";
+import { supportsActiveParentFollowUp } from "@shared/follow-up-steer";
 import type { ConversationShell } from "@shared/contracts";
 import type { WatcherLinkView } from "@shared/watcher";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
@@ -31,7 +31,6 @@ import { useWatcherFeed } from "../../hooks/useWatcherFeed";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
 import { watcherPauseText } from "../../utils/watcherCopy";
 import { watcherAgentLabel } from "@shared/watcher-agent-label";
-import { watcherFindingsTotal } from "../../utils/watcherLinks";
 import { PaneResizeHandle } from "../PaneResizeHandle";
 import { escapeClosedTooltip } from "../Tooltip";
 import { WatcherBar } from "./WatcherBar";
@@ -46,11 +45,11 @@ import { WatcherNotices } from "./WatcherNotices";
 import "./WatcherDock.css";
 
 export const WATCHER_DOCK_WIDTH_KEY = "inertia:layout:watcher-dock-width:v1";
-export const WATCHER_DOCK_DEFAULT_WIDTH = 340;
-export const WATCHER_DOCK_MIN_WIDTH = 280;
-export const WATCHER_DOCK_MAX_WIDTH = 520;
+const WATCHER_DOCK_DEFAULT_WIDTH = 340;
+const WATCHER_DOCK_MIN_WIDTH = 280;
+const WATCHER_DOCK_MAX_WIDTH = 520;
 /** Below this much room left for the chat, the dock floats over it as a sheet. */
-export const WATCHER_DOCK_MIN_CHAT_WIDTH = 360;
+const WATCHER_DOCK_MIN_CHAT_WIDTH = 360;
 /** A sheet keeps this much of the chat visible at its left edge. */
 const SHEET_EDGE = 24;
 /** Gap between the bottom of a sheet and the composer it never covers. */
@@ -229,7 +228,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const watcher = surface.conversations.find(({ id }) => id === link.watcherConversationId);
   const project = watched ? surface.projects.find(({ id }) => id === watched.projectId) : undefined;
   const watchedRunning = watched?.status === "running" || watched?.status === "needs-input";
-  const steerable = steerAvailable(watched?.latestTurn?.harnessId, watched?.status === "running");
+  const steerable = watched?.status === "running" && supportsActiveParentFollowUp(watched.latestTurn?.harnessId ?? null);
   const customBackend = surface.backendProfiles
     .find(({ id }) => id === watcher?.modelSelection.backendProfileId)?.source === "custom";
   const changedPaths = feed.items.find(({ guardState }) => guardState === "changed")?.guardPaths ?? [];
@@ -258,8 +257,8 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     if (message) setError(message);
   }, [errorToken, watchedId]);
 
-  const latestFindingAt = link.latestFindingAt ?? null;
-  const findingsTotal = watcherFindingsTotal(link);
+  const latestFindingAt = link.latestFindingAt;
+  const findingsTotal = link.counters.findingsTotal;
   const { markSeen } = dock;
   useEffect(() => {
     if (dock.open && visible && latestFindingAt) markSeen(latestFindingAt, findingsTotal);

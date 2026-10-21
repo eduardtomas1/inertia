@@ -15,7 +15,7 @@ function watcherRowState(link: WatcherLinkView | undefined): string | null {
 }
 
 /** The thread actions a watcher row shares with every other Work row. */
-export interface WatcherWorkRowMenu {
+interface WatcherWorkRowMenu {
   open: boolean;
   /** The thread actions menu, rendered while it is open. */
   actions: ReactNode;

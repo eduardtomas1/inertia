@@ -11,15 +11,15 @@ import { layoutStorage } from "../utils/layoutStorage";
  * over a narrow chat as a sheet it starts collapsed and opens only when the
  * user asks, without changing that preference.
  */
-export interface WatcherDockRecord {
+interface WatcherDockRecord {
   open: boolean;
   seenAt: string | null;
   seenFindings: number | null;
 }
 
-export type WatcherDockPresentation = "inline" | "sheet";
+type WatcherDockPresentation = "inline" | "sheet";
 
-export interface WatcherDockState {
+interface WatcherDockState {
   /** Whether the dock is shown in its current presentation. */
   open: boolean;
   seenAt: string | null;
@@ -31,7 +31,7 @@ export interface WatcherDockState {
 
 export interface WatcherDockController extends WatcherDockState {
   setOpen: (open: boolean, options?: { focusHeading?: boolean }) => void;
-  markSeen: (at: string, findings: number | null) => void;
+  markSeen: (at: string, findings: number) => void;
 }
 
 const STORAGE_PREFIX = "inertia:layout:watcher-dock:";
@@ -240,7 +240,7 @@ export function useWatcherDock(watchedId: string | null): WatcherDockController 
   const setOpen = useCallback((open: boolean, options?: { focusHeading?: boolean }) => {
     if (watchedId) setWatcherDockOpen(watchedId, open, options);
   }, [watchedId]);
-  const markSeen = useCallback((at: string, findings: number | null) => {
+  const markSeen = useCallback((at: string, findings: number) => {
     const current = watchedId ? readWatcherDock(watchedId) : null;
     if (watchedId && current && (current.seenAt === null || current.seenAt < at || current.seenFindings !== findings)) {
       writeWatcherDock(watchedId, { ...current, seenAt: at, seenFindings: findings });

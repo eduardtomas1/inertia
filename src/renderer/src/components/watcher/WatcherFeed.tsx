@@ -9,7 +9,7 @@ import { LoadingMark } from "../ui";
 import { WatcherFindingCard, type WatcherFindingAction, type WatcherFindingFailure } from "./WatcherFindingCard";
 import { WatcherNoticeLine, WatcherReceiptGroup } from "./WatcherReceiptGroup";
 
-export interface WatcherFeedProps {
+interface WatcherFeedProps {
   feed: WatcherFeedState;
   actions: WatcherActions | null;
   headingId: string;

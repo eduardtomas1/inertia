@@ -60,12 +60,6 @@ export function watcherEventsText(count: number): string {
   return `${count.toLocaleString(INTERFACE_LOCALE)} ${count === 1 ? "event" : "events"}`;
 }
 
-/** Findings the watcher reported so far, once the runtime counts them. */
-export function watcherFindingsTotal(link: WatcherLinkView): number | null {
-  const counters: Readonly<Record<string, unknown>> = link.counters;
-  return typeof counters.findingsTotal === "number" ? counters.findingsTotal : null;
-}
-
 /** "2 new" for findings the user has not seen, "new" when the count is unknown. */
 export function watcherUnseenText(
   link: WatcherLinkView,
@@ -73,9 +67,8 @@ export function watcherUnseenText(
 ): string | null {
   const latest = link.latestFindingAt;
   if (latest === null || (seen.seenAt !== null && latest <= seen.seenAt)) return null;
-  const total = watcherFindingsTotal(link);
-  const count = total === null || (seen.seenAt !== null && seen.seenFindings === null)
+  const count = seen.seenAt !== null && seen.seenFindings === null
     ? null
-    : total - (seen.seenFindings ?? 0);
+    : link.counters.findingsTotal - (seen.seenFindings ?? 0);
   return count !== null && count > 0 ? `${count.toLocaleString(INTERFACE_LOCALE)} new` : "new";
 }

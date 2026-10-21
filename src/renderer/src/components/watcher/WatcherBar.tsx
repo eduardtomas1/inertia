@@ -20,7 +20,7 @@ import { TooltipButton } from "../TooltipButton";
 import { WatcherElapsed } from "./WatcherElapsed";
 import { WatcherMenu } from "./WatcherMenu";
 
-export interface WatcherBarProps {
+interface WatcherBarProps {
   link: WatcherLinkView;
   watched: ConversationShell | undefined;
   watcher: ConversationShell | undefined;
@@ -39,7 +39,7 @@ export interface WatcherBarProps {
   onError: (message: string | null) => void;
 }
 
-type Pending = "pause" | "resume" | "wake" | "review" | "detach" | "visibility" | "delivery" | null;
+type Pending = "pause" | "wake" | "review" | "detach" | "visibility" | "delivery" | null;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "The watcher could not be updated.";
@@ -54,7 +54,7 @@ const QUIET_OUTCOMES = new Set(["silent", "finding"]);
  */
 function useTransitionAnnouncement(link: WatcherLinkView): string {
   const [announcement, setAnnouncement] = useState("");
-  const latestFindingAt = link.latestFindingAt ?? null;
+  const latestFindingAt = link.latestFindingAt;
   const latestAt = link.latest?.at ?? null;
   const outcome = link.latest?.outcome ?? null;
   const previous = useRef({ status: link.status, reason: link.pauseReason, latestAt, latestFindingAt });

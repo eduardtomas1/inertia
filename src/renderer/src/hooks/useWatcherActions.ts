@@ -11,7 +11,7 @@ import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 export type WatcherFeedResult = Extract<RequestResult, { kind: "watcher.feed" }>;
 export type WatcherDeliveryResult = Extract<RequestResult, { kind: "watcher.delivery" }>;
-export type WatcherRequest = (command: CommandWithoutId) => Promise<ServerEvent>;
+type WatcherRequest = (command: CommandWithoutId) => Promise<ServerEvent>;
 
 const UNEXPECTED = "The watcher returned an unexpected response.";
 

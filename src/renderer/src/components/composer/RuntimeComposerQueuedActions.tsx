@@ -86,7 +86,7 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
   const element = <div className="composer-queue" role="list" aria-label="Queued messages">
     <div className={`composer-queue-item${first.attachments.length ? " has-media" : ""}`} role="listitem">
       <CornerDownRight size={14} aria-hidden="true" />
-      {first.watcherNote && <small className="composer-queue-count composer-queue-origin">From watcher</small>}
+      {first.watcherNote && <small className="composer-queue-count">From watcher</small>}
       <span className="composer-queue-copy" title={first.content}>{first.content}</span>
       {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={14} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
       <small className="composer-queue-count">{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>

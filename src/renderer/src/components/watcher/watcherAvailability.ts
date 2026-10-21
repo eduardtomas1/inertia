@@ -3,7 +3,7 @@ import type { WatcherLinkView } from "@shared/watcher";
 import { MAX_ACTIVE_WATCHERS } from "../../utils/watcherLinks";
 import type { WatcherSurfaceModel } from "./watcherContext";
 
-export type WatcherEntry =
+type WatcherEntry =
   | { kind: "attach" }
   | { kind: "show"; link: WatcherLinkView }
   /** `link` is set when the chat has a watcher this window can't show. */

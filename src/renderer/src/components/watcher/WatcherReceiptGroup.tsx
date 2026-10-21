@@ -1,14 +1,15 @@
 import type { CSSProperties } from "react";
 import { ChevronRight } from "lucide-react";
 
-import type { WatcherFeedEntry, WatcherReceiptGroup as ReceiptGroup } from "@shared/watcher-feed";
+import type { WatcherFeedItem } from "@shared/watcher";
+import type { WatcherReceiptGroup as ReceiptGroup } from "@shared/watcher-feed";
 import { formatBytes } from "../../utils/formatBytes";
 import {
   watcherClockTime,
-  watcherEventsText,
   watcherOutcomeText,
   watcherTriggerText,
 } from "../../utils/watcherCopy";
+import { watcherEventsText } from "../../utils/watcherLinks";
 
 export function watcherChangedFilesText(paths: readonly string[]): string {
   return paths.length > 0
@@ -16,13 +17,13 @@ export function watcherChangedFilesText(paths: readonly string[]): string {
     : "The checkout changed during this check";
 }
 
-function guardNote(item: WatcherFeedEntry): string | null {
+function guardNote(item: WatcherFeedItem): string | null {
   if (item.guardState === "inconclusive") return watcherChangedFilesText(item.guardPaths);
   if (item.guardState === "unavailable") return "No Git fingerprint for this checkout";
   return null;
 }
 
-function digestNote(item: WatcherFeedEntry): string | null {
+function digestNote(item: WatcherFeedItem): string | null {
   const parts = [
     item.itemsTruncated > 0 ? `${item.itemsTruncated} shortened` : null,
     item.itemsOmitted > 0 ? `${item.itemsOmitted} left out` : null,
@@ -30,8 +31,8 @@ function digestNote(item: WatcherFeedEntry): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-function sentNote(item: WatcherFeedEntry): string | null {
-  return "digestBytes" in item && typeof item.digestBytes === "number" && item.digestBytes > 0
+function sentNote(item: WatcherFeedItem): string | null {
+  return item.digestBytes !== undefined && item.digestBytes > 0
     ? `${formatBytes(item.digestBytes)} sent`
     : null;
 }
@@ -53,7 +54,7 @@ function commandNotes(ran: number | null | undefined, declined: number): string[
 }
 
 /** One check, as listed inside a receipt or on its own for a notice. */
-export function WatcherCheckLine({ item }: { item: WatcherFeedEntry }): React.JSX.Element {
+function WatcherCheckLine({ item }: { item: WatcherFeedItem }): React.JSX.Element {
   const notes = [
     watcherTriggerText(item.trigger),
     watcherEventsText(item.eventsCovered),
@@ -139,22 +140,22 @@ export function WatcherNoticeLine({
   enter,
   onEntered,
 }: {
-  item: WatcherFeedEntry;
+  item: WatcherFeedItem;
   motionIndex: number;
   enter: boolean;
   onEntered: () => void;
 }): React.JSX.Element {
-  const running = item.state !== "settled";
+  const { outcome } = item;
   return (
     <div
       className="watcher-receipt is-notice"
-      data-outcome={item.outcome ?? "running"}
+      data-outcome={outcome ?? "running"}
       style={{ "--motion-index": Math.min(motionIndex, 5) } as CSSProperties}
       {...enterProps(enter, onEntered)}
     >
       <span className="watcher-notice-line">
-        <span className="watcher-notice-line-title">{running ? `Check ${item.sequence} · checking now` : watcherOutcomeText(item.outcome)}</span>
-        {!running && <WatcherCheckLine item={item} />}
+        <span className="watcher-notice-line-title">{outcome === null ? `Check ${item.sequence} · checking now` : watcherOutcomeText(outcome)}</span>
+        {outcome !== null && <WatcherCheckLine item={item} />}
       </span>
     </div>
   );

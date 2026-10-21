@@ -791,6 +791,45 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("quotes an ended turn's changes when reviewing it, without calling it a final check", async () => {
+    const turnDiff = vi.fn(async (_turnId: string) => ({
+      patchState: "available" as const,
+      truncated: false,
+      patch: "diff --git a/src/parser.ts b/src/parser.ts\n--- a/src/parser.ts\n+++ b/src/parser.ts\n@@ -40,1 +40,1 @@\n-  return tokens.slice(0, -1);\n+  return tokens;\n",
+      files: [{ path: "src/parser.ts", status: "M", insertions: 1, deletions: 1, untracked: false, staged: false, unstaged: true, indexStatus: " ", worktreeStatus: "M" }],
+    }));
+    const f = await createWatcherFixture({ turnDiff });
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const watchedTurn = await f.startWatchedTurn();
+      await f.command("watcher.review", { linkId: link.id });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no review"); });
+      expect(f.provider.input(watcherId).prompt).not.toContain("## Changed files");
+      await f.finishTurn(watcherId, "SILENT");
+      expect(turnDiff).not.toHaveBeenCalled();
+
+      await f.finishTurn(f.watched.id, "Done.");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no final pass"); });
+      await f.finishTurn(watcherId, "SILENT");
+
+      await f.command("watcher.review", { linkId: link.id });
+      await f.advance(1);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("no review"); });
+      const review = f.provider.input(watcherId).prompt;
+      expect(turnDiff).toHaveBeenLastCalledWith(watchedTurn.id);
+      expect(review).toContain("## Changed files — quoted evidence (unified diff)\n> - M src/parser.ts (+1 −1)");
+      expect(review).toContain("1 changed file with diffs");
+      expect(review.split("\n\n")[0]).toContain("Main chat (Codex · gpt-test): turn completed");
+      expect(review.split("\n\n")[0]).not.toContain("Final check for this turn");
+      await f.finishTurn(watcherId, "SILENT");
+    } finally {
+      await f.close();
+    }
+  });
+
   it("reviews a running watched turn from its start and still makes that turn's final check", async () => {
     const f = await createWatcherFixture();
     try {

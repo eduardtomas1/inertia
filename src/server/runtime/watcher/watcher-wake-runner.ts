@@ -1,6 +1,7 @@
 import { modelSelectionIdentityLabel } from "../../../shared/claude-backend-profiles";
 import { watcherAgentLabel } from "../../../shared/watcher-agent-label";
 import type { AgentTurn, ModelSelection } from "../../../shared/contracts";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import {
   MAX_WATCHER_FINDING_BYTES,
   type WatcherWakeOutcome,
@@ -267,12 +268,16 @@ export class WatcherWakeRunner {
       const lastPage = (finalTurnId !== null && finalPage >= WATCHER_FINAL_PASS_MAX_PAGES && spare <= 0)
         || requestPage >= WATCHER_FINAL_PASS_MAX_PAGES;
       const digestTurnId = finalTurnId ?? cursor.turnId;
+      const reviewed = review && cursor.turnId !== null ? store.watcherLinks.digest.turn(watched.id, cursor.turnId) : null;
+      const reviewsEndedTurn = reviewed !== null && isAgentTurnTerminalStatus(reviewed.status);
+      const changesTurnId = finalTurnId ?? (reviewsEndedTurn ? cursor.turnId : null);
       const turnDiff = this.#deps.turnDiff;
-      const diff = finalTurnId !== null && claimed.sharing.changedFiles && turnDiff
-        ? { diff: await readWatcherTurnDiff(turnDiff, finalTurnId) }
+      const diff = changesTurnId !== null && claimed.sharing.changedFiles && turnDiff
+        ? { diff: await readWatcherTurnDiff(turnDiff, changesTurnId) }
         : {};
       const digest = buildWatcherDigest(store.watcherLinks.digest, { ...claimed, cursor }, {
         final: context.final,
+        ...(reviewsEndedTurn ? { includeChanges: true } : {}),
         requested: request !== null,
         sessionFresh: watcher.providerSessionId === null,
         now: this.#deps.now(),

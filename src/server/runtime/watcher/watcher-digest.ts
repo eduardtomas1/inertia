@@ -72,6 +72,7 @@ export type WatcherEarlierFinding = Pick<
 export interface WatcherDigestOptions {
   /** The final pass after the watched turn ended; it is built even with nothing new. */
   final: boolean;
+  includeChanges?: boolean;
   requested?: boolean;
   /** The watcher's provider session has no memory of earlier checks. */
   sessionFresh: boolean;
@@ -581,8 +582,9 @@ export function buildWatcherDigest(
   const earlier = take(earlierFindingsSection(options.earlierFindings ?? [], Math.min(2_048, remaining)));
   const brief = showBrief ? take(briefSection(source, turn, Math.min(Math.floor(cap / 4), remaining))) : null;
   const planPart = showPlan && plan ? take(planSection(plan, planChanged, Math.min(Math.floor(cap / 8), 4_096, remaining))) : null;
-  const changedPaths = options.final && sharing.changedFiles && !options.diff ? source.files(turn.id) : [];
-  const files = !options.final || !sharing.changedFiles
+  const changes = (options.final || options.includeChanges === true) && sharing.changedFiles;
+  const changedPaths = changes && !options.diff ? source.files(turn.id) : [];
+  const files = !changes
     ? null
     : options.diff
       ? take(diffSection(options.diff, Math.min(Math.floor(cap / 3), remaining)))

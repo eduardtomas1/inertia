@@ -10,6 +10,7 @@ import {
   watcherWakeSummariesCoherent,
 } from "../../src/shared/contracts/watcher-schema";
 import { STEERABLE_HARNESS_IDS, supportsActiveParentFollowUp } from "../../src/shared/follow-up-steer";
+import { MAX_WATCHER_AGENT_LABEL_CHARS } from "../../src/shared/watcher-agent-label";
 import { activityExecutionCategory } from "../../src/shared/activity-display";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { queuedMessageSchema } from "../../src/shared/queued-messages";
@@ -19,6 +20,7 @@ import {
   DEFAULT_WATCHER_SHARING,
   MAX_ACTIVE_WATCHERS,
   MAX_WATCHER_HEADLINE_CHARS,
+  MAX_WATCHER_LABEL_CHARS,
   MAX_WATCHER_LINKS_SERIALIZED_BYTES,
   MAX_WATCHER_PAUSE_DETAIL_CHARS,
   WATCHER_HARNESS_IDS,
@@ -184,6 +186,10 @@ describe("watcher shared contracts", () => {
     }
     expect(watcherLinkViewSchema.safeParse({ ...link, instructions: undefined }).success).toBe(true);
     expect(watcherPrintableText("a\u2028b\u0085c\u0007d\uD800")).toBe("a b c d\uFFFD");
+  });
+
+  it("caps an agent label at the stored watcher label length", () => {
+    expect(MAX_WATCHER_AGENT_LABEL_CHARS).toBe(MAX_WATCHER_LABEL_CHARS);
   });
 
   it("keeps eight maximal shell links under the snapshot cap", () => {

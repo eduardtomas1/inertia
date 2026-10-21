@@ -52,6 +52,7 @@ export const MAX_WATCHER_LIVE_LABEL_CHARS = 120;
 export const MAX_WATCHER_PAUSE_DETAIL_CHARS = 1_000;
 export const MAX_WATCHER_DELIVERY_DETAIL_CHARS = 1_000;
 export const MAX_WATCHER_PENDING_RUNNING_IDS = 64;
+export const MAX_WATCHER_COMMANDS_RUN = 10_000;
 export const WATCHER_WAKE_RETENTION = 500;
 export const MAX_WATCHER_LINKS_SERIALIZED_BYTES = 64 * 1_024;
 
@@ -300,7 +301,7 @@ export const watcherFeedItemSchema = z.strictObject({
   createdAt: timestampSchema,
   settledAt: timestampSchema.nullable(),
   /** Read-only commands the watcher ran during this check; omitted when none. */
-  commandsRun: z.number().int().min(1).max(10_000).optional(),
+  commandsRun: z.number().int().min(1).max(MAX_WATCHER_COMMANDS_RUN).optional(),
   resolvedBySequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(),
   commandsDeclined: countSchema,
   digestBytes: z.number().int().min(0).max(65_536).optional(),

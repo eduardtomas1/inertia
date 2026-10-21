@@ -24,6 +24,7 @@ import {
   neutralizeUntrustedAgentText,
   truncateUtf8,
 } from "../untrusted-agent-text";
+import { MAX_WATCHED_TITLE_CHARS } from "./watcher-instructions";
 
 export const WATCHER_DIGEST_BRIEF_MAX_CHARS = 3_000;
 export const WATCHER_DIGEST_FULL_ACTIVITIES = 8;
@@ -31,7 +32,7 @@ export const WATCHER_DIGEST_FULL_ACTIVITY_BYTES = 2 * 1_024;
 export const WATCHER_DIGEST_SHORT_ACTIVITY_CHARS = 240;
 export const WATCHER_DIGEST_MAX_FILES = 200;
 export const WATCHER_DIGEST_DIFF_FILE_BYTES = 6 * 1_024;
-const MAX_TITLE_CHARS = 200;
+const MAX_ACTIVITY_TITLE_CHARS = 200;
 const MAX_HEADLINE_CHARS = 200;
 const MAX_PATH_CHARS = 512;
 const MAX_REPLY_BYTES = 2 * 1_024;
@@ -44,7 +45,7 @@ const HUNK_SHORTENED_LINE = "> [hunk shortened by Inertia]";
 const READ_TOOLS_LINE = "Read whole files with your own read tools.";
 const FORWARDED_NOTE_LINE = "The user started this turn by forwarding a watcher's note; it is not the user's own request.";
 const AUTOMATIC_NOTE_LINE = "The watcher's own note started this turn automatically; it is not the user's own request.";
-const RELEVANT_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
+export const WATCHER_EVENT_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
 
 export type WatcherDigestReader = Pick<
   WatcherDigestSource,
@@ -193,7 +194,7 @@ function activityLabel(activity: AgentActivity): string {
 function renderActivity(activity: AgentActivity, full: boolean): { text: string; truncated: boolean } {
   const lead = `- ${clock(activity.createdAt)} · ${activityLabel(activity)}: `;
   const fullTitle = singleLine(activity.title, 4_096);
-  const title = clipCodeUnits(fullTitle, full ? MAX_TITLE_CHARS : WATCHER_DIGEST_SHORT_ACTIVITY_CHARS);
+  const title = clipCodeUnits(fullTitle, full ? MAX_ACTIVITY_TITLE_CHARS : WATCHER_DIGEST_SHORT_ACTIVITY_CHARS);
   let truncated = title.length < fullTitle.length;
   const detail = activity.detail?.trim() ?? "";
   if (detail.length === 0) return { text: `${lead}${title}`, truncated };
@@ -521,7 +522,7 @@ export function buildWatcherDigest(
     [...reread, ...fresh].filter(({ status }) => status === "running").map(({ id }) => id),
   )].slice(0, MAX_WATCHER_PENDING_RUNNING_IDS);
   const settled = [...reread, ...fresh]
-    .filter((activity) => activity.status !== "running" && RELEVANT_KINDS.has(activity.kind))
+    .filter((activity) => activity.status !== "running" && WATCHER_EVENT_KINDS.has(activity.kind))
     .sort(compareActivities);
 
   const plan = sharing.activities ? source.plan(watchedId, turn.id) : null;
@@ -591,7 +592,7 @@ export function buildWatcherDigest(
   let itemsTruncated = sections.reduce((sum, section) => sum + section.truncated, 0);
   const itemsOmitted = sections.reduce((sum, section) => sum + section.omitted, 0);
   const eventsCovered = settled.length + (planChanged ? 1 : 0);
-  const title = singleLine(options.watchedTitle, MAX_TITLE_CHARS) || "Untitled chat";
+  const title = singleLine(options.watchedTitle, MAX_WATCHED_TITLE_CHARS) || "Untitled chat";
   const since = sameTurn ? (link.lastWakeAt ?? turn.startedAt ?? turn.requestedAt) : (turn.startedAt ?? turn.requestedAt);
   const sequence = options.sequence ?? link.counters.wakesTotal + 1;
   const turnRef = singleLine(turn.id, 200);

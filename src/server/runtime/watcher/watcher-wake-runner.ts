@@ -38,7 +38,7 @@ const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit a file twice du
 export const WATCHER_ROUTE_RETRY_LIMIT = 3;
 /** Consecutive checks that fail to dispatch before the link pauses with `route-unavailable`. */
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
-export const WATCHER_FINAL_PASS_MAX_PAGES = 4;
+export const WATCHER_MAX_CONTINUATION_PAGES = 4;
 export const WATCHER_FINAL_PASS_RETRY_LIMIT = 2;
 export const WATCHER_EARLIER_FINDINGS = 5;
 
@@ -248,8 +248,8 @@ export class WatcherWakeRunner {
       const finalPage = finalTurnId === null ? 0 : drained?.turnId === finalTurnId ? drained.pages + 1 : 1;
       const spare = staleTurn ? 0 : remaining - (consumesAllowance ? 1 : 0);
       const requestPage = request === null ? 0 : context.continued ? (this.#requestPages.get(linkId) ?? 0) + 1 : 1;
-      const lastPage = (finalTurnId !== null && finalPage >= WATCHER_FINAL_PASS_MAX_PAGES && spare <= 0)
-        || requestPage >= WATCHER_FINAL_PASS_MAX_PAGES;
+      const lastPage = (finalTurnId !== null && finalPage >= WATCHER_MAX_CONTINUATION_PAGES && spare <= 0)
+        || requestPage >= WATCHER_MAX_CONTINUATION_PAGES;
       const digestTurnId = finalTurnId ?? cursor.turnId;
       const reviewed = review && cursor.turnId !== null ? store.watcherLinks.digest.turn(watched.id, cursor.turnId) : null;
       const reviewsEndedTurn = reviewed !== null && isAgentTurnTerminalStatus(reviewed.status);

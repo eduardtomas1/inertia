@@ -17,7 +17,7 @@ import {
 export const WATCHER_INSTRUCTION_LABEL = "inertia-watcher";
 /** Hard cap for the whole hidden instruction, well under the 16 KiB per-instruction limit. */
 export const MAX_WATCHER_INSTRUCTION_BYTES = 6_000;
-export const MAX_WATCHER_TITLE_CHARS = 200;
+export const MAX_WATCHED_TITLE_CHARS = 200;
 export const WATCHER_SILENT_RULE =
   "If nothing needs the user's attention, reply with exactly SILENT and nothing else, except the Resolved line when an earlier finding is now fixed.";
 
@@ -130,7 +130,7 @@ export function watcherInstruction(
   watched: WatcherInstructionWatched,
   options: WatcherInstructionOptions = {},
 ): HiddenProviderInstruction {
-  const title = singleLine(watched.title, MAX_WATCHER_TITLE_CHARS) || "Untitled chat";
+  const title = singleLine(watched.title, MAX_WATCHED_TITLE_CHARS) || "Untitled chat";
   const id = singleLine(watched.id, 80);
   const reads = link.budgets?.contextReadsPerWake;
   const contextAccess = options.contextAccess !== false && reads !== 0;

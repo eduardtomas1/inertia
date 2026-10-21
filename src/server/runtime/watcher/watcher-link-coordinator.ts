@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 import { clipCodeUnits } from "../../../shared/code-units";
 import type { ModelSelection, RuntimeMutationEvent } from "../../../shared/contracts";
 import type { WatcherAttachPayload, WatcherUpdatePayload } from "../../../shared/contracts/client-command/watcher";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import {
   MAX_ACTIVE_WATCHERS,
+  MAX_WATCHER_COMMANDS_RUN,
   WATCHER_PRESET_LABELS,
   watcherLinkViewSchema,
   type WatcherFeedItem,
@@ -30,11 +32,10 @@ import type { TurnController } from "../turns/turn-controller";
 import type { WatcherRouteReadiness } from "./watcher-route";
 import type { WatcherWakeScheduler } from "./watcher-wake-scheduler";
 
-export const MAX_WATCHER_TITLE_CHARS = 120;
+const MAX_WATCHER_CHAT_TITLE_CHARS = 120;
 const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher chat was archived. Unarchive it to resume the watcher.";
 const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "paused"];
 const ARCHIVE_PAUSES: readonly WatcherPauseReason[] = ["watched-archived", "watcher-archived"];
-const ENDED: readonly string[] = ["completed", "failed", "cancelled", "interrupted"];
 
 export interface WatcherFeedResult {
   kind: "watcher.feed";
@@ -112,8 +113,8 @@ export interface WatcherLinkCoordinatorDependencies {
 
 function clipTitle(value: string): string {
   const flattened = value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
-  if (flattened.length <= MAX_WATCHER_TITLE_CHARS) return flattened;
-  return `${clipCodeUnits(flattened, MAX_WATCHER_TITLE_CHARS - 1).trimEnd()}…`;
+  if (flattened.length <= MAX_WATCHER_CHAT_TITLE_CHARS) return flattened;
+  return `${clipCodeUnits(flattened, MAX_WATCHER_CHAT_TITLE_CHARS - 1).trimEnd()}…`;
 }
 
 export function watcherConversationTitle(preset: WatcherAttachPayload["preset"], watchedTitle: string): string {
@@ -354,7 +355,7 @@ export class WatcherLinkCoordinator {
     const counts = link ? store.watcherLinks.digest.settledCommandCounts(link.watcherConversationId, turnIds) : new Map<string, number>();
     const items = page.items.map((item) => {
       const commandsRun = item.watcherTurnId !== null && item.state === "settled" ? counts.get(item.watcherTurnId) ?? 0 : 0;
-      return commandsRun > 0 ? { ...item, commandsRun: Math.min(commandsRun, 10_000) } : item;
+      return commandsRun > 0 ? { ...item, commandsRun: Math.min(commandsRun, MAX_WATCHER_COMMANDS_RUN) } : item;
     });
     return {
       kind: "watcher.feed", linkId, feedRevision: page.feedRevision, items, next: page.next,
@@ -425,11 +426,11 @@ export class WatcherLinkCoordinator {
       const turn = store.watcherLinks.digest.turn(watchedId, turnId);
       if (!turn) continue;
       const previous = store.watcherLinks.digest.turnBefore(watchedId, turn);
-      if (previous && link.finalPassTurnId !== previous.id && ENDED.includes(previous.status)
+      if (previous && link.finalPassTurnId !== previous.id && isAgentTurnTerminalStatus(previous.status)
         && previous.completedAt !== null && previous.completedAt > link.createdAt) {
         this.#deps.scheduler.onWatchedTurnSettled(link.id, previous.id);
       }
-      if (running || !ENDED.includes(turn.status)) continue;
+      if (running || !isAgentTurnTerminalStatus(turn.status)) continue;
       this.#deps.scheduler.onWatchedTurnSettled(link.id, turnId);
     }
   }

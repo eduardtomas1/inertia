@@ -4,6 +4,7 @@ import {
   type WatcherWakeTrigger,
 } from "../../../shared/watcher";
 import type { DeltaTimerScheduler } from "../turns/turn-stream-coalescer";
+import { WATCHER_EVENT_KINDS } from "./watcher-digest";
 
 export const WATCHER_SETTLE_DELAY_MS = 2_000;
 export const WATCHER_STALL_TICK_MS = 60_000;
@@ -77,7 +78,6 @@ type ActivityTrigger = Extract<WatcherWakeTrigger, "activity" | "plan" | "error"
 type RequestTrigger = Extract<WatcherWakeTrigger, "manual" | "initial">;
 
 const TRIGGER_RANK: Readonly<Record<ActivityTrigger, number>> = { plan: 1, activity: 2, error: 3 };
-const SETTLED_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command", "file", "error"]);
 const ACCUMULATING_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command"]);
 /** Final passes kept per link: the ended turn's and the one after it. */
 export const WATCHER_MAX_PENDING_FINALS = 2;
@@ -200,7 +200,7 @@ export class WatcherWakeScheduler {
       trigger = "activity";
     } else if (event.type === "agent.activity") {
       const { activity } = event;
-      if (activity.status !== "running" && SETTLED_KINDS.has(activity.kind)) {
+      if (activity.status !== "running" && WATCHER_EVENT_KINDS.has(activity.kind)) {
         trigger = activity.kind === "error" || activity.status === "failed" ? "error" : "activity";
         accumulating = trigger === "activity" && ACCUMULATING_KINDS.has(activity.kind);
       }

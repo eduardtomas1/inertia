@@ -108,7 +108,7 @@ const plan: RuntimeMutationEvent = {
   plan: { conversationId: WATCHED, runId: "run", turnId: "turn-1", explanation: null, steps: [] },
 };
 
-describe("WatcherWakeScheduler", () => {
+describe("watcher wake scheduler", () => {
   it("never wakes on text, reasoning or running activity", () => {
     const { scheduler, timers, wakes } = harness();
     expect(scheduler.observe(LINK, text)).toBe(false);
@@ -679,7 +679,7 @@ describe("WatcherWakeScheduler", () => {
     expect(wakes).toHaveLength(1);
   });
 
-  it("a new watched turn re-arms the budget notice", () => {
+  it("re-arms the budget notice when a new watched turn starts", () => {
     const { scheduler, timers, exhausted } = harness({ allowance: () => 1 });
     scheduler.observe(LINK, started("turn-1"));
     timers.advance(WATCHER_SETTLE_DELAY_MS);
@@ -688,7 +688,7 @@ describe("WatcherWakeScheduler", () => {
     expect(exhausted).toHaveLength(2);
   });
 
-  it("forget and dispose clear every timer and ignore later calls", () => {
+  it("clears every timer on forget and dispose and ignores later calls", () => {
     const { scheduler, timers, wakes } = harness();
     scheduler.observe(LINK, started());
     scheduler.observe("link-2", started());

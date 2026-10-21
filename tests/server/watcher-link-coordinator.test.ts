@@ -120,7 +120,7 @@ describe("watcher link coordinator", () => {
     }
   });
 
-  it("detach cancels the running check and returns the watcher chat to an ordinary chat", async () => {
+  it("cancels the running check on detach and returns the watcher chat to an ordinary chat", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach();
@@ -503,30 +503,20 @@ describe("watcher link coordinator", () => {
     }
   });
 
-  it("records the archive of a watched chat over an earlier pause and refuses to resume until it is unarchived", async () => {
+  it("refuses to resume while the watched chat is archived and records the archive over an earlier pause until it is unarchived", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach();
       await f.command("watcher.pause", { linkId: link.id });
       f.store.archiveConversation(f.watched.id, true);
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the main chat to resume its watcher.");
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "user" });
       f.watchers.onConversationArchived(f.watched.id);
       expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
       await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the main chat to resume its watcher.");
       f.store.archiveConversation(f.watched.id, false);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
-    } finally {
-      await f.close();
-    }
-  });
-
-  it("refuses to resume while the watched chat is archived, whatever the pause reason", async () => {
-    const f = await createWatcherFixture();
-    try {
-      const link = await f.attach();
-      await f.command("watcher.pause", { linkId: link.id });
-      f.store.archiveConversation(f.watched.id, true);
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the main chat to resume its watcher.");
     } finally {
       await f.close();
     }
@@ -624,7 +614,7 @@ describe("watcher link coordinator", () => {
     }
   });
 
-  it("pauses when the watched chat is archived", async () => {
+  it("pauses through the archive command when the watched chat is archived", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach();

@@ -343,7 +343,7 @@ describe("watcher link repository", () => {
     expect(links.beginWatchedTurn(user.id, "turn-2", tick())).toMatchObject({ status: "paused", pauseReason: "user" });
   });
 
-  it("names the newest undismissed finding apart from the latest check", () => {
+  it("stores the newest undismissed finding apart from the latest check", () => {
     const { link } = attach(chat());
     const links = store.watcherLinks;
     expect(links.get(link.id)?.latestFindingAt).toBeNull();

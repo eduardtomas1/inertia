@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Component, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,11 +8,19 @@ import { WatcherDockHost } from "../../src/renderer/src/components/watcher/Watch
 import { WatcherFindingCard } from "../../src/renderer/src/components/watcher/WatcherFindingCard";
 import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
 import { WatcherErrorBoundary } from "../../src/renderer/src/components/watcher/WatcherErrorBoundary";
-import { resetWatcherDockStore } from "../../src/renderer/src/hooks/useWatcherDock";
+import { resetWatcherDockStore, setWatcherDockOpen } from "../../src/renderer/src/hooks/useWatcherDock";
 import { WATCHED_ID, finding, surfaceModel } from "./watcher-fixtures";
 
+const dock = vi.hoisted(() => ({ chunkFails: true, renderFails: true }));
+
 vi.mock("../../src/renderer/src/components/watcher/WatcherDock", () => {
-  throw new Error("chunk failed");
+  if (dock.chunkFails) throw new Error("chunk failed");
+  return {
+    WatcherDock: () => {
+      if (dock.renderFails) throw new Error("render failed");
+      return <p>Dock loaded</p>;
+    },
+  };
 });
 vi.mock("../../src/renderer/src/components/watcher/WatcherAttachDialog", () => {
   throw new Error("chunk failed");
@@ -40,7 +48,16 @@ const settle = () => act(async () => {
 beforeEach(() => {
   window.localStorage.clear();
   resetWatcherDockStore();
+  dock.renderFails = true;
 });
+
+function renderHost(): void {
+  render(
+    <WatcherContext.Provider value={surfaceModel()}>
+      <WatcherDockHost watchedId={WATCHED_ID} />
+    </WatcherContext.Provider>,
+  );
+}
 
 describe("watcher chunks that fail to load", () => {
   it("keeps the chat when the dock chunk fails", async () => {
@@ -55,6 +72,7 @@ describe("watcher chunks that fail to load", () => {
     await settle();
     expect(screen.queryByText("Window failed")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open watcher" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("keeps the window when the attach dialog chunk fails", async () => {
@@ -119,5 +137,33 @@ describe("watcher chunks that fail to load", () => {
     expect(screen.queryByText("Loaded")).not.toBeInTheDocument();
     view.rerender(<WatcherErrorBoundary fallback={null} resetKey={2}><Surface /></WatcherErrorBoundary>);
     expect(screen.getByText("Loaded")).toBeInTheDocument();
+  });
+});
+
+describe("a dock that fails while open", () => {
+  beforeEach(() => {
+    dock.chunkFails = false;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+
+  it("leaves the handle in its place and loads again from it", async () => {
+    renderHost();
+    await settle();
+    const handle = screen.getByRole("button", { name: "Open watcher" });
+    expect(handle).toHaveAttribute("aria-expanded", "false");
+    dock.renderFails = false;
+    fireEvent.click(handle);
+    await settle();
+    expect(screen.getByText("Dock loaded")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open watcher" })).not.toBeInTheDocument();
+  });
+
+  it("loads again when Open watcher comes from elsewhere", async () => {
+    renderHost();
+    await settle();
+    dock.renderFails = false;
+    act(() => setWatcherDockOpen(WATCHED_ID, true, { focusHeading: true }));
+    await settle();
+    expect(screen.getByText("Dock loaded")).toBeInTheDocument();
   });
 });

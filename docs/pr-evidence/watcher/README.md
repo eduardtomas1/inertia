@@ -1,4 +1,4 @@
-# Watcher: attach, dock, receipts, findings and notes
+# Watcher: add, dock, receipts, findings and notes
 
 Real screenshots of the built Electron app on macOS (window content 1440 × 868,
 saved at 1×), captured by `tests/e2e/watcher.spec.ts` with
@@ -14,7 +14,7 @@ these images; the timestamps are the capture run's local clock.
 `renderer-bundle.json` in this folder is the separate renderer bundle
 measurement and is not part of this capture.
 
-## Attach a watcher to a running chat
+## Add a watcher to a running chat
 
 The chat's actions offer **Add a watcher…** while its turn runs. The dialog
 offers only ready routes on watcher agents, defaults to **Reviewer** and says in
@@ -34,7 +34,7 @@ Parser cleanup**), with a plain **Check now** and **More** beside the title,
 and one muted line under both: **Codex · Reviewer · Watching**. Before the first
 check it says **No checks yet**.
 
-![The dock right after attaching, with No checks yet](dock-empty-light.png)
+![The dock right after adding the watcher, with No checks yet](dock-empty-light.png)
 
 ## Checking, then a grouped receipt
 
@@ -75,28 +75,29 @@ final check running.
 ## The menu and automatic sending
 
 **More** holds Pause, **Review the last turn**, Open watcher chat, **Send
-findings automatically**, Collapse and Stop watching…, then the muted numbers: checks left this turn,
-events waiting, the last check and, once known, **Used <n> tokens**. With automatic sending on, the bar's state word reads **Sends
+findings automatically**, Collapse and Stop watching…, then the muted numbers:
+checks left this turn, events waiting, the last check and, once known, **Used
+<n> tokens**. With automatic sending on, the bar's state word reads **Sends
 findings automatically**.
 
 | Menu | Automatic sending on |
 | --- | --- |
 | ![The More menu with Send findings automatically](dock-menu-light.png) | ![The bar reading Codex · Reviewer · Sends findings automatically](dock-auto-send-light.png) |
 
-With automatic sending on, the scenario sends one more message in the main chat.
-The final check of that turn reports a finding, and nobody chooses **Send**:
-the card shows no Send or Dismiss, its status reads **Sent <time> · started
-the main chat's next turn**, and the note appears in the main chat under a
-second **Note from watcher** divider.
+With automatic sending on, the scenario sends one more message in the main
+chat. The final check of that turn reports a finding, and nobody chooses
+**Send**: the card shows no Send or Dismiss, its status reads **Sent <time> ·
+automatically · started the main chat's next turn**, and the note appears in
+the main chat under a second **Note from watcher** divider.
 
 ![A finding sent automatically, with its note in the main chat](dock-auto-sent-light.png)
 
 ## Collapsed
 
-Escape (or Collapse) leaves a slim edge rail with the watcher's icon; it reads
+Escape (or Collapse) leaves a slim handle with the watcher's icon; it reads
 **Open watcher**, or **Open watcher, N new** when findings arrived meanwhile.
 
-![The collapsed rail at the chat's right edge](dock-handle-light.png)
+![The collapsed handle at the chat's right edge](dock-handle-light.png)
 
 ## Work tab
 
@@ -118,8 +119,8 @@ it was.
 ## Four split panes plus the dock
 
 With four chats in split view, a pane would leave the chat less than 360 px
-beside the dock, so the dock becomes a sheet inside the watched chat's pane. A
-sheet starts collapsed; here the rail opened it over a light scrim. It stops
+beside the dock, so the dock becomes a sheet inside the main chat's pane. A
+sheet starts collapsed; here the handle opened it over a light scrim. It stops
 above the pane's composer, which stays usable, and a press outside collapses
 it. It takes no fifth pane.
 
@@ -127,13 +128,13 @@ it. It takes no fifth pane.
 
 ## A resolved finding
 
-The final check of the watched turn answered `SILENT` with a closing
-**Resolved: check 4** line, so the sent card's meta line now reads **Check 4 ·
-5:12 PM · resolved in check 5**, and the final checks of both turns fold into a new receipt
-above the sent card. A resolved finding stays sendable and dismissible and
-moves below any open finding. The scenario then asks for **Review the last
-turn** from the menu, which runs one more quiet check and leaves the menu's
-checks-left count unchanged.
+The final check of the main chat's turn answered `SILENT` with a closing
+**Resolved: check 4** line, so the sent card's muted line now reads **Check 4 ·
+<time> · resolved in check 5**, and the final checks of both turns fold into a
+new receipt above the sent card. A resolved finding moves below any open
+finding, and one that hasn't been sent still offers **Send** and **Dismiss**.
+The scenario then asks for **Review the last turn** from the menu, which runs
+one more quiet check and leaves the menu's checks-left count unchanged.
 
 ![The sent finding marked resolved in check 5](dock-resolved-light.png)
 
@@ -145,9 +146,9 @@ server does not.
 ## Animation
 
 `watcher-dock.gif` (960 × 579, 8.4 s, seven moments each held 1.2 s) steps
-through the same run: the attach dialog, the dock appearing, a check in
+through the same run: the Add a watcher dialog, the dock appearing, a check in
 progress, the quiet receipt, the finding, the queued note after **Send**, and
 the note divider in the main chat. It is assembled from PNG frames the spec
 captured at those moments, because the Electron fixture does not record video.
 
-![Watcher flow from attach to the note in the main chat](watcher-dock.gif)
+![Watcher flow from adding the watcher to the note in the main chat](watcher-dock.gif)

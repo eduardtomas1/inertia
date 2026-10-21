@@ -238,6 +238,9 @@ describe("watcher shared contracts", () => {
     expect(watcherFeedItemSchema.safeParse({
       ...feedItem, delivery: { mode: null, state: "dismissed", detail: null, at },
     }).success).toBe(true);
+    expect(watcherFeedItemSchema.safeParse({
+      ...feedItem, delivery: { mode: "queue", state: "sent", detail: null, at, automatic: true },
+    }).success).toBe(true);
     for (const invalid of [
       { ...feedItem, state: "running" },
       { ...feedItem, settledAt: null },
@@ -247,6 +250,7 @@ describe("watcher shared contracts", () => {
       { ...feedItem, delivery: { mode: "steer", state: "dismissed", detail: null, at } },
       { ...feedItem, finding: null, delivery: { mode: "queue", state: "sent", detail: null, at } },
       { ...feedItem, sequence: 0 },
+      { ...feedItem, delivery: { mode: "queue", state: "sent", detail: null, at, automatic: "yes" } },
     ]) expect(watcherFeedItemSchema.safeParse(invalid).success).toBe(false);
   });
 

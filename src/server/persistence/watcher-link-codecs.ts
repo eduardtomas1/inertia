@@ -95,6 +95,7 @@ export interface WatcherWakeRow {
   delivery_state: WatcherDeliveryState | null;
   delivery_detail: string | null;
   delivery_id: string | null;
+  delivery_automatic: number;
   delivered_message_id: string | null;
   queued_message_id: string | null;
   delivered_at: string | null;
@@ -261,6 +262,7 @@ function delivery(row: WatcherWakeRow): WatcherDelivery | null {
     state: row.delivery_state,
     detail: row.delivery_detail,
     at: row.delivered_at,
+    ...(row.delivery_automatic === 1 ? { automatic: true } : {}),
   };
 }
 

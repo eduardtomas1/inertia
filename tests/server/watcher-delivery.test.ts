@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ClientCommand } from "../../src/shared/contracts";
 import { MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
-import { MAX_WATCHER_NOTE_CHARS } from "../../src/shared/watcher";
+import { MAX_WATCHER_NOTE_CHARS, watcherFeedItemSchema } from "../../src/shared/watcher";
 import { watcherAgentLabel } from "../../src/shared/watcher-agent-label";
 import { agentContextTurnList, agentContextTurnPage } from "../../src/server/runtime/agent-context-pages";
 import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
@@ -53,6 +53,37 @@ function noteMessages(f: WatcherFixture) {
 }
 
 describe("watcher note delivery", () => {
+  it("marks a finding the watcher sent on its own as sent automatically, and a manual send again as not", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      await f.startWatchedTurn("Keep going.");
+      await enqueueUserMessage(f, "One");
+      await enqueueUserMessage(f, "Two");
+      await f.watchers.delivery.deliver(link.id, wakeId, "queue", randomUUID(), true).catch(() => undefined);
+      const item = () => f.watchers.coordinator.feed(link.id).items[0]!;
+      expect(item().delivery).toMatchObject({ mode: "queue", state: "failed", automatic: true });
+      const reply = await deliver(f, link.id, wakeId, "queue");
+      expect(reply).toMatchObject({ result: { delivery: { mode: "queue", state: "queued" } } });
+      expect(item().delivery).not.toHaveProperty("automatic");
+      expect(watcherFeedItemSchema.safeParse(item()).success).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("records an automatic send that reached the main chat as sent automatically", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const { link, wakeId } = await finding(f);
+      const result = await f.watchers.delivery.deliver(link.id, wakeId, "queue", randomUUID(), true);
+      expect(result.delivery).toMatchObject({ mode: "queue", state: "sent", automatic: true });
+      expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({ state: "sent", automatic: true });
+    } finally {
+      await f.close();
+    }
+  });
+
   it("starts the idle main chat's next turn with the labelled note", async () => {
     const f = await createWatcherFixture();
     try {

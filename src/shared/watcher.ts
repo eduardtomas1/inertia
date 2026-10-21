@@ -252,6 +252,7 @@ export const watcherDeliverySchema = z.strictObject({
   state: watcherDeliveryStateSchema,
   detail: z.string().max(MAX_WATCHER_DELIVERY_DETAIL_CHARS).nullable(),
   at: timestampSchema,
+  automatic: z.boolean().optional(),
 }).refine(
   (delivery) => (delivery.mode === null) === (delivery.state === "dismissed"),
   "Only dismissed findings have no delivery mode.",

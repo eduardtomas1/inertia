@@ -113,6 +113,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "delivery_state",
     "delivery_detail",
     "delivery_id",
+    "delivery_automatic",
     "delivered_message_id",
     "queued_message_id",
     "delivered_at",

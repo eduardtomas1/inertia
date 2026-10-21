@@ -128,6 +128,7 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       ),
       delivery_detail TEXT CHECK (delivery_detail IS NULL OR length(delivery_detail) <= 1000),
       delivery_id TEXT CHECK (delivery_id IS NULL OR length(delivery_id) = 36),
+      delivery_automatic INTEGER NOT NULL DEFAULT 0 CHECK (delivery_automatic IN (0, 1)),
       delivered_message_id TEXT CHECK (
         delivered_message_id IS NULL OR length(delivered_message_id) BETWEEN 1 AND 200
       ),

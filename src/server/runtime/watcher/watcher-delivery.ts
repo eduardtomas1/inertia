@@ -131,7 +131,7 @@ export class WatcherDeliveryService {
       throw new RuntimeRequestError("This finding was already sent to the main chat.");
     }
     if (this.#inFlight.has(wakeId)) throw new RuntimeRequestError("This finding is being sent.");
-    const dismissed = this.#deps.store.watcherLinks.setDelivery(wakeId, { mode: null, state: "dismissed" }, this.#deps.now());
+    const dismissed = this.#deps.store.watcherLinks.setDelivery(wakeId, { mode: null, state: "dismissed", automatic: false }, this.#deps.now());
     if (!dismissed) throw new RuntimeRequestError("This finding can no longer be dismissed.");
     if (wake.queuedMessageId !== null && found.link.watchedConversationId !== null) {
       this.#deps.queue()?.withdrawWatcherNote(found.link.watchedConversationId, wake.queuedMessageId);
@@ -301,13 +301,13 @@ export class WatcherDeliveryService {
     }
     if (outcome.kind === "accepted") {
       return { kind: "done", result: this.#record(linkId, wakeId, {
-        mode: "steer", state: "sent", detail: null,
+        mode: "steer", state: "sent", detail: null, automatic: attribution.automatic === true,
         deliveryId, deliveredMessageId: outcome.message.id,
       }) };
     }
     if (outcome.kind === "unconfirmed") {
       return { kind: "done", result: this.#record(linkId, wakeId, {
-        mode: "steer", state: "failed", detail: outcome.message, deliveryId,
+        mode: "steer", state: "failed", detail: outcome.message, deliveryId, automatic: attribution.automatic === true,
       }) };
     }
     return { kind: outcome.kind === "turn-ended" ? "turn-ended" : "refused" };
@@ -334,14 +334,16 @@ export class WatcherDeliveryService {
     try {
       result = queue.enqueueWatcherNote({ conversationId: watchedId, id: deliveryId, content: note, watcherNote: attribution });
     } catch (error) {
-      this.#record(linkId, wakeId, { mode: "queue", state: "failed", detail: publicRuntimeError(error), deliveryId });
+      this.#record(linkId, wakeId, {
+        mode: "queue", state: "failed", detail: publicRuntimeError(error), deliveryId, automatic: attribution.automatic === true,
+      });
       throw error;
     }
     const current = this.#deps.store.watcherLinks.getWake(wakeId);
     const recorded = current?.delivery?.state === "sent"
       ? this.#result(linkId, current)
       : this.#record(linkId, wakeId, {
-          mode: "queue", state: "queued", detail, deliveryId, queuedMessageId: deliveryId,
+          mode: "queue", state: "queued", detail, deliveryId, queuedMessageId: deliveryId, automatic: attribution.automatic === true,
         });
     return { ...recorded, queue: result };
   }
@@ -375,11 +377,13 @@ export class WatcherDeliveryService {
       });
     } catch (error) {
       if (this.#deps.turns.isActive(watchedId)) return null;
-      this.#record(linkId, wakeId, { mode: "queue", state: "failed", detail: publicRuntimeError(error), deliveryId });
+      this.#record(linkId, wakeId, {
+        mode: "queue", state: "failed", detail: publicRuntimeError(error), deliveryId, automatic: attribution.automatic === true,
+      });
       throw error;
     }
     return this.#record(linkId, wakeId, {
-      mode: "queue", state: "sent", detail, deliveryId, deliveredMessageId: acceptedMessageId,
+      mode: "queue", state: "sent", detail, deliveryId, deliveredMessageId: acceptedMessageId, automatic: attribution.automatic === true,
     });
   }
 

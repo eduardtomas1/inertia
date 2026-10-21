@@ -123,6 +123,7 @@ interface WatcherDeliveryUpdate {
   state: WatcherDeliveryState;
   detail?: string | null;
   deliveryId?: string | null;
+  automatic?: boolean;
   deliveredMessageId?: string | null;
   queuedMessageId?: string | null;
 }
@@ -572,6 +573,7 @@ export class WatcherLinkRepository {
         UPDATE watcher_wakes
         SET delivery_mode = ?, delivery_state = ?, delivery_detail = ?,
             delivery_id = COALESCE(?, delivery_id),
+            delivery_automatic = COALESCE(?, delivery_automatic),
             delivered_message_id = COALESCE(?, delivered_message_id),
             queued_message_id = COALESCE(?, queued_message_id),
             delivered_at = ?
@@ -581,6 +583,7 @@ export class WatcherLinkRepository {
         update.state,
         update.detail ? clipCodeUnits(update.detail, MAX_WATCHER_DELIVERY_DETAIL_CHARS) : null,
         update.deliveryId ?? null,
+        update.automatic === undefined ? null : Number(update.automatic),
         update.deliveredMessageId ?? null,
         update.queuedMessageId ?? null,
         at,

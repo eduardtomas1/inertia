@@ -48,24 +48,6 @@ function mergeHead(previous: Feed | null, result: WatcherFeedResult): Feed {
   };
 }
 
-function mergeRefreshed(
-  previous: Feed,
-  head: WatcherFeedResult,
-  refreshed: WatcherFeedItem[],
-  next: WatcherFeedResult["next"],
-): Feed {
-  if (previous.linkId !== head.linkId) return previous;
-  const oldestHead = head.items.at(-1)?.sequence ?? Number.POSITIVE_INFINITY;
-  const pages = refreshed.filter(({ sequence }) => sequence < oldestHead);
-  const oldest = pages.at(-1)?.sequence ?? oldestHead;
-  const later = next === null ? [] : previous.items.filter(({ sequence }) => sequence < oldest);
-  return {
-    ...previous,
-    items: [...head.items, ...pages, ...later],
-    next: later.length > 0 ? previous.next : next,
-  };
-}
-
 function mergePage(previous: Feed, result: WatcherFeedResult): Feed {
   const known = new Set(previous.items.map(({ wakeId }) => wakeId));
   return {
@@ -133,16 +115,15 @@ export function useWatcherFeed(
       setError(null);
       const oldest = merged && merged.pages > 0 ? merged.items.at(-1)?.sequence : undefined;
       if (oldest === undefined) return;
-      const refreshed: WatcherFeedItem[] = [];
+      const fresh = new Map<string, WatcherFeedItem>();
       let cursor = result.next;
       while (cursor && cursor.beforeSequence > oldest) {
         const page = await load.feed(cursor.beforeSequence);
         if (generation.current !== owner) return;
-        refreshed.push(...page.items);
+        for (const item of page.items) fresh.set(item.wakeId, item);
         cursor = page.next;
       }
-      const next = cursor;
-      commitFeed((previous) => previous && mergeRefreshed(previous, result, refreshed, next));
+      commitFeed((previous) => previous && { ...previous, items: previous.items.map((item) => fresh.get(item.wakeId) ?? item) });
     };
     void refresh().then(settle, (failure: unknown) => {
       if (generation.current !== owner) return;

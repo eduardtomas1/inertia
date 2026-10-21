@@ -854,6 +854,30 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("defers a review asked while the watcher answers a question until that answer ends", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const watchedTurn = await f.startWatchedTurn();
+      const question = f.controller.queue({ conversationId: watcherId, content: "What changed so far?" });
+      f.controller.start(question.turn.id);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("question not started"); });
+
+      await f.command("watcher.review", { linkId: link.id });
+      await f.advance(1);
+      expect(f.provider.input(watcherId).turnId).toBe(question.turn.id);
+      await f.finishTurn(watcherId, "Only the parser.");
+      await f.advance(1);
+      await vi.waitFor(() => { if (f.provider.input(watcherId).turnId === question.turn.id) throw new Error("no review"); });
+      expect(f.store.watcherLinks.wakeForTurn(f.provider.input(watcherId).turnId))
+        .toMatchObject({ trigger: "initial", watchedTurnId: watchedTurn.id });
+      await f.finishTurn(watcherId, "SILENT");
+    } finally {
+      await f.close();
+    }
+  });
+
   it("reviews a running watched turn from its start and still makes that turn's final check", async () => {
     const f = await createWatcherFixture();
     try {

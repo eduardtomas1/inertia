@@ -317,9 +317,7 @@ export class WatcherLinkCoordinator {
     const { store } = this.#deps;
     const link = this.#require(linkId);
     if (link.status === "paused") throw new RuntimeRequestError("Resume the watcher before asking it to review the last turn.");
-    if (link.status === "waking" || this.#deps.turns.isActive(link.watcherConversationId)) {
-      throw new RuntimeRequestError("The watcher is already checking.");
-    }
+    if (link.status === "waking") throw new RuntimeRequestError("The watcher is already checking.");
     const latest = link.watchedConversationId === null ? null : store.latestAgentTurnForConversation(link.watchedConversationId);
     if (!latest) throw new RuntimeRequestError("The watched chat has no turn to review yet.");
     const now = this.#deps.now();

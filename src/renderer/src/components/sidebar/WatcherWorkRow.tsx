@@ -14,23 +14,15 @@ function watcherRowState(link: WatcherLinkView | undefined): string | null {
   return null;
 }
 
-/** The thread actions a watcher row shares with every other Work row. */
 interface WatcherWorkRowMenu {
   open: boolean;
-  /** The thread actions menu, rendered while it is open. */
   actions: ReactNode;
-  /** A rename form replaces the row while the user renames the watcher. */
   renameForm: ReactNode | null;
   triggerRef: (node: HTMLButtonElement | null) => void;
   onOpen: (anchor: { x: number; y: number }) => void;
   onPointerDown?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
 }
 
-/**
- * A watcher listed directly under the chat it watches. It shares the parent's
- * section and collapse state, joins the Work tab's arrow-key order, and offers
- * the same thread actions (context menu, Shift+F10, drag to split view).
- */
 export function WatcherWorkRow({
   conversation,
   parentTitle,

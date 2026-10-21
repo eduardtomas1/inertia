@@ -5,11 +5,6 @@ import type { WatcherLinkView } from "@shared/watcher";
 
 export type WatcherLiveEvent = Extract<RuntimeMutationEvent, { type: "watcher.live" }>;
 
-/**
- * Ephemeral phase ticks of running watcher checks, one per link (at most
- * eight active). They are never folded into the app snapshot, so a phase
- * change re-renders only the dock bar that subscribes to it.
- */
 const latestByLink = new Map<string, WatcherLiveEvent>();
 const listeners = new Set<() => void>();
 
@@ -18,10 +13,6 @@ export function publishWatcherLive(event: WatcherLiveEvent): void {
   for (const listener of listeners) listener();
 }
 
-/**
- * Drops a link's phase when its check ends, so the next check never shows
- * the previous one's phase before its own first tick arrives.
- */
 export function clearWatcherLive(linkId: string): void {
   if (!latestByLink.delete(linkId)) return;
   for (const listener of listeners) listener();
@@ -48,7 +39,6 @@ export function useWatcherLive(linkId: string | null): WatcherLiveEvent | null {
   return useSyncExternalStore(subscribe, read, read);
 }
 
-/** Test seam: drops every cached phase. */
 export function resetWatcherLiveStore(): void {
   latestByLink.clear();
   for (const listener of listeners) listener();

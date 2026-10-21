@@ -48,11 +48,8 @@ export const WATCHER_DOCK_WIDTH_KEY = "inertia:layout:watcher-dock-width:v1";
 const WATCHER_DOCK_DEFAULT_WIDTH = 340;
 const WATCHER_DOCK_MIN_WIDTH = 280;
 const WATCHER_DOCK_MAX_WIDTH = 520;
-/** Below this much room left for the chat, the dock floats over it as a sheet. */
 const WATCHER_DOCK_MIN_CHAT_WIDTH = 360;
-/** A sheet keeps this much of the chat visible at its left edge. */
 const SHEET_EDGE = 24;
-/** Gap between the bottom of a sheet and the composer it never covers. */
 const SHEET_COMPOSER_GAP = 8;
 const DOCK_MOTION_MS = 300;
 
@@ -70,11 +67,6 @@ function prefersReducedMotion(): boolean {
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/**
- * Keeps the dock painted for its closing motion, then hides it. Only a user's
- * open or collapse (a new motion token) animates: switching chats, a sheet
- * collapsing for layout or a remount show the dock in place.
- */
 function useDockPresence(open: boolean, motion: number): { presence: Presence; animated: boolean } {
   const [presence, setPresence] = useState<Presence>(open ? "open" : "closed");
   const [animated, setAnimated] = useState(false);
@@ -99,13 +91,11 @@ function useDockPresence(open: boolean, motion: number): { presence: Presence; a
   return { presence, animated };
 }
 
-/** The host's content-box width, like the container query it mirrors. */
 function useHostWidth(frameRef: RefObject<HTMLDivElement | null>): number {
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
     const host = frameRef.current?.parentElement;
     if (!host) return;
-    // An inline tools panel reserves its space with padding on the same host.
     const measure = (): void => {
       const style = window.getComputedStyle(host);
       const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
@@ -120,10 +110,6 @@ function useHostWidth(frameRef: RefObject<HTMLDivElement | null>): number {
   return width;
 }
 
-/**
- * A sheet stops above the watched chat's composer, so the composer stays
- * usable while the sheet is open. Returns the bottom offset in pixels.
- */
 function useComposerClearance(frameRef: RefObject<HTMLDivElement | null>, active: boolean): number {
   const [clearance, setClearance] = useState(0);
   useLayoutEffect(() => {
@@ -172,7 +158,6 @@ function useSheetDismiss(
   }, [frameRef, open, setOpen]);
 }
 
-/** Why the runtime would refuse Resume now, so the dock can say so instead. */
 function resumeBlockedReason(
   link: WatcherLinkView,
   watched: ConversationShell | undefined,
@@ -197,11 +182,6 @@ function resumeBlockedReason(
   return null;
 }
 
-/**
- * The watcher's face: a collapsible side dock beside the watched chat. It
- * reads the link from the shell and its feed by request, so opening it never
- * takes one of the four conversation detail subscriptions.
- */
 export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps): React.JSX.Element {
   const dockId = watcherDockId(watchedId);
   const headingId = watcherDockHeadingId(watchedId);
@@ -214,7 +194,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const [width, setWidth] = useState(persistedWidth);
   useEffect(() => setWidth(persistedWidth), [persistedWidth]);
   const hostWidth = useHostWidth(frameRef);
-  // Decided on the committed width, so dragging the handle never flips it.
   const sheet = hostWidth > 0 && hostWidth - persistedWidth < WATCHER_DOCK_MIN_CHAT_WIDTH;
   const measured = hostWidth > 0;
   useLayoutEffect(() => {
@@ -237,7 +216,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const [resuming, setResuming] = useState(false);
   const mounted = useRef(false);
   const focusHeadingAfterResume = useRef(false);
-  // Set in the effect body too: StrictMode runs the cleanup once at mount.
   useLayoutEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -255,7 +233,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
 
   const readFocusToken = useCallback(() => watcherDockFocusToken(watchedId), [watchedId]);
   const focusToken = useSyncExternalStore(subscribeWatcherDock, readFocusToken, readFocusToken);
-  // Waits for the frame to lose `hidden` on reopen: a hidden heading can't take focus.
   useEffect(() => {
     if (!dock.open || presence !== "open" || focusToken === 0 || !consumeWatcherDockFocus(watchedId)) return;
     const frame = window.requestAnimationFrame(() => {
@@ -264,7 +241,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     return () => window.cancelAnimationFrame(frame);
   }, [dock.open, focusToken, headingId, presence, watchedId]);
 
-  // An error reported from elsewhere (the command palette) shows here.
   const readErrorToken = useCallback(() => watcherDockErrorToken(watchedId), [watchedId]);
   const errorToken = useSyncExternalStore(subscribeWatcherDock, readErrorToken, readErrorToken);
   useEffect(() => {
@@ -285,7 +261,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     if (link.status !== "paused" || closed) setConfirmingResume(false);
   }, [closed, link.status]);
 
-  // After a resume the notice that held focus is gone: focus the heading.
   useLayoutEffect(() => {
     if (link.status === "paused" || !focusHeadingAfterResume.current) return;
     focusHeadingAfterResume.current = false;
@@ -295,8 +270,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     }
   }, [headingId, link.status]);
 
-  // Stop watching unmounts the dock and the handle: never leave focus on the
-  // page body. Layout cleanup runs while the dock is still in the document.
   useLayoutEffect(() => {
     const frame = frameRef.current;
     const host = frame?.parentElement ?? null;

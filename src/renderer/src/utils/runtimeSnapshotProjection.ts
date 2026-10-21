@@ -68,10 +68,6 @@ type WatcherLinkEvent = Extract<
   { type: "watcher.link.updated" | "watcher.link.removed" }
 >;
 
-/**
- * Folds one watcher link mutation into the shell. Links are small shell-scope
- * records; feeds and live phases never enter the snapshot.
- */
 export function applyWatcherLinkEvent(
   snapshot: AppSnapshot,
   event: WatcherLinkEvent,

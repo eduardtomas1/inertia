@@ -116,7 +116,6 @@ describe("WatcherAttachDialog", () => {
     expect(within(dialog).getByRole("spinbutton", { name: /Checks per turn/u })).toHaveValue(30);
     expect(within(dialog).getByRole("spinbutton", { name: /Cooldown between checks/u })).toHaveValue(45);
     expect(within(dialog).getByRole("switch", { name: /Review the last turn now/u })).toBeDisabled();
-    // Stated up front, in the dialog's description, not below the fold.
     expect(dialog).toHaveAccessibleDescription("It reads and reports: it may run read-only commands and never edits files or changes the workspace.");
     expect(within(dialog).queryByText("What is shared with the watcher?")).not.toBeInTheDocument();
     expect(dialog.querySelectorAll("small:not([aria-hidden])")).toHaveLength(1);
@@ -345,7 +344,6 @@ describe("WatcherAttachDialog", () => {
     const [first, second] = recorded.commands.map((command) => payloadOf(command).linkId);
     expect(first).toEqual(second);
     expect(onAttached).not.toHaveBeenCalled();
-    // The first attach did land: its link reaches the shell, and the dialog closes.
     const created = link({ id: first as string });
     view.rerender(<Harness value={{ ...value, watchers: [created] }} request={recorded.request} onAttached={onAttached} />);
     await waitFor(() => expect(onAttached).toHaveBeenCalledWith(created));

@@ -8,11 +8,6 @@ import { watcherCheckTitle } from "../../utils/watcherLinks";
 import { useAnchoredDetailsToggle } from "./activity";
 import "./WatcherRows.css";
 
-/**
- * In a watcher's own chat, each check's request is the digest Inertia sent.
- * It renders as one compact "Check N · K events" row; the digest itself stays
- * behind "What the watcher was shown".
- */
 export function WatcherWakeRequest({
   turn,
   onBeforeToggle,

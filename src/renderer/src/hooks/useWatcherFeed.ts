@@ -6,13 +6,11 @@ import { useDocumentVisibility } from "./useDocumentPresence";
 import { watcherErrorText } from "../utils/watcherCopy";
 
 export interface WatcherFeedState {
-  /** Newest first. */
   items: WatcherFeedItem[];
   loaded: boolean;
   error: string | null;
   hasMore: boolean;
   loadingMore: boolean;
-  /** The watcher chat's total token use from the newest page, or null while unknown. */
   usageTokens: number | null;
   loadMore: () => void;
   retry: () => void;
@@ -30,7 +28,6 @@ interface Feed {
 interface HeadState {
   inFlight: boolean;
   again: boolean;
-  /** Revision requested by the in-flight or last successful head fetch. */
   fetchedRevision: number;
   pendingRevision: number;
 }
@@ -85,12 +82,6 @@ function newerDelivery(server: WatcherDelivery | null, local: WatcherDelivery | 
   return local.at >= server.at ? local : server;
 }
 
-/**
- * Feed by request, the Background tasks precedent: fetched when the dock
- * mounts and whenever the link's `feedRevision` moves, coalesced while a
- * request is in flight and deferred while the window is hidden or the dock
- * is collapsed. It never subscribes to the watcher chat's detail stream.
- */
 export function useWatcherFeed(
   linkId: string,
   feedRevision: number,

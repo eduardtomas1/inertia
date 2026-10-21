@@ -30,9 +30,7 @@ interface WatcherBarProps {
   closed: boolean;
   actions: WatcherActions | null;
   privateConnectConfigured: boolean;
-  /** Why Resume would be refused right now, or null when it can resume. */
   resumeBlocked: string | null;
-  /** The watcher chat's total token use, or null while unknown. */
   usageTokens: number | null;
   onCollapse: () => void;
   onOpenWatcherChat: (() => void) | null;
@@ -44,11 +42,6 @@ type Pending = "pause" | "wake" | "review" | "detach" | "visibility" | "delivery
 
 const QUIET_OUTCOMES = new Set(["silent", "finding"]);
 
-/**
- * Announces what needs attention only: a new finding, a check that failed
- * and a pause. Routine checks ("checking", "nothing to report") stay silent,
- * so a busy turn does not produce two dozen announcements.
- */
 function useTransitionAnnouncement(link: WatcherLinkView): string {
   const [announcement, setAnnouncement] = useState("");
   const latestFindingAt = link.latestFindingAt;
@@ -252,7 +245,6 @@ export function WatcherBar({
   const mounted = useRef(false);
   const keepWatchingRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
-  // Set in the effect body too: StrictMode runs the cleanup once at mount.
   useLayoutEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -269,8 +261,6 @@ export function WatcherBar({
   const latestTurn = watcher?.latestTurn ?? null;
   const turnRunning = latestTurn !== null && !isAgentTurnTerminalStatus(latestTurn.status);
   const startedAt = waking && turnRunning ? latestTurn.startedAt ?? latestTurn.requestedAt : null;
-  // The runtime drops a link's phase when its check ends; the turn id guards
-  // a late tick from the previous check until the new turn reaches the shell.
   const liveForTurn = waking && live && (latestTurn === null || live.turnId === latestTurn.id) ? live : null;
   const paused = link.status === "paused";
   const run = (name: Exclude<Pending, null>, operation: () => Promise<unknown>): void => {
@@ -285,7 +275,6 @@ export function WatcherBar({
   const title = watched?.title ?? "this chat";
   const preset = watcherPresetName(link.preset);
   const summary = `Watcher for ${title}: ${agentLabel}, ${preset}`;
-  // Pending actions keep focus: aria-disabled, never disabled, while busy.
   const resumeUnavailable = !actions || pending !== null || resumeBlocked !== null;
   const checkUnavailable = !actions || pending !== null || waking;
   const reviewUnavailable = checkUnavailable || paused || link.status === "detached";

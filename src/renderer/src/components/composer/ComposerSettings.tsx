@@ -90,7 +90,6 @@ export function ComposerSettings({
   const responseSpeedLabel = selectedFastMode
     ? "Fast"
     : "Standard";
-  // A watcher always runs in Plan mode with Supervised access.
   const runLocked = useWatcherRunLock(conversation.id);
 
   return (

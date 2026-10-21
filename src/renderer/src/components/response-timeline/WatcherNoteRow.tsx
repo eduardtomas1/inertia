@@ -8,10 +8,6 @@ export function watcherNoteLabel(note: Pick<WatcherNoteAttribution, "preset" | "
   return `${WATCHER_NOTE_TITLE} · ${watcherPresetName(note.preset)} · ${note.watcherLabel}`;
 }
 
-/**
- * Marks where a forwarded watcher note starts a turn, so the note is never
- * read as the user's own words. Attribution comes from the persisted message.
- */
 export function WatcherNoteRow({
   id,
   note,

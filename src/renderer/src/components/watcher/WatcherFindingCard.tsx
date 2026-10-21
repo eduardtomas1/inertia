@@ -8,16 +8,10 @@ import { watcherClockTime, watcherDeliveryText, watcherDetailClause } from "../.
 import { WatcherDeliverButton } from "./WatcherDeliverButton";
 import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
 
-// The existing deferred Markdown renderer; the card shows plain text until
-// it arrives, so a finding is readable even if that chunk is still loading.
 const loadFindingMarkdown = createSurfaceLoader(async () => ({
   default: (await import("../ResponseMarkdown")).ResponseMarkdown,
 }));
 
-/**
- * One status line. A local failure shows only while the runtime still has no
- * delivery (or a failed one): once the feed says queued or sent, that wins.
- */
 function findingStatus(
   delivery: WatcherFeedItem["delivery"],
   { pending, failure, watchedRunning }: {
@@ -51,7 +45,6 @@ export interface WatcherFindingFailure {
 interface WatcherFindingCardProps {
   item: WatcherFeedItem;
   motionIndex: number;
-  /** True until this card's entrance has played once. */
   enter: boolean;
   onEntered: () => void;
   projectRoot: string;

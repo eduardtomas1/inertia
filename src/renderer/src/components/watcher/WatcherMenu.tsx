@@ -7,7 +7,6 @@ const MENU_ITEMS = '[role^="menuitem"]:not(:disabled)';
 const FLOATING_GAP = 4;
 const VIEWPORT_MARGIN = 8;
 
-/** Places a floating menu under its trigger, or above it when there's no room. */
 function floatingPosition(trigger: HTMLElement, menu: HTMLElement): CSSProperties {
   const anchor = trigger.getBoundingClientRect();
   const height = menu.offsetHeight;
@@ -20,14 +19,6 @@ function floatingPosition(trigger: HTMLElement, menu: HTMLElement): CSSPropertie
   return { position: "fixed", top, left, right: "auto" };
 }
 
-/**
- * A small `role="menu"` popover in the app's existing grammar: the trigger
- * owns `aria-expanded`/`aria-controls`, the first item takes focus, arrow keys
- * move between items and Escape returns focus to the trigger without
- * reaching the dock's own Escape handling. A `floating` menu renders in the
- * document body at fixed coordinates, so a scrolling feed can't clip it; it
- * closes when its trigger scrolls.
- */
 export function WatcherMenu({
   label,
   trigger,
@@ -112,7 +103,6 @@ export function WatcherMenu({
       style={floating ? position ?? { position: "fixed", top: 0, left: 0, visibility: "hidden" } : undefined}
       onKeyDown={(event) => {
         if (event.key === "Tab") {
-          // A floating menu sits at the end of the body: return to the trigger.
           if (floating) {
             event.preventDefault();
             close();

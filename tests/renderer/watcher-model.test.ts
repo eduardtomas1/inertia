@@ -37,7 +37,6 @@ describe("nestWatcherThreads", () => {
     const ordinary = nestWatcherThreads(views([WATCHED_ID, WATCHER_ID]), [detached]);
     expect(ordinary.threads).toHaveLength(2);
     expect(ordinary.topLevelWatchers.size).toBe(0);
-    // An archived (unlisted) watched chat: the watcher stays listed, marked as a watcher.
     const filtered = nestWatcherThreads(views([WATCHER_ID]), [link()]);
     expect(filtered.threads.map(({ conversation }) => conversation.id)).toEqual([WATCHER_ID]);
     expect(filtered.watchersByParent.size).toBe(0);

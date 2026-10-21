@@ -31,9 +31,7 @@ export const TIMELINE_MINIMAP_MIN_GUTTER = 48;
 // Keep long conversations legible without collapsing ten or more turns into
 // each marker. The rail remains bounded and scrollable in shorter viewports.
 export const TIMELINE_MINIMAP_MAX_MARKERS = 40;
-/** The "Note from watcher" divider, sized like the provider handoff divider. */
 const WATCHER_NOTE_ROW_HEIGHT = 64;
-/** A watcher check's compact "Check N · K events" request row. */
 const WATCHER_WAKE_REQUEST_HEIGHT = 44;
 
 /**
@@ -519,12 +517,11 @@ function estimateTurnRowSize(
     || turn.checkpointUnavailableReason !== null
     ? 28
     : 0;
-  // A watcher check renders as one compact row; its digest stays folded.
-  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : 24
+  const requestHeight = turn.watcherWake ? WATCHER_WAKE_REQUEST_HEIGHT : (24
     + requestActionsHeight
     + requestLines * 22
     + attachmentRows * 25
-    + (estimatedRequestContent === turn.userMessage.content ? 0 : 28);
+    + (estimatedRequestContent === turn.userMessage.content ? 0 : 28));
 
   const transcriptActivities = turn.activities.filter(isTranscriptActivity);
   const activeActivityGroups = turn.isActive

@@ -52,7 +52,6 @@ export interface ResponseTurn {
   foldableActivities: AgentActivity[];
   /** Set when the previous authoritative turn ran on another provider. */
   providerChanged?: true;
-  /** Set on a watcher chat's check: its request is the digest it was shown. */
   watcherWake?: WatcherWakeSummary;
 }
 
@@ -149,7 +148,6 @@ export interface ProviderHandoffItem {
 export type ResponseTimelineItem =
   | { kind: "compaction"; id: string; message: ChatMessage }
   | { kind: "handoff"; id: string; handoff: ProviderHandoffItem }
-  /** Divider before a turn that a forwarded watcher note started. */
   | { kind: "watcher-note"; id: string; turnId: string; note: WatcherNoteAttribution }
   | { kind: "turn"; id: string; turn: ResponseTurn }
   | {
@@ -345,7 +343,6 @@ export interface BuildResponseTimelineInput {
   inputRequests?: AgentInputRequest[];
   checkpoints: CheckpointSummary[];
   gitArtifacts?: TurnGitArtifactSummary[];
-  /** A watcher chat's checks, keyed to the turns that ran them. */
   watcherWakes?: readonly WatcherWakeSummary[];
 }
 
@@ -440,7 +437,6 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
   ];
 }
 
-/** Places a "Note from watcher" divider before each turn a watcher note started. */
 function withWatcherNotes(ordered: ResponseTimelineItem[]): ResponseTimelineItem[] {
   if (!ordered.some((item) => item.kind === "turn" && item.turn.userMessage.watcherNote)) return ordered;
   return ordered.flatMap((item): ResponseTimelineItem[] => {

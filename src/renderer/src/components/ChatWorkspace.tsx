@@ -198,7 +198,6 @@ type ChatWorkspaceProps = {
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
-  /** Watcher checks for the loaded turns; present only on watcher chats. */
   watcherWakes?: readonly WatcherWakeSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;

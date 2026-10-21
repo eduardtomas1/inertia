@@ -1,7 +1,3 @@
-/* Watcher dock. Lazy: loads with the WatcherDock chunk. Existing tokens and
- * motion constants only (docs/BEAUTIFUL_UI_PRIMITIVES.md); the reference
- * EASE is cubic-bezier(0.23, 1, 0.32, 1). */
-
 .watcher-dock-frame {
   --watcher-ease: cubic-bezier(0.23, 1, 0.32, 1);
   position: relative;
@@ -36,8 +32,6 @@
   box-shadow: inset 1px 0 0 var(--line-soft);
 }
 
-/* Narrow hosts: the dock floats over the chat as a sheet that stops above
- * the composer (its bottom offset is set inline), over a scrim. */
 .watcher-dock-frame.is-sheet {
   position: absolute;
   z-index: 24;
@@ -49,8 +43,6 @@
   box-shadow: var(--shadow-overlay);
 }
 
-/* An absolute grid child is sized by its grid area; the auto dock column
- * is empty here, so span the pane's chat row instead. */
 .conversation-pane-workspace > .watcher-dock-frame.is-sheet,
 .conversation-pane-workspace > .watcher-dock-scrim {
   grid-column: 1 / -1;
@@ -240,7 +232,6 @@
   content: "✓";
 }
 
-/* Confirmations and notices */
 .watcher-confirm {
   display: grid;
   gap: 8px;
@@ -338,7 +329,6 @@
   overflow-wrap: anywhere;
 }
 
-/* Feed */
 .watcher-dock-scroll {
   min-height: 0;
   flex: 1 1 auto;
@@ -443,7 +433,6 @@
   background: var(--fill);
 }
 
-/* Entrances play once (the component drops `data-enter` when they end). */
 .watcher-finding[data-enter] {
   animation: watcher-enter 400ms var(--watcher-ease) backwards;
   animation-delay: calc(var(--motion-index, 0) * 100ms);
@@ -571,12 +560,10 @@
   width: 200px;
 }
 
-/* Rendered in the body at fixed coordinates, so the feed can't clip it. */
 .watcher-menu.is-floating {
   z-index: 60;
 }
 
-/* Receipts */
 .watcher-receipt {
   min-width: 0;
   color: var(--text-muted);
@@ -684,8 +671,6 @@
   }
 }
 
-/* Open and close animate only on the user's action (`data-motion`), with
- * transform and opacity: the chat column never re-lays out per frame. */
 .watcher-dock-frame[data-motion][data-state="open"] > .watcher-dock {
   animation: watcher-dock-in var(--dur-slow) var(--watcher-ease) backwards;
 }

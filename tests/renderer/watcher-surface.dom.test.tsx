@@ -63,13 +63,11 @@ describe("watcher surface controller", () => {
     );
     const before = result.current.surface;
     expect(before.conversations.map(({ id }) => id)).toEqual([WATCHED_ID, WATCHER_ID]);
-    // Another chat's shell changes: same linked shells, same context value.
     rerender({ value: {
       ...initial,
       conversations: [initial.conversations[0]!, initial.conversations[1]!, shell(OTHER_WATCHED_ID, "Docs sweep, renamed")],
     } });
     expect(result.current.surface).toBe(before);
-    // The watched chat itself changes: the value follows.
     rerender({ value: {
       ...initial,
       conversations: [shell(WATCHED_ID, "Refactor parser", { status: "running" }), initial.conversations[1]!],

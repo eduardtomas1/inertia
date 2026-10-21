@@ -28,7 +28,6 @@ export interface ResponseTimelineProps {
   turns: AgentTurn[];
   messages: ChatMessage[];
   contextPackets?: readonly ConversationContextPacketSummary[];
-  /** A watcher chat's checks; their requests render as compact check rows. */
   watcherWakes?: readonly WatcherWakeSummary[];
   activities: AgentActivity[];
   subagents?: SubagentTrace[];

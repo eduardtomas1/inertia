@@ -44,7 +44,6 @@ function commandNotes(ran: number | null | undefined, declined: number): string[
   return [commands, declinedNote(declined, commands)].filter((note): note is string => Boolean(note));
 }
 
-/** One check, as listed inside a receipt or on its own for a notice. */
 function WatcherCheckLine({ item }: { item: WatcherFeedItem }): React.JSX.Element {
   const notes = [
     watcherTriggerText(item.trigger),
@@ -65,12 +64,10 @@ function WatcherCheckLine({ item }: { item: WatcherFeedItem }): React.JSX.Elemen
   );
 }
 
-/** "7:32 PM" or "7:32–7:41 PM": the time range the receipt covers. */
 function receiptTimes(group: ReceiptGroup): string {
   const first = watcherClockTime(group.firstAt);
   const last = watcherClockTime(group.lastAt);
   if (group.count === 1 || !last || first === last) return first;
-  // "7:32–7:41 PM": a shared day period is said once.
   const [firstClock, firstPeriod] = first.split(/\s/u);
   const [, lastPeriod] = last.split(/\s/u);
   return `${firstPeriod && firstPeriod === lastPeriod ? firstClock : first}–${last}`;
@@ -93,7 +90,6 @@ function enterProps(enter: boolean, onEntered: () => void) {
   };
 }
 
-/** Consecutive quiet checks, folded into one calm receipt the user can open. */
 export function WatcherReceiptGroup({
   group,
   motionIndex,
@@ -124,7 +120,6 @@ export function WatcherReceiptGroup({
   );
 }
 
-/** A check that ended any other way than quietly or with a finding. */
 export function WatcherNoticeLine({
   item,
   motionIndex,

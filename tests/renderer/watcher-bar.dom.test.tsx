@@ -324,11 +324,9 @@ describe("WatcherBar", () => {
       at: STARTED,
     }));
     expect(screen.getByText("Writing its review")).toBeInTheDocument();
-    // The check settles: the shell's link update drops its phase.
     view.rerender(bar(link()));
     act(() => clearWatcherLive(LINK_ID));
     expect(screen.queryByText("Writing its review")).not.toBeInTheDocument();
-    // The next check starts before its turn reaches the shell.
     view.rerender(bar(link({ status: "waking" })));
     expect(document.querySelector(".watcher-bar-phase-text")).toHaveTextContent(/^Checking…$/u);
   });

@@ -57,7 +57,6 @@ type PaletteItem = {
 const groupOrder = ["Actions", "Settings", "Projects", "Threads", "Messages"] as const;
 const ROWS_COVERED_BY_ACTIONS = new Set(["open-settings"]);
 
-/** Watcher actions for the chat in the primary pane. */
 function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations: Conversation[]): PaletteItem[] {
   const watched = surface?.primaryConversationId
     ? conversations.find(({ id }) => id === surface.primaryConversationId)
@@ -77,7 +76,6 @@ function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations:
       ...base,
       id: "action:pause-watcher",
       label: "Pause watcher",
-      // A failure opens the dock with the error, where Pause can be retried.
       run: () => {
         void createWatcherActions(request, link.id).pause().catch((error: unknown) => {
           reportWatcherDockError(watched.id, watcherErrorText(error, "The watcher could not be paused."));

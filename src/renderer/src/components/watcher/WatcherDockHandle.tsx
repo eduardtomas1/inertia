@@ -8,10 +8,6 @@ import { TooltipButton } from "../TooltipButton";
 import { watcherDockId } from "./watcherContext";
 import "./WatcherDockHandle.css";
 
-/**
- * Announces a new finding while the dock is collapsed. Alternates a trailing
- * period so a second finding is read again.
- */
 function useCollapsedFindingAnnouncement(latestFindingAt: string | null): string {
   const [announcement, setAnnouncement] = useState("");
   const previous = useRef(latestFindingAt);
@@ -30,7 +26,6 @@ export function watcherHandleFor(watchedId: string): HTMLElement | null {
     .find((candidate) => candidate.dataset.watcherHandle === watchedId) ?? null;
 }
 
-/** The collapsed dock: a slim edge in the dock's place that opens it again. */
 export function WatcherDockHandle({ watchedId, link, providerId, dock, controlsDock }: {
   watchedId: string;
   link: WatcherLinkView;

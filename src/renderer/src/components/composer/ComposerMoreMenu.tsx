@@ -87,7 +87,6 @@ export function ComposerMoreMenu({
   const access = accessOptions.find(
     (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
-  // A watcher's Plan mode and Supervised access cannot change.
   const runLocked = useWatcherRunLock(conversation.id);
 
   const renderMoreSectionOptions = (section: MoreSection) => {

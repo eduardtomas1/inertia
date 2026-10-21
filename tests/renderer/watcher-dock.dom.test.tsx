@@ -33,7 +33,6 @@ import {
 const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
 
 beforeAll(async () => {
-  // Hosts declare their measured width; the dock reads it like a container query.
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
     configurable: true,
     get(this: HTMLElement) { return Number(this.dataset.testWidth ?? 0); },
@@ -258,13 +257,11 @@ describe("WatcherDock", () => {
     const frame = document.querySelector(".watcher-dock-frame")!;
     expect(frame).toHaveAttribute("hidden");
     expect(handle()).toHaveAttribute("aria-expanded", "false");
-    // The inline preference is untouched: a sheet's collapse is layout, not a choice.
     expect(readWatcherDock(WATCHED_ID).open).toBe(true);
     fireEvent.click(handle());
     expect(await dock()).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Open watcher/u })).not.toBeInTheDocument();
     expect(document.querySelector(".watcher-dock-scrim")).not.toBeNull();
-    // Pressing inside the sheet keeps it open.
     fireEvent.pointerDown(within(await dock()).getByRole("heading", { name: "Watching Refactor parser" }));
     expect(readWatcherDock(WATCHED_ID).open).toBe(true);
     fireEvent.pointerDown(screen.getByRole("textbox", { name: "Message" }));
@@ -410,7 +407,6 @@ describe("WatcherDock", () => {
     const stop = within(aside).getByRole("button", { name: "Stop watching" });
     stop.focus();
     fireEvent.click(stop);
-    // The link detaches: the shell drops it, so the dock unmounts.
     update(null);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);
@@ -582,7 +578,6 @@ describe("WatcherDock", () => {
     expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
     let confirm = within(alert).getByRole("group", { name: "Confirm resume" });
     expect(confirm).toHaveTextContent("If you edited these files yourself, resume.");
-    // The safe choice takes focus; cancelling returns it to "Resume…".
     await waitFor(() => expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus());
     fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(within(alert).getByRole("button", { name: "Resume…" })).toHaveFocus());
@@ -599,7 +594,6 @@ describe("WatcherDock", () => {
     current = link();
     fireEvent.click(resume);
     await waitFor(() => expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(true));
-    // The notice goes away with the pause; focus lands on the dock heading.
     view.rerender(<Dock model={model()} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Watching Refactor parser" })).toHaveFocus());
   });

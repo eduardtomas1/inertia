@@ -136,7 +136,6 @@ export function finding(sequence: number, text: string, overrides: Partial<Watch
 
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 
-/** The payload of a recorded command, for assertions. */
 export function payloadOf(command: CommandWithoutId | undefined): Record<string, unknown> {
   return command && "payload" in command ? command.payload as Record<string, unknown> : {};
 }
@@ -145,10 +144,6 @@ export function resultEventFor(result: RequestResult): ServerEvent {
   return { type: "request.result", requestId: "request", result } as ServerEvent;
 }
 
-/**
- * Records every command and answers through `respond`, which receives the
- * command and returns the result payload (or throws).
- */
 export function recordingRequest(
   respond: (command: CommandWithoutId) => RequestResult | Promise<RequestResult>,
 ) {
@@ -160,7 +155,6 @@ export function recordingRequest(
   return { request, commands };
 }
 
-/** A runtime that answers watcher commands the way WP3b is expected to. */
 export function watcherRuntime(options: {
   link?: () => WatcherLinkView;
   feed?: () => WatcherFeedItem[];

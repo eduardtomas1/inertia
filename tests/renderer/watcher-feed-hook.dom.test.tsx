@@ -8,7 +8,6 @@ import { LINK_ID, feedItem } from "./watcher-fixtures";
 
 const OTHER_LINK = "77777777-7777-4777-8777-777777777777";
 
-/** Feed requests that resolve only when the test says so. */
 function deferredFeed() {
   const calls: Array<{ linkId: string; before: number | undefined; resolve: (result: WatcherFeedResult) => void }> = [];
   const actionsFor = (linkId: string): WatcherActions => ({

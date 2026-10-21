@@ -3,12 +3,6 @@ import { ChevronDown } from "lucide-react";
 import type { WatcherDeliveryMode } from "@shared/watcher";
 import { WatcherMenu } from "./WatcherMenu";
 
-/**
- * Send queues the note for the main chat's next turn, or starts that turn
- * when the chat is idle. Only while the watched turn runs on a steerable
- * harness does it become a split button whose menu adds Steer now; otherwise
- * the menu would repeat Send.
- */
 export function WatcherDeliverButton({
   disabled,
   steerable,

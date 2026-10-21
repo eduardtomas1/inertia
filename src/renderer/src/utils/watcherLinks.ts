@@ -1,22 +1,10 @@
 import type { WatcherLinkView, WatcherPreset } from "@shared/watcher";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
-/**
- * Eager watcher lookups. This module deliberately imports only types from
- * `@shared/watcher`: its schema values stay in the deferred validator chunk
- * so the first-load routes do not grow with the feature.
- */
-/**
- * Renderer copy of `MAX_ACTIVE_WATCHERS`: importing the value from
- * `@shared/watcher` would pull its zod schemas into the thread actions menu.
- * A unit test keeps the two equal.
- */
 export const MAX_ACTIVE_WATCHERS = 8;
 
 export interface WatcherLinkIndex {
-  /** Attached (not detached) links, keyed by the chat they watch. */
   byWatched: ReadonlyMap<string, WatcherLinkView>;
-  /** Attached (not detached) links, keyed by the watcher's own chat. */
   byWatcher: ReadonlyMap<string, WatcherLinkView>;
   activeCount: number;
 }
@@ -41,10 +29,6 @@ export function indexWatcherLinks(
   return { byWatched, byWatcher, activeCount: byWatcher.size };
 }
 
-/**
- * Renderer copy of the preset names. The record type keeps it exhaustive and
- * a unit test keeps it equal to `WATCHER_PRESET_LABELS`.
- */
 export const WATCHER_PRESET_NAMES: Readonly<Record<WatcherPreset, string>> = {
   reviewer: "Reviewer",
   "scope-guard": "Scope guard",
@@ -61,7 +45,6 @@ export function watcherRowName(preset: WatcherPreset): string {
 
 export const WATCHER_NOTE_TITLE = "Note from watcher";
 
-/** "1 event" / "9 events"; eager because transcript estimates name checks. */
 export function watcherEventsText(count: number): string {
   return `${count.toLocaleString(INTERFACE_LOCALE)} ${count === 1 ? "event" : "events"}`;
 }
@@ -70,7 +53,6 @@ export function watcherCheckTitle(wake: { sequence: number; eventsCovered: numbe
   return `Check ${wake.sequence} · ${watcherEventsText(wake.eventsCovered)}`;
 }
 
-/** "2 new" for findings the user has not seen, "new" when the count is unknown. */
 export function watcherUnseenText(
   link: WatcherLinkView,
   seen: { seenAt: string | null; seenFindings: number | null },

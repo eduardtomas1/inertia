@@ -2,15 +2,6 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 import { layoutStorage } from "../utils/layoutStorage";
 
-/**
- * Per watched chat: whether its dock is open and the newest finding already
- * seen. The collapsed handle and the dock read the same record, so they always
- * agree. Eager and deliberately small; the dock itself is lazy.
- *
- * The persisted `open` is the inline preference. When the dock has to float
- * over a narrow chat as a sheet it starts collapsed and opens only when the
- * user asks, without changing that preference.
- */
 interface WatcherDockRecord {
   open: boolean;
   seenAt: string | null;
@@ -20,12 +11,10 @@ interface WatcherDockRecord {
 type WatcherDockPresentation = "inline" | "sheet";
 
 interface WatcherDockState {
-  /** Whether the dock is shown in its current presentation. */
   open: boolean;
   seenAt: string | null;
   seenFindings: number | null;
   presentation: WatcherDockPresentation;
-  /** Moves each time the user opens or collapses the dock; motion follows it. */
   motion: number;
 }
 
@@ -42,7 +31,6 @@ const OPEN_RECORD: WatcherDockRecord = Object.freeze({ open: true, seenAt: null,
 const records = new Map<string, WatcherDockRecord>();
 const presentations = new Map<string, WatcherDockPresentation>();
 const sheetOpen = new Map<string, boolean>();
-/** When the user last asked to open each dock, so a sheet it turns into right away opens. */
 const openRequests = new Map<string, number>();
 const OPEN_REQUEST_MS = 1_000;
 const motions = new Map<string, number>();
@@ -67,7 +55,6 @@ function watchedIdForKey(key: string): string | null {
   }
 }
 
-/** Open by default: a new watcher's dock opens beside its chat. */
 export function readWatcherDock(watchedId: string): WatcherDockRecord {
   let record = records.get(watchedId);
   if (!record) {
@@ -82,7 +69,6 @@ export function readWatcherDock(watchedId: string): WatcherDockRecord {
         };
       }
     } catch {
-      // Layout preferences are optional; fall back to an open dock.
     }
     records.set(watchedId, record);
   }
@@ -117,10 +103,6 @@ function writeWatcherDock(watchedId: string, next: WatcherDockRecord): void {
   notify(watchedId);
 }
 
-/**
- * Opens or collapses a dock on the user's behalf; opening can also ask it to
- * focus its heading. In sheet presentation only this window's sheet changes.
- */
 export function setWatcherDockOpen(
   watchedId: string,
   open: boolean,
@@ -144,12 +126,6 @@ export function setWatcherDockOpen(
   writeWatcherDock(watchedId, { ...readWatcherDock(watchedId), open });
 }
 
-/**
- * The dock reports how it is presented, once it has measured its host. A
- * sheet starts collapsed unless the user asked for the dock a moment ago (the
- * handle or Open watcher mounted it straight into a sheet). Leaving an open
- * sheet keeps the dock open inline. Layout moves no motion token.
- */
 export function setWatcherDockPresentation(watchedId: string, presentation: WatcherDockPresentation): void {
   const prior = presentations.get(watchedId);
   if (prior === presentation) return;
@@ -169,7 +145,6 @@ export function setWatcherDockPresentation(watchedId: string, presentation: Watc
   else notify(watchedId);
 }
 
-/** True exactly once per focus request, so a remounted dock never steals focus. */
 export function consumeWatcherDockFocus(watchedId: string): boolean {
   const token = focusTokens.get(watchedId) ?? 0;
   if (token <= (consumedFocusTokens.get(watchedId) ?? 0)) return false;
@@ -177,7 +152,6 @@ export function consumeWatcherDockFocus(watchedId: string): boolean {
   return true;
 }
 
-/** Drops a pending focus request, so it cannot fire later. */
 export function cancelWatcherDockFocus(watchedId: string): void {
   consumedFocusTokens.set(watchedId, focusTokens.get(watchedId) ?? 0);
 }
@@ -186,7 +160,6 @@ export function watcherDockFocusToken(watchedId: string): number {
   return focusTokens.get(watchedId) ?? 0;
 }
 
-/** Opens the dock with an error for it to show, e.g. from the command palette. */
 export function reportWatcherDockError(watchedId: string, message: string): void {
   errorSequence += 1;
   errors.set(watchedId, { message, token: errorSequence });
@@ -198,7 +171,6 @@ export function watcherDockErrorToken(watchedId: string): number {
   return errors.get(watchedId)?.token ?? 0;
 }
 
-/** The reported error, once; the dock keeps it in its own state. */
 export function takeWatcherDockError(watchedId: string): string | null {
   const error = errors.get(watchedId);
   if (!error) return null;
@@ -206,7 +178,6 @@ export function takeWatcherDockError(watchedId: string): string | null {
   return error.message;
 }
 
-/** Another window changed a dock record (for example, saw a finding). */
 function onStorage(event: StorageEvent): void {
   if (event.key === null) {
     records.clear();
@@ -249,7 +220,6 @@ export function useWatcherDock(watchedId: string | null): WatcherDockController 
   return useMemo(() => ({ ...state, setOpen, markSeen }), [markSeen, setOpen, state]);
 }
 
-/** Test seam: forget cached records so storage is read again. */
 export function resetWatcherDockStore(): void {
   records.clear();
   presentations.clear();

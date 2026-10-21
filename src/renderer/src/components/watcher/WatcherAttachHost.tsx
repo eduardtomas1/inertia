@@ -3,7 +3,6 @@ import type { WatcherAttachHostProps } from "./WatcherAttachDialog";
 import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
 import { loadWatcherAttachDialog } from "./watcherLoaders";
 
-/** Eager host for the lazy attach dialog; renders nothing until it opens. */
 export function WatcherAttachHost(props: WatcherAttachHostProps): React.JSX.Element {
   return (
     <WatcherErrorBoundary fallback={null} resetKey={props.target}>

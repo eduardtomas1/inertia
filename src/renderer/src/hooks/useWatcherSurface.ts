@@ -29,11 +29,6 @@ const NO_PROJECTS: AppSnapshot["projects"] = [];
 const NO_PROVIDERS: AppSnapshot["providers"] = [];
 const NO_IDS: ReadonlySet<string> = new Set();
 
-/**
- * Only the chats that take part in a watcher link (watched or watcher), and
- * the same array while none of those shells changed: the context value then
- * stays put when unrelated chats update, so handles and composers don't re-render.
- */
 function useLinkedConversations(
   conversations: AppSnapshot["conversations"],
   links: WatcherLinkIndex,
@@ -53,11 +48,6 @@ function useLinkedConversations(
   }, [conversations, links]);
 }
 
-/**
- * Builds the window's watcher model from the shell snapshot. Main windows can
- * attach, show and open watchers; a detached chat window only locks a watcher
- * chat's run settings.
- */
 export function useWatcherSurfaceController({
   snapshot,
   surface: kind,
@@ -75,7 +65,6 @@ export function useWatcherSurfaceController({
   request: ((command: CommandWithoutId) => Promise<ServerEvent>) | null;
   primaryConversationId: string | null;
   visibleConversationIds?: ReadonlySet<string>;
-  /** Chats open in their own window: their dock can't be shown here. */
   detachedConversationIds?: ReadonlySet<string>;
   selectConversation?: (conversation: Conversation) => void;
   openConversationInSplit?: (conversation: Conversation) => void;
@@ -87,8 +76,6 @@ export function useWatcherSurfaceController({
   const main = kind === "main";
   const actions = useStableActions({
     reveal: (watchedId: string): void => {
-      // A detached chat's dock lives in no window here; never leave a focus
-      // request behind for when it returns.
       if (detachedConversationIds.has(watchedId)) {
         cancelWatcherDockFocus(watchedId);
         return;
@@ -99,9 +86,6 @@ export function useWatcherSurfaceController({
       }
       setWatcherDockOpen(watchedId, true, { focusHeading: true });
     },
-    // Without an explicit trigger the dialog restores focus to whatever held
-    // it when the dialog mounted (a closing palette has restored it). Entry
-    // points prefetch the dialog chunk on focus and hover.
     openAttachDialog: (watchedId: string, returnFocusTo: HTMLElement | null = null): void => {
       setTarget({ watchedId, returnFocusTo });
     },

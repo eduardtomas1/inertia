@@ -6,13 +6,8 @@ import type { WatcherSurfaceModel } from "./watcherContext";
 type WatcherEntry =
   | { kind: "attach" }
   | { kind: "show"; link: WatcherLinkView }
-  /** `link` is set when the chat has a watcher this window can't show. */
   | { kind: "unavailable"; reason: string; link?: WatcherLinkView };
 
-/**
- * What a chat's watcher entry point offers (thread actions, command palette).
- * It imports no schema values, so the actions menu stays free of zod.
- */
 export function watcherEntryFor(
   surface: WatcherSurfaceModel,
   conversation: Pick<Conversation, "id" | "projectId" | "archivedAt">,

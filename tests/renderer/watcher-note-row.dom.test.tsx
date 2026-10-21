@@ -160,7 +160,6 @@ describe("watcher note divider", () => {
     timeline([forwarded], messages(forwarded, "The rename misses two call sites.", { watcherNote: note }));
     const request = document.querySelector<HTMLElement>('[data-turn-id="turn-b"] [data-turn-layer="user-request"]')!;
     expect(request).toHaveAttribute("aria-label", "Note from watcher");
-    // The divider carries the full attribution; the bubble only says where it came from.
     expect(within(request).getByText("From watcher")).toBeInTheDocument();
     expect(within(request).queryByText(/Note from watcher ·/u)).not.toBeInTheDocument();
   });

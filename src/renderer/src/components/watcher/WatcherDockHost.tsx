@@ -8,11 +8,6 @@ import { useWatcherSurface } from "./watcherContext";
 import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
 import { loadWatcherDock } from "./watcherLoaders";
 
-/**
- * Eager placeholder beside a chat. While the chat has a watcher it shows the
- * collapsed handle or the dock; the lazy dock mounts when it first opens and
- * stays mounted so collapsing and reopening animate instead of reloading.
- */
 export function WatcherDockHost({ watchedId }: { watchedId: string | null }): React.JSX.Element | null {
   const surface = useWatcherSurface();
   const link = watchedId && surface?.surface === "main"

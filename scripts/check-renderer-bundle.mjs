@@ -72,7 +72,7 @@ const budgets = {
   // the previous build measures the same 2,293,275 bytes as Linux x64).
   // See docs/pr-evidence/visual-replies/renderer-bundle.json.
   // Watchers: the shell's watcher event validators (841 bytes on each route,
-  // foundation) and the eager link index, dock and focus store, chip, dock
+  // foundation) and the eager link index, dock and focus store, dock handle, dock
   // host, attach host, live-phase store, timeline divider/check model and
   // composer lock (8,439 workbench / 6,875 detached bytes). The dock (bar,
   // feed, cards) and attach dialog are deferred and capped separately below.

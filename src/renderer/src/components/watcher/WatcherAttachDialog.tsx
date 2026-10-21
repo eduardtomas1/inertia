@@ -63,7 +63,6 @@ interface WatcherAttachDialogProps {
   onOpenBackendSetup: (profileId: string) => void;
 }
 
-/** Props of the eager host, passed through to the lazy presence wrapper. */
 export interface WatcherAttachHostProps {
   target: WatcherAttachTarget | null;
   snapshot: AppSnapshot | null;
@@ -92,7 +91,6 @@ const BUDGET_FIELDS: ReadonlyArray<{ key: keyof WatcherBudgets; label: string; u
   { key: "contextReadsPerWake", label: "Context reads per check", unit: "" },
 ];
 
-/** Instructions keep newlines and tabs; the runtime refuses other controls. */
 function stripInstructionControls(value: string): string {
   return value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu, "");
 }
@@ -205,11 +203,6 @@ function WatcherBudgetFields({
   );
 }
 
-/**
- * Attaches a read-only watcher to one chat. Only ready routes on harnesses in
- * the reviewed watcher allowlist can be chosen; the dialog states plainly that
- * the watcher never edits files.
- */
 export function WatcherAttachDialog({
   snapshot,
   settings,
@@ -244,8 +237,6 @@ export function WatcherAttachDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const privateConnectConfigured = usePrivateConnectConfigured();
-  // Kept across an ambiguous timeout so a retry is the same attach, which
-  // the runtime recognizes, and replaced only after a definite failure.
   const linkIdRef = useRef<string | null>(null);
   const attachedRef = useRef(false);
   const presets = useRovingRadios(WATCHER_PRESETS, preset, setPreset);
@@ -262,7 +253,6 @@ export function WatcherAttachDialog({
   const selectedRoute = selection
     ? selectedModelSearchRoute(choices.map(({ route }) => route), selection)
     : null;
-  // An empty field means the default, not the minimum.
   const budgets = clampWatcherBudgets(Object.fromEntries(
     BUDGET_FIELDS.map(({ key }) => [key, budgetDrafts[key].trim() === "" ? undefined : Number(budgetDrafts[key])]),
   ) as Partial<Record<keyof WatcherBudgets, number>>);
@@ -288,7 +278,6 @@ export function WatcherAttachDialog({
     };
   }, []);
 
-  // An attach whose answer was lost still lands: close once the link shows up.
   const attachedLink = linkIdRef.current
     ? snapshot.watchers?.find(({ id, status }) => id === linkIdRef.current && status !== "detached") ?? null
     : null;
@@ -543,7 +532,6 @@ export function WatcherAttachDialog({
   );
 }
 
-/** Keeps the dialog mounted through its exit motion after the target clears. */
 export function WatcherAttachPresence({ target, snapshot, ...props }: WatcherAttachHostProps): React.JSX.Element | null {
   const lastTarget = useRef(target);
   if (target) lastTarget.current = target;

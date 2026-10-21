@@ -10,19 +10,12 @@ interface WatcherNoticesProps {
   customBackend: boolean;
   confirmingResume: boolean;
   resuming: boolean;
-  /** Why Resume would be refused right now; the notice says so instead of offering it. */
   resumeBlocked: string | null;
   onResumeRequest: () => void;
   onConfirmResume: () => void;
   onCancelResume: () => void;
 }
 
-/**
- * Pause and guard notices under the bar. Only the write-detected banner is an
- * alert: it lists the unexplained paths and asks before resuming, because a
- * resume there means "these were my edits". The confirmation focuses Cancel,
- * the safe choice, and cancelling returns focus to "Resume…".
- */
 export function WatcherNotices({
   link,
   changedPaths,
@@ -49,8 +42,6 @@ export function WatcherNotices({
       requestRef.current.focus({ preventScroll: true });
     }
   }, [confirmingResume]);
-  // A pause the user chose needs no banner: the bar already says Paused and
-  // offers Resume. Every other pause explains itself here.
   const reason = link.status === "paused" ? link.pauseReason : null;
   const paused = reason !== null && (reason !== "user" || resumeBlocked !== null);
   const writeDetected = reason === "write-detected";

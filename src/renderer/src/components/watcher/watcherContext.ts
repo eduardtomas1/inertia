@@ -11,24 +11,15 @@ import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import type { WatcherLinkIndex } from "../../utils/watcherLinks";
 
-/**
- * Everything the watcher surfaces read from the shell. It is provided once per
- * window, so panes, menus, the palette and the composer need no new props.
- * No member opens a conversation detail subscription; only `openWatcherChat`
- * does, and only because the user asked for the watcher's own chat.
- */
 export interface WatcherSurfaceModel {
   surface: "main" | "detached";
   links: WatcherLinkIndex;
-  /** Only the chats in a watcher link (watched or watcher), stable while they don't change. */
   conversations: readonly ConversationShell[];
   projects: readonly Project[];
   providers: readonly ProviderInfo[];
   backendProfiles: readonly ModelBackendProfileView[];
-  /** Provider display names: configured identity labels over provider labels. */
   providerLabels: ProviderIdentityLabels;
   primaryConversationId: string | null;
-  /** Chats open in their own window, whose dock this window can't show. */
   detachedConversationIds: ReadonlySet<string>;
   online: boolean;
   request: ((command: CommandWithoutId) => Promise<ServerEvent>) | null;
@@ -44,7 +35,6 @@ export function useWatcherSurface(): WatcherSurfaceModel | null {
   return useContext(WatcherContext);
 }
 
-/** True when the chat is an attached watcher, whose run settings are locked. */
 export function useWatcherRunLock(conversationId: string | null | undefined): boolean {
   const surface = useContext(WatcherContext);
   return Boolean(conversationId && surface?.links.byWatcher.has(conversationId));

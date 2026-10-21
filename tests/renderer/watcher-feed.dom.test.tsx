@@ -187,7 +187,6 @@ describe("WatcherFeed", () => {
       "Queue for next turn",
       "Steer now",
     ]);
-    // Rendered outside the scrolling feed, so the last card's menu is never clipped.
     expect(menu.closest(".watcher-feed")).toBeNull();
     expect(menu).toHaveClass("is-floating");
     fireEvent.click(within(menu).getByRole("menuitem", { name: /Steer now/u }));
@@ -263,7 +262,6 @@ describe("WatcherFeed", () => {
       }
       if (command.type === "watcher.note.deliver") {
         attempts += 1;
-        // The first request lands but its answer is lost.
         if (attempts === 1) {
           delivered = { mode: "queue", state: "queued", detail: null, at: NOW };
           throw new RuntimeCommandError("The local service did not answer in time.", "ambiguous");
@@ -276,13 +274,11 @@ describe("WatcherFeed", () => {
     const card = await screen.findByRole("article");
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(/^Not sent · /u));
-    // A retry reuses the same delivery id, so the runtime can't deliver twice.
     fireEvent.click(within(card).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(attempts).toBe(2));
     const ids = runtime.commands.filter(({ type }) => type === "watcher.note.deliver").map((command) => payloadOf(command).deliveryId);
     expect(new Set(ids).size).toBe(1);
     await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(/^Not sent · /u));
-    // The next feed refresh carries the authoritative delivery.
     view.rerender(<FeedHarness runtime={runtime} running revision={2} />);
     await waitFor(() => expect(within(card).getByRole("status")).toHaveTextContent(/^Queued · sends after the current turn$/u));
     expect(within(card).queryByRole("button", { name: "Send" })).not.toBeInTheDocument();

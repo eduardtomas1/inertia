@@ -29,10 +29,6 @@ function isFinding(item: WatcherFeedItem): boolean {
   return item.outcome === "finding" && item.finding !== null;
 }
 
-/**
- * Newest first, except that a resolved finding moves below the oldest open
- * one; the quiet checks around it then fold into one receipt.
- */
 function openFindingsFirst(items: readonly WatcherFeedItem[]): WatcherFeedItem[] {
   let lastOpen = -1;
   items.forEach((item, index) => {
@@ -44,11 +40,6 @@ function openFindingsFirst(items: readonly WatcherFeedItem[]): WatcherFeedItem[]
   return [...head.filter((item) => !resolved.includes(item)), ...resolved, ...items.slice(lastOpen + 1)];
 }
 
-/**
- * Feed entries whose entrance already played, across remounts and collapses:
- * a card or receipt animates in once, never again when the dock reopens or
- * the user returns to the chat.
- */
 const enteredEntries = new Set<string>();
 const MAX_ENTERED_ENTRIES = 2_000;
 
@@ -57,17 +48,10 @@ function markEntered(key: string): void {
   enteredEntries.add(key);
 }
 
-/** Test seam: lets every entry animate again. */
 export function resetWatcherFeedMotion(): void {
   enteredEntries.clear();
 }
 
-/**
- * Findings and receipts, newest first. Findings are cards the user sends or
- * dismisses; quiet checks fold into receipts. Focus follows the action: to the
- * card's own status after Send, to the next card (or the heading) after
- * Dismiss.
- */
 export function WatcherFeed({
   feed,
   actions,
@@ -113,8 +97,6 @@ export function WatcherFeed({
     if (focusTarget(target)) pendingFocus.current = null;
   });
 
-  // The runtime's word wins: once the feed shows a note queued or sent (for
-  // example after an ambiguous timeout), drop the local failure and its id.
   useEffect(() => {
     const settled = feed.items.filter(({ wakeId, delivery }) =>
       failures.has(wakeId) && (delivery?.state === "queued" || delivery?.state === "sent"));
@@ -157,8 +139,6 @@ export function WatcherFeed({
       deliveryIds.current.delete(item.wakeId);
       feed.applyDelivery(item.wakeId, result.delivery);
     }, (error: unknown) => {
-      // An ambiguous timeout keeps the same delivery id so a retry cannot
-      // deliver the note twice; a refused or unsent request starts over.
       if (runtimeCommandDelivery(error) !== "ambiguous") deliveryIds.current.delete(item.wakeId);
       setFailureFor(item.wakeId, { action: "send", message: watcherErrorText(error, "The note could not be sent.") });
     }).finally(() => {

@@ -1,4 +1,3 @@
-/* A watcher check's request in the watcher's own chat. */
 .response-turn > .watcher-wake-request {
   display: grid;
   width: min(100%, var(--transcript-max-width));
@@ -57,7 +56,6 @@
   overflow-wrap: anywhere;
 }
 
-/* The inline tag on a note the watcher forwarded. */
 .message-watcher-origin {
   color: var(--text-muted);
 }

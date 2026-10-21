@@ -21,7 +21,6 @@ const WORK_INDEX_INITIAL_HEIGHT = 720;
 const WORK_INDEX_OVERSCAN = 8;
 export const WORK_ROW_HEIGHT = 58;
 export const WORK_ROW_COMPACT_HEIGHT = 50;
-/** A watcher nested under its chat: one compact line. */
 const WORK_WATCHER_ROW_HEIGHT = 36;
 const WORK_SECTION_HEIGHT = 36;
 const WORK_SHOW_MORE_HEIGHT = 30;
@@ -83,7 +82,6 @@ interface SidebarWorkIndexOptions {
   navigationRef: RefObject<HTMLDivElement | null>;
   searchActive: boolean;
   sections: SidebarWorkSection[];
-  /** Attached watchers, listed directly under the chat they watch. */
   watchersByParent?: ReadonlyMap<string, SidebarThreadView>;
 }
 

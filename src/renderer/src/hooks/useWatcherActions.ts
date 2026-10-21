@@ -36,11 +36,6 @@ export interface WatcherActions {
   dismiss: (wakeId: string) => Promise<WatcherDeliveryResult>;
 }
 
-/**
- * Typed wrappers over the ten watcher commands. Timeouts and delivery
- * semantics come from `runtimeCommandPolicy`; every mutation answers with the
- * updated link, which the shell also receives as `watcher.link.updated`.
- */
 export function createWatcherActions(request: WatcherRequest, linkId: string): WatcherActions {
   const link = async (type: "watcher.pause" | "watcher.resume" | "watcher.wake" | "watcher.review" | "watcher.detach") =>
     expectResult(await request({ type, payload: { linkId } }), "watcher.link").link;

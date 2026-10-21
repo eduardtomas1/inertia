@@ -478,7 +478,6 @@
   }
 }
 
-/* A watcher nested under its chat: one 34px line plus the row gap (36px). */
 .activity-thread.is-watcher {
   height: 34px;
 }
@@ -532,8 +531,6 @@
   color: var(--status-working);
 }
 
-/* A watcher listed as an ordinary row (its chat archived, or finishing a
- * check while its chat is Done) keeps a quiet watcher marker. */
 .thread-watcher-mark {
   flex: 0 0 auto;
   color: var(--text-muted);

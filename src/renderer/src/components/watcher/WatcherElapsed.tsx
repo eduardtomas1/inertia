@@ -9,11 +9,6 @@ function elapsedSince(startedAt: string, now: number): string {
   return Number.isFinite(start) ? formatElapsed(Math.max(0, now - start)) : "";
 }
 
-/**
- * The running check's elapsed time. Ticks write `textContent` directly and
- * the element is hidden from assistive technology, so neither React nor the
- * bar's live region sees a change every second.
- */
 export function WatcherElapsed({ startedAt }: { startedAt: string | null }): React.JSX.Element | null {
   const textRef = useRef<HTMLSpanElement>(null);
   const visible = useDocumentVisibility();

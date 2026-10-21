@@ -8,11 +8,6 @@ import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { setAppearanceInPlace } from "./support/appearance";
 import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
-// Both the watched chat and its watcher run on the fake Codex app server.
-// Each run spawns its own process, so the test steers it through files in the
-// fixture's data directory: `main-step-*` gates release the watched turn's
-// settled commands one at a time, and every watcher check blocks until the
-// test queues a `watcher-reply-*` file, which exactly one check claims.
 const WATCHED_TITLE = "Parser cleanup";
 const SPLIT_TITLES = ["Release notes", "Docs sweep", "Flaky test triage"];
 const BRIEF = "Tidy the line parser and keep its behaviour.";
@@ -33,8 +28,6 @@ if (process.argv[2] === "--help") {
   process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
   process.exit(0);
 }
-// Provider children get an allow-listed environment; the checkout is a
-// direct child of the fixture root, next to the data directory.
 const dataDirectory = path.resolve(process.cwd(), "..", "data");
 const steps = [
   ["main-step-1", "rg -n parseLine src", "src/parser.ts:12:export function parseLine(line) {"],
@@ -152,7 +145,6 @@ test.describe("watcher on the fake Codex route", () => {
         }
       },
     });
-    // Record every command the renderer sends from a fresh socket on.
     app.page.on("websocket", (socket) => {
       socket.on("framesent", ({ payload }) => {
         sentFrames.push(typeof payload === "string" ? payload : payload.toString("utf8"));
@@ -172,8 +164,6 @@ test.describe("watcher on the fake Codex route", () => {
   const gate = async (name: string): Promise<void> => {
     await writeFile(join(app.testDirectory, "data", name), "ready\n", "utf8");
   };
-  // Written beside the data directory and renamed in, so a check never reads
-  // a partial reply.
   const queueWatcherReply = async (reply: string): Promise<void> => {
     replySequence += 1;
     const name = `watcher-reply-${String(replySequence).padStart(2, "0")}`;
@@ -237,12 +227,10 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(dialog).toBeVisible();
     const presets = dialog.getByRole("radiogroup", { name: "Preset" });
     await expect(presets.getByRole("radio")).toHaveCount(3);
-    // The chat's own Codex route is ready, so it is offered and selected.
     await expect(dialog.getByText("No watcher route", { exact: true })).toHaveCount(0);
     await expect(dialog.getByText("Model route unavailable", { exact: true })).toHaveCount(0);
     await presets.getByRole("radio", { name: /^Reviewer/u }).click();
     await expect(presets.getByRole("radio", { name: /^Reviewer/u })).toHaveAttribute("aria-checked", "true");
-    // The read-only boundary is part of the dialog's description, above the fold.
     await expect(dialog.getByText("It reads and reports: it may run read-only commands and never edits files or changes the workspace.", { exact: true })).toBeVisible();
     const attach = dialog.getByRole("button", { name: "Add watcher" });
     await expect(attach).not.toHaveAttribute("aria-disabled");
@@ -260,17 +248,13 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(phase()).toHaveText(/^.+ · Reviewer · Watching$/u);
     await expectMenuNote(/^\d+ of 30 checks left this turn$/u);
     await expect(dock().getByRole("button", { name: "More watcher actions" })).toBeFocused();
-    // Inline beside the chat, not a split pane and not a sheet.
     await expect(page.locator(".watcher-dock-frame")).toHaveAttribute("data-presentation", "inline");
     await expect(page.getByRole("main", { name: "Split conversation workspace" })).toHaveCount(0);
-    // Beside the chat once the opening motion settles: the chat column ends
-    // where the dock begins.
     await expect.poll(async () => {
       const chatBox = await page.locator(".workspace-chat-column").boundingBox();
       const dockBox = await dock().boundingBox();
       return chatBox && dockBox ? Math.round(dockBox.x - (chatBox.x + chatBox.width)) : null;
     }).toBeGreaterThanOrEqual(-1);
-    // The open dock replaces its collapsed handle; nothing sits above the composer.
     await expect(handle()).toHaveCount(0);
     await expect(page.locator(".composer-region").getByText(/Watched by/u)).toHaveCount(0);
     await expect(dock().getByText(/No checks yet/u)).toBeVisible();
@@ -281,8 +265,6 @@ test.describe("watcher on the fake Codex route", () => {
 
   test("shows a check in progress and folds quiet checks into one receipt", async ({ browserName: _browserName }, info) => {
     await gate("main-step-1");
-    // Settled commands gather before an automatic check, so "Check now"
-    // starts this one as soon as the command is waiting.
     await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
@@ -296,8 +278,6 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(receipt).toHaveText(/^Checked once · .+ · nothing to report/u);
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
 
-    // A second quiet check joins the same receipt. "Check now" skips the
-    // cooldown once the next settled command is waiting.
     await gate("main-step-2");
     await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
@@ -359,7 +339,6 @@ test.describe("watcher on the fake Codex route", () => {
 
     await finding.getByRole("button", { name: "Send", exact: true }).click();
     const status = finding.locator(".watcher-finding-status");
-    // One status line: state and mode, never a repeated or stale detail.
     await expect(status).toHaveText(/^Queued · sends after the current turn$/u);
     await expect(status).toBeFocused();
     await expect(finding.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
@@ -367,9 +346,6 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(queue.first()).toBeVisible();
     await capture(info, "gif-06-sent");
 
-    // The watched turn ends; its final check is quiet, reports the finding
-    // resolved, and the note starts the next turn under its own divider,
-    // never as the user's words.
     const findingCheck = (await finding.locator(".watcher-finding-meta").textContent())?.match(/^Check (\d+)/u)?.[1];
     expect(findingCheck).toBeDefined();
     await queueWatcherReply(`SILENT\nResolved: check ${findingCheck}`);
@@ -381,13 +357,10 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(page.getByText(NOTE_ANSWER, { exact: true }).first()).toBeVisible();
     const bubble = page.getByLabel("Note from watcher", { exact: true }).first();
     await expect(bubble).toContainText("Empty lines lost their test:");
-    // The divider carries the attribution; the bubble only marks the origin.
     await expect(bubble.locator(".message-watcher-origin")).toHaveText("From watcher");
     await capture(info, "main-chat-note-light");
     await expect(status).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · [^·]+$/u);
     await expect(finding.locator(".watcher-finding-meta")).toHaveText(/^Check \d+ · \d{1,2}:\d{2}\s[AP]M$/u);
-    // Both turns settle, and the final checks of both (one per watched turn)
-    // fold into one new receipt above the finding, newest first.
     await expect(page.locator('.response-turn [data-turn-status="completed"]')).toHaveCount(2);
     await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
     await expect(feedEntries()).toHaveCount(3);
@@ -408,7 +381,6 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(row.getByRole("button")).toHaveAccessibleName(
       new RegExp(`^Watcher · Reviewer, watching ${WATCHED_TITLE}`, "u"),
     );
-    // The Work list's very next row after its parent, indented under it.
     const order = await sidebar().getByRole("list", { name: "Work", exact: true }).evaluate((list, title) => {
       const items = [...list.querySelectorAll<HTMLElement>('[role="listitem"]')];
       const parent = items.findIndex((item) =>
@@ -423,12 +395,10 @@ test.describe("watcher on the fake Codex route", () => {
     const watcherBox = await row.locator(".watcher-work-row-title").boundingBox();
     expect(watcherBox!.y).toBeGreaterThanOrEqual(parentBox!.y + parentBox!.height - 1);
     expect(watcherBox!.x).toBeGreaterThan(parentBox!.x);
-    // It joins the Work tab's arrow-key order right after its parent.
     await watchedRow().focus();
     await app.page.keyboard.press("ArrowDown");
     await expect(row.getByRole("button")).toBeFocused();
     await capture(info, "work-tab-nested-light");
-    // It offers the same thread actions as every other row.
     await app.page.keyboard.press("Shift+F10");
     const actions = app.page.getByRole("menu", { name: /^Thread actions for Watcher · Reviewer/u });
     await expect(actions).toBeVisible();
@@ -455,7 +425,6 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(page.locator(".watcher-dock-frame")).toBeHidden();
     await expect(handle()).toBeFocused();
     await expect(handle()).toHaveAttribute("aria-expanded", "false");
-    // A quiet check after the sent finding leaves nothing unseen on the handle.
     await expect(handle()).toHaveAccessibleName("Open watcher");
     await capture(info, "dock-handle-light");
 
@@ -464,12 +433,9 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(handle()).toHaveCount(0);
     await expect(dock().getByRole("heading", { level: 2 })).toBeFocused();
     await expect(dock().getByRole("article", { name: FINDING })).toBeVisible();
-    // The dock reads its feed by request and never subscribes to the watcher
-    // conversation's detail.
     expect(sentFrames.some((frame) => frame.includes('"watcher.feed.get"'))).toBe(true);
     expect(subscribed()).toEqual([]);
 
-    // Escape from a control inside the dock collapses it too.
     await dock().getByRole("button", { name: "Check now" }).focus();
     await page.keyboard.press("Escape");
     await expect(page.locator(".watcher-dock-frame")).toBeHidden();
@@ -594,8 +560,6 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(split.getByRole("region", { name: /^(Primary|Second|Third|Fourth) chat: /u })).toHaveCount(4);
     await expect(page.getByRole("region", { name: `Primary chat: Inertia · ${WATCHED_TITLE}` })).toBeVisible();
 
-    // Each pane leaves the chat less than 360 px beside the dock, so the dock
-    // becomes a sheet inside the watched chat's pane, collapsed until asked.
     const frame = page.locator(".watcher-dock-frame");
     await expect(frame).toHaveAttribute("data-presentation", "sheet");
     await expect(frame).toBeHidden();
@@ -608,14 +572,12 @@ test.describe("watcher on the fake Codex route", () => {
     const pane = page.getByRole("region", { name: `Primary chat: Inertia · ${WATCHED_TITLE}` });
     const paneBox = await pane.boundingBox();
     await expect.poll(async () => (await dock().boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(280);
-    // Measured once the opening slide (transform only) has settled.
     await expect.poll(async () => {
       const box = await dock().boundingBox();
       return box ? box.x + box.width : Number.POSITIVE_INFINITY;
     }).toBeLessThanOrEqual(paneBox!.x + paneBox!.width + 1);
     const dockBox = await dock().boundingBox();
     expect(dockBox!.x).toBeGreaterThanOrEqual(paneBox!.x);
-    // The sheet stops above the pane's composer, which stays usable.
     const paneComposer = pane.getByRole("textbox", { name: "Message" });
     const composerBox = await pane.locator(".composer-region").boundingBox();
     expect(dockBox!.y + dockBox!.height).toBeLessThanOrEqual(composerBox!.y + 1);
@@ -623,7 +585,6 @@ test.describe("watcher on the fake Codex route", () => {
     await app.expectNoViewportOverflow();
     await capture(info, "split-panes-with-dock-light");
 
-    // A press outside the sheet (here, into the composer) collapses it.
     await paneComposer.click();
     await expect(frame).toBeHidden();
     await expect(paneComposer).toBeFocused();

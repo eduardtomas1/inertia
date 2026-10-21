@@ -7,7 +7,6 @@ import type {
 } from "@shared/watcher";
 import { INTERFACE_LOCALE } from "../lib/locale";
 
-/** User-facing watcher copy, shared by the dock and the watcher chat rows. */
 const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = {
   user: "You paused it.",
   "wake-budget": "It used its checks for this turn.",
@@ -80,7 +79,6 @@ export function watcherPhaseText(phase: WatcherLivePhase, label: string | null):
   return label?.trim() || PHASE_TEXT[phase];
 }
 
-/** A runtime detail as a clause: no trailing period, sentence case folded. */
 export function watcherDetailClause(detail: string | null): string | null {
   const text = detail?.trim().replace(/\.$/u, "").trim();
   if (!text) return null;
@@ -90,12 +88,6 @@ export function watcherDetailClause(detail: string | null): string | null {
     : text;
 }
 
-/**
- * One status line for a finding's delivery, built from its state, mode and
- * time. The runtime's detail replaces the default explanation only when it
- * explains something the state does not (a fallback, a later dispatch or a
- * failure reason), and is dropped when it merely repeats the line.
- */
 export function watcherDeliveryText(delivery: WatcherDelivery & { automatic?: boolean }, watchedRunning: boolean): string {
   const time = watcherClockTime(delivery.at);
   const head = delivery.state === "queued"

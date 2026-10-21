@@ -127,6 +127,16 @@ describe("readOnlyCommandPathProblem", () => {
     await expect(windows("cat ./l*")).resolves.toBe(OUTSIDE);
   });
 
+  it("refuses wildcards that reach an environment file", async () => {
+    const files = {
+      realpath: async (path: string) => path,
+      readdir: async (path: string) => (path === "/work/repo/config" ? ["app.json", "prod.env.local"] : []),
+    };
+    const posix = (command: string) => readOnlyCommandPathProblem(command, { cwd: "/work/repo", windows: false }, files);
+    await expect(posix("cat config/*.json")).resolves.toBeNull();
+    await expect(posix("cat config/*.local")).resolves.toBe("The command reads an environment file.");
+  });
+
   it("refuses a command whose wildcards reach more paths than it can check", async () => {
     const real = async (path: string) => path;
     const names = Array.from({ length: 5_000 }, (_, index) => `file-${index}.txt`);

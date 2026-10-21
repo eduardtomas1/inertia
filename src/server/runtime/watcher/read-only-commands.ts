@@ -35,7 +35,8 @@ interface SearchSyntax {
 const SHELL_SYNTAX = "The command uses shell syntax that watchers cannot run.";
 const UNSAFE_OPTION = "The command uses an option that can write or run another program.";
 export const OUTSIDE_WORKSPACE = "The command reads outside the workspace.";
-const ENVIRONMENT_FILE = "The command reads an environment file.";
+export const ENVIRONMENT_FILE = "The command reads an environment file.";
+const ENVIRONMENT_GLOB = "The command uses a glob that could match an environment file.";
 const OPTION_GLOB = "The command uses a glob that could expand to an option.";
 const UNIQ_GLOB = "uniq cannot take a glob, because a second matched file would become its output.";
 
@@ -47,6 +48,7 @@ const GLOB = new Set(["*", "?", "["]);
 const STDERR_REDIRECTS = ["2>/dev/null", "2>&1"];
 const PROGRAM_PREFIXES = ["/usr/bin/", "/bin/"];
 const ENVIRONMENT_FILE_NAME = /\.env(?:$|\.)/iu;
+const LITERAL_EXTENSION = /\.([A-Za-z0-9_+-]+)$/u;
 
 const GIT_UNSAFE_LONG = ["output", "ext-diff", "textconv", "open-files-in-pager", "exec", "upload-pack", "receive-pack", "filters", "show-signature"];
 const GIT_GREP_UNSAFE_LONG = [...GIT_UNSAFE_LONG, "no-index", "no-exclude-standard", "untracked"];
@@ -130,6 +132,10 @@ export function readOnlyCommandOperands(command: string, context: ReadOnlyComman
   if (typeof segments === "string") return [];
   return segments.flatMap(([, ...rest]) => rest.flatMap(({ value, glob }) =>
     pathCandidateOffsets(value).map((offset) => ({ value: value.slice(offset), glob: glob.slice(offset) }))));
+}
+
+export function environmentFileName(name: string): boolean {
+  return ENVIRONMENT_FILE_NAME.test(name);
 }
 
 export function watcherCommandEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -242,7 +248,9 @@ function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths:
   const paths = context.windows ? win32 : posix;
   const separators = context.windows ? /[\\/]/u : /\//u;
   if (globReachesParent(word, separators)) return OUTSIDE_WORKSPACE;
-  for (const candidate of pathCandidates(word.value)) {
+  for (const offset of pathCandidateOffsets(word.value)) {
+    const candidate = word.value.slice(offset);
+    if (globMayMatchEnvironmentFile(candidate, word.glob.slice(offset))) return ENVIRONMENT_GLOB;
     if (candidate.startsWith("~")) return OUTSIDE_WORKSPACE;
     if (context.windows && /^[A-Za-z]:(?![\\/])/u.test(candidate)) return OUTSIDE_WORKSPACE;
     if (context.windows && providerPaths && candidate.replace(/^[A-Za-z]:(?=[\\/])/u, "").includes(":")) return OUTSIDE_WORKSPACE;
@@ -256,8 +264,12 @@ function pathProblem(word: Word, context: ReadOnlyCommandContext, providerPaths:
   return null;
 }
 
-function pathCandidates(value: string): string[] {
-  return pathCandidateOffsets(value).map((offset) => value.slice(offset));
+function globMayMatchEnvironmentFile(value: string, glob: readonly boolean[]): boolean {
+  if (!glob.includes(true)) return false;
+  const start = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"), value.lastIndexOf(":")) + 1;
+  const extension = LITERAL_EXTENSION.exec(value.slice(start));
+  if (!extension || glob.slice(start + extension.index).includes(true)) return true;
+  return extension[1]!.toLowerCase() === "env";
 }
 
 function pathCandidateOffsets(value: string): number[] {

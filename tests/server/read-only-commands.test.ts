@@ -69,6 +69,8 @@ describe("classifyReadOnlyCommand", () => {
     ["cat src/*.ts", "cat"],
     ["cat .github/workflows/*.yml", "cat"],
     ["cat ./*.ts", "cat"],
+    ["cat config/*.json", "cat"],
+    ["wc -l src/**/*.ts", "wc"],
     ["grep --include=*.ts -n parse src/parser.ts", "grep"],
     ["head -n 20 src/parser.ts", "head"],
     ["tail -n 5 src/parser.ts", "tail"],
@@ -409,6 +411,16 @@ describe("classifyReadOnlyCommand", () => {
     "cat process.env.X",
     "head -e prod.env",
     "git show HEAD:.env",
+    "cat config/*",
+    "cat config/*.e*",
+    "cat config/prod.en?",
+    "cat config/prod.[e]nv",
+    "cat config/prod.EN?",
+    "cat config/*.env",
+    "head -n 50 deploy/*",
+    "grep KEY config/*",
+    "rg KEY config/prod.e*",
+    "cat src/*.t[s]",
     "cat 'src/a’; rm -rf .; ‘b'",
     "cat \u201csrc\u201d",
     "git diff\u00a0--output=x",
@@ -514,6 +526,7 @@ describe("classifyReadOnlyCommand", () => {
     expect(allowed("npm test")).toEqual({ allowed: false, reason: "npm is not a read-only command watchers can run." });
     expect(allowed("cat /etc/passwd")).toEqual({ allowed: false, reason: "The command reads outside the workspace." });
     expect(allowed("git diff --output=x")).toEqual({ allowed: false, reason: "The command uses an option that can write or run another program." });
+    expect(allowed("cat config/*")).toEqual({ allowed: false, reason: "The command uses a glob that could match an environment file." });
   });
 });
 

@@ -2,6 +2,8 @@ import { promises } from "node:fs";
 import { posix, win32 } from "node:path";
 
 import {
+  ENVIRONMENT_FILE,
+  environmentFileName,
   OUTSIDE_WORKSPACE,
   readOnlyCommandOperands,
   type ReadOnlyCommandContext,
@@ -42,10 +44,10 @@ export async function readOnlyCommandPathProblem(
   const wildcards = context.windows || context.powershell === true;
   const targets = new Set<string>();
   for (const operand of readOnlyCommandOperands(command, context)) {
-    for (const target of await expand(files, paths, cwd, operand, wildcards, MAX_READ_ONLY_COMMAND_PATHS - targets.size)) {
-      targets.add(target);
-    }
+    const expanded = await expand(files, paths, cwd, operand, wildcards, MAX_READ_ONLY_COMMAND_PATHS - targets.size);
+    for (const target of expanded.targets) targets.add(target);
     if (targets.size >= MAX_READ_ONLY_COMMAND_PATHS) return TOO_MANY_PATHS;
+    if (expanded.globbed && expanded.targets.some((target) => environmentFileName(paths.basename(target)))) return ENVIRONMENT_FILE;
   }
   const resolved = await Promise.all([...targets].map((target) => realPath(files, target)));
   return resolved.every((real) => real === null || (real !== undefined && inside(paths, root, real))) ? null : OUTSIDE_WORKSPACE;
@@ -71,11 +73,11 @@ async function expand(
   operand: ReadOnlyCommandOperand,
   wildcards: boolean,
   limit: number,
-): Promise<string[]> {
+): Promise<{ targets: string[]; globbed: boolean }> {
   const separators = paths === win32 ? /[\\/]/u : /\//u;
   const segments = split(operand, separators, wildcards);
   const first = segments.findIndex(({ glob }) => glob.includes(true));
-  if (first < 0) return [paths.resolve(cwd, operand.value)];
+  if (first < 0) return { targets: [paths.resolve(cwd, operand.value)], globbed: false };
   const prefix = segments.slice(0, first).map(({ text }) => text).join("/");
   let current = [paths.resolve(cwd, first === 0 ? "." : `${prefix}/`)];
   for (const segment of segments.slice(first)) {
@@ -95,12 +97,12 @@ async function expand(
       for (const name of names) {
         if (!matcher.test(name)) continue;
         next.push(paths.join(directory, name));
-        if (next.length > limit) return next;
+        if (next.length > limit) return { targets: next, globbed: true };
       }
     }
     current = next;
   }
-  return current;
+  return { targets: current, globbed: true };
 }
 
 function split(operand: ReadOnlyCommandOperand, separators: RegExp, wildcards: boolean): Segment[] {

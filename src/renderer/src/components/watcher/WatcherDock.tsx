@@ -153,6 +153,25 @@ function useComposerClearance(frameRef: RefObject<HTMLDivElement | null>, active
   return clearance;
 }
 
+function useSheetDismiss(
+  open: boolean,
+  frameRef: RefObject<HTMLDivElement | null>,
+  setOpen: (open: boolean) => void,
+): void {
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent): void => {
+      const target = event.target;
+      if (target instanceof Node && frameRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".watcher-dock-scrim")) return;
+      if (target instanceof Element && target.closest('[role="menu"], [role="dialog"]')) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss, true);
+    return () => document.removeEventListener("pointerdown", dismiss, true);
+  }, [frameRef, open, setOpen]);
+}
+
 /** Why the runtime would refuse Resume now, so the dock can say so instead. */
 function resumeBlockedReason(
   link: WatcherLinkView,
@@ -299,22 +318,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
     window.requestAnimationFrame(() => watcherHandleFor(watchedId)?.focus({ preventScroll: true }));
   }, [dock, watchedId]);
 
-  // A sheet collapses on any press outside it (the scrim focuses the handle).
-  const sheetOpen = sheet && dock.open;
-  const { setOpen } = dock;
-  useEffect(() => {
-    if (!sheetOpen) return;
-    const dismiss = (event: PointerEvent): void => {
-      const target = event.target;
-      if (target instanceof Node && frameRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest(".watcher-dock-scrim")) return;
-      // Menus and dialogs portalled to the body belong to whatever opened them.
-      if (target instanceof Element && target.closest('[role="menu"], [role="dialog"]')) return;
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", dismiss, true);
-    return () => document.removeEventListener("pointerdown", dismiss, true);
-  }, [setOpen, sheetOpen]);
+  useSheetDismiss(sheet && dock.open, frameRef, dock.setOpen);
 
   const resume = (): void => {
     if (!actions || resuming) return;

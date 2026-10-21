@@ -87,6 +87,151 @@ function MenuNote({ children }: { children: string }): React.JSX.Element {
   return <div role="menuitem" aria-disabled="true" tabIndex={-1} className="watcher-menu-note">{children}</div>;
 }
 
+function WatcherBarMenuItems({
+  link,
+  pending,
+  actions,
+  reviewUnavailable,
+  privateConnectConfigured,
+  usageTokens,
+  close,
+  run,
+  onOpenWatcherChat,
+  onCollapse,
+  onStop,
+}: {
+  link: WatcherLinkView;
+  pending: Pending;
+  actions: WatcherActions | null;
+  reviewUnavailable: boolean;
+  privateConnectConfigured: boolean;
+  usageTokens: number | null;
+  close: (restoreFocus?: boolean) => void;
+  run: (name: Exclude<Pending, null>, operation: () => Promise<unknown>) => void;
+  onOpenWatcherChat: (() => void) | null;
+  onCollapse: () => void;
+  onStop: () => void;
+}): React.JSX.Element {
+  const paused = link.status === "paused";
+  const counters = link.counters;
+  const allowance = link.budgets.wakesPerWatchedTurn;
+  const checksLeft = Math.min(allowance, Math.max(0, counters.wakeAllowance - counters.wakesThisTurn));
+  const budgetPaused = paused && link.pauseReason === "wake-budget";
+  return (
+    <>
+      {!paused && (
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          aria-disabled={pending !== null || undefined}
+          onClick={() => {
+            if (pending !== null || !actions) return;
+            close();
+            run("pause", actions.pause);
+          }}
+        >
+          Pause
+        </button>
+      )}
+      <button
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        aria-disabled={reviewUnavailable || undefined}
+        onClick={() => {
+          if (reviewUnavailable || !actions) return;
+          close();
+          run("review", actions.review);
+        }}
+      >
+        Review the last turn
+      </button>
+      {onOpenWatcherChat && (
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          onClick={() => {
+            close(false);
+            onOpenWatcherChat();
+          }}
+        >
+          Open watcher chat
+        </button>
+      )}
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        tabIndex={-1}
+        aria-checked={link.delivery === "auto"}
+        aria-disabled={pending !== null || undefined}
+        onClick={() => {
+          if (pending !== null || !actions) return;
+          close();
+          run("delivery", () => actions.update({ delivery: link.delivery === "auto" ? "manual" : "auto" }));
+        }}
+      >
+        Send findings automatically
+      </button>
+      {privateConnectConfigured && (
+        <button
+          type="button"
+          role="menuitemcheckbox"
+          tabIndex={-1}
+          aria-checked={link.privateConnect === "hidden"}
+          aria-disabled={pending !== null || undefined}
+          onClick={() => {
+            if (pending !== null) return;
+            close();
+            if (actions) {
+              run("visibility", () => actions.update({
+                privateConnect: link.privateConnect === "hidden" ? "inherit" : "hidden",
+              }));
+            }
+          }}
+        >
+          Hide from paired devices
+        </button>
+      )}
+      <button
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        onClick={() => {
+          close(false);
+          onCollapse();
+        }}
+      >
+        Collapse
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        tabIndex={-1}
+        className="is-danger"
+        aria-disabled={pending !== null || undefined}
+        onClick={() => {
+          if (pending !== null) return;
+          close(false);
+          onStop();
+        }}
+      >
+        Stop watching…
+      </button>
+      <div role="separator" />
+      {!budgetPaused && (
+        <MenuNote>{`${counterText(checksLeft)} of ${counterText(allowance)} checks left this turn`}</MenuNote>
+      )}
+      <MenuNote>{`${counterText(counters.eventsSeen)} ${counters.eventsSeen === 1 ? "event" : "events"} seen`}</MenuNote>
+      <MenuNote>{`${counterText(counters.eventsPending)} waiting`}</MenuNote>
+      {link.lastWakeAt && <MenuNote>{`Last check ${watcherClockTime(link.lastWakeAt)}`}</MenuNote>}
+      {link.quietSince && <MenuNote>{`Main chat quiet since ${watcherClockTime(link.quietSince)}`}</MenuNote>}
+      {usageTokens !== null && <MenuNote>{`Used ${formatCompact(usageTokens)} tokens`}</MenuNote>}
+    </>
+  );
+}
+
 export function WatcherBar({
   link,
   watched,
@@ -138,10 +283,6 @@ export function WatcherBar({
     ).finally(() => { if (mounted.current) setPending(null); });
   };
   const phase = stateText(link, liveForTurn ? watcherPhaseText(liveForTurn.phase, liveForTurn.label) : null);
-  const counters = link.counters;
-  const allowance = link.budgets.wakesPerWatchedTurn;
-  const checksLeft = Math.min(allowance, Math.max(0, counters.wakeAllowance - counters.wakesThisTurn));
-  const budgetPaused = paused && link.pauseReason === "wake-budget";
   const title = watched?.title ?? "this chat";
   const preset = watcherPresetName(link.preset);
   const summary = `Watcher for ${title}: ${agentLabel}, ${preset}`;
@@ -192,117 +333,19 @@ export function WatcherBar({
             disabled={!actions}
           >
             {(close) => (
-              <>
-                {!paused && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    tabIndex={-1}
-                    aria-disabled={pending !== null || undefined}
-                    onClick={() => {
-                      if (pending !== null || !actions) return;
-                      close();
-                      run("pause", actions.pause);
-                    }}
-                  >
-                    Pause
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="menuitem"
-                  tabIndex={-1}
-                  aria-disabled={reviewUnavailable || undefined}
-                  onClick={() => {
-                    if (reviewUnavailable || !actions) return;
-                    close();
-                    run("review", actions.review);
-                  }}
-                >
-                  Review the last turn
-                </button>
-                {onOpenWatcherChat && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    tabIndex={-1}
-                    onClick={() => {
-                      close(false);
-                      onOpenWatcherChat();
-                    }}
-                  >
-                    Open watcher chat
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="menuitemcheckbox"
-                  tabIndex={-1}
-                  aria-checked={link.delivery === "auto"}
-                  aria-disabled={pending !== null || undefined}
-                  onClick={() => {
-                    if (pending !== null || !actions) return;
-                    close();
-                    run("delivery", () => actions.update({ delivery: link.delivery === "auto" ? "manual" : "auto" }));
-                  }}
-                >
-                  Send findings automatically
-                </button>
-                {privateConnectConfigured && (
-                  <button
-                    type="button"
-                    role="menuitemcheckbox"
-                    tabIndex={-1}
-                    aria-checked={link.privateConnect === "hidden"}
-                    aria-disabled={pending !== null || undefined}
-                    onClick={() => {
-                      if (pending !== null) return;
-                      close();
-                      if (actions) {
-                        run("visibility", () => actions.update({
-                          privateConnect: link.privateConnect === "hidden" ? "inherit" : "hidden",
-                        }));
-                      }
-                    }}
-                  >
-                    Hide from paired devices
-                  </button>
-                )}
-                <button
-                  type="button"
-                  role="menuitem"
-                  tabIndex={-1}
-                  onClick={() => {
-                    close(false);
-                    onCollapse();
-                  }}
-                >
-                  Collapse
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  tabIndex={-1}
-                  className="is-danger"
-                  aria-disabled={pending !== null || undefined}
-                  onClick={() => {
-                    if (pending !== null) return;
-                    close(false);
-                    setConfirmingStop(true);
-                  }}
-                >
-                  Stop watching…
-                </button>
-                <div role="separator" />
-                {!budgetPaused && (
-                  <MenuNote>{`${counterText(checksLeft)} of ${counterText(allowance)} checks left this turn`}</MenuNote>
-                )}
-                <MenuNote>{`${counterText(counters.eventsSeen)} ${counters.eventsSeen === 1 ? "event" : "events"} seen`}</MenuNote>
-                <MenuNote>{`${counterText(counters.eventsPending)} waiting`}</MenuNote>
-                {link.lastWakeAt && <MenuNote>{`Last check ${watcherClockTime(link.lastWakeAt)}`}</MenuNote>}
-                {link.quietSince && <MenuNote>{`Main chat quiet since ${watcherClockTime(link.quietSince)}`}</MenuNote>}
-                {usageTokens !== null && <MenuNote>{`Used ${formatCompact(usageTokens)} tokens`}</MenuNote>}
-              </>
+              <WatcherBarMenuItems
+                link={link}
+                pending={pending}
+                actions={actions}
+                reviewUnavailable={reviewUnavailable}
+                privateConnectConfigured={privateConnectConfigured}
+                usageTokens={usageTokens}
+                close={close}
+                run={run}
+                onOpenWatcherChat={onOpenWatcherChat}
+                onCollapse={onCollapse}
+                onStop={() => setConfirmingStop(true)}
+              />
             )}
           </WatcherMenu>
         </div>

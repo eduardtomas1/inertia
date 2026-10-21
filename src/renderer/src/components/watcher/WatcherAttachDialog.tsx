@@ -150,6 +150,62 @@ function routeChoices(
     });
 }
 
+function initialSelection(
+  snapshot: AppSnapshot,
+  watched: AppSnapshot["conversations"][number] | null,
+  labels: AppSettings["providerIdentityLabels"],
+): ModelSelection | null {
+  const fallback = watched?.modelSelection ?? null;
+  const candidates = fallback ? routeChoices(snapshot, fallback, labels) : [];
+  const own = fallback
+    ? candidates.find((choice) => choice.ready && sameSelection(choice.route.selection, fallback))
+    : undefined;
+  const ready = own ?? candidates.find((choice) => choice.ready) ?? candidates[0];
+  return ready ? cloneSelection(ready.route.selection) : fallback;
+}
+
+function WatcherBudgetFields({
+  drafts,
+  budgets,
+  disabled,
+  onDraftsChange,
+}: {
+  drafts: Record<keyof WatcherBudgets, string>;
+  budgets: WatcherBudgets;
+  disabled: boolean;
+  onDraftsChange: (update: (current: Record<keyof WatcherBudgets, string>) => Record<keyof WatcherBudgets, string>) => void;
+}): React.JSX.Element {
+  return (
+    <div className="watcher-attach-budgets">
+      {BUDGET_FIELDS.map(({ key, label, unit }) => {
+        const limits = WATCHER_BUDGET_LIMITS[key];
+        return (
+          <label key={key} className="watcher-attach-budget">
+            <span>{label}</span>
+            <span className="watcher-attach-budget-input">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={limits.min}
+                max={limits.max}
+                step={1}
+                value={drafts[key]}
+                disabled={disabled}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  onDraftsChange((current) => ({ ...current, [key]: value }));
+                }}
+                onBlur={() => onDraftsChange((current) => ({ ...current, [key]: String(budgets[key]) }))}
+              />
+              {unit && <span aria-hidden="true">{unit}</span>}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Attaches a read-only watcher to one chat. Only ready routes on harnesses in
  * the reviewed watcher allowlist can be chosen; the dialog states plainly that
@@ -173,17 +229,7 @@ export function WatcherAttachDialog({
   const returnFocusRef = useRef(returnFocusTo);
   const watched = snapshot.conversations.find(({ id }) => id === watchedConversationId) ?? null;
   const labels = settings.providerIdentityLabels;
-  // The chat's own route when it can watch, otherwise the first ready one;
-  // chosen once, when the dialog opens.
-  const [selection, setSelection] = useState<ModelSelection | null>(() => {
-    const fallback = watched?.modelSelection ?? null;
-    const candidates = fallback ? routeChoices(snapshot, fallback, labels) : [];
-    const own = fallback
-      ? candidates.find((choice) => choice.ready && sameSelection(choice.route.selection, fallback))
-      : undefined;
-    const ready = own ?? candidates.find((choice) => choice.ready) ?? candidates[0];
-    return ready ? cloneSelection(ready.route.selection) : fallback;
-  });
+  const [selection, setSelection] = useState<ModelSelection | null>(() => initialSelection(snapshot, watched, labels));
   const [preset, setPreset] = useState<WatcherPreset>("reviewer");
   const [instructions, setInstructions] = useState("");
   const [sharing, setSharing] = useState<WatcherSharing>({ ...DEFAULT_WATCHER_SHARING });
@@ -492,33 +538,7 @@ export function WatcherAttachDialog({
           Budgets
           <ChevronDown size={14} aria-hidden="true" />
         </summary>
-        <div className="watcher-attach-budgets">
-          {BUDGET_FIELDS.map(({ key, label, unit }) => {
-            const limits = WATCHER_BUDGET_LIMITS[key];
-            return (
-              <label key={key} className="watcher-attach-budget">
-                <span>{label}</span>
-                <span className="watcher-attach-budget-input">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={limits.min}
-                    max={limits.max}
-                    step={1}
-                    value={budgetDrafts[key]}
-                    disabled={submitting}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setBudgetDrafts((current) => ({ ...current, [key]: value }));
-                    }}
-                    onBlur={() => setBudgetDrafts((current) => ({ ...current, [key]: String(budgets[key]) }))}
-                  />
-                  {unit && <span aria-hidden="true">{unit}</span>}
-                </span>
-              </label>
-            );
-          })}
-        </div>
+        <WatcherBudgetFields drafts={budgetDrafts} budgets={budgets} disabled={submitting} onDraftsChange={setBudgetDrafts} />
       </details>
 
       {error && <p className="watcher-attach-error" role="alert">{error}</p>}

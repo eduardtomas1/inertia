@@ -4,7 +4,10 @@ import type { z } from "zod";
 import type { ClientCommand, ServerEvent } from "../../../shared/contracts";
 import {
   watcherAttachPayloadSchema,
-  watcherCommandSchemas,
+  watcherDeliverCommandSchema,
+  watcherDismissCommandSchema,
+  watcherFeedCommandSchema,
+  watcherLinkCommandSchema,
   watcherUpdatePayloadSchema,
 } from "../../../shared/contracts/client-command/watcher";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -39,7 +42,13 @@ export interface WatcherCommandDependencies {
   send(socket: WebSocket, event: ServerEvent): void;
 }
 
-const [, , linkCommandSchema, feedCommandSchema, deliverCommandSchema, dismissCommandSchema] = watcherCommandSchemas;
+const LINK_ACTIONS = {
+  "watcher.pause": "pause",
+  "watcher.resume": "resume",
+  "watcher.wake": "wake",
+  "watcher.review": "review",
+  "watcher.detach": "detach",
+} as const;
 
 function parsed<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
   const result = schema.safeParse(value);
@@ -55,7 +64,6 @@ function parsed<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
 export function createWatcherCommandHandler(dependencies: WatcherCommandDependencies): RuntimeCommandHandler {
   const { coordinator, delivery } = dependencies;
   return defineRuntimeCommandHandler(WATCHER_COMMAND_TYPES, async (socket, untyped) => {
-    if (!(WATCHER_COMMAND_TYPES as readonly string[]).includes(untyped.type)) return "not-handled";
     const command = untyped as WatcherCommand;
     const reply = (result: Extract<ServerEvent, { type: "request.result" }>["result"]): "handled" => {
       dependencies.send(socket, { type: "request.result", requestId: command.requestId, result });
@@ -71,26 +79,19 @@ export function createWatcherCommandHandler(dependencies: WatcherCommandDependen
       case "watcher.wake":
       case "watcher.review":
       case "watcher.detach": {
-        const { linkId } = parsed(linkCommandSchema, command).payload;
-        const link = command.type === "watcher.pause"
-          ? coordinator.pause(linkId)
-          : command.type === "watcher.resume"
-            ? await coordinator.resume(linkId)
-            : command.type === "watcher.wake"
-              ? coordinator.wake(linkId)
-              : command.type === "watcher.review" ? coordinator.review(linkId) : coordinator.detach(linkId);
-        return reply({ kind: "watcher.link", link });
+        const { linkId } = parsed(watcherLinkCommandSchema, command).payload;
+        return reply({ kind: "watcher.link", link: await coordinator[LINK_ACTIONS[command.type]](linkId) });
       }
       case "watcher.feed.get": {
-        const { linkId, beforeSequence } = parsed(feedCommandSchema, command).payload;
+        const { linkId, beforeSequence } = parsed(watcherFeedCommandSchema, command).payload;
         return reply(coordinator.feed(linkId, beforeSequence));
       }
       case "watcher.note.deliver": {
-        const { linkId, wakeId, mode, deliveryId } = parsed(deliverCommandSchema, command).payload;
+        const { linkId, wakeId, mode, deliveryId } = parsed(watcherDeliverCommandSchema, command).payload;
         return reply(await delivery.deliver(linkId, wakeId, mode, deliveryId));
       }
       case "watcher.note.dismiss": {
-        const { linkId, wakeId } = parsed(dismissCommandSchema, command).payload;
+        const { linkId, wakeId } = parsed(watcherDismissCommandSchema, command).payload;
         return reply(delivery.dismiss(linkId, wakeId));
       }
       default:

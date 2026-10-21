@@ -49,7 +49,7 @@ export const WATCHER_EVENT_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set([
 
 export type WatcherDigestReader = Pick<
   WatcherDigestSource,
-  | "turn" | "latestTurn" | "activitiesAfter" | "activitiesByIds" | "assistantMessagesAfter" | "messageTextAfter" | "plan"
+  | "turn" | "latestTurn" | "activitiesAfter" | "activitiesByIds" | "assistantMessagesAfter" | "messageTailAfter" | "plan"
   | "messageText" | "files" | "watcherNoteOrigin"
 >;
 
@@ -545,7 +545,7 @@ export function buildWatcherDigest(
   const replies = read.flatMap((reply): DigestReply[] => {
     if (quotedBefore?.messageId !== reply.id || reply.bytes < quotedBefore.bytes) return [reply];
     if (reply.bytes === quotedBefore.bytes) return [];
-    const rest = source.messageTextAfter(reply.id, quotedBefore.bytes, MAX_REPLY_BYTES);
+    const rest = source.messageTailAfter(reply.id, quotedBefore.bytes, MAX_REPLY_BYTES);
     return [{ createdAt: reply.createdAt, content: rest.content, truncated: rest.truncated, continued: true }];
   });
   const streaming = isAgentTurnTerminalStatus(turn.status) ? null : read.at(-1) ?? null;

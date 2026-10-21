@@ -98,8 +98,8 @@ class FakeSource implements WatcherDigestReader {
         return { ...reply, content: truncated ? reply.content.slice(0, maximumBytes) : reply.content, truncated, bytes: bytes(reply.content) };
       });
   }
-  messageTextAfter(messageId: string, offsetBytes: number, maximumBytes: number) {
-    this.calls.push(`messageTextAfter:${messageId}`);
+  messageTailAfter(messageId: string, offsetBytes: number, maximumBytes: number) {
+    this.calls.push(`messageTailAfter:${messageId}`);
     const whole = Buffer.from(this.replies.find(({ id }) => id === messageId)?.content ?? "", "utf8");
     const rest = whole.subarray(offsetBytes);
     const kept = rest.subarray(Math.max(0, rest.length - maximumBytes));

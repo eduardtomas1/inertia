@@ -40,6 +40,38 @@ export const watcherUpdatePayloadSchema = z.strictObject({
   "A watcher update must change at least one setting.",
 );
 
+export const watcherLinkCommandSchema = z.strictObject({
+  ...requestBase,
+  type: z.enum(["watcher.pause", "watcher.resume", "watcher.wake", "watcher.review", "watcher.detach"]),
+  payload: z.strictObject({ linkId }),
+});
+
+export const watcherFeedCommandSchema = z.strictObject({
+  ...requestBase,
+  type: z.literal("watcher.feed.get"),
+  payload: z.strictObject({
+    linkId,
+    beforeSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+  }),
+});
+
+export const watcherDeliverCommandSchema = z.strictObject({
+  ...requestBase,
+  type: z.literal("watcher.note.deliver"),
+  payload: z.strictObject({
+    linkId,
+    wakeId: z.uuid(),
+    mode: watcherDeliveryModeSchema,
+    deliveryId: z.uuid(),
+  }),
+});
+
+export const watcherDismissCommandSchema = z.strictObject({
+  ...requestBase,
+  type: z.literal("watcher.note.dismiss"),
+  payload: z.strictObject({ linkId, wakeId: z.uuid() }),
+});
+
 export const watcherCommandSchemas = [
   z.strictObject({
     ...requestBase,
@@ -51,34 +83,10 @@ export const watcherCommandSchemas = [
     type: z.literal("watcher.update"),
     payload: watcherUpdatePayloadSchema,
   }),
-  z.strictObject({
-    ...requestBase,
-    type: z.enum(["watcher.pause", "watcher.resume", "watcher.wake", "watcher.review", "watcher.detach"]),
-    payload: z.strictObject({ linkId }),
-  }),
-  z.strictObject({
-    ...requestBase,
-    type: z.literal("watcher.feed.get"),
-    payload: z.strictObject({
-      linkId,
-      beforeSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
-    }),
-  }),
-  z.strictObject({
-    ...requestBase,
-    type: z.literal("watcher.note.deliver"),
-    payload: z.strictObject({
-      linkId,
-      wakeId: z.uuid(),
-      mode: watcherDeliveryModeSchema,
-      deliveryId: z.uuid(),
-    }),
-  }),
-  z.strictObject({
-    ...requestBase,
-    type: z.literal("watcher.note.dismiss"),
-    payload: z.strictObject({ linkId, wakeId: z.uuid() }),
-  }),
+  watcherLinkCommandSchema,
+  watcherFeedCommandSchema,
+  watcherDeliverCommandSchema,
+  watcherDismissCommandSchema,
 ] as const;
 
 export type WatcherAttachPayload = z.infer<typeof watcherAttachPayloadSchema>;

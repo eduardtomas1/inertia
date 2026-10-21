@@ -166,7 +166,7 @@ export class WatcherDigestSource {
     }));
   }
 
-  messageTextAfter(messageId: string, offsetBytes: number, maximumBytes: number): {
+  messageTailAfter(messageId: string, offsetBytes: number, maximumBytes: number): {
     content: string;
     truncated: boolean;
     bytes: number;

@@ -502,7 +502,7 @@ export class WatcherWakeRunner {
           ? {
               text: read.content.trim(),
               resolved: splitWatcherResolvedLine(
-                store.watcherLinks.digest.messageTextAfter(messageId, 0, MAX_RESOLVED_TAIL_BYTES).content,
+                store.watcherLinks.digest.messageTailAfter(messageId, 0, MAX_RESOLVED_TAIL_BYTES).content,
               ).resolved,
             }
           : splitWatcherResolvedLine(read.content);

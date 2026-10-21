@@ -155,6 +155,9 @@ export interface WatcherLinkRepositoryContext {
   turnReads(): Pick<ConversationContextTurnReads, "messageText" | "files">;
 }
 
+export const WATCHER_ARCHIVED_REFUSAL = "Archived chats can't be watched.";
+export const WATCHER_OF_WATCHER_REFUSAL = "A watcher can't watch another watcher.";
+export const WATCHER_LIMIT_REFUSAL = `Inertia already has ${MAX_ACTIVE_WATCHERS} active watchers. Stop one first.`;
 const TERMINAL_TURN_STATUSES_SQL = "('completed', 'failed', 'cancelled', 'interrupted')";
 const MAX_RETIRED_WAKES_PER_CHECK = 4;
 const ACTIVE_WAKE_STATES_SQL = "('dispatching', 'running')";
@@ -226,13 +229,13 @@ export class WatcherLinkRepository {
       const watched = this.database.prepare("SELECT id, project_id, archived_at FROM conversations WHERE id = ?")
         .get(input.link.watchedConversationId) as { id: string; project_id: string; archived_at: string | null } | undefined;
       if (!watched) throw new WatcherPolicyError("The chat to watch no longer exists.");
-      if (watched.archived_at !== null) throw new WatcherPolicyError("Unarchive this chat before adding a watcher.");
+      if (watched.archived_at !== null) throw new WatcherPolicyError(WATCHER_ARCHIVED_REFUSAL);
       if (watched.project_id !== input.conversation.projectId) {
-        throw new WatcherPolicyError("A watcher must belong to the watched chat's project.");
+        throw new WatcherPolicyError("A watcher must belong to the main chat's project.");
       }
       const watchedPolicy = this.policyForConversation(watched.id);
       if (watchedPolicy && watchedPolicy.status !== "detached") {
-        throw new WatcherPolicyError("A watcher cannot be watched.");
+        throw new WatcherPolicyError(WATCHER_OF_WATCHER_REFUSAL);
       }
       if (this.findActiveByWatched(watched.id)) {
         throw new WatcherPolicyError("This chat already has a watcher.");
@@ -240,7 +243,7 @@ export class WatcherLinkRepository {
       const { active } = this.database.prepare("SELECT COUNT(*) AS active FROM watcher_links WHERE status <> 'detached'")
         .get() as { active: number };
       if (active >= MAX_ACTIVE_WATCHERS) {
-        throw new WatcherPolicyError("Inertia already has eight active watchers. Stop one first.");
+        throw new WatcherPolicyError(WATCHER_LIMIT_REFUSAL);
       }
       const conversation = this.context.conversations.create(
         input.conversation.projectId,
@@ -756,7 +759,7 @@ export class WatcherLinkRepository {
       throw new WatcherPolicyError("A watcher stays read-only: plan mode with supervised access.");
     }
     if (!watcherHarnessAllowed(configuration.harnessId)) {
-      throw new WatcherPolicyError("This agent cannot run as a read-only watcher.");
+      throw new WatcherPolicyError("This agent can't run as a watcher.");
     }
   }
 

@@ -166,7 +166,7 @@ describe("watcher link repository", () => {
     expect(() => store.watcherLinks.createWithConversation({
       link: draft(foreign.id),
       conversation: { projectId, title: "Watcher", options: {} },
-    }, tick())).toThrow("A watcher must belong to the watched chat's project.");
+    }, tick())).toThrow("A watcher must belong to the main chat's project.");
     expect(() => attach(chat("Bad budgets"), { budgets: { ...DEFAULT_WATCHER_BUDGETS, digestKiB: 99 } })).toThrow();
     expect(conversationCount()).toBe(before + 2);
   });
@@ -187,7 +187,7 @@ describe("watcher link repository", () => {
     const watched = chat("Archived meanwhile");
     store.archiveConversation(watched.id, true);
     const before = conversationCount();
-    expect(() => attach(watched)).toThrow(new WatcherPolicyError("Unarchive this chat before adding a watcher."));
+    expect(() => attach(watched)).toThrow(new WatcherPolicyError("Archived chats can't be watched."));
     expect(conversationCount()).toBe(before);
     expect(store.watcherLinks.findActiveByWatched(watched.id)).toBeNull();
   });

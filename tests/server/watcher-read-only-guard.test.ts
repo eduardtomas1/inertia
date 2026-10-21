@@ -296,7 +296,7 @@ describe("read-only watcher turns", () => {
     });
     try {
       expect(() => runtime.controller.queue({ conversationId: runtime.watcher.id, content: "Typed by the user" }))
-        .toThrow("This agent cannot run as a read-only watcher.");
+        .toThrow("This agent can't run as a watcher.");
     } finally {
       runtime.store.close();
     }

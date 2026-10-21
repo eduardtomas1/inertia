@@ -15,6 +15,9 @@ import {
 import type { RuntimeStore } from "../../database";
 import { watcherLinkDetailView, watcherLinkView } from "../../persistence/watcher-link-codecs";
 import {
+  WATCHER_ARCHIVED_REFUSAL,
+  WATCHER_LIMIT_REFUSAL,
+  WATCHER_OF_WATCHER_REFUSAL,
   WatcherPolicyError,
   type WatcherFeedPage,
   type WatcherLinkRecord,
@@ -182,16 +185,16 @@ export class WatcherLinkCoordinator {
     const watched = conversationOrNull(store, payload.watchedConversationId);
     if (!watched) throw new RuntimeRequestError("The chat to watch no longer exists.");
     if (store.project(watched.projectId).workspaceKind === "scratch") {
-      throw new RuntimeRequestError("A watcher needs a chat in a project.");
+      throw new RuntimeRequestError("Chats without a project can't be watched.");
     }
-    if (watched.archivedAt !== null) throw new RuntimeRequestError("Unarchive this chat before adding a watcher.");
+    if (watched.archivedAt !== null) throw new RuntimeRequestError(WATCHER_ARCHIVED_REFUSAL);
     const watchedPolicy = store.watcherLinks.policyForConversation(watched.id);
     if (watchedPolicy && watchedPolicy.status !== "detached") {
-      throw new RuntimeRequestError("A watcher can't watch another watcher.");
+      throw new RuntimeRequestError(WATCHER_OF_WATCHER_REFUSAL);
     }
     if (store.watcherLinks.findActiveByWatched(watched.id)) throw new RuntimeRequestError("This chat already has a watcher.");
     if (store.watcherLinks.active().length >= MAX_ACTIVE_WATCHERS) {
-      throw new RuntimeRequestError("Inertia already has eight active watchers. Stop one first.");
+      throw new RuntimeRequestError(WATCHER_LIMIT_REFUSAL);
     }
     const route = await this.#deps.route(payload.modelSelection);
     if (!route.ready) throw new RuntimeRequestError(route.message);
@@ -200,10 +203,10 @@ export class WatcherLinkCoordinator {
       try {
         actual = store.conversationPath(watched.id);
       } catch {
-        throw new RuntimeRequestError("The watched chat's worktree is unavailable, so a watcher can't share it.");
+        throw new RuntimeRequestError("The main chat's worktree is unavailable, so a watcher can't share it.");
       }
       if (normalizeIdentityPath(resolve(watched.worktreePath)) !== normalizeIdentityPath(resolve(actual))) {
-        throw new RuntimeRequestError("The watched chat's worktree is not the checkout it records.");
+        throw new RuntimeRequestError("The main chat's worktree is not the checkout it records.");
       }
     }
     const current = store.conversation(watched.id);
@@ -291,10 +294,10 @@ export class WatcherLinkCoordinator {
     }
     if (link.watchedConversationId !== null
       && (conversationOrNull(store, link.watchedConversationId)?.archivedAt ?? null) !== null) {
-      throw new RuntimeRequestError("Unarchive the watched chat before resuming its watcher.");
+      throw new RuntimeRequestError("Unarchive the main chat to resume its watcher.");
     }
     if ((conversationOrNull(store, link.watcherConversationId)?.archivedAt ?? null) !== null) {
-      throw new RuntimeRequestError("Unarchive the watcher chat before resuming it.");
+      throw new RuntimeRequestError("Unarchive the watcher chat to resume it.");
     }
     const resumed = store.watcherLinks.transition(linkId, ["paused"], { status: "watching" }, this.#deps.now());
     if (!resumed) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
@@ -319,7 +322,7 @@ export class WatcherLinkCoordinator {
     if (link.status === "paused") throw new RuntimeRequestError("Resume the watcher before asking it to review the last turn.");
     if (link.status === "waking") throw new RuntimeRequestError("The watcher is already checking.");
     const latest = link.watchedConversationId === null ? null : store.latestAgentTurnForConversation(link.watchedConversationId);
-    if (!latest) throw new RuntimeRequestError("The watched chat has no turn to review yet.");
+    if (!latest) throw new RuntimeRequestError("The main chat has no turn to review yet.");
     const now = this.#deps.now();
     if (link.cursor.turnId !== latest.id) {
       store.watcherLinks.beginWatchedTurn(linkId, latest.id, now);

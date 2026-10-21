@@ -209,7 +209,7 @@ export class AgentContextTool {
     const link = this.dependencies.store.watcherLinks.findByWatcher(current.id);
     const budget = link?.budgets.contextReadsPerWake ?? 0;
     if (!this.dependencies.watcherPolicy!.consumeRead(source.turn.id, budget)) {
-      return failure("budget_exceeded", `This check already read context ${budget} times.`);
+      return failure("budget_exceeded", budget === 0 ? "This watcher can't read more of the chat." : `This check already read context ${budget} times.`);
     }
     // "What the watcher sees" bounds this tool as it bounds each check.
     const share: AgentContextShare | undefined = access === "watched" && link

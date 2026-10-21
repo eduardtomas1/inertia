@@ -15,6 +15,7 @@ import type { RuntimeStore } from "../../database";
 import type { WatcherLinkRecord, WatcherWakeRecord } from "../../persistence/watcher-link-repository";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { publicRuntimeError, RuntimeRequestError } from "../../runtime-errors";
+import { WATCHER_NOTE_REMOVED_REASON } from "../queued-message-runtime";
 import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
@@ -35,7 +36,7 @@ export const WATCHER_DELIVERY_DETAIL = Object.freeze({
   idle: "the main chat wasn't running",
   dispatchedLater: "after the turn ended",
   steeredFromQueue: "into the running turn",
-  removed: "it was removed from the main chat's queue",
+  removed: WATCHER_NOTE_REMOVED_REASON,
 });
 
 type QueueReason = "queue" | "steer-idle" | "turn-ended" | "refused";
@@ -401,7 +402,7 @@ export class WatcherDeliveryService {
     detail: string | null,
   ): Promise<WatcherDeliveryResult | null> {
     const interaction = this.#deps.interaction();
-    if (!interaction) throw new RuntimeRequestError("The main chat cannot start a turn right now.");
+    if (!interaction) throw new RuntimeRequestError("The main chat can't start a turn right now.");
     let acceptedMessageId: string | null = null;
     const handler = createTurnInteractionCommandHandler({
       ...interaction,

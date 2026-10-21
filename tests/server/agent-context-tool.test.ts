@@ -751,7 +751,17 @@ describe("inertia_request_context for a watcher", () => {
       parsed(await bridge.invoke(call({})));
       const third = await bridge.invoke(call({}));
       expect(third.success).toBe(false);
-      expect(JSON.parse(third.text).error.code).toBe("budget_exceeded");
+      expect(JSON.parse(third.text).error).toMatchObject({ code: "budget_exceeded", message: "This check already read context 2 times." });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("says a watcher with no context reads can't read more of the chat", async () => {
+    const { bridgeFor, store, watcherTurn } = await watcherFixture(0);
+    try {
+      const refused = await bridgeFor(watcherTurn).invoke(call({}));
+      expect(JSON.parse(refused.text).error).toMatchObject({ code: "budget_exceeded", message: "This watcher can't read more of the chat." });
     } finally {
       store.close();
     }

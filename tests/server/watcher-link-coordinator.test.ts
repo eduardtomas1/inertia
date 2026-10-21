@@ -87,13 +87,13 @@ describe("watcher link coordinator", () => {
 
       const archived = f.store.createConversation(f.project.id, "Old work");
       f.store.archiveConversation(archived.id, true);
-      await refused(f, { watchedConversationId: archived.id }, "Unarchive this chat");
+      await refused(f, { watchedConversationId: archived.id }, "Archived chats can't be watched.");
 
       const scratchRoot = join(f.directory, "scratch");
       await mkdir(scratchRoot);
       const scratch = f.store.createProject("No project", scratchRoot, { workspaceKind: "scratch", activate: false });
       const chat = f.store.createConversation(scratch.id, "Scratch chat");
-      await refused(f, { watchedConversationId: chat.id }, "needs a chat in a project");
+      await refused(f, { watchedConversationId: chat.id }, "Chats without a project can't be watched.");
       expect(f.store.watcherLinks.active()).toHaveLength(1);
     } finally {
       await f.close();
@@ -427,7 +427,7 @@ describe("watcher link coordinator", () => {
       await f.startWatchedTurn();
       await f.advance(10 * 60_000);
       expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watcher chat");
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watcher chat to resume it.");
       f.store.archiveConversation(link.watcherConversationId, false);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
@@ -460,7 +460,7 @@ describe("watcher link coordinator", () => {
       expect(results.map(({ status }) => status).sort()).toEqual(["fulfilled", "rejected"]);
       const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected")!;
       expect(rejected.reason).toBeInstanceOf(RuntimeRequestError);
-      expect(rejected.reason.message).toBe("Inertia already has eight active watchers. Stop one first.");
+      expect(rejected.reason.message).toBe("Inertia already has 8 active watchers. Stop one first.");
       expect(f.store.watcherLinks.active()).toHaveLength(MAX_ACTIVE_WATCHERS);
     } finally {
       await f.close();
@@ -511,7 +511,7 @@ describe("watcher link coordinator", () => {
       f.store.archiveConversation(f.watched.id, true);
       f.watchers.onConversationArchived(f.watched.id);
       expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watched chat");
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the main chat to resume its watcher.");
       f.store.archiveConversation(f.watched.id, false);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
@@ -526,7 +526,7 @@ describe("watcher link coordinator", () => {
       const link = await f.attach();
       await f.command("watcher.pause", { linkId: link.id });
       f.store.archiveConversation(f.watched.id, true);
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watched chat");
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the main chat to resume its watcher.");
     } finally {
       await f.close();
     }
@@ -636,7 +636,7 @@ describe("watcher link coordinator", () => {
       } as unknown as ConversationCommandDependencies);
       await handler({} as never, { type: "conversation.archive", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "watched-archived" });
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the watched chat");
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("Unarchive the main chat to resume its watcher.");
       f.store.archiveConversation(f.watched.id, false);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });

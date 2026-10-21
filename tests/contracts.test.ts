@@ -137,6 +137,53 @@ describe("conversation context contract boundary", () => {
       },
     }).success).toBe(false);
   });
+
+  it("accepts a requested-source summary only for the chat the request names", () => {
+    const requestId = crypto.randomUUID();
+    const conversationId = crypto.randomUUID();
+    const sourceConversationId = crypto.randomUUID();
+    const turnId = crypto.randomUUID();
+    const requestedSource = {
+      conversationId: sourceConversationId,
+      conversationTitle: "Source chat",
+      projectName: "Source project",
+      workspaceLabel: "Project checkout",
+      targetWorkspaceLabel: "Project checkout",
+      workspaceRelation: "same-workspace",
+    };
+    const event = (context: Record<string, unknown>) => ({
+      type: "agent.input.requested",
+      request: {
+        id: requestId,
+        providerId: "codex",
+        conversationId,
+        runId: "run-context",
+        turnId,
+        questions: [],
+        autoResolutionMs: 300_000,
+        conversationContextRequest: {
+          requestId,
+          targetConversationId: conversationId,
+          targetTurnId: turnId,
+          requestedSourceConversationId: sourceConversationId,
+          createdAt: "2026-08-20T10:00:00.000Z",
+          expiresAt: "2026-08-20T10:05:00.000Z",
+          ...context,
+        },
+      },
+    });
+    expect(serverEventSchema.safeParse(event({ requestedSource })).success).toBe(true);
+    expect(serverEventSchema.safeParse(event({
+      requestedSource: { ...requestedSource, conversationId: crypto.randomUUID() },
+    })).success).toBe(false);
+    expect(serverEventSchema.safeParse(event({
+      requestedSourceConversationId: null,
+      requestedSource,
+    })).success).toBe(false);
+    expect(serverEventSchema.safeParse(event({
+      requestedSource: { ...requestedSource, workspaceRelation: "elsewhere" },
+    })).success).toBe(false);
+  });
 });
 
 describe("client command contract", () => {

@@ -491,7 +491,12 @@ function inputRequest(value: unknown): boolean {
   return context === undefined || (recordWithStrings(context, "requestId", "targetConversationId", "targetTurnId", "createdAt", "expiresAt")
     && nullableStringField(context, "requestedSourceConversationId") && context.requestId === value.id && context.targetConversationId === value.conversationId
     && context.targetTurnId === value.turnId && context.requestedSourceConversationId !== context.targetConversationId
-    && Number.isFinite(Date.parse(context.createdAt as string)) && Date.parse(context.expiresAt as string) > Date.parse(context.createdAt as string) && (value.questions as unknown[]).length === 0);
+    && Number.isFinite(Date.parse(context.createdAt as string)) && Date.parse(context.expiresAt as string) > Date.parse(context.createdAt as string) && (value.questions as unknown[]).length === 0
+    && (context.requestedSource === undefined || agentContextRequestedSource(context.requestedSource, context.requestedSourceConversationId)));
+}
+function agentContextRequestedSource(value: unknown, requestedSourceConversationId: unknown): boolean {
+  return recordWithStrings(value, "conversationId", "conversationTitle", "projectName", "workspaceLabel", "targetWorkspaceLabel", "workspaceRelation")
+    && oneOf(value, "workspaceRelation", WORKSPACE_RELATIONS) && typeof requestedSourceConversationId === "string" && value.conversationId === requestedSourceConversationId;
 }
 
 function agentPlan(value: unknown): boolean {

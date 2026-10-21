@@ -368,15 +368,17 @@ export function ComposerConversationContextRequestCard({
   request,
   sources,
   onCommand,
+  onClosed,
 }: {
   request: AgentConversationContextRequest | null;
   sources: readonly ConversationContextSourceOption[];
   onCommand?: ConversationContextCommandRunner;
+  onClosed?: () => void;
 }): React.JSX.Element | null {
   if (!request || !onCommand) return null;
   return (
     <Suspense fallback={null}>
-      <RequestCard key={`${request.targetConversationId}/${request.requestId}`} request={request} sources={sources} onCommand={onCommand} />
+      <RequestCard key={`${request.targetConversationId}/${request.requestId}`} request={request} sources={sources} onCommand={onCommand} onClosed={onClosed} />
     </Suspense>
   );
 }

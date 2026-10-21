@@ -40,7 +40,7 @@ function image(name: string, bytes: number): ChatAttachment {
   };
 }
 
-async function fixture(options: { providerId?: ProviderId; imageModel?: boolean; watcherPolicy?: boolean } = {}) {
+async function fixture(options: { providerId?: ProviderId; imageModel?: boolean; watcherPolicy?: boolean; contextTimeoutMs?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "inertia-agent-context-tool-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -103,8 +103,10 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean;
   const pendingInputs = new Map();
   const contextRequests = new ConversationContextRequestCoordinator({
     pendingInputs,
+    contextPackets: store.contextPackets,
     broadcast: vi.fn(),
     broadcastConversationShell: vi.fn(),
+    ...(options.contextTimeoutMs ? { timeoutMs: options.contextTimeoutMs } : {}),
   });
   const previews = new Map<string, Buffer>();
   const conversationAttachments = {
@@ -417,6 +419,26 @@ describe("inertia_request_context", () => {
     }
   });
 
+  it("tells the agent that an unanswered context request expired, not that its turn ended", async () => {
+    const context = await fixture({ contextTimeoutMs: 5 });
+    const { begin, bridgeFor, pendingInputs, store, target } = context;
+    try {
+      const other = store.createConversation(context.project.id, "Unrelated chat", { activate: false });
+      const current = begin(target, "Look at the other chat.");
+      const result = await bridgeFor(current).invoke(call({ conversationId: other.id }));
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text)).toEqual({
+        error: {
+          code: "request_expired",
+          message: "The user did not answer the context request before it expired.",
+        },
+      });
+      expect(pendingInputs.size).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
   it("asks the user before reading any other chat, then reads its turns for the rest of this turn", async () => {
     const context = await fixture();
     const { begin, bridgeFor, contextRequests, pendingInputs, settle, store, target } = context;
@@ -430,7 +452,15 @@ describe("inertia_request_context", () => {
 
       const approval = bridge.invoke(call({ conversationId: other.id, turnId: otherTurn.id }));
       const chooser = [...pendingInputs.values()][0];
-      expect(chooser?.conversationContextRequest).toMatchObject({ requestedSourceConversationId: other.id });
+      expect(chooser?.conversationContextRequest).toMatchObject({
+        requestedSourceConversationId: other.id,
+        requestedSource: {
+          conversationId: other.id,
+          conversationTitle: "Unrelated chat",
+          projectName: context.project.name,
+          workspaceRelation: "same-workspace",
+        },
+      });
       expect(contextRequests.respond({
         requestId: chooser!.id,
         targetConversationId: target.id,
@@ -450,6 +480,72 @@ describe("inertia_request_context", () => {
       void bridgeFor(later).invoke(call({ conversationId: other.id }));
       expect(pendingInputs.size).toBe(1);
       contextRequests.cancelForTurn(target.id, later.id);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps a named request pending until the user confirms a chat whose workspace changed after the request", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, contextRequests, pendingInputs, settle, store, target } = context;
+    try {
+      const other = store.createConversation(context.project.id, "Unrelated chat", { activate: false });
+      const otherTurn = begin(other, "Unrelated request");
+      store.createMessage(other.id, "Unrelated answer", "assistant", [], otherTurn.id, tick());
+      settle(otherTurn.id);
+      const current = begin(target, "Look at the other chat.");
+      const approval = bridgeFor(current).invoke(call({ conversationId: other.id }));
+      const chooser = [...pendingInputs.values()][0]!;
+      expect(chooser.conversationContextRequest?.requestedSource?.workspaceRelation)
+        .toBe("same-workspace");
+      const requested = chooser.conversationContextRequest!.requestedSource!;
+      vi.spyOn(store.contextPackets, "requestedSourceSummary").mockReturnValue({
+        ...requested,
+        workspaceLabel: "Isolated worktree",
+        workspaceRelation: "different-workspace",
+      });
+      const select = (acknowledgedWorkspaceDifference: boolean) => contextRequests.respond({
+        requestId: chooser.id,
+        targetConversationId: target.id,
+        selection: { sourceConversationId: other.id, acknowledgedWorkspaceDifference },
+      });
+
+      expect(select(false)).toBe(false);
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({ status: "selection-pending" });
+      expect([...pendingInputs.values()][0]?.conversationContextRequest?.requestedSource)
+        .toMatchObject({ conversationId: other.id, workspaceRelation: "different-workspace" });
+
+      expect(select(true)).toBe(true);
+      expect(parsed(await approval).context[0].source.conversationId).toBe(other.id);
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({ status: "completed" });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("asks without host labels when the named chat's folder is gone, and records the user's decline", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, contextRequests, otherProject, pendingInputs, store, target } = context;
+    try {
+      const unreachable = store.createConversation(otherProject.id, "Storefront CSV", { activate: false });
+      await rm(otherProject.path, { recursive: true, force: true });
+      expect(() => store.contextPackets.requestedSourceSummary(unreachable.id, target.id)).toThrow();
+      const current = begin(target, "Look at the storefront chat.");
+      const approval = bridgeFor(current).invoke(call({ conversationId: unreachable.id }));
+      const chooser = [...pendingInputs.values()][0]!;
+      expect(chooser.conversationContextRequest?.requestedSourceConversationId).toBe(unreachable.id);
+      expect(chooser.conversationContextRequest).not.toHaveProperty("requestedSource");
+
+      expect(contextRequests.respond({
+        requestId: chooser.id,
+        targetConversationId: target.id,
+        selection: null,
+      })).toBe(true);
+      const result = await approval;
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text).error.code).toBe("user_cancelled");
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({ status: "cancelled" });
+      expect(pendingInputs.size).toBe(0);
     } finally {
       store.close();
     }

@@ -58,6 +58,7 @@ export interface ComposerProps {
   promptPresetsEnabled?: boolean;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
+  agentContextRequestEnabled?: boolean;
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];

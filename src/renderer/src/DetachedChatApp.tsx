@@ -34,6 +34,7 @@ import { MAC_BRAND_SAFE_INSET } from "@shared/window-chrome";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import type { ConversationContextSourceOption } from "./components/conversation-context/types";
 import { installWindowCloseShortcut } from "./utils/globalShortcuts";
 import type { ProviderTerminalResumeOption } from "./components/providerResumeOptions";
 import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
@@ -95,6 +96,7 @@ const NO_RESUME_OPTIONS: readonly ProviderTerminalResumeOption[] = [];
 const NO_SKILLS: AgentSkillSummary[] = [];
 const NO_BACKEND_PROFILES: ModelBackendProfileView[] = [];
 const NO_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
+const NO_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
 const resolveProviderMaintenance = (): Promise<void> => Promise.resolve();
 const openProviderUpdateInstructions = (url: string): void => {
   void window.inertia.openExternal(url).catch(() => undefined);
@@ -131,6 +133,46 @@ export function preserveDetachedDraftBeforeUnload(
 
 function publicError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+export interface DetachedContextRequests {
+  inputRequests: AgentInputRequest[];
+  contextSources: readonly ConversationContextSourceOption[];
+  mainWindowReviewPending: boolean;
+}
+
+export function detachedContextRequests(
+  pendingInputs: AgentInputRequest[],
+): DetachedContextRequests {
+  const contextSources: ConversationContextSourceOption[] = [];
+  const inputRequests = pendingInputs.filter((request) => {
+    const context = request.conversationContextRequest;
+    if (!context) return true;
+    const source = context.requestedSource;
+    if (
+      !source
+      || context.requestedSourceConversationId === null
+      || source.conversationId !== context.requestedSourceConversationId
+    ) return false;
+    if (!contextSources.some(({ conversationId }) => conversationId === source.conversationId)) {
+      contextSources.push({
+        conversationId: source.conversationId,
+        conversationTitle: source.conversationTitle,
+        projectName: source.projectName,
+        workspaceLabel: source.workspaceLabel,
+        targetWorkspaceLabel: source.targetWorkspaceLabel,
+        workspaceRelation: source.workspaceRelation,
+        archived: false,
+      });
+    }
+    return true;
+  });
+  const mainWindowReviewPending = inputRequests.length !== pendingInputs.length;
+  return {
+    inputRequests: mainWindowReviewPending ? inputRequests : pendingInputs,
+    contextSources: contextSources.length > 0 ? contextSources : NO_CONTEXT_SOURCES,
+    mainWindowReviewPending,
+  };
 }
 
 export function DetachedContextHandoffNotice({
@@ -492,6 +534,10 @@ export default function DetachedChatApp({
     conversation
     && (!detailState || detailState.state === "loading"),
   );
+  const contextRequests = useMemo(
+    () => detachedContextRequests(projection.pendingInputs),
+    [projection.pendingInputs],
+  );
   const watchers = useWatcherSurfaceController({
     snapshot: connection.snapshot,
     surface: "detached",
@@ -499,9 +545,9 @@ export default function DetachedChatApp({
     request: null,
     primaryConversationId: conversationId,
   });
-  const contextHandoffPending = projection.pendingInputs.some(
+  const namedContextRequestId = [...contextRequests.inputRequests].reverse().find(
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,
-  );
+  )?.id ?? null;
   const visibleConversation = projection.detail?.conversation ?? conversation;
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
@@ -543,8 +589,13 @@ export default function DetachedChatApp({
       </header>
 
       <div className="detached-chat-content">
-        {contextHandoffPending && (
+        {contextRequests.mainWindowReviewPending && (
           <DetachedContextHandoffNotice onReturnToMain={dockInMain} />
+        )}
+        {namedContextRequestId && (
+          <p key={namedContextRequestId} className="visually-hidden" role="status" aria-live="polite">
+            The agent asked to read another chat.
+          </p>
         )}
         {unavailableDetail ? (
           <ConversationDetailState
@@ -592,6 +643,9 @@ export default function DetachedChatApp({
             onQueueCommand={runtimeActions.runQueueCommand}
             onLimitResetCommand={runtimeActions.runLimitResetCommand}
             conversationContextHandoffEnabled={false}
+            agentContextRequestEnabled
+            contextSources={contextRequests.contextSources}
+            onConversationContextCommand={runtimeActions.run}
             goal={{
               workflow: workflowState,
               executionStatus,
@@ -603,7 +657,7 @@ export default function DetachedChatApp({
               onClearGoal: workflow.clearGoal,
             }}
             approvals={projection.pendingApprovals}
-            inputRequests={projection.pendingInputs}
+            inputRequests={contextRequests.inputRequests}
             providers={connection.snapshot.providers}
             backendProfiles={connection.snapshot.backendProfiles ?? NO_BACKEND_PROFILES}
             maintenanceStatus={null}

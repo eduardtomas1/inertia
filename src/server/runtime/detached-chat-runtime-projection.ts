@@ -57,16 +57,26 @@ export function projectDetachedChatInputRequest(
   if (
     !contextRequest?.requestedSourceConversationId
     || contextRequest.requestedSourceConversationId === conversationId
+    || detachedContextRequestShareable(contextRequest)
   ) {
     return request;
   }
+  const { requestedSource: _requestedSource, ...unnamed } = contextRequest;
   return {
     ...request,
     conversationContextRequest: {
-      ...contextRequest,
+      ...unnamed,
       requestedSourceConversationId: null,
     },
   };
+}
+
+export function detachedContextRequestShareable(
+  contextRequest: NonNullable<AgentInputRequest["conversationContextRequest"]>,
+): boolean {
+  return contextRequest.requestedSourceConversationId !== null
+    && contextRequest.requestedSource?.conversationId
+      === contextRequest.requestedSourceConversationId;
 }
 
 /**

@@ -153,6 +153,7 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
   const pendingInputs = new Map();
   const contextRequests = new ConversationContextRequestCoordinator({
     pendingInputs,
+    contextPackets: store.contextPackets,
     broadcast: vi.fn(),
     broadcastConversationShell: vi.fn(),
   });

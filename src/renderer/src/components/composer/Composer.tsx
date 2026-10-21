@@ -95,7 +95,8 @@ export const Composer = memo(function Composer({
   skills,
   skillsCapability,
   skillsLoading, skillsError,
-  conversationContextHandoffEnabled = true, promptContext,
+  conversationContextHandoffEnabled = true,
+  agentContextRequestEnabled = conversationContextHandoffEnabled, promptContext,
   contextSources = [], contextPackets = [], hasVisibleHistory = false,
   agentContextRequest = null, onConversationContextCommand,
   onQueueCommand,
@@ -991,9 +992,10 @@ export const Composer = memo(function Composer({
         )}
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
-          contextCards={<>{conversationContextHandoffEnabled && (
+          contextCards={<>{agentContextRequestEnabled && (
+            <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} onClosed={() => textareaRef.current?.focus()} />
+          )}{conversationContextHandoffEnabled && (
             <>
-              <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
               <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />
               <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
             </>

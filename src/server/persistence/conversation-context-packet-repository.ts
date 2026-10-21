@@ -18,6 +18,7 @@ import {
   type MaterializedConversationContext,
   type MessageSendAcceptance,
 } from "../../shared/contracts";
+import type { AgentConversationContextRequestedSource } from "../../shared/conversation-context";
 import { normalizeIdentityPath } from "../project-identity";
 import { boundedSubagentText } from "../provider/subagent-trace";
 import { truncateUtf8 } from "../runtime/untrusted-agent-text";
@@ -928,6 +929,37 @@ export class ConversationContextPacketRepository {
     sourceConversationId: string,
     targetConversationId: string,
   ): ConversationContextSourceTranscript {
+    const { source, target, summary } = this.sourceLabels(
+      sourceConversationId,
+      targetConversationId,
+    );
+    const messages = Array.from(conversationContextSourceRows(
+      this.context.database, source.id, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES,
+    ), (row) => scrubAndBoundExcerpt(row)).reverse();
+    return {
+      ...summary,
+      projectId: source.project_id,
+      targetConversationId: target.id,
+      targetProjectId: target.project_id,
+      messages,
+    };
+  }
+
+  requestedSourceSummary(
+    sourceConversationId: string,
+    targetConversationId: string,
+  ): AgentConversationContextRequestedSource {
+    return this.sourceLabels(sourceConversationId, targetConversationId).summary;
+  }
+
+  private sourceLabels(
+    sourceConversationId: string,
+    targetConversationId: string,
+  ): {
+    source: ConversationRow;
+    target: ConversationRow;
+    summary: AgentConversationContextRequestedSource;
+  } {
     if (sourceConversationId === targetConversationId) {
       throw new Error("Choose another chat as the context source.");
     }
@@ -941,22 +973,19 @@ export class ConversationContextPacketRepository {
     const targetPath = normalizeIdentityPath(resolve(
       this.context.conversationPath(target.id),
     ));
-    const messages = Array.from(conversationContextSourceRows(
-      this.context.database, source.id, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES,
-    ), (row) => scrubAndBoundExcerpt(row)).reverse();
     return {
-      conversationId: source.id,
-      projectId: source.project_id,
-      conversationTitle: source.title,
-      projectName: project.name,
-      workspaceLabel: workspaceLabel(source),
-      targetConversationId: target.id,
-      targetProjectId: target.project_id,
-      targetWorkspaceLabel: workspaceLabel(target),
-      workspaceRelation: sourcePath === targetPath
-        ? "same-workspace"
-        : "different-workspace",
-      messages,
+      source,
+      target,
+      summary: {
+        conversationId: source.id,
+        conversationTitle: source.title,
+        projectName: project.name,
+        workspaceLabel: workspaceLabel(source),
+        targetWorkspaceLabel: workspaceLabel(target),
+        workspaceRelation: sourcePath === targetPath
+          ? "same-workspace"
+          : "different-workspace",
+      },
     };
   }
 

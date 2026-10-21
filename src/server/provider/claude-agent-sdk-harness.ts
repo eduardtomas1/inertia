@@ -11,7 +11,7 @@ import {
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
-import { WATCHER_COMMAND_ENVIRONMENT } from "../runtime/watcher/read-only-commands";
+import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -1114,13 +1114,13 @@ function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
   readOnlyProfile?: ProviderRunInput["readOnlyProfile"],
 ): NodeJS.ProcessEnv {
-  return {
+  const run = {
     ...CLAUDE_SUBAGENT_LIMITS,
     ...CLAUDE_STARTUP_FAILURE_RESULTS,
     ...CLAUDE_TRANSCRIPT_FLUSH,
     ...(environment ?? process.env),
-    ...(readOnlyProfile === "watcher" ? WATCHER_COMMAND_ENVIRONMENT : {}),
   };
+  return readOnlyProfile === "watcher" ? watcherCommandEnvironment(run) : run;
 }
 
 function stringValue(value: unknown): string | undefined {

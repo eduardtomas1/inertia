@@ -119,13 +119,23 @@ describe("Claude permission broker", () => {
   it.each([
     "git diff --stat",
     "git log --oneline | head -5",
-    "rg -n parse src",
     "cat /workspace/src/parser.ts",
   ])("runs the read-only command %s for a watcher without an approval", async (command) => {
     const events: AgentHarnessEvent[] = [];
     const input = { command, description: "Inspect the work" };
     await expect(watcherBroker(events).canUseTool("Bash", input, callbackOptions()))
       .resolves.toEqual({ behavior: "allow", updatedInput: input });
+    expect(events).toEqual([]);
+  });
+
+  it.each([
+    ["rg -n parse src", "rg --no-config -n parse src"],
+    ["git log --oneline | rg fix", "git log --oneline | rg --no-config fix"],
+  ])("runs the ripgrep command %s for a watcher without its configuration file", async (command, rewritten) => {
+    const events: AgentHarnessEvent[] = [];
+    const input = { command, description: "Search the work" };
+    await expect(watcherBroker(events).canUseTool("Bash", input, callbackOptions()))
+      .resolves.toEqual({ behavior: "allow", updatedInput: { command: rewritten, description: "Search the work" } });
     expect(events).toEqual([]);
   });
 

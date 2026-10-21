@@ -6,7 +6,7 @@ import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { claudeQuestions } from "./claude-questions";
-import { classifyReadOnlyCommand } from "../runtime/watcher/read-only-commands";
+import { classifyReadOnlyCommand, ripgrepWithoutConfig } from "../runtime/watcher/read-only-commands";
 import type { ProviderRunInput } from "./contracts";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import type { AgentApprovalDecision, AgentInputRequest, AgentPlanStep } from "./interactions";
@@ -95,13 +95,13 @@ export class ClaudePermissionBroker {
       return deny("The proposed plan was returned to the user for review.");
     }
 
-    if (
-      input.readOnlyProfile === "watcher"
+    const watcherCommand = input.readOnlyProfile === "watcher"
       && toolName === "Bash"
       && !mcpServer
       && callbackOptions.blockedPath === undefined
-      && watcherCommandAllowed(toolInput, input.cwd)
-    ) return { behavior: "allow", updatedInput: toolInput };
+      ? allowedWatcherCommand(toolInput, input.cwd)
+      : null;
+    if (watcherCommand !== null) return { behavior: "allow", updatedInput: { ...toolInput, command: watcherCommand } };
 
     if (
       (input.access === "full" && input.interactionMode !== "plan")
@@ -205,11 +205,14 @@ export class ClaudePermissionBroker {
   }
 }
 
-function watcherCommandAllowed(toolInput: Record<string, unknown>, cwd: string): boolean {
+function allowedWatcherCommand(toolInput: Record<string, unknown>, cwd: string): string | null {
+  const context = { cwd, windows: process.platform === "win32" };
   return typeof toolInput.command === "string"
     && toolInput.run_in_background !== true
     && toolInput.dangerouslyDisableSandbox !== true
-    && classifyReadOnlyCommand(toolInput.command, { cwd, windows: process.platform === "win32" }).allowed;
+    && classifyReadOnlyCommand(toolInput.command, context).allowed
+    ? ripgrepWithoutConfig(toolInput.command, context)
+    : null;
 }
 
 function planSteps(markdown: string): AgentPlanStep[] {

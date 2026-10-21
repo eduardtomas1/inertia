@@ -294,14 +294,22 @@ an approval and counts towards the receipt's command count; a declined one is a
 `GIT_OPTIONAL_LOCKS=0`, so `git status` leaves `.git/index` alone; `git diff`
 and `git describe --dirty` still refresh the index after a file's timestamps
 change (measured with Git 2.54) and can hold `index.lock` for that moment.
+They also drop `RIPGREP_CONFIG_PATH`, in any letter case, from the provider's
+environment, so a ripgrep configuration file cannot add `--pre` to a plain
+`rg` search. On Claude the broker also returns each allowed command with
+`--no-config` inserted after every `rg`, so a shell startup file that sets the
+variable again is ignored as well. OpenCode's permission reply cannot change
+the command, so OpenCode watchers rely on the environment alone.
 Known limits: containment is lexical, so a symbolic link inside the workspace
 can lead outside it; a search reads any workspace file its pattern reaches
 except files that Git's or rg's ignore rules skip, so a tracked or unignored
 secret file can be read; programs still honor their own configuration (a
 `diff.external`, textconv, `core.fsmonitor`, `gpg.program` or
-`log.showSignature` setting in Git config, `RIPGREP_CONFIG_PATH`, jq's
-`~/.jq`, or aliases and functions that OpenCode's shell loads), which only
-someone who can already write that configuration can set.
+`log.showSignature` setting in Git config, a `RIPGREP_CONFIG_PATH` that
+OpenCode's shell startup files set again, or one that applies to an `rg`
+command Claude Code runs on its own read-only rules without asking the
+broker, jq's `~/.jq`, or aliases and functions that OpenCode's shell loads),
+which only someone who can already write that configuration can set.
 
 ### Why an allowlist and not a capability id
 

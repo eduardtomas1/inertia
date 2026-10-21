@@ -2,7 +2,8 @@ import { posix, win32 } from "node:path";
 
 export const MAX_READ_ONLY_COMMAND_CHARS = 4_096;
 export const MAX_READ_ONLY_COMMAND_ARGUMENTS = 256;
-export const WATCHER_COMMAND_ENVIRONMENT = Object.freeze({ GIT_OPTIONAL_LOCKS: "0" });
+const WATCHER_COMMAND_ENVIRONMENT_KEYS = new Set(["GIT_OPTIONAL_LOCKS", "RIPGREP_CONFIG_PATH"]);
+const RIPGREP_NO_CONFIG = " --no-config";
 
 export interface ReadOnlyCommandContext {
   cwd: string;
@@ -17,6 +18,7 @@ export type ReadOnlyCommandVerdict =
 interface Word {
   value: string;
   glob: boolean[];
+  end: number;
 }
 
 type ProgramRule = (args: readonly string[], globbed: readonly boolean[]) => string | null;
@@ -61,7 +63,7 @@ const SEARCH_LONG_FLAGS = ["--line-number", "--ignore-case", "--word-regexp", "-
 const GREP_SEARCH: SearchSyntax = { flags: "nivwxlcFoqHPIhLaEGs", values: "ABCmdD", longFlags: new Set(SEARCH_LONG_FLAGS) };
 const GIT_GREP_SEARCH: SearchSyntax = { flags: "nivwxlcFoqHPIhLaEGWp", values: "ABCm", longFlags: new Set(SEARCH_LONG_FLAGS) };
 const SEARCH_SYNTAX: Readonly<Record<string, SearchSyntax>> = Object.freeze({
-  rg: { flags: "nivwxlcFoqHPIhLasSUNbp0", values: "ABCmgtTMjErd", longFlags: new Set([...SEARCH_LONG_FLAGS, "--no-heading", "--smart-case"]) },
+  rg: { flags: "nivwxlcFoqHPIhLasSUNbp0", values: "ABCmgtTMjErd", longFlags: new Set([...SEARCH_LONG_FLAGS, "--no-heading", "--smart-case", "--no-config"]) },
   grep: GREP_SEARCH,
   egrep: GREP_SEARCH,
   fgrep: GREP_SEARCH,
@@ -110,6 +112,23 @@ export function classifyReadOnlyCommand(command: string, context: ReadOnlyComman
   return first === null ? refuse(SHELL_SYNTAX) : { allowed: true, program: first };
 }
 
+export function ripgrepWithoutConfig(command: string, context: ReadOnlyCommandContext): string {
+  const segments = tokenize(command, context.windows, context.windows || context.powershell === true);
+  if (typeof segments === "string") return command;
+  const characters = [...command];
+  for (const [head] of [...segments].reverse()) {
+    if (head && programName(head.value) === "rg") characters.splice(head.end, 0, RIPGREP_NO_CONFIG);
+  }
+  return characters.join("");
+}
+
+export function watcherCommandEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(Object.entries(environment).filter(([key]) => !WATCHER_COMMAND_ENVIRONMENT_KEYS.has(key.toUpperCase()))),
+    GIT_OPTIONAL_LOCKS: "0",
+  };
+}
+
 function classifySegment(words: readonly Word[], context: ReadOnlyCommandContext): ReadOnlyCommandVerdict {
   const [head, ...rest] = words;
   if (!head) return refuse(SHELL_SYNTAX);
@@ -147,12 +166,14 @@ function tokenize(command: string, windows: boolean, powershell: boolean): Word[
     if (quote === "'") {
       if (character === "'") quote = null;
       else append(word!, character, false);
+      word!.end = index + 1;
       continue;
     }
     if (quote === "\"") {
       if (character === "\"") quote = null;
       else if (DOUBLE_QUOTED_REJECTED.has(character)) return SHELL_SYNTAX;
       else append(word!, character, false);
+      word!.end = index + 1;
       continue;
     }
     if (character === " " || character === "\t") {
@@ -180,9 +201,10 @@ function tokenize(command: string, windows: boolean, powershell: boolean): Word[
     if (!word && WORD_START_REJECTED.has(character)) return SHELL_SYNTAX;
     if (character === "~" && /[=:]$/u.test(word?.value ?? "")) return SHELL_SYNTAX;
     if (powershell && (character === "," || (!word && character === "@"))) return SHELL_SYNTAX;
-    word ??= { value: "", glob: [] };
+    word ??= { value: "", glob: [], end: index };
     if (character === "'" || character === "\"") quote = character;
     else append(word, character, GLOB.has(character));
+    word.end = index + 1;
   }
   if (quote !== null) return SHELL_SYNTAX;
   if (word) segments.at(-1)!.push(word);

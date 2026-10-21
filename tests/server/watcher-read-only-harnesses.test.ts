@@ -416,6 +416,44 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     expect(await checkoutState(repo)).toEqual(before);
   });
 
+  it("starts a watcher's Claude Code without ripgrep's configuration path", async () => {
+    const root = portableFixtureRoot("watcher claude ripgrep config");
+    roots.push(root);
+    const ripgrepConfig = join(root, "ripgreprc");
+    const environments: Array<Record<string, string | undefined> | undefined> = [];
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        environments.push(options?.env);
+        return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSuccessResult("SILENT", "completed");
+        })());
+      },
+    });
+    for (const readOnlyProfile of ["watcher", null] as const) {
+      const run = harness.start({
+        input: {
+          ...nativeProviderRunInput({
+            providerId: "claude",
+            conversationId: `claude-ripgrep-config-${readOnlyProfile ?? "chat"}`,
+            cwd: root,
+            prompt: "Review the parser.",
+            interactionMode: "plan",
+            access: "supervised",
+          }),
+          ...(readOnlyProfile ? { readOnlyProfile } : {}),
+        },
+        executable: process.execPath,
+        environment: { PATH: process.env.PATH ?? "", RIPGREP_CONFIG_PATH: ripgrepConfig },
+        providerNativeToolsAvailable: true,
+      });
+      await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    }
+
+    expect(environments[0]).not.toHaveProperty("RIPGREP_CONFIG_PATH");
+    expect(environments[0]).toMatchObject({ PATH: process.env.PATH ?? "", GIT_OPTIONAL_LOCKS: "0" });
+    expect(environments[1]).toMatchObject({ RIPGREP_CONFIG_PATH: ripgrepConfig });
+  });
+
   it("asks a Claude chat that is not a watcher for every Bash command and sends no watcher plan instructions", async () => {
     const root = portableFixtureRoot("claude plan bash");
     roots.push(root);
@@ -701,6 +739,7 @@ interface OpenCodeCapture {
   calls: Array<{ tool: string; action: string; reply?: string }>;
   aborted?: boolean;
   gitOptionalLocks: string | null;
+  ripgrepConfigPath: string | null;
 }
 
 /**
@@ -717,7 +756,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
-const capture = { calls: [], gitOptionalLocks: process.env.GIT_OPTIONAL_LOCKS ?? null };
+const capture = { calls: [], gitOptionalLocks: process.env.GIT_OPTIONAL_LOCKS ?? null, ripgrepConfigPath: process.env.RIPGREP_CONFIG_PATH ?? null };
 const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(capture));
 const agentRules = ${JSON.stringify(agentRules)};
 const nativeTools = ${JSON.stringify(OPENCODE_NATIVE_TOOLS)};
@@ -823,6 +862,8 @@ server.listen(0, "127.0.0.1", () => {
   const manager = ProviderManager.createForTests({ commands: { opencode: command } }, new AgentHarnessRegistry([createOpenCodeSdkHarness()]));
   return {
     manager,
+    command,
+    captured: () => existsSync(capturePath),
     capture: () => JSON.parse(readFileSync(capturePath, "utf8")) as OpenCodeCapture,
     pid: () => Number(readFileSync(pidPath, "utf8")),
   };
@@ -921,6 +962,36 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
     await opencode.manager.disposeAll();
+    await expectProcessGone(opencode.pid());
+  });
+
+  it("starts a watcher's OpenCode server without ripgrep's configuration path", async () => {
+    const root = portableFixtureRoot("watcher opencode ripgrep config");
+    roots.push(root);
+    const repo = repository(root, ["serve"]);
+    const opencode = openCodeServer(root, repo);
+    const run = createOpenCodeSdkHarness().start({
+      input: {
+        ...nativeProviderRunInput({
+          providerId: "opencode",
+          conversationId: "opencode-ripgrep-config",
+          cwd: repo,
+          prompt: "Review the parser.",
+          interactionMode: "plan",
+          access: "supervised",
+          model: "fake/model-a",
+        }),
+        readOnlyProfile: "watcher",
+      },
+      executable: opencode.command,
+      environment: { ...process.env, RIPGREP_CONFIG_PATH: join(root, "ripgreprc") },
+      providerNativeToolsAvailable: true,
+    });
+    await waitFor("the OpenCode session", opencode.captured, 10_000);
+    run.cancel(true);
+    await run.result;
+
+    expect(opencode.capture()).toMatchObject({ gitOptionalLocks: "0", ripgrepConfigPath: null });
     await expectProcessGone(opencode.pid());
   });
 

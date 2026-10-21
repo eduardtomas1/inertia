@@ -1,7 +1,11 @@
 // @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 
-import { classifyReadOnlyCommand } from "../../src/server/runtime/watcher/read-only-commands";
+import {
+  classifyReadOnlyCommand,
+  ripgrepWithoutConfig,
+  watcherCommandEnvironment,
+} from "../../src/server/runtime/watcher/read-only-commands";
 
 const POSIX = { cwd: "/work/repo", windows: false };
 const WINDOWS = { cwd: "C:\\work\\repo", windows: true };
@@ -56,6 +60,8 @@ describe("classifyReadOnlyCommand", () => {
     ["grep -n parse src/parser.ts", "grep"],
     ["rg parse src", "rg"],
     ["rg -U parse src", "rg"],
+    ["rg --no-config pattern src", "rg"],
+    ["rg --no-config -n process.env.X src", "rg"],
     ["egrep 'a|b' src/parser.ts", "egrep"],
     ["fgrep -f patterns.txt src", "fgrep"],
     ["cat src/parser.ts", "cat"],
@@ -494,5 +500,39 @@ describe("classifyReadOnlyCommand", () => {
     expect(allowed("npm test")).toEqual({ allowed: false, reason: "npm is not a read-only command watchers can run." });
     expect(allowed("cat /etc/passwd")).toEqual({ allowed: false, reason: "The command reads outside the workspace." });
     expect(allowed("git diff --output=x")).toEqual({ allowed: false, reason: "The command uses an option that can write or run another program." });
+  });
+});
+
+describe("ripgrepWithoutConfig", () => {
+  it.each([
+    ["rg parse src", "rg --no-config parse src"],
+    ["rg", "rg --no-config"],
+    ["/usr/bin/rg -n parse src", "/usr/bin/rg --no-config -n parse src"],
+    ["'rg' parse", "'rg' --no-config parse"],
+    ["cat src/parser.ts | rg parse | head -5", "cat src/parser.ts | rg --no-config parse | head -5"],
+    ["rg -l parse|rg -v test", "rg --no-config -l parse|rg --no-config -v test"],
+    ["rg 'naïve é' src", "rg --no-config 'naïve é' src"],
+    ["git grep rg -- src", "git grep rg -- src"],
+    ["cat rg", "cat rg"],
+    ["git diff; rg x", "git diff; rg x"],
+  ])("rewrites %j to %j", (command, rewritten) => {
+    expect(ripgrepWithoutConfig(command, POSIX)).toBe(rewritten);
+    expect(allowed(rewritten).allowed).toBe(allowed(command).allowed);
+  });
+
+  it("rewrites by the Windows quoting rules", () => {
+    expect(ripgrepWithoutConfig("rg -n 'parse input' src", WINDOWS)).toBe("rg --no-config -n 'parse input' src");
+    expect(ripgrepWithoutConfig("rg -n 'parse input' src", POWERSHELL)).toBe("rg --no-config -n 'parse input' src");
+  });
+});
+
+describe("watcherCommandEnvironment", () => {
+  it("drops ripgrep's configuration path in any letter case and turns off optional Git locks", () => {
+    expect(watcherCommandEnvironment({
+      PATH: "/usr/bin",
+      RIPGREP_CONFIG_PATH: "/home/user/.ripgreprc",
+      Ripgrep_Config_Path: "/home/user/.ripgreprc",
+      git_optional_locks: "1",
+    })).toEqual({ PATH: "/usr/bin", GIT_OPTIONAL_LOCKS: "0" });
   });
 });

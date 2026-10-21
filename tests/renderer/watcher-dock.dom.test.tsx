@@ -23,6 +23,7 @@ import {
   OTHER_WATCHED_ID,
   WATCHED_ID,
   WATCHER_ID,
+  feedItem,
   link,
   shell,
   surfaceModel,
@@ -525,6 +526,27 @@ describe("WatcherDock", () => {
       expect(notice.querySelector(".watcher-notice-blocked")?.textContent).not.toMatch(/resume/iu);
     });
   }
+
+  it("names each unexplained path once in the write-detected banner", async () => {
+    setup({
+      link: link({
+        status: "paused",
+        pauseReason: "write-detected",
+        pauseDetail: "Files changed during a check, and no running agent accounts for them: src/parser.ts.",
+      }),
+      feed: () => [feedItem(9, { outcome: "write-detected", guardState: "changed", guardPaths: ["src/parser.ts"] })],
+    });
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(within(alert).getByRole("list", { name: "Changed paths" })).toHaveTextContent("src/parser.ts"));
+    expect(alert.textContent?.match(/src\/parser\.ts/gu)).toHaveLength(1);
+    expect(alert.textContent?.match(/no running agent accounts for/gu)).toHaveLength(1);
+  });
+
+  it("keeps the runtime's explanation when no changed path is listed", async () => {
+    const detail = "Files changed during a check, and no running agent accounts for them.";
+    setup({ link: link({ status: "paused", pauseReason: "write-detected", pauseDetail: detail }) });
+    expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+  });
 
   it("asks before resuming after unexplained changes, focusing Cancel, and keeps focus in the dock", async () => {
     let current = link({ status: "paused", pauseReason: "write-detected" });

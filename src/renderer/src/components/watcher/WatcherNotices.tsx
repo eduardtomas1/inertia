@@ -76,12 +76,11 @@ export function WatcherNotices({
             <TriangleAlert size={14} aria-hidden="true" />
             Files changed that no running agent accounts for
           </p>
-          {changedPaths.length > 0 && (
+          {changedPaths.length > 0 ? (
             <ul className="watcher-notice-paths" aria-label="Changed paths">
               {changedPaths.map((path) => <li key={path}><code>{path}</code></li>)}
             </ul>
-          )}
-          {link.pauseDetail && <p>{link.pauseDetail}</p>}
+          ) : link.pauseDetail && <p>{link.pauseDetail}</p>}
           {confirmingResume ? (
             <div
               className="watcher-confirm"

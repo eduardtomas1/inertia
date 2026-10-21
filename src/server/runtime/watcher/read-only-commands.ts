@@ -57,7 +57,7 @@ const GIT_TAG_FLAGS = new Set(["--list", "-l", "-n", "--no-column", "--ignore-ca
 const GIT_REF_FILTERS = ["--contains=", "--no-contains=", "--merged=", "--no-merged=", "--points-at=", "--sort=", "--format="];
 const GIT_CAT_FILE_MODES = new Set(["-p", "-t", "-s"]);
 const GIT_WORKTREE_LIST_FLAGS = new Set(["--porcelain", "-v", "--verbose", "-z"]);
-const FIND_UNSAFE = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls", "-L", "-follow"]);
+const FIND_UNSAFE = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls", "-L", "-follow", "-files0-from"]);
 const TAIL_OBSOLETE_FOLLOW = /^\+\d*[bcl]?f$/u;
 const JQ_FILE_OPTIONS = new Set(["--from-file", "--library-path", "--rawfile", "--slurpfile"]);
 const JQ_MODULE = /\b(?:import|include|modulemeta)\b/u;
@@ -84,17 +84,17 @@ const PROGRAMS: Readonly<Record<string, ProgramRule>> = Object.freeze({
   tail: tailRule,
   ls: optionRule({ short: "L", long: ["dereference"] }),
   find: findRule,
-  wc: noRule,
+  wc: optionRule({ long: ["files0-from"] }),
   diff: optionRule({ short: "lr", long: ["paginate", "recursive"] }),
   stat: noRule,
-  file: optionRule({ short: "CzZ", long: ["compile", "uncompress", "uncompress-noreport"] }),
+  file: optionRule({ short: "CzZf", long: ["compile", "uncompress", "uncompress-noreport", "files-from"] }),
   tree: optionRule({ short: "oRl", long: ["output"] }),
   pwd: noRule,
   which: noRule,
   echo: noRule,
   nl: noRule,
   cut: noRule,
-  sort: optionRule({ short: "oT", long: ["output", "temporary-directory", "compress-program"] }),
+  sort: optionRule({ short: "oT", long: ["output", "temporary-directory", "compress-program", "files0-from"] }),
   uniq: uniqRule,
   tr: noRule,
   column: noRule,

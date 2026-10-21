@@ -271,10 +271,12 @@ and `--no-exclude-standard` and their abbreviations refused), `rg` without
 without recursion (`-r`, `-R`, `-d`, `--directories`), `cat` (without
 PowerShell's `-Wait`), `head`, `tail` without follow (including the obsolete
 `+Nf` form), `ls` without `-L`/`--dereference`, `find` without `-L`, `-follow`,
-`-exec`, `-ok`, `-delete` or `-fprint` forms,
-`wc`, `diff` without `-r` or `-l`, `stat`, `file` without `-C`, `-z` or `-Z`,
-`tree` without `-o`, `-R` or `-l`, `sort` without `-o`, `-T` or
-`--compress-program`, `uniq` with at most one file and no glob, `cut`, `nl`,
+`-exec`, `-ok`, `-delete`, `-fprint` or `-files0-from` forms,
+`wc` without `--files0-from`, `diff` without `-r` or `-l`, `stat`, `file`
+without `-C`, `-z`, `-Z` or `-f`/`--files-from`, `tree` without `-o`, `-R` or
+`-l`, `sort` without `-o`, `-T`, `--compress-program` or `--files0-from` (the
+`files0-from` and `files-from` options read the names of further files from a
+file, which neither containment check sees), `uniq` with at most one file and no glob, `cut`, `nl`,
 `tr`, `column`, `jq` without environment access, program files, modules or
 extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`, `import`,
 `include`, `modulemeta`), `pwd`, `which` and `echo`. An argument that is

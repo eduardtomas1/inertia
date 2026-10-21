@@ -1,14 +1,13 @@
-import { STEERABLE_HARNESS_IDS } from "./follow-up-steer";
+import { supportsActiveParentFollowUp } from "./follow-up-steer";
 import type { WatcherFeedItem } from "./watcher";
 
-/** A feed item, optionally carrying how many read-only commands its check ran. */
-export type WatcherFeedEntry = WatcherFeedItem & { commandsRun?: number };
+export type WatcherFeedEntry = WatcherFeedItem;
 
 export interface WatcherReceiptGroup {
   kind: "receipts";
   /** Stable while newer quiet checks join: keyed by the oldest check in the group. */
   key: string;
-  items: WatcherFeedEntry[];
+  items: WatcherFeedItem[];
   count: number;
   firstAt: string;
   lastAt: string;
@@ -19,22 +18,22 @@ export interface WatcherReceiptGroup {
 export interface WatcherFeedSingle {
   kind: "item";
   key: string;
-  item: WatcherFeedEntry;
+  item: WatcherFeedItem;
 }
 
 export type WatcherFeedGroup = WatcherReceiptGroup | WatcherFeedSingle;
 
-function quiet(item: WatcherFeedEntry): boolean {
+function quiet(item: WatcherFeedItem): boolean {
   return item.state === "settled" && item.outcome === "silent";
 }
 
-function receipt(items: WatcherFeedEntry[]): WatcherReceiptGroup {
+function receipt(items: WatcherFeedItem[]): WatcherReceiptGroup {
   const oldest = items.reduce((left, right) => (right.sequence < left.sequence ? right : left));
   const starts = items.map(({ createdAt }) => createdAt).sort();
   const ends = items.map(({ settledAt, createdAt }) => settledAt ?? createdAt).sort();
   const counts = items
     .map(({ commandsRun }) => commandsRun)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+    .filter((value): value is number => value !== undefined);
   return {
     kind: "receipts",
     key: `receipts:${oldest.wakeId}`,
@@ -51,9 +50,9 @@ function receipt(items: WatcherFeedEntry[]): WatcherReceiptGroup {
  * other item (finding, failure, notice, or a check still running) on its own,
  * where it ends the current receipt. Input order is preserved.
  */
-export function groupWatcherFeed(items: readonly WatcherFeedEntry[]): WatcherFeedGroup[] {
+export function groupWatcherFeed(items: readonly WatcherFeedItem[]): WatcherFeedGroup[] {
   const groups: WatcherFeedGroup[] = [];
-  let run: WatcherFeedEntry[] = [];
+  let run: WatcherFeedItem[] = [];
   const flush = () => {
     if (run.length > 0) groups.push(receipt(run));
     run = [];
@@ -72,7 +71,5 @@ export function groupWatcherFeed(items: readonly WatcherFeedEntry[]): WatcherFee
 
 /** Steer is offered only while the watched turn runs on a harness that accepts it. */
 export function steerAvailable(watchedHarnessId: string | null | undefined, watchedRunning: boolean): boolean {
-  return watchedRunning
-    && typeof watchedHarnessId === "string"
-    && (STEERABLE_HARNESS_IDS as readonly string[]).includes(watchedHarnessId);
+  return watchedRunning && supportsActiveParentFollowUp(watchedHarnessId ?? null);
 }

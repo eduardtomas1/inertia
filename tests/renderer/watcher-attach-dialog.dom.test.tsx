@@ -192,7 +192,7 @@ describe("WatcherAttachDialog", () => {
       { request, onAttached },
     );
     const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
-    expect(attach).toBeEnabled();
+    expect(attach).not.toHaveAttribute("aria-disabled");
     fireEvent.click(attach);
     await waitFor(() => expect(onAttached).toHaveBeenCalledWith(link()));
     const command = request.mock.calls[0]![0];
@@ -249,13 +249,13 @@ describe("WatcherAttachDialog", () => {
       ready("codex", "Codex", { authState: "unauthenticated", canRun: false }),
       ready("cursor", "Cursor"),
     ]));
-    expect(within(dialog).getByRole("button", { name: "Attach watcher" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Attach watcher" })).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).getByRole("status")).not.toHaveTextContent(/Cursor/u);
   });
 
   it("offers no route when only agents that cannot watch are ready", async () => {
     const { dialog } = await openDialog(snapshot([ready("cursor", "Cursor")], "cursor"));
-    expect(within(dialog).getByRole("button", { name: "Attach watcher" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Attach watcher" })).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).getByRole("status")).toHaveTextContent("No watcher route");
   });
 
@@ -350,6 +350,27 @@ describe("WatcherAttachDialog", () => {
     view.rerender(<Harness value={{ ...value, watchers: [created] }} request={recorded.request} onAttached={onAttached} />);
     await waitFor(() => expect(onAttached).toHaveBeenCalledWith(created));
     expect(onAttached).toHaveBeenCalledOnce();
+  });
+
+  it("keeps focus on Attach while it submits and after it fails", async () => {
+    let fail: (error: Error) => void = () => undefined;
+    const recorded = recordingRequest(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request: recorded.request });
+    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    attach.focus();
+    fireEvent.click(attach);
+    await waitFor(() => expect(recorded.commands).toHaveLength(1));
+    expect(attach).toHaveFocus();
+    expect(attach).toHaveAttribute("aria-disabled", "true");
+    expect(cancel).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(cancel);
+    expect(screen.getByRole("dialog", { name: "Add a watcher" })).toBeInTheDocument();
+    cancel.focus();
+    await act(async () => { fail(new RuntimeCommandError("This chat already has a watcher.", "rejected")); });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("This chat already has a watcher.");
+    expect(attach).toHaveFocus();
+    expect(attach).not.toHaveAttribute("aria-disabled");
   });
 
   it("starts over with a new link id after a definite failure", async () => {

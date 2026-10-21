@@ -166,6 +166,7 @@ export function WatcherAttachDialog({
   onOpenBackendSetup,
 }: WatcherAttachDialogProps): React.JSX.Element | null {
   const dialogRef = useRef<HTMLElement>(null);
+  const attachRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef(true);
   const returnFocusRef = useRef(returnFocusTo);
   const watched = snapshot.conversations.find(({ id }) => id === watchedConversationId) ?? null;
@@ -327,6 +328,7 @@ export function WatcherAttachDialog({
       if (runtimeCommandDelivery(failure) !== "ambiguous") linkIdRef.current = null;
       setError(failure instanceof Error ? failure.message : "The watcher could not be attached.");
       setSubmitting(false);
+      attachRef.current?.focus({ preventScroll: true });
     });
   };
 
@@ -339,18 +341,24 @@ export function WatcherAttachDialog({
       title="Add a watcher"
       description={WATCHER_READ_ONLY_STATEMENT}
       closeLabel="Close"
-      closeDisabled={submitting}
+      closeInert={submitting}
       onClose={onClose}
       onDismiss={() => { if (!submitting) onClose(); }}
       trapFocus={false}
       footer={<>
-        <button type="button" className="secondary-button" disabled={submitting} onClick={onClose}>
+        <button
+          type="button"
+          className="secondary-button"
+          aria-disabled={submitting || undefined}
+          onClick={() => { if (!submitting) onClose(); }}
+        >
           Cancel
         </button>
         <button
+          ref={attachRef}
           type="button"
           className="primary-button"
-          disabled={!canAttach}
+          aria-disabled={!canAttach || undefined}
           title={routeReady ? undefined : "Choose a ready model route."}
           onClick={attach}
         >

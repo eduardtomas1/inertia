@@ -4,10 +4,9 @@ import { ChevronRight } from "lucide-react";
 import type { WatcherDeliveryMode, WatcherFeedItem } from "@shared/watcher";
 import { useLoadedSurface } from "../../hooks/useLoadedSurface";
 import { createSurfaceLoader } from "../../utils/surfaceLoader";
-import { watcherClockTime, watcherDeliveryText } from "../../utils/watcherCopy";
+import { watcherClockTime, watcherDeliveryText, watcherDetailClause } from "../../utils/watcherCopy";
 import { WatcherDeliverButton } from "./WatcherDeliverButton";
 import { WatcherErrorBoundary } from "./WatcherErrorBoundary";
-import { watcherChangedFilesText } from "./WatcherReceiptGroup";
 
 // The existing deferred Markdown renderer; the card shows plain text until
 // it arrives, so a finding is readable even if that chunk is still loading.
@@ -29,7 +28,7 @@ function findingStatus(
 ): string {
   if (pending) return pending === "dismiss" ? "Dismissing…" : "Sending…";
   if (failure && (delivery === null || delivery.state === "failed")) {
-    return failure.action === "dismiss" ? failure.message : `Not sent · ${failure.message}`;
+    return failure.action === "dismiss" ? failure.message : `Not sent · ${watcherDetailClause(failure.message) ?? failure.message}`;
   }
   if (!delivery) return "";
   return watcherDeliveryText(delivery, watchedRunning);
@@ -147,6 +146,7 @@ export function WatcherFindingCard({
       <p className="watcher-finding-meta">
         Check {item.sequence}
         {time && <> · <time dateTime={item.settledAt ?? undefined}>{time}</time></>}
+        {item.resolvedBySequence !== null && ` · resolved in check ${item.resolvedBySequence}`}
       </p>
       {item.guardState === "inconclusive" && (item.guardPaths.length > 0 ? (
         <details className="watcher-finding-paths">
@@ -159,11 +159,8 @@ export function WatcherFindingCard({
           </ul>
         </details>
       ) : (
-        <p className="watcher-finding-meta">{watcherChangedFilesText([])}</p>
+        <p className="watcher-finding-meta">The checkout changed during this check</p>
       ))}
-      {item.resolvedBySequence !== null && (
-        <p className="watcher-finding-resolved">Resolved in check {item.resolvedBySequence}</p>
-      )}
       {deliverable && (
         <div className="watcher-finding-actions">
           <WatcherDeliverButton

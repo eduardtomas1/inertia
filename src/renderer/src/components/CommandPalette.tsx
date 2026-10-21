@@ -84,6 +84,20 @@ function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations:
         });
       },
     }] : []),
+    ...(link.status === "paused" && request ? [{
+      ...base,
+      id: "action:resume-watcher",
+      label: link.pauseReason === "write-detected" ? "Resume watcher…" : "Resume watcher",
+      run: () => {
+        if (link.pauseReason === "write-detected") {
+          surface.showWatcher(watched.id);
+          return;
+        }
+        void createWatcherActions(request, link.id).resume().catch((error: unknown) => {
+          reportWatcherDockError(watched.id, watcherErrorText(error, "The watcher could not resume."));
+        });
+      },
+    }] : []),
   ];
 }
 

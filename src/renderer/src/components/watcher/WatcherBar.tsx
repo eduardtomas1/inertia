@@ -14,7 +14,7 @@ import {
   watcherPauseAnnouncement,
   watcherPhaseText,
 } from "../../utils/watcherCopy";
-import { watcherPresetName } from "../../utils/watcherLinks";
+import { watcherEventsText, watcherPresetName } from "../../utils/watcherLinks";
 import type { WatcherActions } from "../../hooks/useWatcherActions";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import { TooltipButton } from "../TooltipButton";
@@ -223,8 +223,7 @@ function WatcherBarMenuItems({
       {!budgetPaused && (
         <MenuNote>{`${counterText(checksLeft)} of ${counterText(allowance)} checks left this turn`}</MenuNote>
       )}
-      <MenuNote>{`${counterText(counters.eventsSeen)} ${counters.eventsSeen === 1 ? "event" : "events"} seen`}</MenuNote>
-      <MenuNote>{`${counterText(counters.eventsPending)} waiting`}</MenuNote>
+      <MenuNote>{`${watcherEventsText(counters.eventsPending)} waiting`}</MenuNote>
       {link.lastWakeAt && <MenuNote>{`Last check ${watcherClockTime(link.lastWakeAt)}`}</MenuNote>}
       {link.quietSince && <MenuNote>{`Main chat quiet since ${watcherClockTime(link.quietSince)}`}</MenuNote>}
       {usageTokens !== null && <MenuNote>{`Used ${formatCompact(usageTokens)} tokens`}</MenuNote>}
@@ -291,7 +290,7 @@ export function WatcherBar({
   const checkUnavailable = !actions || pending !== null || waking;
   const reviewUnavailable = checkUnavailable || paused || link.status === "detached";
   const primaryUnavailable = paused ? resumeUnavailable : checkUnavailable;
-  const primaryLabel = paused ? "Resume" : "Check now";
+  const primaryLabel = paused ? link.pauseReason === "write-detected" ? "Resume…" : "Resume" : "Check now";
   const restoreMoreFocus = (): void => {
     moreRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
   };

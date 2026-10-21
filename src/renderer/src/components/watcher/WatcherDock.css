@@ -463,14 +463,6 @@
 }
 
 .watcher-finding-meta,
-.watcher-finding-resolved {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: var(--leading-chrome);
-  font-variant-numeric: tabular-nums;
-}
-
 .watcher-finding-paths {
   color: var(--text-muted);
   font-size: var(--text-xs);

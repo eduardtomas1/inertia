@@ -70,12 +70,12 @@ describe("WatcherFeed", () => {
       feedItem(3, { guardState: "inconclusive" }),
       feedItem(2, { outcome: "failed" }),
     ]);
-    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
     const entries = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     expect(entries.map((entry) => entry.dataset.kind)).toEqual(["receipts", "finding", "receipts", "notice"]);
     expect(entries[0]).toHaveTextContent(/Checked 2 times · 10:35–10:36 AM · nothing to report/u);
     expect(entries[2]).toHaveTextContent(/Checked once · 10:33 AM · nothing to report/u);
-    expect(entries[2]).toHaveTextContent("The checkout changed during this check");
+    expect(entries[2]).toHaveTextContent("the checkout changed during this check");
     expect(entries[3]).toHaveTextContent("The check failed.");
     expect(within(entries[1]!).getByRole("article", { name: "The parser drops the trailing token." })).toBeInTheDocument();
   });
@@ -86,7 +86,7 @@ describe("WatcherFeed", () => {
       feedItem(2),
       feedItem(1, { commandsRun: 1 }),
     ]);
-    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
     const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     expect(receipt).toHaveTextContent(/Checked 3 times · .* · nothing to report · ran 3 read-only commands/u);
     expect(receipt).toHaveTextContent("ran 1 read-only command");
@@ -98,15 +98,25 @@ describe("WatcherFeed", () => {
       feedItem(2, { commandsDeclined: 2 }),
       feedItem(1, { commandsDeclined: 1 }),
     ]);
-    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
     const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     expect(within(receipt!).getByText(/^Checked 3 times/u)).toHaveTextContent(
       /^Checked 3 times · .* · nothing to report · ran 2 read-only commands · 4 declined$/u,
     );
     const checks = receipt!.querySelectorAll(".watcher-check-notes");
     expect(checks[0]).toHaveTextContent(/ · ran 2 read-only commands · 1 declined$/u);
+    expect(receipt!.querySelector(".watcher-check-title")).toHaveTextContent(/^Check 3 · \d{1,2}:\d{2}\s?[AP]M$/u);
     expect(checks[1]).toHaveTextContent(/ · 2 commands declined$/u);
     expect(checks[2]).toHaveTextContent(/ · 1 command declined$/u);
+  });
+
+  it("names a running check by its number alone and announces loading once", async () => {
+    renderFeed([feedItem(7, { state: "running", outcome: null, settledAt: null }), feedItem(6)]);
+    expect(screen.getAllByText(/Loading checks/u)).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading checks…$/u);
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
+    const [running] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
+    expect(running).toHaveTextContent(/^Check 7$/u);
   });
 
   it("lists the files that changed during an inconclusive check, never blaming busy work", async () => {
@@ -114,10 +124,10 @@ describe("WatcherFeed", () => {
       feedItem(2, { guardState: "inconclusive", guardPaths: ["src/parser.ts", "README.md"] }),
       feedItem(1),
     ]);
-    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
     const [receipt] = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     const checks = receipt!.querySelectorAll(".watcher-check-notes");
-    expect(checks[0]).toHaveTextContent(/ · Files changed during this check: src\/parser\.ts, README\.md$/u);
+    expect(checks[0]).toHaveTextContent(/ · files changed during this check: src\/parser\.ts, README\.md$/u);
     expect(receipt).not.toHaveTextContent(/busy/u);
     expect(checks[1]).not.toHaveTextContent(/changed/u);
   });
@@ -137,7 +147,7 @@ describe("WatcherFeed", () => {
   it("says how much the check sent to the watcher when the runtime records it", async () => {
     const sent: WatcherFeedItem & { digestBytes?: number } = { ...feedItem(1), digestBytes: 24 * 1024 };
     renderFeed([feedItem(2), sent]);
-    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
     const checks = list.querySelectorAll(".watcher-check-notes");
     expect(checks[1]).toHaveTextContent(/ · 24 KiB sent$/u);
     expect(checks[0]).not.toHaveTextContent(/sent/u);
@@ -211,14 +221,14 @@ describe("WatcherFeed", () => {
       finding(4, "Still open."),
       feedItem(3),
     ]);
-    const list = await screen.findByRole("list", { name: "Watcher findings" });
+    const list = await screen.findByRole("list", { name: "Watcher checks" });
     const entries = within(list).getAllByRole("listitem").filter((item) => item.parentElement === list);
     expect(entries.map((entry) => entry.dataset.kind)).toEqual(["receipts", "finding", "finding", "receipts"]);
     expect(within(entries[0]!).getByText(/^Checked 2 times/u)).toBeInTheDocument();
     const open = within(entries[1]!).getByRole("article", { name: "Still open." });
     const resolved = within(entries[2]!).getByRole("article", { name: "Resolved later." });
-    expect(open).not.toHaveTextContent(/Resolved/u);
-    expect(resolved.querySelector(".watcher-finding-resolved")).toHaveTextContent(/^Resolved in check 7$/u);
+    expect(open).not.toHaveTextContent(/resolved/u);
+    expect(resolved.querySelector(".watcher-finding-meta")).toHaveTextContent(/^Check 6 · \d{1,2}:\d{2}\s?[AP]M · resolved in check 7$/u);
     expect(within(resolved).getByRole("button", { name: "Send" })).toBeEnabled();
     expect(within(resolved).getByRole("button", { name: "Dismiss" })).toBeEnabled();
     fireEvent.click(within(open).getByRole("button", { name: "Dismiss" }));

@@ -12,15 +12,13 @@ import {
 } from "../../utils/watcherCopy";
 import { watcherEventsText } from "../../utils/watcherLinks";
 
-export function watcherChangedFilesText(paths: readonly string[]): string {
-  return paths.length > 0
-    ? `Files changed during this check: ${paths.join(", ")}`
-    : "The checkout changed during this check";
-}
-
 function guardNote(item: WatcherFeedItem): string | null {
-  if (item.guardState === "inconclusive") return watcherChangedFilesText(item.guardPaths);
-  if (item.guardState === "unavailable") return "No Git fingerprint for this checkout";
+  if (item.guardState === "inconclusive") {
+    return item.guardPaths.length > 0
+      ? `files changed during this check: ${item.guardPaths.join(", ")}`
+      : "the checkout changed during this check";
+  }
+  if (item.guardState === "unavailable") return "no Git fingerprint for this checkout";
   return null;
 }
 
@@ -59,7 +57,7 @@ function WatcherCheckLine({ item }: { item: WatcherFeedItem }): React.JSX.Elemen
   return (
     <span className="watcher-check-line">
       <span className="watcher-check-title">
-        Check {item.sequence}
+        Check {item.sequence} ·{" "}
         <time dateTime={item.settledAt ?? item.createdAt}>{watcherClockTime(item.settledAt ?? item.createdAt)}</time>
       </span>
       <span className="watcher-check-notes">{notes.join(" · ")}</span>
@@ -147,7 +145,7 @@ export function WatcherNoticeLine({
       {...enterProps(enter, onEntered)}
     >
       <span className="watcher-notice-line">
-        <span className="watcher-notice-line-title">{outcome === null ? `Check ${item.sequence} · checking now` : watcherOutcomeText(outcome)}</span>
+        <span className="watcher-notice-line-title">{outcome === null ? `Check ${item.sequence}` : watcherOutcomeText(outcome)}</span>
         {outcome !== null && <WatcherCheckLine item={item} />}
       </span>
     </div>

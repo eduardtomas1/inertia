@@ -159,7 +159,7 @@ describe("WatcherDock", () => {
   it("drops the Stop watching and resume prompts when the dock collapses", async () => {
     setup({ link: link({ status: "paused", pauseReason: "write-detected" }) });
     const aside = await dock();
-    fireEvent.click(within(aside).getByRole("button", { name: "Resume…" }));
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Resume…" }));
     fireEvent.click(within(aside).getByRole("button", { name: "More watcher actions" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Stop watching…" }));
     expect(within(aside).getByRole("group", { name: "Confirm resume" })).toBeInTheDocument();
@@ -443,7 +443,7 @@ describe("WatcherDock", () => {
     })}
     />);
     const aside = await dock();
-    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
+    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the main chat to resume its watcher.")).toBeInTheDocument();
     expect(within(aside).getByRole("button", { name: "Resume" })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(within(aside).getByRole("button", { name: "Resume" }));
     expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
@@ -470,7 +470,7 @@ describe("WatcherDock", () => {
     fireEvent.click(resume);
     expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
     const announced = aside.querySelector('.watcher-bar [role="status"]')!.textContent ?? "";
-    expect(announced).toMatch(/^Paused: /u);
+    expect(announced).toMatch(/^Paused\. /u);
     expect(announced).not.toContain("You paused it.");
   });
 
@@ -484,7 +484,7 @@ describe("WatcherDock", () => {
     })}
     />);
     const aside = await dock();
-    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the watched chat to resume its watcher.")).toBeInTheDocument();
+    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the main chat to resume its watcher.")).toBeInTheDocument();
     const resume = within(aside).getByRole("button", { name: "Resume" });
     expect(resume).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(resume);

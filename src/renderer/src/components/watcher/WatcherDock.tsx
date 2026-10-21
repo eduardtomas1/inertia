@@ -185,7 +185,7 @@ function resumeBlockedReason(
       ? watcherPauseText(link.pauseReason, link.pauseDetail)
       : "Unarchive the watcher chat to resume it.";
   }
-  if (watched && watched.archivedAt !== null) return "Unarchive the watched chat to resume its watcher.";
+  if (watched && watched.archivedAt !== null) return "Unarchive the main chat to resume its watcher.";
   if ((link.pauseReason === "usage-limit" || link.pauseReason === "route-unavailable") && watcher) {
     const readiness = composerRouteReadiness({
       provider: surface.providers.find(({ id }) => id === watcher.providerId),

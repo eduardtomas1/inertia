@@ -221,15 +221,6 @@
   line-height: var(--leading-chrome);
 }
 
-.watcher-attach-toggle p {
-  grid-column: 2;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: var(--leading-chrome);
-  text-wrap: pretty;
-}
-
 .watcher-attach-error {
   margin: 0;
   color: var(--danger);

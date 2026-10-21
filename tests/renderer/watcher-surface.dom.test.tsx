@@ -5,7 +5,7 @@ import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import { watcherEntryFor } from "../../src/renderer/src/components/watcher/watcherAvailability";
-import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
+import { WatcherContext, type WatcherSurfaceModel } from "../../src/renderer/src/components/watcher/watcherContext";
 import {
   consumeWatcherDockFocus,
   readWatcherDock,
@@ -23,6 +23,7 @@ import {
   project,
   shell,
   surfaceModel,
+  watcherRuntime,
 } from "./watcher-fixtures";
 
 beforeEach(() => {
@@ -101,31 +102,53 @@ describe("watcher surface controller", () => {
   });
 });
 
-describe("Pause watcher in the command palette", () => {
+function renderPalette(model: WatcherSurfaceModel): void {
+  render(
+    <WatcherContext.Provider value={model}>
+      <CommandPalette
+        open
+        projects={[project]}
+        conversations={[shell(WATCHED_ID, "Refactor parser")]}
+        newThreadShortcut="⌘N"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onNewThread={vi.fn()}
+        onNewThreadIn={vi.fn()}
+        currentProjectId={null}
+        onAddProject={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    </WatcherContext.Provider>,
+  );
+}
+
+describe("watcher actions in the command palette", () => {
+  it("resumes a paused watcher", async () => {
+    const paused = link({ status: "paused", pauseReason: "user" });
+    const runtime = watcherRuntime({ link: () => paused });
+    renderPalette(surfaceModel({ watchers: [paused], request: runtime.request }));
+    expect(screen.queryByRole("option", { name: /Pause watcher/u })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("option", { name: /^Resume watcher/u }));
+    await waitFor(() => expect(runtime.commands.map(({ type }) => type)).toContain("watcher.resume"));
+  });
+
+  it("opens the dock to confirm a resume after unexplained changes", async () => {
+    const paused = link({ status: "paused", pauseReason: "write-detected" });
+    const runtime = watcherRuntime({ link: () => paused });
+    const model = surfaceModel({ watchers: [paused], request: runtime.request });
+    renderPalette(model);
+    fireEvent.click(await screen.findByRole("option", { name: /^Resume watcher…/u }));
+    expect(model.showWatcher).toHaveBeenCalledWith(WATCHED_ID);
+    expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
+  });
+
   it("opens the dock with the error when the pause fails", async () => {
     window.localStorage.setItem(watcherDockStorageKey(WATCHED_ID), JSON.stringify({ open: false, seenAt: null }));
     const request = vi.fn(async (): Promise<ServerEvent> => {
       throw new RuntimeCommandError("The watcher changed meanwhile. Try again.", "rejected");
     });
-    const watched = shell(WATCHED_ID, "Refactor parser");
-    render(
-      <WatcherContext.Provider value={surfaceModel({ request })}>
-        <CommandPalette
-          open
-          projects={[project]}
-          conversations={[watched]}
-          newThreadShortcut="⌘N"
-          onClose={vi.fn()}
-          onSelectProject={vi.fn()}
-          onSelectConversation={vi.fn()}
-          onNewThread={vi.fn()}
-          onNewThreadIn={vi.fn()}
-          currentProjectId={null}
-          onAddProject={vi.fn()}
-          onOpenSettings={vi.fn()}
-        />
-      </WatcherContext.Provider>,
-    );
+    renderPalette(surfaceModel({ request }));
     fireEvent.click(await screen.findByRole("option", { name: /Pause watcher/u }));
     await waitFor(() => expect(readWatcherDock(WATCHED_ID).open).toBe(true));
     expect(takeWatcherDockError(WATCHED_ID)).toBe("The watcher changed meanwhile. Try again.");

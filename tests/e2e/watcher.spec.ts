@@ -244,7 +244,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(presets.getByRole("radio", { name: /^Reviewer/u })).toHaveAttribute("aria-checked", "true");
     // The read-only boundary is part of the dialog's description, above the fold.
     await expect(dialog.getByText("It reads and reports: it may run read-only commands and never edits files or changes the workspace.", { exact: true })).toBeVisible();
-    const attach = dialog.getByRole("button", { name: "Attach watcher" });
+    const attach = dialog.getByRole("button", { name: "Add watcher" });
     await expect(attach).not.toHaveAttribute("aria-disabled");
     const bounds = await dialog.boundingBox();
     expect(bounds).not.toBeNull();
@@ -283,10 +283,10 @@ test.describe("watcher on the fake Codex route", () => {
     await gate("main-step-1");
     // Settled commands gather before an automatic check, so "Check now"
     // starts this one as soon as the command is waiting.
-    await expectMenuNote("1 waiting");
+    await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
-    await expect(dock().locator(".watcher-notice-line")).toContainText(/Check 1 · checking now/u);
+    await expect(dock().locator(".watcher-notice-line")).toHaveText(/^Check 1$/u);
     await expect(dock().getByRole("button", { name: "Check now" })).toHaveAttribute("aria-disabled", "true");
     await expect(sidebar().locator(".watcher-work-row-state")).toHaveText("Checking");
     await capture(info, "dock-checking-light");
@@ -299,14 +299,14 @@ test.describe("watcher on the fake Codex route", () => {
     // A second quiet check joins the same receipt. "Check now" skips the
     // cooldown once the next settled command is waiting.
     await gate("main-step-2");
-    await expectMenuNote("1 waiting");
+    await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply("SILENT");
     await expect(receipt).toHaveText(/^Checked 2 times · .+ · nothing to report/u);
     await expect(dock().locator(".watcher-receipt:not(.is-notice)")).toHaveCount(1);
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
-    await expectMenuNote("0 waiting");
+    await expectMenuNote("0 events waiting");
     await receipt.click();
     await expect(dock().locator(".watcher-receipt-checks > li")).toHaveCount(2);
     await capture(info, "dock-receipts-light");
@@ -324,7 +324,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(phase()).toHaveText(/ · Watching$/u);
 
     await gate("main-step-2b");
-    await expectMenuNote("1 waiting");
+    await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply(DISMISSED);
@@ -341,7 +341,7 @@ test.describe("watcher on the fake Codex route", () => {
   test("queues a finding and delivers it after the watched turn as a watcher note", async ({ browserName: _browserName }, info) => {
     const page = app.page;
     await gate("main-step-3");
-    await expectMenuNote("1 waiting");
+    await expectMenuNote("1 event waiting");
     await dock().getByRole("button", { name: "Check now" }).click();
     await expect(phase()).toHaveAttribute("data-phase", "waking");
     await queueWatcherReply(FINDING);
@@ -397,7 +397,7 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(feedEntries().nth(2)).toHaveAttribute("data-kind", "receipts");
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
     await expect(dock().locator(".watcher-notice-line")).toHaveCount(0);
-    await expect(finding.locator(".watcher-finding-resolved")).toHaveText(`Resolved in check ${Number(findingCheck) + 1}`);
+    await expect(finding.locator(".watcher-finding-meta").first()).toHaveText(new RegExp(`^Check ${findingCheck} · .+ · resolved in check ${Number(findingCheck) + 1}$`, "u"));
     await capture(info, "dock-resolved-light");
     expect(app.rendererErrors).toEqual([]);
   });

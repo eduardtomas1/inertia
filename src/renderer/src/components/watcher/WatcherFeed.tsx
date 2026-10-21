@@ -196,9 +196,9 @@ export function WatcherFeed({
   }, []);
 
   return (
-    <section className="watcher-feed" aria-label="Findings">
+    <section className="watcher-feed" aria-label="Checks">
       {!feed.loaded && !feed.error && (
-        <p className="watcher-feed-empty"><LoadingMark label="Loading checks" /> Loading checks…</p>
+        <p className="watcher-feed-empty" role="status"><LoadingMark aria-hidden="true" /> Loading checks…</p>
       )}
       {feed.error && (
         <p className="watcher-feed-error" role="alert">
@@ -210,7 +210,7 @@ export function WatcherFeed({
         <p className="watcher-feed-empty">No checks yet</p>
       )}
       {groups.length > 0 && (
-        <ol className="watcher-feed-list" aria-label="Watcher findings">
+        <ol className="watcher-feed-list" aria-label="Watcher checks">
           {groups.map((group, index) => {
             const motionKey = `${linkId}:${group.key}`;
             const enter = !enteredEntries.has(motionKey);

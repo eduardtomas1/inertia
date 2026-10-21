@@ -111,13 +111,12 @@ describe("WatcherBar", () => {
       "Collapse",
       "Stop watching…",
       "27 of 30 checks left this turn",
-      "9 events seen",
-      "2 waiting",
+      "2 events waiting",
       expect.stringMatching(/^Last check /u),
       expect.stringMatching(/^Main chat quiet since /u),
       "Used 48.2K tokens",
     ]);
-    expect(within(menu).getByRole("menuitem", { name: "2 waiting" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(menu).getByRole("menuitem", { name: "2 events waiting" })).toHaveAttribute("aria-disabled", "true");
     expect(within(menu).getByRole("menuitem", { name: "Used 48.2K tokens" })).toHaveAttribute("aria-disabled", "true");
   });
 
@@ -245,14 +244,14 @@ describe("WatcherBar", () => {
       latest: { outcome: "failed", at: "2026-10-19T10:45:00.000Z", text: "" },
       latestFindingAt: "2026-10-19T10:44:00.000Z",
     })));
-    expect(liveRegion()).toHaveTextContent("Paused: It used its checks for this turn.");
+    expect(liveRegion()).toHaveTextContent("Paused. It used its checks for this turn.");
   });
 
   it("announces the runtime's own words for a pause it explains", () => {
     const detail = "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.";
     const view = render(bar(link()));
     view.rerender(bar(link({ status: "paused", pauseReason: "wake-budget", pauseDetail: detail })));
-    expect(liveRegion()).toHaveTextContent(`Paused: ${detail}`);
+    expect(liveRegion()).toHaveTextContent(`Paused. ${detail}`);
   });
 
   it("announces a second finding and a repeated failure again", () => {
@@ -351,6 +350,9 @@ describe("WatcherBar", () => {
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Resume" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(onResumeRequest).toHaveBeenCalledOnce();
+    view.rerender(bar(link({ status: "paused", pauseReason: "write-detected" }), runtime, onResumeRequest));
+    fireEvent.click(screen.getByRole("button", { name: "Resume…" }));
+    expect(onResumeRequest).toHaveBeenCalledTimes(2);
   });
 
   it("keeps focus on a pending action: aria-disabled, never disabled", async () => {
@@ -406,11 +408,11 @@ describe("WatcherBar", () => {
       link({ status: "paused", pauseReason: "watched-archived" }),
       undefined,
       onResumeRequest,
-      { resumeBlocked: "Unarchive the watched chat to resume its watcher." },
+      { resumeBlocked: "Unarchive the main chat to resume its watcher." },
     ));
     const resume = screen.getByRole("button", { name: "Resume" });
     expect(resume).toHaveAttribute("aria-disabled", "true");
-    expect(resume).toHaveAccessibleDescription("Unarchive the watched chat to resume its watcher.");
+    expect(resume).toHaveAccessibleDescription("Unarchive the main chat to resume its watcher.");
     fireEvent.click(resume);
     expect(onResumeRequest).not.toHaveBeenCalled();
   });

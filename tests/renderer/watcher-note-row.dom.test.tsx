@@ -200,7 +200,7 @@ describe("watcher check rows", () => {
     }]);
     const row = screen.getByRole("article", { name: "Check 4 · 9 events" });
     expect(row).toHaveTextContent("Final check");
-    expect(row).toHaveTextContent("Nothing to report.");
+    expect(row).toHaveTextContent(/Nothing to report(?!\.)/u);
     expect(row).toHaveTextContent("1 shortened");
     const summary = within(row).getByText("What the watcher was shown");
     const details = summary.closest("details")!;

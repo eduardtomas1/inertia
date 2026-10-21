@@ -29,14 +29,6 @@
   content: "·";
 }
 
-.watcher-wake-mark {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--text-faint);
-}
-
 .watcher-wake-digest > summary {
   display: inline-flex;
   min-height: 24px;

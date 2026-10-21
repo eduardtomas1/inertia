@@ -15,7 +15,7 @@ const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = 
   "write-detected": "Files changed that no running agent accounts for.",
   "write-attempts": "It tried to edit a file twice during one turn.",
   "route-unavailable": "Its route is unavailable. Check Settings → Agents.",
-  "watched-archived": "The watched chat was archived.",
+  "watched-archived": "The main chat was archived.",
   "watcher-archived": "The watcher chat was archived.",
 };
 
@@ -24,7 +24,7 @@ export function watcherPauseText(reason: WatcherPauseReason, detail: string | nu
 }
 
 export function watcherPauseAnnouncement(reason: WatcherPauseReason | null, detail: string | null): string {
-  return reason ? `Paused: ${watcherPauseText(reason, detail)}` : "Paused: the watcher is paused.";
+  return reason ? `Paused. ${watcherPauseText(reason, detail)}` : "Paused.";
 }
 
 const OUTCOME_TEXT: Readonly<Record<Exclude<WatcherWakeOutcome, "silent" | "finding">, string>> = {
@@ -48,7 +48,7 @@ const TRIGGER_TEXT: Readonly<Record<WatcherWakeTrigger, string>> = {
   plan: "After a plan change",
   error: "After an error",
   "turn-end": "Final check",
-  manual: "Check now",
+  manual: "Manual check",
   initial: "Review of the last turn",
 };
 
@@ -81,7 +81,7 @@ export function watcherPhaseText(phase: WatcherLivePhase, label: string | null):
 }
 
 /** A runtime detail as a clause: no trailing period, sentence case folded. */
-function detailClause(detail: string | null): string | null {
+export function watcherDetailClause(detail: string | null): string | null {
   const text = detail?.trim().replace(/\.$/u, "").trim();
   if (!text) return null;
   const [first = "", second = ""] = text;
@@ -110,7 +110,7 @@ export function watcherDeliveryText(delivery: WatcherDelivery & { automatic?: bo
     : delivery.state === "sent"
       ? delivery.mode === "steer" ? "into the running turn" : "started the main chat's next turn"
       : null;
-  const clause = detailClause(delivery.detail);
+  const clause = watcherDetailClause(delivery.detail);
   const repeats = clause !== null && (
     clause === fallback
     || /^(queued|sent|steered|not sent|dismissed)\b/iu.test(clause)

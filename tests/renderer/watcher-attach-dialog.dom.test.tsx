@@ -162,7 +162,7 @@ describe("WatcherAttachDialog", () => {
     }
     expect(review).toBeEnabled();
     fireEvent.click(review);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add watcher" }));
     await waitFor(() => expect(request).toHaveBeenCalled());
     expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ initialReview: true });
   });
@@ -175,7 +175,7 @@ describe("WatcherAttachDialog", () => {
     const instructions = within(dialog).getByRole("textbox", { name: /Your instructions/u });
     const brief = within(dialog).getByRole("checkbox", { name: /The brief/u });
     const budgets = within(dialog).getByText("Budgets").closest("summary")!;
-    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    const attach = within(dialog).getByRole("button", { name: "Add watcher" });
     expect(index(preset)).toBeGreaterThan(-1);
     expect(order.filter((element) => element.getAttribute("role") === "radio")).toEqual([preset]);
     expect(index(preset)).toBeLessThan(index(instructions));
@@ -191,7 +191,7 @@ describe("WatcherAttachDialog", () => {
       snapshot([ready("cursor", "Cursor"), ready("codex", "Codex")], "cursor"),
       { request, onAttached },
     );
-    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    const attach = within(dialog).getByRole("button", { name: "Add watcher" });
     expect(attach).not.toHaveAttribute("aria-disabled");
     fireEvent.click(attach);
     await waitFor(() => expect(onAttached).toHaveBeenCalledWith(link()));
@@ -215,12 +215,12 @@ describe("WatcherAttachDialog", () => {
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request });
     const toggle = within(dialog).getByRole("switch", { name: "Send findings to the main chat automatically" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(toggle).toHaveAccessibleDescription("Each finding is queued as a note from the watcher; your own messages still go first.");
+    expect(toggle).not.toHaveAttribute("aria-describedby");
     const sharing = within(dialog).getByRole("group", { name: "What the watcher sees" });
     expect(sharing.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add watcher" }));
     await waitFor(() => expect(request).toHaveBeenCalled());
     expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ delivery: "auto" });
   });
@@ -249,13 +249,13 @@ describe("WatcherAttachDialog", () => {
       ready("codex", "Codex", { authState: "unauthenticated", canRun: false }),
       ready("cursor", "Cursor"),
     ]));
-    expect(within(dialog).getByRole("button", { name: "Attach watcher" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).getByRole("button", { name: "Add watcher" })).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).getByRole("status")).not.toHaveTextContent(/Cursor/u);
   });
 
   it("offers no route when only agents that cannot watch are ready", async () => {
     const { dialog } = await openDialog(snapshot([ready("cursor", "Cursor")], "cursor"));
-    expect(within(dialog).getByRole("button", { name: "Attach watcher" })).toHaveAttribute("aria-disabled", "true");
+    expect(within(dialog).getByRole("button", { name: "Add watcher" })).toHaveAttribute("aria-disabled", "true");
     expect(within(dialog).getByRole("status")).toHaveTextContent("No watcher route");
   });
 
@@ -323,7 +323,7 @@ describe("WatcherAttachDialog", () => {
     fireEvent.change(checks, { target: { value: "" } });
     fireEvent.blur(checks);
     expect(checks).toHaveValue(30);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Attach watcher" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add watcher" }));
     await waitFor(() => expect(request).toHaveBeenCalled());
     expect(payloadOf(request.mock.calls[0]![0])).toMatchObject({ budgets: { wakesPerWatchedTurn: 30 } });
   });
@@ -337,7 +337,7 @@ describe("WatcherAttachDialog", () => {
     const view = render(<Harness value={value} request={recorded.request} onAttached={onAttached} />);
     fireEvent.click(screen.getByRole("button", { name: "Add a watcher…" }));
     const dialog = await screen.findByRole("dialog", { name: "Add a watcher" });
-    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    const attach = within(dialog).getByRole("button", { name: "Add watcher" });
     fireEvent.click(attach);
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("did not answer in time");
     fireEvent.click(attach);
@@ -356,7 +356,7 @@ describe("WatcherAttachDialog", () => {
     let fail: (error: Error) => void = () => undefined;
     const recorded = recordingRequest(() => new Promise((_resolve, reject) => { fail = reject; }));
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request: recorded.request });
-    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    const attach = within(dialog).getByRole("button", { name: "Add watcher" });
     const cancel = within(dialog).getByRole("button", { name: "Cancel" });
     attach.focus();
     fireEvent.click(attach);
@@ -378,7 +378,7 @@ describe("WatcherAttachDialog", () => {
       throw new RuntimeCommandError("This chat already has a watcher.", "rejected");
     });
     const { dialog } = await openDialog(snapshot([ready("codex", "Codex")]), { request: recorded.request });
-    const attach = within(dialog).getByRole("button", { name: "Attach watcher" });
+    const attach = within(dialog).getByRole("button", { name: "Add watcher" });
     fireEvent.click(attach);
     await within(dialog).findByRole("alert");
     fireEvent.click(attach);

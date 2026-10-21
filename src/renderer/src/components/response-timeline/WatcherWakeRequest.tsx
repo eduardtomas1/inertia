@@ -38,10 +38,9 @@ export function WatcherWakeRequest({
       tabIndex={-1}
     >
       <p className="watcher-wake-row">
-        <span className="watcher-wake-mark" aria-hidden="true" />
         <strong>{title}</strong>
         <span>{watcherTriggerText(wake.trigger)}</span>
-        {wake.outcome && <span>{watcherOutcomeText(wake.outcome)}</span>}
+        {wake.outcome && <span>{watcherOutcomeText(wake.outcome).replace(/\.$/u, "")}</span>}
         {omitted && <span>{omitted}</span>}
       </p>
       <details className="watcher-wake-digest">

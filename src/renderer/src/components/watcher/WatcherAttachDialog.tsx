@@ -77,7 +77,6 @@ export interface WatcherAttachHostProps {
 
 const WATCHER_READ_ONLY_STATEMENT = "It reads and reports: it may run read-only commands and never edits files or changes the workspace.";
 const ATTACH_FAILED = "The watcher could not be attached.";
-const WATCHER_AUTO_SEND_DETAIL = "Each finding is queued as a note from the watcher; your own messages still go first.";
 
 const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string }> = [
   { key: "brief", label: "The brief" },
@@ -404,11 +403,11 @@ export function WatcherAttachDialog({
           type="button"
           className="primary-button"
           aria-disabled={!canAttach || undefined}
-          title={routeReady ? undefined : "Choose a ready model route."}
+          title={routeReady ? undefined : "Choose a ready route."}
           onClick={attach}
         >
-          {submitting && <LoadingMark label="Attaching watcher" />}
-          {submitting ? "Attaching…" : "Attach watcher"}
+          {submitting && <LoadingMark label="Adding watcher" />}
+          {submitting ? "Adding…" : "Add watcher"}
         </button>
       </>}
     >
@@ -501,12 +500,10 @@ export function WatcherAttachDialog({
         <Switch
           id="watcher-attach-auto-send"
           checked={delivery === "auto"}
-          describedBy="watcher-attach-auto-send-detail"
           disabled={submitting}
           onChange={(checked) => setDelivery(checked ? "auto" : "manual")}
         />
         <label htmlFor="watcher-attach-auto-send">Send findings to the main chat automatically</label>
-        <p id="watcher-attach-auto-send-detail">{WATCHER_AUTO_SEND_DETAIL}</p>
       </section>
 
       <section className="watcher-attach-section watcher-attach-toggle">

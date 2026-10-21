@@ -709,6 +709,48 @@ describe("buildWatcherDigest", () => {
     expect(partial.content).not.toContain("More activity followed");
   });
 
+  it("flags a continuation once a check reads a full page of replies, so the final pass reaches the last one", () => {
+    const source = new FakeSource();
+    source.turns = [turn({ status: "completed", completedAt: at(40) })];
+    source.activities = [activity(1), activity(2), activity(3)];
+    source.replies = Array.from({ length: 25 }, (_, index) => ({
+      id: `m${String(index + 1).padStart(2, "0")}`,
+      createdAt: at(index + 10),
+      content: index === 24 ? "FINAL-ANSWER" : `SEGMENT-${index + 1}.`,
+    }));
+    const first = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options({ final: true }))!;
+    expect(first.stats).toMatchObject({ moreFollows: true, eventsCovered: 3 });
+    expect(first.content).toContain("More activity followed; the next check covers it.");
+    expect(first.content).toContain("SEGMENT-20.");
+    expect(first.content).not.toContain("FINAL-ANSWER");
+    expect(first.cursor).toMatchObject({ activityId: "act-0003", messageAt: at(29) });
+
+    const second = buildWatcherDigest(source, link({ cursor: first.cursor }), options({ final: true }))!;
+    expect(second.stats.moreFollows).toBe(false);
+    expect(second.content).toContain("FINAL-ANSWER");
+    expect(second.content).not.toContain("SEGMENT-20.");
+    expect(second.content).not.toContain("More activity followed");
+  });
+
+  it("keeps the last reply of a full page open while the turn runs, so the rest it streams still follows", () => {
+    const source = new FakeSource();
+    source.replies = Array.from({ length: 20 }, (_, index) => ({
+      id: `m${String(index + 1).padStart(2, "0")}`,
+      createdAt: at(index + 10),
+      content: index === 19 ? "HEAD-OF-ANSWER" : `SEGMENT-${index + 1}.`,
+    }));
+    const first = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
+    expect(first.stats.moreFollows).toBe(true);
+    expect(first.content).toContain("> HEAD-OF-ANSWER");
+    expect(first.cursor.messageAt).toBe(at(28));
+    expect(first.openReply).toEqual({ messageId: "m20", bytes: bytes("HEAD-OF-ANSWER") });
+
+    source.replies[19]!.content = "HEAD-OF-ANSWER and TAIL-OF-ANSWER";
+    const next = buildWatcherDigest(source, link({ cursor: first.cursor }), options({ openReply: first.openReply }))!;
+    expect(next.content).toContain("(continued):\n> and TAIL-OF-ANSWER");
+    expect(next.content).not.toContain("SEGMENT-19.");
+  });
+
   it("neutralizes and flattens the watched title in the header", () => {
     const source = new FakeSource();
     source.activities = [activity(1)];

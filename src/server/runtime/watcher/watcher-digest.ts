@@ -533,7 +533,6 @@ export function buildWatcherDigest(
     { at: base.activityAt, id: base.activityId },
     MAX_WATCHER_DIGEST_ACTIVITIES,
   ).filter(({ id }) => !rereadIds.has(id));
-  const moreFollows = fresh.length >= MAX_WATCHER_DIGEST_ACTIVITIES;
   const last = fresh.at(-1);
   const pendingRunningIds = [...new Set(
     [...reread, ...fresh].filter(({ status }) => status === "running").map(({ id }) => id),
@@ -560,10 +559,9 @@ export function buildWatcherDigest(
     const rest = source.messageTextAfter(reply.id, quotedBefore.bytes, MAX_REPLY_BYTES);
     return [{ createdAt: reply.createdAt, content: rest.content, truncated: rest.truncated, continued: true }];
   });
-  const streaming = !isAgentTurnTerminalStatus(turn.status) && read.length < MAX_WATCHER_DIGEST_MESSAGES
-    ? read.at(-1) ?? null
-    : null;
+  const streaming = isAgentTurnTerminalStatus(turn.status) ? null : read.at(-1) ?? null;
   const lastClosed = streaming ? read.at(-2) : read.at(-1);
+  const moreFollows = fresh.length >= MAX_WATCHER_DIGEST_ACTIVITIES || read.length >= MAX_WATCHER_DIGEST_MESSAGES;
   const showBrief = sharing.brief && (firstWake || options.sessionFresh);
   const somethingNew = settled.length > 0 || replies.length > 0 || planChanged || (firstWake && (showBrief || showPlan));
   if (!somethingNew && !options.final && options.requested !== true) return null;

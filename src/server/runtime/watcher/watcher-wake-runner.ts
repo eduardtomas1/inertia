@@ -141,7 +141,8 @@ class TurnMemory<T> {
 function advanced({ start, digest }: Pick<RunningWake, "start" | "digest">): boolean {
   return digest.cursor.turnId !== start.turnId
     || digest.cursor.activityAt !== start.activityAt
-    || digest.cursor.activityId !== start.activityId;
+    || digest.cursor.activityId !== start.activityId
+    || digest.cursor.messageAt !== start.messageAt;
 }
 
 const VIOLATION_OUTCOMES: ReadonlyArray<[ReadOnlyWatcherViolation["kind"][], WatcherWakeOutcome]> = [

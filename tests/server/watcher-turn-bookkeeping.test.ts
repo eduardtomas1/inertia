@@ -319,6 +319,42 @@ describe("watcher checks past the per-check activity cap", () => {
     }
   });
 
+  it("follows a final pass whose replies fill a page with more pages until the last reply is quoted", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach();
+      const watcherId = link.watcherConversationId;
+      const turn = await f.startWatchedTurn();
+      watchedActivities(f, 3);
+      for (let index = 1; index <= 44; index += 1) {
+        f.provider.emit(f.watched.id, { type: "text", text: `SEGMENT-${index}.` });
+        f.provider.emit(f.watched.id, { type: "text-boundary" });
+      }
+      await f.finishTurn(f.watched.id, "FINAL-ANSWER");
+      await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      for (const [index, quoted, unquoted, more] of [
+        [1, "SEGMENT-20.", "SEGMENT-21.", true],
+        [2, "SEGMENT-40.", "SEGMENT-20.", true],
+        [3, "FINAL-ANSWER", "SEGMENT-40.", false],
+      ] as const) {
+        const page = await check(f, watcherId, index);
+        expect(page.wake).toMatchObject({ trigger: "turn-end", watchedTurnId: turn.id });
+        expect(page.digest).toContain("Final check for this turn");
+        expect(page.digest).toContain(quoted);
+        expect(page.digest).not.toContain(unquoted);
+        expect(page.digest.includes(MORE_FOLLOWS)).toBe(more);
+        expect(page.digest.includes("FINAL-ANSWER")).toBe(!more);
+        await f.finishTurn(watcherId, "SILENT");
+        await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
+      }
+      await f.advance(30 * 60_000);
+      expect(watcherInputs(f, watcherId)).toHaveLength(3);
+      expect(f.linkView(link.id)).toMatchObject({ status: "watching", finalPassTurnId: turn.id });
+    } finally {
+      await f.close();
+    }
+  });
+
   it("follows a final pass that hit the cap with more final passes and marks it done after the last page", async () => {
     const f = await createWatcherFixture();
     try {

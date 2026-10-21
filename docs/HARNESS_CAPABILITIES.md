@@ -252,20 +252,21 @@ backslashes outside single quotes, control characters, Unicode quotes, dashes
 and spaces, PowerShell's `--%`, and unbalanced quotes. On Windows it also
 refuses `%`, `^`, `,`, `"`, `\` and `&`, `|`, `<`, `>` anywhere except a plain
 pipe, empty arguments, and any `:` in a path argument other than a drive
-letter. That keeps cmd.exe expansion, PowerShell provider paths such as `env:`,
-and Windows PowerShell's legacy argument passing, which can split an argument
-that contains a quote or ends in a backslash, out. OpenCode's shell can be PowerShell on any
-platform, so OpenCode watchers also refuse unquoted commas, which PowerShell
-turns into separate arguments, and an unquoted `@` at the start of a word,
-which PowerShell treats as splatting. A pipe is allowed only when every
-segment is. A word whose first character is an unquoted glob, or an option
-word with a glob before any `=`, is refused, because the shell could expand it
-into an option-shaped file name; `./*.ts`, `src/*.ts` and `--include=*.ts` are
-allowed. The programs are read-only `git` subcommands (only `-C`,
-`--no-pager`, `--no-optional-locks` and `-c core.pager=cat` as global options;
-`--output`, `--ext-diff`, `--textconv`, `--show-signature`, the `%G` and
-`%(signature)` format placeholders, `git grep -O`, `--no-index`, `--untracked`
-and `--no-exclude-standard` and their abbreviations refused), `rg` without
+letter. These rules keep out cmd.exe expansion, PowerShell provider paths such
+as `env:`, and Windows PowerShell's legacy argument passing, which can split an
+argument that contains a quote or ends in a backslash. OpenCode's shell can be
+PowerShell on any platform, so OpenCode watchers also refuse unquoted commas,
+which PowerShell turns into separate arguments, and an unquoted `@` at the
+start of a word, which PowerShell treats as splatting. A pipe is allowed only
+when every segment is. A word whose first character is an unquoted glob, or an
+option word with a glob before any `=`, is refused, because the shell could
+expand it into an option-shaped file name; `./*.ts`, `src/*.ts` and
+`--include=*.ts` are allowed. The programs are read-only `git` subcommands
+(only `-C`, `--no-pager`, `--no-optional-locks` and `-c core.pager=cat` as
+global options; `--output`, `--ext-diff`, `--textconv`, `--show-signature`, the
+`%G` and `%(signature)` format placeholders, `git grep -O`, `--no-index`,
+`--untracked` and `--no-exclude-standard` and their abbreviations refused),
+`rg` without
 `--pre`, `--hostname-bin`, `-z`/`--search-zip`, `-L`/`--follow`, `--hidden`/`-.`,
 `-u`/`--unrestricted` or any `--no-ignore` option, `grep`, `egrep` and `fgrep`
 without recursion (`-r`, `-R`, `-d`, `--directories`), `cat` (without
@@ -276,28 +277,32 @@ PowerShell's `-Wait`), `head`, `tail` without follow (including the obsolete
 without `-C`, `-z`, `-Z` or `-f`/`--files-from`, `tree` without `-o`, `-R` or
 `-l`, `sort` without `-o`, `-T`, `--compress-program` or `--files0-from` (the
 `files0-from` and `files-from` options read the names of further files from a
-file, which neither containment check sees), `uniq` with at most one file and no glob, `cut`, `nl`,
-`tr`, `column`, `jq` without environment access, program files, modules or
-extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`, `import`,
-`include`, `modulemeta`), `pwd`, `which` and `echo`. An argument that is
-absolute, starts with `~` or contains a `..` segment must stay inside the
+file, which neither containment check sees), `uniq` with at most one file and
+no glob, `cut`, `nl`, `tr`, `column`, `jq` without environment access, program
+files, modules or extra input files (`-f`, `-L`, `--rawfile`, `--slurpfile`,
+`import`, `include`, `modulemeta`), `pwd`, `which` and `echo`. An argument that
+is absolute, starts with `~` or contains a `..` segment must stay inside the
 workspace, and so must every suffix of a short-option bundle after its first
 letter, so `grep -nf/etc/passwd` and also `grep -nfsrc/patterns` are refused
-while `grep -nf src/patterns` is allowed. Because that check is lexical, Claude's
-broker and OpenCode's permission handler then resolve every argument and
-option value that names an existing path with `realpath`, after expanding its
-wildcards against the directory listing (quoted wildcards too on Windows and
-wherever the shell may be PowerShell), and decline the command without an
+while `grep -nf src/patterns` is allowed. Because that check is lexical,
+Claude's broker and OpenCode's permission handler then resolve every argument
+and option value that names an existing path with `realpath`, after expanding
+its wildcards against the directory listing (quoted wildcards too on Windows
+and wherever the shell may be PowerShell), and decline the command without an
 approval when one resolves outside the workspace's own real path, so a
 symbolic link or junction inside the workspace cannot lead a read outside it.
-A command whose wildcards reach more than 4,096 paths is declined. `.env`, `*.env` and `*.env.*` names
-are refused in any letter case wherever they appear in an argument, except in
-the search pattern of `rg`, `grep`, `egrep`, `fgrep` and `git grep`: the first
-positional word when no `-e`, `--regexp`, `-f` or `--file` supplies the
-pattern, and every `-e` or `--regexp` value. A pattern such as
+A command whose wildcards reach more than 4,096 paths is declined. `.env`,
+`*.env` and `*.env.*` names are refused in any letter case wherever they
+appear in an argument, except in the search pattern of `rg`, `grep`,
+`egrep`, `fgrep` and `git grep`: the first positional word when no `-e`,
+`--regexp`, `-f` or `--file` supplies the pattern, and every `-e` or
+`--regexp` value. A pattern such as
 `process.env.API_URL` is therefore allowed, while a path operand or a `-f`
-pattern file with such a name is refused. When an option before the pattern is
-not one the classifier knows, no word is treated as the pattern. A command is
+pattern file with such a name is refused. A path operand with a wildcard is
+refused unless its last segment ends in a literal extension other than `.env`,
+so `src/*.ts` is allowed while `config/*`, `*.e*`, `prod.en?` and `prod.[e]nv`
+are refused. When an option before the pattern is not one the classifier
+knows, no word is treated as the pattern. A command is
 capped at 4,096 characters and 256 arguments. An allowed command runs without
 an approval and counts towards the receipt's command count; a declined one is a
 `command-attempt`. Claude and OpenCode watcher runs set
@@ -311,10 +316,10 @@ environment, so a ripgrep configuration file cannot add `--pre` to a plain
 variable again is ignored as well. OpenCode's permission reply cannot change
 the command, so OpenCode watchers rely on the environment alone.
 Known limits: the real-path check runs just before the command does, so a link
-created in between is not seen; a search reads any workspace file its pattern reaches
-except files that Git's or rg's ignore rules skip, so a tracked or unignored
-secret file can be read; programs still honor their own configuration (a
-`diff.external`, textconv, `core.fsmonitor`, `gpg.program` or
+created in between is not seen; a search reads any workspace file its pattern
+reaches except files that Git's or rg's ignore rules skip, so a tracked or
+unignored secret file can be read; programs still honor their own
+configuration (a `diff.external`, textconv, `core.fsmonitor`, `gpg.program` or
 `log.showSignature` setting in Git config, a `RIPGREP_CONFIG_PATH` that
 OpenCode's shell startup files set again, or one that applies to an `rg`
 command Claude Code runs on its own read-only rules without asking the
@@ -362,32 +367,36 @@ Each layer works on its own; none relies on the model following instructions.
 4. **Git fingerprint backstop.** `src/server/git/checkout-fingerprint.ts`
    fingerprints the checkout before and after each check through
    `runGitInspection` (`--no-optional-locks`, `core.fsmonitor=false`):
-   `rev-parse --verify HEAD`, `symbolic-ref -q HEAD` (so a branch switch at
-   the same commit counts as a HEAD move), a bounded
-   `status --porcelain=v2 -z --untracked-files=all --no-renames`, and
+   `rev-parse --verify -q HEAD`, `symbolic-ref -q HEAD` (so a branch switch at
+   the same commit counts as a HEAD move), a bounded `status --porcelain=v2 -z
+   --untracked-files=all --no-renames --ignore-submodules=dirty`, and
    `hash-object --no-filters` for changed and untracked paths, batched to at
-   most 24 K characters of arguments for Windows. `--no-filters` keeps
-   repository clean filters from running. Each initialized submodule that
-   `.gitmodules` lists inside the checkout (at most 16) is fingerprinted the
-   same way with its own filters disabled, so uncommitted edits inside it
-   count. Ignored files, `.git` internals such as hooks, config and other
-   refs, and submodules nested inside submodules are not fingerprinted. More
-   than 2,000 paths or 64 MiB of hashed bytes in all marks the fingerprint
-   truncated. A changed path is *explained* when another
-   turn active on the same checkout reported it in a file activity during the
-   window. The result is *inconclusive*, and does not pause, when another
-   active turn ran a command, a workspace or source-control run was active, a
-   terminal resume was active, or the watcher's own turn had no activity that
-   could write (no command outside the read-only command allowlist and no
-   started edit; `watcherActivityMayWrite`, which classifies the command text
-   a harness records in the activity's `Command:` detail, or the title when
-   there is none). An inconclusive check keeps its finding and records its
-   unexplained paths on the feed item (`guardPaths`), which the finding card
-   and the check's receipt line list. Unexplained
-   paths in a conclusive window pause the link with `write-detected` and list
-   at most 20 paths. A non-repository,
-   a timeout or a truncated fingerprint is *unavailable*; the other layers
-   still apply.
+   most 24 K characters of arguments for Windows. Every filter driver that the
+   repository's config names has its `clean`, `smudge` and `process` commands
+   blanked and `required` set to false through `-c` for `status` (more than 64
+   drivers make the fingerprint unavailable), and `--no-filters` keeps them
+   out of `hash-object`, so no repository filter runs.
+   `--ignore-submodules=dirty` leaves submodule worktrees to their own
+   fingerprints: each initialized submodule that `.gitmodules` lists inside the
+   checkout (at most 16) is fingerprinted the same way with its own filters
+   disabled, so uncommitted edits inside it count. Ignored files, `.git`
+   internals such as hooks, config and other refs, and submodules nested
+   inside submodules are not fingerprinted. More than 2,000 paths or 64 MiB of
+   hashed bytes in all marks the fingerprint truncated. A changed path is
+   *explained* when another turn active on the same checkout reported it in a
+   file activity during the window. The result is *inconclusive*, and does not
+   pause, when another active turn ran a command, a workspace or
+   source-control run was active, a terminal resume was active, or the
+   watcher's own turn had no activity that could write (no command outside the
+   read-only command allowlist and no started edit; `watcherActivityMayWrite`,
+   which classifies the command text a harness records in the activity's
+   `Command:` detail, or the title when there is none, after unwrapping a
+   shell wrapper such as Codex's `/bin/zsh -lc '…'`). An inconclusive check
+   keeps its finding and records its unexplained paths on the feed item
+   (`guardPaths`), which the finding card and the check's receipt line list.
+   Unexplained paths in a conclusive window pause the link with
+   `write-detected` and list at most 20 paths. A non-repository, a timeout or
+   a truncated fingerprint is *unavailable*; the other layers still apply.
 5. **Boundary instruction.** The `inertia-watcher` instruction states that the
    watcher is read-only.
 
@@ -411,7 +420,8 @@ no agent messages or pages, and with `changedFiles` off no file lists.
   the `Resolved: check N` line when an earlier finding is now fixed. With
   automatic sending on, the boundary tells the watcher that the user chose to
   have Inertia send its findings. It stays under 6 KiB, below the 16 KiB
-  per-instruction cap.
+  per-instruction cap, and accompanies every watcher turn, including a
+  message the user types into the watcher chat.
 - `inertia-watcher-note` accompanies a main-chat turn that delivers a watcher
   note, and marks the note as forwarded from the watcher, not written by the
   user. A note sent automatically carries `automatic: true` in its
@@ -435,7 +445,9 @@ unavailable; with neither, it says that Inertia could not capture the turn's
 changes instead of reporting no changed files. A turn that a watcher note
 started is quoted under a heading that says whether the user forwarded the
 note or the watcher sent it automatically. A `manual` or `initial` digest is
-built even when nothing is new, and then says so. Each check records its
+built even when nothing is new, and then says so. An `initial` digest of a
+watched turn that has already ended also quotes that turn's diff or changed
+paths, without counting as its final pass. Each check records its
 digest's size (`digestBytes`), which the receipt line shows, for example
 `24 KiB sent`. Every check lists up to five of the watcher's earlier findings
 in the same watched turn with their delivery state, and a reply that ends with
@@ -448,27 +460,29 @@ A paused link records its reason. A wake whose route fails the
 runnable provider) retries as transient with the scheduler's backoff at most
 `WATCHER_ROUTE_RETRY_LIMIT` (3) times; the next failure pauses the link with
 `route-unavailable`, a detail that names the route and the readiness message,
-and a `watcher.link.updated` broadcast. A check that starts resets the count.
-A check whose watcher turn fails to queue (for example when path authority
-refuses the shared checkout) is recorded as `failed`; the
-`WATCHER_DISPATCH_FAILURE_LIMIT`-th (3rd) consecutive failure pauses the link
-with `route-unavailable` instead of retrying with backoff forever. A
-`wake-budget` pause belongs to one watched turn: the next watched turn ends it
-and grants a fresh allowance. A final pass always digests the turn that ended
-(`turnId` on the digest), even when the next turn already began, and never
-spends the next turn's allowance; the cursor update is a compare-and-set on
-the turn the digest was built from, so a late check never rewinds coverage.
+and a `watcher.link.updated` broadcast. The retry count starts again when a
+check finds its route ready or the link resumes. A check whose watcher turn
+fails to queue (for example when path authority refuses the shared checkout)
+is recorded as `failed`; the `WATCHER_DISPATCH_FAILURE_LIMIT`-th (3rd)
+consecutive failure pauses the link with `route-unavailable` instead of
+retrying with backoff forever, and that count starts again when a check's turn
+queues or the link resumes. A `wake-budget` pause belongs to one watched turn:
+the next watched turn ends it and grants a fresh allowance. A final pass always
+digests the turn that ended (`turnId` on the digest), even when the next turn
+already began, and never spends the next turn's allowance; the cursor update is
+a compare-and-set on the turn the digest was built from, so a late check never
+rewinds coverage.
 `usage-limit` and `route-unavailable`
 resume only once `watcherRouteReadiness` reports the watcher's route ready,
 and no link resumes while its watched chat or its own chat is archived,
-whatever its pause reason. Every resume tops the turn's check allowance back up to
+whatever its pause reason. Every resume refills the turn's check allowance to
 `wakesPerWatchedTurn`. A final pass that ends usage-limited stays due, so it
 runs once the link resumes; a failed one is retried at most
 `WATCHER_FINAL_PASS_RETRY_LIMIT` (2) times, and a cancelled one is done. A
 pause or archive that lands while a check is being prepared settles the
 attempt as paused or transient, so a final pass it carried stays due. The
 further pages of a `manual` or `initial` check keep that request's trigger: they
-spend no allowance and stop after `WATCHER_FINAL_PASS_MAX_PAGES` (4) pages.
+spend no allowance and stop after `WATCHER_MAX_CONTINUATION_PAGES` (4) pages.
 After a restart, reconciliation also schedules the final pass of the turn
 before the cursor's turn when that turn ended after the link was created and
 has no recorded final pass. Deleting the watched chat detaches the link in

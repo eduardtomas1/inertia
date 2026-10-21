@@ -460,6 +460,30 @@ function counted(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
+function digestContents(parts: {
+  earlier: boolean;
+  brief: string | null;
+  plan: string | null;
+  activities: number | null;
+  replies: number | null;
+  changedFiles: number | null;
+  diff: WatcherDigestDiff | null | undefined;
+}): string[] {
+  const { changedFiles, diff } = parts;
+  return [
+    ...(parts.earlier ? ["your earlier findings"] : []),
+    ...(parts.brief === null ? [] : [parts.brief]),
+    ...(parts.plan === null ? [] : [parts.plan]),
+    ...(parts.activities === null ? [] : [counted(parts.activities, "activity", "activities")]),
+    ...(parts.replies === null ? [] : [counted(parts.replies, "assistant reply", "assistant replies")]),
+    ...(changedFiles === null
+      ? []
+      : [changedFiles === 0
+          ? diff === null ? "changes not captured" : "no changed files"
+          : `${counted(changedFiles, "changed file", "changed files")}${diff ? " with diffs" : " (paths only)"}`]),
+  ];
+}
+
 function elapsed(from: string, to: string): string | null {
   const ms = Date.parse(to) - Date.parse(from);
   if (!Number.isFinite(ms) || ms < 0) return null;
@@ -575,19 +599,15 @@ export function buildWatcherDigest(
   const activities = take(activitySection(settled, sharing.activities, remaining));
   const evidence = [brief, planPart, activities, replyPart, files].filter((section): section is Section => section !== null);
   const sections = earlier ? [earlier, ...evidence] : evidence;
-  const changedCount = options.diff ? options.diff.files.length : changedPaths.length;
-  const contents = [
-    ...(earlier ? ["your earlier findings"] : []),
-    ...(brief ? [source.watcherNoteOrigin(turn.userMessageId) === null ? "brief" : "the watcher's note"] : []),
-    ...(planPart ? [planChanged ? "changed plan" : "plan"] : []),
-    ...(activities ? [counted(settled.length, "activity", "activities")] : []),
-    ...(replyPart ? [counted(replies.filter((reply) => reply.content.trim().length > 0).length, "assistant reply", "assistant replies")] : []),
-    ...(files
-      ? [changedCount === 0
-          ? options.diff === null ? "changes not captured" : "no changed files"
-          : `${counted(changedCount, "changed file", "changed files")}${options.diff ? " with diffs" : " (paths only)"}`]
-      : []),
-  ];
+  const contents = digestContents({
+    earlier: earlier !== null,
+    brief: brief === null ? null : source.watcherNoteOrigin(turn.userMessageId) === null ? "brief" : "the watcher's note",
+    plan: planPart === null ? null : planChanged ? "changed plan" : "plan",
+    activities: activities === null ? null : settled.length,
+    replies: replyPart === null ? null : replies.filter((reply) => reply.content.trim().length > 0).length,
+    changedFiles: files === null ? null : options.diff ? options.diff.files.length : changedPaths.length,
+    diff: options.diff,
+  });
 
   let itemsTruncated = sections.reduce((sum, section) => sum + section.truncated, 0);
   const itemsOmitted = sections.reduce((sum, section) => sum + section.omitted, 0);

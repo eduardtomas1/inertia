@@ -244,12 +244,8 @@ export class WatcherWakeRunner {
       const previousPlanKey = !staleTurn && !review && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;
       const remaining = claimed.counters.wakeAllowance - claimed.counters.wakesThisTurn;
       const consumesAllowance = trigger !== "manual" && trigger !== "initial" && remaining > 0;
-      const drained = this.#finalPages.get(linkId);
-      const finalPage = finalTurnId === null ? 0 : drained?.turnId === finalTurnId ? drained.pages + 1 : 1;
       const spare = staleTurn ? 0 : remaining - (consumesAllowance ? 1 : 0);
-      const requestPage = request === null ? 0 : context.continued ? (this.#requestPages.get(linkId) ?? 0) + 1 : 1;
-      const lastPage = (finalTurnId !== null && finalPage >= WATCHER_MAX_CONTINUATION_PAGES && spare <= 0)
-        || requestPage >= WATCHER_MAX_CONTINUATION_PAGES;
+      const { finalPage, requestPage, lastPage } = this.#pages(linkId, finalTurnId, request, context.continued, spare);
       const digestTurnId = finalTurnId ?? cursor.turnId;
       const reviewed = review && cursor.turnId !== null ? store.watcherLinks.digest.turn(watched.id, cursor.turnId) : null;
       const reviewsEndedTurn = reviewed !== null && isAgentTurnTerminalStatus(reviewed.status);
@@ -336,6 +332,21 @@ export class WatcherWakeRunner {
       if (store.watcherLinks.get(linkId)?.status === "waking" && !this.isRunning(linkId)) release("transient");
       throw error;
     }
+  }
+
+  #pages(
+    linkId: string,
+    finalTurnId: string | null,
+    request: RunningWake["request"],
+    continued: boolean,
+    spare: number,
+  ): Pick<RunningWake, "finalPage" | "requestPage" | "lastPage"> {
+    const drained = this.#finalPages.get(linkId);
+    const finalPage = finalTurnId === null ? 0 : drained?.turnId === finalTurnId ? drained.pages + 1 : 1;
+    const requestPage = request === null ? 0 : continued ? (this.#requestPages.get(linkId) ?? 0) + 1 : 1;
+    const lastPage = (finalTurnId !== null && finalPage >= WATCHER_MAX_CONTINUATION_PAGES && spare <= 0)
+      || requestPage >= WATCHER_MAX_CONTINUATION_PAGES;
+    return { finalPage, requestPage, lastPage };
   }
 
   #claimLost(linkId: string): WatcherWakeAttempt {
@@ -487,29 +498,10 @@ export class WatcherWakeRunner {
       } catch {
         guard = { state: "unavailable", paths: [], pauseDetail: null };
       }
-      const usageLimited = turn.usageLimited === true || store.limitResets.usageLimited(turn.id);
-      let finding: string | null = null;
-      let resolved: number[] = [];
-      if (turn.status === "cancelled") outcome = "cancelled";
-      else if (usageLimited) outcome = "usage-limited";
-      else if (turn.status !== "completed") outcome = "failed";
-      else {
-        const messageId = turn.terminalAssistantMessageId;
-        const read = messageId
-          ? store.watcherLinks.digest.messageText(messageId, MAX_REPLY_READ_BYTES)
-          : { content: "", truncated: false };
-        const reply = read.truncated && messageId
-          ? {
-              text: read.content.trim(),
-              resolved: splitWatcherResolvedLine(
-                store.watcherLinks.digest.messageTailAfter(messageId, 0, MAX_RESOLVED_TAIL_BYTES).content,
-              ).resolved,
-            }
-          : splitWatcherResolvedLine(read.content);
-        resolved = reply.resolved;
-        outcome = classifyWatcherReply(reply.text);
-        if (outcome === "finding") finding = findingPreview(reply.text);
-      }
+      const reply = this.#replyOutcome(turn);
+      const { usageLimited, resolved } = reply;
+      let { finding } = reply;
+      outcome = reply.outcome;
       const violations = running?.violations ?? [];
       const stopped = violations.some((violation) => violation.stopped) || (running?.pause ?? null) !== null;
       const override = VIOLATION_OUTCOMES.find(([kinds]) =>
@@ -593,6 +585,33 @@ export class WatcherWakeRunner {
     }
     if (found) this.#autoDeliver(linkId, wake.wakeId, wake.watchedTurnId);
     return true;
+  }
+
+  #replyOutcome(turn: AgentTurn): {
+    outcome: WatcherWakeOutcome;
+    finding: string | null;
+    resolved: number[];
+    usageLimited: boolean;
+  } {
+    const usageLimited = turn.usageLimited === true || this.#deps.store.limitResets.usageLimited(turn.id);
+    const ended = (outcome: WatcherWakeOutcome) => ({ outcome, finding: null, resolved: [], usageLimited });
+    if (turn.status === "cancelled") return ended("cancelled");
+    if (usageLimited) return ended("usage-limited");
+    if (turn.status !== "completed") return ended("failed");
+    const reply = this.#reply(turn.terminalAssistantMessageId);
+    const outcome = classifyWatcherReply(reply.text);
+    return { outcome, finding: outcome === "finding" ? findingPreview(reply.text) : null, resolved: reply.resolved, usageLimited };
+  }
+
+  #reply(messageId: string | null): { text: string; resolved: number[] } {
+    if (!messageId) return { text: "", resolved: [] };
+    const { digest } = this.#deps.store.watcherLinks;
+    const read = digest.messageText(messageId, MAX_REPLY_READ_BYTES);
+    if (!read.truncated) return splitWatcherResolvedLine(read.content);
+    return {
+      text: read.content.trim(),
+      resolved: splitWatcherResolvedLine(digest.messageTailAfter(messageId, 0, MAX_RESOLVED_TAIL_BYTES).content).resolved,
+    };
   }
 
   #autoDeliver(linkId: string, wakeId: string, watchedTurnId: string | null): void {

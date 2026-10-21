@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   defaultSettings,
+  type AgentInputRequest,
   type AppSnapshot,
+  type ClientCommand,
   type ConversationDetail,
   type Project,
   type ServerEvent,
@@ -158,7 +160,124 @@ const context = {
   draft: "",
 };
 
+type ConnectionListener = Parameters<InertiaConnection["subscribe"]>[0];
+
+function contextInputRequest(
+  id: string,
+  requestedSource: { conversationId: string; conversationTitle: string } | null,
+): AgentInputRequest {
+  return {
+    id,
+    providerId: "claude",
+    conversationId,
+    runId: "detached-run",
+    turnId: "detached-turn",
+    questions: [],
+    autoResolutionMs: 300_000,
+    conversationContextRequest: {
+      requestId: id,
+      targetConversationId: conversationId,
+      targetTurnId: "detached-turn",
+      requestedSourceConversationId: requestedSource?.conversationId ?? null,
+      ...(requestedSource ? {
+        requestedSource: {
+          ...requestedSource,
+          projectName: "Source project",
+          workspaceLabel: "Project checkout",
+          targetWorkspaceLabel: "Project checkout",
+          workspaceRelation: "same-workspace" as const,
+        },
+      } : {}),
+      createdAt: now,
+      expiresAt: "2026-09-20T10:05:00.000Z",
+    },
+  };
+}
+
+function liveConnection(): {
+  commands: ClientCommand[];
+  emit(event: ServerEvent): void;
+} {
+  const listeners = new Set<ConnectionListener>();
+  const commands: ClientCommand[] = [];
+  harness.connection = {
+    ...connectionFor(snapshot),
+    subscribe: (listener: ConnectionListener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    sendCommand: async (command: ClientCommand) => {
+      commands.push(command);
+      if (command.type === "conversation.context.agent.respond") {
+        return { type: "request.ok", requestId: command.requestId } as ServerEvent;
+      }
+      return await sendCommand(command);
+    },
+  };
+  return {
+    commands,
+    emit: (event) => {
+      act(() => {
+        for (const listener of listeners) listener(event as Parameters<ConnectionListener>[0]);
+      });
+    },
+  };
+}
+
 describe("detached chat window", () => {
+  it("answers its own chat's request for a named chat in the window", async () => {
+    const live = liveConnection();
+    const sourceConversationId = "63636363-6363-4363-8363-636363636363";
+    const requestId = "64646464-6464-4464-8464-646464646464";
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    await screen.findByRole("textbox", { name: "Message" });
+
+    live.emit({
+      type: "agent.input.requested",
+      request: contextInputRequest(requestId, {
+        conversationId: sourceConversationId,
+        conversationTitle: "Source chat",
+      }),
+    });
+    await act(async () => { await vi.dynamicImportSettled(); });
+
+    const card = await screen.findByRole("region", { name: "Agent requested chat context" });
+    expect(card).toHaveTextContent("Source chat");
+    expect(card).toHaveTextContent("From Source project · Project checkout");
+    expect(screen.queryByText("Review this request in the main window.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share chat" }));
+    expect(await screen.findByText("Sharing approved.")).toBeInTheDocument();
+    expect(live.commands.filter(({ type }) => type === "conversation.context.agent.respond"))
+      .toEqual([expect.objectContaining({
+        payload: {
+          decision: "select",
+          contextRequestId: requestId,
+          sourceConversationId,
+          targetConversationId: conversationId,
+          acknowledgedWorkspaceDifference: false,
+        },
+      })]);
+  });
+
+  it("sends a request that leaves the chat open to the main window", async () => {
+    const live = liveConnection();
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    await screen.findByRole("textbox", { name: "Message" });
+
+    live.emit({
+      type: "agent.input.requested",
+      request: contextInputRequest("65656565-6565-4565-8565-656565656565", null),
+    });
+    await act(async () => { await vi.dynamicImportSettled(); });
+
+    expect(await screen.findByText("Review this request in the main window.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Agent requested chat context" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Share chat" })).toBeNull();
+  });
+
   it("keeps the composer still when an unrelated snapshot update arrives", async () => {
     const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
     const view = render(<DetachedChatApp initialWindowContext={context} />);

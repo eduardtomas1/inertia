@@ -178,6 +178,8 @@ type ChatWorkspaceProps = {
   promptPresetsEnabled?: boolean;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
+  /** Shows the agent's context request card; defaults to the handoff setting. */
+  agentContextRequestEnabled?: boolean;
   goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
@@ -289,6 +291,7 @@ export function ChatWorkspace({
   promptPresetsEnabled = true,
   promptStashEnabled = true,
   conversationContextHandoffEnabled = true,
+  agentContextRequestEnabled = conversationContextHandoffEnabled,
   goal,
   approvals,
   inputRequests,
@@ -989,7 +992,9 @@ export function ChatWorkspace({
               messages={ownedMessages}
               contextPackets={contextPackets}
               watcherWakes={watcherWakes}
-              onConversationContextCommand={onConversationContextCommand}
+              onConversationContextCommand={conversationContextHandoffEnabled
+                ? onConversationContextCommand
+                : undefined}
               activities={ownedActivities}
               subagents={ownedSubagents}
               reasonings={ownedReasonings}
@@ -1101,6 +1106,7 @@ export function ChatWorkspace({
           skillsError={skillsError}
           goal={goalControl}
           conversationContextHandoffEnabled={conversationContextHandoffEnabled}
+          agentContextRequestEnabled={agentContextRequestEnabled}
           promptContext={promptContext}
           contextSources={contextSources}
           contextPackets={contextPackets}

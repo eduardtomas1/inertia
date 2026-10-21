@@ -4,6 +4,7 @@ import type {
   AppSnapshot,
   ClientCommand,
 } from "../../shared/contracts";
+import { detachedContextRequestShareable } from "./detached-chat-runtime-projection";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
 
 const REJECTION = "That request is unavailable in a detached chat.";
@@ -85,9 +86,31 @@ export function detachedChatCommandRejection(
         && !command.payload.context?.conversationContextPacketIds?.length
         ? null
         : REJECTION;
-    case "conversation.context.source.load":
     case "conversation.context.agent.source.load":
-    case "conversation.context.agent.respond":
+    case "conversation.context.agent.respond": {
+      // Only an agent request for this window's chat that names one source
+      // chat. Requests that leave the choice open stay in the main window.
+      const { contextRequestId, targetConversationId } = command.payload;
+      const pending = resources.pendingInput(
+        targetConversationId,
+        contextRequestId,
+      );
+      const contextRequest = pending?.conversationContextRequest;
+      if (
+        !ownsExistingConversation(targetConversationId)
+        || pending?.conversationId !== authority.conversationId
+        || !contextRequest
+        || contextRequest.requestId !== contextRequestId
+        || !detachedContextRequestShareable(contextRequest)
+      ) return REJECTION;
+      const payload = command.payload;
+      if ("decision" in payload && payload.decision === "cancel") return null;
+      return payload.sourceConversationId
+        === contextRequest.requestedSourceConversationId
+        ? null
+        : REJECTION;
+    }
+    case "conversation.context.source.load":
     case "conversation.context.create":
     case "conversation.context.load":
     case "conversation.context.remove":

@@ -463,6 +463,64 @@ describe("runtime sync hub", () => {
     ).toBe(request);
   });
 
+  it("keeps a named source and its host summary for the detached chat that may answer it", () => {
+    const runtime = fixture();
+    const base = conversationContextInputRequest();
+    const request: AgentInputRequest = {
+      ...base,
+      conversationContextRequest: {
+        ...base.conversationContextRequest!,
+        requestedSource: {
+          conversationId: CONVERSATION_B,
+          conversationTitle: "Named chat",
+          projectName: "B",
+          workspaceLabel: "Project checkout",
+          targetWorkspaceLabel: "Project checkout",
+          workspaceRelation: "different-workspace",
+        },
+      },
+    };
+    const mismatched: AgentInputRequest = {
+      ...request,
+      id: "input-2",
+      conversationContextRequest: {
+        ...request.conversationContextRequest!,
+        requestId: "input-2",
+        requestedSource: {
+          ...request.conversationContextRequest!.requestedSource!,
+          conversationId: "unrelated",
+        },
+      },
+    };
+    runtime.hub.connect("detached-named", { kind: "none" }, {
+      snapshot: () => snapshot(undefined),
+      approvals: [],
+      inputs: [request, mismatched],
+      plans: [],
+    }, {
+      kind: "detached-chat",
+      conversationId: CONVERSATION_A,
+      clientId: "window-named",
+    });
+
+    const hydrated = runtime.events.get("detached-named")?.filter(
+      (event): event is Extract<ServerEvent, { type: "agent.input.requested" }> =>
+        event.type === "agent.input.requested",
+    ) ?? [];
+    expect(hydrated.map(({ request: entry }) => entry.conversationContextRequest)).toEqual([
+      request.conversationContextRequest,
+      expect.objectContaining({ requestId: "input-2", requestedSourceConversationId: null }),
+    ]);
+    expect(hydrated[1]?.request.conversationContextRequest).not.toHaveProperty("requestedSource");
+
+    runtime.events.get("detached-named")!.length = 0;
+    runtime.hub.broadcast({ type: "agent.input.requested", request });
+    expect(runtime.events.get("detached-named")?.[0]).toMatchObject({
+      type: "runtime.event",
+      event: { type: "agent.input.requested", request },
+    });
+  });
+
   it("owns a fresh socket before sending welcome so an immediate disconnect is not leaked", () => {
     let hub: RuntimeSyncHub<string>;
     const events: ServerEvent[] = [];

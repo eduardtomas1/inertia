@@ -11,6 +11,7 @@ import type {
   RuntimeMutationEvent,
 } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
+import type { AgentConversationContextRequestedSource } from "../../shared/conversation-context";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import {
   MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES,
@@ -359,6 +360,24 @@ export class AgentContextTool {
     return { images, notes };
   }
 
+  /**
+   * Labels the named chat for the approval card. A missing summary only means
+   * a detached window cannot offer the chat; the main window still can.
+   */
+  private requestedSourceSummary(
+    sourceConversationId: string,
+    targetConversationId: string,
+  ): AgentConversationContextRequestedSource | undefined {
+    try {
+      return this.dependencies.store.contextPackets.requestedSourceSummary(
+        sourceConversationId,
+        targetConversationId,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   private async requestApproval(
     source: AgentContextToolSource,
     call: ProviderHostToolCall,
@@ -405,6 +424,9 @@ export class AgentContextTool {
       );
     }
     const durable = reserved.request!;
+    const requestedSource = requestedSourceConversationId
+      ? this.requestedSourceSummary(requestedSourceConversationId, current.id)
+      : undefined;
     const outcome = await this.dependencies.contextRequests.request({
       scope: {
         contextRequestId: durable.id,
@@ -415,6 +437,7 @@ export class AgentContextTool {
       },
       providerId: source.turn.providerId,
       requestedSourceConversationId,
+      ...(requestedSource ? { requestedSource } : {}),
       createdAt,
       signal: call.signal,
     });
@@ -438,9 +461,13 @@ export class AgentContextTool {
         );
       }
       return failure(
-        status === "cancelled" ? "user_cancelled" : "call_cancelled",
+        status === "cancelled"
+          ? "user_cancelled"
+          : status === "expired"
+            ? "request_expired"
+            : "call_cancelled",
         status === "expired"
-          ? "The context chooser expired."
+          ? "The user did not answer the context request before it expired."
           : status === "cancelled"
             ? "The user did not share chat context."
             : "The parent turn ended before context selection settled.",

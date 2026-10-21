@@ -137,6 +137,84 @@ function resources(): DetachedChatRuntimePolicyResources {
   };
 }
 
+function namedContextRequest(
+  conversationId: string,
+  sourceConversationId: string,
+): AgentInputRequest {
+  return {
+    id: REQUEST,
+    providerId: "codex",
+    conversationId,
+    runId: RUN,
+    turnId: REQUEST,
+    questions: [],
+    autoResolutionMs: 300_000,
+    conversationContextRequest: {
+      requestId: REQUEST,
+      targetConversationId: conversationId,
+      targetTurnId: REQUEST,
+      requestedSourceConversationId: sourceConversationId,
+      requestedSource: {
+        conversationId: sourceConversationId,
+        conversationTitle: "Secret",
+        projectName: "Secret",
+        workspaceLabel: "Project checkout",
+        targetWorkspaceLabel: "Project checkout",
+        workspaceRelation: "different-workspace",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:05:00.000Z",
+    },
+  };
+}
+
+function namedContextResources(): DetachedChatRuntimePolicyResources {
+  return {
+    ...resources(),
+    pendingInput: (conversationId, requestId) =>
+      conversationId === CONVERSATION && requestId === REQUEST
+        ? namedContextRequest(CONVERSATION, OTHER_CONVERSATION)
+        : null,
+  };
+}
+
+function agentContextCommands(
+  targetConversationId: string,
+  sourceConversationId: string,
+): ClientCommand[] {
+  return [
+    {
+      type: "conversation.context.agent.source.load",
+      requestId: REQUEST,
+      payload: {
+        contextRequestId: REQUEST,
+        sourceConversationId,
+        targetConversationId,
+      },
+    },
+    {
+      type: "conversation.context.agent.respond",
+      requestId: REQUEST,
+      payload: {
+        decision: "cancel",
+        contextRequestId: REQUEST,
+        targetConversationId,
+      },
+    },
+    {
+      type: "conversation.context.agent.respond",
+      requestId: REQUEST,
+      payload: {
+        decision: "select",
+        contextRequestId: REQUEST,
+        sourceConversationId,
+        targetConversationId,
+        acknowledgedWorkspaceDifference: true,
+      },
+    },
+  ];
+}
+
 function rejection(command: ClientCommand): string | null {
   return detachedChatCommandRejection(authority, command, resources());
 }
@@ -328,31 +406,13 @@ describe("detached chat runtime authority", () => {
     }
   });
 
-  it("keeps every conversation-context command outside detached authority", () => {
+  it("keeps manual conversation-context commands outside detached authority", () => {
     const commands: ClientCommand[] = [
       {
         type: "conversation.context.source.load",
         requestId: REQUEST,
         payload: {
           sourceConversationId: OTHER_CONVERSATION,
-          targetConversationId: CONVERSATION,
-        },
-      },
-      {
-        type: "conversation.context.agent.source.load",
-        requestId: REQUEST,
-        payload: {
-          contextRequestId: REQUEST,
-          sourceConversationId: OTHER_CONVERSATION,
-          targetConversationId: CONVERSATION,
-        },
-      },
-      {
-        type: "conversation.context.agent.respond",
-        requestId: REQUEST,
-        payload: {
-          decision: "cancel",
-          contextRequestId: REQUEST,
           targetConversationId: CONVERSATION,
         },
       },
@@ -384,9 +444,65 @@ describe("detached chat runtime authority", () => {
       },
     ];
 
-    expect(commands.map(rejection)).toEqual(commands.map(() =>
+    expect(commands.map((command) => detachedChatCommandRejection(
+      authority,
+      command,
+      namedContextResources(),
+    ))).toEqual(commands.map(() =>
       "That request is unavailable in a detached chat."));
     expect(commands.map(mainRejection)).toEqual(commands.map(() => null));
+  });
+
+  it("lets a detached chat answer its own agent context request for the one chat it names", () => {
+    const commands = agentContextCommands(CONVERSATION, OTHER_CONVERSATION);
+    expect(commands.map((command) => detachedChatCommandRejection(
+      authority,
+      command,
+      namedContextResources(),
+    ))).toEqual(commands.map(() => null));
+    expect(commands.map(mainRejection)).toEqual(commands.map(() => null));
+  });
+
+  it("refuses agent context answers for another chat, another source, or an open choice", () => {
+    const REJECTED = "That request is unavailable in a detached chat.";
+    const otherSource = "22222222-2222-4222-8222-222222222222";
+    // The pending request belongs to another chat.
+    const foreign = agentContextCommands(OTHER_CONVERSATION, OTHER_CONVERSATION);
+    expect(foreign.map((command) => detachedChatCommandRejection(authority, command, {
+      ...namedContextResources(),
+      pendingInput: (conversationId, requestId) =>
+        conversationId === OTHER_CONVERSATION && requestId === REQUEST
+          ? namedContextRequest(OTHER_CONVERSATION, CONVERSATION)
+          : null,
+    }))).toEqual(foreign.map(() => REJECTED));
+    // The window's own request, but a source chat the request did not name.
+    const [load, , select] = agentContextCommands(CONVERSATION, otherSource);
+    expect([load!, select!].map((command) => detachedChatCommandRejection(
+      authority,
+      command,
+      namedContextResources(),
+    ))).toEqual([REJECTED, REJECTED]);
+    // The request lets the user pick any chat, so it stays in the main window.
+    const open = agentContextCommands(CONVERSATION, OTHER_CONVERSATION);
+    const unnamed = namedContextRequest(CONVERSATION, OTHER_CONVERSATION);
+    unnamed.conversationContextRequest = {
+      ...unnamed.conversationContextRequest!,
+      requestedSourceConversationId: null,
+    };
+    delete unnamed.conversationContextRequest.requestedSource;
+    expect(open.map((command) => detachedChatCommandRejection(authority, command, {
+      ...namedContextResources(),
+      pendingInput: () => unnamed,
+    }))).toEqual(open.map(() => REJECTED));
+    // A named request without its host summary is not shown in the window.
+    const unsummarized = namedContextRequest(CONVERSATION, OTHER_CONVERSATION);
+    delete unsummarized.conversationContextRequest!.requestedSource;
+    expect(open.map((command) => detachedChatCommandRejection(authority, command, {
+      ...namedContextResources(),
+      pendingInput: () => unsummarized,
+    }))).toEqual(open.map(() => REJECTED));
+    // Nothing pending: the generic resources know no context request.
+    expect(open.map(rejection)).toEqual(open.map(() => REJECTED));
   });
 
   it("binds indirect resource identities to the owned conversation", () => {

@@ -58,6 +58,8 @@ export interface ComposerProps {
   promptPresetsEnabled?: boolean;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
+  /** Shows the agent's context request card; defaults to the handoff setting. */
+  agentContextRequestEnabled?: boolean;
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];

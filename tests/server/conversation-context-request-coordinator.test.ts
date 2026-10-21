@@ -95,6 +95,40 @@ describe("ConversationContextRequestCoordinator", () => {
     ]);
   });
 
+  it("carries the host summary of the named chat only when it describes that chat", () => {
+    const { coordinator, pendingInputs } = fixture();
+    const requestedSource = {
+      conversationId: sourceConversationId,
+      conversationTitle: "Source chat",
+      projectName: "Source project",
+      workspaceLabel: "Project checkout",
+      targetWorkspaceLabel: "Isolated worktree",
+      workspaceRelation: "different-workspace" as const,
+    };
+    const requests = [
+      { id: scope.contextRequestId, source: sourceConversationId, summary: requestedSource },
+      { id: "3674a434-c57a-4e4c-a841-98e4966ec6b7", source: sourceConversationId, summary: { ...requestedSource, conversationId: sourceMessageId } },
+      { id: "f0b3f7c9-2f5c-4c0a-9f43-7f6f0e0e8b51", source: null, summary: requestedSource },
+    ];
+    for (const { id, source, summary } of requests) {
+      void coordinator.request({
+        scope: { ...scope, contextRequestId: id },
+        providerId: "codex",
+        requestedSourceConversationId: source,
+        requestedSource: summary,
+        createdAt: "2026-08-20T10:00:00.000Z",
+        signal: new AbortController().signal,
+      });
+    }
+
+    const contexts = [...pendingInputs.values()].map(({ conversationContextRequest }) =>
+      conversationContextRequest);
+    expect(contexts[0]?.requestedSource).toEqual(requestedSource);
+    expect(contexts[1]).not.toHaveProperty("requestedSource");
+    expect(contexts[2]).not.toHaveProperty("requestedSource");
+    coordinator.cancelForTurn(scope.targetConversationId, scope.targetTurnId);
+  });
+
   it("settles cancellation, timeout, and turn interruption without leaving UI state", async () => {
     vi.useFakeTimers();
     const cancelled = fixture();

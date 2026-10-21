@@ -2,6 +2,7 @@ import type {
   AgentInputRequest,
   RuntimeMutationEvent,
 } from "../../shared/contracts";
+import type { AgentConversationContextRequestedSource } from "../../shared/conversation-context";
 import {
   deletePendingInteraction,
   registerPendingInteraction,
@@ -81,6 +82,8 @@ export class ConversationContextRequestCoordinator {
     scope: ConversationContextAuthorizationScope;
     providerId: AgentInputRequest["providerId"];
     requestedSourceConversationId: string | null;
+    /** Host-built labels; ignored unless they describe the named chat. */
+    requestedSource?: AgentConversationContextRequestedSource;
     createdAt: string;
     signal: AbortSignal;
   }): Promise<ConversationContextSelectionOutcome> {
@@ -111,6 +114,11 @@ export class ConversationContextRequestCoordinator {
         targetConversationId: input.scope.targetConversationId,
         targetTurnId: input.scope.targetTurnId,
         requestedSourceConversationId: input.requestedSourceConversationId,
+        ...(input.requestedSource
+          && input.requestedSourceConversationId !== null
+          && input.requestedSource.conversationId === input.requestedSourceConversationId
+          ? { requestedSource: { ...input.requestedSource } }
+          : {}),
         createdAt: input.createdAt,
         expiresAt: new Date(
           (Number.isFinite(createdMs) ? createdMs : Date.now()) + timeoutMs,

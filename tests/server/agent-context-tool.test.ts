@@ -40,7 +40,7 @@ function image(name: string, bytes: number): ChatAttachment {
   };
 }
 
-async function fixture(options: { providerId?: ProviderId; imageModel?: boolean; watcherPolicy?: boolean } = {}) {
+async function fixture(options: { providerId?: ProviderId; imageModel?: boolean; watcherPolicy?: boolean; contextTimeoutMs?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "inertia-agent-context-tool-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -105,6 +105,7 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean;
     pendingInputs,
     broadcast: vi.fn(),
     broadcastConversationShell: vi.fn(),
+    ...(options.contextTimeoutMs ? { timeoutMs: options.contextTimeoutMs } : {}),
   });
   const previews = new Map<string, Buffer>();
   const conversationAttachments = {
@@ -417,6 +418,26 @@ describe("inertia_request_context", () => {
     }
   });
 
+  it("tells the agent that an unanswered context request expired, not that its turn ended", async () => {
+    const context = await fixture({ contextTimeoutMs: 5 });
+    const { begin, bridgeFor, pendingInputs, store, target } = context;
+    try {
+      const other = store.createConversation(context.project.id, "Unrelated chat", { activate: false });
+      const current = begin(target, "Look at the other chat.");
+      const result = await bridgeFor(current).invoke(call({ conversationId: other.id }));
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text)).toEqual({
+        error: {
+          code: "request_expired",
+          message: "The user did not answer the context request before it expired.",
+        },
+      });
+      expect(pendingInputs.size).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
   it("asks the user before reading any other chat, then reads its turns for the rest of this turn", async () => {
     const context = await fixture();
     const { begin, bridgeFor, contextRequests, pendingInputs, settle, store, target } = context;
@@ -430,7 +451,15 @@ describe("inertia_request_context", () => {
 
       const approval = bridge.invoke(call({ conversationId: other.id, turnId: otherTurn.id }));
       const chooser = [...pendingInputs.values()][0];
-      expect(chooser?.conversationContextRequest).toMatchObject({ requestedSourceConversationId: other.id });
+      expect(chooser?.conversationContextRequest).toMatchObject({
+        requestedSourceConversationId: other.id,
+        requestedSource: {
+          conversationId: other.id,
+          conversationTitle: "Unrelated chat",
+          projectName: context.project.name,
+          workspaceRelation: "same-workspace",
+        },
+      });
       expect(contextRequests.respond({
         requestId: chooser!.id,
         targetConversationId: target.id,

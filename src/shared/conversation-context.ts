@@ -108,12 +108,27 @@ export interface AgentContextReadSummary {
   lastReadAt: string;
 }
 
+/**
+ * Host-built labels for the one chat an agent request names. A detached chat
+ * window sees no other chats, so this summary is the only source it can offer.
+ */
+export interface AgentConversationContextRequestedSource {
+  conversationId: string;
+  conversationTitle: string;
+  projectName: string;
+  workspaceLabel: string;
+  targetWorkspaceLabel: string;
+  workspaceRelation: ConversationContextWorkspaceRelation;
+}
+
 /** Renderer-safe prompt for a host-owned, user-selected context disclosure. */
 export interface AgentConversationContextRequest {
   requestId: string;
   targetConversationId: string;
   targetTurnId: string;
   requestedSourceConversationId: string | null;
+  /** Present only when requestedSourceConversationId names an existing chat. */
+  requestedSource?: AgentConversationContextRequestedSource;
   createdAt: string;
   expiresAt: string;
 }

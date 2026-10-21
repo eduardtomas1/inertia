@@ -48,7 +48,11 @@ export type DetachedWatcherLinkLookup = (
   linkId: string,
 ) => Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId"> | null;
 
-/** Removes a foreign conversation identity from host-owned input prompts. */
+/**
+ * Keeps a foreign conversation identity out of host-owned input prompts unless
+ * the request names that one chat and carries its host-built summary. That
+ * named chat is the only foreign chat a detached window can show or share.
+ */
 export function projectDetachedChatInputRequest(
   request: AgentInputRequest,
   conversationId: string,
@@ -57,16 +61,27 @@ export function projectDetachedChatInputRequest(
   if (
     !contextRequest?.requestedSourceConversationId
     || contextRequest.requestedSourceConversationId === conversationId
+    || detachedContextRequestShareable(contextRequest)
   ) {
     return request;
   }
+  const { requestedSource: _requestedSource, ...unnamed } = contextRequest;
   return {
     ...request,
     conversationContextRequest: {
-      ...contextRequest,
+      ...unnamed,
       requestedSourceConversationId: null,
     },
   };
+}
+
+/** True when a detached window may answer this context request itself. */
+export function detachedContextRequestShareable(
+  contextRequest: NonNullable<AgentInputRequest["conversationContextRequest"]>,
+): boolean {
+  return contextRequest.requestedSourceConversationId !== null
+    && contextRequest.requestedSource?.conversationId
+      === contextRequest.requestedSourceConversationId;
 }
 
 /**

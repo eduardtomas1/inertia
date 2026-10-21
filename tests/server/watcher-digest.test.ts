@@ -86,10 +86,12 @@ class FakeSource implements WatcherDigestReader {
   activitiesByIds(conversationId: string, ids: readonly string[]) {
     return this.activities.filter((entry) => entry.conversationId === conversationId && ids.includes(entry.id));
   }
-  assistantMessagesAfter(_conversationId: string, _turnId: string, after: string | null, limit: number, maximumBytes: number) {
+  assistantMessagesAfter(_conversationId: string, _turnId: string, after: WatcherActivityCursor, limit: number, maximumBytes: number) {
     this.calls.push("assistantMessagesAfter");
     return this.replies
-      .filter((reply) => after === null || reply.createdAt > after)
+      .filter((reply) => after.at === null
+        || reply.createdAt > after.at
+        || (reply.createdAt === after.at && reply.id > (after.id ?? "")))
       .slice(0, limit)
       .map((reply) => {
         const truncated = bytes(reply.content) > maximumBytes;
@@ -136,6 +138,7 @@ function link(overrides: {
       activityAt: null,
       activityId: null,
       messageAt: null,
+      messageId: null,
       pendingRunningIds: [],
       ...overrides.cursor,
     },
@@ -183,7 +186,7 @@ describe("buildWatcherDigest", () => {
     expect(digest.stats).toMatchObject({ eventsCovered: 2, itemsTruncated: 0, itemsOmitted: 0, commandsRun: 0 });
     expect(digest.stats.bytes).toBe(bytes(digest.content));
     expect(digest.cursor).toEqual({
-      turnId: TURN, activityAt: at(2), activityId: "act-0002", messageAt: null, pendingRunningIds: [],
+      turnId: TURN, activityAt: at(2), activityId: "act-0002", messageAt: null, messageId: null, pendingRunningIds: [],
     });
   });
 
@@ -453,7 +456,7 @@ describe("buildWatcherDigest", () => {
     ];
     const shared = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
     expect(shared.content).toContain("## Assistant replies so far — quoted evidence\n10:00:05:\n> I'll add the limiter first.");
-    expect(shared.cursor.messageAt).toBe(at(5));
+    expect(shared.cursor).toMatchObject({ messageAt: at(5), messageId: "m1" });
     expect(shared.openReply).toEqual({ messageId: "m2", bytes: bytes("Now the tests.") });
 
     source.calls = [];
@@ -723,7 +726,7 @@ describe("buildWatcherDigest", () => {
     expect(first.content).toContain("More activity followed; the next check covers it.");
     expect(first.content).toContain("SEGMENT-20.");
     expect(first.content).not.toContain("FINAL-ANSWER");
-    expect(first.cursor).toMatchObject({ activityId: "act-0003", messageAt: at(29) });
+    expect(first.cursor).toMatchObject({ activityId: "act-0003", messageAt: at(29), messageId: "m20" });
 
     const second = buildWatcherDigest(source, link({ cursor: first.cursor }), options({ final: true }))!;
     expect(second.stats.moreFollows).toBe(false);

@@ -56,6 +56,9 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
       cursor_message_at TEXT CHECK (
         cursor_message_at IS NULL OR length(cursor_message_at) BETWEEN 20 AND 40
       ),
+      cursor_message_id TEXT CHECK (
+        cursor_message_id IS NULL OR length(cursor_message_id) BETWEEN 1 AND 200
+      ),
       pending_running_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (
         json_valid(pending_running_ids_json) AND json_type(pending_running_ids_json) = 'array'
         AND json_array_length(pending_running_ids_json) <= 64

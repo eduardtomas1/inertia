@@ -518,7 +518,7 @@ export function buildWatcherDigest(
   const sameTurn = link.cursor.turnId === turn.id;
   const base: WatcherCursor = sameTurn
     ? link.cursor
-    : { turnId: turn.id, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
+    : { turnId: turn.id, activityAt: null, activityId: null, messageAt: null, messageId: null, pendingRunningIds: [] };
   const firstWake = !sameTurn
     || (base.activityAt === null && base.messageAt === null && base.pendingRunningIds.length === 0);
   const { sharing } = link;
@@ -550,7 +550,13 @@ export function buildWatcherDigest(
   );
 
   const read = sharing.partialReplies
-    ? source.assistantMessagesAfter(watchedId, turn.id, base.messageAt, MAX_WATCHER_DIGEST_MESSAGES, MAX_REPLY_BYTES * 2)
+    ? source.assistantMessagesAfter(
+        watchedId,
+        turn.id,
+        { at: base.messageAt, id: base.messageId },
+        MAX_WATCHER_DIGEST_MESSAGES,
+        MAX_REPLY_BYTES * 2,
+      )
     : [];
   const quotedBefore = options.openReply ?? null;
   const replies = read.flatMap((reply): DigestReply[] => {
@@ -642,6 +648,7 @@ export function buildWatcherDigest(
     activityAt: last?.createdAt ?? base.activityAt,
     activityId: last?.id ?? base.activityId,
     messageAt: lastClosed?.createdAt ?? base.messageAt,
+    messageId: lastClosed?.id ?? base.messageId,
     pendingRunningIds,
   };
   return {

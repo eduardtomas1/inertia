@@ -387,7 +387,7 @@ export class WatcherLinkRepository {
       this.database.prepare(`
         UPDATE watcher_links
         SET cursor_turn_id = ?, cursor_activity_at = NULL, cursor_activity_id = NULL,
-            cursor_message_at = NULL, pending_running_ids_json = '[]',
+            cursor_message_at = NULL, cursor_message_id = NULL, pending_running_ids_json = '[]',
             wakes_this_turn = 0, wake_allowance = ?, write_attempts_this_turn = 0,
             last_watched_output_at = ?, quiet_since = NULL, updated_at = ?,
             status = CASE WHEN status = 'paused' AND pause_reason = 'wake-budget' THEN 'watching' ELSE status END,
@@ -420,10 +420,10 @@ export class WatcherLinkRepository {
       const moved = this.database.prepare(`
         UPDATE watcher_links
         SET cursor_turn_id = ?, cursor_activity_at = ?, cursor_activity_id = ?, cursor_message_at = ?,
-            pending_running_ids_json = ?, events_seen = events_seen + ?, updated_at = ?
+            cursor_message_id = ?, pending_running_ids_json = ?, events_seen = events_seen + ?, updated_at = ?
         WHERE id = ? AND status <> 'detached' AND (cursor_turn_id IS ? OR cursor_turn_id IS ?)
       `).run(
-        cursor.turnId, cursor.activityAt, cursor.activityId, cursor.messageAt,
+        cursor.turnId, cursor.activityAt, cursor.activityId, cursor.messageAt, cursor.messageId,
         JSON.stringify(pending), delta, at, linkId, expectedTurnId, cursor.turnId,
       ).changes;
       if (moved === 1) return this.get(linkId);
@@ -684,7 +684,7 @@ export class WatcherLinkRepository {
     const changed = this.database.prepare(`
       UPDATE watcher_links
       SET cursor_activity_at = NULL, cursor_activity_id = NULL, cursor_message_at = NULL,
-          pending_running_ids_json = '[]', updated_at = ?
+          cursor_message_id = NULL, pending_running_ids_json = '[]', updated_at = ?
       WHERE id = ? AND cursor_turn_id = ? AND status <> 'detached'
     `).run(at, linkId, turnId).changes;
     return changed === 1 ? this.get(linkId) : null;

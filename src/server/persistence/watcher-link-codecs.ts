@@ -51,6 +51,7 @@ export interface WatcherLinkRow {
   cursor_activity_at: string | null;
   cursor_activity_id: string | null;
   cursor_message_at: string | null;
+  cursor_message_id: string | null;
   pending_running_ids_json: string;
   wakes_this_turn: number;
   wake_allowance: number;
@@ -107,6 +108,7 @@ export interface WatcherCursor {
   activityAt: string | null;
   activityId: string | null;
   messageAt: string | null;
+  messageId: string | null;
   /** Activities still running at the last check, re-read on the next one. */
   pendingRunningIds: string[];
 }
@@ -239,6 +241,7 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
       activityAt: row.cursor_activity_at,
       activityId: row.cursor_activity_id,
       messageAt: row.cursor_message_at,
+      messageId: row.cursor_message_id,
       pendingRunningIds: stringArray(row.pending_running_ids_json, MAX_WATCHER_PENDING_RUNNING_IDS),
     },
     writeAttemptsThisTurn: row.write_attempts_this_turn,

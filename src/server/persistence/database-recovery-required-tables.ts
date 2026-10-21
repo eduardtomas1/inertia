@@ -76,6 +76,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "cursor_activity_at",
     "cursor_activity_id",
     "cursor_message_at",
+    "cursor_message_id",
     "pending_running_ids_json",
     "wakes_this_turn",
     "wake_allowance",

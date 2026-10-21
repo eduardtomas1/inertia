@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { WatcherPolicyError, type WatcherLinkDraft } from "../../src/server/persistence/watcher-link-repository";
+import { buildWatcherDigest } from "../../src/server/runtime/watcher/watcher-digest";
 import type { Conversation } from "../../src/shared/contracts";
 import { watcherFeedResultSchema } from "../../src/shared/contracts/watcher-schema";
 import {
@@ -250,7 +251,14 @@ describe("watcher link repository", () => {
     expect(links.recordWriteAttempt(link.id)).toBe(1);
     expect(links.recordWriteAttempt(link.id)).toBe(2);
     expect(links.beginWatchedTurn(link.id, "turn-1", tick())?.writeAttemptsThisTurn).toBe(2);
-    const cursor = { turnId: "turn-1", activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-9", messageAt: null, pendingRunningIds: ["a", "a", "b"] };
+    const cursor = {
+      turnId: "turn-1",
+      activityAt: "2030-01-01T00:00:05.000Z",
+      activityId: "activity-9",
+      messageAt: "2030-01-01T00:00:06.000Z",
+      messageId: "message-4",
+      pendingRunningIds: ["a", "a", "b"],
+    };
     expect(links.notePendingEvents(link.id, 7, tick())?.counters.eventsPending).toBe(7);
     expect(links.notePendingEvents(link.id, 7, tick())).toBeNull();
     // The scheduler is the only source of the pending count: neither a check nor a new turn changes it.
@@ -259,7 +267,7 @@ describe("watcher link repository", () => {
     expect(links.grantWakes(link.id, 3)?.counters.wakeAllowance).toBe(8);
     expect(links.beginWatchedTurn(link.id, "turn-2", tick())).toMatchObject({
       writeAttemptsThisTurn: 0, counters: { wakeAllowance: 5, eventsPending: 7 },
-      cursor: { turnId: "turn-2", activityAt: null, activityId: null, pendingRunningIds: [] },
+      cursor: { turnId: "turn-2", activityAt: null, activityId: null, messageAt: null, messageId: null, pendingRunningIds: [] },
     });
     expect(links.markQuiet(link.id, tick())?.quietSince).not.toBeNull();
     expect(links.markQuiet(link.id, tick())).toBeNull();
@@ -288,7 +296,7 @@ describe("watcher link repository", () => {
   it("moves the cursor only while it still follows the check's turn", () => {
     const { link } = attach(chat());
     const links = store.watcherLinks;
-    const covered = (turnId: string) => ({ turnId, activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-1", messageAt: null, pendingRunningIds: [] });
+    const covered = (turnId: string) => ({ turnId, activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-1", messageAt: null, messageId: null, pendingRunningIds: [] });
     // A first check of a link that followed no turn yet takes the digest's turn.
     expect(links.advanceCursor(link.id, covered("turn-1"), 2, tick(), null)?.cursor).toEqual(covered("turn-1"));
     // The next turn begins while a check of turn-1 is still running; its late settlement must not rewind.
@@ -500,6 +508,32 @@ describe("watcher link repository", () => {
     expect(links.watcherTurnActiveFor(watched.id)).toBe(false);
     links.transition(link.id, ["watching"], { status: "detached", reason: "user" }, tick());
     expect(links.parentForWatcher(conversation.id)).toBeNull();
+  });
+
+  it("reads every assistant reply when replies that share a timestamp straddle a check's page", () => {
+    const watched = chat();
+    const { link } = attach(watched);
+    const turn = beginTurn(watched);
+    const at = "2030-01-01T00:10:00.000Z";
+    const contentById = new Map(Array.from({ length: 21 }, (_, index) => {
+      const message = store.createMessage(watched.id, `Segment ${index + 1}.`, "assistant", [], turn.id, at);
+      return [message.id, message.content] as const;
+    }));
+    const ordered = [...contentById.keys()].sort().map((id) => contentById.get(id)!);
+    const record = store.watcherLinks.get(link.id)!;
+    const options = { final: false, sessionFresh: false, now: "2030-01-01T00:20:00.000Z", watchedTitle: "Main chat", turnId: turn.id };
+    const cursor = { turnId: turn.id, activityAt: null, activityId: null, messageAt: null, messageId: null, pendingRunningIds: [] };
+
+    const first = buildWatcherDigest(store.watcherLinks.digest, { ...record, cursor }, options)!;
+    expect(first.stats.moreFollows).toBe(true);
+    expect(first.content).toContain(`> ${ordered[19]}`);
+    expect(first.content).not.toContain(`> ${ordered[20]}`);
+    expect(first.cursor).toMatchObject({ messageAt: at, messageId: [...contentById.keys()].sort()[18] });
+
+    const second = buildWatcherDigest(store.watcherLinks.digest, { ...record, cursor: first.cursor }, { ...options, openReply: first.openReply })!;
+    expect(second.content).toContain(`> ${ordered[20]}`);
+    expect(second.content).not.toContain(`> ${ordered[18]}`);
+    expect(second.stats.moreFollows).toBe(false);
   });
 
   it("counts a watcher turn's completed commands without reading their details", () => {

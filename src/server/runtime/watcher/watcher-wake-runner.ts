@@ -142,7 +142,8 @@ function advanced({ start, digest }: Pick<RunningWake, "start" | "digest">): boo
   return digest.cursor.turnId !== start.turnId
     || digest.cursor.activityAt !== start.activityAt
     || digest.cursor.activityId !== start.activityId
-    || digest.cursor.messageAt !== start.messageAt;
+    || digest.cursor.messageAt !== start.messageAt
+    || digest.cursor.messageId !== start.messageId;
 }
 
 const VIOLATION_OUTCOMES: ReadonlyArray<[ReadOnlyWatcherViolation["kind"][], WatcherWakeOutcome]> = [
@@ -253,7 +254,7 @@ export class WatcherWakeRunner {
       const cursor: WatcherCursor = !staleTurn
         ? claimed.cursor
         : this.#priorCursors.get(linkId, finalTurnId)
-          ?? { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, pendingRunningIds: [] };
+          ?? { turnId: finalTurnId, activityAt: null, activityId: null, messageAt: null, messageId: null, pendingRunningIds: [] };
       const request = trigger === "manual" || trigger === "initial" ? trigger : null;
       const review = trigger === "initial" && !context.continued;
       const previousPlanKey = !staleTurn && !review && this.#planKeys.has(linkId) ? this.#planKeys.get(linkId)! : undefined;

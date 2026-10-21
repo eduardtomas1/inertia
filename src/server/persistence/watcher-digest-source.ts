@@ -17,7 +17,7 @@ export const MAX_WATCHER_DIGEST_DIFF_FILES = 200;
 /** Activity details are bounded at the query so a huge tool result never loads whole. */
 export const MAX_WATCHER_ACTIVITY_DETAIL_CHARS = 8_192;
 
-/** `(created_at, id)` position after the last activity a watcher already saw. */
+/** `(created_at, id)` position after the last activity or reply a watcher already saw. */
 export interface WatcherActivityCursor {
   at: string | null;
   id: string | null;
@@ -135,22 +135,28 @@ export class WatcherDigestSource {
     `).all(conversationId, JSON.stringify(bounded)) as ActivityRow[]).map(activityFromRow);
   }
 
-  /** Assistant replies in the watched turn created after `after`, oldest first. */
+  /** Assistant replies in the watched turn strictly after the cursor, oldest first. */
   assistantMessagesAfter(
     conversationId: string,
     turnId: string,
-    after: string | null,
+    cursor: WatcherActivityCursor,
     limit: number,
     maximumBytes: number,
   ): WatcherDigestMessage[] {
     const bounded = boundedLimit(limit, MAX_WATCHER_DIGEST_MESSAGES);
     if (bounded === 0) return [];
-    const rows = cachedStatement(this.context.database, `
-      SELECT id, created_at, ${MESSAGE_BYTES_SQL} AS bytes FROM messages
-      WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant'
-        AND (? IS NULL OR created_at > ?)
-      ORDER BY created_at ASC, id ASC LIMIT ?
-    `).all(conversationId, turnId, after, after, bounded) as Array<{ id: string; created_at: string; bytes: number }>;
+    const rows = (cursor.at === null
+      ? cachedStatement(this.context.database, `
+          SELECT id, created_at, ${MESSAGE_BYTES_SQL} AS bytes FROM messages
+          WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant'
+          ORDER BY created_at ASC, id ASC LIMIT ?
+        `).all(conversationId, turnId, bounded)
+      : cachedStatement(this.context.database, `
+          SELECT id, created_at, ${MESSAGE_BYTES_SQL} AS bytes FROM messages
+          WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant'
+            AND (created_at > ? OR (created_at = ? AND id > ?))
+          ORDER BY created_at ASC, id ASC LIMIT ?
+        `).all(conversationId, turnId, cursor.at, cursor.at, cursor.id ?? "", bounded)) as Array<{ id: string; created_at: string; bytes: number }>;
     const reads = this.context.turnReads();
     return rows.map((row) => ({
       id: row.id,

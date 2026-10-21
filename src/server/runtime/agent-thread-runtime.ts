@@ -53,6 +53,7 @@ export function createAgentThreadRuntime(
   const creation = new ConversationCreationService(dependencies);
   const contextRequests = new ConversationContextRequestCoordinator({
     pendingInputs: dependencies.pendingInputs,
+    contextPackets: dependencies.store.contextPackets,
     broadcast: dependencies.broadcast,
     broadcastConversationShell: dependencies.broadcastConversationShell,
   });

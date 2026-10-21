@@ -103,6 +103,7 @@ async function fixture(options: { providerId?: ProviderId; imageModel?: boolean;
   const pendingInputs = new Map();
   const contextRequests = new ConversationContextRequestCoordinator({
     pendingInputs,
+    contextPackets: store.contextPackets,
     broadcast: vi.fn(),
     broadcastConversationShell: vi.fn(),
     ...(options.contextTimeoutMs ? { timeoutMs: options.contextTimeoutMs } : {}),
@@ -479,6 +480,44 @@ describe("inertia_request_context", () => {
       void bridgeFor(later).invoke(call({ conversationId: other.id }));
       expect(pendingInputs.size).toBe(1);
       contextRequests.cancelForTurn(target.id, later.id);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps a named request pending until the user confirms a chat whose workspace changed after the request", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, contextRequests, pendingInputs, settle, store, target } = context;
+    try {
+      const other = store.createConversation(context.project.id, "Unrelated chat", { activate: false });
+      const otherTurn = begin(other, "Unrelated request");
+      store.createMessage(other.id, "Unrelated answer", "assistant", [], otherTurn.id, tick());
+      settle(otherTurn.id);
+      const current = begin(target, "Look at the other chat.");
+      const approval = bridgeFor(current).invoke(call({ conversationId: other.id }));
+      const chooser = [...pendingInputs.values()][0]!;
+      expect(chooser.conversationContextRequest?.requestedSource?.workspaceRelation)
+        .toBe("same-workspace");
+      const requested = chooser.conversationContextRequest!.requestedSource!;
+      vi.spyOn(store.contextPackets, "requestedSourceSummary").mockReturnValue({
+        ...requested,
+        workspaceLabel: "Isolated worktree",
+        workspaceRelation: "different-workspace",
+      });
+      const select = (acknowledgedWorkspaceDifference: boolean) => contextRequests.respond({
+        requestId: chooser.id,
+        targetConversationId: target.id,
+        selection: { sourceConversationId: other.id, acknowledgedWorkspaceDifference },
+      });
+
+      expect(select(false)).toBe(false);
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({ status: "selection-pending" });
+      expect([...pendingInputs.values()][0]?.conversationContextRequest?.requestedSource)
+        .toMatchObject({ conversationId: other.id, workspaceRelation: "different-workspace" });
+
+      expect(select(true)).toBe(true);
+      expect(parsed(await approval).context[0].source.conversationId).toBe(other.id);
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({ status: "completed" });
     } finally {
       store.close();
     }

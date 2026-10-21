@@ -3,6 +3,7 @@ import type {
   RuntimeMutationEvent,
 } from "../../shared/contracts";
 import type { AgentConversationContextRequestedSource } from "../../shared/conversation-context";
+import type { ConversationContextPacketRepository } from "../persistence/conversation-context-packet-repository";
 import {
   deletePendingInteraction,
   registerPendingInteraction,
@@ -50,6 +51,7 @@ interface AuthorizedSelection {
 
 export interface ConversationContextRequestCoordinatorOptions {
   pendingInputs: Map<string, AgentInputRequest>;
+  contextPackets: Pick<ConversationContextPacketRepository, "requestedSourceSummary">;
   broadcast(event: RuntimeMutationEvent): void;
   broadcastConversationShell(conversationId: string): void;
   /** Test-only shortening seam; production callers must omit it. */
@@ -207,6 +209,16 @@ export class ConversationContextRequestCoordinator {
       input.targetConversationId,
       input.selection.sourceConversationId,
     )) return false;
+    if (!input.selection.acknowledgedWorkspaceDifference) {
+      const current = this.currentSource(
+        input.selection.sourceConversationId,
+        input.targetConversationId,
+      );
+      if (current?.workspaceRelation === "different-workspace") {
+        this.refreshRequestedSource(pending, current);
+        return false;
+      }
+    }
     const receipt = {};
     this.authorized.set(receipt, {
       scope: pending.scope,
@@ -262,6 +274,37 @@ export class ConversationContextRequestCoordinator {
       cancelled += 1;
     }
     return cancelled;
+  }
+
+  private currentSource(
+    sourceConversationId: string,
+    targetConversationId: string,
+  ): AgentConversationContextRequestedSource | null {
+    try {
+      return this.options.contextPackets.requestedSourceSummary(
+        sourceConversationId,
+        targetConversationId,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private refreshRequestedSource(
+    pending: PendingSelection,
+    current: AgentConversationContextRequestedSource,
+  ): void {
+    const context = pending.request.conversationContextRequest;
+    if (context?.requestedSourceConversationId !== current.conversationId) return;
+    const request: AgentInputRequest = {
+      ...pending.request,
+      conversationContextRequest: { ...context, requestedSource: { ...current } },
+    };
+    deletePendingInteraction(this.options.pendingInputs, pending.request, request.id);
+    registerPendingInteraction(this.options.pendingInputs, request);
+    pending.request = request;
+    this.options.broadcast({ type: "agent.input.requested", request });
+    this.options.broadcastConversationShell(request.conversationId);
   }
 
   private finish(

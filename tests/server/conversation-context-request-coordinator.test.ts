@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentInputRequest, RuntimeMutationEvent } from "../../src/shared/contracts";
+import type { AgentConversationContextRequestedSource } from "../../src/shared/conversation-context";
 import {
   ConversationContextRequestCoordinator,
   type ConversationContextAuthorizationScope,
@@ -23,13 +24,21 @@ const sourceMessageId = "79235532-5538-4d22-a66a-836bc28f97f3";
 function fixture(timeoutMs = 1_000) {
   const pendingInputs = new Map<string, AgentInputRequest>();
   const events: RuntimeMutationEvent[] = [];
+  const sources = new Map<string, AgentConversationContextRequestedSource>();
   const coordinator = new ConversationContextRequestCoordinator({
     pendingInputs,
+    contextPackets: {
+      requestedSourceSummary: (sourceId) => {
+        const source = sources.get(sourceId);
+        if (!source) throw new Error("Conversation not found.");
+        return source;
+      },
+    },
     broadcast: (event) => events.push(event),
     broadcastConversationShell: vi.fn(),
     timeoutMs,
   });
-  return { coordinator, events, pendingInputs };
+  return { coordinator, events, pendingInputs, sources };
 }
 
 afterEach(() => {
@@ -126,6 +135,78 @@ describe("ConversationContextRequestCoordinator", () => {
     expect(contexts[0]?.requestedSource).toEqual(requestedSource);
     expect(contexts[1]).not.toHaveProperty("requestedSource");
     expect(contexts[2]).not.toHaveProperty("requestedSource");
+    coordinator.cancelForTurn(scope.targetConversationId, scope.targetTurnId);
+  });
+
+  it("keeps the request open and refreshes its labels when the named chat moved to another workspace", async () => {
+    const { coordinator, events, pendingInputs, sources } = fixture();
+    const requestedSource: AgentConversationContextRequestedSource = {
+      conversationId: sourceConversationId,
+      conversationTitle: "Source chat",
+      projectName: "Source project",
+      workspaceLabel: "Project checkout",
+      targetWorkspaceLabel: "Project checkout",
+      workspaceRelation: "same-workspace",
+    };
+    const outcomePromise = coordinator.request({
+      scope,
+      providerId: "codex",
+      requestedSourceConversationId: sourceConversationId,
+      requestedSource,
+      createdAt: "2026-08-20T10:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+    const moved: AgentConversationContextRequestedSource = {
+      ...requestedSource,
+      workspaceLabel: "Isolated worktree",
+      workspaceRelation: "different-workspace",
+    };
+    sources.set(sourceConversationId, moved);
+    const select = (acknowledgedWorkspaceDifference: boolean) => coordinator.respond({
+      requestId: scope.contextRequestId,
+      targetConversationId: scope.targetConversationId,
+      selection: { sourceConversationId, acknowledgedWorkspaceDifference },
+    });
+
+    expect(select(false)).toBe(false);
+    expect(coordinator.requestFor(scope.contextRequestId, scope.targetConversationId)
+      ?.conversationContextRequest?.requestedSource).toEqual(moved);
+    expect([...pendingInputs.values()].map(({ conversationContextRequest }) =>
+      conversationContextRequest?.requestedSource)).toEqual([moved]);
+    expect(events.map((event) => event.type === "agent.input.requested"
+      ? event.request.conversationContextRequest?.requestedSource?.workspaceRelation
+      : event.type)).toEqual(["same-workspace", "different-workspace"]);
+
+    expect(select(true)).toBe(true);
+    await expect(outcomePromise).resolves.toMatchObject({ kind: "selected" });
+    expect(pendingInputs.size).toBe(0);
+  });
+
+  it("refuses an unconfirmed share from a chat in another workspace on an open request", async () => {
+    const { coordinator, pendingInputs, sources } = fixture();
+    sources.set(sourceConversationId, {
+      conversationId: sourceConversationId,
+      conversationTitle: "Source chat",
+      projectName: "Other project",
+      workspaceLabel: "Project checkout",
+      targetWorkspaceLabel: "Project checkout",
+      workspaceRelation: "different-workspace",
+    });
+    void coordinator.request({
+      scope,
+      providerId: "codex",
+      requestedSourceConversationId: null,
+      createdAt: "2026-08-20T10:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    expect(coordinator.respond({
+      requestId: scope.contextRequestId,
+      targetConversationId: scope.targetConversationId,
+      selection: { sourceConversationId, acknowledgedWorkspaceDifference: false },
+    })).toBe(false);
+    expect([...pendingInputs.values()][0]?.conversationContextRequest)
+      .not.toHaveProperty("requestedSource");
     coordinator.cancelForTurn(scope.targetConversationId, scope.targetTurnId);
   });
 

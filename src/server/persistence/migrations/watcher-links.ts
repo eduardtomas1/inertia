@@ -1,10 +1,5 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-/**
- * Schema v99: read-only watcher links and their checks. The migration is one
- * self-contained statement list so its lineage digest needs no helper source.
- * `agent_context_reads` is rebuilt to admit the `watched` access kind.
- */
 export const watcherLinksMigration: DatabaseMigrationDefinition = {
   name: "PersistWatcherLinks",
   foreignKeys: "off",

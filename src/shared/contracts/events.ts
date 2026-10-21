@@ -128,13 +128,11 @@ export type RuntimeMutationEvent =
   | { type: "watcher.link.updated"; link: WatcherLinkView }
   | { type: "watcher.link.removed"; linkId: string; watcherConversationId?: string; watchedConversationId?: string | null }
   | {
-      /** Ephemeral phase of a running watcher check; never folded into a snapshot. */
       type: "watcher.live";
       linkId: string;
       watcherConversationId: string;
       turnId: string;
       phase: WatcherLivePhase;
-      /** Bounded, neutralized label such as "Reading src/x.ts". */
       label: string | null;
       at: string;
     }
@@ -245,7 +243,6 @@ export type ServerEvent =
             kind: "watcher.feed";
             linkId: string;
             feedRevision: number;
-            /** Newest first, at most one page. */
             items: WatcherFeedItem[];
             next: { beforeSequence: number } | null;
             usage?: WatcherUsage;

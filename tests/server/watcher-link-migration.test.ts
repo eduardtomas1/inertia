@@ -46,7 +46,6 @@ function cloneRow(database: Database.Database, table: string, sourceId: string, 
 const rows = (database: Database.Database, sql: string): Row[] => database.prepare(sql).all() as Row[];
 const withoutNote = (entries: Row[]): Row[] => entries.map(({ watcher_note_json: _note, ...row }) => row);
 
-/** Upgrades the published v0.0.6 fixture to schema 98 and seeds rows the v99 rebuild must keep. */
 async function schema98Database() {
   const directory = await mkdtemp(join(tmpdir(), "inertia-watcher-migration-"));
   directories.push(directory);

@@ -22,7 +22,6 @@ const WATCHED = "watched-1";
 const COOLDOWN_MS = 45_000;
 const ALLOWANCE = WATCHER_BUDGET_LIMITS.wakesPerWatchedTurn.default;
 
-/** The shared fake scheduler, plus due times so tests can advance a clock. */
 class ClockedScheduler extends FakeTurnScheduler {
   now = 1_000_000;
   readonly dueAt = new Map<number, number>();

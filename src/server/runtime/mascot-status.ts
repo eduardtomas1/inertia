@@ -93,7 +93,6 @@ export class MascotStatusPublisher {
     private readonly projectName?: (id: string) => string | null,
     private readonly schedule: (task: () => void) => void = (task) => queueMicrotask(task),
     private readonly clock: MascotClock = systemClock,
-    /** True for a settled turn that must raise no completion cue, such as a quiet watcher check. */
     private readonly quietTurn?: (turnId: string) => boolean,
   ) {}
 
@@ -400,10 +399,6 @@ export function storeMascotStatus(
   );
 }
 
-/**
- * A watcher check raises no completion cue while it is still being settled
- * or when it found nothing to report. Findings, failures and pauses still do.
- */
 export function quietWatcherCheck(
   watcherLinks: WatcherWakeLookup | undefined,
   turnId: string,

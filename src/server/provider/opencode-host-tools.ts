@@ -37,7 +37,6 @@ export interface OpenCodeHostTools {
   respondToApproval(requestId: string, decision: AgentApprovalDecision): boolean;
 }
 
-/** Native OpenCode tools a read-only watcher may run without a prompt. */
 const OPENCODE_WATCHER_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
 const OPENCODE_WATCHER_DENIED_READS = [".env", "*.env", "*.env.*"] as const;
 
@@ -47,9 +46,6 @@ export function openCodePermissions(
   readOnlyProfile?: "watcher",
 ): PermissionRuleset {
   if (readOnlyProfile === "watcher") {
-    // The supervised catch-all would make every read prompt, and a watcher
-    // declines every prompt. Deny-by-default removes edit and every
-    // other native tool; the last matching rule wins, so the allows follow.
     return [
       { permission: "*", pattern: "*", action: "deny" },
       { permission: "bash", pattern: "*", action: "ask" },

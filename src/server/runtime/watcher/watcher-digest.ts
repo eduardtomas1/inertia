@@ -36,7 +36,6 @@ const MAX_ACTIVITY_TITLE_CHARS = 200;
 const MAX_HEADLINE_CHARS = 200;
 const MAX_PATH_CHARS = 512;
 const MAX_REPLY_BYTES = 2 * 1_024;
-/** Bytes held back for the header, pointer and the hard-cap marker. */
 const FRAME_RESERVE_BYTES = 1_024;
 const HARD_CAP_MARKER = "\n\n[This check was cut at its size limit by Inertia.]";
 const EARLIER_TEXT_MARKER = "[… earlier text left out by Inertia]";
@@ -74,27 +73,14 @@ type WatcherEarlierFinding = Pick<
 >;
 
 interface WatcherDigestOptions {
-  /** The final pass after the watched turn ended; it is built even with nothing new. */
   final: boolean;
   includeChanges?: boolean;
   requested?: boolean;
-  /** The watcher's provider session has no memory of earlier checks. */
   sessionFresh: boolean;
-  /** When the check is built; shown in the header next to the coverage start. */
   now: string;
   watchedTitle: string;
-  /** Check number shown in the header; defaults to the next sequence. */
   sequence?: number;
-  /**
-   * `planKey` of the plan the previous check showed. When omitted the plan is
-   * shown on the first check of a turn, on a fresh session and on the final pass.
-   */
   previousPlanKey?: string | null;
-  /**
-   * The watched turn to digest. The final pass names its own turn, so a pass
-   * that runs after the next turn began still reviews the turn that ended.
-   * Defaults to the cursor's turn, then the latest turn.
-   */
   turnId?: string;
   openReply?: WatcherOpenReply | null;
   lastPage?: boolean;
@@ -109,10 +95,6 @@ interface WatcherDigestStats {
   itemsTruncated: number;
   itemsOmitted: number;
   bytes: number;
-  /**
-   * The check read as many activities as one check may: more may follow, and
-   * a continuation check of the same watched turn reviews them.
-   */
   moreFollows: boolean;
 }
 
@@ -120,7 +102,6 @@ export interface WatcherDigest {
   content: string;
   turnId: string;
   cursor: WatcherCursor;
-  /** Stable key of the watched turn's current plan, or null without one. */
   planKey: string | null;
   openReply: WatcherOpenReply | null;
   stats: WatcherDigestStats;
@@ -135,7 +116,6 @@ interface DigestReply {
 
 const bytes = watcherUtf8Bytes;
 
-/** Neutralizes, then clips by characters and bytes; prefixes of neutralized text stay neutralized. */
 function bounded(value: string, maximumBytes: number, maximumChars = Number.MAX_SAFE_INTEGER): {
   text: string;
   truncated: boolean;
@@ -167,7 +147,6 @@ function compareActivities(left: AgentActivity, right: AgentActivity): number {
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
-/** FNV-1a over the plan's explanation and steps; enough to notice a change. */
 export function watcherPlanKey(plan: AgentPlan | null): string | null {
   if (!plan) return null;
   const serialized = JSON.stringify([plan.explanation, plan.steps.map(({ step, status }) => [step, status])]);
@@ -506,12 +485,6 @@ function statusLabel(status: AgentTurn["status"]): string {
   return status.replaceAll("-", " ");
 }
 
-/**
- * Builds the visible content of one watcher check from bounded, read-only
- * queries on the watched chat. Returns null when nothing new settled and this
- * is not the final pass. Every quoted string is neutralized and bounded, and
- * the whole digest stays within `budgets.digestKiB`.
- */
 export function buildWatcherDigest(
   source: WatcherDigestReader,
   link: WatcherDigestLink,

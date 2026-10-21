@@ -51,7 +51,6 @@ export interface ConversationDetail {
   contextPackets?: ConversationContextPacketSummary[];
   /** Chats an agent read through the context tool, per turn; absent from legacy projections. */
   contextReads?: AgentContextReadSummary[];
-  /** Watcher checks for the loaded turns; present only on watcher conversations. */
   watcherWakes?: WatcherWakeSummary[];
 }
 

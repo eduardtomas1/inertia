@@ -48,11 +48,6 @@ interface PrivateConnectGatewayDependencies {
   stopRun?(conversationId: string, runId: string): { stopped: boolean; alreadyStopped: boolean };
   inputs?(): Iterable<AgentInputRequest>;
   privateConnectPromptSafety?(conversation: Conversation): PrivateConnectPromptSafety;
-  /**
-   * The watched chat and visibility of an attached watcher conversation, or
-   * null for every other conversation. A watcher is visible when it is not
-   * hidden and either has its own grant or its watched chat is visible.
-   */
   watcherParent?(conversationId: string): PrivateConnectWatcherParent | null;
   transcriptCache?: PrivateConnectTranscriptCache;
   now?(): Date;
@@ -718,10 +713,6 @@ function grantedConversation(
     && privateConnectRuntimeGrantAllowsConversation(subject.grants, projectId, id);
 }
 
-/**
- * A watcher is visible when it is not hidden and either has its own grant or
- * the chat it watches is visible. Every other conversation needs its grant.
- */
 function authorizedConversation(
   subject: PrivateConnectRuntimeAuthorization,
   conversation: Pick<Conversation, "id" | "projectId" | "archivedAt">,

@@ -63,7 +63,6 @@ import {
 
 export type { WatcherCursor, WatcherLinkRecord, WatcherWakeRecord } from "./watcher-link-codecs";
 
-/** A watcher policy refusal; command handlers map it to a user-facing request error. */
 export class WatcherPolicyError extends Error {
   constructor(message: string) {
     super(message);
@@ -111,7 +110,6 @@ interface WatcherWakeDraft {
   itemsTruncated: number;
   itemsOmitted: number;
   digestBytes: number;
-  /** False for checks that must not spend the per-turn allowance. Defaults to true. */
   consumesAllowance?: boolean;
 }
 
@@ -121,11 +119,9 @@ interface WatcherGuardResult {
 }
 
 interface WatcherDeliveryUpdate {
-  /** Null only when the finding is dismissed. */
   mode: WatcherDeliveryMode | null;
   state: WatcherDeliveryState;
   detail?: string | null;
-  /** Client idempotency key of the delivery command; kept across later state changes. */
   deliveryId?: string | null;
   deliveredMessageId?: string | null;
   queuedMessageId?: string | null;
@@ -179,11 +175,6 @@ function boundedGuardPaths(paths: readonly string[]): string {
   return JSON.stringify(kept);
 }
 
-/**
- * Durable watcher links and their checks. Every state change is a
- * compare-and-set on the stored status or wake state, so concurrent
- * schedulers, commands and restart recovery never double-apply a transition.
- */
 export class WatcherLinkRepository {
   readonly digest: WatcherDigestSource;
   private readonly database: Database.Database;
@@ -193,13 +184,6 @@ export class WatcherLinkRepository {
     this.digest = new WatcherDigestSource({ database: context.database, turnReads: context.turnReads });
   }
 
-  /**
-   * Creates the watcher conversation, locks its title and records the link in
-   * one transaction. A repeated link id for the same watched chat replays the
-   * attached link with `created: false`; the active-link limit and every
-   * conflict are refused as policy errors inside the transaction, and the
-   * limit trigger and the unique watched index stay as the backstop.
-   */
   createWithConversation(
     input: { link: WatcherLinkDraft; conversation: WatcherConversationPlan },
     now: string,
@@ -267,7 +251,6 @@ export class WatcherLinkRepository {
     return row ? watcherLinkFromRow(row) : null;
   }
 
-  /** The link owning a watcher conversation, including detached ones. */
   findByWatcher(conversationId: string): WatcherLinkRecord | null {
     const row = cachedStatement(this.database, `${LATEST_WATCHER_WAKE_SQL} WHERE link.watcher_conversation_id = ?`)
       .get(conversationId) as WatcherLinkRow | undefined;
@@ -281,10 +264,6 @@ export class WatcherLinkRepository {
     return row ? watcherLinkFromRow(row) : null;
   }
 
-  /**
-   * The Private Connect parent of an attached watcher chat: one indexed row,
-   * with no check join, because the shell projection asks once per chat.
-   */
   parentForWatcher(conversationId: string): { watchedConversationId: string | null; privateConnect: WatcherPrivateConnect } | null {
     const row = cachedStatement(this.database, `
       SELECT watched_conversation_id, private_connect FROM watcher_links
@@ -293,11 +272,6 @@ export class WatcherLinkRepository {
     return row ? { watchedConversationId: row.watched_conversation_id, privateConnect: row.private_connect } : null;
   }
 
-  /**
-   * True while the attached watcher of this chat has an unfinished turn: the
-   * same condition the delete trigger refuses on, checked before any side
-   * effect of a delete.
-   */
   watcherTurnActiveFor(watchedConversationId: string): boolean {
     return cachedStatement(this.database, `
       SELECT 1 FROM watcher_links AS link
@@ -308,12 +282,10 @@ export class WatcherLinkRepository {
     `).get(watchedConversationId) !== undefined;
   }
 
-  /** Attached links, oldest first. Detached links leave the shell projection. */
   active(): WatcherLinkRecord[] {
     return activeWatcherLinks(this.database);
   }
 
-  /** Renderer-safe shell projection; a row that fails the view contract is withheld. */
   transition(
     linkId: string,
     expected: readonly WatcherStatus[],
@@ -365,13 +337,6 @@ export class WatcherLinkRepository {
     return changed === 1 ? this.get(linkId) : null;
   }
 
-  /**
-   * Starts following a new watched turn: resets the cursor, the per-turn
-   * counters and the wake allowance. A pause for the previous turn's wake
-   * budget ends with it, because that budget is per turn. Repeating it for the
-   * same turn is a no-op. The pending-event count is the scheduler's and is
-   * left alone.
-   */
   beginWatchedTurn(linkId: string, turnId: string, now: string): WatcherLinkRecord | null {
     const at = requireTimestamp(now, "Watched turn start time");
     return this.database.transaction(() => {
@@ -393,13 +358,6 @@ export class WatcherLinkRepository {
     })();
   }
 
-  /**
-   * Moves coverage forward after a check that saw `eventsDelta` new events.
-   * The move is a compare-and-set: it applies only while the stored cursor is
-   * still on `expectedTurnId` (the cursor the check's digest was built from)
-   * or on the digest's own turn. A check that settles after the next watched
-   * turn began only adds to `events_seen`, so it never rewinds coverage.
-   */
   advanceCursor(
     linkId: string,
     cursor: WatcherCursor,
@@ -429,11 +387,6 @@ export class WatcherLinkRepository {
     })();
   }
 
-  /**
-   * Records how many observed events wait for the next check. The wake
-   * scheduler is the only source of this count; returns the link only when the
-   * stored count changed.
-   */
   notePendingEvents(linkId: string, pending: number, now: string): WatcherLinkRecord | null {
     const at = requireTimestamp(now, "Watcher event time");
     const count = boundedCount(pending);
@@ -444,7 +397,6 @@ export class WatcherLinkRepository {
     return changed === 1 ? this.get(linkId) : null;
   }
 
-  /** The watched chat produced output; clears the quiet marker. */
   recordWatchedOutput(linkId: string, at: string): void {
     const timestamp = requireTimestamp(at, "Watched output time");
     this.database.prepare(`
@@ -453,7 +405,6 @@ export class WatcherLinkRepository {
     `).run(timestamp, linkId);
   }
 
-  /** Marks the watched chat quiet since its last output; returns the link when it changed. */
   markQuiet(linkId: string, now: string): WatcherLinkRecord | null {
     const at = requireTimestamp(now, "Watcher quiet time");
     const changed = this.database.prepare(`
@@ -463,7 +414,6 @@ export class WatcherLinkRepository {
     return changed === 1 ? this.get(linkId) : null;
   }
 
-  /** Records that a watched turn needs no further final pass: its final pass settled, or an initial review covered the turn. */
   markFinalPass(linkId: string, turnId: string, now: string): boolean {
     const at = requireTimestamp(now, "Watcher final pass time");
     return this.database.prepare(`
@@ -481,7 +431,6 @@ export class WatcherLinkRepository {
     return changed === 1 ? this.get(linkId) : null;
   }
 
-  /** Counts a blocked write in the current watched turn; returns the new count. */
   recordWriteAttempt(linkId: string, now = new Date().toISOString()): number {
     const at = requireTimestamp(now, "Watcher attempt time");
     const row = this.database.prepare(`
@@ -492,10 +441,6 @@ export class WatcherLinkRepository {
     return row?.count ?? 0;
   }
 
-  /**
-   * Opens a check on a link that is already `waking`. At most one check per
-   * link is in flight; the sequence is allocated here.
-   */
   createWake(draft: WatcherWakeDraft, now: string): WatcherWakeRecord | null {
     const at = requireTimestamp(now, "Watcher check time");
     return this.database.transaction(() => {
@@ -520,8 +465,6 @@ export class WatcherLinkRepository {
         boundedCount(draft.eventsCovered), boundedCount(draft.itemsTruncated),
         boundedCount(draft.itemsOmitted), Math.min(65_536, boundedCount(draft.digestBytes)), at,
       );
-      // A check spends the allowance of the turn the link follows now; a late
-      // final pass of an earlier turn never spends the next turn's checks.
       this.database.prepare(`
         UPDATE watcher_links
         SET wakes_this_turn = wakes_this_turn
@@ -534,7 +477,6 @@ export class WatcherLinkRepository {
     })();
   }
 
-  /** Binds the queued watcher turn to its check; the turn must belong to the watcher chat. */
   attachWakeTurn(wakeId: string, turnId: string, now: string): boolean {
     const at = requireTimestamp(now, "Watcher check start time");
     return this.database.transaction(() => {
@@ -600,7 +542,6 @@ export class WatcherLinkRepository {
     return row ? watcherWakeFromRow(row) : null;
   }
 
-  /** One newest-first page of checks strictly older than `beforeSequence`. */
   feed(linkId: string, beforeSequence?: number, limit = MAX_WATCHER_FEED_PAGE): WatcherFeedPage | null {
     const link = this.database.prepare("SELECT feed_revision FROM watcher_links WHERE id = ?")
       .get(linkId) as { feed_revision: number } | undefined;
@@ -620,10 +561,6 @@ export class WatcherLinkRepository {
     };
   }
 
-  /**
-   * Records a user-initiated delivery or dismissal of a settled finding.
-   * Delivered and dismissed findings are final; a failed delivery may retry.
-   */
   setDelivery(wakeId: string, update: WatcherDeliveryUpdate, now: string): WatcherWakeRecord | null {
     const at = requireTimestamp(now, "Watcher delivery time");
     if ((update.mode === null) !== (update.state === "dismissed")) return null;
@@ -726,14 +663,12 @@ export class WatcherLinkRepository {
     return { totalTokens };
   }
 
-  /** The watcher policy for a conversation, including detached watchers. */
   policyForConversation(conversationId: string): { linkId: string; status: WatcherStatus } | null {
     const row = cachedStatement(this.database, "SELECT id, status FROM watcher_links WHERE watcher_conversation_id = ?")
       .get(conversationId) as { id: string; status: WatcherStatus } | undefined;
     return row ? { linkId: row.id, status: row.status } : null;
   }
 
-  /** Attached watchers stay in plan mode, supervised access and an allowed harness. */
   assertRunConfigurationAllowed(conversationId: string, configuration: WatcherRunConfiguration): void {
     const policy = this.policyForConversation(conversationId);
     if (!policy || policy.status === "detached") return;
@@ -745,10 +680,6 @@ export class WatcherLinkRepository {
     }
   }
 
-  /**
-   * A turn that claims a check must match a dispatching check of this watcher
-   * chat that has no turn yet. Ordinary user turns need no claim.
-   */
   assertWakeTurnAllowed(conversationId: string, wakeId?: string): void {
     if (wakeId === undefined) return;
     const allowed = this.database.prepare(`
@@ -762,10 +693,6 @@ export class WatcherLinkRepository {
     if (!allowed) throw new WatcherPolicyError("This watcher check is no longer waiting to start.");
   }
 
-  /**
-   * Restart recovery: checks whose turn is missing or terminal fail, and
-   * links left `waking` without a live check return to `watching`.
-   */
   recoverInterruptedWakes(now: string): { wakes: number; links: number } {
     const at = requireTimestamp(now, "Watcher recovery time");
     return this.database.transaction(() => {

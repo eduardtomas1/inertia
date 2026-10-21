@@ -337,7 +337,6 @@ export interface AppSnapshot {
   /** Present on authoritative snapshots; optional only for legacy fixtures. */
   promptPresets?: PromptPreset[];
   todos?: Todo[];
-  /** Attached watcher links; optional only for legacy fixtures. */
   watchers?: WatcherLinkView[];
   activeProjectId: string | null;
   activeConversationId: string | null;

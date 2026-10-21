@@ -8,7 +8,6 @@ import { truncateUtf8 } from "../untrusted-agent-text";
 type WatcherReplyClass = "silent" | "finding";
 
 const SILENT_PATTERN = /^SILENT\.?$/u;
-/** Longer replies cannot be a wrapped `SILENT`, so they skip the unwrap loop. */
 const MAX_SILENT_CANDIDATE_CHARS = 64;
 const WRAPPERS: ReadonlyArray<readonly [string, string]> = [
   ["**", "**"],
@@ -37,13 +36,6 @@ function unwrap(value: string): string {
   return current;
 }
 
-/**
- * Classifies a watcher's final reply. Only an exact `SILENT` (optionally with
- * one trailing period, after trimming and stripping surrounding bold,
- * backticks or quotes) is silent, and so is an empty reply on a completed
- * turn. Anything else is a finding. Callers map failed, cancelled and
- * usage-limited turns to their own outcomes before asking.
- */
 export function classifyWatcherReply(text: string | null): WatcherReplyClass {
   const trimmed = (text ?? "").trim();
   if (trimmed.length === 0) return "silent";
@@ -61,12 +53,6 @@ export function splitWatcherResolvedLine(text: string): { text: string; resolved
   return { text: trimmed.slice(0, lineStart).trim(), resolved: [...new Set(checks)] };
 }
 
-/**
- * The stored preview of a finding: trimmed, at most `MAX_WATCHER_NOTE_CHARS`
- * characters and `MAX_WATCHER_FINDING_BYTES` UTF-8 bytes, never splitting a
- * surrogate pair or a multi-byte character. Shortened previews end with a
- * marker that stays inside both limits.
- */
 export function findingPreview(text: string): string {
   const trimmed = text.replaceAll("\0", "�").trim();
   const fitsChars = trimmed.length <= MAX_WATCHER_NOTE_CHARS;

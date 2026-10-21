@@ -21,18 +21,12 @@ const MAX_ATTRIBUTION_TEXTS = 2_000;
 
 export interface WatcherGuardOutcome {
   state: WatcherGuardState;
-  /** Unexplained changed paths, at most `MAX_WATCHER_GUARD_PATHS`. */
   paths: string[];
-  /** Set only for `changed`: the bounded banner text for the pause. */
   pauseDetail: string | null;
 }
 
 export interface WatcherGuardWindow {
   readonly watcherConversationId: string;
-  /**
-   * Closes the window after the watcher turn settled. A turn that produced no
-   * activity at all is `skipped`: nothing it did could have written.
-   */
   after(watcherTurnId: string | null): Promise<WatcherGuardOutcome>;
   dispose(): void;
 }
@@ -48,7 +42,6 @@ interface WatcherCheckoutGuardDependencies {
   clock?: () => number;
   deadlineMs?: number;
   signal?: AbortSignal;
-  /** Decides path folding for attribution; defaults to the running platform. */
   platform?: NodeJS.Platform;
 }
 
@@ -57,7 +50,6 @@ interface OpenWindow {
   checkoutPath: string | null;
   startedAt: string;
   before: Promise<CheckoutFingerprint>;
-  /** Other turns that were active on this checkout during the window. */
   turns: Map<string, Set<string>>;
   matches: Map<string, boolean>;
   texts: string[];
@@ -71,13 +63,6 @@ function attributionText(activity: Pick<AgentActivity, "title" | "detail">): str
   return `${activity.title}\n${activity.detail ?? ""}`.slice(0, MAX_ATTRIBUTION_TEXT_CHARS).replaceAll("\\", "/");
 }
 
-/**
- * The form a path and the activity texts are compared in. Git reports NFC
- * paths (with `core.precomposeunicode`) while an agent may print NFD, so both
- * sides are NFC. Windows and macOS file systems are case-insensitive by
- * default, so there the comparison also folds case: an edit of `Src/App.tsx`
- * explains Git's `src/App.tsx`.
- */
 export function watcherAttributionForm(value: string, platform: NodeJS.Platform): string {
   const normalized = value.replaceAll("\\", "/").normalize("NFC");
   return platform === "win32" || platform === "darwin" ? normalized.toLowerCase() : normalized;
@@ -103,7 +88,6 @@ export function watcherActivityMayWrite(
   return activityExecutionCategory({ kind: activity.kind, title, status: "running" }) === "coding";
 }
 
-/** Activities that may have touched files: tool or file work, never reasoning or status lines. */
 function mayWrite(activity: Pick<AgentActivity, "kind">): boolean {
   return activity.kind === "file" || activity.kind === "tool";
 }
@@ -117,16 +101,6 @@ function pauseDetail(paths: readonly string[], total: number, headChanged: boole
   return text.length <= MAX_WATCHER_PAUSE_DETAIL_CHARS ? text : `${text.slice(0, MAX_WATCHER_PAUSE_DETAIL_CHARS - 1)}…`;
 }
 
-/**
- * The Git fingerprint backstop for read-only watcher checks. It fingerprints
- * the shared checkout before and after a check through read-only Git
- * inspection, then attributes every changed path: a path that another turn on
- * the same checkout reported in its activities is explained; a command run by
- * another turn, a workspace or source-control run, or a terminal resume makes
- * the window inconclusive, and so does a change while the watcher's own turn
- * only read; anything left pauses the watcher. It never writes
- * to the repository and never reuses checkpoints or artifact capture.
- */
 export class WatcherCheckoutGuard {
   readonly #deps: WatcherCheckoutGuardDependencies;
   readonly #open = new Set<OpenWindow>();
@@ -143,7 +117,6 @@ export class WatcherCheckoutGuard {
     this.#platform = dependencies.platform ?? process.platform;
   }
 
-  /** Opens a window and starts the before-fingerprint; resolves once it is taken. */
   async before(watcherConversationId: string): Promise<WatcherGuardWindow> {
     let checkoutPath: string | null = null;
     try {
@@ -175,7 +148,6 @@ export class WatcherCheckoutGuard {
     };
   }
 
-  /** Feeds runtime events into every open window. */
   observe(event: RuntimeMutationEvent): void {
     if (this.#open.size === 0) return;
     if (event.type === "agent.started") {
@@ -197,7 +169,6 @@ export class WatcherCheckoutGuard {
   async #fingerprint(checkoutPath: string): Promise<CheckoutFingerprint> {
     try {
       return await this.#capture(checkoutPath, {
-        // Git deadlines are wall-clock bounds, independent of the injected clock.
         deadlineAt: Date.now() + this.#deadlineMs,
         ...(this.#deps.signal ? { signal: this.#deps.signal } : {}),
       });
@@ -260,7 +231,6 @@ export class WatcherCheckoutGuard {
     }
   }
 
-  /** A check, service or source-control run of this chat; agent runs are attributed by activity. */
   #workspaceRunActive(conversationId: string): boolean {
     try {
       return this.#deps.store.workspaceRunsForConversation(conversationId).some((run) =>
@@ -316,7 +286,6 @@ export class WatcherCheckoutGuard {
     }
   }
 
-  /** Adds durable activities of every overlapping turn, which covers events missed in memory. */
   #attributeFromStore(window: OpenWindow, endedAt: string): void {
     for (const [conversationId, turnIds] of window.turns) {
       if (this.#workspaceRunActive(conversationId)) window.busy = true;

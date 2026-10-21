@@ -16,7 +16,6 @@ export type WatcherRouteReadiness =
       ready: true;
       selection: ModelSelection;
       providerId: NonNullable<ReturnType<typeof providerIdForHarness>>;
-      /** False for custom backends, which never receive Inertia host tools. */
       contextAccess: boolean;
     }
   | { ready: false; message: string };
@@ -25,11 +24,6 @@ function message(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
-/**
- * The Duo preflight for one watcher route: a valid selection, a resolvable
- * route on a reviewed watcher harness, backend readiness and a runnable
- * provider. Nothing is spawned.
- */
 export async function watcherRouteReadiness(
   dependencies: WatcherRouteDependencies,
   input: ModelSelection,

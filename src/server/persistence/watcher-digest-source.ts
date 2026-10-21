@@ -14,10 +14,8 @@ import { cachedStatement } from "./statement-cache";
 export const MAX_WATCHER_DIGEST_ACTIVITIES = 200;
 export const MAX_WATCHER_DIGEST_MESSAGES = 20;
 const MAX_WATCHER_DIGEST_DIFF_FILES = 200;
-/** Activity details are bounded at the query so a huge tool result never loads whole. */
 const MAX_WATCHER_ACTIVITY_DETAIL_CHARS = 8_192;
 
-/** `(created_at, id)` position after the last activity or reply a watcher already saw. */
 export interface WatcherActivityCursor {
   at: string | null;
   id: string | null;
@@ -66,11 +64,6 @@ function boundedLimit(limit: number, maximum: number): number {
   return Number.isSafeInteger(limit) ? Math.min(maximum, Math.max(0, limit)) : 0;
 }
 
-/**
- * Read-only, bounded queries the watcher digest is built from. Every query is
- * scoped to one watched conversation and turn and uses existing indexes; none
- * writes, so building a digest never changes the watched chat.
- */
 export class WatcherDigestSource {
   constructor(private readonly context: WatcherDigestSourceContext) {}
 
@@ -100,7 +93,6 @@ export class WatcherDigestSource {
     return row ? agentTurnFromRow(row) : null;
   }
 
-  /** Activities strictly after the cursor, oldest first. */
   activitiesAfter(
     conversationId: string,
     turnId: string,
@@ -124,7 +116,6 @@ export class WatcherDigestSource {
     return (rows as ActivityRow[]).map(activityFromRow);
   }
 
-  /** Re-reads activities that were still running at the previous check. */
   activitiesByIds(conversationId: string, ids: readonly string[]): AgentActivity[] {
     const bounded = [...new Set(ids)].slice(0, MAX_WATCHER_PENDING_RUNNING_IDS);
     if (bounded.length === 0) return [];
@@ -135,7 +126,6 @@ export class WatcherDigestSource {
     `).all(conversationId, JSON.stringify(bounded)) as ActivityRow[]).map(activityFromRow);
   }
 
-  /** Assistant replies in the watched turn strictly after the cursor, oldest first. */
   assistantMessagesAfter(
     conversationId: string,
     turnId: string,
@@ -203,10 +193,6 @@ export class WatcherDigestSource {
     return { content: truncated ? content.replace(/^\S*\s*/u, "") : content, truncated, bytes };
   }
 
-  /**
-   * Completed command activities per turn of one conversation, counted in SQL
-   * for the receipts' "ran N read-only commands" line; no details are read.
-   */
   settledCommandCounts(conversationId: string, turnIds: readonly string[]): Map<string, number> {
     const bounded = [...new Set(turnIds)].slice(0, MAX_WATCHER_FEED_PAGE);
     if (bounded.length === 0) return new Map();

@@ -12,17 +12,10 @@ export interface WatcherTurnSource {
 }
 
 export interface WatcherTurnPolicy extends AgentContextWatcherPolicy {
-  /** True for an attached (not detached) watcher conversation. */
   isWatcherConversation(conversationId: string): boolean;
-  /**
-   * The host tools of a watcher turn: only the chat context tool, or none
-   * without a context bridge. Null for every other conversation.
-   */
   hostToolsForTurn(source: WatcherTurnSource): ProviderHostToolBridge | null;
-  /** Watchers never receive capability packs; null leaves other chats unchanged. */
   harnessInstructionsFor(input: { conversation: Conversation }): readonly HiddenProviderInstruction[] | null;
   watcherInstructionsFor(input: { conversation: Conversation; hostTools: boolean }): readonly HiddenProviderInstruction[];
-  /** Forgets the per-check read counter of a settled turn. */
   forgetTurn(turnId: string): void;
 }
 
@@ -34,14 +27,8 @@ const EMPTY_BRIDGE: ProviderHostToolBridge = Object.freeze({
   }),
 });
 
-/** Bounds the in-memory read counters if settlements are ever missed. */
 const MAX_TRACKED_TURNS = 256;
 
-/**
- * Watcher rules the turn layer and the context tool consult through injected
- * hooks. It is built before the watcher runtime so the TurnController and the
- * agent thread manager can receive it without importing watcher modules.
- */
 export function createWatcherTurnPolicy(
   store: Pick<RuntimeStore, "watcherLinks" | "conversation">,
   contextBridge: (source: WatcherTurnSource) => ProviderHostToolBridge | undefined,

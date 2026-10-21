@@ -1,8 +1,3 @@
-/**
- * Harnesses whose active turn accepts an acknowledged parent follow-up
- * ("steer"). The runtime admission check and the renderer composer share
- * this list so they cannot drift apart.
- */
 export const STEERABLE_HARNESS_IDS = [
   "codex-app-server",
   "claude-agent-sdk",

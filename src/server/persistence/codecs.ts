@@ -757,7 +757,6 @@ export function rendererSafeAttachments(
   }));
 }
 
-/** Parses stored watcher-note attribution; malformed values stay unprojected. */
 export function watcherNoteFromJson(value: string | null | undefined): WatcherNoteAttribution | undefined {
   if (!value) return undefined;
   try {

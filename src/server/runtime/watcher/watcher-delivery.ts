@@ -25,12 +25,6 @@ import type { TurnController } from "../turns/turn-controller";
 import { neutralizeUntrustedAgentText } from "../untrusted-agent-text";
 import { watcherNoteDelivery, watcherSteerContent } from "./watcher-note-instruction";
 
-/**
- * `delivery.detail` explains only what state and mode do not: a fallback
- * from Steer, a queued note that went out later, or why it was not sent. The
- * plain queued, sent and steered outcomes carry no detail. Each fixed detail
- * is a lowercase fragment the renderer appends to its own status line.
- */
 export const WATCHER_DELIVERY_DETAIL = Object.freeze({
   turnEnded: "the turn ended before the note arrived",
   refused: "the agent didn't take the note mid-turn",
@@ -68,29 +62,19 @@ export interface WatcherNoteQueue {
     content: string;
     watcherNote: WatcherNoteAttribution;
   }): MessageQueueResult;
-  /** Removes a waiting or blocked watcher note before the finding is sent again. */
   withdrawWatcherNote(conversationId: string, id: string): boolean;
 }
 
 interface WatcherDeliveryDependencies {
   store: RuntimeStore;
   turns: Pick<TurnController, "isActive" | "acquireFollowUpAdmission" | "steer">;
-  /** The same server-side dependencies the message commands use. */
   interaction(): TurnInteractionCommandDependencies | undefined;
   queue(): WatcherNoteQueue | undefined;
-  /** Provider labels keyed by provider id: the runtime's provider labels under the user's identity labels. */
   providerLabels(): Readonly<Record<string, string | undefined>>;
   now(): string;
-  /** The link's feed changed; republish it. */
   changed(linkId: string): void;
 }
 
-/**
- * The watcher's agent as the note attribution names it: the shared
- * `watcherAgentLabel`, fed with the same provider labels the renderer's dock
- * uses (runtime provider labels under the user's identity labels), so the
- * note divider and the dock read the same.
- */
 export function watcherLabel(
   store: Pick<RuntimeStore, "conversation" | "shellSnapshot">,
   watcherConversationId: string,
@@ -105,20 +89,11 @@ export function watcherLabel(
   return watcherAgentLabel(conversation, labels);
 }
 
-/** The neutralized note text the user forwards, capped at `MAX_WATCHER_NOTE_CHARS`. */
 export function watcherNoteText(finding: string): string {
   const normalized = watcherNormalizeLineBreaks(finding).trim();
   return clipCodeUnits(neutralizeUntrustedAgentText(normalized), MAX_WATCHER_NOTE_CHARS).trimEnd();
 }
 
-/**
- * Forwards a settled finding into the watched chat on the user's explicit
- * command. Queue is the default: an idle chat starts a turn at once, a busy
- * chat queues the note behind the user's own queued messages. Steer delivers
- * into a running turn on a steerable harness and falls back to queueing when
- * the turn ended or the agent refused it. Repeating a delivery id replays
- * its result; delivered and dismissed findings are final.
- */
 export class WatcherDeliveryService {
   readonly #deps: WatcherDeliveryDependencies;
   readonly #inFlight = new Map<string, Promise<WatcherDeliveryResult>>();
@@ -165,13 +140,6 @@ export class WatcherDeliveryService {
     return this.#result(linkId, dismissed);
   }
 
-  /**
-   * A forwarded note reached the watched chat as a user message. A queued
-   * note, or one that failed in the queue and was then sent from it, is
-   * marked sent: "after the turn ended" when it started a turn, or "into the
-   * running turn" when it was sent into one. Notes this service is sending
-   * right now record their own result.
-   */
   noteDelivered(attribution: WatcherNoteAttribution, message: Pick<ChatMessage, "id" | "turnId">): void {
     if (this.#inFlight.has(attribution.wakeId)) return;
     const wake = this.#deps.store.watcherLinks.getWake(attribution.wakeId);
@@ -187,12 +155,6 @@ export class WatcherDeliveryService {
     if (updated) this.#deps.changed(attribution.linkId);
   }
 
-  /**
-   * A queued note left the main chat's queue without being sent: the user
-   * removed it, a route change blocked it, or its dispatch failed. The
-   * finding becomes `failed` with the reason, so it can be sent again or
-   * dismissed.
-   */
   noteUndelivered(attribution: WatcherNoteAttribution, reason: string): void {
     const wake = this.#deps.store.watcherLinks.getWake(attribution.wakeId);
     if (!wake || wake.linkId !== attribution.linkId || wake.delivery?.state !== "queued") return;
@@ -213,11 +175,6 @@ export class WatcherDeliveryService {
     }
   }
 
-  /**
-   * A finding still recorded as queued whose queue entry is gone, blocked or
-   * already accepted is brought up to date before the user acts on it. This
-   * covers paths that bypass `noteUndelivered`, such as a restart.
-   */
   #reconcileQueued(link: WatcherLinkRecord, wake: WatcherWakeRecord): WatcherWakeRecord {
     if (wake.delivery?.state !== "queued" || wake.queuedMessageId === null || link.watchedConversationId === null) return wake;
     const entry = this.#deps.store.queuedMessages.get(link.watchedConversationId, wake.queuedMessageId);
@@ -287,7 +244,6 @@ export class WatcherDeliveryService {
     const note = watcherNoteText(wake.finding!);
     if (note.length === 0) throw new RuntimeRequestError("This finding has no text to send.");
     if (wake.delivery?.state === "failed" && wake.queuedMessageId !== null && wake.queuedMessageId !== deliveryId) {
-      // A note blocked in the queue is withdrawn so sending again never forwards it twice.
       this.#deps.queue()?.withdrawWatcherNote(watchedId, wake.queuedMessageId);
     }
     const label = watcherLabel(this.#deps.store, link.watcherConversationId, this.#deps.providerLabels());
@@ -390,7 +346,6 @@ export class WatcherDeliveryService {
     return { ...recorded, queue: result };
   }
 
-  /** Starts the watched chat's next turn with the note; null when it became busy meanwhile. */
   async #sendNow(
     linkId: string,
     wakeId: string,

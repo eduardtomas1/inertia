@@ -11,34 +11,22 @@ export const WATCHER_STALL_TICK_MS = 60_000;
 export const WATCHER_QUIET_AFTER_MS = 10 * 60_000;
 export const WATCHER_RETRY_BASE_MS = 5_000;
 export const WATCHER_RETRY_MAX_MS = 120_000;
-/** How often a wake that is due re-checks a busy watcher or a deferral. */
 export const WATCHER_RECHECK_MS = 5_000;
 export const WATCHER_ACCUMULATE_MIN = 6;
 export const WATCHER_ACCUMULATE_AGE_COOLDOWNS = 3;
 export const WATCHER_SPACING_MAX_COOLDOWNS = 10;
 
-/**
- * What `onWake` reports back:
- * - `started`: a check began; call `wakeFinished` once it settles.
- * - `skipped`: nothing to check (no new digest, link gone); the events are dropped.
- * - `transient`: the runtime is held, closing or has no route; retried with backoff.
- * - `paused`: the attempt paused the link; its final pass stays due until `resume`.
- */
 export type WatcherWakeAttempt = "started" | "skipped" | "transient" | "paused";
 
 export interface WatcherWakeContext {
-  /** True for the final pass after the watched turn ended. */
   final: boolean;
   watchedTurnId: string | null;
-  /** Observed events this wake covers. */
   events: number;
   continued: boolean;
 }
 
 export interface WatcherWakeSchedulerDependencies {
-  /** Compatible with `TurnTimerScheduler`, so tests can use `FakeTurnScheduler`. */
   scheduler: DeltaTimerScheduler;
-  /** Milliseconds since the epoch. */
   clock: () => number;
   onWake(
     linkId: string,
@@ -46,16 +34,9 @@ export interface WatcherWakeSchedulerDependencies {
     context: WatcherWakeContext,
   ): WatcherWakeAttempt | Promise<WatcherWakeAttempt>;
   onQuiet(linkId: string): void;
-  /** The watcher conversation already has a turn in flight. */
   isBusy(linkId: string): boolean;
-  /** Wakes left in the watched turn, counting the unit reserved for the final pass. */
   allowance(linkId: string): number;
-  /** Mid-turn wakes ran out; called once per watched turn until `resume`. */
   onBudgetExhausted?(linkId: string): void;
-  /**
-   * The pending-event count changed outside `observe`: a wake consumed it, or
-   * a transient attempt put it back. The scheduler is its only source.
-   */
   onPendingChanged?(linkId: string): void;
   cooldownMs?(linkId: string): number;
   onError?(linkId: string, error: unknown): void;
@@ -70,7 +51,6 @@ export interface WatcherWakeSchedulerDependencies {
 interface WatcherTrackOptions {
   watchedTurnId?: string | null;
   watchedRunning?: boolean;
-  /** Last watched output in epoch milliseconds; defaults to now. */
   lastOutputAt?: number;
 }
 
@@ -79,7 +59,6 @@ type RequestTrigger = Extract<WatcherWakeTrigger, "manual" | "initial">;
 
 const TRIGGER_RANK: Readonly<Record<ActivityTrigger, number>> = { plan: 1, activity: 2, error: 3 };
 const ACCUMULATING_KINDS: ReadonlySet<AgentActivity["kind"]> = new Set(["tool", "command"]);
-/** Final passes kept per link: the ended turn's and the one after it. */
 export const WATCHER_MAX_PENDING_FINALS = 2;
 const MAX_DONE_FINALS = 4;
 const OUTPUT_EVENTS: ReadonlySet<RuntimeMutationEvent["type"]> = new Set([
@@ -94,9 +73,7 @@ interface LinkState {
   immediate: boolean;
   request: RequestTrigger | null;
   requestContinues: boolean;
-  /** A settled check left activity of its watched turn unread; another check follows without new events. */
   continuation: boolean;
-  /** Final passes still due, oldest first; a new watched turn never erases one. */
   finals: FinalPass[];
   finalDoneTurnIds: string[];
   watchedTurnId: string | null;
@@ -136,14 +113,6 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
 }
 
-/**
- * Decides when a watcher wakes. It counts only settled watched events,
- * coalesces them, honours the cooldown and a short settle delay, keeps the
- * last wake of each watched turn for the final pass, waits while the watcher
- * is busy or the user's own watcher turn runs, retries transient failures and
- * marks the watched chat quiet after ten minutes without output. It never
- * talks to a model or the database; everything goes through injected callbacks.
- */
 export class WatcherWakeScheduler {
   readonly #deps: WatcherWakeSchedulerDependencies;
   readonly #links = new Map<string, LinkState>();
@@ -165,7 +134,6 @@ export class WatcherWakeScheduler {
     this.#recheckMs = dependencies.recheckMs ?? WATCHER_RECHECK_MS;
   }
 
-  /** Registers a link, for example after attach or restart, with its watched turn state. */
   track(linkId: string, options: WatcherTrackOptions = {}): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -176,11 +144,6 @@ export class WatcherWakeScheduler {
     else this.#stopStall(state);
   }
 
-  /**
-   * Feeds one runtime event of the watched conversation. Returns true when
-   * the event counts toward a wake. Text and reasoning only refresh the
-   * quiet marker.
-   */
   observe(linkId: string, event: RuntimeMutationEvent): boolean {
     const state = this.#state(linkId);
     if (!state) return false;
@@ -217,7 +180,6 @@ export class WatcherWakeScheduler {
     return true;
   }
 
-  /** The watched turn ended; schedules its final pass once. */
   onWatchedTurnSettled(linkId: string, turnId: string): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -234,7 +196,6 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /** "Check now" or the initial review: skips the settle delay, cooldown and budget gate. */
   requestWake(linkId: string, trigger: RequestTrigger): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -244,13 +205,6 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /**
-   * A settled check read only the first page of what waits. Without a final
-   * turn, another mid-turn check follows with no new events, after the
-   * cooldown and within the allowance like any automatic check; the next page
-   * of a request stays that request. With a final turn, the final pass of
-   * that turn is due again, so its remaining pages drain.
-   */
   continueWake(linkId: string, finalTurnId: string | null, request: RequestTrigger | null = null): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -268,7 +222,6 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /** Holds due wakes while `predicate` is true, for example while the user's own watcher turn runs. */
   deferWhile(linkId: string, predicate: (() => boolean) | null): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -276,7 +229,6 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /** A started check settled; the cooldown starts now. */
   wakeFinished(linkId: string): void {
     const state = this.#links.get(linkId);
     if (!state || this.#disposed) return;
@@ -285,13 +237,11 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /** Re-evaluates a link, for example after the user's own watcher turn ended. */
   poke(linkId: string): void {
     const state = this.#links.get(linkId);
     if (state && !this.#disposed) this.#schedule(linkId, state);
   }
 
-  /** Stops new wakes. With `finalPass`, the final pass still runs (budget pauses). */
   pause(linkId: string, options: { finalPass?: boolean } = {}): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -299,7 +249,6 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /** Resumes wakes; a resume after budget exhaustion follows a new grant. */
   resume(linkId: string): void {
     const state = this.#state(linkId);
     if (!state) return;
@@ -310,7 +259,6 @@ export class WatcherWakeScheduler {
     this.#schedule(linkId, state);
   }
 
-  /** Observed events waiting for the next wake. */
   pendingEvents(linkId: string): number {
     return this.#links.get(linkId)?.pending ?? 0;
   }
@@ -378,7 +326,6 @@ export class WatcherWakeScheduler {
     return state.lastWakeEndAt + Math.min(WATCHER_SPACING_MAX_COOLDOWNS * cooldown, Math.max(cooldown, spread));
   }
 
-  /** The next wake to run and when it is due, ignoring busy and deferral. */
   #next(linkId: string, state: LinkState): { kind: Consumed["kind"]; at: number } | null {
     const final = state.finals[0];
     if (final && (!state.paused || state.paused.finalPass)) {

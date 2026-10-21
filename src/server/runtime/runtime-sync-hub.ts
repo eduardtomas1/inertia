@@ -68,7 +68,6 @@ export class RuntimeSyncHub<Socket> {
       onSent?: (sent: boolean) => void,
     ) => void,
     private readonly sequencer = new RuntimeSequencer(),
-    /** Resolves both sides of a watcher link for detached-window projection. */
     private readonly watcherLink?: DetachedWatcherLinkLookup,
   ) {}
 

@@ -24,8 +24,6 @@ export class TurnArtifactSequencer {
   constructor(private readonly options: TurnArtifactSequencerOptions) {}
 
   captureBefore(active: ActiveTurn): Promise<void> | null {
-    // A watcher shares its checkout with a concurrent writer: it must never
-    // checkpoint (a Revert would wipe that work) or claim its changed files.
     if (active.readOnlyWatcher) return null;
     try {
       const priorCheckpoint = this.#checkpoints.get(active.conversation.id) ?? null;

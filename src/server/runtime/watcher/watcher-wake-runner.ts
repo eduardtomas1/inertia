@@ -31,12 +31,7 @@ import {
 
 const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit.";
 const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit a file twice during one turn of the main chat.";
-/**
- * Consecutive wakes that may find the watcher's route unready and retry with
- * the scheduler's backoff before the link pauses with `route-unavailable`.
- */
 export const WATCHER_ROUTE_RETRY_LIMIT = 3;
-/** Consecutive checks that fail to dispatch before the link pauses with `route-unavailable`. */
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
 const WATCHER_MAX_CONTINUATION_PAGES = 4;
 export const WATCHER_FINAL_PASS_RETRY_LIMIT = 2;
@@ -50,7 +45,6 @@ function watcherDispatchFailedDetail(message: string): string {
   return `The watcher's checks couldn't start ${WATCHER_DISPATCH_FAILURE_LIMIT} times in a row: ${message.trim()}`;
 }
 
-/** Room for a finding preview plus its trailing marker. */
 const MAX_REPLY_READ_BYTES = MAX_WATCHER_FINDING_BYTES * 2;
 const MAX_RESOLVED_TAIL_BYTES = 2_048;
 
@@ -63,9 +57,7 @@ interface WatcherWakeRunnerDependencies {
   guard: Pick<WatcherCheckoutGuard, "before">;
   live: Pick<WatcherLiveProjection, "begin" | "end">;
   scheduler(): Pick<WatcherWakeScheduler, "wakeFinished" | "pause" | "resume" | "continueWake" | "pendingEvents">;
-  /** Republishes the link (`watcher.link.updated`). */
   publish(linkId: string): void;
-  /** Refreshes the watcher chat's shell row after a check settles. */
   refreshConversation?(conversationId: string): void;
   detailChanged?(conversationId: string): void;
   turnDiff?(turnId: string): Promise<WatcherTurnDiffSnapshot>;
@@ -80,9 +72,7 @@ interface RunningWake {
   watcherConversationId: string;
   window: WatcherGuardWindow;
   digest: WatcherDigest;
-  /** The cursor the digest was built from; the stored cursor moves only while its turn still holds. */
   start: WatcherCursor;
-  /** The final pass's turn, or null for a mid-turn check. */
   finalTurnId: string | null;
   finalPage: number;
   request: Extract<WatcherWakeTrigger, "manual" | "initial"> | null;
@@ -121,7 +111,6 @@ class TurnMemory<T> {
   }
 }
 
-/** The check read past where it started; a continuation that did not would read the same page again. */
 function advanced({ start, digest }: Pick<RunningWake, "start" | "digest">): boolean {
   return digest.cursor.turnId !== start.turnId
     || digest.cursor.activityAt !== start.activityAt
@@ -136,21 +125,12 @@ const VIOLATION_OUTCOMES: ReadonlyArray<[ReadOnlyWatcherViolation["kind"][], Wat
   [["input", "approval-limit"], "permission-declined"],
 ];
 
-/**
- * Runs and settles watcher checks. A check claims the link (`watching` →
- * `waking`), builds the digest, opens the checkout guard window, records the
- * check and queues a plan-mode, supervised watcher turn that claims it. On
- * settlement it classifies the reply, applies read-only violations and the
- * guard result, moves the cursor only for silent and finding outcomes, and
- * decides whether the link pauses.
- */
 export class WatcherWakeRunner {
   readonly #deps: WatcherWakeRunnerDependencies;
   readonly #running = new Map<string, RunningWake>();
   readonly #planKeys = new Map<string, string | null>();
   readonly #routeFailures = new Map<string, number>();
   readonly #dispatchFailures = new Map<string, number>();
-  /** Coverage of a watched turn whose final pass is still due after the next turn began. */
   readonly #priorCursors = new TurnMemory<WatcherCursor>();
   readonly #openReplies = new TurnMemory<WatcherOpenReply>();
   readonly #finalPages = new Map<string, { turnId: string; pages: number }>();
@@ -161,7 +141,6 @@ export class WatcherWakeRunner {
     this.#deps = dependencies;
   }
 
-  /** True while a check of this link is running in this process. */
   isRunning(linkId: string): boolean {
     for (const wake of this.#running.values()) if (wake.linkId === linkId) return true;
     return false;
@@ -178,17 +157,11 @@ export class WatcherWakeRunner {
     this.#requestPages.delete(linkId);
   }
 
-  /** A resumed link starts its route and dispatch retries afresh. */
   resumed(linkId: string): void {
     this.#routeFailures.delete(linkId);
     this.#dispatchFailures.delete(linkId);
   }
 
-  /**
-   * The watched chat started a new turn. Keeps how far the previous turn was
-   * covered when its final pass has not run yet, so that pass reviews only
-   * what is new in that turn.
-   */
   watchedTurnChanging(link: Pick<WatcherLinkRecord, "id" | "cursor" | "finalPassTurnId">, nextTurnId: string): void {
     const { cursor } = link;
     if (cursor.turnId === null || cursor.turnId === nextTurnId || link.finalPassTurnId === cursor.turnId) return;
@@ -232,7 +205,6 @@ export class WatcherWakeRunner {
       if (context.final && context.watchedTurnId !== null && claimed.finalPassTurnId === context.watchedTurnId) {
         return release("skipped");
       }
-      // The final pass reviews its own turn, even when the next one already began.
       const finalTurnId = context.final ? context.watchedTurnId : null;
       const staleTurn = finalTurnId !== null && claimed.cursor.turnId !== null && claimed.cursor.turnId !== finalTurnId;
       const cursor: WatcherCursor = !staleTurn
@@ -273,7 +245,6 @@ export class WatcherWakeRunner {
       });
       if (!digest) return release("skipped");
       window = await this.#deps.guard.before(watcher.id);
-      // The guard can take seconds; the user may have started a watcher-chat turn meanwhile.
       if (turns.isActive(watcher.id) || turns.isClosing()) {
         window.dispose();
         return release("transient");
@@ -355,11 +326,6 @@ export class WatcherWakeRunner {
     return status === "watching" ? "transient" : "skipped";
   }
 
-  /**
-   * A wake whose route is not ready (the same preflight as attach) retries as
-   * transient up to the limit, then pauses the link with `route-unavailable`.
-   * Resuming that pause requires a ready route.
-   */
   #routeUnavailable(
     linkId: string,
     selection: ModelSelection,
@@ -384,11 +350,6 @@ export class WatcherWakeRunner {
     return "paused";
   }
 
-  /**
-   * Counts a check that failed to dispatch. The limit-th consecutive failure
-   * pauses the link with `route-unavailable` instead of retrying forever;
-   * returns true when it paused.
-   */
   #dispatchFailed(linkId: string, error: unknown): boolean {
     const failures = (this.#dispatchFailures.get(linkId) ?? 0) + 1;
     if (failures < WATCHER_DISPATCH_FAILURE_LIMIT) {
@@ -426,11 +387,6 @@ export class WatcherWakeRunner {
     return true;
   }
 
-  /**
-   * Ends the `waking` claim. A final pass made while paused for the wake
-   * budget returns to that pause, unless the watched chat started its next
-   * turn meanwhile: the budget is per turn, so the link watches again.
-   */
   #release(linkId: string, restore: WatcherTransition, checkTurnId: string | null): boolean {
     const { store } = this.#deps;
     const budgetPause = restore.status === "paused" && restore.reason === "wake-budget";
@@ -442,10 +398,6 @@ export class WatcherWakeRunner {
     return true;
   }
 
-  /**
-   * Records a read-only violation of a watcher turn. A second write attempt
-   * in the same watched turn pauses the link and stops the check.
-   */
   onViolation(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void {
     const { store, turns } = this.#deps;
     const link = store.watcherLinks.get(violation.linkId);
@@ -469,11 +421,6 @@ export class WatcherWakeRunner {
     }
   }
 
-  /**
-   * Settles the check a watcher turn ran; false when the turn ran no check.
-   * Whatever fails while settling, the `waking` claim is released and the
-   * scheduler hears `wakeFinished`, so a link never stays wedged.
-   */
   async settle(turn: AgentTurn): Promise<boolean> {
     const { store } = this.#deps;
     const wake = store.watcherLinks.wakeForTurn(turn.id);
@@ -544,14 +491,12 @@ export class WatcherWakeRunner {
         try {
           store.watcherLinks.settleWake(wake.wakeId, "failed", null, null, now);
         } catch {
-          // Restart recovery fails a check that stayed unsettled.
         }
       }
       const scheduler = this.#deps.scheduler();
       const finalTurnId = running?.finalTurnId ?? null;
       try {
         if (continues && !pause) {
-          // More of the same watched turn waits: check it without waiting for new events.
           if (finalTurnId !== null && running) this.#finalPages.set(linkId, { turnId: finalTurnId, pages: running.finalPage });
           if (running?.request) this.#requestPages.set(linkId, running.requestPage);
           scheduler.continueWake(linkId, finalTurnId, running?.request ?? null);
@@ -562,7 +507,6 @@ export class WatcherWakeRunner {
           this.#finalPassDone(linkId, finalTurnId);
         }
       } catch {
-        // A continuation that could not be queued leaves the rest to the next check.
       }
       try {
         if (pause) {
@@ -571,7 +515,6 @@ export class WatcherWakeRunner {
           this.#release(linkId, running?.restore ?? { status: "watching" }, running?.digest.turnId ?? wake.watchedTurnId);
         }
       } catch {
-        // The claim is released below whatever the transition did.
       } finally {
         scheduler.wakeFinished(linkId);
       }
@@ -580,7 +523,6 @@ export class WatcherWakeRunner {
         this.#deps.refreshConversation?.(turn.conversationId);
         this.#deps.detailChanged?.(turn.conversationId);
       } catch {
-        // Publishing is best effort; the next snapshot carries the state.
       }
     }
     if (found) this.#autoDeliver(linkId, wake.wakeId, wake.watchedTurnId);
@@ -631,12 +573,6 @@ export class WatcherWakeRunner {
     }
   }
 
-  /**
-   * Moves the link's coverage after a silent or finding check. A check of a
-   * turn the link no longer follows keeps that turn's coverage for its final
-   * pass instead of rewinding the cursor. True when the check's coverage was
-   * kept, in the stored cursor or for that final pass.
-   */
   #advance(linkId: string, running: RunningWake, now: string): boolean {
     const { digest } = running;
     const link = this.#deps.store.watcherLinks.advanceCursor(

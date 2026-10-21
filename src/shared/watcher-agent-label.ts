@@ -1,6 +1,5 @@
 import { clipCodeUnits } from "./code-units";
 
-/** Longest agent label a watcher note or the dock shows. Equal to `MAX_WATCHER_LABEL_CHARS`. */
 export const MAX_WATCHER_AGENT_LABEL_CHARS = 80;
 const WATCHER_AGENT_LABEL_SEPARATOR = " · ";
 
@@ -13,13 +12,6 @@ function oneLine(value: string): string {
   return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/gu, " ").replace(/\s+/gu, " ").trim();
 }
 
-/**
- * The single name of a watcher's agent: the provider identity label, then the
- * model when one is chosen ("Codex · gpt-5"), or the provider alone for the
- * provider's default model. The server stamps it on forwarded notes and the
- * renderer uses it in the dock, so both name the agent the same way. Kept
- * free of schema dependencies so renderer callers stay out of the zod chunk.
- */
 export function watcherAgentLabel(
   conversation: WatcherAgentLabelSource | undefined,
   providerLabels: Readonly<Record<string, string | undefined>> | undefined,

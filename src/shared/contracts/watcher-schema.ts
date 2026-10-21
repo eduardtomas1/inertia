@@ -106,13 +106,6 @@ export const watcherRequestResultValidators = {
   "watcher.delivery": (value: unknown) => watcherDeliveryResultSchema.safeParse(value).success,
 } as const;
 
-/**
- * Snapshot coherence for `AppSnapshot.watchers`. Links are unique, at most
- * one attached link watches a chat, attached watchers never watch another
- * attached watcher, and every chat present in the snapshot shares the link's
- * project. A projection may omit one side of a link (a detached chat window
- * carries only its own chat), but never both.
- */
 export function watcherLinkCollectionCoherent(
   value: unknown,
   conversationProjects: ReadonlyMap<unknown, unknown>,
@@ -140,7 +133,6 @@ export function watcherLinkCollectionCoherent(
     && watcherLinksSerializedBytes(links) <= MAX_WATCHER_LINKS_SERIALIZED_BYTES;
 }
 
-/** Detail coherence for `ConversationDetail.watcherWakes`: unique and owned by loaded turns. */
 export function watcherWakeSummariesCoherent(value: unknown, agentTurns: unknown): boolean {
   if (value === undefined) return true;
   if (!Array.isArray(value) || !Array.isArray(agentTurns)) return false;

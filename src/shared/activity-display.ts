@@ -70,10 +70,6 @@ function normalizedActivityTitle(title: string): string {
     .trim();
 }
 
-/**
- * Classifies only explicit provider/runtime activity. Ambiguous tool names stay
- * generic instead of becoming invented product stages.
- */
 export function activityExecutionCategory(
   activity: Pick<AgentActivity, "kind" | "title" | "status">,
 ): ActivityExecutionCategory {

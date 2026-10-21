@@ -57,7 +57,6 @@ export function conversationOrNull(
   }
 }
 
-/** In-memory lookup of attached links by either side; the database stays authoritative. */
 export class WatcherLinkIndex {
   readonly #byWatched = new Map<string, string>();
   readonly #byWatcher = new Map<string, string>();
@@ -125,13 +124,6 @@ function policyError(error: unknown): unknown {
   return error instanceof WatcherPolicyError ? new RuntimeRequestError(error.message) : error;
 }
 
-/**
- * Owns the lifecycle of watcher links: attach (with a Duo-style route
- * preflight and atomic creation of the locked, read-only watcher chat),
- * settings, pause and resume, manual checks, detach, the feed, archive
- * handling and restart reconciliation. Every change is published as
- * `watcher.link.updated` or `watcher.link.removed`.
- */
 export class WatcherLinkCoordinator {
   readonly #deps: WatcherLinkCoordinatorDependencies;
 
@@ -139,10 +131,6 @@ export class WatcherLinkCoordinator {
     this.#deps = dependencies;
   }
 
-  /**
-   * Broadcasts the link's shell view; detached links leave the shell. Returns
-   * the stored link, or null when it no longer exists.
-   */
   publish(linkId: string, sides?: WatcherLinkSides): WatcherLinkRecord | null {
     const link = this.#deps.store.watcherLinks.get(linkId);
     if (!link || link.status === "detached") {
@@ -246,8 +234,6 @@ export class WatcherLinkCoordinator {
     if (payload.initialReview && latest && (latest.status === "completed" || running)) {
       if (!running) {
         store.watcherLinks.beginWatchedTurn(link.id, latest.id, this.#deps.now());
-        // The turn ended before the watcher existed: the initial review covers
-        // it, so no restart may schedule a final check for it later.
         store.watcherLinks.markFinalPass(link.id, latest.id, this.#deps.now());
       }
       this.#deps.scheduler.requestWake(link.id, "initial");
@@ -363,11 +349,6 @@ export class WatcherLinkCoordinator {
     };
   }
 
-  /**
-   * Attached links a chat takes part in, as watched chat or watcher chat.
-   * Read before the chat is deleted: the delete detaches or removes them in
-   * SQL, so they can no longer be found by that chat afterwards.
-   */
   linksTouching(conversationId: string): string[] {
     const { watcherLinks } = this.#deps.store;
     const ids = new Set<string>();
@@ -378,14 +359,6 @@ export class WatcherLinkCoordinator {
     return [...ids];
   }
 
-  /**
-   * A chat was archived. The watcher of an archived chat pauses with
-   * `watched-archived`; a watcher whose own chat was archived pauses with
-   * `watcher-archived`. Either replaces an earlier pause that was not for an
-   * archive and cancels a running check, so no check keeps running in a chat
-   * the user put away. Both wait for the user to unarchive and resume.
-   * Repeating it for a chat that stays archived is a no-op.
-   */
   onConversationArchived(conversationId: string): void {
     const { watcherLinks } = this.#deps.store;
     const watched = watcherLinks.findActiveByWatched(conversationId);
@@ -405,11 +378,6 @@ export class WatcherLinkCoordinator {
     this.publish(link.id);
   }
 
-  /**
-   * After startup: tracks every attached link, clears the waiting count the
-   * new scheduler does not hold, and schedules, at most once, the final pass of
-   * a watched turn that ended while Inertia was closed.
-   */
   reconcileAfterReady(): void {
     const { store } = this.#deps;
     for (const link of store.watcherLinks.active()) {

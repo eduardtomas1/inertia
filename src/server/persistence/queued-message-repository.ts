@@ -54,7 +54,6 @@ export class QueuedMessageRepository {
     }
     return project(row);
   }
-  /** User-authored messages always dispatch before forwarded watcher notes. */
   list(conversationId: string): QueuedMessage[] {
     return (this.database.prepare("SELECT * FROM queued_messages WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked') ORDER BY (watcher_note_json IS NOT NULL), sequence")
       .all(conversationId) as QueueRow[]).map(project);
@@ -65,7 +64,6 @@ export class QueuedMessageRepository {
   }
   add(input: {
     id: string; conversation: Conversation; content: string; attachments: readonly ChatAttachment[]; digest: string;
-    /** Server-only attribution for a forwarded watcher note. */
     watcherNote?: WatcherNoteAttribution;
   }): QueuedMessage {
     return this.database.transaction(() => {

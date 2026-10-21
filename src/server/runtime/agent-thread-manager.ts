@@ -284,7 +284,6 @@ export interface AgentThreadManagerDependencies {
   >;
   contextRequests: ConversationContextRequestCoordinator;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
-  /** Injected watcher read rules for the context tool. */
   watcherPolicy?: AgentContextWatcherPolicy;
   agentBrowser?: RuntimeAgentBrowserBroker;
   providerInfo(): readonly ProviderInfo[];
@@ -372,7 +371,6 @@ export class AgentThreadManager {
     return this.capabilities.bridgeFor(source);
   }
 
-  /** Only the chat context tool: no orchestration, browser or page tools. */
   contextOnlyBridgeFor(source: AgentThreadSource): ProviderHostToolBridge {
     return {
       definitions: [AGENT_CONTEXT_TOOL_DEFINITION],

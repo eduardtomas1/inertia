@@ -126,14 +126,6 @@ interface ProviderRunRequest {
    * means no limit.
    */
   maxBudgetUsd?: number;
-  /**
-   * Narrows a plan-mode, supervised run to read-only tools where the
-   * harness's own supervised ruleset would prompt for reads. Set only for
-   * turns in an attached watcher chat; OpenCode maps it to a ruleset that
-   * denies everything except read, glob, grep, list and Inertia host tools.
-   * Other harnesses ignore it. It is run input, never a capability, so it
-   * does not change any capability manifest or attestation digest.
-   */
   readOnlyProfile?: "watcher";
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {

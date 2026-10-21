@@ -201,11 +201,6 @@ export interface TurnControllerHooks {
    * a newer active turn.
    */
   onTurnSettled?(turn: AgentTurn, settlement: TurnSettledEvidence): void | Promise<void>;
-  /**
-   * A read-only watcher turn tried to write, run a command, ask a question, or
-   * exhausted its permission denials. Called before any stop settles the turn,
-   * so the owner can classify the settlement. Failures are ignored.
-   */
   onReadOnlyViolation?(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
@@ -221,26 +216,19 @@ export interface ReadOnlyWatcherViolation {
   linkId: string;
   wakeId: string | null;
   kind: ReadOnlyWatcherViolationKind;
-  /** Bounded provider-supplied title; untrusted display text. */
   detail: string;
-  /** True when Inertia stopped the turn because of this violation. */
   stopped: boolean;
 }
 
-/** Server-only read-only policy for a turn in an attached watcher chat. */
 export interface ReadOnlyWatcherTurn {
   linkId: string;
-  /** The claimed check, or null for a message the user typed into the watcher. */
   wakeId: string | null;
   deniedApprovals: number;
 }
 
 export interface FollowUpSteerOptions {
-  /** Provider-facing text; the persisted message keeps the visible content. */
   providerContent?: string;
-  /** Server-only attribution for a forwarded watcher note. */
   watcherNote?: WatcherNoteAttribution;
-  /** Queue entry completed in the same transaction as the accepted follow-up. */
   queuedMessageId?: string;
 }
 
@@ -257,9 +245,7 @@ export interface QueueTurnRequest {
   privateConnectDeviceId?: string;
   /** Server-only authorization for the exact locked Duo judge dispatch. */
   authorizedDuoComparisonLaunchId?: string;
-  /** Server-only claim on the exact dispatching watcher check this turn runs. */
   authorizedWatcherWakeId?: string;
-  /** Server-only attribution for a watcher note forwarded into this chat. */
   watcherNote?: WatcherNoteAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
@@ -400,7 +386,6 @@ export interface ActiveTurn {
   inputIds: Set<string>;
   subagentTelemetry?: TurnSubagentTelemetry;
   onSettled?: QueueTurnRequest["onSettled"];
-  /** Present only for turns in an attached watcher chat. */
   readOnlyWatcher?: ReadOnlyWatcherTurn;
 }
 

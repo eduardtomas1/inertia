@@ -44,7 +44,6 @@ function watcherLinkTouches(
     || link.watchedConversationId === conversationId;
 }
 
-/** Both sides of a watcher link, looked up when an event names only the link. */
 export type DetachedWatcherLinkLookup = (
   linkId: string,
 ) => Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId"> | null;

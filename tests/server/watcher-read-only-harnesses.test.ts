@@ -35,14 +35,6 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput, resolveNativeModelRoute } from "./model-route-fixture";
 
-/**
- * Runs real watcher turns (plan mode, supervised access) through the
- * TurnController's read-only watcher policy and the real Claude, Codex and
- * OpenCode harness adapters, against scripted providers only. Each scripted
- * provider performs a write only if Inertia lets it, so the temporary
- * repository's checkout fingerprint is the proof that nothing changed.
- */
-
 const PARSER_SOURCE = "export function parse(input: string): string[] {\n  return input.split(\" \");\n}\n";
 const OVERWRITE = "export {};\n";
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
@@ -60,7 +52,6 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
-/** A committed repository; provider fixture entry points are excluded so the tree starts clean. */
 function repository(root: string, excluded: readonly string[]): string {
   const repo = join(root, "repo");
   mkdirSync(join(repo, "src"), { recursive: true });
@@ -98,14 +89,9 @@ interface WatcherHarnessRuntime {
   violations: ReadOnlyWatcherViolation[];
   startCheck(): AgentTurn;
   settled(turnId: string): Promise<AgentTurn>;
-  /** The watcher chat's activities, sorted with `byActivity`. */
   activities(): Array<{ kind: string; status: string; title: string }>;
 }
 
-/**
- * A watched chat and an attached watcher on the given route, with a
- * TurnController whose provider runtime is the real ProviderManager.
- */
 function watcherHarnessRuntime(root: string, repo: string, manager: ProviderManager, selection: ModelSelection): WatcherHarnessRuntime {
   const store = new RuntimeStore(join(root, "inertia.sqlite"), repo, { recoverInterruptedRuns: false });
   const project = store.createProject("Watcher harness project", repo);
@@ -154,7 +140,6 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
   const controller = new TurnController(store, provider, new Map(), new Map(), new Map(), {
     broadcast: (event) => { events.push(event); },
     broadcastSnapshot: () => undefined,
-    // No capability contract: these turns carry no host tools or capability packs.
     providerInfo: () => [],
     onReadOnlyViolation: (_turn, violation) => { violations.push(violation); },
   }, {
@@ -206,7 +191,6 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
       await waitFor("the provider run to release its owner", () => !manager.isRunning(watcher.id), 10_000);
       return store.agentTurn(turnId);
     },
-    // Activities that settle in the same millisecond have no stable order.
     activities: () => store.conversationDetail(watcher.id)!.activities
       .map(({ kind, status, title }) => ({ kind, status, title }))
       .sort(byActivity),
@@ -221,9 +205,6 @@ function expectWatcherRunInput(input: ProviderRunInput | undefined, providerId: 
   expect(input).toMatchObject({ providerId, interactionMode: "plan", access: "supervised", readOnlyProfile: "watcher" });
 }
 
-// --- Claude Agent SDK -------------------------------------------------------
-
-/** The plan-mode tools Claude Code runs without asking `canUseTool`. */
 const CLAUDE_PLAN_MODE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Grep", "Glob"]);
 
 interface ClaudeQueryOptions {
@@ -238,7 +219,6 @@ interface ClaudeQueryOptions {
 
 interface ClaudeScript {
   options: ClaudeQueryOptions;
-  /** Claude Code's own gate: plan mode allows read-only tools, anything else asks `canUseTool`. */
   permission(tool: string, input: Record<string, unknown>, toolUseId: string): Promise<PermissionResult>;
   aborted(): Promise<boolean>;
 }
@@ -499,7 +479,6 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
       yield claudeSystem("init");
       yield claudeStream({ type: "message_start", message: { id: "msg-edit", content: [] } });
       yield claudeStream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu-edit", name: "Edit", input: {} } });
-      // Claude Code would now run the edit; Inertia has to stop the turn first.
       abortedBeforeEdit = await sdk.aborted();
       if (!abortedBeforeEdit) writeFileSync(parserPath, OVERWRITE);
     });
@@ -517,11 +496,8 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
   });
 });
 
-// --- Codex app-server -------------------------------------------------------
-
 type CodexScenario = "read-then-write" | "malformed";
 
-/** A scripted app-server that writes only when its write command is approved. */
 function codexAppServer(root: string, repo: string, scenario: CodexScenario) {
   const command = portableNodeExecutable(root, "codex");
   const capturePath = join(root, "codex-capture.jsonl");
@@ -712,9 +688,6 @@ describe("watcher turns on the Codex app-server harness", () => {
   });
 });
 
-// --- OpenCode SDK -----------------------------------------------------------
-
-/** OpenCode's plan agent rules, which the session ruleset is appended to. */
 const OPENCODE_PLAN_AGENT_RULES: PermissionRuleset = [
   { permission: "*", pattern: "*", action: "allow" },
   { permission: "question", pattern: "*", action: "allow" },
@@ -742,11 +715,6 @@ interface OpenCodeCapture {
   ripgrepConfigPath: string | null;
 }
 
-/**
- * A scripted OpenCode server that evaluates the session ruleset the way
- * OpenCode does (agent rules, then session rules, last match wins), prompts
- * for `ask`, and writes only when an edit or shell call is allowed.
- */
 function openCodeServer(
   root: string,
   repo: string,
@@ -1030,10 +998,6 @@ describe("watcher turns on the OpenCode SDK harness", () => {
   });
 
   it("keeps the watcher profile winning over an agent whose own rules allow edits, shell and outside reads", async () => {
-    // OpenCode evaluates the agent's ruleset first and the session's after it,
-    // and the last matching rule wins. The watcher profile relies on that
-    // order: its deny-by-default session rules must override any allow the
-    // agent configuration carries.
     const permissiveAgent: PermissionRuleset = [
       { permission: "*", pattern: "*", action: "allow" },
       { permission: "edit", pattern: "*", action: "allow" },

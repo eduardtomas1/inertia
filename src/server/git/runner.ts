@@ -70,10 +70,6 @@ export interface RunGitOptions {
 }
 
 export type RunGitInspectionOptions = Omit<RunGitOptions, "input"> & {
-  /**
-   * Filter driver names whose clean, smudge and process commands are blanked
-   * for this inspection, so comparing worktree content never runs them.
-   */
   disabledFilterDrivers?: readonly string[];
 };
 

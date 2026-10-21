@@ -33,7 +33,6 @@ interface AgentThreadRuntimeDependencies {
   pendingInputs: Map<string, AgentInputRequest>;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   agentBrowser?: RuntimeAgentBrowserBroker;
-  /** Injected watcher read rules for the context tool. */
   watcherPolicy?: AgentContextWatcherPolicy;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;

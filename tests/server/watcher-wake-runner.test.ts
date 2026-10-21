@@ -27,7 +27,6 @@ function watchedActivity(f: WatcherFixture, label = "Read src/parser.ts", kind: 
   f.provider.emit(f.watched.id, { type: "activity", kind, phase: "completed", label, activityId: `watched-${++activitySequence}` });
 }
 
-/** One settled watched activity, then the coalesced check reaches the watcher's provider. */
 async function wakeOnce(f: WatcherFixture, linkId: string): Promise<string> {
   const { watcherConversationId } = f.store.watcherLinks.get(linkId)!;
   watchedActivity(f);
@@ -438,7 +437,6 @@ describe("watcher wake runner", () => {
         }
       };
 
-      // Three transient retries keep the link watching, and a ready route starts the check.
       ready = false;
       watchedActivity(f);
       await failAttempts(WATCHER_ROUTE_RETRY_LIMIT);
@@ -449,7 +447,6 @@ describe("watcher wake runner", () => {
       await f.finishTurn(watcherId, "SILENT");
       expect(watcherRuns()).toBe(1);
 
-      // The started check reset the count: three more retries, then the fourth failure pauses.
       ready = false;
       for (let index = 0; index < WATCHER_ACCUMULATE_MIN; index += 1) watchedActivity(f, `Read src/b${index}.ts`);
       await failAttempts(WATCHER_ROUTE_RETRY_LIMIT);
@@ -463,7 +460,6 @@ describe("watcher wake runner", () => {
         link: expect.objectContaining({ id: link.id, status: "paused", pauseReason: "route-unavailable", pauseDetail: paused.pauseDetail }),
       });
 
-      // Paused: no further retries, and resume waits for a ready route.
       const callsWhilePaused = readiness.mock.calls.length;
       await f.advance(10 * 60_000);
       expect(readiness.mock.calls.length).toBe(callsWhilePaused);

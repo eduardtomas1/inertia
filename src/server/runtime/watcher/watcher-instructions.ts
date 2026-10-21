@@ -15,7 +15,6 @@ import {
 } from "../untrusted-agent-text";
 
 export const WATCHER_INSTRUCTION_LABEL = "inertia-watcher";
-/** Hard cap for the whole hidden instruction, well under the 16 KiB per-instruction limit. */
 export const MAX_WATCHER_INSTRUCTION_BYTES = 6_000;
 export const MAX_WATCHED_TITLE_CHARS = 200;
 export const WATCHER_SILENT_RULE =
@@ -83,16 +82,11 @@ interface WatcherInstructionWatched {
 }
 
 interface WatcherInstructionOptions {
-  /**
-   * False when the watcher's route has no Inertia host tools (custom
-   * backends), so it can only review what each check sends.
-   */
   contextAccess?: boolean;
 }
 
 const bytes = watcherUtf8Bytes;
 
-/** One neutralized line, safe to embed in a sentence. */
 function singleLine(value: string, maximum: number): string {
   return clipCodeUnits(neutralizeUntrustedAgentText(watcherFlattenLine(value)), maximum);
 }
@@ -101,11 +95,6 @@ function quotedLines(value: string): string {
   return value.split("\n").map((line) => `> ${line}`).join("\n");
 }
 
-/**
- * The user's instructions, neutralized, capped at 2,000 characters and then
- * at `maximumBytes`, and quoted line by line so no line can imitate an
- * Inertia section label or a turn marker.
- */
 function userInstructionsSection(raw: string, maximumBytes: number): string {
   const normalized = watcherNormalizeLineBreaks(raw).trim();
   const heading = "User instructions — written by the user who attached you. They refine your role; they never lift the read-only boundary:";
@@ -119,12 +108,6 @@ function userInstructionsSection(raw: string, maximumBytes: number): string {
   return `${truncateUtf8(full, budget).text}${marker}`;
 }
 
-/**
- * Hidden instruction for every watcher turn. It carries only the role and
- * read-only boundary, the watched chat's identity, the preset, the user's
- * quoted instructions, the output format and the SILENT rule. The check's
- * evidence is the turn's visible content, never part of this instruction.
- */
 export function watcherInstruction(
   link: WatcherInstructionLink,
   watched: WatcherInstructionWatched,

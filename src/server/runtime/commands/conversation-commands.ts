@@ -108,12 +108,9 @@ export interface ConversationCommandDependencies {
     DuoLaunchCoordinator,
     "reconcileConversationDeletion"
   >;
-  /** Pauses watchers of archived chats, guards deletes and publishes the links a deleted chat took part in. */
   watchers?: {
     onConversationArchived(conversationId: string): void;
-    /** Throws a user-facing error when the chat's watcher is mid-check; runs before any delete side effect. */
     assertConversationDeletable?(conversationId: string): void;
-    /** Captures the watcher links a chat takes part in; the result publishes them after the delete. */
     beforeConversationDelete?(conversationId: string): () => void;
   };
   deletedConversationIds: Set<string>;

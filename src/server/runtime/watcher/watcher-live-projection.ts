@@ -37,7 +37,6 @@ const PHASES: Readonly<Record<ReturnType<typeof activityExecutionCategory>, Watc
   attention: "thinking",
 };
 
-/** One neutralized line of at most `MAX_WATCHER_LIVE_LABEL_CHARS`. */
 export function watcherLiveLabel(activity: Pick<AgentActivity, "kind" | "title" | "status">): string | null {
   const raw = hostToolActivityTitle(activity) ?? activity.title;
   let flattened = "";
@@ -50,12 +49,6 @@ export function watcherLiveLabel(activity: Pick<AgentActivity, "kind" | "title" 
   return line.length <= MAX_WATCHER_LIVE_LABEL_CHARS ? line : `${clipCodeUnits(line, MAX_WATCHER_LIVE_LABEL_CHARS - 1)}…`;
 }
 
-/**
- * Projects a running watcher check's activities into ephemeral `watcher.live`
- * phase events: at most one per interval per link, only when the phase or
- * label changed, and only while a check is running. A throttled change is
- * delivered once at the end of the interval.
- */
 export class WatcherLiveProjection {
   readonly #deps: WatcherLiveProjectionDependencies;
   readonly #intervalMs: number;
@@ -66,7 +59,6 @@ export class WatcherLiveProjection {
     this.#intervalMs = dependencies.intervalMs ?? WATCHER_LIVE_INTERVAL_MS;
   }
 
-  /** A check started; announces the `starting` phase. */
   begin(linkId: string, watcherConversationId: string, turnId: string): void {
     this.end(linkId);
     this.#links.set(linkId, {
@@ -75,7 +67,6 @@ export class WatcherLiveProjection {
     this.#offer(linkId, "starting", null);
   }
 
-  /** Feeds an activity of the watcher conversation. */
   observe(linkId: string, activity: AgentActivity): void {
     const state = this.#links.get(linkId);
     if (!state || activity.turnId !== state.turnId || activity.conversationId !== state.watcherConversationId) return;
@@ -83,7 +74,6 @@ export class WatcherLiveProjection {
     this.#offer(linkId, phase, watcherLiveLabel(activity));
   }
 
-  /** The check settled; nothing more is emitted for it. */
   end(linkId: string): void {
     const state = this.#links.get(linkId);
     if (!state) return;
@@ -131,7 +121,6 @@ export class WatcherLiveProjection {
     try {
       this.#deps.broadcast(event);
     } catch {
-      // Live phases are best effort and never affect the check.
     }
   }
 }

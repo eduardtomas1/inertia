@@ -68,7 +68,6 @@ export class TurnInteractionCoordinator {
     approvals: Set<string>;
     inputs: Set<string>;
   }>();
-  /** Watcher approvals answered with a denial; never in the shared pending maps. */
   private readonly deniedReadOnlyApprovals = new WeakMap<ActiveTurn, Set<string>>();
 
   constructor(private readonly options: TurnInteractionCoordinatorOptions) {}
@@ -223,12 +222,6 @@ export class TurnInteractionCoordinator {
     this.broadcastConversationShell(active);
   }
 
-  /**
-   * Answers a watcher's approval request with a denial and no approval card.
-   * The request is tracked privately so its resolution matches, while the
-   * shared pending map and the chat's attention state stay untouched. A second
-   * request in one turn, or one that cannot be denied, stops the turn.
-   */
   denyForReadOnly(
     active: ActiveTurn,
     request: Extract<ProviderEvent, { type: "approval" }>["request"],
@@ -270,7 +263,6 @@ export class TurnInteractionCoordinator {
     this.reportReadOnlyViolation(active, kind, detail, false);
   }
 
-  /** Stops a watcher turn that tried something a read-only check never does. */
   stopForReadOnly(active: ActiveTurn, kind: ReadOnlyWatcherViolationKind, detail: string): void {
     if (!active.readOnlyWatcher || !active.runState.acceptsProviderEvents()) return;
     requestProviderCancellation(this.options.providers, active.conversation.id);
@@ -295,7 +287,6 @@ export class TurnInteractionCoordinator {
         stopped,
       });
     } catch {
-      // The watcher owner's bookkeeping never changes how the turn stops.
     }
   }
 

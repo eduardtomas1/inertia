@@ -193,7 +193,6 @@ describe("watcher shared contracts", () => {
   });
 
   it("keeps eight maximal shell links under the snapshot cap", () => {
-    // Every printable code unit serializes to at most three bytes; CJK is the worst case.
     const wide = (length: number) => "界".repeat(length);
     const maximal = (index: number): WatcherLinkView => {
       const id = (suffix: string) => `${String(index).padStart(8, "0")}-0000-4000-8000-00000000000${suffix}`;
@@ -227,7 +226,6 @@ describe("watcher shared contracts", () => {
     expect(watcherLinksSerializedBytes(links)).toBeLessThan(MAX_WATCHER_LINKS_SERIALIZED_BYTES);
     const conversations = new Map(links.flatMap((entry) => [[entry.watcherConversationId, projectId], [entry.watchedConversationId!, projectId]]));
     expect(watcherLinkCollectionCoherent(links, conversations, new Set([projectId]))).toBe(true);
-    // Carrying 2,000 characters of instructions per link is what would break the cap.
     const withInstructions = links.map((entry) => ({ ...entry, instructions: wide(2_000) }));
     expect(watcherLinksSerializedBytes(withInstructions)).toBeGreaterThan(MAX_WATCHER_LINKS_SERIALIZED_BYTES);
   });

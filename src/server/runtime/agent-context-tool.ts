@@ -85,15 +85,8 @@ export interface AgentContextToolSource {
   turn: AgentTurn;
 }
 
-/**
- * Injected watcher rules; the tool never imports watcher runtime modules. An
- * attached watcher reads its watched chat with no approval card, within a
- * per-check read budget, and never opens the context chooser.
- */
 export interface AgentContextWatcherPolicy {
-  /** The chat an attached watcher conversation watches, or null. */
   watchedConversationFor(conversationId: string): string | null;
-  /** Spends one read of this turn's budget; false once the budget is used up. */
   consumeRead(turnId: string, budget: number): boolean;
 }
 
@@ -181,10 +174,6 @@ export class AgentContextTool {
     });
   }
 
-  /**
-   * Watchers read their watched chat, their own chat and chats already shared
-   * with them. Anything else fails instead of asking the user to choose.
-   */
   private async readAsWatcher(
     source: AgentContextToolSource,
     call: ProviderHostToolCall,
@@ -211,7 +200,6 @@ export class AgentContextTool {
     if (!this.dependencies.watcherPolicy!.consumeRead(source.turn.id, budget)) {
       return failure("budget_exceeded", budget === 0 ? "This watcher can't read more of the chat." : `This check already read context ${budget} times.`);
     }
-    // "What the watcher sees" bounds this tool as it bounds each check.
     const share: AgentContextShare | undefined = access === "watched" && link
       ? {
           requests: link.sharing.brief,

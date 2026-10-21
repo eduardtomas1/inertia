@@ -110,7 +110,6 @@ function settleTurn(turnId: string) {
   store.settleAgentTurn(turnId, { status: "completed", terminalReason: "provider-completed", startedAt: at, completedAt: at, updatedAt: at });
 }
 
-/** Runs one complete check through the compare-and-set lifecycle. */
 function check(linkId: string, outcome: "silent" | "finding" = "silent", watchedTurnId: string | null = null) {
   expect(store.watcherLinks.transition(linkId, ["watching"], { status: "waking" }, tick())).not.toBeNull();
   const wake = store.watcherLinks.createWake({
@@ -263,7 +262,6 @@ describe("watcher link repository", () => {
     };
     expect(links.notePendingEvents(link.id, 7, tick())?.counters.eventsPending).toBe(7);
     expect(links.notePendingEvents(link.id, 7, tick())).toBeNull();
-    // The scheduler is the only source of the pending count: neither a check nor a new turn changes it.
     const advanced = links.advanceCursor(link.id, cursor, 4, tick());
     expect(advanced).toMatchObject({ cursor: { ...cursor, pendingRunningIds: ["a", "b"] }, counters: { eventsSeen: 4, eventsPending: 7 } });
     expect(links.grantWakes(link.id, 3)?.counters.wakeAllowance).toBe(8);
@@ -299,9 +297,7 @@ describe("watcher link repository", () => {
     const { link } = attach(chat());
     const links = store.watcherLinks;
     const covered = (turnId: string) => ({ turnId, activityAt: "2030-01-01T00:00:05.000Z", activityId: "activity-1", messageAt: null, messageId: null, pendingRunningIds: [] });
-    // A first check of a link that followed no turn yet takes the digest's turn.
     expect(links.advanceCursor(link.id, covered("turn-1"), 2, tick(), null)?.cursor).toEqual(covered("turn-1"));
-    // The next turn begins while a check of turn-1 is still running; its late settlement must not rewind.
     links.beginWatchedTurn(link.id, "turn-2", tick());
     const late = links.advanceCursor(link.id, { ...covered("turn-1"), activityId: "activity-2" }, 3, tick(), "turn-1");
     expect(late).toMatchObject({

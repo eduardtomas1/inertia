@@ -56,11 +56,6 @@ function parsed<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
   return result.data;
 }
 
-/**
- * Owns the ten watcher commands. Payloads are validated again at this
- * boundary; every result is one of `watcher.link`, `watcher.feed` or
- * `watcher.delivery`. Note delivery is always an explicit user command.
- */
 export function createWatcherCommandHandler(dependencies: WatcherCommandDependencies): RuntimeCommandHandler {
   const { coordinator, delivery } = dependencies;
   return defineRuntimeCommandHandler(WATCHER_COMMAND_TYPES, async (socket, untyped) => {

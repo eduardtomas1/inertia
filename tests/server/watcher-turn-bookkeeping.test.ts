@@ -23,7 +23,6 @@ async function watcherRunning(f: WatcherFixture, watcherId: string): Promise<voi
   await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("watcher not running"); });
 }
 
-/** The check's own digest, without the restored history of earlier checks. */
 function digestOf(prompt: string): string {
   return prompt.split("Structured execution context")[0]!;
 }
@@ -41,7 +40,6 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
       const first = await f.startWatchedTurn("First task.");
       watchedActivity(f, "Read src/first.ts");
       await f.finishTurn(f.watched.id, "Done with the first task.");
-      // A queued message starts the next turn before the final pass's settle delay ends.
       const second = await f.startWatchedTurn("Second task.");
       expect(f.linkView(link.id).watchedTurnId).toBe(second.id);
 
@@ -83,7 +81,6 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
       await f.finishTurn(watcherId, "SILENT");
       expect(f.linkView(link.id)).toMatchObject({ watchedTurnId: second.id, cursor: { turnId: second.id, activityAt: null } });
 
-      // The first turn's final pass shows only what the in-flight check did not cover.
       await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
       await watcherRunning(f, watcherId);
       const final = digestOf(f.provider.input(watcherId).prompt);
@@ -94,7 +91,6 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
       expect(final).not.toContain("Second task.");
       await f.finishTurn(watcherId, "SILENT");
 
-      // The second turn is reviewed: its next mid-turn check digests its own work.
       watchedActivity(f, "Read src/second.ts");
       await f.advance(10 * 60_000);
       await watcherRunning(f, watcherId);
@@ -150,7 +146,6 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
       await f.advance(WATCHER_PENDING_PUBLISH_MS);
       expect(f.linkView(link.id).counters.eventsPending).toBe(1);
 
-      // A turn with no activities: its final pass covers no events and still clears the count.
       await f.finishTurn(f.watched.id, "Done.");
       await f.advance(WATCHER_SETTLE_DELAY_MS + 1);
       await watcherRunning(f, watcherId);
@@ -159,7 +154,6 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
       await f.finishTurn(watcherId, "SILENT");
       expect(f.linkView(link.id).counters).toMatchObject({ eventsPending: 0, eventsSeen: 0 });
 
-      // A transient attempt puts its events back; the check that then fails leaves none waiting.
       await f.startWatchedTurn("Next task.");
       ready = false;
       watchedActivity(f, "Read src/a.ts");
@@ -255,12 +249,10 @@ describe("watcher bookkeeping across overlapping watched turns", () => {
   });
 });
 
-/** Settled watched activities, all before any check reads them. */
 function watchedActivities(f: WatcherFixture, count: number): void {
   for (let index = 0; index < count; index += 1) watchedActivity(f, `Read src/page-${index}.ts`);
 }
 
-/** Waits for the watcher's `count`-th check input and returns its digest and check record. */
 async function check(f: WatcherFixture, watcherId: string, count: number) {
   await vi.waitFor(() => { if (watcherInputs(f, watcherId).length < count) throw new Error("check not started"); });
   const input = watcherInputs(f, watcherId)[count - 1]!;
@@ -289,7 +281,6 @@ describe("watcher checks past the per-check activity cap", () => {
       expect(afterFirst.cursor.activityId).not.toBeNull();
       expect(afterFirst.counters.eventsPending).toBe(0);
 
-      // The continuation is an automatic check: it waits out the cooldown.
       await f.advance(cooldownMs - 1);
       expect(watcherInputs(f, watcherId)).toHaveLength(1);
       await f.advance(1);
@@ -396,7 +387,6 @@ describe("watcher checks past the per-check activity cap", () => {
       await f.finishTurn(watcherId, "SILENT");
       expect(f.linkView(link.id).counters).toMatchObject({ wakesThisTurn: 1, wakeAllowance: 2 });
 
-      // The last unit is the final pass's: the continuation stops at the budget like any mid-turn check.
       await f.advance(10 * 60_000);
       expect(watcherInputs(f, watcherId)).toHaveLength(1);
       expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "wake-budget", finalPassTurnId: null });

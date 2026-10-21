@@ -2,11 +2,6 @@ import { z } from "zod";
 
 import { providerIdSchema } from "./contracts/client-command/common";
 
-/**
- * Reviewed allowlist of harnesses that can host a read-only watcher. This is
- * deliberately separate from provider capability ids: adding a capability id
- * would change every harness's attestation digest and break session resume.
- */
 export const WATCHER_HARNESS_IDS = ["claude-agent-sdk", "codex-app-server", "opencode-sdk"] as const;
 export const WATCHER_PRESETS = ["reviewer", "scope-guard", "explainer"] as const;
 export const WATCHER_STATUSES = ["watching", "waking", "idle", "paused", "detached"] as const;
@@ -16,7 +11,6 @@ export const WATCHER_PAUSE_REASONS = [
 ] as const;
 export const WATCHER_DETACH_REASONS = ["user", "watched-deleted"] as const;
 export const WATCHER_WAKE_TRIGGERS = ["activity", "plan", "error", "turn-end", "manual", "initial"] as const;
-/** `command-attempt` is only a command approval that was requested and denied. */
 export const WATCHER_WAKE_OUTCOMES = [
   "silent", "finding", "failed", "cancelled", "usage-limited", "permission-declined",
   "write-attempt", "command-attempt", "write-detected",
@@ -68,10 +62,6 @@ const withoutControlCharacters = (value: string): boolean => {
   return true;
 };
 
-/**
- * Replaces NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR, which renderers and
- * models treat as line breaks, so quoted text cannot step outside its quote.
- */
 export function watcherNormalizeLineBreaks(value: string): string {
   return value.replaceAll("\0", "\uFFFD").replace(/\r\n?/gu, "\n").replace(/[\u0085\u2028\u2029]/gu, "\n");
 }
@@ -89,7 +79,6 @@ export function watcherUtf8Bytes(value: string): number {
   return UTF8.encode(value).byteLength;
 }
 
-/** True when every UTF-16 surrogate is paired, so JSON never escapes it to six bytes. */
 function wellFormed(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -104,11 +93,6 @@ function wellFormed(value: string): boolean {
   return true;
 }
 
-/**
- * One printable line: no C0 controls, DEL, C1 controls or line separators, and
- * no lone surrogates. Each code unit then serializes to at most three bytes of
- * JSON, which is what keeps the shell projection's size provable.
- */
 export function watcherPrintableLine(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -117,7 +101,6 @@ export function watcherPrintableLine(value: string): boolean {
   return wellFormed(value);
 }
 
-/** Replaces controls and separators with spaces and lone surrogates with U+FFFD. */
 export function watcherPrintableText(value: string): string {
   let result = "";
   for (let index = 0; index < value.length; index += 1) {
@@ -141,7 +124,6 @@ export function watcherPrintableText(value: string): string {
   return result;
 }
 
-/** Instructions may use newlines and tabs; every other control character is refused. */
 function instructionCharactersAllowed(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -200,7 +182,6 @@ export const watcherLabelSchema = z.string()
   .max(MAX_WATCHER_LABEL_CHARS)
   .refine(withoutControlCharacters, "Watcher labels must stay on one line.");
 
-/** Denormalized attribution on a forwarded note; never an execution authority. */
 export const watcherNoteAttributionSchema = z.strictObject({
   linkId: z.uuid(),
   wakeId: z.uuid(),
@@ -237,12 +218,6 @@ export const watcherLinkViewSchema = z.strictObject({
   watchedConversationId: z.uuid().nullable(),
   projectId: z.uuid(),
   preset: watcherPresetSchema,
-  /**
-   * `instructions` and `usage` are present only on `watcher.link` command
-   * results. The shell projection (`AppSnapshot.watchers` and
-   * `watcher.link.updated`) leaves them out so eight links always fit
-   * `MAX_WATCHER_LINKS_SERIALIZED_BYTES` and no broadcast reads turn usage.
-   */
   instructions: watcherInstructionsSchema.optional(),
   usage: watcherUsageSchema.optional(),
   sharing: watcherSharingSchema,
@@ -260,7 +235,6 @@ export const watcherLinkViewSchema = z.strictObject({
   quietSince: timestampSchema.nullable(),
   feedRevision: countSchema,
   latest: watcherFeedHeadlineSchema.nullable(),
-  /** Settlement time of the newest finding that was not dismissed, whatever later checks reported. */
   latestFindingAt: timestampSchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
@@ -300,7 +274,6 @@ export const watcherFeedItemSchema = z.strictObject({
   delivery: watcherDeliverySchema.nullable(),
   createdAt: timestampSchema,
   settledAt: timestampSchema.nullable(),
-  /** Read-only commands the watcher ran during this check; omitted when none. */
   commandsRun: z.number().int().min(1).max(MAX_WATCHER_COMMANDS_RUN).optional(),
   resolvedBySequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).nullable(),
   commandsDeclined: countSchema,
@@ -369,7 +342,6 @@ export const DEFAULT_WATCHER_BUDGETS: Readonly<WatcherBudgets> = Object.freeze({
   contextReadsPerWake: WATCHER_BUDGET_LIMITS.contextReadsPerWake.default,
 });
 
-/** Fills missing budgets with defaults and clamps finite values into range. */
 export function clampWatcherBudgets(input: Partial<Record<WatcherBudgetKey, unknown>> = {}): WatcherBudgets {
   const clamp = (key: WatcherBudgetKey): number => {
     const limits = WATCHER_BUDGET_LIMITS[key];

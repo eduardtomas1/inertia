@@ -5,17 +5,8 @@ import { isContained, mayBeInsideGitRepository, repositoryRoot } from "./paths";
 import { runGitInspection } from "./runner";
 import { GitError, isGitProcessTreeTerminationFailure } from "./types";
 
-/**
- * A read-only fingerprint of a checkout's HEAD, its branch, the index and the
- * dirty worktree, including the dirty worktrees of the submodules listed in
- * `.gitmodules`, used to notice writes nobody accounts for. It never writes
- * into the repository: no checkpoint refs, no `write-tree`, no index refresh,
- * and no repository filter or hook ever runs. Ignored files, `.git` internals
- * and submodules nested inside submodules are outside it.
- */
 export const MAX_CHECKOUT_FINGERPRINT_PATHS = 2_000;
 const MAX_CHECKOUT_FINGERPRINT_BYTES = 64 * 1024 * 1024;
-/** Keeps every hash-object command line well inside the Windows limit. */
 const MAX_HASH_ARGUMENT_CHARS = 24_000;
 const MAX_STATUS_BYTES = 4 * 1024 * 1024;
 const MAX_CONFIG_BYTES = 1024 * 1024;
@@ -28,7 +19,6 @@ export interface CapturedCheckoutFingerprint {
   root: string;
   head: string | null;
   branch: string | null;
-  /** Repository-relative path to an opaque state descriptor; clean paths are absent. */
   entries: ReadonlyMap<string, string>;
 }
 
@@ -52,7 +42,6 @@ class FingerprintLimit extends Error {}
 interface StatusEntry {
   path: string;
   descriptor: string;
-  /** True when the worktree side differs from the index or is untracked. */
   worktree: boolean;
   deleted: boolean;
 }
@@ -139,7 +128,6 @@ async function addSubmoduleEntries(
   }
 }
 
-/** Parses `status --porcelain=v2 -z --no-renames` records. */
 function statusEntries(output: Buffer): StatusEntry[] {
   const fields = output.toString("utf8").split("\0");
   const entries: StatusEntry[] = [];
@@ -187,7 +175,6 @@ function hashBatches(paths: readonly string[]): string[][] {
   return batches;
 }
 
-/** Hashes raw worktree bytes; `--no-filters` keeps repository clean filters from running. */
 async function worktreeDigests(
   root: string,
   entries: readonly StatusEntry[],
@@ -285,7 +272,6 @@ async function captureRepository(
   }
 }
 
-/** Paths whose HEAD, index or worktree state differs between two captures of one checkout. */
 export function diffCheckoutFingerprints(
   before: CapturedCheckoutFingerprint,
   after: CapturedCheckoutFingerprint,

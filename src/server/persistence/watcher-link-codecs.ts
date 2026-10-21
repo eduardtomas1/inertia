@@ -104,18 +104,15 @@ export interface WatcherWakeRow {
   commands_declined: number;
 }
 
-/** Where the watcher's coverage of the watched turn stands. */
 export interface WatcherCursor {
   turnId: string | null;
   activityAt: string | null;
   activityId: string | null;
   messageAt: string | null;
   messageId: string | null;
-  /** Activities still running at the last check, re-read on the next one. */
   pendingRunningIds: string[];
 }
 
-/** Server-side link state; the renderer only ever sees the `WatcherLinkView` part. */
 export interface WatcherLinkRecord extends WatcherLinkView {
   instructions: string;
   cursor: WatcherCursor;
@@ -124,7 +121,6 @@ export interface WatcherLinkRecord extends WatcherLinkView {
   lastWatchedOutputAt: string | null;
 }
 
-/** Server-side wake state, including delivery identities never sent to the renderer. */
 export interface WatcherWakeRecord extends WatcherFeedItem {
   linkId: string;
   digestBytes: number;
@@ -165,7 +161,6 @@ function stringArray(value: string, maximum: number): string[] {
     : [];
 }
 
-/** Cuts to at most `maximumBytes` of UTF-8 without splitting a code point. */
 export function truncateUtf8Bytes(value: string, maximumBytes: number): string {
   if (watcherUtf8Bytes(value) <= maximumBytes) return value;
   let bytes = 0;
@@ -179,10 +174,6 @@ export function truncateUtf8Bytes(value: string, maximumBytes: number): string {
   return value.slice(0, end);
 }
 
-/**
- * One printable line of at most `maximum` code units. Every code unit then
- * serializes to at most three bytes, which bounds the shell projection.
- */
 export function watcherPrintableLineOf(value: string, maximum: number): string {
   return clipCodeUnits(watcherPrintableText(value).replace(/\s+/gu, " ").trim(), maximum).trim();
 }
@@ -243,7 +234,6 @@ export function watcherLinkFromRow(row: WatcherLinkRow): WatcherLinkRecord {
   };
 }
 
-/** Strips server-only fields so the projection matches the strict view schema. */
 function strippedView(record: WatcherLinkRecord): WatcherLinkView & { instructions: string } {
   const {
     cursor: _cursor,
@@ -255,17 +245,11 @@ function strippedView(record: WatcherLinkRecord): WatcherLinkView & { instructio
   return view;
 }
 
-/**
- * The shell projection of a link (`AppSnapshot.watchers`, `watcher.link.updated`):
- * server-only fields and the user's instructions are left out, so eight links
- * stay provably under `MAX_WATCHER_LINKS_SERIALIZED_BYTES`.
- */
 export function watcherLinkView(record: WatcherLinkRecord): WatcherLinkView {
   const { instructions: _instructions, ...view } = strippedView(record);
   return view;
 }
 
-/** A `watcher.link` command result: the shell view plus the user's instructions and the watcher's usage. */
 export function watcherLinkDetailView(record: WatcherLinkRecord, usage: WatcherUsage): WatcherLinkView {
   return { ...strippedView(record), usage };
 }
@@ -319,8 +303,6 @@ export function watcherFeedItem(record: WatcherWakeRecord): WatcherFeedItem {
   return item;
 }
 
-/** Attached links, oldest first. Detached links leave the shell projection. */
-/** True while `targetConversationId` is an attached watcher of `sourceConversationId` in one project. */
 export function watcherWatchedAccess(
   database: Database.Database,
   targetConversationId: string,
@@ -343,18 +325,12 @@ export function activeWatcherLinks(database: Database.Database): WatcherLinkReco
     .all() as WatcherLinkRow[]).map(watcherLinkFromRow);
 }
 
-/** Renderer-safe shell projection; a row that fails the view contract is withheld. */
 export function watcherLinkViews(database: Database.Database): WatcherLinkView[] {
   return activeWatcherLinks(database)
     .map(watcherLinkView)
     .filter((view) => watcherLinkViewSchema.safeParse(view).success);
 }
 
-/**
- * Compact check summaries for a watcher conversation's loaded turns.
- * Returns undefined for chats that never were watchers, so ordinary details
- * stay byte-identical.
- */
 export function watcherWakeSummaries(
   database: Database.Database,
   conversationId: string,

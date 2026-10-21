@@ -144,7 +144,6 @@ export interface BeginAgentTurnInput
   restartContinuationPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
-  /** Server-only attribution for a forwarded watcher note. */
   watcherNote?: WatcherNoteAttribution;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
@@ -165,7 +164,6 @@ export interface BeginAgentTurnInput
 
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
-  /** User messages only; denormalized so it survives watcher deletion. */
   watcherNote?: WatcherNoteAttribution;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */

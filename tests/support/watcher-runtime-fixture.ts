@@ -52,7 +52,6 @@ interface Run {
   resolve(result: ProviderRunResult): void;
 }
 
-/** A fake provider that runs one turn per conversation, several conversations at once. */
 export class MultiTurnProvider implements TurnProviderRuntime {
   readonly runs = new Map<string, Run>();
   readonly inputs: ProviderRunInput[] = [];
@@ -131,7 +130,6 @@ export class MultiTurnProvider implements TurnProviderRuntime {
   }
 }
 
-/** Time-ordered fake timers driven by `advance`. */
 export class ManualTimers implements TurnTimerScheduler {
   now = Date.parse("2030-01-01T00:00:00.000Z");
   private next = 0;
@@ -188,7 +186,6 @@ export interface WatcherFixtureOptions {
   captureFingerprint?: (path: string, options: CheckoutFingerprintOptions) => Promise<CheckoutFingerprint>;
   providerInfo?: () => ProviderInfo[];
   readiness?: (selection: ModelSelection) => Promise<{ ready: boolean; message: string | null } | null>;
-  /** The platform whose path rules the checkout guard applies. */
   platform?: NodeJS.Platform;
   turnDiff?: (turnId: string) => Promise<WatcherTurnDiffSnapshot>;
 }
@@ -347,7 +344,6 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     return reply.result.link;
   };
 
-  /** Starts a turn in the watched chat and waits until its provider run is live. */
   const startWatchedTurn = async (content = "Fix the parser bug.") => {
     const queued = controller.queue({ conversationId: watched.id, content });
     controller.start(queued.turn.id);
@@ -356,7 +352,6 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     return queued.turn;
   };
 
-  /** Runs due watcher timers and waits for the resulting watcher turn to reach the provider. */
   const advance = async (ms: number): Promise<void> => {
     timers.advance(ms);
     await flush();

@@ -94,10 +94,6 @@ export function prepareTurnRequest(
   }
 }
 
-/**
- * Turns in an attached watcher chat, including messages the user types there,
- * run only in plan mode with supervised access on a reviewed harness.
- */
 function readOnlyWatcherPolicy(
   store: RuntimeStore,
   conversation: Conversation,

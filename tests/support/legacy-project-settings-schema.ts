@@ -30,7 +30,6 @@ export function removeProjectSettingsFromLegacyFixture(database: Database.Databa
   }
 }
 
-/** Removes the schema-99 watcher artifacts so an older migration can be replayed. */
 export function removeWatcherLinksFromLegacyFixture(database: Database.Database): void {
   database.exec(`
     DROP TRIGGER IF EXISTS watcher_links_watched_delete;

@@ -52,7 +52,6 @@ function captured(fingerprint: CheckoutFingerprint): CapturedCheckoutFingerprint
   return fingerprint as CapturedCheckoutFingerprint;
 }
 
-/** Moves a file's mtime forward so Git must look past its cached stat data. */
 function ageForward(path: string): void {
   const later = new Date(Date.now() + 5_000);
   utimesSync(path, later, later);
@@ -163,8 +162,6 @@ describe("checkout fingerprint", () => {
     const indexBytes = readFileSync(index);
     const indexMtime = statSync(index).mtimeMs;
 
-    // Same size, newer mtime: an ordinary status would hash it through the
-    // clean filter and rewrite the index with fresh stat data.
     writeFileSync(join(root, "a.txt"), "ALPHA\n");
     ageForward(join(root, "a.txt"));
     ageForward(join(root, "b.txt"));

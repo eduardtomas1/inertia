@@ -4,16 +4,10 @@ import {
   type WatcherNoteAttribution,
 } from "../../../shared/watcher";
 
-/**
- * The hidden instruction that frames a watcher note the user forwarded into
- * the watched chat. It imports nothing from the runtime so the turn command
- * layer can use it without an import cycle.
- */
 const WATCHER_NOTE_INSTRUCTION_LABEL = "inertia-watcher-note";
 
 const MAX_WATCHER_NOTE_INSTRUCTION_CHARS = 1_500;
 
-/** Structurally a hidden provider instruction. */
 interface WatcherNoteInstruction {
   label: typeof WATCHER_NOTE_INSTRUCTION_LABEL;
   text: string;
@@ -41,10 +35,6 @@ export function watcherNoteDelivery(attribution: WatcherNoteAttribution): Watche
   return { note: attribution, instruction: watcherNoteInstruction(attribution) };
 }
 
-/**
- * Provider-facing text of a steered note. It mirrors how a queued note's turn
- * frames it: the visible note followed by the labelled internal instruction.
- */
 export function watcherSteerContent(note: string, attribution: WatcherNoteAttribution): string {
   const instruction = watcherNoteInstruction(attribution);
   return [

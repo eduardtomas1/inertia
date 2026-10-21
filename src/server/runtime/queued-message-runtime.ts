@@ -26,7 +26,6 @@ const transientDispatchFailure = (error: unknown): boolean => error instanceof M
 interface QueuedMessageRuntimeOptions {
   signal: AbortSignal;
   track<T>(operation: () => Promise<T>): Promise<T>;
-  /** A queued watcher note was removed or blocked, so it will not be sent as queued. */
   onWatcherNoteUndelivered?(note: WatcherNoteAttribution, reason: string): void;
 }
 
@@ -59,10 +58,8 @@ export function createQueuedMessageRuntime(
     try {
       options.onWatcherNoteUndelivered?.(entry.watcherNote, reason);
     } catch {
-      // Watcher bookkeeping never interrupts the queue.
     }
   };
-  /** Blocks a queue entry; a blocked watcher note marks its finding as not sent. */
   const block = (conversationId: string, entry: { id: string; watcherNote?: WatcherNoteAttribution }, reason: string): void => {
     store.queuedMessages.block(conversationId, entry.id, reason);
     undelivered(entry, reason);
@@ -238,10 +235,6 @@ export function createQueuedMessageRuntime(
     },
   };
 
-  /**
-   * Queues a watcher note the user chose to forward. It waits behind every
-   * user-authored queued message and shares the chat's queue limit.
-   */
   function enqueueWatcherNote(input: { conversationId: string; id: string; content: string; watcherNote: WatcherNoteAttribution }): MessageQueueResult {
     const conversation = requireConversation(input.conversationId);
     if (!dependencies.enableProviders) throw new RuntimeRequestError("Message queues require an available provider runtime.");
@@ -264,7 +257,6 @@ export function createQueuedMessageRuntime(
     return result(conversation.id, input.id);
   }
 
-  /** Withdraws a waiting or blocked watcher note, for example before its finding is sent again. */
   function withdrawWatcherNote(conversationId: string, id: string): boolean {
     const entry = store.queuedMessages.get(conversationId, id);
     if (!entry?.watcherNote) return false;

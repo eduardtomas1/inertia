@@ -35,18 +35,10 @@ const TURN_ABOUT = "One turn of an Inertia chat, in order: the user's request, t
 
 type JsonEntry = Record<string, unknown>;
 
-/**
- * What a reader may see of a chat. A watcher's sharing toggles map here, so
- * the context tool never shows more than the watcher's checks would.
- */
 export interface AgentContextShare {
-  /** The user's requests and follow-ups, with their attachments. */
   requests: boolean;
-  /** Commands, tool calls and errors. */
   activities: boolean;
-  /** The agent's messages and the pages it showed. */
   answers: boolean;
-  /** The files the turn changed. */
   files: boolean;
 }
 

@@ -11,8 +11,6 @@ import { openCodeSubscriptionCredential } from "../../src/server/usage/opencode-
 import type { Provider } from "@opencode-ai/sdk/v2";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
 
-// Quota attribution accepts a reset only between now and 31 days ahead on the
-// real clock, so a fixed calendar date turns into a date bomb. Derive it.
 const reset = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 + 7 * 86_400_000).toISOString();
 const jwt = (claims: Record<string, unknown>, nonce: string) => ["eyJhbGciOiJSUzI1NiJ9",
   Buffer.from(JSON.stringify({ ...claims, jti: nonce })).toString("base64url"), `signature-${nonce}`].join(".");

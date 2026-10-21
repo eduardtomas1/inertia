@@ -52,7 +52,6 @@ function markReferences(
   });
 }
 
-/** Restored history labels forwarded watcher notes so they never read as the user's own words. */
 function markWatcherNotes(
   database: Database.Database,
   excerpts: readonly ConversationContextExcerpt[],

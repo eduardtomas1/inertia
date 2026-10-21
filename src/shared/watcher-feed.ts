@@ -5,13 +5,11 @@ export type WatcherFeedEntry = WatcherFeedItem;
 
 export interface WatcherReceiptGroup {
   kind: "receipts";
-  /** Stable while newer quiet checks join: keyed by the oldest check in the group. */
   key: string;
   items: WatcherFeedItem[];
   count: number;
   firstAt: string;
   lastAt: string;
-  /** Total read-only commands, or null when no item in the group reported a count. */
   commandsRun: number | null;
 }
 
@@ -45,11 +43,6 @@ function receipt(items: WatcherFeedItem[]): WatcherReceiptGroup {
   };
 }
 
-/**
- * Groups consecutive quiet (`silent`) checks into one receipt and keeps every
- * other item (finding, failure, notice, or a check still running) on its own,
- * where it ends the current receipt. Input order is preserved.
- */
 export function groupWatcherFeed(items: readonly WatcherFeedItem[]): WatcherFeedGroup[] {
   const groups: WatcherFeedGroup[] = [];
   let run: WatcherFeedItem[] = [];
@@ -69,7 +62,6 @@ export function groupWatcherFeed(items: readonly WatcherFeedItem[]): WatcherFeed
   return groups;
 }
 
-/** Steer is offered only while the watched turn runs on a harness that accepts it. */
 export function steerAvailable(watchedHarnessId: string | null | undefined, watchedRunning: boolean): boolean {
   return watchedRunning && supportsActiveParentFollowUp(watchedHarnessId ?? null);
 }

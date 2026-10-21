@@ -119,7 +119,6 @@ export interface TurnInteractionCommandDependencies {
     adopt(input: UndeliveredFollowUp, unconfirmed: string | null): MessageQueueResult;
   };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
-  /** Server-only: a user-initiated watcher note delivery, never from renderer IPC. */
   watcherDelivery?: import("../watcher/watcher-note-instruction").WatcherNoteDelivery;
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
   store: RuntimeStore;

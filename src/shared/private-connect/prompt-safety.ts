@@ -147,11 +147,6 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
 export const READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE =
   "Read-only watcher · approvals are declined automatically";
 
-/**
- * The prompt safety of a conversation on this harness. An attached watcher
- * keeps its harness contract but declines every approval itself, so its
- * headline says so; an unsupported harness stays unsupported.
- */
 export function privateConnectPromptSafetyForHarness(
   harnessId: HarnessId | null | undefined,
   options: { watcher?: boolean } = {},

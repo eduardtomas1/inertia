@@ -22,7 +22,6 @@ afterEach(cleanupWatcherFixtures);
 
 const FINDING = "- The parser drops the last token in src/parser.ts:42.";
 
-/** A watched turn ends, its final pass reports a finding, and the watcher is paused to keep the test quiet. */
 async function finding(f: WatcherFixture, text = FINDING) {
   const link = await f.attach();
   await f.startWatchedTurn();
@@ -75,7 +74,6 @@ describe("watcher note delivery", () => {
         content: FINDING,
         watcherNote: { linkId: link.id, wakeId, watcherConversationId: link.watcherConversationId, preset: "reviewer", delivery: "queue" },
       });
-      // The note names the agent exactly as the dock does: provider label, then the model.
       const watcher = f.store.conversation(link.watcherConversationId);
       expect(message!.watcherNote!.watcherLabel).toBe("codex · gpt-test");
       expect(message!.watcherNote!.watcherLabel).toBe(watcherAgentLabel(watcher, { codex: "codex" }));
@@ -321,7 +319,6 @@ describe("watcher note delivery", () => {
       await f.startWatchedTurn("Busy");
       const deliveryId = randomUUID();
       await deliver(f, link.id, wakeId, "queue", deliveryId);
-      // A path that bypasses the runtime, for example a repair after a restart.
       f.store.queuedMessages.cancel(f.watched.id, deliveryId);
       const reply = await f.command("watcher.note.dismiss", { linkId: link.id, wakeId });
       expect(reply).toMatchObject({ result: { delivery: { mode: null, state: "dismissed" } } });

@@ -15,11 +15,12 @@ test("opens each thread submenu beside its row and keeps it open while the point
     const menu = page.getByRole("menu", { name: /^Thread actions for/u });
     await expect(menu).toBeVisible();
     const trigger = menu.getByRole("menuitem", { name, exact: true });
-    const row_ = (await trigger.boundingBox())!;
-    await page.mouse.move(row_.x + row_.width / 2, row_.y + row_.height / 2, { steps: 5 });
+    const start = (await trigger.boundingBox())!;
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2, { steps: 5 });
     const submenu = page.getByRole("menu", { name, exact: true });
     await expect(submenu).toBeVisible();
-    await page.waitForTimeout(300);
+    await expect.poll(() => menu.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
+    const row_ = (await trigger.boundingBox())!;
     const box = (await submenu.boundingBox())!;
     expect(Math.abs(box.x - (row_.x + row_.width + 4))).toBeLessThan(3);
     expect(Math.abs(box.y - row_.y)).toBeLessThan(3);

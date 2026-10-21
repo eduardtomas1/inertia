@@ -482,7 +482,7 @@ test.describe("watcher on the fake Codex route", () => {
     const card = dock().getByRole("article", { name: AUTO_FINDING });
     await expect(card).toBeVisible();
     await expect(card.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
-    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · started the main chat's next turn$/u);
+    await expect(card.locator(".watcher-finding-status")).toHaveText(/^Sent \d{1,2}:\d{2}\s[AP]M · automatically · started the main chat's next turn$/u);
     await expect(page.getByRole("separator", { name: /^Note from watcher · Reviewer · /u })).toHaveCount(2);
     await expect(page.getByLabel("Note from watcher", { exact: true })).toHaveCount(2);
     const autoNote = page.getByLabel("Note from watcher", { exact: true }).last();

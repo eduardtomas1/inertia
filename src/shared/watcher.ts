@@ -4,7 +4,7 @@ import { providerIdSchema } from "./contracts/client-command/common";
 
 export const WATCHER_HARNESS_IDS = ["claude-agent-sdk", "codex-app-server", "opencode-sdk"] as const;
 export const WATCHER_PRESETS = ["reviewer", "scope-guard", "explainer"] as const;
-export const WATCHER_STATUSES = ["watching", "waking", "idle", "paused", "detached"] as const;
+export const WATCHER_STATUSES = ["watching", "waking", "paused", "detached"] as const;
 export const WATCHER_PAUSE_REASONS = [
   "user", "wake-budget", "usage-limit", "write-detected", "write-attempts",
   "route-unavailable", "watched-archived", "watcher-archived",

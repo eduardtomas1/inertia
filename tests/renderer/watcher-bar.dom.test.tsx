@@ -88,11 +88,6 @@ describe("watcher bar", () => {
     expect(liveRegion()).toBeEmptyDOMElement();
   });
 
-  it("shows an idle link as Watching, with no state the runtime never reaches", () => {
-    render(bar(link({ status: "idle" })));
-    expect(document.querySelector(".watcher-bar-state")).toHaveTextContent(/^Team Codex · fixture-model · Reviewer · Watching$/u);
-  });
-
   it("keeps one primary text action beside the title, with the rest and the numbers in More", async () => {
     render(bar(link({ quietSince: "2026-10-19T10:50:00.000Z" }), undefined, undefined, { privateConnectConfigured: true, usageTokens: 48_200 }));
     const actions = document.querySelector<HTMLElement>(".watcher-bar-actions")!;
@@ -244,11 +239,11 @@ describe("watcher bar", () => {
       latest: { outcome: "failed", at: "2026-10-19T10:45:00.000Z", text: "" },
       latestFindingAt: "2026-10-19T10:44:00.000Z",
     })));
-    expect(liveRegion()).toHaveTextContent("Paused. It used its checks for this turn.");
+    expect(liveRegion()).toHaveTextContent("Paused. It used its checks for this turn. It still makes the final check, and resumes when the next turn starts or when you choose Resume.");
   });
 
   it("announces the runtime's own words for a pause it explains", () => {
-    const detail = "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.";
+    const detail = "The watcher used its checks for this turn. It still makes the final check, and resumes when the next turn starts or when you choose Resume.";
     const view = render(bar(link()));
     view.rerender(bar(link({ status: "paused", pauseReason: "wake-budget", pauseDetail: detail })));
     expect(liveRegion()).toHaveTextContent(`Paused. ${detail}`);

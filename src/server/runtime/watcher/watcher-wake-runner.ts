@@ -29,7 +29,7 @@ import {
   type WatcherWakeScheduler,
 } from "./watcher-wake-scheduler";
 
-const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit.";
+export const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit.";
 const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit a file twice during one turn of the main chat.";
 export const WATCHER_ROUTE_RETRY_LIMIT = 3;
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
@@ -37,7 +37,7 @@ const WATCHER_MAX_CONTINUATION_PAGES = 4;
 export const WATCHER_FINAL_PASS_RETRY_LIMIT = 2;
 const WATCHER_EARLIER_FINDINGS = 5;
 
-function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
+export function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
   return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()}`;
 }
 

@@ -9,7 +9,7 @@ import { INTERFACE_LOCALE } from "../lib/locale";
 
 const WATCHER_PAUSE_REASON_TEXT: Readonly<Record<WatcherPauseReason, string>> = {
   user: "You paused it.",
-  "wake-budget": "It used its checks for this turn.",
+  "wake-budget": "It used its checks for this turn. It still makes the final check, and resumes when the next turn starts or when you choose Resume.",
   "usage-limit": "Its account reached a usage limit.",
   "write-detected": "Files changed that no running agent accounts for.",
   "write-attempts": "It tried to edit a file twice during one turn.",

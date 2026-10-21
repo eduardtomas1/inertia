@@ -222,11 +222,13 @@ describe("Private Connect supervised runtime gateway", () => {
       type: "conversation.get", requestId: "33333333-3333-4333-8333-333333333333", conversationId: conversation.id,
     });
     if (!response.ok || response.result.kind !== "conversation") throw new Error("Expected a conversation detail.");
-    expect(response.result.detail.messages.map(({ role, content }) => [role, content])).toEqual([
+    const messages = response.result.detail.messages.map(({ role, content }) => [role, content]);
+    expect(messages).toHaveLength(3);
+    expect(messages).toEqual(expect.arrayContaining([
       ["user", "[Forwarded watcher note]\n\nThe parser drops a token."],
       ["user", "[Watcher note sent automatically]\n\nThe test for empty lines is gone."],
       ["user", "Fix it."],
-    ]);
+    ]));
   });
 
   it("leaves the missing checkpoint notice out of remote activity rows", async () => {

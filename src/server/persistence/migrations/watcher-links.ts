@@ -35,7 +35,7 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
         CHECK (private_connect IN ('inherit', 'hidden')),
       delivery TEXT NOT NULL DEFAULT 'manual' CHECK (delivery IN ('manual', 'auto')),
       status TEXT NOT NULL
-        CHECK (status IN ('watching', 'waking', 'idle', 'paused', 'detached')),
+        CHECK (status IN ('watching', 'waking', 'paused', 'detached')),
       pause_reason TEXT CHECK (pause_reason IS NULL OR pause_reason IN (
         'user', 'wake-budget', 'usage-limit', 'write-detected', 'write-attempts',
         'route-unavailable', 'watched-archived', 'watcher-archived'

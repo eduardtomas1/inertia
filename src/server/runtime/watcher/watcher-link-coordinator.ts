@@ -31,7 +31,7 @@ import type { WatcherWakeScheduler } from "./watcher-wake-scheduler";
 
 export const MAX_WATCHER_TITLE_CHARS = 120;
 const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher chat was archived. Unarchive it to resume the watcher.";
-const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "idle", "paused"];
+const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "paused"];
 const ARCHIVE_PAUSES: readonly WatcherPauseReason[] = ["watched-archived", "watcher-archived"];
 const ENDED: readonly string[] = ["completed", "failed", "cancelled", "interrupted"];
 
@@ -272,7 +272,7 @@ export class WatcherLinkCoordinator {
     const link = this.#require(linkId);
     if (link.status === "paused") return this.#detail(link);
     const paused = this.#deps.store.watcherLinks.transition(
-      linkId, ["watching", "waking", "idle"], { status: "paused", reason: "user" }, this.#deps.now(),
+      linkId, ["watching", "waking"], { status: "paused", reason: "user" }, this.#deps.now(),
     );
     if (!paused) throw new RuntimeRequestError("This watcher changed meanwhile. Try again.");
     this.#deps.scheduler.pause(linkId);

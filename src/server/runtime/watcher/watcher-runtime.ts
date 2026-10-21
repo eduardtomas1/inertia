@@ -204,7 +204,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     allowance: remaining,
     onBudgetExhausted: (linkId) => {
       const paused = store.watcherLinks.transition(
-        linkId, ["watching", "idle"], { status: "paused", reason: "wake-budget", detail: WATCHER_BUDGET_PAUSE_DETAIL }, now(),
+        linkId, ["watching"], { status: "paused", reason: "wake-budget", detail: WATCHER_BUDGET_PAUSE_DETAIL }, now(),
       );
       if (!paused) return;
       wakeScheduler.pause(linkId, { finalPass: true });

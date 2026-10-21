@@ -205,7 +205,7 @@ export class WatcherWakeRunner {
     const link = store.watcherLinks.get(linkId);
     if (!link || link.status === "detached" || link.watchedConversationId === null) return "skipped";
     const budgetFinalPass = context.final && link.status === "paused" && link.pauseReason === "wake-budget";
-    if (link.status !== "watching" && link.status !== "idle" && !budgetFinalPass) return "skipped";
+    if (link.status !== "watching" && !budgetFinalPass) return "skipped";
     if (turns.isClosing() || isHeld()) return "transient";
     const watcher = conversationOrNull(store, link.watcherConversationId);
     const watched = conversationOrNull(store, link.watchedConversationId);
@@ -217,7 +217,7 @@ export class WatcherWakeRunner {
 
     const claimed = store.watcherLinks.transition(
       linkId,
-      budgetFinalPass ? ["paused"] : ["watching", "idle"],
+      budgetFinalPass ? ["paused"] : ["watching"],
       { status: "waking" },
       this.#deps.now(),
     );
@@ -346,7 +346,7 @@ export class WatcherWakeRunner {
   #claimLost(linkId: string): WatcherWakeAttempt {
     const status = this.#deps.store.watcherLinks.get(linkId)?.status;
     if (status === "paused") return "paused";
-    return status === "watching" || status === "idle" ? "transient" : "skipped";
+    return status === "watching" ? "transient" : "skipped";
   }
 
   /**
@@ -368,7 +368,7 @@ export class WatcherWakeRunner {
     this.#routeFailures.delete(linkId);
     const paused = this.#deps.store.watcherLinks.transition(
       linkId,
-      budgetFinalPass ? ["paused"] : ["watching", "idle"],
+      budgetFinalPass ? ["paused"] : ["watching"],
       { status: "paused", reason: "route-unavailable", detail: watcherRouteUnavailableDetail(selection, message) },
       this.#deps.now(),
     );
@@ -453,7 +453,7 @@ export class WatcherWakeRunner {
     if (running) {
       running.violations.push(violation);
       if (pause) running.pause = pause;
-    } else if (pause && store.watcherLinks.transition(link.id, ["watching", "idle"], pause, this.#deps.now())) {
+    } else if (pause && store.watcherLinks.transition(link.id, ["watching"], pause, this.#deps.now())) {
       this.#deps.scheduler().pause(link.id);
       this.#deps.publish(link.id);
     }
@@ -579,7 +579,7 @@ export class WatcherWakeRunner {
       }
       try {
         if (pause) {
-          if (store.watcherLinks.transition(linkId, ["waking", "watching", "idle"], pause, now)) scheduler.pause(linkId);
+          if (store.watcherLinks.transition(linkId, ["waking", "watching"], pause, now)) scheduler.pause(linkId);
         } else {
           this.#release(linkId, running?.restore ?? { status: "watching" }, running?.digest.turnId ?? wake.watchedTurnId);
         }

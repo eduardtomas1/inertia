@@ -519,6 +519,23 @@ describe("runtime sync hub", () => {
       type: "runtime.event",
       event: { type: "agent.input.requested", request },
     });
+
+    runtime.events.get("detached-named")!.length = 0;
+    runtime.hub.broadcast({ type: "agent.input.requested", request: mismatched });
+    const broadcast = runtime.events.get("detached-named")?.[0];
+    expect(broadcast).toMatchObject({
+      type: "runtime.event",
+      event: {
+        type: "agent.input.requested",
+        request: {
+          id: "input-2",
+          conversationContextRequest: { requestId: "input-2", requestedSourceConversationId: null },
+        },
+      },
+    });
+    expect(broadcast?.type === "runtime.event" && broadcast.event.type === "agent.input.requested"
+      ? broadcast.event.request.conversationContextRequest
+      : null).not.toHaveProperty("requestedSource");
   });
 
   it("owns a fresh socket before sending welcome so an immediate disconnect is not leaked", () => {

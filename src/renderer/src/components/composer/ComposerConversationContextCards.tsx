@@ -270,12 +270,26 @@ export function ConversationContextRequestCard({
   request,
   sources,
   onCommand,
+  onClosed,
 }: {
   request: AgentConversationContextRequest;
   sources: readonly ConversationContextSourceOption[];
   onCommand: ConversationContextCommandRunner;
+  onClosed?: () => void;
 }): React.JSX.Element {
   const preselected = request.requestedSourceConversationId;
+  const closed = useRef(onClosed);
+  closed.current = onClosed;
+  useLayoutEffect(() => () => {
+    const focused = document.activeElement;
+    requestAnimationFrame(() => {
+      if (
+        focused
+        && !focused.isConnected
+        && (!document.activeElement || document.activeElement === document.body)
+      ) closed.current?.();
+    });
+  }, []);
   const [selected, setSelected] = useState<string>("");
   const [pending, setPending] = useState(false);
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);

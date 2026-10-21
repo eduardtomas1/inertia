@@ -993,7 +993,7 @@ export const Composer = memo(function Composer({
         {attachmentError && <p className="composer-limit-warning" role="alert">{attachmentError}</p>}
         <ComposerInputZone
           contextCards={<>{agentContextRequestEnabled && (
-            <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} />
+            <ComposerConversationContextRequestCard request={agentContextRequest} sources={contextSources} onCommand={onConversationContextCommand} onClosed={() => textareaRef.current?.focus()} />
           )}{conversationContextHandoffEnabled && (
             <>
               <ComposerConversationContextStrip controller={conversationContext} disabled={submissionPending || running} onConfirmationClosed={() => requestAnimationFrame(() => textareaRef.current?.focus())} />

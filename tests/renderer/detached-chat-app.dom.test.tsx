@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -259,6 +259,39 @@ describe("detached chat window", () => {
           acknowledgedWorkspaceDifference: false,
         },
       })]);
+  });
+
+  it("returns focus to the message box when the answered request card closes", async () => {
+    const live = liveConnection();
+    const requestId = "66666666-6666-4666-8666-666666666666";
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    const message = await screen.findByRole("textbox", { name: "Message" });
+
+    live.emit({
+      type: "agent.input.requested",
+      request: contextInputRequest(requestId, {
+        conversationId: "63636363-6363-4363-8363-636363636363",
+        conversationTitle: "Source chat",
+      }),
+    });
+    await act(async () => { await vi.dynamicImportSettled(); });
+    fireEvent.click(await screen.findByRole("button", { name: "Share chat" }));
+    await screen.findByText("Sharing approved.");
+    const preview = screen.getByRole("button", { name: "Preview" });
+    preview.focus();
+    expect(preview).toHaveFocus();
+
+    live.emit({
+      type: "agent.input.resolved",
+      conversationId,
+      runId: "detached-run",
+      turnId: "detached-turn",
+      requestId,
+    });
+
+    expect(screen.queryByRole("region", { name: "Agent requested chat context" })).toBeNull();
+    await waitFor(() => expect(message).toHaveFocus());
   });
 
   it("sends a request that leaves the chat open to the main window", async () => {

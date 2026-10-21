@@ -553,6 +553,9 @@ export default function DetachedChatApp({
     request: null,
     primaryConversationId: conversationId,
   });
+  const namedContextRequestId = [...contextRequests.inputRequests].reverse().find(
+    ({ conversationContextRequest }) => conversationContextRequest !== undefined,
+  )?.id ?? null;
   const visibleConversation = projection.detail?.conversation ?? conversation;
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
@@ -596,6 +599,11 @@ export default function DetachedChatApp({
       <div className="detached-chat-content">
         {contextRequests.mainWindowReviewPending && (
           <DetachedContextHandoffNotice onReturnToMain={dockInMain} />
+        )}
+        {namedContextRequestId && (
+          <p key={namedContextRequestId} className="visually-hidden" role="status" aria-live="polite">
+            The agent asked to read another chat.
+          </p>
         )}
         {unavailableDetail ? (
           <ConversationDetailState

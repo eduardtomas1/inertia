@@ -261,6 +261,41 @@ describe("detached chat window", () => {
       })]);
   });
 
+  it("announces each new request for a named chat", async () => {
+    const live = liveConnection();
+    const source = {
+      conversationId: "63636363-6363-4363-8363-636363636363",
+      conversationTitle: "Source chat",
+    };
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    await screen.findByRole("textbox", { name: "Message" });
+
+    live.emit({
+      type: "agent.input.requested",
+      request: contextInputRequest("67676767-6767-4767-8767-676767676767", source),
+    });
+    const first = screen.getByText("The agent asked to read another chat.");
+    expect(first).toHaveAttribute("role", "status");
+    expect(first).toHaveAttribute("aria-live", "polite");
+
+    live.emit({
+      type: "agent.input.resolved",
+      conversationId,
+      runId: "detached-run",
+      turnId: "detached-turn",
+      requestId: "67676767-6767-4767-8767-676767676767",
+    });
+    expect(screen.queryByText("The agent asked to read another chat.")).toBeNull();
+    live.emit({
+      type: "agent.input.requested",
+      request: contextInputRequest("68686868-6868-4868-8868-686868686868", source),
+    });
+    const second = screen.getByText("The agent asked to read another chat.");
+    expect(second).toHaveAttribute("role", "status");
+    expect(second).not.toBe(first);
+  });
+
   it("returns focus to the message box when the answered request card closes", async () => {
     const live = liveConnection();
     const requestId = "66666666-6666-4666-8666-666666666666";

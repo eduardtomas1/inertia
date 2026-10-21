@@ -15,7 +15,8 @@
     "Wave 2 follow-up: wave2FollowUpBaselineBytes is 7a8d14930 (the integrated PR head with watcher.review and the note's providerId) and wave2FollowUpBytes the branch after the renderer follow-ups, both built on macOS with Node 22.23.2 from the same package-lock. The dock grows by 240 bytes (Review the last turn), the attach dialog by 22 (the one-sentence read-only line), and the transcript and core by 174 (the provider mark on the Note from watcher divider); transcriptJavaScript stays within its cap. The baseline already measured over budget from the integrated server and contract changes: attach by 55, workbench first load by 34, detached chat first load by 20 and core by 260 bytes; those caps were raised by that overshoot plus this growth, the dock cap by exactly this growth.",
     "Fix round: fixRoundBaselineBytes is be02d4a7e (the integrated PR head after wave 2) and fixRoundBytes the renderer fix-round branch, both built on macOS with Node 22.23.2 from the same package-lock. The dock grows by 1,017 bytes (per-action Send and Dismiss status, changed files of an inconclusive check, the sent-size note, the runtime's pause words in the announcement); the attach dialog by 38 (Review the last turn now while the turn runs). First-load routes grow by 211 (workbench) and 61 (detached chat) bytes and core by 319 for the dock host's handle fallback, the hint-less tooltip, the automatic note tooltip and /compact in a watcher composer; transcriptJavaScript (+72) and the welcome guide (+45) stay within their caps, and the 22-byte changes on unrelated deferred chunks are shared-helper import metadata. The dock, attach, first-load and core caps were raised by exactly this growth.",
     "Integrated head: the server fix round changed shared contracts after the renderer fix round measured, and the attach dialog closure grew by 76 bytes (18,691 to 18,767) on the combined head 90187d709; its cap was raised by exactly those bytes. Every other measurement stayed within its cap.",
-    "CI fix: the More menu owns Escape with a document-level listener while open and focuses its first item once positioned, which adds 183 bytes to the dock closure (40,440 to 40,623); its cap was raised by exactly those bytes."
+    "CI fix: the More menu owns Escape with a document-level listener while open and focuses its first item once positioned, which adds 183 bytes to the dock closure (40,440 to 40,623); its cap was raised by exactly those bytes.",
+    "Last round: lastRoundBaselineBytes is 8e5f4e897 (the PR head with the Codex finding fixes) and lastRoundBytes the renderer branch after the last bug-fix and polish round, both built on macOS with Node 22.23.2 from the same package-lock. The baseline already measured 58 bytes over the dock cap from the Codex feed fix (cached pages a refreshed newest page no longer reaches). The dock grows by a further 410 bytes (refreshing loaded earlier checks in place, the collapse reset of the Stop watching and resume prompts, the terminal-aware sheet clearance, the extracted menu items and sheet dismissal, the automatic-sending status word); core by 64 (Resume watcher in the command palette, the shared check title, row name and note title). The attach dialog shrinks by 76 bytes (no helper sentence, shared error text), both first-load routes by 28 and the transcript by 55. The dock cap was raised by the overshoot plus the growth, core by exactly its growth, and the attach and both first-load caps lowered by exactly their savings."
   ],
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
@@ -38,7 +39,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 1163,
       "fixRoundBytes": 1163,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 1163,
+      "lastRoundBytes": 1163,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredUsageLimitsJavaScript": {
       "preFoundationBytes": 21747,
@@ -60,7 +64,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 21769,
       "fixRoundBytes": 21769,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 21769,
+      "lastRoundBytes": 21769,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredWatcherDockJavaScript": {
       "preFoundationBytes": null,
@@ -84,7 +91,10 @@
       "fixRoundBytes": 40440,
       "deltaFromFixRoundBaselineBytes": 1017,
       "ciFixBytes": 40623,
-      "deltaFromIntegratedHeadBytes": 183
+      "deltaFromIntegratedHeadBytes": 183,
+      "lastRoundBaselineBytes": 40681,
+      "lastRoundBytes": 41091,
+      "deltaFromLastRoundBaselineBytes": 410
     },
     "deferredWatcherAttachJavaScript": {
       "preFoundationBytes": null,
@@ -108,7 +118,10 @@
       "fixRoundBytes": 18691,
       "deltaFromFixRoundBaselineBytes": 38,
       "integratedHeadBytes": 18767,
-      "deltaFromFixRoundBytes": 76
+      "deltaFromFixRoundBytes": 76,
+      "lastRoundBaselineBytes": 18767,
+      "lastRoundBytes": 18691,
+      "deltaFromLastRoundBaselineBytes": -76
     },
     "deferredWelcomeGuideJavaScript": {
       "preFoundationBytes": 37212,
@@ -130,7 +143,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 38267,
       "fixRoundBytes": 38312,
-      "deltaFromFixRoundBaselineBytes": 45
+      "deltaFromFixRoundBaselineBytes": 45,
+      "lastRoundBaselineBytes": 38312,
+      "lastRoundBytes": 38312,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredWorkingOrbJavaScript": {
       "preFoundationBytes": 21807,
@@ -152,7 +168,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 21829,
       "fixRoundBytes": 21829,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 21829,
+      "lastRoundBytes": 21829,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredSnapshotSettingsJavaScript": {
       "preFoundationBytes": 4032,
@@ -174,7 +193,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 4076,
       "fixRoundBytes": 4098,
-      "deltaFromFixRoundBaselineBytes": 22
+      "deltaFromFixRoundBaselineBytes": 22,
+      "lastRoundBaselineBytes": 4098,
+      "lastRoundBytes": 4098,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredSnapshotControlJavaScript": {
       "preFoundationBytes": 6867,
@@ -196,7 +218,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 6889,
       "fixRoundBytes": 6889,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 6889,
+      "lastRoundBytes": 6889,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredAttachmentStorageSettingsJavaScript": {
       "preFoundationBytes": 5308,
@@ -218,7 +243,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 5352,
       "fixRoundBytes": 5379,
-      "deltaFromFixRoundBaselineBytes": 27
+      "deltaFromFixRoundBaselineBytes": 27,
+      "lastRoundBaselineBytes": 5379,
+      "lastRoundBytes": 5379,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredBackgroundTasksJavaScript": {
       "preFoundationBytes": 19386,
@@ -240,7 +268,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 19408,
       "fixRoundBytes": 19408,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 19408,
+      "lastRoundBytes": 19408,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredTasksViewJavaScript": {
       "preFoundationBytes": 21109,
@@ -262,7 +293,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 21132,
       "fixRoundBytes": 21122,
-      "deltaFromFixRoundBaselineBytes": -10
+      "deltaFromFixRoundBaselineBytes": -10,
+      "lastRoundBaselineBytes": 21122,
+      "lastRoundBytes": 21122,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredProjectSettingsJavaScript": {
       "preFoundationBytes": 17087,
@@ -284,7 +318,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 17155,
       "fixRoundBytes": 17177,
-      "deltaFromFixRoundBaselineBytes": 22
+      "deltaFromFixRoundBaselineBytes": 22,
+      "lastRoundBaselineBytes": 17177,
+      "lastRoundBytes": 17177,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredCliConversationImportJavaScript": {
       "preFoundationBytes": 9623,
@@ -306,7 +343,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 9645,
       "fixRoundBytes": 9645,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 9645,
+      "lastRoundBytes": 9645,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredReviewNoteJavaScript": {
       "preFoundationBytes": 1475,
@@ -328,7 +368,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 1497,
       "fixRoundBytes": 1497,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 1497,
+      "lastRoundBytes": 1497,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredThreadActionsJavaScript": {
       "preFoundationBytes": 8196,
@@ -350,7 +393,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 8859,
       "fixRoundBytes": 8859,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 9127,
+      "lastRoundBytes": 9127,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredProjectCustomizeJavaScript": {
       "preFoundationBytes": 11993,
@@ -372,7 +418,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 12016,
       "fixRoundBytes": 12016,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 12016,
+      "lastRoundBytes": 12016,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredProjectColorContrastJavaScript": {
       "preFoundationBytes": 1802,
@@ -394,7 +443,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 1824,
       "fixRoundBytes": 1824,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 1824,
+      "lastRoundBytes": 1824,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredDiagnosticsJavaScript": {
       "preFoundationBytes": 18404,
@@ -416,7 +468,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 18448,
       "fixRoundBytes": 18470,
-      "deltaFromFixRoundBaselineBytes": 22
+      "deltaFromFixRoundBaselineBytes": 22,
+      "lastRoundBaselineBytes": 18470,
+      "lastRoundBytes": 18470,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredDiagnosticCatalogJavaScript": {
       "preFoundationBytes": 9980,
@@ -438,7 +493,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 9980,
       "fixRoundBytes": 9980,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 9980,
+      "lastRoundBytes": 9980,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredIssueReportJavaScript": {
       "preFoundationBytes": 13348,
@@ -460,7 +518,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 13370,
       "fixRoundBytes": 13370,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 13370,
+      "lastRoundBytes": 13370,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "mascotFirstLoadJavaScript": {
       "preFoundationBytes": 11506,
@@ -482,7 +543,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 11506,
       "fixRoundBytes": 11506,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 11506,
+      "lastRoundBytes": 11506,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "mascotJavaScript": {
       "preFoundationBytes": 11506,
@@ -504,7 +568,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 11506,
       "fixRoundBytes": 11506,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 11506,
+      "lastRoundBytes": 11506,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "mascotSettingsJavaScript": {
       "preFoundationBytes": 7473,
@@ -526,7 +593,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 7495,
       "fixRoundBytes": 7495,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 7495,
+      "lastRoundBytes": 7495,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "entryJavaScript": {
       "preFoundationBytes": 222492,
@@ -548,7 +618,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 222556,
       "fixRoundBytes": 222556,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 222556,
+      "lastRoundBytes": 222556,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "mainWorkbenchFirstLoadJavaScript": {
       "preFoundationBytes": 878750,
@@ -570,7 +643,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 902798,
       "fixRoundBytes": 903009,
-      "deltaFromFixRoundBaselineBytes": 211
+      "deltaFromFixRoundBaselineBytes": 211,
+      "lastRoundBaselineBytes": 903009,
+      "lastRoundBytes": 902981,
+      "deltaFromLastRoundBaselineBytes": -28
     },
     "detachedChatFirstLoadJavaScript": {
       "preFoundationBytes": 672293,
@@ -592,7 +668,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 691510,
       "fixRoundBytes": 691571,
-      "deltaFromFixRoundBaselineBytes": 61
+      "deltaFromFixRoundBaselineBytes": 61,
+      "lastRoundBaselineBytes": 691571,
+      "lastRoundBytes": 691543,
+      "deltaFromLastRoundBaselineBytes": -28
     },
     "entryCss": {
       "preFoundationBytes": 241072,
@@ -614,7 +693,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 241100,
       "fixRoundBytes": 241100,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 241105,
+      "lastRoundBytes": 241105,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "colorThemesCss": {
       "preFoundationBytes": 8675,
@@ -636,7 +718,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 8675,
       "fixRoundBytes": 8675,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 8675,
+      "lastRoundBytes": 8675,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "detachedChatCss": {
       "preFoundationBytes": 3069,
@@ -658,7 +743,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 3069,
       "fixRoundBytes": 3069,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 3069,
+      "lastRoundBytes": 3069,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "settingsJavaScript": {
       "preFoundationBytes": 77802,
@@ -680,7 +768,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 77501,
       "fixRoundBytes": 77342,
-      "deltaFromFixRoundBaselineBytes": -159
+      "deltaFromFixRoundBaselineBytes": -159,
+      "lastRoundBaselineBytes": 77342,
+      "lastRoundBytes": 77342,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "filesFirstLoadJavaScript": {
       "preFoundationBytes": 110836,
@@ -702,7 +793,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 110882,
       "fixRoundBytes": 110882,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 110882,
+      "lastRoundBytes": 110882,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredMarkdownJavaScript": {
       "preFoundationBytes": 434721,
@@ -724,7 +818,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 434721,
       "fixRoundBytes": 434721,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 434721,
+      "lastRoundBytes": 434721,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "transcriptJavaScript": {
       "preFoundationBytes": 567967,
@@ -746,7 +843,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 174,
       "fixRoundBaselineBytes": 578216,
       "fixRoundBytes": 578288,
-      "deltaFromFixRoundBaselineBytes": 72
+      "deltaFromFixRoundBaselineBytes": 72,
+      "lastRoundBaselineBytes": 578288,
+      "lastRoundBytes": 578233,
+      "deltaFromLastRoundBaselineBytes": -55
     },
     "deferredFailureDiagnosticsJavaScript": {
       "preFoundationBytes": 5749,
@@ -768,7 +868,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 5771,
       "fixRoundBytes": 5771,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 5771,
+      "lastRoundBytes": 5771,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredAttachmentPreviewJavaScript": {
       "preFoundationBytes": 17794,
@@ -790,7 +893,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 17839,
       "fixRoundBytes": 17839,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 17839,
+      "lastRoundBytes": 17839,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredPreviewJavaScript": {
       "preFoundationBytes": 7613,
@@ -812,7 +918,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 7653,
       "fixRoundBytes": 7653,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 7653,
+      "lastRoundBytes": 7653,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredBrowserEvidenceJavaScript": {
       "preFoundationBytes": 3431,
@@ -834,7 +943,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 3453,
       "fixRoundBytes": 3453,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 3453,
+      "lastRoundBytes": 3453,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredSpreadsheetJavaScript": {
       "preFoundationBytes": 487396,
@@ -856,7 +968,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 487396,
       "fixRoundBytes": 487396,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 487396,
+      "lastRoundBytes": 487396,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredDiscordSettingsJavaScript": {
       "preFoundationBytes": 7891,
@@ -878,7 +993,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 7940,
       "fixRoundBytes": 7962,
-      "deltaFromFixRoundBaselineBytes": 22
+      "deltaFromFixRoundBaselineBytes": 22,
+      "lastRoundBaselineBytes": 7962,
+      "lastRoundBytes": 7962,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredCanaryRollbackJavaScript": {
       "preFoundationBytes": 2232,
@@ -900,7 +1018,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 2276,
       "fixRoundBytes": 2298,
-      "deltaFromFixRoundBaselineBytes": 22
+      "deltaFromFixRoundBaselineBytes": 22,
+      "lastRoundBaselineBytes": 2298,
+      "lastRoundBytes": 2298,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredLifecycleIntegritySettingsJavaScript": {
       "preFoundationBytes": 2573,
@@ -922,7 +1043,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 2617,
       "fixRoundBytes": 2639,
-      "deltaFromFixRoundBaselineBytes": 22
+      "deltaFromFixRoundBaselineBytes": 22,
+      "lastRoundBaselineBytes": 2639,
+      "lastRoundBytes": 2639,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredSidebarUpdateControlJavaScript": {
       "preFoundationBytes": 15797,
@@ -944,7 +1068,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 15842,
       "fixRoundBytes": 15842,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 15842,
+      "lastRoundBytes": 15842,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredProviderAuthJavaScript": {
       "preFoundationBytes": 11182,
@@ -966,7 +1093,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 11204,
       "fixRoundBytes": 11204,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 11204,
+      "lastRoundBytes": 11204,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredProviderMaintenanceJavaScript": {
       "preFoundationBytes": 4388,
@@ -988,7 +1118,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 4410,
       "fixRoundBytes": 4410,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 4410,
+      "lastRoundBytes": 4410,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredComposerQueueJavaScript": {
       "preFoundationBytes": 12974,
@@ -1010,7 +1143,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 13140,
       "fixRoundBytes": 13140,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 13140,
+      "lastRoundBytes": 13151,
+      "deltaFromLastRoundBaselineBytes": 11
     },
     "deferredTerminalJavaScript": {
       "preFoundationBytes": 27107,
@@ -1032,7 +1168,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 27152,
       "fixRoundBytes": 27152,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 27152,
+      "lastRoundBytes": 27152,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredGitMenusJavaScript": {
       "preFoundationBytes": 8073,
@@ -1054,7 +1193,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 8119,
       "fixRoundBytes": 8119,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 8119,
+      "lastRoundBytes": 8119,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredWorkspaceHeaderActionsJavaScript": {
       "preFoundationBytes": 20768,
@@ -1076,7 +1218,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 20818,
       "fixRoundBytes": 20818,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 20818,
+      "lastRoundBytes": 20818,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "detachedChatJavaScript": {
       "preFoundationBytes": 11123,
@@ -1098,7 +1243,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 11364,
       "fixRoundBytes": 11364,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 11364,
+      "lastRoundBytes": 11364,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "preMergeConfidenceJavaScript": {
       "preFoundationBytes": 27428,
@@ -1120,7 +1268,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 27473,
       "fixRoundBytes": 27473,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 27473,
+      "lastRoundBytes": 27473,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "morphiconsJavaScript": {
       "preFoundationBytes": 15829,
@@ -1142,7 +1293,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 20685,
       "fixRoundBytes": 20685,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 20685,
+      "lastRoundBytes": 20685,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "morphingIconFeedbackJavaScript": {
       "preFoundationBytes": 3913,
@@ -1164,7 +1318,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 3948,
       "fixRoundBytes": 3948,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 3948,
+      "lastRoundBytes": 3948,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "coreJavaScript": {
       "preFoundationBytes": 2302269,
@@ -1186,7 +1343,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 174,
       "fixRoundBaselineBytes": 2334580,
       "fixRoundBytes": 2334899,
-      "deltaFromFixRoundBaselineBytes": 319
+      "deltaFromFixRoundBaselineBytes": 319,
+      "lastRoundBaselineBytes": 2334899,
+      "lastRoundBytes": 2334963,
+      "deltaFromLastRoundBaselineBytes": 64
     },
     "deferredPdfJavaScript": {
       "preFoundationBytes": 437503,
@@ -1208,7 +1368,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 437503,
       "fixRoundBytes": 437503,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 437503,
+      "lastRoundBytes": 437503,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredPdfWorker": {
       "preFoundationBytes": 1264342,
@@ -1230,7 +1393,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 1264342,
       "fixRoundBytes": 1264342,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 1264342,
+      "lastRoundBytes": 1264342,
+      "deltaFromLastRoundBaselineBytes": 0
     },
     "deferredIconRegionJavaScript": {
       "preFoundationBytes": null,
@@ -1252,7 +1418,10 @@
       "deltaFromWave2FollowUpBaselineBytes": 0,
       "fixRoundBaselineBytes": 12995,
       "fixRoundBytes": 12995,
-      "deltaFromFixRoundBaselineBytes": 0
+      "deltaFromFixRoundBaselineBytes": 0,
+      "lastRoundBaselineBytes": 12995,
+      "lastRoundBytes": 12995,
+      "deltaFromLastRoundBaselineBytes": 0
     }
   },
   "reviewFixBaseline": "c17cbf0",

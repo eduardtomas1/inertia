@@ -21,9 +21,9 @@ offers only ready routes on watcher agents, defaults to **Reviewer** and says in
 its description, above the fold, that the watcher reads and reports: it may run
 read-only commands and never edits files or changes the workspace. Under what the
 watcher sees, two plain switches: **Send findings to the main chat
-automatically** (off by default, with one line on what it does) and **Review
-the last turn now**, which is available because the chat already has a turn,
-here a running one. **Budgets** stays folded at the end.
+automatically** (off by default) and **Review the last turn now**, which is
+available because the chat already has a turn, here a running one. **Budgets**
+stays folded at the end, above **Cancel** and **Add watcher**.
 
 ![Add a watcher dialog with the Reviewer preset selected](attach-dialog-light.png)
 
@@ -39,13 +39,15 @@ check it says **No checks yet**.
 ## Checking, then a grouped receipt
 
 Settled commands gather before an automatic check, so **Check now** starts the
-first one once the menu says **1 waiting**; the bar shows the check in progress,
-and the Work tab marks the watcher **Checking**. Two quiet checks (`SILENT`)
-fold into one receipt with a chevron, opened here to list each check.
+first one once the menu says **1 event waiting**; the bar shows the check in
+progress, the feed lists it as **Check 1**, and the Work tab marks the watcher
+**Checking**. Two quiet checks (`SILENT`) fold into one receipt with a chevron,
+opened here to list each check, for example **Check 2 · 5:12 PM** over **Manual
+check · 1 event · 669 B sent**.
 
 | Checking | Receipt |
 | --- | --- |
-| ![Check 1 checking now, with the elapsed timer in the bar](dock-checking-light.png) | ![Checked 2 times … nothing to report, expanded](dock-receipts-light.png) |
+| ![Check 1 in the feed, with the elapsed timer in the bar](dock-checking-light.png) | ![Checked 2 times … nothing to report, expanded](dock-receipts-light.png) |
 
 ## A finding, light and dark
 
@@ -74,8 +76,7 @@ final check running.
 
 **More** holds Pause, **Review the last turn**, Open watcher chat, **Send
 findings automatically**, Collapse and Stop watching…, then the muted numbers: checks left this turn,
-events seen, events waiting, the last check and, once known, **Used <n>
-tokens**. With automatic sending on, the bar's state word reads **Sends
+events waiting, the last check and, once known, **Used <n> tokens**. With automatic sending on, the bar's state word reads **Sends
 findings automatically**.
 
 | Menu | Automatic sending on |
@@ -127,14 +128,14 @@ it. It takes no fifth pane.
 ## A resolved finding
 
 The final check of the watched turn answered `SILENT` with a closing
-**Resolved: check 4** line, so the sent card now shows a muted **Resolved in
-check 5** line, and the final checks of both turns fold into a new receipt
+**Resolved: check 4** line, so the sent card's meta line now reads **Check 4 ·
+5:12 PM · resolved in check 5**, and the final checks of both turns fold into a new receipt
 above the sent card. A resolved finding stays sendable and dismissible and
 moves below any open finding. The scenario then asks for **Review the last
 turn** from the menu, which runs one more quiet check and leaves the menu's
 checks-left count unchanged.
 
-![The sent finding marked Resolved in check 5](dock-resolved-light.png)
+![The sent finding marked resolved in check 5](dock-resolved-light.png)
 
 ## Not captured here
 

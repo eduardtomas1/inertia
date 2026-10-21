@@ -487,15 +487,16 @@ test.describe("watcher on the fake Codex route", () => {
     await expect(page.getByLabel("Note from watcher", { exact: true })).toHaveCount(2);
     const autoNote = page.getByLabel("Note from watcher", { exact: true }).last();
     await expect(autoNote).toContainText(AUTO_FINDING);
-    await autoNote.locator(".message-watcher-origin").hover();
-    await expect(page.locator('[role="tooltip"]')).toHaveText(/^Sent automatically by the watcher \(Reviewer · .+\)$/u);
-    await page.mouse.move(0, 0);
     await expect(page.getByText(NOTE_ANSWER, { exact: true })).toHaveCount(2);
     const autoCheck = Number((await card.locator(".watcher-finding-meta").textContent())?.match(/^Check (\d+)/u)?.[1]);
     await expect.poll(() => dock().locator(".watcher-check-title").evaluateAll((titles, label) => titles.filter((title) =>
       (title.textContent ?? "").replace(title.querySelector("time")?.textContent ?? "", "").trim() === label).length,
     `Check ${autoCheck + 1} ·`)).toBe(1);
     await expect(phase()).not.toHaveAttribute("data-phase", "waking");
+    await expect(composer.getByRole("button", { name: /^Stop/u })).toHaveCount(0);
+    await expect(page.getByText("Capturing changes…", { exact: true })).toHaveCount(0);
+    await autoNote.locator(".message-watcher-origin").hover();
+    await expect(page.locator('[role="tooltip"]')).toHaveText(/^Sent automatically by the watcher \(Reviewer · .+\)$/u);
     await capture(info, "dock-auto-sent-light");
 
     await dock().getByRole("button", { name: "More watcher actions" }).click();

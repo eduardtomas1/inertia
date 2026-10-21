@@ -2,11 +2,12 @@ import type WebSocket from "ws";
 
 import type { ChatMessage, ServerEvent } from "../../../shared/contracts";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
+import { clipCodeUnits } from "../../../shared/code-units";
 import type { MessageQueueResult } from "../../../shared/queued-messages";
 import { watcherAgentLabel } from "../../../shared/watcher-agent-label";
 import {
   MAX_WATCHER_NOTE_CHARS,
-  watcherReplaceLineSeparators,
+  watcherNormalizeLineBreaks,
   type WatcherDelivery,
   type WatcherDeliveryMode,
   type WatcherNoteAttribution,
@@ -48,6 +49,10 @@ const QUEUE_DETAILS: Readonly<Record<QueueReason, string | null>> = Object.freez
   refused: WATCHER_DELIVERY_DETAIL.refused,
 });
 
+export const WATCHER_PROVIDER_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(PROVIDER_INFO).map(([id, info]) => [id, info.name]),
+);
+
 export interface WatcherDeliveryResult {
   kind: "watcher.delivery";
   linkId: string;
@@ -80,12 +85,6 @@ export interface WatcherDeliveryDependencies {
   changed(linkId: string): void;
 }
 
-function clipCodeUnits(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const last = value.charCodeAt(maximum - 1);
-  return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
-}
-
 /**
  * The watcher's agent as the note attribution names it: the shared
  * `watcherAgentLabel`, fed with the same provider labels the renderer's dock
@@ -99,7 +98,7 @@ export function watcherLabel(
 ): string {
   const conversation = store.conversation(watcherConversationId);
   const labels = {
-    ...Object.fromEntries(Object.entries(PROVIDER_INFO).map(([id, info]) => [id, info.name])),
+    ...WATCHER_PROVIDER_NAMES,
     ...providerLabels,
     ...store.shellSnapshot().settings.providerIdentityLabels,
   };
@@ -108,7 +107,7 @@ export function watcherLabel(
 
 /** The neutralized note text the user forwards, capped at `MAX_WATCHER_NOTE_CHARS`. */
 export function watcherNoteText(finding: string): string {
-  const normalized = watcherReplaceLineSeparators(finding.replaceAll("\0", "�").replace(/\r\n?/gu, "\n"), "\n").trim();
+  const normalized = watcherNormalizeLineBreaks(finding).trim();
   return clipCodeUnits(neutralizeUntrustedAgentText(normalized), MAX_WATCHER_NOTE_CHARS).trimEnd();
 }
 

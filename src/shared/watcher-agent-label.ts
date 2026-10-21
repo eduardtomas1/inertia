@@ -1,3 +1,5 @@
+import { clipCodeUnits } from "./code-units";
+
 /** Longest agent label a watcher note or the dock shows. Equal to `MAX_WATCHER_LABEL_CHARS`. */
 export const MAX_WATCHER_AGENT_LABEL_CHARS = 80;
 export const WATCHER_AGENT_LABEL_SEPARATOR = " · ";
@@ -5,12 +7,6 @@ export const WATCHER_AGENT_LABEL_SEPARATOR = " · ";
 export interface WatcherAgentLabelSource {
   providerId: string;
   modelSelection: { alias?: string | null; modelId?: string | null };
-}
-
-function clipCodeUnits(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const last = value.charCodeAt(maximum - 1);
-  return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
 }
 
 function oneLine(value: string): string {

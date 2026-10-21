@@ -56,11 +56,10 @@ export const WATCHER_WAKE_RETENTION = 500;
 export const MAX_WATCHER_LINKS_SERIALIZED_BYTES = 64 * 1_024;
 
 const UTF8 = new TextEncoder();
-const utf8Bytes = (value: string): number => UTF8.encode(value).byteLength;
 const timestampSchema = z.string().datetime({ offset: true });
 const countSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const turnIdSchema = z.string().min(1).max(200);
-const singleLine = (value: string): boolean => {
+const withoutControlCharacters = (value: string): boolean => {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code < 0x20 || code === 0x7f) return false;
@@ -72,8 +71,21 @@ const singleLine = (value: string): boolean => {
  * Replaces NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR, which renderers and
  * models treat as line breaks, so quoted text cannot step outside its quote.
  */
-export function watcherReplaceLineSeparators(value: string, replacement: string): string {
-  return value.replace(/[\u0085\u2028\u2029]/gu, replacement);
+export function watcherNormalizeLineBreaks(value: string): string {
+  return value.replaceAll("\0", "\uFFFD").replace(/\r\n?/gu, "\n").replace(/[\u0085\u2028\u2029]/gu, "\n");
+}
+
+export function watcherFlattenLine(value: string): string {
+  let flattened = "";
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    flattened += code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029 ? " " : character;
+  }
+  return flattened.replace(/\s+/gu, " ").trim();
+}
+
+export function watcherUtf8Bytes(value: string): number {
+  return UTF8.encode(value).byteLength;
 }
 
 /** True when every UTF-16 surrogate is paired, so JSON never escapes it to six bytes. */
@@ -185,7 +197,7 @@ export const watcherLabelSchema = z.string()
   .trim()
   .min(1)
   .max(MAX_WATCHER_LABEL_CHARS)
-  .refine(singleLine, "Watcher labels must stay on one line.");
+  .refine(withoutControlCharacters, "Watcher labels must stay on one line.");
 
 /** Denormalized attribution on a forwarded note; never an execution authority. */
 export const watcherNoteAttributionSchema = z.strictObject({
@@ -283,7 +295,7 @@ export const watcherFeedItemSchema = z.strictObject({
   itemsOmitted: countSchema,
   guardState: watcherGuardStateSchema.nullable(),
   guardPaths: z.array(z.string().min(1).max(4_096)).max(MAX_WATCHER_GUARD_PATHS),
-  finding: z.string().refine((value) => utf8Bytes(value) <= MAX_WATCHER_FINDING_BYTES).nullable(),
+  finding: z.string().refine((value) => watcherUtf8Bytes(value) <= MAX_WATCHER_FINDING_BYTES).nullable(),
   delivery: watcherDeliverySchema.nullable(),
   createdAt: timestampSchema,
   settledAt: timestampSchema.nullable(),
@@ -377,5 +389,5 @@ export function watcherHarnessAllowed(harnessId: string): harnessId is WatcherHa
 }
 
 export function watcherLinksSerializedBytes(links: readonly WatcherLinkView[]): number {
-  return utf8Bytes(JSON.stringify(links));
+  return watcherUtf8Bytes(JSON.stringify(links));
 }

@@ -1,4 +1,5 @@
 import { activityExecutionCategory, hostToolActivityTitle } from "../../../shared/activity-display";
+import { clipCodeUnits } from "../../../shared/code-units";
 import type { AgentActivity, RuntimeMutationEvent } from "../../../shared/contracts";
 import {
   MAX_WATCHER_LIVE_LABEL_CHARS,
@@ -36,12 +37,6 @@ const PHASES: Readonly<Record<ReturnType<typeof activityExecutionCategory>, Watc
   attention: "thinking",
 };
 
-function clipCodeUnits(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const last = value.charCodeAt(maximum - 2);
-  return `${value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 2 : maximum - 1)}…`;
-}
-
 /** One neutralized line of at most `MAX_WATCHER_LIVE_LABEL_CHARS`. */
 export function watcherLiveLabel(activity: Pick<AgentActivity, "kind" | "title" | "status">): string | null {
   const raw = hostToolActivityTitle(activity) ?? activity.title;
@@ -51,7 +46,8 @@ export function watcherLiveLabel(activity: Pick<AgentActivity, "kind" | "title" 
     flattened += code < 0x20 || code === 0x7f ? " " : character;
   }
   const line = neutralizeUntrustedAgentText(flattened.replace(/\s+/gu, " ").trim());
-  return line.length === 0 ? null : clipCodeUnits(line, MAX_WATCHER_LIVE_LABEL_CHARS);
+  if (line.length === 0) return null;
+  return line.length <= MAX_WATCHER_LIVE_LABEL_CHARS ? line : `${clipCodeUnits(line, MAX_WATCHER_LIVE_LABEL_CHARS - 1)}…`;
 }
 
 /**

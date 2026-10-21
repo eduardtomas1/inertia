@@ -1,3 +1,4 @@
+import { clipCodeUnits } from "../../../shared/code-units";
 import {
   MAX_WATCHER_FINDING_BYTES,
   MAX_WATCHER_NOTE_CHARS,
@@ -58,12 +59,6 @@ export function splitWatcherResolvedLine(text: string): { text: string; resolved
   const checks = [...line.matchAll(/\d+/gu)].map(([digits]) => Number(digits));
   if (checks.length > MAX_WATCHER_RESOLVED_CHECKS || checks.some((check) => check < 1)) return { text: trimmed, resolved: [] };
   return { text: trimmed.slice(0, lineStart).trim(), resolved: [...new Set(checks)] };
-}
-
-function clipCodeUnits(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const last = value.charCodeAt(maximum - 1);
-  return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
 }
 
 /**

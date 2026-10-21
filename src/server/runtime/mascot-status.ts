@@ -374,12 +374,14 @@ export class MascotStatusPublisher {
   }
 }
 
+type WatcherWakeLookup = { wakeForTurn(turnId: string): { state: string; outcome: string | null } | null };
+
 export function storeMascotStatus(
   publish: ((feed: MascotFeed) => void) | undefined,
   store: () => {
     conversationShell(id: string): ConversationShell | null;
     project(id: string): Pick<Project, "name">;
-    watcherLinks?: { wakeForTurn(turnId: string): { state: string; outcome: string | null } | null };
+    watcherLinks?: WatcherWakeLookup;
   },
 ): MascotStatusPublisher {
   return new MascotStatusPublisher(
@@ -403,7 +405,7 @@ export function storeMascotStatus(
  * or when it found nothing to report. Findings, failures and pauses still do.
  */
 export function quietWatcherCheck(
-  watcherLinks: { wakeForTurn(turnId: string): { state: string; outcome: string | null } | null } | undefined,
+  watcherLinks: WatcherWakeLookup | undefined,
   turnId: string,
 ): boolean {
   try {

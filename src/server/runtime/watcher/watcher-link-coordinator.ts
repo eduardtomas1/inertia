@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 
+import { clipCodeUnits } from "../../../shared/code-units";
 import type { ModelSelection, RuntimeMutationEvent } from "../../../shared/contracts";
 import type { WatcherAttachPayload, WatcherUpdatePayload } from "../../../shared/contracts/client-command/watcher";
 import {
@@ -112,9 +113,7 @@ export interface WatcherLinkCoordinatorDependencies {
 function clipTitle(value: string): string {
   const flattened = value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
   if (flattened.length <= MAX_WATCHER_TITLE_CHARS) return flattened;
-  const end = MAX_WATCHER_TITLE_CHARS - 1;
-  const last = flattened.charCodeAt(end - 1);
-  return `${flattened.slice(0, last >= 0xD800 && last <= 0xDBFF ? end - 1 : end).trimEnd()}…`;
+  return `${clipCodeUnits(flattened, MAX_WATCHER_TITLE_CHARS - 1).trimEnd()}…`;
 }
 
 export function watcherConversationTitle(preset: WatcherAttachPayload["preset"], watchedTitle: string): string {

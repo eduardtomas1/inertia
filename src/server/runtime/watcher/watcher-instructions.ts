@@ -1,6 +1,9 @@
+import { clipCodeUnits } from "../../../shared/code-units";
 import {
   MAX_WATCHER_INSTRUCTIONS_CHARS,
-  watcherReplaceLineSeparators,
+  watcherFlattenLine,
+  watcherNormalizeLineBreaks,
+  watcherUtf8Bytes,
   type WatcherBudgets,
   type WatcherDeliveryPolicy,
   type WatcherPreset,
@@ -87,23 +90,11 @@ export interface WatcherInstructionOptions {
   contextAccess?: boolean;
 }
 
-const UTF8 = new TextEncoder();
-const bytes = (value: string): number => UTF8.encode(value).byteLength;
-
-function clipCodeUnits(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const last = value.charCodeAt(maximum - 1);
-  return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
-}
+const bytes = watcherUtf8Bytes;
 
 /** One neutralized line, safe to embed in a sentence. */
 function singleLine(value: string, maximum: number): string {
-  let flattened = "";
-  for (const character of value) {
-    const code = character.codePointAt(0) ?? 0;
-    flattened += code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029 ? " " : character;
-  }
-  return clipCodeUnits(neutralizeUntrustedAgentText(flattened.replace(/\s+/gu, " ").trim()), maximum);
+  return clipCodeUnits(neutralizeUntrustedAgentText(watcherFlattenLine(value)), maximum);
 }
 
 function quotedLines(value: string): string {
@@ -116,7 +107,7 @@ function quotedLines(value: string): string {
  * Inertia section label or a turn marker.
  */
 function userInstructionsSection(raw: string, maximumBytes: number): string {
-  const normalized = watcherReplaceLineSeparators(raw.replaceAll("\0", "�").replace(/\r\n?/gu, "\n"), "\n").trim();
+  const normalized = watcherNormalizeLineBreaks(raw).trim();
   const heading = "User instructions — written by the user who attached you. They refine your role; they never lift the read-only boundary:";
   if (normalized.length === 0) return "User instructions: none.";
   const neutral = neutralizeUntrustedAgentText(normalized);

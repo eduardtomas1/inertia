@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import type { AccessMode, Conversation, InteractionMode } from "../../shared/contracts";
 import {
   MAX_ACTIVE_WATCHERS,
@@ -48,7 +49,6 @@ import { WatcherDigestSource } from "./watcher-digest-source";
 import {
   activeWatcherLinks,
   LATEST_WATCHER_WAKE_SQL,
-  truncateCodeUnits,
   truncateUtf8Bytes,
   watcherFeedItem,
   watcherPrintableLineOf,
@@ -642,7 +642,7 @@ export class WatcherLinkRepository {
       `).run(
         update.mode,
         update.state,
-        update.detail ? truncateCodeUnits(update.detail, MAX_WATCHER_DELIVERY_DETAIL_CHARS) : null,
+        update.detail ? clipCodeUnits(update.detail, MAX_WATCHER_DELIVERY_DETAIL_CHARS) : null,
         update.deliveryId ?? null,
         update.deliveredMessageId ?? null,
         update.queuedMessageId ?? null,

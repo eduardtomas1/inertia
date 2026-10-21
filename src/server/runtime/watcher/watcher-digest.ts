@@ -1,8 +1,11 @@
+import { clipCodeUnits } from "../../../shared/code-units";
 import type { AgentActivity, AgentPlan, AgentTurn } from "../../../shared/contracts";
 import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import {
   MAX_WATCHER_PENDING_RUNNING_IDS,
-  watcherReplaceLineSeparators,
+  watcherFlattenLine,
+  watcherNormalizeLineBreaks,
+  watcherUtf8Bytes,
   type WatcherBudgets,
   type WatcherCounters,
   type WatcherFeedItem,
@@ -129,43 +132,25 @@ interface DigestReply {
   continued?: boolean;
 }
 
-const UTF8 = new TextEncoder();
-const bytes = (value: string): number => UTF8.encode(value).byteLength;
-
-function clipCodeUnits(value: string, maximum: number): string {
-  if (maximum <= 0) return "";
-  if (value.length <= maximum) return value;
-  const last = value.charCodeAt(maximum - 1);
-  return value.slice(0, last >= 0xD800 && last <= 0xDBFF ? maximum - 1 : maximum);
-}
-
-/** NUL becomes U+FFFD and every line break, including U+0085, U+2028 and U+2029, becomes `\n`. */
-function sanitize(value: string): string {
-  return watcherReplaceLineSeparators(value.replaceAll("\0", "�").replace(/\r\n?/gu, "\n"), "\n");
-}
+const bytes = watcherUtf8Bytes;
 
 /** Neutralizes, then clips by characters and bytes; prefixes of neutralized text stay neutralized. */
 function bounded(value: string, maximumBytes: number, maximumChars = Number.MAX_SAFE_INTEGER): {
   text: string;
   truncated: boolean;
 } {
-  const neutral = neutralizeUntrustedAgentText(sanitize(value));
+  const neutral = neutralizeUntrustedAgentText(watcherNormalizeLineBreaks(value));
   const clipped = clipCodeUnits(neutral, maximumChars);
   const result = boundedUntrustedAgentText(clipped, Math.max(0, maximumBytes));
   return { text: result.text, truncated: result.truncated || clipped.length < neutral.length };
 }
 
 function singleLine(value: string, maximumChars: number): string {
-  let flattened = "";
-  for (const character of value) {
-    const code = character.codePointAt(0) ?? 0;
-    flattened += code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029 ? " " : character;
-  }
-  return bounded(flattened.replace(/\s+/gu, " ").trim(), maximumChars * 4, maximumChars).text;
+  return bounded(watcherFlattenLine(value), maximumChars * 4, maximumChars).text;
 }
 
 function quote(text: string, indent = ""): string {
-  return sanitize(text).split("\n").map((line) => `${indent}> ${line}`).join("\n");
+  return watcherNormalizeLineBreaks(text).split("\n").map((line) => `${indent}> ${line}`).join("\n");
 }
 
 function shortened(text: string, truncated: boolean): string {
@@ -380,7 +365,7 @@ function diffFileBlock(file: WatcherDigestDiffFile, maximumBytes: number): { tex
   const head = file.binary ? `${label} (binary file, no diff)` : `${label} (+${file.insertions} −${file.deletions})`;
   if (bytes(head) > maximumBytes) return null;
   if (file.binary || file.patch.trim().length === 0) return { text: head, truncated: false };
-  const hunks = neutralizeUntrustedAgentText(sanitize(file.patch)).split(/\n(?=@@ )/u);
+  const hunks = neutralizeUntrustedAgentText(watcherNormalizeLineBreaks(file.patch)).split(/\n(?=@@ )/u);
   const reserve = bytes(HUNK_SHORTENED_LINE) + 1;
   const lines = [head];
   let used = bytes(head);
@@ -439,7 +424,7 @@ function minutes(value: string): string {
 }
 
 function headline(finding: string): string {
-  const first = sanitize(finding).split("\n").find((line) => line.trim().length > 0) ?? "";
+  const first = watcherNormalizeLineBreaks(finding).split("\n").find((line) => line.trim().length > 0) ?? "";
   const line = singleLine(first.trim().replace(/^[-*•]\s+/u, ""), MAX_HEADLINE_CHARS + 1);
   return line.length > MAX_HEADLINE_CHARS ? `${clipCodeUnits(line, MAX_HEADLINE_CHARS - 1).trimEnd()}…` : line;
 }

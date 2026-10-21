@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import { cachedStatement } from "./statement-cache";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import {
   clampWatcherBudgets,
   DEFAULT_WATCHER_SHARING,
@@ -12,6 +13,7 @@ import {
   watcherLinkViewSchema,
   watcherPrintableText,
   watcherSharingSchema,
+  watcherUtf8Bytes,
   type WatcherDelivery,
   type WatcherDeliveryMode,
   type WatcherDeliveryPolicy,
@@ -163,22 +165,13 @@ function stringArray(value: string, maximum: number): string[] {
     : [];
 }
 
-/** Cuts on a UTF-16 boundary that never splits a surrogate pair. */
-export function truncateCodeUnits(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const end = /[\uD800-\uDBFF]/u.test(value[maximum - 1] ?? "") ? maximum - 1 : maximum;
-  return value.slice(0, end);
-}
-
-const UTF8 = new TextEncoder();
-
 /** Cuts to at most `maximumBytes` of UTF-8 without splitting a code point. */
 export function truncateUtf8Bytes(value: string, maximumBytes: number): string {
-  if (UTF8.encode(value).byteLength <= maximumBytes) return value;
+  if (watcherUtf8Bytes(value) <= maximumBytes) return value;
   let bytes = 0;
   let end = 0;
   for (const character of value) {
-    const size = UTF8.encode(character).byteLength;
+    const size = watcherUtf8Bytes(character);
     if (bytes + size > maximumBytes) break;
     bytes += size;
     end += character.length;
@@ -191,7 +184,7 @@ export function truncateUtf8Bytes(value: string, maximumBytes: number): string {
  * serializes to at most three bytes, which bounds the shell projection.
  */
 export function watcherPrintableLineOf(value: string, maximum: number): string {
-  return truncateCodeUnits(watcherPrintableText(value).replace(/\s+/gu, " ").trim(), maximum).trim();
+  return clipCodeUnits(watcherPrintableText(value).replace(/\s+/gu, " ").trim(), maximum).trim();
 }
 
 function headline(row: WatcherLinkRow): WatcherFeedHeadline | null {

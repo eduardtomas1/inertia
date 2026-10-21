@@ -8,7 +8,6 @@ import {
   type WatcherWakeTrigger,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
-import { PROVIDER_INFO } from "../../provider/catalog";
 import { readWatcherTurnDiff, type WatcherTurnDiffSnapshot } from "../../persistence/watcher-digest-source";
 import type { WatcherCursor, WatcherLinkRecord, WatcherTransition } from "../../persistence/watcher-link-repository";
 import type { TurnController } from "../turns/turn-controller";
@@ -16,7 +15,7 @@ import type { ReadOnlyWatcherViolation } from "../turns/turn-controller-types";
 import { publicRuntimeError } from "../../runtime-errors";
 import { isHeld } from "../update-hold";
 import type { WatcherCheckoutGuard, WatcherGuardOutcome, WatcherGuardWindow } from "./watcher-checkout-guard";
-import type { WatcherDeliveryService } from "./watcher-delivery";
+import { WATCHER_PROVIDER_NAMES, type WatcherDeliveryService } from "./watcher-delivery";
 import { conversationOrNull } from "./watcher-link-coordinator";
 import { buildWatcherDigest, type WatcherDigest, type WatcherOpenReply } from "./watcher-digest";
 import { watcherInstruction } from "./watcher-instructions";
@@ -50,10 +49,6 @@ function watcherRouteUnavailableDetail(selection: ModelSelection, message: strin
 function watcherDispatchFailedDetail(message: string): string {
   return `The watcher's checks couldn't start ${WATCHER_DISPATCH_FAILURE_LIMIT} times in a row: ${message.trim()}`;
 }
-
-const PROVIDER_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(PROVIDER_INFO).map(([id, info]) => [id, info.name]),
-);
 
 /** Room for a finding preview plus its trailing marker. */
 const MAX_REPLY_READ_BYTES = MAX_WATCHER_FINDING_BYTES * 2;
@@ -270,7 +265,7 @@ export class WatcherWakeRunner {
         sessionFresh: watcher.providerSessionId === null,
         now: this.#deps.now(),
         watchedTitle: watched.title,
-        watchedAgent: watcherAgentLabel(watched, PROVIDER_NAMES),
+        watchedAgent: watcherAgentLabel(watched, WATCHER_PROVIDER_NAMES),
         sequence: claimed.counters.wakesTotal + 1,
         ...(previousPlanKey === undefined ? {} : { previousPlanKey }),
         ...(finalTurnId === null ? {} : { turnId: finalTurnId }),

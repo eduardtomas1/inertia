@@ -17,6 +17,8 @@ import {
   type DetachedChatRuntimePolicyResources,
 } from "../../src/server/runtime/detached-chat-runtime-policy";
 import type { RuntimeClientAuthority } from "../../src/server/runtime/runtime-client-authority";
+import { ConversationContextRequestCoordinator } from "../../src/server/runtime/conversation-context-request-coordinator";
+import { createDetachedChatRuntimeSecurity } from "../../src/server/runtime/detached-chat-runtime-security";
 
 const CONVERSATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_CONVERSATION = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -503,6 +505,89 @@ describe("detached chat runtime authority", () => {
     }))).toEqual(open.map(() => REJECTED));
     // Nothing pending: the generic resources know no context request.
     expect(open.map(rejection)).toEqual(open.map(() => REJECTED));
+  });
+
+  it("refuses an agent context answer when the pending input does not carry the command's identity", () => {
+    const REJECTED = "That request is unavailable in a detached chat.";
+    const commands = agentContextCommands(CONVERSATION, OTHER_CONVERSATION);
+    const foreignOwner = namedContextRequest(OTHER_CONVERSATION, CONVERSATION);
+    foreignOwner.conversationContextRequest = namedContextRequest(
+      CONVERSATION,
+      OTHER_CONVERSATION,
+    ).conversationContextRequest;
+    const otherRequest = namedContextRequest(CONVERSATION, OTHER_CONVERSATION);
+    otherRequest.conversationContextRequest = {
+      ...otherRequest.conversationContextRequest!,
+      requestId: "22222222-2222-4222-8222-222222222222",
+    };
+    for (const pending of [foreignOwner, otherRequest]) {
+      expect(commands.map((command) => detachedChatCommandRejection(authority, command, {
+        ...namedContextResources(),
+        pendingInput: () => pending,
+      }))).toEqual(commands.map(() => REJECTED));
+    }
+  });
+
+  it("authorizes one answer to a live named context request for the window's chat", async () => {
+    const pendingInputs = new Map<string, AgentInputRequest>();
+    const requestedSource = namedContextRequest(CONVERSATION, OTHER_CONVERSATION)
+      .conversationContextRequest!.requestedSource!;
+    const coordinator = new ConversationContextRequestCoordinator({
+      pendingInputs,
+      contextPackets: { requestedSourceSummary: () => requestedSource },
+      broadcast: () => undefined,
+      broadcastConversationShell: () => undefined,
+    });
+    const security = createDetachedChatRuntimeSecurity({
+      websocketPath: "/runtime",
+      store: {
+        subagentTrace: () => { throw new Error("Not found."); },
+        checkpoint: () => { throw new Error("Not found."); },
+      },
+      snapshot,
+      pendingApprovals: new Map(),
+      pendingInputs,
+    });
+    const outcome = coordinator.request({
+      scope: {
+        contextRequestId: REQUEST,
+        targetConversationId: CONVERSATION,
+        targetTurnId: REQUEST,
+        targetRunId: RUN,
+        toolCallIdHash: "a".repeat(64),
+      },
+      providerId: "codex",
+      requestedSourceConversationId: OTHER_CONVERSATION,
+      requestedSource,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+    const otherSource = "22222222-2222-4222-8222-222222222222";
+    const [, , wrongSource] = agentContextCommands(CONVERSATION, otherSource);
+    const [load, , select] = agentContextCommands(CONVERSATION, OTHER_CONVERSATION);
+
+    expect(security.authorizationError(authority, wrongSource!)).toMatchObject({
+      type: "request.error",
+      message: "That request is unavailable in a detached chat.",
+    });
+    expect(security.authorizationError(authority, load!)).toBeNull();
+    expect(security.authorizationError(authority, select!)).toBeNull();
+    expect(coordinator.respond({
+      requestId: REQUEST,
+      targetConversationId: CONVERSATION,
+      selection: { sourceConversationId: OTHER_CONVERSATION, acknowledgedWorkspaceDifference: true },
+    })).toBe(true);
+    await expect(outcome).resolves.toMatchObject({ kind: "selected" });
+
+    expect(security.authorizationError(authority, select!)).toMatchObject({
+      type: "request.error",
+      message: "That request is unavailable in a detached chat.",
+    });
+    expect(coordinator.respond({
+      requestId: REQUEST,
+      targetConversationId: CONVERSATION,
+      selection: { sourceConversationId: OTHER_CONVERSATION, acknowledgedWorkspaceDifference: true },
+    })).toBe(false);
   });
 
   it("binds indirect resource identities to the owned conversation", () => {

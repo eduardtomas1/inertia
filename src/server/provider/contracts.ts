@@ -126,6 +126,7 @@ interface ProviderRunRequest {
    * means no limit.
    */
   maxBudgetUsd?: number;
+  readOnlyProfile?: "watcher";
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {
     kind: "compact";

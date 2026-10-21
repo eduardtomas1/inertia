@@ -98,6 +98,7 @@ import type {
   ResponseTimelineProps,
 } from "./response-timeline/types";
 import { IconButton, LoadingMark } from "./ui";
+import type { WatcherWakeSummary } from "@shared/watcher";
 import { loadResponseTimeline } from "./chatSurfaceLoaders";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import { composerFocusRestorer } from "../utils/composerFocusRestore";
@@ -197,6 +198,7 @@ type ChatWorkspaceProps = {
   promptContext?: string | null;
   contextSources?: readonly ConversationContextSourceOption[];
   contextPackets?: readonly ConversationContextPacketSummary[];
+  watcherWakes?: readonly WatcherWakeSummary[];
   onConversationContextCommand?: ConversationContextCommandRunner;
   onQueueCommand?: QueueCommandRunner;
   onLimitResetCommand?: LimitResetCommandRunner;
@@ -307,6 +309,7 @@ export function ChatWorkspace({
   promptContext,
   contextSources = EMPTY_CONTEXT_SOURCES,
   contextPackets = EMPTY_CONTEXT_PACKETS,
+  watcherWakes,
   onConversationContextCommand,
   onQueueCommand,
   onLimitResetCommand,
@@ -985,6 +988,7 @@ export function ChatWorkspace({
               turns={ownedTurns}
               messages={ownedMessages}
               contextPackets={contextPackets}
+              watcherWakes={watcherWakes}
               onConversationContextCommand={onConversationContextCommand}
               activities={ownedActivities}
               subagents={ownedSubagents}

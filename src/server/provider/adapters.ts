@@ -144,6 +144,20 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       "The spend limit is invalid.",
     );
   }
+  if (
+    input.readOnlyProfile !== undefined
+    && (
+      input.readOnlyProfile !== "watcher"
+      || input.interactionMode !== "plan"
+      || input.access !== "supervised"
+      || input.goalStart !== undefined
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The read-only profile is invalid.",
+    );
+  }
   if (input.goalStart) {
     const objective = input.goalStart.objective?.trim();
     const budget = input.goalStart.tokenBudget;

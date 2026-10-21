@@ -169,6 +169,7 @@ function startCodexRun(
       ...(options.hostTools ? { hostTools: options.hostTools } : {}),
       planMode: options.input.interactionMode === "plan",
       access: options.input.access,
+      ...(options.input.readOnlyProfile ? { readOnlyProfile: options.input.readOnlyProfile } : {}),
       onText: emitter.text,
       onTextBoundary: emitter.textBoundary,
       onActivity: emitter.activity,

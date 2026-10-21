@@ -36,6 +36,13 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
   ];
   const unchanged = omittedTurnIds.length === currentOmitted.length
     && omittedTurnIds.every((id) => currentOmitted.includes(id));
+  const currentWakes = current.watcherWakes ?? [];
+  const incomingWakes = incoming.watcherWakes ?? [];
+  const wakeSources = mode === "refresh"
+    ? [...currentWakes.filter(({ turnId }) => !replacedTurns.has(turnId)), ...incomingWakes]
+    : [...incomingWakes, ...currentWakes];
+  const watcherWakes = current.watcherWakes || incoming.watcherWakes
+    ? [...new Map(wakeSources.map((wake) => [wake.wakeId, wake])).values()] : undefined;
   const page = mode === "older" ? incoming.history : current.history ?? incoming.history;
   const history = !page || (unchanged && page === current.history) ? page
     : { older: page.older, ...(omittedTurnIds.length ? { omittedTurnIds: unchanged ? currentOmitted : omittedTurnIds } : {}) };
@@ -53,5 +60,6 @@ export function mergeConversationHistory(current: ConversationDetail, incoming: 
     contextPackets: merge((current.contextPackets ?? []).filter((packet) =>
       mode !== "refresh" || packet.consumedMessageId !== null), incoming.contextPackets ?? []),
     plans,
+    ...(watcherWakes ? { watcherWakes } : {}),
   };
 }

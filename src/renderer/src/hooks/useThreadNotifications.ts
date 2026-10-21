@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { AppSnapshot, Conversation, ConversationLatestTurnSummary } from "@shared/contracts";
 import type { DesktopNotificationKind } from "@shared/desktop";
+import type { WatcherLinkView } from "@shared/watcher";
 
 export function threadNotificationKind(
   previous: Conversation,
@@ -23,6 +24,27 @@ export function threadNotificationKind(
   return null;
 }
 
+export function checkingWatcherIds(
+  ...snapshots: ReadonlyArray<readonly WatcherLinkView[] | undefined>
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const links of snapshots) {
+    for (const link of links ?? []) {
+      if (link.status === "waking") ids.add(link.watcherConversationId);
+    }
+  }
+  return ids;
+}
+
+export function threadNotificationKindFor(
+  previous: Conversation,
+  current: Parameters<typeof threadNotificationKind>[1],
+  quietConversationIds: ReadonlySet<string>,
+): DesktopNotificationKind | null {
+  if (quietConversationIds.has(current.id)) return null;
+  return threadNotificationKind(previous, current);
+}
+
 export function useThreadNotifications(
   snapshot: AppSnapshot | null,
   documentActive: boolean,
@@ -33,6 +55,7 @@ export function useThreadNotifications(
   onlyInBackground = false,
 ): void {
   const previousRef = useRef<Map<string, Conversation> | null>(null);
+  const previousWatchersRef = useRef<AppSnapshot["watchers"]>(undefined);
   const snapshotRef = useRef(snapshot);
   const activateRef = useRef(onActivate);
   const pendingActivationIdRef = useRef<string | null>(null);
@@ -73,13 +96,16 @@ export function useThreadNotifications(
       conversation,
     ]));
     const previous = previousRef.current;
+    const previousWatchers = previousWatchersRef.current;
     previousRef.current = next;
+    previousWatchersRef.current = snapshot.watchers;
     if (!previous || !enabled) return;
 
+    const quiet = checkingWatcherIds(previousWatchers, snapshot.watchers);
     for (const conversation of snapshot.conversations) {
       const prior = previous.get(conversation.id);
       if (!prior) continue;
-      const kind = threadNotificationKind(prior, conversation);
+      const kind = threadNotificationKindFor(prior, conversation, quiet);
       if (!kind) continue;
       if (
         conversation.snoozedUntil

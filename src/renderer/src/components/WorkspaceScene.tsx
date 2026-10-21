@@ -23,6 +23,7 @@ import {
   type DetachedConversationPlaceholderProps,
 } from "./DetachedConversationPlaceholder";
 import { PaneResizeHandle } from "./PaneResizeHandle";
+import { WatcherDockHost } from "./watcher/WatcherDockHost";
 import type { SettingsViewProps } from "./settings/settingsTypes";
 import { LoadingMark } from "./ui";
 import type { Project } from "@shared/contracts";
@@ -297,6 +298,7 @@ function ConversationPane({
           )}
         <TerminalDock tools={tools} containerRef={chatRef} surfaceTarget={terminalTarget} />
       </div>
+      <WatcherDockHost watchedId={detachedChat || detailState ? null : chat.conversation?.id ?? null} />
       <WorkspaceToolSurface
         resizeHandle={resizeHandle}
         tools={tools}
@@ -377,6 +379,9 @@ function WorkspaceSceneView({
           )}
           <TerminalDock tools={tools} containerRef={chatColumnRef} surfaceTarget={terminalTarget} />
         </div>
+      )}
+      {view !== "settings" && !splitScene && (
+        <WatcherDockHost watchedId={detachedChat || detailState ? null : chat.conversation?.id ?? null} />
       )}
 
       {!splitScene && (

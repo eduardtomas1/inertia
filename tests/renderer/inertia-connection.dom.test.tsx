@@ -21,6 +21,7 @@ import {
 } from "../../src/shared/runtime-command-timeouts";
 import { useInertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { runtimeCommandDelivery } from "../../src/renderer/src/utils/connectionMessages";
+import { publishWatcherLive, resetWatcherLiveStore, useWatcherLive } from "../../src/renderer/src/utils/watcherLiveStore";
 
 class FakeWebSocket extends EventTarget {
   static readonly OPEN = 1;
@@ -139,6 +140,53 @@ describe("useInertiaConnection", () => {
     await vi.waitFor(() => expect(hook.result.current.status).toBe("online"));
     expect(hook.result.current.error).toBeNull();
     expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("drops a finished check's live phase when a snapshot resyncs the links", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn().mockResolvedValue({ websocketUrl: "ws://127.0.0.1:12345/runtime/test" }),
+        onRuntimeReady: vi.fn(() => vi.fn()),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    resetWatcherLiveStore();
+    publishWatcherLive({
+      type: "watcher.live",
+      linkId: "link-1",
+      watcherConversationId: "watcher-1",
+      turnId: "turn-1",
+      phase: "writing",
+      label: null,
+      at: "2026-10-19T10:42:00.000Z",
+    });
+    const live = renderHook(() => useWatcherLive("link-1"));
+    expect(live.result.current?.phase).toBe("writing");
+    renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const sync = { runtimeGeneration: "runtime-resync", latestSequence: 0 };
+    act(() => {
+      FakeWebSocket.instances[0]!.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({
+          type: "server.welcome",
+          protocolVersion: 1,
+          snapshot: {
+            projects: [],
+            conversations: [],
+            runs: [],
+            providers: [],
+            settings: defaultSettings,
+            activeProjectId: null,
+            activeConversationId: null,
+            sync,
+          },
+          sync,
+        }),
+      }));
+    });
+    await waitFor(() => expect(live.result.current).toBeNull());
+    resetWatcherLiveStore();
   });
 
   it("does not poll a non-retryable startup blocker", async () => {

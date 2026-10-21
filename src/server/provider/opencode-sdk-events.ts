@@ -11,6 +11,7 @@ import { openCodeAttachmentReadAllowed } from "./attachment-read-grant";
 import type { AgentHarnessStartOptions } from "./agent-harness";
 import { createAgentHarnessEmitter } from "./agent-harness";
 import { type ProviderRunFailure } from "./contracts";
+import { openCodeWatcherCommandAllowed, openCodeWatcherCommandContained } from "./opencode-host-tools";
 import { CappedProviderBuffer } from "./io";
 import type { AgentApprovalDecision } from "./interactions";
 import {
@@ -152,6 +153,12 @@ export function handleOpenCodeInteractionEvent(
       || openCodeAttachmentReadAllowed(permission, properties, options.input.attachmentReadRoots)
     ) {
       void replies.permission({ protocol, sessionId, nativeId }, "once")
+        .catch(onFailure);
+      return true;
+    }
+    if (openCodeWatcherCommandAllowed(permission, properties, options.input)) {
+      void openCodeWatcherCommandContained(properties, options.input)
+        .then((contained) => replies.permission({ protocol, sessionId, nativeId }, contained ? "once" : "reject"))
         .catch(onFailure);
       return true;
     }

@@ -81,6 +81,8 @@ export class RestartContinuationScheduler {
       const conversation = this.store.conversation(conversationId);
       const turn = this.store.latestAgentTurnForConversation(conversationId);
       if (!turn || conversation.archivedAt !== null || !CONTINUABLE_STATUSES.has(turn.status)) return null;
+      const watcher = this.store.watcherLinks.policyForConversation(conversationId);
+      if (watcher && watcher.status !== "detached") return null;
       if (this.dependencies.pendingInteraction(conversationId) || this.store.queuedMessages.list(conversationId).length > 0) return null;
       return { conversationId, interruptedTurnId: turn.id, routeIdentity: queuedRouteIdentity(conversation) };
     } catch {

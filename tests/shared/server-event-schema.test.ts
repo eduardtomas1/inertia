@@ -1983,4 +1983,80 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(() => parseServerEvent(event({ kind: "agent.workflow", workflow: { ...workflow, goals: [{ ...workflow.goals[0], conversationId: "conversation-2" }] } }))).toThrow("Malformed server event");
     expect(() => parseServerEvent(event({ kind: "agent.skills", conversationId: conversation.id, skills: [{ ...skill, conversationId: "conversation-2" }], skillDiscovery: workflow.skillDiscovery }))).toThrow("Malformed server event");
   });
+  it("accepts shell-scoped watcher events, results, links and wake summaries", () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const watcherId = "22222222-2222-4222-8222-222222222222";
+    const watchedId = "33333333-3333-4333-8333-333333333333";
+    const link = {
+      id: "44444444-4444-4444-8444-444444444444", watcherConversationId: watcherId, watchedConversationId: watchedId,
+      projectId, preset: "reviewer", instructions: "", privateConnect: "inherit", delivery: "manual", status: "watching",
+      sharing: { brief: true, activities: true, changedFiles: true, partialReplies: false },
+      budgets: { wakesPerWatchedTurn: 30, cooldownSeconds: 45, digestKiB: 24, contextReadsPerWake: 4 },
+      pauseReason: null, pauseDetail: null, detachedReason: null, watchedTurnId: null,
+      counters: { wakesThisTurn: 0, wakeAllowance: 30, wakesTotal: 0, eventsSeen: 0, eventsPending: 0, findingsTotal: 0 },
+      lastWakeAt: null, quietSince: null, feedRevision: 0, latest: null, latestFindingAt: null, createdAt: checkedAt, updatedAt: checkedAt,
+    };
+    const shells = [watcherId, watchedId].map((id) => ({ ...conversationShell, id, projectId }));
+    const withWatchers = (watchers: unknown, conversations: unknown[] = shells): unknown => parseServerEvent({
+      type: "snapshot.updated",
+      snapshot: snapshot({ projects: [{ ...project, id: projectId }], activeProjectId: projectId, conversations, watchers }),
+    });
+    expect(withWatchers([link])).toBeTruthy();
+    expect(withWatchers([])).toBeTruthy();
+    for (const invalid of [
+      [link, { ...link }],
+      [{ ...link, projectId: "55555555-5555-4555-8555-555555555555" }],
+      [{ ...link, status: "paused" }],
+      [{ ...link, watchedConversationId: watcherId }],
+    ]) expect(() => withWatchers(invalid)).toThrow("Malformed server event");
+    expect(() => withWatchers([link], [])).toThrow("Malformed server event");
+
+    const frame = (scope: unknown, mutation: unknown): unknown => ({
+      type: "runtime.event", sync: { runtimeGeneration: "runtime-1", latestSequence: 1 }, scope, event: mutation,
+    });
+    const live = {
+      type: "watcher.live", linkId: link.id, watcherConversationId: watcherId, turnId: "turn-1",
+      phase: "searching", label: null, at: checkedAt,
+    };
+    for (const mutation of [{ type: "watcher.link.updated", link }, { type: "watcher.link.removed", linkId: link.id }, live]) {
+      expect(parseServerEvent(frame({ kind: "shell" }, mutation))).toBeTruthy();
+      expect(() => parseServerEvent(frame({ kind: "conversation-detail", conversationId: watcherId }, mutation)))
+        .toThrow("Malformed server event");
+    }
+    expect(() => parseServerEvent(frame({ kind: "shell" }, { ...live, phase: "editing" }))).toThrow("Malformed server event");
+
+    const item = {
+      wakeId: "66666666-6666-4666-8666-666666666666", sequence: 1, watcherTurnId: "turn-1", watchedTurnId: null,
+      trigger: "manual", outcome: "silent", state: "settled", eventsCovered: 0, itemsTruncated: 0, itemsOmitted: 0,
+      guardState: null, guardPaths: [], finding: null, delivery: null, createdAt: checkedAt, settledAt: checkedAt, resolvedBySequence: null, commandsDeclined: 0,
+    };
+    expect(parseServerEvent(event({ kind: "watcher.link", link }))).toBeTruthy();
+    expect(parseServerEvent(event({ kind: "watcher.feed", linkId: link.id, feedRevision: 1, items: [item], next: null }))).toBeTruthy();
+    expect(parseServerEvent(event({
+      kind: "watcher.delivery", linkId: link.id, wakeId: item.wakeId,
+      delivery: { mode: null, state: "dismissed", detail: null, at: checkedAt },
+    }))).toBeTruthy();
+    for (const invalid of [
+      { kind: "watcher.link", link: { ...link, preset: "auditor" } },
+      { kind: "watcher.feed", linkId: link.id, feedRevision: 1, items: [{ ...item, state: "running" }], next: null },
+      { kind: "watcher.delivery", linkId: link.id, wakeId: item.wakeId, delivery: { mode: "queue", state: "dismissed", detail: null, at: checkedAt } },
+    ]) expect(() => parseServerEvent(event(invalid))).toThrow("Malformed server event");
+
+    const ready = (detail: Record<string, unknown>) => event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready", detail: { ...conversationDetail, ...detail },
+    });
+    const summary = {
+      wakeId: item.wakeId, turnId: "turn-1", sequence: 1, trigger: "manual", outcome: null,
+      eventsCovered: 3, itemsTruncated: 0, itemsOmitted: 1, guardState: null,
+    };
+    expect(parseServerEvent(ready({ watcherWakes: [summary] }))).toBeTruthy();
+    expect(() => parseServerEvent(ready({ watcherWakes: [{ ...summary, turnId: "turn-9" }] }))).toThrow("Malformed server event");
+    expect(() => parseServerEvent(ready({ watcherWakes: [summary, { ...summary }] }))).toThrow("Malformed server event");
+    const read = {
+      targetMessageId: "message-1", targetTurnId: "turn-1", sourceConversationId: watchedId,
+      sourceConversationTitle: "Main chat", sourceState: "available", access: "watched",
+      listedTurns: false, turnIds: [], firstReadAt: checkedAt, lastReadAt: checkedAt,
+    };
+    expect(parseServerEvent(ready({ contextReads: [read] }))).toBeTruthy();
+  });
 });

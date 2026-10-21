@@ -1475,7 +1475,7 @@ describe("runtime migration catalog", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
       migrateRuntimeDatabase(database);
       expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
-        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null })));
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
       expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),
@@ -2156,6 +2156,7 @@ describe("runtime migration catalog", () => {
       { version: 96 },
       { version: 97 },
       { version: 98 },
+      { version: 99 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2178,6 +2179,21 @@ describe("runtime migration catalog", () => {
     expect(migrated.prepare(
       "SELECT COUNT(*) AS count FROM conversation_title_locks",
     ).get()).toEqual({ count: 0 });
+    expect(migrated.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('watcher_links', 'watcher_wakes') ORDER BY name",
+    ).all()).toEqual([{ name: "watcher_links" }, { name: "watcher_wakes" }]);
+    expect(migrated.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'watcher_%' ORDER BY name",
+    ).all()).toEqual([
+      { name: "watcher_links_active_limit" },
+      { name: "watcher_links_detached_final" },
+      { name: "watcher_links_watched_delete" },
+    ]);
+    for (const table of ["messages", "queued_messages"]) {
+      expect((migrated.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+        name: string;
+      }>).some(({ name }) => name === "watcher_note_json")).toBe(true);
+    }
     expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
       name: string;
     }>).some(({ name }) => name === "suspended_duration_ms")).toBe(true);

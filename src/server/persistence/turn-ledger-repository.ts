@@ -289,7 +289,7 @@ export class TurnLedgerRepository {
         input.attachments ?? [],
         null,
         input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId },
+        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote },
       );
       const turn = this.create({
         ...input,

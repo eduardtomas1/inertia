@@ -7,6 +7,7 @@ import {
   type CodexControlClientOptions,
 } from "./control-client";
 import { boundedText, objectValue, type JsonObject } from "./protocol";
+import { disabledCodexMcpServers } from "./read-only-thread-config";
 
 const TITLE_TIMEOUT_MS = 30_000;
 const TITLE_INTERRUPT_GRACE_MS = 1_000;
@@ -150,11 +151,6 @@ function titleRequest(prompt: string): string {
   return `${TITLE_INSTRUCTIONS}\n\nRequest:\n${request.slice(0, end)}`;
 }
 
-function disabledMcpServers(config: JsonObject): JsonObject {
-  const servers = objectValue(objectValue(config.config)?.mcp_servers) ?? {};
-  return Object.fromEntries(Object.keys(servers).map((name) => [name, { enabled: false }]));
-}
-
 function modelParams(options: CodexThreadTitleOptions): JsonObject {
   return options.model ? { model: options.model } : {};
 }
@@ -174,7 +170,7 @@ function threadStartParams(options: CodexThreadTitleOptions, config: JsonObject)
       ...Object.fromEntries(DISABLED_CONFIG_KEYS.map((key) => [key, false])),
       web_search: "disabled",
       default_permissions: ":read-only",
-      mcp_servers: disabledMcpServers(config),
+      mcp_servers: disabledCodexMcpServers(config),
     },
   };
 }

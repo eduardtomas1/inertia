@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import {
   privateConnectPromptSafetyForHarness,
 } from "../../../src/shared/private-connect/prompt-safety";
 import { removeTemporaryDirectory } from "../../helpers/temporary-directory";
+import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../../src/shared/watcher";
 
 const temporaryDirectories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -390,5 +392,86 @@ describe("Private Connect grant migration", () => {
       legacyProjectWide: false,
     }]);
     expect(grants[0]?.conversationIds).toEqual(["c1"]);
+  });
+});
+
+describe("Private Connect watcher visibility", () => {
+  function watcherFixture(privateConnect: "inherit" | "hidden" = "inherit") {
+    const f = fixture();
+    const { link, conversation: watcher } = f.store.watcherLinks.createWithConversation({
+      link: {
+        id: randomUUID(),
+        watchedConversationId: f.granted.id,
+        preset: "reviewer",
+        instructions: "",
+        sharing: { ...DEFAULT_WATCHER_SHARING },
+        budgets: { ...DEFAULT_WATCHER_BUDGETS },
+        privateConnect,
+      },
+      conversation: {
+        projectId: f.project.id,
+        title: "Watcher · Reviewer · Granted conversation",
+        options: { interactionMode: "plan", accessMode: "supervised" },
+      },
+    }, new Date().toISOString());
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => f.store.shellSnapshot(),
+      conversation: (conversationId) => f.store.conversationShell(conversationId),
+      detail: (conversationId) => f.store.conversationDetail(conversationId),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: f.queuePrompt,
+      privateConnectPromptSafety: (conversation) => privateConnectPromptSafetyForHarness(
+        "codex-app-server",
+        { watcher: f.store.watcherLinks.policyForConversation(conversation.id)?.status === "watching" },
+      ),
+      watcherParent: (conversationId) => {
+        const parent = f.store.watcherLinks.findByWatcher(conversationId);
+        return parent && parent.status !== "detached"
+          ? { watchedConversationId: parent.watchedConversationId, privateConnect: parent.privateConnect }
+          : null;
+      },
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+    });
+    return { ...f, gateway, link, watcher };
+  }
+
+  it("shows a watcher whenever the chat it watches is visible", async () => {
+    const f = watcherFixture();
+    const subject = f.subject([f.explicit(f.project.id, [f.granted.id])]);
+    expect(await visibleConversations(f.gateway, subject)).toEqual([f.granted.id, f.watcher.id].sort());
+    expect((await fetchConversation(f.gateway, subject, f.watcher.id)).ok).toBe(true);
+    expect((await sendPrompt(f.gateway, subject, f.watcher.id)).ok).toBe(true);
+    const state = await f.gateway.request(subject, { type: "state.get", requestId: REQUEST_ID });
+    const watcherState = state.ok && state.result.kind === "state"
+      ? state.result.state.conversations.find(({ id }) => id === f.watcher.id)
+      : undefined;
+    expect(watcherState?.promptSafety.headline).toBe("Read-only watcher · approvals are declined automatically");
+  });
+
+  it("shows a watcher with its own grant even when the watched chat is not granted", async () => {
+    const f = watcherFixture();
+    const subject = f.subject([f.explicit(f.project.id, [f.watcher.id])]);
+    expect(await visibleConversations(f.gateway, subject)).toEqual([f.watcher.id]);
+    const hidden = f.subject([f.explicit(f.project.id, [f.sibling.id])]);
+    expect(await visibleConversations(f.gateway, hidden)).toEqual([f.sibling.id]);
+    expect((await fetchConversation(f.gateway, hidden, f.watcher.id)).ok).toBe(false);
+  });
+
+  it("never shows a hidden watcher, even with an explicit grant", async () => {
+    const f = watcherFixture("hidden");
+    const subject = f.subject([f.explicit(f.project.id, [f.granted.id, f.watcher.id])]);
+    expect(await visibleConversations(f.gateway, subject)).toEqual([f.granted.id]);
+    expect((await fetchConversation(f.gateway, subject, f.watcher.id)).ok).toBe(false);
+    expect((await sendPrompt(f.gateway, subject, f.watcher.id)).ok).toBe(false);
+  });
+
+  it("treats a detached watcher as an ordinary chat that needs its own grant", async () => {
+    const f = watcherFixture("hidden");
+    f.store.watcherLinks.transition(f.link.id, ["watching"], { status: "detached", reason: "user" }, new Date().toISOString());
+    expect(await visibleConversations(f.gateway, f.subject([f.explicit(f.project.id, [f.granted.id])])))
+      .toEqual([f.granted.id]);
+    expect(await visibleConversations(f.gateway, f.subject([f.explicit(f.project.id, [f.watcher.id])])))
+      .toEqual([f.watcher.id]);
   });
 });

@@ -69,7 +69,24 @@ export interface RunGitOptions {
   failureMessage: string;
 }
 
-export type RunGitInspectionOptions = Omit<RunGitOptions, "input">;
+export type RunGitInspectionOptions = Omit<RunGitOptions, "input"> & {
+  disabledFilterDrivers?: readonly string[];
+};
+
+const MAX_DISABLED_FILTER_DRIVERS = 64;
+
+function disabledFilterArguments(names: readonly string[] = []): string[] {
+  if (names.length > MAX_DISABLED_FILTER_DRIVERS) {
+    throw new GitError("invalid-input", "The repository configures too many filter drivers.");
+  }
+  return names.flatMap((name) => {
+    if (name.length === 0 || name.length > 256 || /[=\0\r\n]/u.test(name)) {
+      throw new GitError("invalid-input", "A repository filter driver name cannot be overridden safely.");
+    }
+    return ["clean=", "smudge=", "process=", "required=false"]
+      .flatMap((setting) => ["-c", `filter.${name}.${setting}`]);
+  });
+}
 
 export interface GitRunnerDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
@@ -160,7 +177,7 @@ export async function settleGitInspections<First, Second, Third>(
   }
 }
 
-function inspectionArguments(args: readonly string[]): string[] {
+function inspectionArguments(args: readonly string[], disabledFilterDrivers?: readonly string[]): string[] {
   const [command, ...rest] = args;
   if (!command || command.startsWith("-")) {
     throw new GitError(
@@ -181,6 +198,7 @@ function inspectionArguments(args: readonly string[]): string[] {
     "--no-optional-locks",
     "-c",
     "core.fsmonitor=false",
+    ...disabledFilterArguments(disabledFilterDrivers),
     ...commandArguments,
   ];
 }
@@ -527,7 +545,7 @@ export function runGitInspection(
   args: readonly string[],
   options: RunGitInspectionOptions,
 ): Promise<GitProcessResult> {
-  const prepared = inspectionArguments(args);
+  const prepared = inspectionArguments(args, options.disabledFilterDrivers);
   return withGitScanProcessSlot(
     options,
     async (signal) => await runGitProcess(

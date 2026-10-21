@@ -1,6 +1,8 @@
 import type { OpencodeClient, PermissionRuleset } from "@opencode-ai/sdk/v2";
 
-import type { ProviderHostToolBridge } from "./contracts";
+import { readOnlyCommandPathProblem } from "../runtime/watcher/read-only-command-paths";
+import { classifyReadOnlyCommand, type ReadOnlyCommandContext } from "../runtime/watcher/read-only-commands";
+import type { ProviderHostToolBridge, ProviderRunInput } from "./contracts";
 import type { AgentApprovalDecision, AgentApprovalRequest } from "./interactions";
 import { INERTIA_HOST_MCP_NAME, openCodeHostMcpConfig } from "./host-tool-mcp-config";
 import {
@@ -35,10 +37,23 @@ export interface OpenCodeHostTools {
   respondToApproval(requestId: string, decision: AgentApprovalDecision): boolean;
 }
 
+const OPENCODE_WATCHER_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
+const OPENCODE_WATCHER_DENIED_READS = [".env", "*.env", "*.env.*"] as const;
+
 export function openCodePermissions(
   access: "full" | "supervised" | "auto-edit",
   interactionMode: "build" | "plan",
+  readOnlyProfile?: "watcher",
 ): PermissionRuleset {
+  if (readOnlyProfile === "watcher") {
+    return [
+      { permission: "*", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "*", action: "ask" },
+      ...OPENCODE_WATCHER_READ_TOOLS.map((permission) => ({ permission, pattern: "*", action: "allow" } as const)),
+      ...OPENCODE_WATCHER_DENIED_READS.map((pattern) => ({ permission: "read", pattern, action: "deny" } as const)),
+      { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
+    ];
+  }
   const planEdits = interactionMode === "plan"
     ? [{ permission: "edit", pattern: "*", action: "deny" } as const]
     : [];
@@ -59,6 +74,38 @@ export function openCodePermissions(
     },
     ...planEdits,
   ];
+}
+
+export function openCodeWatcherCommandAllowed(
+  permission: string,
+  properties: Record<string, unknown>,
+  input: Pick<ProviderRunInput, "cwd" | "readOnlyProfile">,
+): boolean {
+  const command = openCodePermissionCommand(properties);
+  return input.readOnlyProfile === "watcher"
+    && permission === "bash"
+    && command !== undefined
+    && classifyReadOnlyCommand(command, openCodeWatcherCommandContext(input)).allowed;
+}
+
+export async function openCodeWatcherCommandContained(
+  properties: Record<string, unknown>,
+  input: Pick<ProviderRunInput, "cwd">,
+): Promise<boolean> {
+  const command = openCodePermissionCommand(properties);
+  return command !== undefined && await readOnlyCommandPathProblem(command, openCodeWatcherCommandContext(input)) === null;
+}
+
+function openCodePermissionCommand(properties: Record<string, unknown>): string | undefined {
+  const metadata = properties.metadata;
+  const command = typeof metadata === "object" && metadata !== null
+    ? (metadata as Record<string, unknown>).command
+    : undefined;
+  return typeof command === "string" ? command : undefined;
+}
+
+function openCodeWatcherCommandContext(input: Pick<ProviderRunInput, "cwd">): ReadOnlyCommandContext {
+  return { cwd: input.cwd, windows: process.platform === "win32", powershell: true };
 }
 
 export function createOpenCodeHostTools(input: {

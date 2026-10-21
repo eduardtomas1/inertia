@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS,
+  READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
   privateConnectPromptSafetyForHarness,
   privateConnectPromptSafetyIsUsable,
@@ -46,5 +47,20 @@ describe("Private Connect prompt safety", () => {
     const safety = privateConnectPromptSafetyForHarness("opencode-sdk");
     expect(privateConnectPromptSafetyLabel("OpenCode", safety)).toContain("OpenCode Private Connect prompt");
     expect(privateConnectPromptSafetyLabel("OpenCode", safety)).toContain(safety.headline);
+  });
+});
+
+describe("Private Connect prompt safety for watchers", () => {
+  it("labels a read-only watcher and keeps unsupported harnesses unsupported", () => {
+    const base = privateConnectPromptSafetyForHarness("claude-agent-sdk");
+    const watcher = privateConnectPromptSafetyForHarness("claude-agent-sdk", { watcher: true });
+    expect(watcher).toMatchObject({ ...base, headline: READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE, explanation: expect.stringContaining("read-only watcher") });
+    expect(watcher.headline).toBe("Read-only watcher · approvals are declined automatically");
+    expect(watcher.explanation).not.toBe(base.explanation);
+    expect(privateConnectPromptSafetyIsUsable(watcher)).toBe(true);
+    expect(privateConnectPromptSafetyForHarness("codex-app-server", { watcher: false }))
+      .toBe(privateConnectPromptSafetyForHarness("codex-app-server"));
+    expect(privateConnectPromptSafetyForHarness("antigravity-cli", { watcher: true }).supported).toBe(false);
+    expect(privateConnectPromptSafetyForHarness(null, { watcher: true })).toBe(UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY);
   });
 });

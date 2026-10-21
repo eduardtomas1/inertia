@@ -40,6 +40,7 @@ import type { TurnStreamChannel } from "./turn-stream-channel";
 import type { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import type { StreamingTrace } from "../test-streaming-trace";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
+import type { WatcherNoteAttribution } from "../../../shared/watcher";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -158,6 +159,10 @@ export interface TurnControllerHooks {
   harnessInstructionsForTurn?(input: {
     conversation: Conversation;
   }): readonly HiddenProviderInstruction[];
+  watcherInstructionsForTurn?(input: {
+    conversation: Conversation;
+    hostTools: boolean;
+  }): readonly HiddenProviderInstruction[];
   /** Exact-turn host authority; absent means the selected harness gets no tools. */
   hostToolsForTurn?(input: {
     conversation: Conversation;
@@ -196,8 +201,35 @@ export interface TurnControllerHooks {
    * a newer active turn.
    */
   onTurnSettled?(turn: AgentTurn, settlement: TurnSettledEvidence): void | Promise<void>;
+  onReadOnlyViolation?(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
+}
+
+export type ReadOnlyWatcherViolationKind =
+  | "write-attempt"
+  | "command-attempt"
+  | "input"
+  | "approval-limit";
+
+export interface ReadOnlyWatcherViolation {
+  linkId: string;
+  wakeId: string | null;
+  kind: ReadOnlyWatcherViolationKind;
+  detail: string;
+  stopped: boolean;
+}
+
+export interface ReadOnlyWatcherTurn {
+  linkId: string;
+  wakeId: string | null;
+  deniedApprovals: number;
+}
+
+export interface FollowUpSteerOptions {
+  providerContent?: string;
+  watcherNote?: WatcherNoteAttribution;
+  queuedMessageId?: string;
 }
 
 export interface TurnSettledEvidence {
@@ -213,6 +245,8 @@ export interface QueueTurnRequest {
   privateConnectDeviceId?: string;
   /** Server-only authorization for the exact locked Duo judge dispatch. */
   authorizedDuoComparisonLaunchId?: string;
+  authorizedWatcherWakeId?: string;
+  watcherNote?: WatcherNoteAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
@@ -352,6 +386,7 @@ export interface ActiveTurn {
   inputIds: Set<string>;
   subagentTelemetry?: TurnSubagentTelemetry;
   onSettled?: QueueTurnRequest["onSettled"];
+  readOnlyWatcher?: ReadOnlyWatcherTurn;
 }
 
 export interface FollowUpAdmissionLease {

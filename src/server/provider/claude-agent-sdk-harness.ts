@@ -11,6 +11,7 @@ import {
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
+import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
@@ -34,6 +35,7 @@ import {
 import {
   providerRunTerminal,
   type ProviderRunFailure,
+  type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
 import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
@@ -73,6 +75,12 @@ import {
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+
+export const CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS = [
+  "You are a read-only reviewer, not a planner.",
+  "Answer each check directly in your reply.",
+  "Never write or edit a plan file, never call ExitPlanMode and never ask to leave plan mode.",
+].join(" ");
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -359,7 +367,7 @@ function startClaudeRun(
         options: {
           abortController,
           cwd: options.input.cwd,
-          env: claudeRunEnvironment(options.environment),
+          env: claudeRunEnvironment(options.environment, options.input.readOnlyProfile),
           pathToClaudeCodeExecutable: options.executable,
           spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
           includePartialMessages: true,
@@ -397,6 +405,7 @@ function startClaudeRun(
               : options.input.access === "auto-edit"
                 ? "acceptEdits"
                 : "default",
+          ...(options.input.readOnlyProfile === "watcher" ? { planModeInstructions: CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS } : {}),
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool: permissions.canUseTool,
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
@@ -1103,13 +1112,15 @@ export function claudeSupportsThinkingDisplay(
 
 function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
+  readOnlyProfile?: ProviderRunInput["readOnlyProfile"],
 ): NodeJS.ProcessEnv {
-  return {
+  const run = {
     ...CLAUDE_SUBAGENT_LIMITS,
     ...CLAUDE_STARTUP_FAILURE_RESULTS,
     ...CLAUDE_TRANSCRIPT_FLUSH,
     ...(environment ?? process.env),
   };
+  return readOnlyProfile === "watcher" ? watcherCommandEnvironment(run) : run;
 }
 
 function stringValue(value: unknown): string | undefined {

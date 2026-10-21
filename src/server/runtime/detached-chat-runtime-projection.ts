@@ -5,6 +5,7 @@ import type {
   RuntimeSequencedFrame,
 } from "../../shared/contracts";
 import { defaultSettings } from "../../shared/contracts/app";
+import type { WatcherLinkView } from "../../shared/watcher";
 import type { RuntimeDetailSubscription } from "../runtime-sequencing";
 import { projectRuntimeFrame, runtimeCursorFrame } from "../runtime-sequencing";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
@@ -34,6 +35,18 @@ function projectedSettings(settings: AppSettings): AppSettings {
     workingIndicator: { ...settings.workingIndicator },
   };
 }
+
+function watcherLinkTouches(
+  link: Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId">,
+  conversationId: string,
+): boolean {
+  return link.watcherConversationId === conversationId
+    || link.watchedConversationId === conversationId;
+}
+
+export type DetachedWatcherLinkLookup = (
+  linkId: string,
+) => Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId"> | null;
 
 /** Removes a foreign conversation identity from host-owned input prompts. */
 export function projectDetachedChatInputRequest(
@@ -86,6 +99,9 @@ export function projectDetachedChatSnapshot(
     settings: projectedSettings(snapshot.settings),
     promptPresets: [],
     todos: [],
+    ...(snapshot.watchers ? {
+      watchers: snapshot.watchers.filter((link) => watcherLinkTouches(link, conversationId)),
+    } : {}),
     activeProjectId: project?.id ?? null,
     activeConversationId: conversation?.id ?? null,
     ...(snapshot.sync ? { sync: snapshot.sync } : {}),
@@ -96,6 +112,7 @@ export function projectRuntimeFrameForAuthority(
   frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>,
   subscription: RuntimeDetailSubscription,
   authority: RuntimeClientAuthority,
+  watcherLink?: DetachedWatcherLinkLookup,
 ): RuntimeSequencedFrame {
   if (authority.kind === "main") {
     return projectRuntimeFrame(frame, subscription);
@@ -143,6 +160,22 @@ export function projectRuntimeFrameForAuthority(
             ...frame,
             event: { ...frame.event, request },
           };
+    }
+    case "watcher.link.updated":
+      return watcherLinkTouches(frame.event.link, authority.conversationId)
+        ? frame
+        : runtimeCursorFrame(frame);
+    case "watcher.link.removed":
+    case "watcher.live": {
+      const named = frame.event.type === "watcher.link.removed" && frame.event.watcherConversationId !== undefined
+        ? { watcherConversationId: frame.event.watcherConversationId, watchedConversationId: frame.event.watchedConversationId ?? null }
+        : null;
+      const link = named ?? watcherLink?.(frame.event.linkId) ?? null;
+      return link
+        && (frame.event.type !== "watcher.live" || link.watcherConversationId === frame.event.watcherConversationId)
+        && watcherLinkTouches(link, authority.conversationId)
+        ? frame
+        : runtimeCursorFrame(frame);
     }
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":

@@ -230,6 +230,53 @@ describe("detached chat runtime authority", () => {
     })).toEqual({ type: "runtime.cursor", sync });
   });
 
+  it("passes watcher link removals and live phases only when the link touches the detached chat", () => {
+    const LINK = "22222222-2222-4222-8222-222222222222";
+    const UNKNOWN_LINK = "44444444-4444-4444-8444-444444444444";
+    const links = new Map([[LINK, { watcherConversationId: OTHER_CONVERSATION, watchedConversationId: CONVERSATION }]]);
+    const sync = { runtimeGeneration: "33333333-3333-4333-8333-333333333333", latestSequence: 2 };
+    const live = (linkId: string, watcherConversationId = OTHER_CONVERSATION): RuntimeSequencedFrame & { type: "runtime.event" } => ({
+      type: "runtime.event", sync, scope: { kind: "shell" },
+      event: {
+        type: "watcher.live", linkId, watcherConversationId, turnId: "turn",
+        phase: "reading", label: "Read src/a.ts", at: "2030-01-01T00:00:00.000Z",
+      },
+    });
+    const removed = (linkId: string): RuntimeSequencedFrame & { type: "runtime.event" } => ({
+      type: "runtime.event", sync, scope: { kind: "shell" }, event: { type: "watcher.link.removed", linkId },
+    });
+    const project = (frame: RuntimeSequencedFrame & { type: "runtime.event" }, conversationId = CONVERSATION) =>
+      projectRuntimeFrameForAuthority(
+        frame,
+        { conversationIds: [] },
+        { ...authority, conversationId },
+        (linkId) => links.get(linkId) ?? null,
+      );
+    expect(project(live(LINK))).toEqual(live(LINK));
+    expect(project(removed(LINK))).toEqual(removed(LINK));
+    expect(project(live(LINK), OTHER_CONVERSATION)).toEqual(live(LINK));
+    expect(project(live(LINK), "55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
+    expect(project(live(UNKNOWN_LINK))).toEqual({ type: "runtime.cursor", sync });
+    expect(project(removed(UNKNOWN_LINK))).toEqual({ type: "runtime.cursor", sync });
+    expect(project(live(LINK, CONVERSATION))).toEqual({ type: "runtime.cursor", sync });
+    expect(projectRuntimeFrameForAuthority(live(LINK), { conversationIds: [] }, authority))
+      .toEqual({ type: "runtime.cursor", sync });
+  });
+
+  it("passes the removal of a deleted link to the detached chat it touched, from the sides the event names", () => {
+    const LINK = "22222222-2222-4222-8222-222222222222";
+    const sync = { runtimeGeneration: "33333333-3333-4333-8333-333333333333", latestSequence: 2 };
+    const removed: RuntimeSequencedFrame & { type: "runtime.event" } = {
+      type: "runtime.event", sync, scope: { kind: "shell" },
+      event: { type: "watcher.link.removed", linkId: LINK, watcherConversationId: OTHER_CONVERSATION, watchedConversationId: CONVERSATION },
+    };
+    const project = (conversationId: string) =>
+      projectRuntimeFrameForAuthority(removed, { conversationIds: [] }, { ...authority, conversationId }, () => null);
+    expect(project(CONVERSATION)).toEqual(removed);
+    expect(project(OTHER_CONVERSATION)).toEqual(removed);
+    expect(project("55555555-5555-4555-8555-555555555555")).toEqual({ type: "runtime.cursor", sync });
+  });
+
   it("requires detached messages to target the owner without activation", () => {
     type MessageCommand = Extract<ClientCommand, { type: "message.send" }>;
     const message = (activate?: boolean): MessageCommand => ({

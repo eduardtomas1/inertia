@@ -1,4 +1,4 @@
-import type { AgentActivity } from "../../../shared/contracts";
+import type { AgentActivity, Conversation } from "../../../shared/contracts";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
@@ -37,6 +37,7 @@ import type {
   ActiveTurn,
   QueuedTurn,
   QueueTurnRequest,
+  ReadOnlyWatcherTurn,
   TurnControllerHooks,
   TurnProviderRuntime,
 } from "./turn-controller-types";
@@ -93,6 +94,29 @@ export function prepareTurnRequest(
   }
 }
 
+function readOnlyWatcherPolicy(
+  store: RuntimeStore,
+  conversation: Conversation,
+  harnessId: string,
+  request: QueueTurnRequest,
+): ReadOnlyWatcherTurn | undefined {
+  const policy = store.watcherLinks.policyForConversation(conversation.id);
+  if (!policy || policy.status === "detached") return undefined;
+  try {
+    store.watcherLinks.assertRunConfigurationAllowed(conversation.id, {
+      interactionMode: conversation.interactionMode,
+      accessMode: conversation.accessMode,
+      harnessId,
+    });
+  } catch (error) {
+    throw new RuntimeRequestError(error instanceof Error ? error.message : "A watcher stays read-only.");
+  }
+  if (request.goalStart !== undefined || request.watcherNote !== undefined) {
+    throw new RuntimeRequestError("A watcher chat only runs read-only checks.");
+  }
+  return { linkId: policy.linkId, wakeId: request.authorizedWatcherWakeId ?? null, deniedApprovals: 0 };
+}
+
 function retireUsageLimitSnooze(
   dependencies: PrepareTurnRequestDependencies,
   conversationId: string,
@@ -142,6 +166,7 @@ export function resolveTurnRequest(
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
   dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  const readOnlyWatcher = readOnlyWatcherPolicy(dependencies.store, conversation, route.harnessId, request);
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const capabilityContract = exactProvider?.capabilityContract;
   const hostToolBridgeAttested = capabilityContract !== undefined
@@ -153,8 +178,11 @@ export function resolveTurnRequest(
       harnessId: route.harnessId,
       backendProfile: route.backendProfile,
     });
-  const capabilityInstructions = hostToolBridgeAttested
+  const capabilityInstructions = hostToolBridgeAttested && !readOnlyWatcher
     ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
+    : [];
+  const watcherInstructions = readOnlyWatcher?.wakeId === null
+    ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
     : [];
 
   const exactModel = routeSelection.modelId === "provider-default"
@@ -258,6 +286,7 @@ export function resolveTurnRequest(
     context: request.context,
     internalInstructions: [
       ...(resumesImportedCodex ? [] : capabilityInstructions),
+      ...watcherInstructions,
       ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
         sharesInterruptionEndpoint(
           dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,
@@ -405,6 +434,7 @@ export function resolveTurnRequest(
     ...(request.goalStart ? { goalStart: request.goalStart } : {}),
     ...(goalContinuationExpected ? { goalContinuationExpected: true } : {}),
     ...(maxBudgetUsd !== null ? { maxBudgetUsd } : {}),
+    ...(readOnlyWatcher ? { readOnlyProfile: "watcher" as const } : {}),
   } satisfies ActiveTurn["providerInput"];
   const harnessId = dependencies.providers.harnessIdFor(providerInput);
   if (harnessId !== route.harnessId) {
@@ -429,6 +459,7 @@ export function resolveTurnRequest(
     attachments,
     activateConversation: request.activateConversation,
     privateConnectDeviceId: request.privateConnectDeviceId,
+    ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
     executionContext: assembled.persistence,
     ...(contextPacketIds.length > 0
       ? {
@@ -480,13 +511,14 @@ export function resolveTurnRequest(
           providerInput,
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],
-          checkpointId: request.checkpointId ?? null,
-          checkpointFailure: request.checkpointId
+          checkpointId: readOnlyWatcher ? null : request.checkpointId ?? null,
+          checkpointFailure: request.checkpointId || readOnlyWatcher
             ? null
             : request.checkpointFailure ?? null,
-          ...(request.turnCheckpoint && !request.checkpointId
+          ...(request.turnCheckpoint && !request.checkpointId && !readOnlyWatcher
             ? { turnCheckpoint: true }
             : {}),
+          ...(readOnlyWatcher ? { readOnlyWatcher } : {}),
           rendererOwnerId: request.rendererOwnerId ?? null,
           structuredContext,
           gitBeforeCapture: null,

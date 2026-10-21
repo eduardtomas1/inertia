@@ -2,18 +2,21 @@ import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ChatAttachment, Conversation } from "../../shared/contracts";
 import { MAX_QUEUED_MESSAGES, type QueuedMessage } from "../../shared/queued-messages";
-import { parseStoredAttachments, rendererSafeAttachments } from "./codecs";
+import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
+import { parseStoredAttachments, rendererSafeAttachments, watcherNoteFromJson } from "./codecs";
 
 interface QueueRow {
   id: string; conversation_id: string; content: string; attachments_json: string;
   intent_digest: string; route_identity: string; state: QueuedMessage["state"];
   created_at: string; error: string | null; turn_id: string | null; user_message_id: string | null;
+  watcher_note_json?: string | null;
 }
 function project(row: QueueRow): QueuedMessage {
+  const watcherNote = watcherNoteFromJson(row.watcher_note_json);
   return { id: row.id, conversationId: row.conversation_id, content: row.content,
     attachments: rendererSafeAttachments(parseStoredAttachments(row.attachments_json)),
     state: row.state, createdAt: row.created_at, error: row.error,
-    turnId: row.turn_id, userMessageId: row.user_message_id };
+    turnId: row.turn_id, userMessageId: row.user_message_id, ...(watcherNote ? { watcherNote } : {}) };
 }
 export function queuedRouteIdentity(conversation: Conversation): string {
   return JSON.stringify([conversation.projectId, conversation.worktreePath, conversation.providerId,
@@ -52,21 +55,26 @@ export class QueuedMessageRepository {
     return project(row);
   }
   list(conversationId: string): QueuedMessage[] {
-    return (this.database.prepare("SELECT * FROM queued_messages WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked') ORDER BY sequence")
+    return (this.database.prepare("SELECT * FROM queued_messages WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked') ORDER BY (watcher_note_json IS NOT NULL), sequence")
       .all(conversationId) as QueueRow[]).map(project);
   }
   pendingConversationIds(): string[] {
     return (this.database.prepare("SELECT DISTINCT conversation_id FROM queued_messages WHERE state = 'waiting'").all() as { conversation_id: string }[])
       .map(({ conversation_id }) => conversation_id);
   }
-  add(input: { id: string; conversation: Conversation; content: string; attachments: readonly ChatAttachment[]; digest: string }): QueuedMessage {
+  add(input: {
+    id: string; conversation: Conversation; content: string; attachments: readonly ChatAttachment[]; digest: string;
+    watcherNote?: WatcherNoteAttribution;
+  }): QueuedMessage {
     return this.database.transaction(() => {
       const existing = this.replay(input.conversation.id, input.id, input.digest);
       if (existing) return existing;
       if (this.list(input.conversation.id).length >= MAX_QUEUED_MESSAGES) throw new QueuedMessageLimitError();
-      this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity, state, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?)`).run(input.id, input.conversation.id, input.content.trim(),
-        JSON.stringify(rendererSafeAttachments(input.attachments)), input.digest, queuedRouteIdentity(input.conversation), new Date().toISOString());
+      const watcherNote = input.watcherNote === undefined ? null : watcherNoteAttributionSchema.parse(input.watcherNote);
+      this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity, state, created_at, watcher_note_json)
+        VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`).run(input.id, input.conversation.id, input.content.trim(),
+        JSON.stringify(rendererSafeAttachments(input.attachments)), input.digest, queuedRouteIdentity(input.conversation), new Date().toISOString(),
+        watcherNote ? JSON.stringify(watcherNote) : null);
       return this.get(input.conversation.id, input.id)!;
     })();
   }

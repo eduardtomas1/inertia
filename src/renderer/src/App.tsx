@@ -79,6 +79,9 @@ import { createWorkspaceTurnActions } from "./components/workspace-scene/createW
 import { requestSubagentFollowUp } from "./utils/subagentFollowUp";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
+import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
+import { WatcherContext } from "./components/watcher/watcherContext";
+import { WatcherAttachHost } from "./components/watcher/WatcherAttachHost";
 const focusPrimaryPreview = (): void => focusWorkspacePreviewAddress("primary");
 
 export function commandMayChangeWorkspaceAuthority(
@@ -965,6 +968,17 @@ export default function App(): React.JSX.Element {
     splitPanes.splitScene,
     workspaceScene,
   ]);
+  const watchers = useWatcherSurfaceController({
+    snapshot: connection.snapshot,
+    surface: "main",
+    online: connection.status === "online",
+    request,
+    primaryConversationId: conversation?.id ?? null,
+    visibleConversationIds: split.splitConversationIds,
+    detachedConversationIds: detachedChats.conversationIds,
+    selectConversation,
+    openConversationInSplit,
+  });
   const layoutUsage = useMemo(
     () => ({ status: connection.status, request }),
     [connection.status, request],
@@ -1065,6 +1079,10 @@ export default function App(): React.JSX.Element {
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
+    <WatcherContext.Provider value={watchers.surface}>
+    <WatcherAttachHost target={watchers.attach.target} snapshot={connection.snapshot} settings={settings} request={request}
+      onClose={watchers.attach.close} onAttached={watchers.attach.attached}
+      onOpenProviderSetup={openProviderSetup} onOpenBackendSetup={openBackendSetup} />
     <AppLayout
       platform={platform}
       documentActive={documentActive}
@@ -1106,6 +1124,7 @@ export default function App(): React.JSX.Element {
       providerAuth={layoutProviderAuth}
       actions={layoutActions}
     />
+    </WatcherContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>

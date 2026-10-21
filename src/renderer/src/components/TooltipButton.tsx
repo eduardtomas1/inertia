@@ -30,7 +30,7 @@ export function TooltipButton({
     onFocus,
     onBlur,
     onKeyDown,
-  });
+  }, label !== "");
   const setButton = useCallback((node: HTMLButtonElement | null) => {
     button.current = node;
     if (typeof ref === "function") ref(node);

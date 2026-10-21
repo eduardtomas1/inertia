@@ -66,6 +66,9 @@ import {
 import { navigateMenuItems } from "../utils/menuKeyboard";
 import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
+import { WatcherWorkRow } from "./sidebar/WatcherWorkRow";
+import { nestWatcherThreads } from "../utils/watcherSidebar";
+import { watcherRowName } from "../utils/watcherLinks";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
@@ -137,12 +140,12 @@ function workRepositoryLabel(project: Project | undefined): string | null {
 }
 
 function workFocusConversationId(identity: string): string | null {
-  if (identity.startsWith("thread-actions:")) {
-    return identity.slice("thread-actions:".length);
-  }
-  return identity.startsWith("thread:")
-    ? identity.slice("thread:".length)
-    : null;
+  const prefix = ["thread-actions:", "thread:", "watcher:"].find((candidate) => identity.startsWith(candidate));
+  return prefix ? identity.slice(prefix.length) : null;
+}
+
+function workConversationIdentities(conversationId: string): readonly string[] {
+  return [`thread:${conversationId}`, `watcher:${conversationId}`];
 }
 
 function SidebarView({
@@ -365,9 +368,14 @@ function SidebarView({
     snapshot?.settings.providerIdentityLabels,
     threadViewsById,
   ]);
+  const watcherLinks = snapshot?.watchers;
+  const nestedWork = useMemo(
+    () => nestWatcherThreads(activityThreads, watcherLinks),
+    [activityThreads, watcherLinks],
+  );
   const workSections = useMemo(
-    () => groupWorkThreads(activityThreads, snoozeNow, scratchProjectIds),
-    [activityThreads, snoozeNow, scratchProjectIds],
+    () => groupWorkThreads(nestedWork.threads, snoozeNow, scratchProjectIds),
+    [nestedWork.threads, snoozeNow, scratchProjectIds],
   );
   const workSearchActive = Boolean(query.trim());
   const [
@@ -393,6 +401,7 @@ function SidebarView({
     navigationRef,
     searchActive: workSearchActive,
     sections: workSections,
+    watchersByParent: nestedWork.watchersByParent,
   });
   useLayoutEffect(() => {
     if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
@@ -428,7 +437,7 @@ function SidebarView({
     const conversationId = renameFocusRef.current;
     if (renaming || !conversationId) return;
     renameFocusRef.current = null;
-    focusWorkIdentity(`thread:${conversationId}`);
+    workConversationIdentities(conversationId).some((identity) => focusWorkIdentity(identity));
   }, [focusWorkIdentity, renaming]);
   useLayoutEffect(() => {
     const identity = workFocusIdentityRef.current;
@@ -463,7 +472,7 @@ function SidebarView({
       ? [focusedConversationId]
       : workFocusConversationIdsRef.current;
     const destinationThreadIdentity = focusedConversationIds
-      .map((conversationId) => `thread:${conversationId}` as const)
+      .flatMap(workConversationIdentities)
       .find((candidate) => workIndexByIdentity.has(candidate));
     const destinationSection = focusedConversationIds
       .map((conversationId) => workSections.find((section) => (
@@ -752,8 +761,16 @@ function SidebarView({
     const isDetached = detachedConversationIds.has(conversation.id);
     const canOrganize = canOrganizeThread(conversation, snapshot?.runs ?? []);
     const workingSince = model.run?.status === "running" ? model.run.startedAt : null;
+    const watcherLink = nestedWork.topLevelWatchers.get(conversation.id);
+    const unread = model.unread && (!watcherLink || Boolean(conversation.markedUnreadAt));
+    const watcherParent = watcherLink?.watchedConversationId
+      ? conversations.find(({ id }) => id === watcherLink.watchedConversationId)
+      : undefined;
     const accessibleContext = [
       conversation.title,
+      watcherLink
+        ? `${watcherRowName(watcherLink.preset)}${watcherParent ? `, watching ${watcherParent.title}` : ""}`
+        : null,
       providerLabel,
       projectLabel,
       repositoryLabel ? `Repository ${repositoryLabel}` : null,
@@ -765,7 +782,7 @@ function SidebarView({
       conversation.pinnedAt ? "Pinned" : null,
       isDetached ? "Open in a separate chat window" : null,
       splitConversationIds.has(conversation.id) ? "Open in split view" : null,
-      model.unread ? conversation.markedUnreadAt ? "Unread" : "New completion" : null,
+      unread ? conversation.markedUnreadAt ? "Unread" : "New completion" : null,
     ].filter((value): value is string => Boolean(value)).join(", ");
     return (
       <div
@@ -775,7 +792,7 @@ function SidebarView({
           isActive && "is-active",
           isDetached && "is-detached",
           splitConversationIds.has(conversation.id) && "is-split",
-          model.unread && "is-unread",
+          unread && "is-unread",
           conversationMenu === conversation.id && "has-open-menu",
           canOrganize && "has-thread-inline-actions",
         )}
@@ -826,7 +843,8 @@ function SidebarView({
             <span className="activity-thread-topline">
               <span className="activity-thread-provider" aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={14} /></span>
               <span className="activity-thread-title">{conversation.title}</span>
-              {model.unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
+              {watcherLink && <span className="thread-watcher-mark" aria-hidden="true">Watcher</span>}
+              {unread && <span className="thread-unread-mark">{conversation.markedUnreadAt ? "Unread" : "New"}</span>}
               <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationIds.has(conversation.id)} />
               <span className="activity-thread-trailing" aria-hidden="true">
                 <WorkStatusCue
@@ -871,6 +889,38 @@ function SidebarView({
   const renderWorkIndexItem = (item: WorkIndexItem): React.JSX.Element => {
     if (item.kind === "thread") {
       return activityRow(item.conversation, item.position, item.sectionId);
+    }
+    if (item.kind === "watcher") {
+      const watcher = item.conversation;
+      const model = threadViewsById.get(watcher.id);
+      const isDetached = detachedConversationIds.has(watcher.id);
+      return (
+        <WatcherWorkRow
+          conversation={watcher}
+          parentTitle={threadViewsById.get(item.parentId)?.conversation.title ?? "this chat"}
+          link={watcherLinks?.find(({ watcherConversationId }) => watcherConversationId === watcher.id)}
+          position={item.position}
+          setSize={visibleWorkConversationIds.size}
+          active={snapshot?.activeConversationId === watcher.id && view === "workspace"}
+          statusLabel={statusLabels[model?.status ?? "idle"]}
+          menu={{
+            open: conversationMenu === watcher.id,
+            actions: conversationMenu === watcher.id ? conversationActions(watcher) : null,
+            renameForm: renaming === watcher.id ? renameForm(watcher) : null,
+            triggerRef: (node) => setMenuTrigger(watcher.id, node),
+            onOpen: (anchor) => {
+              preview.close();
+              setMenuAnchor(anchor);
+              setInitialSubmenu(undefined);
+              if (conversationMenu !== watcher.id) toggleMenu(watcher.id);
+            },
+            onPointerDown: view === "workspace" && !isDetached && watcher.archivedAt === null
+              ? (event) => startChatDrag(event, { conversationId: watcher.id, title: watcher.title }, preview.close)
+              : undefined,
+          }}
+          onActivate={activateConversation}
+        />
+      );
     }
     if (item.kind === "show-more") {
       return (

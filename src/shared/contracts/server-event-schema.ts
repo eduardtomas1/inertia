@@ -28,6 +28,7 @@ import { validNotificationSettings } from "./notification-settings-schema";
 import { validAppearanceSettings } from "./appearance-settings-schema";
 import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 import { subagentTrace } from "./subagent-trace-schema";
+import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -464,7 +465,7 @@ function conversationContextPacketSummary(value: unknown): value is UnknownRecor
 }
 function agentContextReadSummary(value: unknown): boolean {
   return recordWithStrings(value, "targetMessageId", "targetTurnId", "sourceConversationId", "sourceConversationTitle", "sourceState", "access", "firstReadAt", "lastReadAt")
-    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved"])
+    && oneOf(value, "sourceState", ["available", "deleted"]) && oneOf(value, "access", ["own", "referenced", "approved", "watched"])
     && booleanField(value, "listedTurns") && arrayOf(value.turnIds, (entry) => typeof entry === "string");
 }
 function conversationContextPacket(value: unknown): boolean {
@@ -1010,6 +1011,7 @@ function conversationDetail(
     && (value.contextPackets === undefined
       || arrayOf(value.contextPackets, conversationContextPacketSummary))
     && (value.contextReads === undefined || arrayOf(value.contextReads, agentContextReadSummary))
+    && watcherWakeSummariesCoherent(value.watcherWakes, value.agentTurns)
     && conversationDetailCollectionsCoherent(value, conversationId);
 }
 
@@ -1085,6 +1087,10 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       && oneOf(value, "status", ["failed", "interrupted"])
       && optionalNullableStringField(value, "terminalAssistantMessageId")
       && optionalTerminalAssistantMessage(value);
+    case "watcher.link.updated":
+    case "watcher.link.removed":
+    case "watcher.live":
+      return watcherMutationEvent(value);
     default:
       return unknownEventType(type);
   }
@@ -1149,6 +1155,7 @@ const REQUEST_RESULT_VALIDATORS = {
     && booleanField(value, "hasMore"),
   "duo.prepared": (value) => duoPrepared(value),
   "duo.status": (value) => duoStatus(value),
+  ...watcherRequestResultValidators,
   "git.status": (value) => gitStatus(value.status),
   "git.workspace.status": (value) => workspaceGitStatus(value.status),
   "git.diff": (value) => gitDiff(value.diff),

@@ -92,7 +92,7 @@ export interface ConversationContextSourceTranscript {
   messages: ConversationContextExcerpt[];
 }
 
-export type AgentContextReadAccess = "own" | "referenced" | "approved";
+export type AgentContextReadAccess = "own" | "referenced" | "approved" | "watched";
 
 /** What an agent read from one chat during one turn, through the context tool. */
 export interface AgentContextReadSummary {

@@ -7,6 +7,12 @@ import {
   type SplitPaneView,
 } from "../../src/renderer/src/components/ConversationSplitView";
 import { currentChatDrag } from "../../src/renderer/src/utils/chatDrag";
+import { WatcherDockHost } from "../../src/renderer/src/components/watcher/WatcherDockHost";
+import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
+import { loadWatcherDock } from "../../src/renderer/src/components/watcher/watcherLoaders";
+import { RuntimeDetailSubscriptions, type RuntimeDetailSubscriptionOwner } from "../../src/renderer/src/utils/runtimeSequencing";
+import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
+import { link as watcherLink, payloadOf, recordingRequest, shell, surfaceModel } from "./watcher-fixtures";
 import {
   splitLeaves,
   swapSplitPanes,
@@ -553,5 +559,57 @@ describe("ConversationSplitView", () => {
     expect(screen.getByRole("textbox", { name: "tertiary pending resource" }))
       .toHaveValue("tertiary terminal");
     expect(unmounted).not.toHaveBeenCalled();
+  });
+
+  it("keeps the four detail subscription owners unchanged with a watcher dock in every pane", async () => {
+    await loadWatcherDock();
+    const owners: SplitPaneOwner[] = ["primary", "secondary", "tertiary", "quaternary"];
+    const ids = owners.map((_, index) => `aaaaaaaa-aaaa-4aaa-8aaa-00000000000${index}`);
+    const links = ids.map((watchedId, index) => watcherLink({
+      id: `bbbbbbbb-bbbb-4bbb-8bbb-00000000000${index}`,
+      watcherConversationId: `cccccccc-cccc-4ccc-8ccc-00000000000${index}`,
+      watchedConversationId: watchedId,
+    }));
+    const subscriptions = new RuntimeDetailSubscriptions();
+    owners.forEach((owner, index) => subscriptions.set(owner as RuntimeDetailSubscriptionOwner, ids[index]!));
+    const before = JSON.stringify(subscriptions.mountedPanes());
+    const runtime = recordingRequest((command: CommandWithoutId) => {
+      if (command.type === "conversation.detail.subscription") {
+        subscriptions.set(command.payload.owner, command.payload.conversationId);
+      }
+      if (command.type !== "watcher.feed.get") throw new Error(`Unexpected ${command.type}`);
+      return { kind: "watcher.feed", linkId: command.payload.linkId, feedRevision: 1, items: [], next: null };
+    });
+    const model = surfaceModel({
+      watchers: links,
+      shells: [
+        ...ids.map((id, index) => shell(id, `Chat ${index + 1}`)),
+        ...links.map((current) => shell(current.watcherConversationId, "Watcher")),
+      ],
+      request: runtime.request,
+    });
+    render(
+      <WatcherContext.Provider value={model}>
+        <ConversationSplitView
+          layout={grid}
+          panes={owners.map((owner, index) => pane(owner, `Chat ${index + 1}`, "Inertia", (
+            <div className="conversation-pane-workspace">
+              <div className="conversation-pane-chat">Chat {index + 1}</div>
+              <WatcherDockHost watchedId={ids[index]!} />
+            </div>
+          )))}
+          onLayoutChange={() => undefined}
+          onClosePane={() => undefined}
+        />
+      </WatcherContext.Provider>,
+    );
+    for (let index = 0; index < owners.length; index += 1) {
+      expect(await screen.findByRole("complementary", { name: `Watching Chat ${index + 1}` })).toBeInTheDocument();
+    }
+    await waitFor(() => expect(runtime.commands).toHaveLength(4));
+    expect(runtime.commands.every(({ type }) => type === "watcher.feed.get")).toBe(true);
+    expect(new Set(runtime.commands.map((command) => payloadOf(command).linkId)))
+      .toEqual(new Set(links.map(({ id }) => id)));
+    expect(JSON.stringify(subscriptions.mountedPanes())).toBe(before);
   });
 });

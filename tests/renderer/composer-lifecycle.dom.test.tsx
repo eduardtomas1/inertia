@@ -43,6 +43,8 @@ import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 
 import { composerProps, conversation, deferred, openComposerTools, provider } from "./composer-fixtures";
+import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
+import { WATCHER_ID, link, surfaceModel } from "./watcher-fixtures";
 
 function attachment(id: string): ChatAttachment {
   return {
@@ -952,6 +954,51 @@ describe("composer asynchronous ownership", () => {
     expect(screen.queryByRole("button", { name: "Send queued message now" }))
       .not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps /plan and /build unavailable in an attached watcher's composer", async () => {
+    const current = conversation(WATCHER_ID);
+    const onUpdateConversation = vi.fn(async () => undefined);
+    render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(current, { onUpdateConversation })} />
+      </WatcherContext.Provider>,
+    );
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/b" } });
+    expect(await screen.findByRole("option", { name: /\/build/u })).toBeDisabled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "/p" } });
+    expect(await screen.findByRole("option", { name: /\/plan/u })).toBeDisabled();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUpdateConversation).not.toHaveBeenCalled();
+  });
+
+  it("names an attached watcher's locked run settings in its composer", () => {
+    const current = conversation(WATCHER_ID);
+    const view = render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(current)} />
+      </WatcherContext.Provider>,
+    );
+    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toHaveTextContent(/^Read-only watcher · Plan · Supervised$/u);
+    view.rerender(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [] })}>
+        <Composer {...composerProps(current)} />
+      </WatcherContext.Provider>,
+    );
+    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toBeNull();
+  });
+
+  it("keeps /compact available in an attached watcher's composer", async () => {
+    const current = conversation(WATCHER_ID);
+    render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link()] })}>
+        <Composer {...composerProps(current)} />
+      </WatcherContext.Provider>,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "/c" } });
+    expect(await screen.findByRole("option", { name: /\/compact/u })).toBeEnabled();
   });
 
   it("opens goal and folder resume flows directly from slash commands", async () => {

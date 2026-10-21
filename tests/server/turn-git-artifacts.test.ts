@@ -727,6 +727,20 @@ describe("turn Git artifacts", () => {
     runtime.store.close();
   });
 
+  it("reads a turn's diff once its finalization in flight completes", async () => {
+    const runtime = workspace();
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+    const turn = beginTurn(runtime.store, runtime.conversationId, "turn-settling");
+    const checkpoint = await checkpointFor(runtime.store, runtime.repository, runtime.data, runtime.conversationId, 1);
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+    writeFileSync(join(runtime.repository, "tracked.txt"), "before\nafter\n");
+    const finalization = manager.finalize({ turn, checkpointId: checkpoint.id });
+    await expect(manager.turnDiff(turn.id)).rejects.toThrow("unavailable");
+    expect((await manager.settledTurnDiff(turn.id)).patch).toContain("+after");
+    await finalization;
+    runtime.store.close();
+  });
+
   it("bounds oversized patches and rejects tampered or out-of-artifact reads", async () => {
     const runtime = workspace();
     const turn = beginTurn(runtime.store, runtime.conversationId, "turn-bounded");

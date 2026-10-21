@@ -699,6 +699,19 @@ describe("Tasks view", () => {
     await act(async () => undefined);
   });
 
+  it("closes the detail with one Escape while the close button's tooltip is showing", async () => {
+    const user = userEvent.setup();
+    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
+    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    const close = screen.getByRole("button", { name: "Close task details" });
+    fireEvent.pointerEnter(close, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull());
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(document.querySelector(".task-detail")).toHaveClass("is-leaving");
+    await act(async () => undefined);
+  });
+
   it("lets the closed detail fade out inert before removing it", async () => {
     const user = userEvent.setup();
     harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));

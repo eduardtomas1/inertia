@@ -68,6 +68,8 @@ import { applyInterfaceScale } from "./utils/interfaceScale";
 import { cachedAppSettings } from "./utils/cachedSettings";
 import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
+import { WatcherContext } from "./components/watcher/watcherContext";
+import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 import { loadResponseTimeline } from "./components/chatSurfaceLoaders";
 
@@ -490,6 +492,13 @@ export default function DetachedChatApp({
     conversation
     && (!detailState || detailState.state === "loading"),
   );
+  const watchers = useWatcherSurfaceController({
+    snapshot: connection.snapshot,
+    surface: "detached",
+    online: connection.status === "online",
+    request: null,
+    primaryConversationId: conversationId,
+  });
   const contextHandoffPending = projection.pendingInputs.some(
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,
   );
@@ -497,6 +506,7 @@ export default function DetachedChatApp({
   return (
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
+    <WatcherContext.Provider value={watchers.surface}>
     <div
       className={`detached-chat-shell platform-${window.inertia?.getPlatform?.() ?? "unknown"}`}
       data-interface-scale={settings.interfaceScale}
@@ -610,6 +620,7 @@ export default function DetachedChatApp({
             autoScrollToFinalAnswer={settings.autoScrollToFinalAnswer}
             promptContext={null}
             contextPackets={projection.detail?.contextPackets ?? NO_CONTEXT_PACKETS}
+            watcherWakes={projection.detail?.watcherWakes}
             previewContextUrl={null}
             providerIdentityLabels={settings.providerIdentityLabels}
             loading={false}
@@ -662,6 +673,7 @@ export default function DetachedChatApp({
         </div>
       )}
     </div>
+    </WatcherContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
   );

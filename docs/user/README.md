@@ -10,6 +10,7 @@ Inertia is a calm desktop workspace for building with coding agents. It keeps ag
 | **[Chats and agents](chats-and-agents.md)** | Prompts with context, models and access modes, and keeping work organized. |
 | **[Working side by side](working-side-by-side.md)** | Split view and separate chat windows. |
 | **[Duo](duo.md)** | One brief for two agents, with an optional third-model comparison. |
+| **[Watcher](watcher.md)** | A read-only second agent that follows a chat and keeps its findings in a side dock. |
 | **[Review and ship](review-and-ship.md)** | Diffs, hunk review, commits, branches and pull requests. |
 | **[Usage and limits](usage-and-limits.md)** | Recorded usage and each account's remaining quota. |
 | **[Keyboard shortcuts](keyboard-shortcuts.md)** | Everything you can do from the keyboard. |
@@ -29,6 +30,10 @@ Codex, Claude, Cursor, Antigravity, Kimi Code and OpenCode. Connect them in **Se
 ### Can I work on two things at once?
 
 Yes. Open two chats in [split view](working-side-by-side.md), move a chat into its own window, or launch a [Duo](duo.md).
+
+### Can a second agent check the work while it happens?
+
+Yes. Add a [watcher](watcher.md) from the chat's actions with **Add a watcher…**. It follows the chat read-only in a side dock and sends nothing to the main chat until you choose **Send**, unless you turn on automatic sending.
 
 ### Can I check on my agents from my phone?
 

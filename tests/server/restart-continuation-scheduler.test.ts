@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../src/shared/watcher";
 import { RuntimeStore } from "../../src/server/database";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import type { RestartContinuationPlan } from "../../src/server/persistence/restart-continuation-repository";
@@ -116,6 +117,23 @@ describe("restart continuation plans", () => {
     expect(plan(notStarted.conversationId)).toBeNull();
     expect(plan(running.conversationId)).toMatchObject({ interruptedTurnId: running.turnId, state: "waiting" });
     expect(plan(approval.conversationId)).toBeNull();
+  });
+
+  it("never plans a continuation for an attached watcher's own chat", () => {
+    const watched = runningChat("Watched");
+    const { link, conversation: watcher } = store.watcherLinks.createWithConversation({
+      link: {
+        id: randomUUID(), watchedConversationId: watched.conversationId, preset: "reviewer", instructions: "",
+        sharing: { ...DEFAULT_WATCHER_SHARING }, budgets: { ...DEFAULT_WATCHER_BUDGETS }, privateConnect: "inherit",
+      },
+      conversation: { projectId, title: "Watcher", options: { model: "gpt-test", interactionMode: "plan", accessMode: "supervised" } },
+    }, new Date().toISOString());
+    const check = begin(watcher.id, "Check 1.");
+    store.updateAgentTurnLifecycle(check.id, { status: "running" });
+
+    expect(scheduler.createPlans([watched.conversationId, watcher.id])).toEqual([watched.conversationId]);
+    expect(plan(watcher.id)).toBeNull();
+    expect(store.watcherLinks.get(link.id)?.status).toBe("watching");
   });
 
   it("plans nothing when providers are disabled", () => {

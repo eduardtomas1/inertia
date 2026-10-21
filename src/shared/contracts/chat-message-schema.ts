@@ -2,6 +2,7 @@ import { snapshotSourceSchema } from "../snapshots";
 import { isContextCompaction } from "../context-compaction";
 import { isHtmlRenderReference } from "../html-render-reference";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES } from "../attachments";
+import { watcherNoteAttributionSchema } from "../watcher";
 import type { ChatMessage } from "./agent";
 
 type UnknownRecord = Record<string, unknown>;
@@ -49,6 +50,8 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
       || (value.role === "system" && typeof value.turnId === "string" && isHtmlRenderReference(value.htmlRender)))
     && (value.privateConnectDeviceId === undefined
       || (value.role === "user" && isMessageOriginDeviceId(value.privateConnectDeviceId)))
+    && (value.watcherNote === undefined
+      || (value.role === "user" && watcherNoteAttributionSchema.safeParse(value.watcherNote).success))
     && (value.turnId === null || stringField(value, "turnId"))
     && ["user", "assistant", "system"].includes(value.role as string)
     && Array.isArray(value.attachments)

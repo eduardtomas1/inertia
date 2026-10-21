@@ -144,11 +144,25 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
     },
   });
 
+export const READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE =
+  "Read-only watcher · approvals are declined automatically";
+
 export function privateConnectPromptSafetyForHarness(
   harnessId: HarnessId | null | undefined,
+  options: { watcher?: boolean } = {},
 ): PrivateConnectPromptSafety {
   if (typeof harnessId !== "string") return UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY;
-  return PRIVATE_CONNECT_PROMPT_SAFETY[harnessId] ?? UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY;
+  const safety = PRIVATE_CONNECT_PROMPT_SAFETY[harnessId] ?? UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY;
+  if (options.watcher !== true || !safety.supported) return safety;
+  return {
+    ...safety,
+    headline: READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE,
+    explanation:
+      "This chat is a read-only watcher. It runs in Plan mode with Supervised access, and "
+      + "Inertia declines every approval it requests without asking, so a Private Connect "
+      + "prompt cannot make it edit files or run commands that need approval. Project "
+      + "reads remain provider-controlled, and its answer can include project-derived text.",
+  };
 }
 
 export function privateConnectPromptSafetyIsUsable(

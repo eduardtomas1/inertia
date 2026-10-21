@@ -45,6 +45,7 @@ import type { ContinuationReasonCode, TurnSessionRecovery } from "../../shared/c
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
 import type { WorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
+import type { WatcherNoteAttribution } from "../../shared/watcher";
 
 export interface NewConversationOptions {
   /** Privileged preallocation used by atomic multi-conversation workflows. */
@@ -143,6 +144,7 @@ export interface BeginAgentTurnInput
   restartContinuationPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
+  watcherNote?: WatcherNoteAttribution;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   /**
@@ -162,6 +164,7 @@ export interface BeginAgentTurnInput
 
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
+  watcherNote?: WatcherNoteAttribution;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
   /** Turn-scoped system messages only; written with its html_renders row. */
   htmlRender?: import("../../shared/html-render").HtmlRenderReference;

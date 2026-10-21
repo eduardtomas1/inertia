@@ -9,6 +9,7 @@ import {
 import type { Conversation } from "@shared/contracts";
 
 import type {
+  SidebarThreadView,
   SidebarWorkSection,
   SidebarWorkSectionId,
 } from "../utils/sidebarModel";
@@ -20,6 +21,7 @@ const WORK_INDEX_INITIAL_HEIGHT = 720;
 const WORK_INDEX_OVERSCAN = 8;
 export const WORK_ROW_HEIGHT = 58;
 export const WORK_ROW_COMPACT_HEIGHT = 50;
+const WORK_WATCHER_ROW_HEIGHT = 36;
 const WORK_SECTION_HEIGHT = 36;
 const WORK_SHOW_MORE_HEIGHT = 30;
 
@@ -43,6 +45,14 @@ export type WorkIndexItem =
       id: `thread:${string}`;
       kind: "thread";
       conversation: Conversation;
+      position: number;
+      sectionId: SidebarWorkSectionId;
+    }
+  | {
+      id: `watcher:${string}`;
+      kind: "watcher";
+      conversation: Conversation;
+      parentId: string;
       position: number;
       sectionId: SidebarWorkSectionId;
     }
@@ -72,6 +82,7 @@ interface SidebarWorkIndexOptions {
   navigationRef: RefObject<HTMLDivElement | null>;
   searchActive: boolean;
   sections: SidebarWorkSection[];
+  watchersByParent?: ReadonlyMap<string, SidebarThreadView>;
 }
 
 export function useSidebarWorkIndex({
@@ -84,6 +95,7 @@ export function useSidebarWorkIndex({
   navigationRef,
   searchActive,
   sections,
+  watchersByParent,
 }: SidebarWorkIndexOptions) {
   const [retainedIdentity, setRetainedIdentity] = useState<string | null>(null);
   const [viewport, setViewport] = useState({
@@ -122,6 +134,18 @@ export function useSidebarWorkIndex({
           position: threadPosition,
           sectionId: section.id,
         });
+        const watcher = watchersByParent?.get(conversation.id);
+        if (watcher) {
+          threadPosition += 1;
+          next.push({
+            id: `watcher:${watcher.conversation.id}`,
+            kind: "watcher",
+            conversation: watcher.conversation,
+            parentId: conversation.id,
+            position: threadPosition,
+            sectionId: section.id,
+          });
+        }
       }
       if (pageId && visibleThreads.length < section.threads.length) {
         next.push({
@@ -133,7 +157,7 @@ export function useSidebarWorkIndex({
       }
     }
     return next;
-  }, [doneVisible, expandedSections, searchActive, sections]);
+  }, [doneVisible, expandedSections, searchActive, sections, watchersByParent]);
   const {
     focusOrder,
     indexByIdentity,
@@ -146,7 +170,7 @@ export function useSidebarWorkIndex({
     const visible = new Set<string>();
     items.forEach((item, index) => {
       indexes.set(item.id, index);
-      if (item.kind === "thread") {
+      if (item.kind === "thread" || item.kind === "watcher") {
         visible.add(item.conversation.id);
         navigation.push(item.id);
         focus.push(item.id);
@@ -167,6 +191,7 @@ export function useSidebarWorkIndex({
     const item = items[index];
     if (item?.kind === "section") return WORK_SECTION_HEIGHT;
     if (item?.kind === "show-more") return WORK_SHOW_MORE_HEIGHT;
+    if (item?.kind === "watcher") return WORK_WATCHER_ROW_HEIGHT;
     return compact ? WORK_ROW_COMPACT_HEIGHT : WORK_ROW_HEIGHT;
   }, [compact, items]);
   const { offsets, totalSize } = useMemo(() => {
@@ -227,7 +252,8 @@ export function useSidebarWorkIndex({
     });
   }
   const activeIndex = items.findIndex((item) => (
-    item.kind === "thread" && item.conversation.id === activeConversationId
+    (item.kind === "thread" || item.kind === "watcher")
+    && item.conversation.id === activeConversationId
   ));
   const retainedTargetIndex = (retainedIdentity === null ? undefined : indexByIdentity.get(retainedIdentity)) ?? activeIndex;
   if (
@@ -244,7 +270,7 @@ export function useSidebarWorkIndex({
     }
   }
   const renderedConversationIds = new Set(renderedItems.flatMap(({ item }) => (
-    item.kind === "thread" ? [item.conversation.id] : []
+    item.kind === "thread" || item.kind === "watcher" ? [item.conversation.id] : []
   )));
   const layoutKey = useMemo(
     () => sidebarWorkLayoutKey(compact, items),

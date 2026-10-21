@@ -62,3 +62,25 @@ export function applyConversationShellEvent(
     runs,
   };
 }
+
+type WatcherLinkEvent = Extract<
+  RuntimeMutationEvent,
+  { type: "watcher.link.updated" | "watcher.link.removed" }
+>;
+
+export function applyWatcherLinkEvent(
+  snapshot: AppSnapshot,
+  event: WatcherLinkEvent,
+): AppSnapshot {
+  const current = snapshot.watchers ?? [];
+  if (event.type === "watcher.link.removed") {
+    if (!current.some(({ id }) => id === event.linkId)) return snapshot;
+    return { ...snapshot, watchers: current.filter(({ id }) => id !== event.linkId) };
+  }
+  const index = current.findIndex(({ id }) => id === event.link.id);
+  if (index >= 0 && structurallyEqual(current[index], event.link)) return snapshot;
+  const watchers = index >= 0
+    ? current.map((link, position) => position === index ? event.link : link)
+    : [...current, event.link];
+  return { ...snapshot, watchers };
+}

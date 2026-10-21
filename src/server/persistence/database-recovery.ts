@@ -22,6 +22,7 @@ import {
   DATABASE_SCHEMA_REQUIREMENTS,
 } from "./database-recovery-required-tables";
 import { schemaLessEmptyDatabase } from "./database-empty-primary";
+import { isUnsupportedFutureDatabase } from "./database-future-schema";
 import {
   databaseFamilyEntryExists,
   quarantineDatabaseFamily,
@@ -431,6 +432,14 @@ function validateOpenDatabase(
       "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?",
     ).get(index)) return "inconsistent";
   }
+  for (const [introducedAt, trigger, fragments] of schemaRequirements.triggers) {
+    if (version < introducedAt) continue;
+    const row = database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { sql: unknown } | undefined;
+    const sql = typeof row?.sql === "string" ? row.sql.replace(/\s+/gu, " ").toLowerCase() : "";
+    if (!fragments.every((fragment) => sql.includes(fragment))) return "inconsistent";
+  }
   if (database.prepare("PRAGMA foreign_key_check").get()) return "inconsistent";
   return "valid-current";
 }
@@ -648,30 +657,6 @@ function listBackupMetadata(databasePath: string): ValidatedBackup[] {
     right.modifiedAt - left.modifiedAt
     || right.filename.localeCompare(left.filename, "en"));
   return backups;
-}
-
-function isUnsupportedFutureDatabase(path: string): boolean {
-  if (!regularOwnedFile(path)) return false;
-  let database: Database.Database | null = null;
-  try {
-    database = new Database(path, { readonly: true, fileMustExist: true });
-    const hasMigrations = database.prepare(
-      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
-    ).get();
-    if (!hasMigrations) return false;
-    const versions = database.prepare(
-      "SELECT version FROM schema_migrations ORDER BY version ASC",
-    ).all() as Array<{ version: unknown }>;
-    return versions.length > CURRENT_DATABASE_SCHEMA_VERSION
-      && versions.every(({ version }, index) =>
-        typeof version === "number"
-        && Number.isSafeInteger(version)
-        && version === index + 1);
-  } catch {
-    return false;
-  } finally {
-    if (database?.open) database.close();
-  }
 }
 
 function compactTimestamp(now: Date): string {

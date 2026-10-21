@@ -6,6 +6,7 @@ export interface DatabaseSchemaRequirements {
   tables: DatabaseRequiredTables;
   columns: readonly (readonly [number, string, readonly string[]])[];
   indexes: readonly (readonly [number, string])[];
+  triggers: readonly (readonly [number, string, readonly string[]])[];
 }
 
 const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] = [
@@ -54,6 +55,73 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "updated_at",
   ]],
   [98, "conversation_title_locks", ["conversation_id"]],
+  [99, "messages", ["watcher_note_json"]],
+  [99, "queued_messages", ["watcher_note_json"]],
+  [99, "watcher_links", [
+    "id",
+    "watcher_conversation_id",
+    "watched_conversation_id",
+    "project_id",
+    "preset",
+    "instructions",
+    "sharing_json",
+    "budgets_json",
+    "private_connect",
+    "delivery",
+    "status",
+    "pause_reason",
+    "pause_detail",
+    "detached_reason",
+    "cursor_turn_id",
+    "cursor_activity_at",
+    "cursor_activity_id",
+    "cursor_message_at",
+    "cursor_message_id",
+    "pending_running_ids_json",
+    "wakes_this_turn",
+    "wake_allowance",
+    "write_attempts_this_turn",
+    "wakes_total",
+    "events_seen",
+    "events_pending",
+    "findings_total",
+    "final_pass_turn_id",
+    "last_wake_at",
+    "last_watched_output_at",
+    "quiet_since",
+    "feed_revision",
+    "created_at",
+    "updated_at",
+  ]],
+  [99, "watcher_wakes", [
+    "id",
+    "link_id",
+    "watcher_turn_id",
+    "watched_turn_id",
+    "sequence",
+    "trigger",
+    "state",
+    "outcome",
+    "events_covered",
+    "items_truncated",
+    "items_omitted",
+    "digest_bytes",
+    "guard_state",
+    "guard_paths_json",
+    "finding_preview",
+    "delivery_mode",
+    "delivery_state",
+    "delivery_detail",
+    "delivery_id",
+    "delivery_automatic",
+    "delivered_message_id",
+    "queued_message_id",
+    "delivered_at",
+    "created_at",
+    "settled_at",
+    "resolved_by_sequence",
+    "commands_declined",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -98,6 +166,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [96, ["todos"]],
   [97, ["restart_continuation_plans"]],
   [98, ["conversation_title_locks"]],
+  [99, ["watcher_links", "watcher_wakes"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -112,5 +181,28 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [94, "agent_context_reads_identity_idx"],
     [94, "agent_context_reads_target_idx"],
     [96, "todos_conversation_idx"],
+    [99, "watcher_links_active_watched_idx"],
+    [99, "watcher_links_project_idx"],
+    [99, "watcher_wakes_link_idx"],
+  ],
+  triggers: [
+    [99, "watcher_links_active_limit", [
+      "before insert on watcher_links",
+      "(select count(*) from watcher_links where status <> 'detached') >= 8",
+      "raise(abort,",
+    ]],
+    [99, "watcher_links_detached_final", [
+      "before update of status on watcher_links",
+      "old.status = 'detached' and new.status <> 'detached'",
+      "raise(abort,",
+    ]],
+    [99, "watcher_links_watched_delete", [
+      "before delete on conversations",
+      "raise(abort,",
+      "turn.status not in ('completed', 'failed', 'cancelled', 'interrupted')",
+      "update watcher_links",
+      "watched_conversation_id = null",
+      "where watched_conversation_id = old.id",
+    ]],
   ],
 };

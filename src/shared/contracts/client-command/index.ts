@@ -12,6 +12,7 @@ import { workspaceCommandSchemas } from "./workspace";
 import { promptPresetCommandSchema } from "./prompt-presets";
 import { todoCommandSchemas } from "./todos";
 import { updatesCommandSchemas } from "./updates";
+import { watcherCommandSchemas } from "./watcher";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
@@ -22,6 +23,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...promptPresetCommandSchema.options,
   ...todoCommandSchemas,
   ...updatesCommandSchemas,
+  ...watcherCommandSchemas,
   ...gitCommandSchemas,
   ...workspaceCommandSchemas,
 ]);

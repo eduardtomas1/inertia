@@ -21,6 +21,58 @@ afterEach(() => {
 });
 
 describe("Private Connect supervised runtime gateway", () => {
+  it("withholds a hidden watcher's runs and refuses to stop them, even on a project-wide grant", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-watcher-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const watched = store.createConversation(project.id, "Allowed chat");
+    const watcher = store.createConversation(project.id, "Watcher · Reviewer · Allowed chat");
+    const stopRun = vi.fn(() => ({ stopped: true, alreadyStopped: false }));
+    let visibility: "inherit" | "hidden" = "hidden";
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => {
+        const shell = store.shellSnapshot();
+        return {
+          ...shell,
+          runs: [watched.id, watcher.id].map((conversationId, index) => ({
+            id: `run-${index}`, kind: "agent", conversationId, status: "running",
+          })) as unknown as typeof shell.runs,
+        };
+      },
+      conversation: (id) => store.conversationShell(id),
+      detail: (id) => store.conversationDetail(id),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+      stopRun,
+      watcherParent: (id) => id === watcher.id ? { watchedConversationId: watched.id, privateConnect: visibility } : null,
+    });
+    const subject: PrivateConnectRuntimeAuthorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view", "prompt"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const state = async () => {
+      const response = await gateway.request(subject, { type: "state.get", requestId: "33333333-3333-4333-8333-333333333333" });
+      if (!response.ok || response.result.kind !== "state") throw new Error("state unavailable");
+      return response.result.state;
+    };
+    expect((await state()).conversations.map(({ id }) => id)).toEqual([watched.id]);
+    expect((await state()).runs.map(({ conversationId }) => conversationId)).toEqual([watched.id]);
+    expect(await gateway.request(subject, {
+      type: "run.stop", requestId: "33333333-3333-4333-8333-333333333333", conversationId: watcher.id, runId: "run-1",
+    })).toMatchObject({ ok: false, code: "not-found" });
+    expect(stopRun).not.toHaveBeenCalled();
+    visibility = "inherit";
+    expect((await state()).conversations.map(({ id }) => id).sort()).toEqual([watched.id, watcher.id].sort());
+  });
+
   it.each(["input.respond", "run.stop"] as const)("requires runtime mutation authority for %s", async (type) => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-scope-"));
     directories.push(directory);
@@ -118,6 +170,65 @@ describe("Private Connect supervised runtime gateway", () => {
     expect(privateConnectRuntimeSafeSubagentSchema.safeParse({ ...subagent, model: "private-model" }).success)
       .toBe(false);
     expect(JSON.stringify(response)).not.toMatch(/private-model|Reading private files/u);
+  });
+
+  it("labels a forwarded or automatic watcher note so it never reads as the user's own message", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-private-connect-note-"));
+    directories.push(directory);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
+    stores.push(store);
+    const project = store.createProject("Allowed", directory);
+    const conversation = store.createConversation(project.id, "Allowed chat");
+    store.beginAgentTurn({ id: "turn-note", runId: "run-note",
+      conversationId: conversation.id, content: "The parser drops a token.", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative",
+      watcherNote: {
+        linkId: "55555555-5555-4555-8555-555555555555", wakeId: "66666666-6666-4666-8666-666666666666",
+        watcherConversationId: "77777777-7777-4777-8777-777777777777", preset: "reviewer",
+        watcherLabel: "codex · gpt-test", delivery: "queue",
+      } });
+    store.beginAgentTurn({ id: "turn-auto", runId: "run-auto",
+      conversationId: conversation.id, content: "The test for empty lines is gone.", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative",
+      watcherNote: {
+        linkId: "55555555-5555-4555-8555-555555555555", wakeId: "88888888-8888-4888-8888-888888888888",
+        watcherConversationId: "77777777-7777-4777-8777-777777777777", preset: "reviewer",
+        watcherLabel: "codex · gpt-test", delivery: "queue", automatic: true,
+      } });
+    store.beginAgentTurn({ id: "turn-user", runId: "run-user",
+      conversationId: conversation.id, content: "Fix it.", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-test", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "supervised", configurationRevision: 1, association: "authoritative" });
+    const gateway = new PrivateConnectRuntimeGateway({
+      shell: () => store.shellSnapshot(),
+      conversation: (conversationId) => store.conversationShell(conversationId),
+      detail: (conversationId) => store.conversationDetail(conversationId),
+      isConversationActive: () => false,
+      preparePrompt: async () => undefined,
+      queuePrompt: () => ({ turnId: "unused" }),
+    });
+    const subject: PrivateConnectRuntimeAuthorization = {
+      deviceId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "22222222-2222-4222-8222-222222222222",
+      scopes: ["view"],
+      projectIds: [project.id],
+      grants: privateConnectRuntimeGrantsFromProjectIds([project.id]),
+      grantVersion: 1,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    };
+    const response = await gateway.request(subject, {
+      type: "conversation.get", requestId: "33333333-3333-4333-8333-333333333333", conversationId: conversation.id,
+    });
+    if (!response.ok || response.result.kind !== "conversation") throw new Error("Expected a conversation detail.");
+    const messages = response.result.detail.messages.map(({ role, content }) => [role, content]);
+    expect(messages).toHaveLength(3);
+    expect(messages).toEqual(expect.arrayContaining([
+      ["user", "[Forwarded watcher note]\n\nThe parser drops a token."],
+      ["user", "[Watcher note sent automatically]\n\nThe test for empty lines is gone."],
+      ["user", "Fix it."],
+    ]));
   });
 
   it("leaves the missing checkpoint notice out of remote activity rows", async () => {

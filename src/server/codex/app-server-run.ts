@@ -41,6 +41,7 @@ import {
   type JsonLineDecoderFailure,
   type JsonObject,
 } from "./protocol";
+import { codexWatcherThreadConfig } from "./read-only-thread-config";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
@@ -944,6 +945,20 @@ export async function openCodexTurn({
   notify("initialized");
 
   const accessPolicy = codexAccessPolicy(options);
+  const watcherConfig = options.readOnlyProfile === "watcher"
+    ? codexWatcherThreadConfig(await request("config/read", { includeLayers: false, cwd: options.cwd }))
+    : null;
+  const providerConfig = modelProvider ? {
+    [`model_providers.${modelProvider.providerId}`]: {
+      name: modelProvider.displayName,
+      base_url: modelProvider.baseUrl,
+      wire_api: "responses",
+      requires_openai_auth: false,
+      ...(modelProvider.credentialEnvironmentKey
+        ? { env_key: modelProvider.credentialEnvironmentKey }
+        : {}),
+    },
+  } : null;
   const threadConfig = {
     cwd: options.cwd,
     approvalPolicy: accessPolicy.approvalPolicy,
@@ -953,20 +968,8 @@ export async function openCodexTurn({
     ...(options.serviceTier !== undefined
       ? { serviceTier: options.serviceTier }
       : {}),
-    ...(modelProvider ? {
-      modelProvider: modelProvider.providerId,
-      config: {
-        [`model_providers.${modelProvider.providerId}`]: {
-          name: modelProvider.displayName,
-          base_url: modelProvider.baseUrl,
-          wire_api: "responses",
-          requires_openai_auth: false,
-          ...(modelProvider.credentialEnvironmentKey
-            ? { env_key: modelProvider.credentialEnvironmentKey }
-            : {}),
-        },
-      },
-    } : {}),
+    ...(modelProvider ? { modelProvider: modelProvider.providerId } : {}),
+    ...(providerConfig || watcherConfig ? { config: { ...watcherConfig, ...providerConfig } } : {}),
   };
   let opened: JsonObject;
   if (options.sessionId) {

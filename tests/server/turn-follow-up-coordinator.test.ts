@@ -681,3 +681,63 @@ describe("assistant rows around an accepted follow-up", () => {
     }
   });
 });
+
+describe("watcher note steering", () => {
+  afterEach(cleanupTurnControllerTestDirectories);
+
+  const note = {
+    linkId: "11111111-1111-4111-8111-111111111111",
+    wakeId: "22222222-2222-4222-8222-222222222222",
+    watcherConversationId: "33333333-3333-4333-8333-333333333333",
+    preset: "reviewer" as const,
+    watcherLabel: "Codex · test route",
+    delivery: "steer" as const,
+  };
+
+  it("sends the labelled provider content and persists the visible note with its attribution", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "First task" });
+    runtime.controller.start(queued.turn.id);
+    runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+    const lease = runtime.controller.acquireFollowUpAdmission(runtime.conversationId)!;
+    try {
+      const steered = await runtime.controller.steer(
+        lease,
+        { content: "The export test still fails on Windows paths.", imagePaths: [] },
+        [],
+        undefined,
+        undefined,
+        { providerContent: "[inertia-watcher-note]\nThe export test still fails on Windows paths.", watcherNote: note },
+      );
+      expect(steered).toMatchObject({
+        kind: "accepted",
+        message: { content: "The export test still fails on Windows paths.", watcherNote: note },
+      });
+      expect(runtime.provider.steerCalls).toEqual(["[inertia-watcher-note]\nThe export test still fails on Windows paths."]);
+      const persisted = runtime.store.conversationDetail(runtime.conversationId)!.messages
+        .find(({ content }) => content === "The export test still fails on Windows paths.");
+      expect(persisted?.watcherNote).toEqual(note);
+    } finally {
+      lease.release();
+      runtime.store.close();
+    }
+  });
+
+  it("keeps ordinary follow-ups free of watcher attribution", async () => {
+    const active = activeTurn();
+    const steer = vi.fn(async () => true);
+    const persist = vi.fn(() => ({ content: "Plain" }) as ChatMessage);
+    const coordinator = new TurnFollowUpCoordinator({
+      providers: { steer } as unknown as TurnProviderRuntime,
+      store: { createAcknowledgedFollowUpMessage: persist } as unknown as RuntimeStore,
+      now: () => "2026-09-08T09:00:00.000Z", activeForConversation: () => active,
+    });
+    const lease = coordinator.acquire(active)!;
+    try {
+      await coordinator.steer(lease, { content: "Plain", imagePaths: [] }, [], undefined, undefined, { providerContent: "  " });
+      expect(steer).not.toHaveBeenCalled();
+      await coordinator.steer(lease, { content: "Plain", imagePaths: [] }, []);
+      expect(persist).toHaveBeenCalledWith("conversation-1", "turn-1", "Plain", lease.submittedAt, "2026-09-08T09:00:00.000Z", [], undefined);
+    } finally { lease.release(); }
+  });
+});

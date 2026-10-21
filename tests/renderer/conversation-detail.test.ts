@@ -236,6 +236,26 @@ describe("paged history reconciliation", () => {
       .history).toEqual({ older });
   });
 
+  it("keeps watcher wake summaries across older pages and refreshes by wake identity", () => {
+    const wake = (turnId: string, wakeId: string, sequence: number) => ({
+      wakeId, turnId, sequence, trigger: "activity" as const, outcome: "silent" as const,
+      eventsCovered: 1, itemsTruncated: 0, itemsOmitted: 0, guardState: null,
+    });
+    const liveWake = wake("live", "00000000-0000-4000-8000-000000000002", 2);
+    const oldWake = wake("old", "00000000-0000-4000-8000-000000000001", 1);
+    const current = { ...page("live", "live"), watcherWakes: [liveWake] };
+    const loaded = mergeConversationHistory(current, { ...page("old", "old"), watcherWakes: [oldWake] }, "older");
+    expect(loaded.watcherWakes?.map(({ turnId }) => turnId).sort()).toEqual(["live", "old"]);
+    const settled = { ...liveWake, outcome: "finding" as const };
+    const refreshed = mergeConversationHistory(loaded, { ...page("live", "done"), watcherWakes: [settled] }, "refresh");
+    expect(refreshed.watcherWakes).toHaveLength(2);
+    expect(refreshed.watcherWakes).toContainEqual(oldWake);
+    expect(refreshed.watcherWakes).toContainEqual(settled);
+    const dropped = mergeConversationHistory(refreshed, page("live", "done"), "refresh");
+    expect(dropped.watcherWakes).toEqual([oldWake]);
+    expect(mergeConversationHistory(page("live", "live"), page("old", "old"), "older").watcherWakes).toBeUndefined();
+  });
+
   it("resets a disconnected latest window to avoid silently skipping offline turns", () => {
     const current = { ...page("old", "old"), history: { older: null } };
     const latest = page("new", "new");

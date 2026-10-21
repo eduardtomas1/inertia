@@ -6,6 +6,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
+import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { LimitResetScheduler, type LimitResetDependencies } from "../../src/server/usage/limit-reset-scheduler";
 import { resetQuota, resumeAccountIdentity } from "../../src/server/usage/limit-reset-policy";
@@ -636,6 +637,7 @@ describe("schema 87 usage-limit tags", () => {
     const path = join(directory, "inertia.sqlite");
     store.close();
     const raw = new Database(path);
+    removeWatcherLinksFromLegacyFixture(raw);
     raw.exec("DROP TABLE html_renders; ALTER TABLE messages DROP COLUMN html_render_json; DROP TABLE cli_conversation_imports; DROP INDEX agent_turns_provider_session_before_idx; DROP INDEX agent_turns_provider_session_after_idx; ALTER TABLE agent_turns DROP COLUMN origin; DROP TABLE usage_limited_turns; DROP TABLE usage_limit_resume_plans; ALTER TABLE app_state DROP COLUMN quota_warnings_enabled; ALTER TABLE app_state DROP COLUMN quota_warning_threshold; ALTER TABLE app_state DROP COLUMN notify_only_in_background; DELETE FROM schema_migrations WHERE version >= 87;");
     for (const column of ["model", "activity", "usage_json", "tool_use_count", "duration_ms"]) {
       raw.exec(`ALTER TABLE subagent_traces DROP COLUMN ${column}`);

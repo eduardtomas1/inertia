@@ -1,0 +1,66 @@
+.conversation-pane-workspace:has(> .watcher-dock-frame:not([hidden]), > .watcher-dock-handle) {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: auto;
+}
+
+.conversation-pane-workspace:has(> .watcher-dock-frame:not([hidden]), > .watcher-dock-handle) > .conversation-pane-chat {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.conversation-pane-workspace > :is(.watcher-dock-frame, .watcher-dock-handle) {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.conversation-pane-workspace:has(> .watcher-dock-frame:not([hidden]), > .watcher-dock-handle) > :is(.workspace-tools-resize-handle, .workspace-panel) {
+  grid-column: 1 / -1;
+}
+
+.conversation-pane-workspace:has(> .watcher-dock-frame:not([hidden]), > .watcher-dock-handle) > .workspace-tools-resize-handle {
+  height: 7px;
+}
+
+.watcher-dock-handle {
+  display: flex;
+  min-height: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 4px;
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+
+.watcher-dock-handle-button {
+  display: grid;
+  min-width: 32px;
+  justify-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.watcher-dock-handle-button:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.watcher-dock-handle-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.watcher-dock-handle-new {
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

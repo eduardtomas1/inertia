@@ -747,6 +747,11 @@
       "version": 98,
       "name": "PersistConversationTitleLocks",
       "digest": "039b5abb2b597512e2867f1e8a6e12ebba015af44969c26e7bf359d05502af5e"
+    },
+    {
+      "version": 99,
+      "name": "PersistWatcherLinks",
+      "digest": "e0f0a8fb4d1ff4b1fbbbba217aafca4619c7b8f17143345e4dab910122434b95"
     }
   ]
 }

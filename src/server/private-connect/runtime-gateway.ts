@@ -31,6 +31,7 @@ import {
   sanitizePrivateConnectContent,
   sanitizePrivateConnectLabel,
 } from "../../shared/private-connect/sanitizer";
+import { WATCHER_NOTE_HISTORY_LABELS, type WatcherPrivateConnect } from "../../shared/watcher";
 import { PROVIDER_INFO } from "../provider/catalog";
 import { PrivateConnectTranscriptCache } from "./transcript-cache";
 
@@ -47,6 +48,7 @@ interface PrivateConnectGatewayDependencies {
   stopRun?(conversationId: string, runId: string): { stopped: boolean; alreadyStopped: boolean };
   inputs?(): Iterable<AgentInputRequest>;
   privateConnectPromptSafety?(conversation: Conversation): PrivateConnectPromptSafety;
+  watcherParent?(conversationId: string): PrivateConnectWatcherParent | null;
   transcriptCache?: PrivateConnectTranscriptCache;
   now?(): Date;
 }
@@ -95,6 +97,18 @@ export class PrivateConnectRuntimeGateway {
     this.transcriptCache.invalidateConversation(conversationId);
   }
 
+  private authorized(
+    subject: PrivateConnectRuntimeAuthorization,
+    conversation: Pick<Conversation, "id" | "projectId" | "archivedAt">,
+  ): boolean {
+    return authorizedConversation(
+      subject,
+      conversation,
+      this.dependencies.watcherParent,
+      (conversationId) => this.dependencies.conversation(conversationId),
+    );
+  }
+
   forgetMessage(conversationId: string, messageId: string): void {
     this.transcriptCache.invalidateMessage(conversationId, messageId);
   }
@@ -139,6 +153,7 @@ export class PrivateConnectRuntimeGateway {
             subject,
             this.now(),
             (conversation) => this.promptSafety(conversation),
+            this.dependencies.watcherParent,
           ),
         },
       });
@@ -165,7 +180,7 @@ export class PrivateConnectRuntimeGateway {
     request: Extract<PrivateConnectRuntimeRequest, { type: "input.respond" }>,
   ): PrivateConnectRuntimeResponse {
     const conversation = this.dependencies.conversation(request.conversationId);
-    if (!conversation || !authorizedConversation(subject, conversation)) return unavailableConversationResponse(request.requestId);
+    if (!conversation || !this.authorized(subject, conversation)) return unavailableConversationResponse(request.requestId);
     const pending = this.dependencies.respondToInput;
     if (!pending) return failedResponse(request.requestId, "unavailable", "Questions are not available while the local runtime is restarting.");
     if (!this.dependencies.shell().conversations.find(({ id }) => id === request.conversationId)?.pendingInput) {
@@ -191,7 +206,7 @@ export class PrivateConnectRuntimeGateway {
     request: Extract<PrivateConnectRuntimeRequest, { type: "run.stop" }>,
   ): PrivateConnectRuntimeResponse {
     const conversation = this.dependencies.conversation(request.conversationId);
-    if (!conversation || !authorizedConversation(subject, conversation)) return unavailableConversationResponse(request.requestId);
+    if (!conversation || !this.authorized(subject, conversation)) return unavailableConversationResponse(request.requestId);
     const stop = this.dependencies.stopRun;
     if (!stop) return failedResponse(request.requestId, "unavailable", "Stopping is not available while the local runtime is restarting.");
     const result = stop(request.conversationId, request.runId);
@@ -214,7 +229,7 @@ export class PrivateConnectRuntimeGateway {
     request: Extract<PrivateConnectRuntimeRequest, { type: "conversation.get" }>,
   ): PrivateConnectRuntimeResponse {
     const detail = this.dependencies.detail(request.conversationId);
-    if (!detail || !authorizedConversation(subject, detail.conversation)) {
+    if (!detail || !this.authorized(subject, detail.conversation)) {
       return failedResponse(
         request.requestId,
         "not-found",
@@ -254,7 +269,11 @@ export class PrivateConnectRuntimeGateway {
               content: this.transcriptCache.content(
                 request.conversationId,
                 message.id,
-                message.htmlRender ? htmlRenderContextLine(message.htmlRender.title) : message.content,
+                message.htmlRender
+                  ? htmlRenderContextLine(message.htmlRender.title)
+                  : message.watcherNote
+                    ? `${WATCHER_NOTE_HISTORY_LABELS[message.watcherNote.automatic ? "automatic" : "forwarded"]}\n\n${message.content}`
+                    : message.content,
               ),
               createdAt: message.createdAt,
             })),
@@ -319,7 +338,7 @@ export class PrivateConnectRuntimeGateway {
       );
     }
     const conversation = this.dependencies.conversation(request.conversationId);
-    if (!conversation || !authorizedConversation(subject, conversation)) {
+    if (!conversation || !this.authorized(subject, conversation)) {
       return unavailableConversationResponse(request.requestId);
     }
     const receipt = this.receipts.get(request.deliveryId);
@@ -522,7 +541,7 @@ export class PrivateConnectRuntimeGateway {
     request: Extract<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,
     conversation: Conversation,
   ): PrivateConnectRuntimeResponse | null {
-    if (!authorizedConversation(subject, conversation)) {
+    if (!this.authorized(subject, conversation)) {
       return unavailableConversationResponse(request.requestId);
     }
     if (conversation.accessMode !== "supervised") {
@@ -677,14 +696,38 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
-function authorizedConversation(
+interface PrivateConnectWatcherParent {
+  watchedConversationId: string | null;
+  privateConnect: WatcherPrivateConnect;
+}
+
+type WatcherParentLookup = (conversationId: string) => PrivateConnectWatcherParent | null;
+
+function grantedConversation(
   subject: PrivateConnectRuntimeAuthorization,
-  conversation: Conversation,
+  conversation: Pick<Conversation, "id" | "projectId" | "archivedAt">,
 ): boolean {
   const { id, projectId, archivedAt } = conversation;
   return archivedAt === null
     && subject.projectIds.includes(projectId)
     && privateConnectRuntimeGrantAllowsConversation(subject.grants, projectId, id);
+}
+
+function authorizedConversation(
+  subject: PrivateConnectRuntimeAuthorization,
+  conversation: Pick<Conversation, "id" | "projectId" | "archivedAt">,
+  watcherParent: WatcherParentLookup | undefined,
+  watched: (conversationId: string) => Pick<Conversation, "id" | "projectId" | "archivedAt"> | null,
+): boolean {
+  const parent = watcherParent?.(conversation.id) ?? null;
+  if (!parent) return grantedConversation(subject, conversation);
+  if (parent.privateConnect === "hidden") return false;
+  if (conversation.archivedAt !== null || !subject.projectIds.includes(conversation.projectId)) return false;
+  if (grantedConversation(subject, conversation)) return true;
+  const target = parent.watchedConversationId === null ? null : watched(parent.watchedConversationId);
+  return target !== null
+    && target.projectId === conversation.projectId
+    && grantedConversation(subject, target);
 }
 
 function unavailableConversationResponse(requestId: string): PrivateConnectRuntimeResponse {
@@ -700,14 +743,14 @@ function projectShell(
   subject: PrivateConnectRuntimeAuthorization,
   now: Date,
   safety: (conversation: AppSnapshot["conversations"][number]) => PrivateConnectPromptSafety,
+  watcherParent?: WatcherParentLookup,
 ) {
   const projectIds = new Set(subject.projectIds);
+  const byId = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
   const conversationIds = new Set(
     snapshot.conversations
-      .filter(({ id, projectId, archivedAt }) =>
-        projectIds.has(projectId)
-        && archivedAt === null
-        && privateConnectRuntimeGrantAllowsConversation(subject.grants, projectId, id))
+      .filter((conversation) =>
+        authorizedConversation(subject, conversation, watcherParent, (id) => byId.get(id) ?? null))
       .map(({ id }) => id),
   );
   return {

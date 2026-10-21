@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_BYTES } from "./attachments";
 import { snapshotSourceSchema } from "./snapshots";
+import { watcherNoteAttributionSchema } from "./watcher";
 
 export const MAX_QUEUED_MESSAGES = 3;
 export const queuedMessageStateSchema = z.enum(["waiting", "dispatching", "blocked", "accepted", "cancelled"]);
@@ -14,6 +15,7 @@ export const queuedMessageSchema = z.strictObject({
   attachments: z.array(queuedAttachmentSchema).max(MAX_ATTACHMENT_COUNT),
   state: queuedMessageStateSchema, createdAt: z.string().datetime(),
   error: z.string().max(1000).nullable(), turnId: z.string().nullable(), userMessageId: z.string().nullable(),
+  watcherNote: watcherNoteAttributionSchema.optional(),
 });
 export const messageQueueResultSchema = z.strictObject({
   kind: z.literal("message.queue"), conversationId: z.uuid(),

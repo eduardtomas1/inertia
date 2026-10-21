@@ -36,6 +36,7 @@ import { ComposerAttachmentList } from "../ComposerAttachmentList";
 import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { TooltipButton } from "../TooltipButton";
 import { LoadingMark } from "../ui";
+import { useWatcherRunLock } from "../watcher/watcherContext";
 import {
   RouteRepairIcon,
   routeRepairLabel,
@@ -184,7 +185,8 @@ export function ComposerInputZone({
   const mentionMatch = /(?:^|\s)@([^\s@]{1,200})$/u.exec(message);
   const mentionQueryText = mentionMatch?.[1] ?? "";
   useEffect(() => { onMentionQuery(mentionQueryText); }, [mentionQueryText, onMentionQuery]);
-  const modeChangesDisabled = disabled || running;
+  const runLocked = useWatcherRunLock(conversationId);
+  const modeChangesDisabled = disabled || running || runLocked;
   const slashQuery = slashMatch?.[1].toLowerCase();
   const slashCommands: ComposerSlashCommand[] = slashMatch ? [
     { id: "goal", description: "View or set this chat's goal", section: "built-in", action: onOpenGoal, disabled: disabled || !goalAvailable },
@@ -198,7 +200,7 @@ export function ComposerInputZone({
         : "Compact this chat's provider context",
       section: "provider",
       action: onCompactCommand,
-      disabled: modeChangesDisabled || compactUnavailableReason !== null,
+      disabled: disabled || running || compactUnavailableReason !== null,
     },
   ] : [];
   const matchingSlashCommands = slashMatch

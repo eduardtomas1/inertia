@@ -107,6 +107,7 @@ export async function initializeRuntimePersistence(
         }
       }
       await reconcileInterruptedDuoLaunches(store);
+      store.watcherLinks.recoverInterruptedWakes(new Date().toISOString());
       // Recovery receipts reset the supervisor's one fresh readiness window.
       // Emit them only after every mandatory startup reconciliation succeeds;
       // otherwise remaining recovery work would consume that second phase.

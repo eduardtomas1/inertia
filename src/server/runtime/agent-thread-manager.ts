@@ -37,6 +37,7 @@ import {
   AGENT_CONTEXT_TOOL_DEFINITION,
   AGENT_CONTEXT_TOOL_NAME,
   AgentContextTool,
+  type AgentContextWatcherPolicy,
 } from "./agent-context-tool";
 import { hostToolDigest as digest } from "./host-tool-digest";
 import type { TurnController } from "./turns/turn-controller";
@@ -283,6 +284,7 @@ export interface AgentThreadManagerDependencies {
   >;
   contextRequests: ConversationContextRequestCoordinator;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
+  watcherPolicy?: AgentContextWatcherPolicy;
   agentBrowser?: RuntimeAgentBrowserBroker;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
@@ -367,6 +369,16 @@ export class AgentThreadManager {
 
   bridgeFor(source: AgentThreadSource): ProviderHostToolBridge {
     return this.capabilities.bridgeFor(source);
+  }
+
+  contextOnlyBridgeFor(source: AgentThreadSource): ProviderHostToolBridge {
+    return {
+      definitions: [AGENT_CONTEXT_TOOL_DEFINITION],
+      retiredToolNames: new Set<string>(),
+      invoke: async (call) => call.tool === AGENT_CONTEXT_TOOL_NAME
+        ? await this.invoke(source, call)
+        : failure("unknown_tool", "That Inertia host tool is not available."),
+    };
   }
 
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {

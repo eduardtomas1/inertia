@@ -13,6 +13,7 @@ import {
   type OwnedProcessTreeTermination,
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
+import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
 import {
   createAgentHarnessEmitter,
   type AgentHarness,
@@ -423,7 +424,8 @@ function startOpenCodeRun(
     let cleanupConfirmed = true;
     try {
       const credentials = ownedOpenCodeCredentials(options.environment);
-      const environment = ownedOpenCodeEnvironment(options.environment, credentials);
+      const owned = ownedOpenCodeEnvironment(options.environment, credentials);
+      const environment = options.input.readOnlyProfile === "watcher" ? watcherCommandEnvironment(owned) : owned;
       launchCredentials = credentialEncodings([
         ...launchCredentialValues(environment),
         credentials.password,
@@ -538,7 +540,7 @@ function startOpenCodeRun(
             {
               sessionID: sessionId!,
               directory: options.input.cwd,
-              permission: openCodePermissions(options.input.access, options.input.interactionMode),
+              permission: openCodePermissions(options.input.access, options.input.interactionMode, options.input.readOnlyProfile),
             },
             { signal, throwOnError: true },
           ),
@@ -550,7 +552,7 @@ function startOpenCodeRun(
             directory: options.input.cwd,
             ...(selectedModel ? { model: { id: selectedModel.id, providerID: selectedModel.providerID, ...(options.input.reasoningEffort ? { variant: options.input.reasoningEffort } : {}) } } : {}),
             ...(agent ? { agent: agent.name } : {}),
-            permission: openCodePermissions(options.input.access, options.input.interactionMode),
+            permission: openCodePermissions(options.input.access, options.input.interactionMode, options.input.readOnlyProfile),
           }, { signal, throwOnError: true }),
         );
         const safeSessionId = hostTools?.redactPayload(created.data.id)

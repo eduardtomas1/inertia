@@ -108,6 +108,11 @@ export interface ConversationCommandDependencies {
     DuoLaunchCoordinator,
     "reconcileConversationDeletion"
   >;
+  watchers?: {
+    onConversationArchived(conversationId: string): void;
+    assertConversationDeletable?(conversationId: string): void;
+    beforeConversationDelete?(conversationId: string): () => void;
+  };
   deletedConversationIds: Set<string>;
   dataDirectory: string;
   rememberDeletedConversation(conversationId: string): void;
@@ -483,6 +488,11 @@ export function createConversationCommandHandler(
             dependencies.store.assertDuoComparisonTurnAllowed(
               conversationId,
             );
+            dependencies.store.watcherLinks.assertRunConfigurationAllowed(conversationId, {
+              interactionMode: update.interactionMode ?? current.interactionMode,
+              accessMode: update.accessMode ?? current.accessMode,
+              harnessId: (canonicalSelection ?? current.modelSelection).harnessId,
+            });
           } catch (error) {
             throw new RuntimeRequestError(
               error instanceof Error
@@ -549,6 +559,7 @@ export function createConversationCommandHandler(
           true,
         );
         dependencies.forgetRemoteTranscript(command.payload.conversationId);
+        dependencies.watchers?.onConversationArchived(command.payload.conversationId);
         return "mutation";
       case "conversation.unarchive":
         dependencies.store.archiveConversation(
@@ -586,6 +597,7 @@ export function createConversationCommandHandler(
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
+        dependencies.watchers?.assertConversationDeletable?.(conversation.id);
         if (dependencies.store.contextPackets.hasDraftForTargetWithoutMessages(conversation.id)) {
           throw new RuntimeRequestError(
             "A new chat continues from this one. Send its first message or remove the context first.",
@@ -727,9 +739,11 @@ export function createConversationCommandHandler(
           const contextTargetConversationIds = dependencies.store.contextPackets
             .targetConversationIdsForSource(finalConversation.id);
           dependencies.contextRequests?.cancelForSource(finalConversation.id);
+          const publishDeletedWatcherLinks = dependencies.watchers?.beforeConversationDelete?.(finalConversation.id);
           dependencies.store.deleteConversation(
             finalConversation.id,
           );
+          publishDeletedWatcherLinks?.();
           for (const targetConversationId of contextTargetConversationIds) {
             dependencies.runtimeSync.broadcast({
               type: "conversation.detail.invalidated",

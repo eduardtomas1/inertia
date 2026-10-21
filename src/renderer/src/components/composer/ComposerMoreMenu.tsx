@@ -19,6 +19,7 @@ import {
   RESPONSE_SPEED_LABEL,
 } from "./config";
 import type { ComposerSettingsModel } from "./ComposerSettings";
+import { useWatcherRunLock } from "../watcher/watcherContext";
 import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
 import type { MoreSection } from "./types";
 import {
@@ -86,6 +87,7 @@ export function ComposerMoreMenu({
   const access = accessOptions.find(
     (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
+  const runLocked = useWatcherRunLock(conversation.id);
 
   const renderMoreSectionOptions = (section: MoreSection) => {
     if (section === "actions") {
@@ -240,11 +242,13 @@ export function ComposerMoreMenu({
       section: "mode",
       label: "Mode",
       value: conversation.interactionMode === "build" ? "Build" : "Plan",
+      disabled: runLocked,
     },
     {
       section: "access",
       label: "Access",
       value: access.label,
+      disabled: runLocked,
     },
   ];
 

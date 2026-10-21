@@ -1,4 +1,4 @@
-import { ChevronRight, CircleHelp, FolderPlus, ListTodo, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
+import { ChevronRight, CircleHelp, Eye, FolderPlus, ListTodo, MessageSquare, Search, Settings, SquarePen, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Conversation, Project } from "@shared/contracts";
@@ -12,6 +12,12 @@ import { IconButton } from "./ui";
 import { ProjectIcon } from "./ProjectIcon";
 import { isProjectSettingsRow, SETTINGS_SECTION_ROWS } from "./settingsRows";
 import { searchSettings } from "./settings/settingsMatcher";
+import { useWatcherSurface, type WatcherSurfaceModel } from "./watcher/watcherContext";
+import { watcherEntryFor } from "./watcher/watcherAvailability";
+import { prefetchWatcherAttachDialog } from "./watcher/watcherLoaders";
+import { createWatcherActions } from "../hooks/useWatcherActions";
+import { reportWatcherDockError } from "../hooks/useWatcherDock";
+import { watcherErrorText } from "../utils/watcherCopy";
 
 export type CommandPaletteView = "search" | "new-chat";
 
@@ -50,6 +56,48 @@ type PaletteItem = {
 
 const groupOrder = ["Actions", "Settings", "Projects", "Threads", "Messages"] as const;
 const ROWS_COVERED_BY_ACTIONS = new Set(["open-settings"]);
+
+function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations: Conversation[]): PaletteItem[] {
+  const watched = surface?.primaryConversationId
+    ? conversations.find(({ id }) => id === surface.primaryConversationId)
+    : undefined;
+  if (!surface?.openAttachDialog || !watched) return [];
+  const entry = watcherEntryFor(surface, watched);
+  const base = { group: "Actions" as const, detail: watched.title, keywords: "watcher review", icon: <Eye size={14} /> };
+  if (entry.kind === "attach") {
+    return [{ ...base, id: "action:add-watcher", label: "Add a watcher", run: () => surface.openAttachDialog?.(watched.id, null) }];
+  }
+  if (entry.kind !== "show") return [];
+  const { link } = entry;
+  const request = surface.request;
+  return [
+    { ...base, id: "action:show-watcher", label: "Open watcher", run: () => surface.showWatcher(watched.id) },
+    ...(link.status !== "paused" && request ? [{
+      ...base,
+      id: "action:pause-watcher",
+      label: "Pause watcher",
+      run: () => {
+        void createWatcherActions(request, link.id).pause().catch((error: unknown) => {
+          reportWatcherDockError(watched.id, watcherErrorText(error, "The watcher could not be paused."));
+        });
+      },
+    }] : []),
+    ...(link.status === "paused" && request ? [{
+      ...base,
+      id: "action:resume-watcher",
+      label: link.pauseReason === "write-detected" ? "Resume watcher…" : "Resume watcher",
+      run: () => {
+        if (link.pauseReason === "write-detected") {
+          surface.showWatcher(watched.id);
+          return;
+        }
+        void createWatcherActions(request, link.id).resume().catch((error: unknown) => {
+          reportWatcherDockError(watched.id, watcherErrorText(error, "The watcher could not resume."));
+        });
+      },
+    }] : []),
+  ];
+}
 
 function score(label: string, detail: string | undefined, query: string, keywords = ""): number {
   const target = `${label} ${detail ?? ""} ${keywords}`.toLocaleLowerCase();
@@ -102,6 +150,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   const restorePriorFocus = useRef(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const search = useMessageSearch(open && !choosingProject, query, sendCommand);
+  const watcherSurface = useWatcherSurface();
   useNativePreviewSuspension(open);
 
   useLayoutEffect(() => {
@@ -128,12 +177,13 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
       ...(onOpenTasks ? [{ id: "action:tasks", group: "Actions" as const, label: "Open tasks", icon: <ListTodo size={14} />, run: onOpenTasks }] : []),
       { id: "action:settings", group: "Actions", label: "Open settings", icon: <Settings size={14} />, run: onOpenSettings },
       { id: "action:help", group: "Actions", label: "Open help", icon: <CircleHelp size={14} />, run: openHelpGuide },
+      ...watcherPaletteItems(watcherSurface, conversations),
     ];
     const projectItems: PaletteItem[] = projects.filter((project) => project.workspaceKind !== "scratch").map((project) => ({ id: `project:${project.id}`, group: "Projects", label: project.name, detail: project.path, icon: <ProjectIcon project={project} size={14} />, run: () => onSelectProject(project) }));
     const projectNames = new Map(projects.map((project) => [project.id, project.name]));
     const threadItems: PaletteItem[] = conversations.filter(({ archivedAt }) => archivedAt === null).map((thread) => ({ id: `thread:${thread.id}`, group: "Threads", label: thread.title, detail: projectNames.get(thread.projectId) ?? "Thread", icon: <MessageSquare size={14} />, run: () => onSelectConversation(thread) }));
     return [...actions, ...projectItems, ...threadItems];
-  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onOpenTasks, onSelectConversation, onSelectProject, projects]);
+  }, [conversations, newThreadShortcut, onAddProject, onNewThread, onNewThreadWithoutProject, onOpenSettings, onOpenTasks, onSelectConversation, onSelectProject, projects, watcherSurface]);
   const settingsItems = useMemo<PaletteItem[]>(() => {
     const regular = projects.filter((project) => project.workspaceKind !== "scratch");
     const projectId = (regular.find(({ id }) => id === currentProjectId) ?? regular[0])?.id;
@@ -176,6 +226,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
   const activeItemId = items[activeIndex]?.id;
   useEffect(() => {
     if (!activeItemId) return;
+    if (activeItemId === "action:add-watcher") prefetchWatcherAttachDialog();
     document.getElementById(`palette-${activeItemId}`)?.scrollIntoView({ block: "nearest" });
   }, [activeItemId]);
 

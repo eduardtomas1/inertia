@@ -32,6 +32,7 @@ import {
   DEFAULT_AGENT_CONTEXT_TURNS,
   MAX_AGENT_CONTEXT_TURNS,
   type AgentContextImageNote,
+  type AgentContextShare,
 } from "./agent-context-pages";
 import { createConversationContextPacketFromAuthorizedAgent } from "./conversation-context-service";
 import type { ConversationContextRequestCoordinator } from "./conversation-context-request-coordinator";
@@ -84,7 +85,13 @@ export interface AgentContextToolSource {
   turn: AgentTurn;
 }
 
+export interface AgentContextWatcherPolicy {
+  watchedConversationFor(conversationId: string): string | null;
+  consumeRead(turnId: string, budget: number): boolean;
+}
+
 export interface AgentContextToolDependencies {
+  watcherPolicy?: AgentContextWatcherPolicy;
   store: RuntimeStore;
   contextRequests: ConversationContextRequestCoordinator;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
@@ -131,8 +138,16 @@ export class AgentContextTool {
     source: AgentContextToolSource,
     call: ProviderHostToolCall,
   ): Promise<ProviderHostToolResult> {
-    const input = inputSchema.parse(call.arguments ?? {});
+    const parsed = inputSchema.parse(call.arguments ?? {});
     const current = this.dependencies.assertSource(source);
+    const watchedConversationId = this.dependencies.watcherPolicy?.watchedConversationFor(current.id) ?? null;
+    if (watchedConversationId !== null) {
+      return await this.readAsWatcher(source, call, current, {
+        ...parsed,
+        conversationId: parsed.conversationId ?? watchedConversationId,
+      });
+    }
+    const input = parsed;
     if (!input.conversationId && (input.turnId || input.cursor || input.limit)) {
       return failure("invalid_arguments", "Pass a conversationId with turnId, cursor, or limit.");
     }
@@ -159,12 +174,55 @@ export class AgentContextTool {
     });
   }
 
+  private async readAsWatcher(
+    source: AgentContextToolSource,
+    call: ProviderHostToolCall,
+    current: Conversation,
+    input: z.infer<typeof inputSchema> & { conversationId: string },
+  ): Promise<ProviderHostToolResult> {
+    if (input.turnId && input.limit) {
+      return failure("invalid_arguments", "limit applies to the turn list, not to one turn.");
+    }
+    const access = this.dependencies.store.contextPackets.turnReads.access({
+      targetConversationId: current.id,
+      targetTurnId: source.turn.id,
+      targetUserMessageId: source.turn.userMessageId,
+      sourceConversationId: input.conversationId,
+    });
+    if (!access) {
+      return failure(
+        "not_available_to_watchers",
+        "A watcher reads only the chat it watches. Omit conversationId to read the watched chat.",
+      );
+    }
+    const link = this.dependencies.store.watcherLinks.findByWatcher(current.id);
+    const budget = link?.budgets.contextReadsPerWake ?? 0;
+    if (!this.dependencies.watcherPolicy!.consumeRead(source.turn.id, budget)) {
+      return failure("budget_exceeded", budget === 0 ? "This watcher can't read more of the chat." : `This check already read context ${budget} times.`);
+    }
+    const share: AgentContextShare | undefined = access === "watched" && link
+      ? {
+          requests: link.sharing.brief,
+          activities: link.sharing.activities,
+          answers: link.sharing.partialReplies,
+          files: link.sharing.changedFiles,
+        }
+      : undefined;
+    return await this.read(source, call, current, access, {
+      conversationId: input.conversationId,
+      turnId: input.turnId,
+      cursor: input.cursor,
+      limit: input.limit ?? DEFAULT_AGENT_CONTEXT_TURNS,
+      ...(share ? { share } : {}),
+    });
+  }
+
   private async read(
     source: AgentContextToolSource,
     call: ProviderHostToolCall,
     current: Conversation,
     access: AgentContextReadAccess,
-    input: { conversationId: string; turnId?: string; cursor?: string; limit: number },
+    input: { conversationId: string; turnId?: string; cursor?: string; limit: number; share?: AgentContextShare },
   ): Promise<ProviderHostToolResult> {
     const reads = this.dependencies.store.contextPackets.turnReads;
     const route = access === "own" ? this.ownChatRoute(current, source.turn) : undefined;
@@ -177,6 +235,7 @@ export class AgentContextTool {
         limit: input.limit,
         cursor: input.cursor,
         route,
+        ...(input.share ? { share: input.share } : {}),
       });
     } else {
       const turn = reads.turn(input.conversationId, input.turnId, route);
@@ -185,7 +244,7 @@ export class AgentContextTool {
           ? failure("turn_withheld", "That turn ran on another model endpoint, so it is withheld from this chat's history.")
           : failure("turn_not_found", "That turn is not part of this chat.");
       }
-      const attachments = input.cursor === undefined
+      const attachments = input.cursor === undefined && input.share?.requests !== false
         ? reads.requestAttachments(input.conversationId, turn)
           .filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
         : [];
@@ -197,6 +256,7 @@ export class AgentContextTool {
         turn,
         cursor: input.cursor,
         images: loaded.notes,
+        ...(input.share ? { share: input.share } : {}),
       });
     }
     this.dependencies.assertSource(source);

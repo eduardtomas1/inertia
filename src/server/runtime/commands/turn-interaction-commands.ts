@@ -119,6 +119,7 @@ export interface TurnInteractionCommandDependencies {
     adopt(input: UndeliveredFollowUp, unconfirmed: string | null): MessageQueueResult;
   };
   limitResetDispatch?: { planId: string; assertCurrent(): void };
+  watcherDelivery?: import("../watcher/watcher-note-instruction").WatcherNoteDelivery;
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
@@ -209,7 +210,7 @@ export function createTurnInteractionCommandHandler(
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
-          if (scheduledDispatch) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
+          if (scheduledDispatch || dependencies.watcherDelivery) throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
           messageSendStage = "follow-up-preparation";
           if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(
@@ -782,6 +783,7 @@ export function createTurnInteractionCommandHandler(
                 contextRequestId: command.requestId,
                 turnCheckpoint: true,
                 skills: resolvedSkills.inputs,
+                ...(dependencies.watcherDelivery ? { watcherNote: dependencies.watcherDelivery.note, internalInstructions: [dependencies.watcherDelivery.instruction] } : {}),
               }, () => {
                 durableTurnPersisted = true;
                 acceptRetainedAttachments();

@@ -5,6 +5,13 @@ import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } f
 import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
 import type { MessageQueueResult } from "../queued-messages";
 import type {
+  WatcherDelivery,
+  WatcherFeedItem,
+  WatcherLinkView,
+  WatcherLivePhase,
+  WatcherUsage,
+} from "../watcher";
+import type {
   AgentGoal,
   AgentWorkflowState,
   AgentSkillSummary,
@@ -118,6 +125,17 @@ export type RuntimeMutationEvent =
   | { type: "agent.input.resolved"; conversationId: string; runId: string; turnId: string; requestId: string }
   | { type: "agent.plan.updated"; plan: AgentPlan }
   | { type: "agent.goal.updated"; goal: AgentGoal }
+  | { type: "watcher.link.updated"; link: WatcherLinkView }
+  | { type: "watcher.link.removed"; linkId: string; watcherConversationId?: string; watchedConversationId?: string | null }
+  | {
+      type: "watcher.live";
+      linkId: string;
+      watcherConversationId: string;
+      turnId: string;
+      phase: WatcherLivePhase;
+      label: string | null;
+      at: string;
+    }
   | {
       type: "agent.goal.cleared";
       conversationId: string;
@@ -220,6 +238,22 @@ export type ServerEvent =
         | DuoPreparedResult
         | DuoPendingResult
         | DuoStatusResult
+        | { kind: "watcher.link"; link: WatcherLinkView }
+        | {
+            kind: "watcher.feed";
+            linkId: string;
+            feedRevision: number;
+            items: WatcherFeedItem[];
+            next: { beforeSequence: number } | null;
+            usage?: WatcherUsage;
+          }
+        | {
+            kind: "watcher.delivery";
+            linkId: string;
+            wakeId: string;
+            delivery: WatcherDelivery;
+            queue?: MessageQueueResult;
+          }
         | { kind: "backend.profile"; profile: ModelBackendProfileDetail }
         | { kind: "backend.profile.probe"; profile: ModelBackendProfileDetail }
         | { kind: "backend.default"; value: ModelBackendDefault | null }

@@ -93,6 +93,7 @@ export class MascotStatusPublisher {
     private readonly projectName?: (id: string) => string | null,
     private readonly schedule: (task: () => void) => void = (task) => queueMicrotask(task),
     private readonly clock: MascotClock = systemClock,
+    private readonly quietTurn?: (turnId: string) => boolean,
   ) {}
 
   replace(
@@ -228,7 +229,8 @@ export class MascotStatusPublisher {
         message: null, progress: keep ? previous.status.progress : null, steps: keep ? previous.status.steps : null,
         since: timestamp(terminal ? turn.completedAt ?? turn.updatedAt : turn.startedAt ?? turn.requestedAt), quietSince: null,
       },
-      seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt || this.seenRuns.has(turn.runId)),
+      seen: terminal && (!turn.completedAt || (conversation.lastViewedAt ?? "") >= turn.completedAt || this.seenRuns.has(turn.runId)
+        || this.quietTurn?.(turn.id) === true),
       // Activity updates must not bounce between live chats.
       at: terminal ? turn.updatedAt : turn.requestedAt,
       changedAt: sameTurn && previous.status.phase === phase ? previous.changedAt : Number.isFinite(changed) ? changed : now,
@@ -371,9 +373,15 @@ export class MascotStatusPublisher {
   }
 }
 
+type WatcherWakeLookup = { wakeForTurn(turnId: string): { state: string; outcome: string | null } | null };
+
 export function storeMascotStatus(
   publish: ((feed: MascotFeed) => void) | undefined,
-  store: () => { conversationShell(id: string): ConversationShell | null; project(id: string): Pick<Project, "name"> },
+  store: () => {
+    conversationShell(id: string): ConversationShell | null;
+    project(id: string): Pick<Project, "name">;
+    watcherLinks?: WatcherWakeLookup;
+  },
 ): MascotStatusPublisher {
   return new MascotStatusPublisher(
     publish,
@@ -385,5 +393,20 @@ export function storeMascotStatus(
         return null;
       }
     },
+    undefined,
+    undefined,
+    (turnId) => quietWatcherCheck(store().watcherLinks, turnId),
   );
+}
+
+export function quietWatcherCheck(
+  watcherLinks: WatcherWakeLookup | undefined,
+  turnId: string,
+): boolean {
+  try {
+    const wake = watcherLinks?.wakeForTurn(turnId) ?? null;
+    return wake !== null && (wake.state !== "settled" || wake.outcome === "silent");
+  } catch {
+    return false;
+  }
 }

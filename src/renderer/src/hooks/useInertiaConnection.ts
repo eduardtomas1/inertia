@@ -19,7 +19,11 @@ import {
   UNREADABLE_RUNTIME_RESPONSE,
   type PendingConnectionRequest,
 } from "../utils/connectionMessages";
-import { applyConversationShellEvent } from "../utils/runtimeSnapshotProjection";
+import {
+  applyConversationShellEvent,
+  applyWatcherLinkEvent,
+} from "../utils/runtimeSnapshotProjection";
+import { clearWatcherLive, publishWatcherLive, retainWatcherLive } from "../utils/watcherLiveStore";
 import {
   publishesWorkspaceGitCompletion,
   runtimeCommandPolicy,
@@ -181,6 +185,7 @@ export function useInertiaConnection(): InertiaConnection {
                   setRuntimeGeneration(null);
                   setStatus("online");
                 }
+                retainWatcherLive(event.snapshot.watchers);
                 setSnapshot(event.snapshot);
               } else if (event.type === "runtime.resumed") {
                 if (projectionRef.current.beginResume(event.sync) !== "resume") {
@@ -201,12 +206,25 @@ export function useInertiaConnection(): InertiaConnection {
                 if (event.type === "runtime.cursor") return;
                 event = event.event;
                 if (event.type === "snapshot.updated") {
+                  retainWatcherLive(event.snapshot.watchers);
                   setSnapshot(event.snapshot);
                 } else if (event.type === "conversation.shell.updated") {
                   const shellEvent = event;
                   setSnapshot((current) => current
                     ? applyConversationShellEvent(current, shellEvent)
                     : current);
+                } else if (
+                  event.type === "watcher.link.updated"
+                  || event.type === "watcher.link.removed"
+                ) {
+                  const linkEvent = event;
+                  if (linkEvent.type === "watcher.link.removed") clearWatcherLive(linkEvent.linkId);
+                  else if (linkEvent.link.status !== "waking") clearWatcherLive(linkEvent.link.id);
+                  setSnapshot((current) => current
+                    ? applyWatcherLinkEvent(current, linkEvent)
+                    : current);
+                } else if (event.type === "watcher.live") {
+                  publishWatcherLive(event);
                 }
               } else if (event.type === "runtime.sync.completed") {
                 const decision = projectionRef.current.complete(event.sync);
@@ -220,6 +238,7 @@ export function useInertiaConnection(): InertiaConnection {
                   setError(null);
                 }
               } else if (event.type === "snapshot.updated") {
+                retainWatcherLive(event.snapshot.watchers);
                 setSnapshot(event.snapshot);
               } else if (event.type === "conversation.shell.updated") {
                 const shellEvent = event;

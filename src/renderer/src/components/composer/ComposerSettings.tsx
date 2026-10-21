@@ -17,6 +17,7 @@ import {
   RESPONSE_SPEED_LABEL,
 } from "./config";
 import { ComposerResponseSpeedOptions } from "./ComposerResponseSpeedOptions";
+import { useWatcherRunLock, WATCHER_RUN_LOCK_LABEL } from "../watcher/watcherContext";
 import type { ComposerMenuController } from "./useComposerMenus";
 
 export interface ComposerSettingsModel {
@@ -89,6 +90,7 @@ export function ComposerSettings({
   const responseSpeedLabel = selectedFastMode
     ? "Fast"
     : "Standard";
+  const runLocked = useWatcherRunLock(conversation.id);
 
   return (
     <div
@@ -209,6 +211,11 @@ export function ComposerSettings({
           )}
         </div>
       )}
+      {runLocked ? (
+        <span className="composer-pill composer-run-lock" data-composer-setting="run-lock">
+          {WATCHER_RUN_LOCK_LABEL}
+        </span>
+      ) : <>
       <div className="popover-anchor composer-setting-control access-control composer-access-control">
         <button
           ref={(node) => setMenuTrigger("access", node)}
@@ -336,6 +343,7 @@ export function ComposerSettings({
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }

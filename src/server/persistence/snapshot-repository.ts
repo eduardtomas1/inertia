@@ -72,6 +72,7 @@ import {
   REASONING_PROJECTION_COLUMNS,
 } from "./stream-text-storage";
 import { agentContextReadSummaries } from "./conversation-context-turn-reads";
+import { watcherLinkViews, watcherWakeSummaries } from "./watcher-link-codecs";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number };
@@ -81,6 +82,15 @@ type HistoryPageRecords = Omit<ConversationDetail, "conversation" | "history" | 
 const EMPTY_CONVERSATION_RECORDS: ConversationRecords = { usage: [], goals: [], reviewSummaries: [], reviewStates: [], reviewNotes: [] };
 const EMPTY_HISTORY_RECORDS: HistoryPageRecords = { agentTurns: [], turnGitArtifacts: [], messages: [], activities: [],
   subagents: [], reasonings: [], plans: [], checkpoints: [], contextPackets: [], contextReads: [] };
+
+function watcherWakeField(
+  database: PersistenceContext["database"],
+  conversationId: string,
+  turnIds: readonly string[] | undefined,
+): Pick<ConversationDetail, "watcherWakes"> {
+  const watcherWakes = watcherWakeSummaries(database, conversationId, turnIds);
+  return watcherWakes ? { watcherWakes } : {};
+}
 
 export interface RecentConversationLimits {
   messages: number;
@@ -188,6 +198,7 @@ export class SnapshotRepository {
       providers,
       promptPresets: this.promptPresets.list(),
       todos: this.todos.list(),
+      watchers: watcherLinkViews(this.context.database),
       settings: settingsFromState(state),
       activeProjectId: state.active_project_id,
       activeConversationId: state.active_conversation_id,
@@ -279,7 +290,7 @@ export class SnapshotRepository {
       ...EMPTY_CONVERSATION_RECORDS,
       conversation: conversationDetailFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
-          attachments_json, compaction_json, html_render_json, private_connect_device_id, created_at
+          attachments_json, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
           WHERE messages.conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
           ORDER BY messages.created_at DESC, messages.id DESC LIMIT ?)`,
@@ -309,8 +320,9 @@ export class SnapshotRepository {
         .all(...where.parameters) as T[];
     };
     const messages = query<MessageRow>("messages", MESSAGE_PROJECTION_COLUMNS, "messages.created_at ASC, messages.id ASC").map(messageFromRow);
+    const turns = query<UsageLimitedTurnRow>("agent_turns", `agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited`, "requested_at ASC, id ASC").map(agentTurnFromRow);
     return {
-      agentTurns: query<UsageLimitedTurnRow>("agent_turns", `agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited`, "requested_at ASC, id ASC").map(agentTurnFromRow),
+      agentTurns: turns,
       turnGitArtifacts: query<TurnGitArtifactRow>("turn_git_artifacts", "*", "created_at ASC, id ASC").map(turnGitArtifactFromRow),
       messages,
       activities: query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map(activityFromRow),
@@ -320,6 +332,7 @@ export class SnapshotRepository {
       checkpoints: query<CheckpointRow>("checkpoints", "*", "created_at ASC, id ASC").map(checkpointFromRow),
       contextPackets: this.context.contextPackets(conversationId, scope ? messages.map(({ id }) => id) : undefined),
       contextReads: agentContextReadSummaries(this.context.database, conversationId, scope ? messages.map(({ id }) => id) : undefined),
+      ...watcherWakeField(this.context.database, conversationId, scope ? turns.map(({ id }) => id) : undefined),
     };
   }
 
@@ -331,7 +344,8 @@ export class SnapshotRepository {
       .all(conversationId, turn.user_message_id) as MessageRow[]).map(messageFromRow);
     return { ...EMPTY_HISTORY_RECORDS, agentTurns: [agentTurnFromRow(turn)], messages,
       contextPackets: this.context.contextPackets(conversationId, messages.map(({ id }) => id)),
-      contextReads: agentContextReadSummaries(this.context.database, conversationId, messages.map(({ id }) => id)) };
+      contextReads: agentContextReadSummaries(this.context.database, conversationId, messages.map(({ id }) => id)),
+      ...watcherWakeField(this.context.database, conversationId, [turnId]) };
   }
 
   private conversationRecords(conversationId: string): ConversationRecords {

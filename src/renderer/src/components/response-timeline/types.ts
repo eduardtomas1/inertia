@@ -1,3 +1,4 @@
+import type { WatcherWakeSummary } from "@shared/watcher";
 import type { RefObject } from "react";
 import type {
   AgentActivity,
@@ -27,6 +28,7 @@ export interface ResponseTimelineProps {
   turns: AgentTurn[];
   messages: ChatMessage[];
   contextPackets?: readonly ConversationContextPacketSummary[];
+  watcherWakes?: readonly WatcherWakeSummary[];
   activities: AgentActivity[];
   subagents?: SubagentTrace[];
   reasonings: AgentReasoning[];

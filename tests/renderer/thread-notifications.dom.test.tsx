@@ -6,6 +6,7 @@ import { ThreadNotifications } from "../../src/renderer/src/hooks/useThreadNotif
 import { activateNotificationConversation } from "../../src/renderer/src/components/AppLayout";
 import type { AppSnapshot, Conversation } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { link } from "./watcher-fixtures";
 
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
@@ -355,6 +356,36 @@ describe("thread notification lifecycle", () => {
     );
 
     expect(showThreadNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps a watcher's checks quiet and notifies when it answers the user", () => {
+    const showThreadNotification = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        onThreadNotificationActivated: vi.fn(() => vi.fn()),
+        showThreadNotification,
+      },
+    });
+    const watcher = conversation("running");
+    const finished = { ...conversation("completed"), id: watcher.id };
+    const watching = link({ watcherConversationId: watcher.id });
+    const checking = link({ watcherConversationId: watcher.id, status: "waking" });
+    const props = {
+      documentActive: false,
+      activeConversationVisible: false,
+      splitConversationIds: new Set<string>(),
+      enabled: true,
+      onActivate: vi.fn(),
+    };
+    const at = (thread: Conversation, watchers: AppSnapshot["watchers"]) => ({ ...snapshot(thread), watchers }) as AppSnapshot;
+    const view = render(<ThreadNotifications {...props} snapshot={at(watcher, [checking])} />);
+    view.rerender(<ThreadNotifications {...props} snapshot={at(finished, [watching])} />);
+    expect(showThreadNotification).not.toHaveBeenCalled();
+    view.rerender(<ThreadNotifications {...props} snapshot={at(watcher, [watching])} />);
+    view.rerender(<ThreadNotifications {...props} snapshot={at({ ...finished, completedAt: "2026-08-09T09:02:00.000Z" }, [watching])} />);
+    expect(showThreadNotification).toHaveBeenCalledOnce();
+    expect(showThreadNotification).toHaveBeenLastCalledWith({ conversationId: watcher.id, kind: "completed" });
   });
 
   it("asks the desktop to show background-only alerts only while Inertia is in the background", () => {

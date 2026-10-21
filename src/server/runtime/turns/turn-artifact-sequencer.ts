@@ -24,6 +24,7 @@ export class TurnArtifactSequencer {
   constructor(private readonly options: TurnArtifactSequencerOptions) {}
 
   captureBefore(active: ActiveTurn): Promise<void> | null {
+    if (active.readOnlyWatcher) return null;
     try {
       const priorCheckpoint = this.#checkpoints.get(active.conversation.id) ?? null;
       const turnCheckpoint = this.createTurnCheckpoint(active, priorCheckpoint)
@@ -90,6 +91,7 @@ export class TurnArtifactSequencer {
   }
 
   finalize(active: ActiveTurn, effects: TurnSettlementEffects): void | Promise<void> {
+    if (active.readOnlyWatcher) return;
     this.#checkpointStops.get(active.turn.id)?.abort();
     const finalization = this.options.hooks.captureGitArtifacts?.({
       turn: active.turn,

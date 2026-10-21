@@ -2,7 +2,7 @@ import { createRef } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
+import { escapeClosedTooltip, TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "../../src/renderer/src/components/Tooltip";
 import { TooltipButton } from "../../src/renderer/src/components/TooltipButton";
 import { HintButton } from "../../src/renderer/src/components/HintButton";
 import { readSourceText } from "../helpers/source-text";
@@ -83,6 +83,26 @@ describe("text button tooltip", () => {
     expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent("Copy code");
     fireEvent.keyDown(copy, { key: "Escape" });
     expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+
+  it("leaves Escape to the surface around it when it has no hint to show", () => {
+    const collapse = vi.fn();
+    render(
+      <aside onKeyDown={(event) => {
+        if (event.key === "Escape" && !escapeClosedTooltip(event.nativeEvent)) collapse();
+      }}
+      >
+        <TooltipButton tooltip="">Check now</TooltipButton>
+      </aside>,
+    );
+    const button = screen.getByRole("button", { name: "Check now" });
+    fireEvent.pointerEnter(button, { pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+    });
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+    fireEvent.keyDown(button, { key: "Escape" });
+    expect(collapse).toHaveBeenCalledOnce();
   });
 
   it("keeps the same focused button when a hint appears or goes away", () => {

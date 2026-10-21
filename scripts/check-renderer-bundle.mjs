@@ -71,13 +71,22 @@ const budgets = {
   // title match add 750 core bytes (2,294,025 measured on macOS arm64, where
   // the previous build measures the same 2,293,275 bytes as Linux x64).
   // See docs/pr-evidence/visual-replies/renderer-bundle.json.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21,
+  // Watchers: the shell's watcher event validators (841 bytes on each route,
+  // foundation) and the eager link index, dock and focus store, dock handle, dock
+  // host, attach host, live-phase store, timeline divider/check model and
+  // composer lock (8,439 workbench / 6,875 detached bytes). The dock (bar,
+  // feed, cards) and attach dialog are deferred and capped separately below.
+  // Measured 888,030 / 680,009 bytes on Linux x64; previous headroom kept.
+  // The review fixes and the collapsed dock handle add 863 workbench bytes;
+  // removing the composer chip saves 873 detached bytes.
+  // See docs/pr-evidence/watcher/renderer-bundle.json.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
   // Global storage settings add shared command/result guards; measured 642,614 bytes.
   // The 5 KiB management UI is separately deferred and capped below.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342,
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   entryCss: 241_004 + 256,
@@ -90,6 +99,11 @@ const budgets = {
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6,
+  // The watcher dock (bar, notices, feed, cards, receipts) and the attach
+  // dialog stay lazy; their closures exclude every initial-route chunk.
+  // Measured 41,091 / 18,691 bytes after the last review round, no headroom.
+  deferredWatcherDockJavaScript: 31.375 * kibibyte + 5_737 + 343 + 975 + 240 + 1_017 + 183 + 58 + 410 + 58,
+  deferredWatcherAttachJavaScript: 18.5 * kibibyte + 761 - 2_037 + 372 + 536 + 55 + 22 + 38 + 76 - 76 + 34,
   deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
@@ -100,11 +114,14 @@ const budgets = {
   // Keeping an expanded running task's moving line adds 49 bytes (19,340
   // measured).
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21,
-  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17,
+  // Nesting a watcher under its chat in the Work tab adds 6 bytes over v0.0.73
+  // (21,132 measured on Linux x64).
+  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   deferredProjectSettingsJavaScript: 12.5 * kibibyte + 567 + 3_226 + 1_065,
   deferredCliConversationImportJavaScript: 9_797 + 256,
-  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255,
+  // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
+  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
@@ -180,7 +197,11 @@ const budgets = {
   // The plain-text attachment tables add 571 core bytes (2,160,571 measured).
   // Storage contracts and its deferred loader bring core to 2,165,834 bytes.
   // Retain about 0.2 KiB headroom; settings UI has its own 5 KiB ceiling.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27,
+  // Watchers add 7,250 core bytes of shared contracts and validators
+  // (foundation) and 5,734 bytes of eager renderer wiring, after subtracting
+  // the separately capped deferred dock and attach dialog closures. The review
+  // fixes add 1,078 core bytes.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -647,6 +668,24 @@ if (mainWorkbenchJavaScriptClosure.has(usageLimitsEntry) || detachedChatJavaScri
   throw new Error("Provider Limits must remain deferred from the initial workbench");
 }
 const deferredUsageLimitsJavaScriptBytes = await closureBytes(await javaScriptClosure(usageLimitsEntry), new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]));
+// The watcher dock and attach dialog load only when a watcher exists or is
+// being added. Charge each deferred closure once: the dialog excludes chunks
+// it shares with the dock, and neither may join an initial route.
+const [watcherDockEntry, watcherAttachEntry] = ["WatcherDock", "WatcherAttachDialog"].map((prefix) => {
+  const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
+  if (!entry) throw new Error(`Missing deferred watcher surface: ${prefix}`);
+  if (entryJavaScriptClosure.has(entry) || mainWorkbenchJavaScriptClosure.has(entry) || detachedChatJavaScriptClosure.has(entry)) {
+    throw new Error(`The watcher surface must stay off the initial chat routes: ${prefix}`);
+  }
+  return entry;
+});
+const initialRouteJavaScriptClosure = new Set([...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...detachedChatJavaScriptClosure]);
+const watcherDockJavaScriptClosure = await javaScriptClosure(watcherDockEntry);
+const deferredWatcherDockJavaScriptBytes = await closureBytes(watcherDockJavaScriptClosure, initialRouteJavaScriptClosure);
+const deferredWatcherAttachJavaScriptBytes = await closureBytes(
+  await javaScriptClosure(watcherAttachEntry),
+  new Set([...initialRouteJavaScriptClosure, ...watcherDockJavaScriptClosure]),
+);
 const welcomeGuideEntry = assetNames.find((name) => /^WelcomeGuide-.*\.js$/u.test(name));
 if (!welcomeGuideEntry) throw new Error("Missing deferred welcome guide");
 if (mainWorkbenchJavaScriptClosure.has(welcomeGuideEntry) || detachedChatJavaScriptClosure.has(welcomeGuideEntry)) {
@@ -700,6 +739,8 @@ const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
   - deferredUsageLimitsJavaScriptBytes
+  - deferredWatcherDockJavaScriptBytes
+  - deferredWatcherAttachJavaScriptBytes
   - deferredWelcomeGuideJavaScriptBytes
   - deferredWorkingOrbJavaScriptBytes
   - deferredSnapshotSettingsJavaScriptBytes
@@ -744,6 +785,8 @@ const coreJavaScriptBytes =
 const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
+  deferredWatcherDockJavaScript: deferredWatcherDockJavaScriptBytes,
+  deferredWatcherAttachJavaScript: deferredWatcherAttachJavaScriptBytes,
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredWorkingOrbJavaScript: deferredWorkingOrbJavaScriptBytes,
   deferredSnapshotSettingsJavaScript: deferredSnapshotSettingsJavaScriptBytes,

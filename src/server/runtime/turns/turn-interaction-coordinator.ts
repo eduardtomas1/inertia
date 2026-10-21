@@ -16,12 +16,19 @@ import {
 } from "../pending-interaction-registry";
 import type {
   ActiveTurn,
+  ReadOnlyWatcherViolationKind,
   TurnControllerHooks,
   TurnProviderRuntime,
   TurnTerminalCause,
 } from "./turn-controller-types";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
 import { broadcastTurnSnapshot } from "./turn-controller-support";
+import {
+  READ_ONLY_WATCHER_MAX_DENIALS,
+  READ_ONLY_WATCHER_STOP_MESSAGE,
+  readOnlyApprovalViolationKind,
+  readOnlyViolationDetail,
+} from "./turn-read-only-watcher";
 
 function interactionOwner(active: ActiveTurn): PendingInteractionOwner {
   return {
@@ -61,6 +68,7 @@ export class TurnInteractionCoordinator {
     approvals: Set<string>;
     inputs: Set<string>;
   }>();
+  private readonly deniedReadOnlyApprovals = new WeakMap<ActiveTurn, Set<string>>();
 
   constructor(private readonly options: TurnInteractionCoordinatorOptions) {}
 
@@ -214,11 +222,80 @@ export class TurnInteractionCoordinator {
     this.broadcastConversationShell(active);
   }
 
+  denyForReadOnly(
+    active: ActiveTurn,
+    request: Extract<ProviderEvent, { type: "approval" }>["request"],
+  ): void {
+    const watcher = active.readOnlyWatcher;
+    if (!watcher) throw new Error("Only watcher turns decline approvals automatically.");
+    this.options.streams.closeAssistantSegment(active);
+    this.options.streams.flush(active, "reasoning");
+    const denied = this.deniedReadOnlyApprovals.get(active) ?? new Set<string>();
+    this.deniedReadOnlyApprovals.set(active, denied);
+    if (denied.has(request.requestId)) {
+      throw new Error("The provider reused an outstanding approval request identity.");
+    }
+    denied.add(request.requestId);
+    const detail = readOnlyViolationDetail(request.title);
+    const kind = readOnlyApprovalViolationKind(request);
+    const responded = request.availableDecisions.includes("deny")
+      && this.options.providers.respondToApproval(
+        active.conversation.id,
+        request.requestId,
+        "deny",
+        { runId: active.turn.runId, turnId: active.turn.id },
+      );
+    watcher.deniedApprovals += 1;
+    const activity = this.options.store.addActivity({
+      conversationId: active.conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+      kind: "status",
+      title: `Needed permission: ${detail} — declined (watchers are read-only)`,
+      detail: null,
+      status: "completed",
+    });
+    this.options.hooks.broadcast({ type: "agent.activity", activity });
+    if (!responded || watcher.deniedApprovals >= READ_ONLY_WATCHER_MAX_DENIALS) {
+      this.stopForReadOnly(active, responded && kind !== "write-attempt" ? "approval-limit" : kind, detail);
+      return;
+    }
+    this.reportReadOnlyViolation(active, kind, detail, false);
+  }
+
+  stopForReadOnly(active: ActiveTurn, kind: ReadOnlyWatcherViolationKind, detail: string): void {
+    if (!active.readOnlyWatcher || !active.runState.acceptsProviderEvents()) return;
+    requestProviderCancellation(this.options.providers, active.conversation.id);
+    this.reportReadOnlyViolation(active, kind, readOnlyViolationDetail(detail), true);
+    this.options.settle(active, "failed", "unsupported-interaction", READ_ONLY_WATCHER_STOP_MESSAGE);
+  }
+
+  private reportReadOnlyViolation(
+    active: ActiveTurn,
+    kind: ReadOnlyWatcherViolationKind,
+    detail: string,
+    stopped: boolean,
+  ): void {
+    const watcher = active.readOnlyWatcher;
+    if (!watcher) return;
+    try {
+      this.options.hooks.onReadOnlyViolation?.(active.turn, {
+        linkId: watcher.linkId,
+        wakeId: watcher.wakeId,
+        kind,
+        detail,
+        stopped,
+      });
+    } catch {
+    }
+  }
+
   resolveApproval(
     active: ActiveTurn,
     requestId: string,
     decision: AgentApprovalDecision | "cancelled",
   ): void {
+    if (this.deniedReadOnlyApprovals.get(active)?.delete(requestId)) return;
     this.responses(active).approvals.delete(requestId);
     const owner = interactionOwner(active);
     const pending = pendingInteractionForOwner(

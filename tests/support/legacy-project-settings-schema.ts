@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 
 export function removeProjectSettingsFromLegacyFixture(database: Database.Database): void {
+  removeWatcherLinksFromLegacyFixture(database);
   database.exec(`
     DROP TABLE IF EXISTS html_renders;
     DROP TABLE IF EXISTS cli_conversation_imports;
@@ -27,4 +28,18 @@ export function removeProjectSettingsFromLegacyFixture(database: Database.Databa
   for (const column of ["target_turn_id", "target_run_id"]) {
     if (operationColumns.some(({ name }) => name === column)) database.exec(`ALTER TABLE agent_thread_operations DROP COLUMN ${column}`);
   }
+}
+
+export function removeWatcherLinksFromLegacyFixture(database: Database.Database): void {
+  database.exec(`
+    DROP TRIGGER IF EXISTS watcher_links_watched_delete;
+    DROP TABLE IF EXISTS watcher_wakes;
+    DROP TABLE IF EXISTS watcher_links;
+  `);
+  for (const table of ["messages", "queued_messages"]) {
+    if ((database.pragma(`table_info(${table})`) as Array<{ name: string }>).some(({ name }) => name === "watcher_note_json")) {
+      database.exec(`ALTER TABLE ${table} DROP COLUMN watcher_note_json`);
+    }
+  }
+  database.exec("DELETE FROM schema_migrations WHERE version >= 99");
 }

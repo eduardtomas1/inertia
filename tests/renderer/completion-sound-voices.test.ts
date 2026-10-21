@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BUILT_IN_COMPLETION_SOUNDS } from "../../src/shared/completion-sound";
 import { COMPLETION_SOUND_VOICES } from "../../src/renderer/src/utils/completionSoundPlayer";
 import { completionSoundTriggered } from "../../src/renderer/src/hooks/useCompletionSounds";
+import { checkingWatcherIds } from "../../src/renderer/src/hooks/useThreadNotifications";
 import type { AppSnapshot, ConversationShell } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
 import { WATCHED_ID, WATCHER_ID, link, project, shell } from "./watcher-fixtures";
@@ -58,19 +59,20 @@ describe("completion sounds for watchers", () => {
   const finished = (id: string) => shell(id, "Chat", { status: "completed", completedAt: "2026-10-19T10:50:00.000Z" });
   const running = (id: string) => shell(id, "Chat", { status: "running" });
 
+  const checking = [link({ status: "waking" })];
+
   it("never rings when only a watcher's check finished", () => {
     const previous = new Map([[WATCHER_ID, running(WATCHER_ID)]]);
-    expect(completionSoundTriggered(snapshot([finished(WATCHER_ID)]), previous, new Map(), settings)).toBe(false);
+    expect(completionSoundTriggered(snapshot([finished(WATCHER_ID)]), previous, new Map(), settings, checkingWatcherIds(checking))).toBe(false);
   });
 
   it("still rings for the watched chat itself", () => {
     const previous = new Map([[WATCHED_ID, running(WATCHED_ID)], [WATCHER_ID, running(WATCHER_ID)]]);
-    expect(completionSoundTriggered(snapshot([finished(WATCHED_ID), finished(WATCHER_ID)]), previous, new Map(), settings)).toBe(true);
+    expect(completionSoundTriggered(snapshot([finished(WATCHED_ID), finished(WATCHER_ID)]), previous, new Map(), settings, checkingWatcherIds(checking))).toBe(true);
   });
 
-  it("rings for a watcher that was detached into an ordinary chat", () => {
+  it("rings when the watcher answers a question the user asked it", () => {
     const previous = new Map([[WATCHER_ID, running(WATCHER_ID)]]);
-    const detached = link({ status: "detached", detachedReason: "user", watchedConversationId: null });
-    expect(completionSoundTriggered(snapshot([finished(WATCHER_ID)], [detached]), previous, new Map(), settings)).toBe(true);
+    expect(completionSoundTriggered(snapshot([finished(WATCHER_ID)]), previous, new Map(), settings, checkingWatcherIds([link()]))).toBe(true);
   });
 });

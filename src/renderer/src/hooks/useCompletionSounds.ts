@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import type { AppSnapshot, ConversationShell } from "@shared/contracts";
 import { completionSoundDue, type CompletionSoundSettings } from "@shared/completion-sound";
 import { playCompletionSound } from "../utils/completionSoundPlayer";
-import { threadNotificationKindFor, watcherConversationIds } from "./useThreadNotifications";
+import { checkingWatcherIds, threadNotificationKindFor } from "./useThreadNotifications";
 
 export function completedTurnDurationMs(conversation: ConversationShell, observedStart?: number): number | null {
   const turn = conversation.latestTurn;
@@ -14,18 +14,14 @@ export function completedTurnDurationMs(conversation: ConversationShell, observe
   return Math.max(0, (Number.isFinite(end) ? end : Date.now()) - observedStart);
 }
 
-/**
- * Whether this snapshot finished a turn that should ring. Watcher chats never
- * ring: their checks are quiet by design. Tracks observed running starts.
- */
 export function completionSoundTriggered(
   snapshot: AppSnapshot,
   previous: ReadonlyMap<string, ConversationShell> | null,
   runningSince: Map<string, number>,
   settings: CompletionSoundSettings,
+  quiet: ReadonlySet<string>,
   now = Date.now(),
 ): boolean {
-  const quiet = watcherConversationIds(snapshot.watchers);
   let due = false;
   for (const conversation of snapshot.conversations) {
     const prior = previous?.get(conversation.id);
@@ -54,6 +50,7 @@ export function useCompletionSounds(
   play: (settings: CompletionSoundSettings) => unknown = playCompletionSound,
 ): void {
   const previousRef = useRef<Map<string, ConversationShell> | null>(null);
+  const previousWatchersRef = useRef<AppSnapshot["watchers"]>(undefined);
   const runningSinceRef = useRef(new Map<string, number>());
   const settingsRef = useRef(settings);
   const playRef = useRef(play);
@@ -63,8 +60,10 @@ export function useCompletionSounds(
   useEffect(() => {
     if (!snapshot) return;
     const previous = previousRef.current;
+    const quiet = checkingWatcherIds(previousWatchersRef.current, snapshot.watchers);
     previousRef.current = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
-    if (completionSoundTriggered(snapshot, previous, runningSinceRef.current, settingsRef.current)) {
+    previousWatchersRef.current = snapshot.watchers;
+    if (completionSoundTriggered(snapshot, previous, runningSinceRef.current, settingsRef.current, quiet)) {
       void Promise.resolve(playRef.current(settingsRef.current)).catch(() => undefined);
     }
   }, [snapshot]);

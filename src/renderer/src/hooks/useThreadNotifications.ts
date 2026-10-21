@@ -24,21 +24,18 @@ export function threadNotificationKind(
   return null;
 }
 
-/** Attached watcher chats, whose checks never notify, ring or mark unread. */
-export function watcherConversationIds(
-  links: readonly WatcherLinkView[] | undefined,
+export function checkingWatcherIds(
+  ...snapshots: ReadonlyArray<readonly WatcherLinkView[] | undefined>
 ): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const link of links ?? []) {
-    if (link.status !== "detached") ids.add(link.watcherConversationId);
+  for (const links of snapshots) {
+    for (const link of links ?? []) {
+      if (link.status === "waking") ids.add(link.watcherConversationId);
+    }
   }
   return ids;
 }
 
-/**
- * Watcher checks are quiet by design: a watcher chat never notifies. Its
- * findings surface only as the badge on the watched chat's chip.
- */
 export function threadNotificationKindFor(
   previous: Conversation,
   current: Parameters<typeof threadNotificationKind>[1],
@@ -58,6 +55,7 @@ export function useThreadNotifications(
   onlyInBackground = false,
 ): void {
   const previousRef = useRef<Map<string, Conversation> | null>(null);
+  const previousWatchersRef = useRef<AppSnapshot["watchers"]>(undefined);
   const snapshotRef = useRef(snapshot);
   const activateRef = useRef(onActivate);
   const pendingActivationIdRef = useRef<string | null>(null);
@@ -98,10 +96,12 @@ export function useThreadNotifications(
       conversation,
     ]));
     const previous = previousRef.current;
+    const previousWatchers = previousWatchersRef.current;
     previousRef.current = next;
+    previousWatchersRef.current = snapshot.watchers;
     if (!previous || !enabled) return;
 
-    const quiet = watcherConversationIds(snapshot.watchers);
+    const quiet = checkingWatcherIds(previousWatchers, snapshot.watchers);
     for (const conversation of snapshot.conversations) {
       const prior = previous.get(conversation.id);
       if (!prior) continue;

@@ -171,6 +171,19 @@ describe("WatcherDock", () => {
     expect(readWatcherDock(WATCHED_ID).open).toBe(true);
   });
 
+  it("closes the More menu on Escape from its trigger and keeps the dock open", async () => {
+    setup();
+    const aside = await dock();
+    const more = within(aside).getByRole("button", { name: "More watcher actions" });
+    fireEvent.click(more);
+    await screen.findByRole("menu", { name: "More watcher actions" });
+    more.focus();
+    fireEvent.keyDown(more, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(readWatcherDock(WATCHED_ID).open).toBe(true);
+    expect(more).toHaveFocus();
+  });
+
   it("animates open and close only on the user's action, never on mount", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     try {

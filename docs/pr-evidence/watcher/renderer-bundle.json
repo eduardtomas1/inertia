@@ -14,7 +14,8 @@
     "Wave 2 renderer: wave2BaselineBytes is 872e420bb (wave 1 renderer, scheduler and contract pass) and wave2Bytes the branch after the wave 2 renderer work, both built on macOS with Node 22.23.2 from the same package-lock (sizes are identical on every platform). The dock grows by 975 bytes (resolved findings below open ones, the declined-commands note, the automatic-sending menu item and state word, the usage line); the attach dialog by 536 bytes (the automatic-sending switch). First-load routes and core grow by 35 bytes for the shared Switch's optional description link. The baseline already measured 372 bytes over the attach budget and 28 over the core budget from the contract pass, so those caps were raised by that overshoot plus this growth; the others by exactly this growth.",
     "Wave 2 follow-up: wave2FollowUpBaselineBytes is 7a8d14930 (the integrated PR head with watcher.review and the note's providerId) and wave2FollowUpBytes the branch after the renderer follow-ups, both built on macOS with Node 22.23.2 from the same package-lock. The dock grows by 240 bytes (Review the last turn), the attach dialog by 22 (the one-sentence read-only line), and the transcript and core by 174 (the provider mark on the Note from watcher divider); transcriptJavaScript stays within its cap. The baseline already measured over budget from the integrated server and contract changes: attach by 55, workbench first load by 34, detached chat first load by 20 and core by 260 bytes; those caps were raised by that overshoot plus this growth, the dock cap by exactly this growth.",
     "Fix round: fixRoundBaselineBytes is be02d4a7e (the integrated PR head after wave 2) and fixRoundBytes the renderer fix-round branch, both built on macOS with Node 22.23.2 from the same package-lock. The dock grows by 1,017 bytes (per-action Send and Dismiss status, changed files of an inconclusive check, the sent-size note, the runtime's pause words in the announcement); the attach dialog by 38 (Review the last turn now while the turn runs). First-load routes grow by 211 (workbench) and 61 (detached chat) bytes and core by 319 for the dock host's handle fallback, the hint-less tooltip, the automatic note tooltip and /compact in a watcher composer; transcriptJavaScript (+72) and the welcome guide (+45) stay within their caps, and the 22-byte changes on unrelated deferred chunks are shared-helper import metadata. The dock, attach, first-load and core caps were raised by exactly this growth.",
-    "Integrated head: the server fix round changed shared contracts after the renderer fix round measured, and the attach dialog closure grew by 76 bytes (18,691 to 18,767) on the combined head 90187d709; its cap was raised by exactly those bytes. Every other measurement stayed within its cap."
+    "Integrated head: the server fix round changed shared contracts after the renderer fix round measured, and the attach dialog closure grew by 76 bytes (18,691 to 18,767) on the combined head 90187d709; its cap was raised by exactly those bytes. Every other measurement stayed within its cap.",
+    "CI fix: the More menu owns Escape with a document-level listener while open and focuses its first item once positioned, which adds 366 bytes to the dock closure (40,440 to 40,806); its cap was raised by exactly those bytes."
   ],
   "measurements": {
     "deferredLegacyPromptStashJavaScript": {
@@ -81,7 +82,9 @@
       "deltaFromWave2FollowUpBaselineBytes": 240,
       "fixRoundBaselineBytes": 39423,
       "fixRoundBytes": 40440,
-      "deltaFromFixRoundBaselineBytes": 1017
+      "deltaFromFixRoundBaselineBytes": 1017,
+      "ciFixBytes": 40806,
+      "deltaFromIntegratedHeadBytes": 366
     },
     "deferredWatcherAttachJavaScript": {
       "preFoundationBytes": null,

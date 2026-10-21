@@ -63,12 +63,12 @@ export function WatcherMenu({
     setPosition(floatingPosition(triggerRef.current, menuRef.current));
   }, [floating, open]);
   useEffect(() => {
-    if (!open) return;
+    if (!open || (floating && !position)) return;
     const frame = window.requestAnimationFrame(() => {
       menuRef.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [open]);
+  }, [floating, open, position]);
   useEffect(() => {
     if (!open) return;
     const inside = (target: EventTarget | null): boolean => target instanceof Node
@@ -77,10 +77,17 @@ export function WatcherMenu({
       if (inside(event.target)) return;
       setOpen(false);
     };
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    };
     const scrolled = (event: Event): void => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
       setOpen(false);
     };
+    document.addEventListener("keydown", escape, true);
     document.addEventListener("pointerdown", dismiss, true);
     document.addEventListener("focusin", dismiss);
     if (floating) {
@@ -88,6 +95,7 @@ export function WatcherMenu({
       window.addEventListener("resize", scrolled);
     }
     return () => {
+      document.removeEventListener("keydown", escape, true);
       document.removeEventListener("pointerdown", dismiss, true);
       document.removeEventListener("focusin", dismiss);
       window.removeEventListener("scroll", scrolled, true);

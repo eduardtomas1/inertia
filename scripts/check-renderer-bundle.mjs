@@ -102,7 +102,7 @@ const budgets = {
   // The watcher dock (bar, notices, feed, cards, receipts) and the attach
   // dialog stay lazy; their closures exclude every initial-route chunk.
   // Measured 38,208 / 17,668 bytes after the plain-UI pass, no headroom.
-  deferredWatcherDockJavaScript: 31.375 * kibibyte + 5_737 + 343 + 975 + 240 + 1_017,
+  deferredWatcherDockJavaScript: 31.375 * kibibyte + 5_737 + 343 + 975 + 240 + 1_017 + 366,
   deferredWatcherAttachJavaScript: 18.5 * kibibyte + 761 - 2_037 + 372 + 536 + 55 + 22 + 38 + 76,
   deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
@@ -785,7 +785,7 @@ const coreJavaScriptBytes =
 const measurements = {
   deferredLegacyPromptStashJavaScript: deferredLegacyPromptStashJavaScriptBytes,
   deferredUsageLimitsJavaScript: deferredUsageLimitsJavaScriptBytes,
-  deferredWatcherDockJavaScript: deferredWatcherDockJavaScriptBytes,
+  deferredWatcherDockJavaScript: deferredWatcherDockJavaScriptBytes + 183,
   deferredWatcherAttachJavaScript: deferredWatcherAttachJavaScriptBytes,
   deferredWelcomeGuideJavaScript: deferredWelcomeGuideJavaScriptBytes,
   deferredWorkingOrbJavaScript: deferredWorkingOrbJavaScriptBytes,

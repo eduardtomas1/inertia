@@ -276,7 +276,7 @@ export function createQueuedMessageRuntime(
   async function stopAndSend(input: { conversationId: string; id: string; turnId: string; content: string; attachments: ChatAttachment[] }, handoffId: string): Promise<void> {
     const { conversationId, id, turnId } = input;
     requireConversation(conversationId);
-    if (store.queuedMessages.list(conversationId).some((entry) => entry.id !== id)) {
+    if (store.queuedMessages.list(conversationId).some((entry) => entry.id !== id && !entry.watcherNote)) {
       throw new RuntimeRequestError("Send or remove the queued message first.");
     }
     await enqueue({ conversationId, id, content: input.content, attachments: input.attachments }, handoffId);

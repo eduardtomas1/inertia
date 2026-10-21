@@ -943,6 +943,24 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       } finally { await f.close(); }
     });
 
+    it("lets Stop and send go ahead of a waiting note, which then waits for the next turn", async () => {
+      const f = await fixture();
+      try {
+        const initial = startRunning(f);
+        const noteId = randomUUID();
+        f.queue.enqueueWatcherNote({
+          conversationId: f.conversationId, id: noteId, content: "Check the Windows path handling.", watcherNote: note,
+        });
+        const id = randomUUID();
+        await f.stopAndSend(id, initial.turn.id);
+        await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+        await f.drain();
+        expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+        expect(f.provider.input?.prompt).toContain("Do this instead.");
+        expect(f.store.queuedMessages.get(f.conversationId, noteId)?.state).toBe("waiting");
+      } finally { await f.close(); }
+    });
+
     it("names the main chat's full queue", async () => {
       const f = await fixture();
       try {

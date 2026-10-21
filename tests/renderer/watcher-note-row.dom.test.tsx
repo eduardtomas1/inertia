@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { TOOLTIP_DELAY_MS } from "../../src/renderer/src/components/Tooltip";
+import { WatcherWakeRequest } from "../../src/renderer/src/components/response-timeline/WatcherWakeRequest";
+import type { ResponseTurn } from "../../src/renderer/src/utils/response-timeline/model";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import type { WatcherNoteAttribution, WatcherWakeSummary } from "../../src/shared/watcher";
 import { providerNativeBackendProfile } from "../../src/shared/model-routing";
@@ -206,5 +208,19 @@ describe("watcher check rows", () => {
     fireEvent.click(summary);
     expect(within(details).getByText("Check 4 for 'Refactor parser' · digest body")).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Your request" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the transcript anchored while the digest opens", async () => {
+    const before = vi.fn();
+    const after = vi.fn();
+    const check = {
+      id: "turn-check",
+      userMessage: { id: "user-turn-check", content: "digest body" },
+      watcherWake: { sequence: 4, trigger: "turn-end", outcome: "silent", eventsCovered: 9, itemsTruncated: 0, itemsOmitted: 0 },
+    } as unknown as ResponseTurn;
+    render(<WatcherWakeRequest turn={check} onBeforeToggle={before} onAfterToggle={after} />);
+    fireEvent.click(screen.getByText("What the watcher was shown"));
+    expect(before).toHaveBeenCalledOnce();
+    await waitFor(() => expect(after).toHaveBeenCalledOnce());
   });
 });

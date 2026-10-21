@@ -4,6 +4,7 @@ import {
   watcherOutcomeText,
   watcherTriggerText,
 } from "../../utils/watcherCopy";
+import { useAnchoredDetailsToggle } from "./activity";
 import "./WatcherRows.css";
 
 /**
@@ -11,7 +12,16 @@ import "./WatcherRows.css";
  * It renders as one compact "Check N · K events" row; the digest itself stays
  * behind "What the watcher was shown".
  */
-export function WatcherWakeRequest({ turn }: { turn: ResponseTurn }): React.JSX.Element | null {
+export function WatcherWakeRequest({
+  turn,
+  onBeforeToggle,
+  onAfterToggle,
+}: {
+  turn: ResponseTurn;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}): React.JSX.Element | null {
+  const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const wake = turn.watcherWake;
   if (!wake) return null;
   const title = `Check ${wake.sequence} · ${watcherEventsText(wake.eventsCovered)}`;
@@ -39,7 +49,7 @@ export function WatcherWakeRequest({ turn }: { turn: ResponseTurn }): React.JSX.
         {omitted && <span>{omitted}</span>}
       </p>
       <details className="watcher-wake-digest">
-        <summary>What the watcher was shown</summary>
+        <summary {...anchorToggleHandlers}>What the watcher was shown</summary>
         <pre>{turn.userMessage.content}</pre>
       </details>
     </article>

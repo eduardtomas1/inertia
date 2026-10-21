@@ -116,7 +116,7 @@ export function UserRequestLayer({
     ({ consumedMessageId }) => consumedMessageId === turn.userMessage.id,
   ) ?? [];
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
-  if (turn.watcherWake) return <WatcherWakeRequest turn={turn} />;
+  if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
   return (
     <article

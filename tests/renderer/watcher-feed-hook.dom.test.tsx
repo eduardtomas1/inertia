@@ -75,6 +75,31 @@ describe("useWatcherFeed", () => {
     expect(result.current.hasMore).toBe(false);
   });
 
+  it("drops loaded earlier pages that a refreshed newest page no longer reaches, so no checks go missing between them", async () => {
+    const feed = deferredFeed();
+    const actions = feed.actionsFor(LINK_ID);
+    const { result, rerender } = renderHook(({ revision }) => useWatcherFeed(LINK_ID, revision, actions), {
+      initialProps: { revision: 1 },
+    });
+    await act(async () => { feed.calls[0]!.resolve(feed.page(LINK_ID, [feedItem(10), feedItem(9)], 9)); });
+    act(() => result.current.loadMore());
+    await act(async () => { feed.calls[1]!.resolve(feed.page(LINK_ID, [feedItem(8), feedItem(7)], 7)); });
+    rerender({ revision: 2 });
+    await waitFor(() => expect(feed.calls).toHaveLength(3));
+    await act(async () => { feed.calls[2]!.resolve(feed.page(LINK_ID, [feedItem(12), feedItem(11)], 11)); });
+    expect(result.current.items.map(({ sequence }) => sequence)).toEqual([12, 11, 10, 9, 8, 7]);
+    rerender({ revision: 3 });
+    await waitFor(() => expect(feed.calls).toHaveLength(4));
+    await act(async () => { feed.calls[3]!.resolve(feed.page(LINK_ID, [feedItem(20), feedItem(19)], 19)); });
+    expect(result.current.items.map(({ sequence }) => sequence)).toEqual([20, 19]);
+    expect(result.current.hasMore).toBe(true);
+
+    act(() => result.current.loadMore());
+    expect(feed.calls[4]!.before).toBe(19);
+    await act(async () => { feed.calls[4]!.resolve(feed.page(LINK_ID, [feedItem(18), feedItem(17)], 17)); });
+    expect(result.current.items.map(({ sequence }) => sequence)).toEqual([20, 19, 18, 17]);
+  });
+
   it("carries the watcher's token use from the newest page, and none while unknown", async () => {
     const feed = deferredFeed();
     const actions = feed.actionsFor(LINK_ID);

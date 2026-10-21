@@ -39,12 +39,13 @@ const freshHead = (): HeadState => ({ inFlight: false, again: false, fetchedRevi
 function mergeHead(previous: Feed | null, result: WatcherFeedResult): Feed {
   const kept = previous?.linkId === result.linkId ? previous : null;
   const oldestHead = result.items.at(-1)?.sequence ?? Number.POSITIVE_INFINITY;
-  const paged = kept !== null && kept.pages > 0;
+  const newestKept = kept?.items[0]?.sequence ?? Number.NEGATIVE_INFINITY;
+  const paged = kept !== null && kept.pages > 0 && oldestHead <= newestKept + 1;
   return {
     linkId: result.linkId,
     items: [...result.items, ...(paged ? kept.items.filter(({ sequence }) => sequence < oldestHead) : [])],
     next: paged ? kept.next : result.next,
-    pages: kept?.pages ?? 0,
+    pages: paged ? kept.pages : 0,
     usageTokens: result.usage?.totalTokens ?? null,
   };
 }

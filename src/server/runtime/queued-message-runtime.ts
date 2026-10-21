@@ -247,15 +247,17 @@ export function createQueuedMessageRuntime(
     if (!dependencies.enableProviders) throw new RuntimeRequestError("Message queues require an available provider runtime.");
     const content = input.content.trim();
     if (!content) throw new RuntimeRequestError("The watcher note is empty.");
+    const queueFull = () => new RuntimeRequestError("The main chat's queue is full. Send or remove a queued message, then try again.");
+    if (input.watcherNote.automatic === true && store.queuedMessages.list(conversation.id).length >= MAX_QUEUED_MESSAGES - 1) {
+      throw queueFull();
+    }
     try {
       store.queuedMessages.add({
         id: input.id, conversation, content, attachments: [],
         digest: queuedIntentDigest(content, []), watcherNote: input.watcherNote,
       });
     } catch (error) {
-      throw error instanceof QueuedMessageLimitError
-        ? new RuntimeRequestError("The main chat's queue is full. Send or remove a queued message, then try again.")
-        : error;
+      throw error instanceof QueuedMessageLimitError ? queueFull() : error;
     }
     changed(conversation.id);
     void schedule(conversation.id).catch(() => undefined);

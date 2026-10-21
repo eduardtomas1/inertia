@@ -726,6 +726,32 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("leaves the last queue slot to the user when an automatic finding would take it", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ delivery: "auto" });
+      await f.startWatchedTurn();
+      const enqueue = (content: string) => f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.enqueue", requestId: randomUUID(),
+        payload: { conversationId: f.watched.id, id: randomUUID(), content, attachments: [] },
+      } as ClientCommand);
+      for (const content of ["One", "Two"]) await enqueue(content);
+      const watcherId = await wakeOnce(f, link.id);
+      await f.finishTurn(watcherId, "- The parser drops the last token.");
+      await vi.waitFor(() => {
+        expect(feed(f, link.id)[0]).toMatchObject({
+          outcome: "finding",
+          delivery: { mode: "queue", state: "failed", detail: expect.stringContaining("queue is full") },
+        });
+      });
+      expect(f.store.queuedMessages.list(f.watched.id).map(({ content }) => content)).toEqual(["One", "Two"]);
+      await enqueue("Three");
+      expect(f.store.queuedMessages.list(f.watched.id).map(({ content }) => content)).toEqual(["One", "Two", "Three"]);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("reviews the watched chat's last turn again from its start without spending a check", async () => {
     const f = await createWatcherFixture();
     try {

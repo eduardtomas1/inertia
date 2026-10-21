@@ -88,7 +88,7 @@ function detailClause(detail: string | null): string | null {
  * explains something the state does not (a fallback, a later dispatch or a
  * failure reason), and is dropped when it merely repeats the line.
  */
-export function watcherDeliveryText(delivery: WatcherDelivery, watchedRunning: boolean): string {
+export function watcherDeliveryText(delivery: WatcherDelivery & { automatic?: boolean }, watchedRunning: boolean): string {
   const time = watcherClockTime(delivery.at);
   const head = delivery.state === "queued"
     ? "Queued"
@@ -108,7 +108,8 @@ export function watcherDeliveryText(delivery: WatcherDelivery, watchedRunning: b
     || /^(queued|sent|steered|not sent|dismissed)\b/iu.test(clause)
   );
   const explanation = clause !== null && !repeats ? clause : fallback;
-  return explanation ? `${head} · ${explanation}` : head;
+  const automatic = delivery.automatic === true && (delivery.state === "queued" || delivery.state === "sent");
+  return [head, automatic ? "automatically" : null, explanation].filter(Boolean).join(" · ");
 }
 
 export function watcherClockTime(value: string | null): string {

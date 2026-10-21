@@ -171,6 +171,15 @@ describe("delivery status line", () => {
       .toBe("Not sent · the main chat was deleted");
   });
 
+  it("says when the watcher sent a finding on its own", () => {
+    expect(watcherDeliveryText({ mode: "queue", state: "sent", detail: null, at, automatic: true }, false))
+      .toBe(`Sent ${time} · automatically · started the main chat's next turn`);
+    expect(watcherDeliveryText({ mode: "queue", state: "queued", detail: null, at, automatic: true }, true))
+      .toBe("Queued · automatically · sends after the current turn");
+    expect(watcherDeliveryText({ mode: "queue", state: "failed", detail: "The queue is full.", at, automatic: true }, false))
+      .toBe("Not sent · the queue is full");
+  });
+
   it("never repeats the line when a detail restates the state", () => {
     const queued = watcherDeliveryText({ mode: "queue", state: "queued", detail: "Queued · sends after the current turn", at }, true);
     expect(queued).toBe("Queued · sends after the current turn");

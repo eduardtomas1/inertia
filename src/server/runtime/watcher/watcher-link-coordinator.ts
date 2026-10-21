@@ -8,6 +8,7 @@ import {
   MAX_ACTIVE_WATCHERS,
   MAX_WATCHER_COMMANDS_RUN,
   WATCHER_PRESET_LABELS,
+  watcherFlattenLine,
   watcherLinkViewSchema,
   type WatcherFeedItem,
   type WatcherLinkView,
@@ -111,7 +112,7 @@ interface WatcherLinkCoordinatorDependencies {
 }
 
 function clipTitle(value: string): string {
-  const flattened = value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
+  const flattened = watcherFlattenLine(value);
   if (flattened.length <= MAX_WATCHER_CHAT_TITLE_CHARS) return flattened;
   return `${clipCodeUnits(flattened, MAX_WATCHER_CHAT_TITLE_CHARS - 1).trimEnd()}…`;
 }

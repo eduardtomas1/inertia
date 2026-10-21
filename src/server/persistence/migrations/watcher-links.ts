@@ -230,7 +230,7 @@ export const watcherLinksMigration: DatabaseMigrationDefinition = {
     CREATE TRIGGER watcher_links_watched_delete
       BEFORE DELETE ON conversations
       BEGIN
-        SELECT RAISE(ABORT, 'Stop the watcher''s current check before deleting this chat.')
+        SELECT RAISE(ABORT, 'The watcher is still working. Wait for it to finish or choose Stop watching…, then delete this chat.')
         WHERE EXISTS (
           SELECT 1
           FROM watcher_links AS link

@@ -18,7 +18,7 @@ import {
 } from "../../src/server/runtime/commands/project-workspace-commands";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import { WATCHER_CHAT_ARCHIVED_DETAIL } from "../../src/server/runtime/watcher/watcher-link-coordinator";
-import { WATCHER_DELETE_REFUSAL, WATCHER_PENDING_PUBLISH_MS } from "../../src/server/runtime/watcher/watcher-runtime";
+import { WATCHER_PENDING_PUBLISH_MS } from "../../src/server/runtime/watcher/watcher-runtime";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
   cleanupWatcherFixtures,
@@ -398,7 +398,7 @@ describe("watcher link coordinator", () => {
       } as unknown as ConversationCommandDependencies);
       const attempt = handler({} as never, { type: "conversation.delete", requestId: randomUUID(), payload: { conversationId: f.watched.id } });
       await expect(attempt).rejects.toBeInstanceOf(RuntimeRequestError);
-      await expect(attempt).rejects.toThrow(WATCHER_DELETE_REFUSAL);
+      await expect(attempt).rejects.toThrow("The watcher is still working. Wait for it to finish or choose Stop watching…, then delete this chat.");
       expect(acquireAtCheckout).not.toHaveBeenCalled();
       expect(ownership).not.toHaveBeenCalled();
       expect(transfer).not.toHaveBeenCalled();

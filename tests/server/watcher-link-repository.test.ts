@@ -788,7 +788,7 @@ describe("watcher link repository", () => {
     const watched = chat();
     const { link, conversation } = attach(watched);
     const turn = beginTurn(conversation);
-    expect(() => store.deleteConversation(watched.id)).toThrow("Stop the watcher's current check before deleting this chat.");
+    expect(() => store.deleteConversation(watched.id)).toThrow("The watcher is still working. Wait for it to finish or choose Stop watching…, then delete this chat.");
     expect(store.conversationShell(watched.id)).not.toBeNull();
     expect(store.watcherLinks.get(link.id)?.status).toBe("watching");
     settleTurn(turn.id);

@@ -136,19 +136,11 @@ function publicError(error: unknown, fallback: string): string {
 }
 
 export interface DetachedContextRequests {
-  /** Pending inputs this window renders, including answerable context requests. */
   inputRequests: AgentInputRequest[];
-  /** The named source chats, built by the host, that this window may share. */
   contextSources: readonly ConversationContextSourceOption[];
-  /** A context request leaves the chat open, so it is chosen in the main window. */
   mainWindowReviewPending: boolean;
 }
 
-/**
- * A detached window only knows its own chat. It answers a context request
- * that names one source chat with the host's summary of that chat; a request
- * that leaves the choice open needs the main window's full chat list.
- */
 export function detachedContextRequests(
   pendingInputs: AgentInputRequest[],
 ): DetachedContextRequests {

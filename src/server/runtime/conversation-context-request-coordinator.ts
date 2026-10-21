@@ -84,7 +84,6 @@ export class ConversationContextRequestCoordinator {
     scope: ConversationContextAuthorizationScope;
     providerId: AgentInputRequest["providerId"];
     requestedSourceConversationId: string | null;
-    /** Host-built labels; ignored unless they describe the named chat. */
     requestedSource?: AgentConversationContextRequestedSource;
     createdAt: string;
     signal: AbortSignal;

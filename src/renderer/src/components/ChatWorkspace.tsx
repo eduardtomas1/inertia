@@ -178,7 +178,6 @@ type ChatWorkspaceProps = {
   promptPresetsEnabled?: boolean;
   promptStashEnabled?: boolean;
   conversationContextHandoffEnabled?: boolean;
-  /** Shows the agent's context request card; defaults to the handoff setting. */
   agentContextRequestEnabled?: boolean;
   goal?: ChatGoalControlProps | null;
   approvals: AgentApprovalRequest[];

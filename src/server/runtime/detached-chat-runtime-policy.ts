@@ -88,8 +88,6 @@ export function detachedChatCommandRejection(
         : REJECTION;
     case "conversation.context.agent.source.load":
     case "conversation.context.agent.respond": {
-      // Only an agent request for this window's chat that names one source
-      // chat. Requests that leave the choice open stay in the main window.
       const { contextRequestId, targetConversationId } = command.payload;
       const pending = resources.pendingInput(
         targetConversationId,

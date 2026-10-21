@@ -945,7 +945,6 @@ export class ConversationContextPacketRepository {
     };
   }
 
-  /** Labels for one named source chat, without any of its messages. */
   requestedSourceSummary(
     sourceConversationId: string,
     targetConversationId: string,

@@ -468,7 +468,6 @@ describe("detached chat runtime authority", () => {
   it("refuses agent context answers for another chat, another source, or an open choice", () => {
     const REJECTED = "That request is unavailable in a detached chat.";
     const otherSource = "22222222-2222-4222-8222-222222222222";
-    // The pending request belongs to another chat.
     const foreign = agentContextCommands(OTHER_CONVERSATION, OTHER_CONVERSATION);
     expect(foreign.map((command) => detachedChatCommandRejection(authority, command, {
       ...namedContextResources(),
@@ -477,14 +476,12 @@ describe("detached chat runtime authority", () => {
           ? namedContextRequest(OTHER_CONVERSATION, CONVERSATION)
           : null,
     }))).toEqual(foreign.map(() => REJECTED));
-    // The window's own request, but a source chat the request did not name.
     const [load, , select] = agentContextCommands(CONVERSATION, otherSource);
     expect([load!, select!].map((command) => detachedChatCommandRejection(
       authority,
       command,
       namedContextResources(),
     ))).toEqual([REJECTED, REJECTED]);
-    // The request lets the user pick any chat, so it stays in the main window.
     const open = agentContextCommands(CONVERSATION, OTHER_CONVERSATION);
     const unnamed = namedContextRequest(CONVERSATION, OTHER_CONVERSATION);
     unnamed.conversationContextRequest = {
@@ -496,14 +493,12 @@ describe("detached chat runtime authority", () => {
       ...namedContextResources(),
       pendingInput: () => unnamed,
     }))).toEqual(open.map(() => REJECTED));
-    // A named request without its host summary is not shown in the window.
     const unsummarized = namedContextRequest(CONVERSATION, OTHER_CONVERSATION);
     delete unsummarized.conversationContextRequest!.requestedSource;
     expect(open.map((command) => detachedChatCommandRejection(authority, command, {
       ...namedContextResources(),
       pendingInput: () => unsummarized,
     }))).toEqual(open.map(() => REJECTED));
-    // Nothing pending: the generic resources know no context request.
     expect(open.map(rejection)).toEqual(open.map(() => REJECTED));
   });
 

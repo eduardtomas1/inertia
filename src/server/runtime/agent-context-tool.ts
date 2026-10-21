@@ -360,10 +360,6 @@ export class AgentContextTool {
     return { images, notes };
   }
 
-  /**
-   * Labels the named chat for the approval card. A missing summary only means
-   * a detached window cannot offer the chat; the main window still can.
-   */
   private requestedSourceSummary(
     sourceConversationId: string,
     targetConversationId: string,

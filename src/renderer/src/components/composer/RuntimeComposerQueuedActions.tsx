@@ -64,7 +64,8 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
     const timer = window.setInterval(refresh, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
   }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
-  useEffect(() => setRuntimeQueueLength(conversationId, queue.length), [conversationId, queue.length]);
+  const userQueued = queue.filter(({ watcherNote }) => !watcherNote).length;
+  useEffect(() => setRuntimeQueueLength(conversationId, userQueued), [conversationId, userQueued]);
   const first = queue[0];
   if (!first) return null;
   const dispatching = first.state === "dispatching";

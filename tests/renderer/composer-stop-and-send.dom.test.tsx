@@ -112,6 +112,28 @@ describe("Stop and send for routes without live follow-ups", () => {
     expect(input).toHaveValue("Do this instead.");
   });
 
+  it("still offers Stop and send while only a watcher's note waits in the queue", async () => {
+    const current = conversation("78787878-7878-4878-8878-787878787878");
+    const note = {
+      id: "79797979-7979-4979-8979-797979797979", conversationId: current.id, content: "The rename misses two call sites.",
+      attachments: [], state: "waiting" as const, createdAt: "2026-10-05T00:00:00.000Z", error: null, turnId: null, userMessageId: null,
+      watcherNote: {
+        linkId: "44444444-4444-4444-8444-444444444444", wakeId: "66666666-6666-4666-8666-000000000004",
+        watcherConversationId: "33333333-3333-4333-8333-333333333333", preset: "reviewer" as const,
+        watcherLabel: "Codex", delivery: "queue" as const,
+      },
+    };
+    const run = vi.fn<QueueCommandRunner>(async () => ({ kind: "message.queue", conversationId: current.id, entries: [note], receipt: null }));
+    render(<Composer {...composerProps(current, {
+      running: true, latestTurn: runningTurn("kimi-acp"), onQueueCommand: run,
+    })} />);
+    expect(await screen.findByText("The rename misses two call sites.")).toBeVisible();
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Do this instead." } });
+    expect(await screen.findByRole("button", { name: "Stop and send" })).toBeVisible();
+    expect(screen.queryByText("Send or remove the queued message first.")).toBeNull();
+  });
+
   it("keeps the draft and its error when the runtime refuses", async () => {
     const current = conversation("73737373-7373-4373-8373-737373737373");
     const run = vi.fn<QueueCommandRunner>(async (command) => {

@@ -77,6 +77,30 @@ describe("watcher wake runner", () => {
     }
   });
 
+  it("gives a question typed in the watcher chat the watcher instruction once, and a check only its own", async () => {
+    const f = await createWatcherFixture();
+    try {
+      const link = await f.attach({ instructions: "Focus on parser edge cases." });
+      const watcherId = link.watcherConversationId;
+      const question = f.controller.queue({ conversationId: watcherId, content: "Why did you flag the parser?" });
+      f.controller.start(question.turn.id);
+      await vi.waitFor(() => { if (!f.provider.runs.has(watcherId)) throw new Error("question not started"); });
+      const asked = f.provider.input(watcherId).prompt;
+      expect(asked.split("[inertia-watcher]")).toHaveLength(2);
+      expect(asked).toContain("Watched chat: \"Fix the parser\"");
+      expect(asked).toContain("> Focus on parser edge cases.");
+      expect(asked).not.toContain("Capability pack.");
+      await f.finishTurn(watcherId, "Because the last token is dropped.");
+
+      await f.startWatchedTurn();
+      await wakeOnce(f, link.id);
+      expect(f.provider.input(watcherId).prompt.split("[inertia-watcher]")).toHaveLength(2);
+      await f.finishTurn(watcherId, "SILENT");
+    } finally {
+      await f.close();
+    }
+  });
+
   it("invalidates the open watcher chat's detail once when a check starts and once when it settles, never the watched chat's", async () => {
     const f = await createWatcherFixture();
     try {

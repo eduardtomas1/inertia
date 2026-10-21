@@ -17,6 +17,7 @@ import { publicRuntimeError } from "../../runtime-errors";
 import { isHeld } from "../update-hold";
 import type { WatcherCheckoutGuard, WatcherGuardOutcome, WatcherGuardWindow } from "./watcher-checkout-guard";
 import type { WatcherDeliveryService } from "./watcher-delivery";
+import { conversationOrNull } from "./watcher-link-coordinator";
 import { buildWatcherDigest, type WatcherDigest, type WatcherOpenReply } from "./watcher-digest";
 import { watcherInstruction } from "./watcher-instructions";
 import type { WatcherLiveProjection } from "./watcher-live-projection";
@@ -97,17 +98,6 @@ interface RunningWake {
   restore: WatcherTransition;
   violations: ReadOnlyWatcherViolation[];
   pause: WatcherTransition | null;
-}
-
-export function conversationOrNull(
-  store: Pick<RuntimeStore, "conversation">,
-  conversationId: string,
-): ReturnType<RuntimeStore["conversation"]> | null {
-  try {
-    return store.conversation(conversationId);
-  } catch {
-    return null;
-  }
 }
 
 class TurnMemory<T> {

@@ -185,6 +185,9 @@ export function resolveTurnRequest(
   const capabilityInstructions = hostToolBridgeAttested && !readOnlyWatcher
     ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
     : [];
+  const watcherInstructions = readOnlyWatcher?.wakeId === null
+    ? dependencies.hooks.watcherInstructionsForTurn?.({ conversation, hostTools: hostToolBridgeAttested }) ?? []
+    : [];
 
   const exactModel = routeSelection.modelId === "provider-default"
     ? exactProvider?.models.find(({ isDefault }) => isDefault)
@@ -287,6 +290,7 @@ export function resolveTurnRequest(
     context: request.context,
     internalInstructions: [
       ...(resumesImportedCodex ? [] : capabilityInstructions),
+      ...watcherInstructions,
       ...(interruptedTurnId === null ? [] : [runtimeInterruptionInstruction(
         sharesInterruptionEndpoint(
           dependencies.store.agentTurn(interruptedTurnId).continuationIdentity,

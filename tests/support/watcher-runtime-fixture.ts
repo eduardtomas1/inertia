@@ -239,6 +239,7 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     providerInfo: () => infos(),
     harnessInstructionsForTurn: (input) => policy.harnessInstructionsFor(input)
       ?? [{ label: "inertia-orchestration", text: "Capability pack." }],
+    watcherInstructionsForTurn: (input) => policy.watcherInstructionsFor(input),
     hostToolsForTurn: (input) => policy.hostToolsForTurn(input) ?? {
       definitions: [AGENT_CONTEXT_TOOL_DEFINITION, { ...AGENT_CONTEXT_TOOL_DEFINITION, name: "inertia_spawn_agent" }],
       invoke: async () => ({ success: true, text: "{}" }),

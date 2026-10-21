@@ -24,7 +24,6 @@ import { normalizeIdentityPath } from "../../project-identity";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TurnController } from "../turns/turn-controller";
 import type { WatcherRouteReadiness } from "./watcher-route";
-import { conversationOrNull } from "./watcher-wake-runner";
 import type { WatcherWakeScheduler } from "./watcher-wake-scheduler";
 
 export const MAX_WATCHER_TITLE_CHARS = 120;
@@ -40,6 +39,17 @@ export interface WatcherFeedResult {
   items: WatcherFeedItem[];
   next: WatcherFeedPage["next"];
   usage?: WatcherUsage;
+}
+
+export function conversationOrNull(
+  store: Pick<RuntimeStore, "conversation">,
+  conversationId: string,
+): ReturnType<RuntimeStore["conversation"]> | null {
+  try {
+    return store.conversation(conversationId);
+  } catch {
+    return null;
+  }
 }
 
 /** In-memory lookup of attached links by either side; the database stays authoritative. */

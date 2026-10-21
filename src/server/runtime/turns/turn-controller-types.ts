@@ -159,6 +159,10 @@ export interface TurnControllerHooks {
   harnessInstructionsForTurn?(input: {
     conversation: Conversation;
   }): readonly HiddenProviderInstruction[];
+  watcherInstructionsForTurn?(input: {
+    conversation: Conversation;
+    hostTools: boolean;
+  }): readonly HiddenProviderInstruction[];
   /** Exact-turn host authority; absent means the selected harness gets no tools. */
   hostToolsForTurn?(input: {
     conversation: Conversation;

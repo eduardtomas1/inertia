@@ -3,6 +3,8 @@ import type { RuntimeStore } from "../../database";
 import type { ProviderHostToolBridge } from "../../provider/contracts";
 import type { AgentContextWatcherPolicy } from "../agent-context-tool";
 import type { HiddenProviderInstruction } from "../turns/request-context";
+import { watcherInstruction } from "./watcher-instructions";
+import { conversationOrNull } from "./watcher-link-coordinator";
 
 export interface WatcherTurnSource {
   conversation: Conversation;
@@ -19,6 +21,7 @@ export interface WatcherTurnPolicy extends AgentContextWatcherPolicy {
   hostToolsForTurn(source: WatcherTurnSource): ProviderHostToolBridge | null;
   /** Watchers never receive capability packs; null leaves other chats unchanged. */
   harnessInstructionsFor(input: { conversation: Conversation }): readonly HiddenProviderInstruction[] | null;
+  watcherInstructionsFor(input: { conversation: Conversation; hostTools: boolean }): readonly HiddenProviderInstruction[];
   /** Forgets the per-check read counter of a settled turn. */
   forgetTurn(turnId: string): void;
 }
@@ -40,7 +43,7 @@ const MAX_TRACKED_TURNS = 256;
  * agent thread manager can receive it without importing watcher modules.
  */
 export function createWatcherTurnPolicy(
-  store: Pick<RuntimeStore, "watcherLinks">,
+  store: Pick<RuntimeStore, "watcherLinks" | "conversation">,
   contextBridge: (source: WatcherTurnSource) => ProviderHostToolBridge | undefined,
 ): WatcherTurnPolicy {
   const reads = new Map<string, number>();
@@ -68,6 +71,13 @@ export function createWatcherTurnPolicy(
     },
     harnessInstructionsFor({ conversation }) {
       return isWatcherConversation(conversation.id) ? [] : null;
+    },
+    watcherInstructionsFor({ conversation, hostTools }) {
+      const link = store.watcherLinks.findByWatcher(conversation.id);
+      if (!link || link.status === "detached" || link.watchedConversationId === null) return [];
+      const watched = conversationOrNull(store, link.watchedConversationId);
+      if (!watched) return [];
+      return [watcherInstruction(link, { title: watched.title, id: watched.id }, { contextAccess: hostTools })];
     },
     forgetTurn(turnId) {
       reads.delete(turnId);

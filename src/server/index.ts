@@ -647,6 +647,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       providerInfo: () => providerInfo,
       reportIncident: commandIncidents.report,
       harnessInstructionsForTurn: (input) => watcherPolicy.harnessInstructionsFor(input) ?? agentThreads?.manager.capabilityInstructions() ?? [],
+      watcherInstructionsForTurn: (input) => watcherPolicy.watcherInstructionsFor(input),
       hostToolsForTurn: (input) => watcherPolicy.hostToolsForTurn(input) ?? agentThreads?.manager.bridgeFor(input),
       onReadOnlyViolation: (turn, violation) => watchers?.onReadOnlyViolation(turn, violation),
       applyProviderMetadata: (event) => {

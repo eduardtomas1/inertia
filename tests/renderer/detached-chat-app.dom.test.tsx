@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -344,6 +344,56 @@ describe("detached chat window", () => {
     expect(await screen.findByText("Review this request in the main window.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Agent requested chat context" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Share chat" })).toBeNull();
+  });
+
+  it("shows context shared in an earlier message as plain text it cannot open", async () => {
+    const turn = taskTurn({
+      id: "context-turn",
+      conversationId,
+      userMessageId: "context-message",
+      status: "completed",
+      completedAt: "2030-01-01T00:02:00.000Z",
+    });
+    harnessDetail.current = {
+      ...detail,
+      agentTurns: [turn],
+      messages: [{
+        id: "context-message",
+        conversationId,
+        turnId: turn.id,
+        role: "user",
+        content: "Use the referenced chat.",
+        attachments: [],
+        createdAt: turn.requestedAt,
+      }],
+      contextPackets: [{
+        id: "69696969-6969-4969-8969-696969696969",
+        sourceConversationId: "63636363-6363-4363-8363-636363636363",
+        targetConversationId: conversationId,
+        sourceProjectId: projectId,
+        targetProjectId: projectId,
+        sourceConversationTitle: "Source chat",
+        sourceProjectName: "Inertia",
+        sourceWorkspaceLabel: "Project checkout",
+        targetWorkspaceLabel: "Project checkout",
+        workspaceRelation: "same-workspace",
+        note: null,
+        messageCount: 2,
+        characterCount: 120,
+        droppedMessageCount: 0,
+        createdAt: turn.requestedAt,
+        consumedMessageId: "context-message",
+        consumedAt: turn.requestedAt,
+        sourceState: "available",
+      }],
+    };
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+    await act(async () => { await vi.dynamicImportSettled(); });
+
+    const shared = await screen.findByRole("generic", { name: "Shared chat context" });
+    expect(shared).toHaveTextContent("Context from Source chat");
+    expect(within(shared).queryByRole("button")).toBeNull();
   });
 
   it("keeps the composer still when an unrelated snapshot update arrives", async () => {

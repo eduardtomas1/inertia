@@ -523,6 +523,34 @@ describe("inertia_request_context", () => {
     }
   });
 
+  it("asks without host labels when the named chat's folder is gone, and records the user's decline", async () => {
+    const context = await fixture();
+    const { begin, bridgeFor, contextRequests, otherProject, pendingInputs, store, target } = context;
+    try {
+      const unreachable = store.createConversation(otherProject.id, "Storefront CSV", { activate: false });
+      await rm(otherProject.path, { recursive: true, force: true });
+      expect(() => store.contextPackets.requestedSourceSummary(unreachable.id, target.id)).toThrow();
+      const current = begin(target, "Look at the storefront chat.");
+      const approval = bridgeFor(current).invoke(call({ conversationId: unreachable.id }));
+      const chooser = [...pendingInputs.values()][0]!;
+      expect(chooser.conversationContextRequest?.requestedSourceConversationId).toBe(unreachable.id);
+      expect(chooser.conversationContextRequest).not.toHaveProperty("requestedSource");
+
+      expect(contextRequests.respond({
+        requestId: chooser.id,
+        targetConversationId: target.id,
+        selection: null,
+      })).toBe(true);
+      const result = await approval;
+      expect(result.success).toBe(false);
+      expect(JSON.parse(result.text).error.code).toBe("user_cancelled");
+      expect(store.contextPackets.agentRequest(chooser.id)).toMatchObject({ status: "cancelled" });
+      expect(pendingInputs.size).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
   it("does not carry a reference into a later turn of the same chat", async () => {
     const context = await fixture();
     const { begin, bridgeFor, contextRequests, pendingInputs, settle, store, target } = context;

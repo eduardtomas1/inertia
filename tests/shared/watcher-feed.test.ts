@@ -1,18 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { STEERABLE_HARNESS_IDS } from "../../src/shared/follow-up-steer";
-import { watcherFeedItemSchema, type WatcherWakeOutcome } from "../../src/shared/watcher";
-import {
-  groupWatcherFeed,
-  steerAvailable,
-  type WatcherFeedEntry,
-} from "../../src/shared/watcher-feed";
+import { watcherFeedItemSchema, type WatcherFeedItem, type WatcherWakeOutcome } from "../../src/shared/watcher";
+import { groupWatcherFeed } from "../../src/shared/watcher-feed";
 
 function item(
   sequence: number,
   outcome: WatcherWakeOutcome | null,
-  extra: Partial<WatcherFeedEntry> = {},
-): WatcherFeedEntry {
+  extra: Partial<WatcherFeedItem> = {},
+): WatcherFeedItem {
   const minute = String(sequence).padStart(2, "0");
   const settledState = outcome !== null;
   return {
@@ -96,17 +91,5 @@ describe("groupWatcherFeed", () => {
 
   it("returns no groups for an empty feed", () => {
     expect(groupWatcherFeed([])).toEqual([]);
-  });
-});
-
-describe("steerAvailable", () => {
-  it("is offered only while the watched turn runs on a steerable harness", () => {
-    for (const harnessId of STEERABLE_HARNESS_IDS) {
-      expect(steerAvailable(harnessId, true)).toBe(true);
-      expect(steerAvailable(harnessId, false)).toBe(false);
-    }
-    expect(steerAvailable("cursor-agent", true)).toBe(false);
-    expect(steerAvailable(null, true)).toBe(false);
-    expect(steerAvailable(undefined, true)).toBe(false);
   });
 });

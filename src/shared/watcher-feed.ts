@@ -1,7 +1,4 @@
-import { supportsActiveParentFollowUp } from "./follow-up-steer";
 import type { WatcherFeedItem } from "./watcher";
-
-export type WatcherFeedEntry = WatcherFeedItem;
 
 export interface WatcherReceiptGroup {
   kind: "receipts";
@@ -60,8 +57,4 @@ export function groupWatcherFeed(items: readonly WatcherFeedItem[]): WatcherFeed
   }
   flush();
   return groups;
-}
-
-export function steerAvailable(watchedHarnessId: string | null | undefined, watchedRunning: boolean): boolean {
-  return watchedRunning && supportsActiveParentFollowUp(watchedHarnessId ?? null);
 }

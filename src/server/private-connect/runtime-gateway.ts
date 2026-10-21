@@ -31,7 +31,7 @@ import {
   sanitizePrivateConnectContent,
   sanitizePrivateConnectLabel,
 } from "../../shared/private-connect/sanitizer";
-import type { WatcherPrivateConnect } from "../../shared/watcher";
+import { WATCHER_NOTE_HISTORY_LABELS, type WatcherPrivateConnect } from "../../shared/watcher";
 import { PROVIDER_INFO } from "../provider/catalog";
 import { PrivateConnectTranscriptCache } from "./transcript-cache";
 
@@ -81,8 +81,6 @@ interface PendingPrivateConnectPromptPreparation {
 const PREPARED_PROMPT_TTL_MS = 15_000;
 const PREPARED_PROMPT_LIMIT =
   PRIVATE_CONNECT_RUNTIME_LIMITS.sessions * PRIVATE_CONNECT_RUNTIME_LIMITS.inFlightRequestsPerSession;
-const FORWARDED_WATCHER_NOTE_LABEL = "[Forwarded watcher note]\n\n";
-const AUTOMATIC_WATCHER_NOTE_LABEL = "[Watcher note sent automatically]\n\n";
 const PROJECTION_VALIDATOR_PLACEHOLDER = "A".repeat(43) as PrivateConnectRuntimeProjectionValidator;
 
 export class PrivateConnectRuntimeGateway {
@@ -279,7 +277,7 @@ export class PrivateConnectRuntimeGateway {
                 message.htmlRender
                   ? htmlRenderContextLine(message.htmlRender.title)
                   : message.watcherNote
-                    ? `${message.watcherNote.automatic ? AUTOMATIC_WATCHER_NOTE_LABEL : FORWARDED_WATCHER_NOTE_LABEL}${message.content}`
+                    ? `${WATCHER_NOTE_HISTORY_LABELS[message.watcherNote.automatic ? "automatic" : "forwarded"]}\n\n${message.content}`
                     : message.content,
               ),
               createdAt: message.createdAt,

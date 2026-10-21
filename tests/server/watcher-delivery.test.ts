@@ -388,11 +388,14 @@ describe("watcher note delivery", () => {
     }
   });
 
-  it("labels a forwarded note in the main chat's restored history so it never reads as the user's words", async () => {
+  it.each([
+    ["a forwarded", false, "[Forwarded watcher note]"],
+    ["an automatic", true, "[Watcher note sent automatically]"],
+  ] as const)("labels %s note in the main chat's restored history so it never reads as the user's words", async (_kind, automatic, label) => {
     const f = await createWatcherFixture();
     try {
       const { link, wakeId } = await finding(f);
-      await deliver(f, link.id, wakeId, "queue");
+      await f.watchers.delivery.deliver(link.id, wakeId, "queue", randomUUID(), automatic);
       await vi.waitFor(() => { if (!f.provider.runs.has(f.watched.id)) throw new Error("note turn not started"); });
       await f.finishTurn(f.watched.id, "Fixed the last token.");
       const history = f.store.continuationHistory(f.watched.id, MAX_CONVERSATION_CONTEXT_TURN_BYTES, "2030-01-01T01:00:00.000Z");
@@ -403,7 +406,7 @@ describe("watcher note delivery", () => {
       expect(messages).toEqual([
         ["user", "Fix the parser bug."],
         ["agent · Codex gpt-test", "Done."],
-        ["user", `[Forwarded watcher note]\n\n${FINDING}`],
+        ["user", `${label}\n\n${FINDING}`],
         ["agent", "Fixed the last token."],
       ]);
     } finally {

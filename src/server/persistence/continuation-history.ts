@@ -7,6 +7,7 @@ import {
   type ConversationContextExcerpt,
   type ConversationContextPacket,
 } from "../../shared/conversation-context";
+import { WATCHER_NOTE_HISTORY_LABELS } from "../../shared/watcher";
 import {
   collectConversationContextExcerpts,
   conversationContextWorkspaceLabel,
@@ -58,13 +59,15 @@ function markWatcherNotes(
 ): ConversationContextExcerpt[] {
   const userMessageIds = excerpts.filter(({ role }) => role === "user").map(({ sourceMessageId }) => sourceMessageId);
   if (userMessageIds.length === 0) return [...excerpts];
-  const forwarded = new Set((database.prepare(`
-    SELECT id FROM messages
+  const notes = new Map((database.prepare(`
+    SELECT id, json_extract(watcher_note_json, '$.automatic') AS automatic FROM messages
     WHERE id IN (SELECT value FROM json_each(?)) AND watcher_note_json IS NOT NULL
-  `).all(JSON.stringify(userMessageIds)) as { id: string }[]).map(({ id }) => id));
-  return excerpts.map((excerpt) => forwarded.has(excerpt.sourceMessageId)
-    ? { ...excerpt, content: `[Forwarded watcher note]\n\n${excerpt.content}` }
-    : excerpt);
+  `).all(JSON.stringify(userMessageIds)) as { id: string; automatic: number | null }[])
+    .map(({ id, automatic }) => [id, WATCHER_NOTE_HISTORY_LABELS[automatic === 1 ? "automatic" : "forwarded"]]));
+  return excerpts.map((excerpt) => {
+    const label = notes.get(excerpt.sourceMessageId);
+    return label ? { ...excerpt, content: `${label}\n\n${excerpt.content}` } : excerpt;
+  });
 }
 
 function sentReferenceBlocks(

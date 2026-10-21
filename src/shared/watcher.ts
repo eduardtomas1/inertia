@@ -35,6 +35,11 @@ export const WATCHER_PRESET_LABELS: Readonly<Record<(typeof WATCHER_PRESETS)[num
   explainer: "Explainer",
 };
 
+export const WATCHER_NOTE_HISTORY_LABELS = Object.freeze({
+  forwarded: "[Forwarded watcher note]",
+  automatic: "[Watcher note sent automatically]",
+});
+
 export const MAX_ACTIVE_WATCHERS = 8;
 export const MAX_WATCHER_INSTRUCTIONS_CHARS = 2_000;
 export const MAX_WATCHER_NOTE_CHARS = 8_000;

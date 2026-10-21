@@ -30,8 +30,8 @@ import {
   type WatcherWakeScheduler,
 } from "./watcher-wake-scheduler";
 
-export const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit. It can resume once its route is ready again.";
-export const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit files twice during one turn of the main chat.";
+const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit.";
+const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit a file twice during one turn of the main chat.";
 /**
  * Consecutive wakes that may find the watcher's route unready and retry with
  * the scheduler's backoff before the link pauses with `route-unavailable`.
@@ -43,14 +43,12 @@ export const WATCHER_FINAL_PASS_MAX_PAGES = 4;
 export const WATCHER_FINAL_PASS_RETRY_LIMIT = 2;
 export const WATCHER_EARLIER_FINDINGS = 5;
 
-export function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
-  return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()} `
-    + "Check Settings → Agents; it can resume once the route is ready.";
+function watcherRouteUnavailableDetail(selection: ModelSelection, message: string): string {
+  return `The watcher's route (${modelSelectionIdentityLabel(selection)}) isn't ready: ${message.trim()}`;
 }
 
-export function watcherDispatchFailedDetail(message: string): string {
-  return `The watcher's checks could not start ${WATCHER_DISPATCH_FAILURE_LIMIT} times in a row: ${message.trim()} `
-    + "It can resume once the watcher chat can run again.";
+function watcherDispatchFailedDetail(message: string): string {
+  return `The watcher's checks couldn't start ${WATCHER_DISPATCH_FAILURE_LIMIT} times in a row: ${message.trim()}`;
 }
 
 const PROVIDER_NAMES: Readonly<Record<string, string>> = Object.fromEntries(

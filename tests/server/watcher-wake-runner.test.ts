@@ -182,7 +182,9 @@ describe("watcher wake runner", () => {
       const watcherId = await wakeOnce(f, link.id);
       await f.finishTurn(watcherId, null, "failed", { reason: "provider-error", message: "Usage limit reached.", usageLimited: true });
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "usage-limited" });
-      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "usage-limit" });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({
+        status: "paused", pauseReason: "usage-limit", pauseDetail: "The watcher's own account reached its usage limit.",
+      });
       expect(f.provider.runs.has(f.watched.id)).toBe(true);
       expect(f.store.conversation(f.watched.id).status).toBe("running");
     } finally {
@@ -314,7 +316,7 @@ describe("watcher wake runner", () => {
       expect(f.store.watcherLinks.get(link.id)).toMatchObject({
         status: "paused",
         pauseReason: "wake-budget",
-        pauseDetail: "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.",
+        pauseDetail: "The watcher used its checks for this turn. It still makes the final check, and resumes when the next turn starts or when you choose Resume.",
       });
       expect(f.provider.runs.has(watcherId)).toBe(false);
 
@@ -346,7 +348,9 @@ describe("watcher wake runner", () => {
       f.provider.emit(watcherId, { type: "activity", kind: "tool", phase: "started", label: "Edit", activityId: "edit-1" });
       await f.flush();
       expect(feed(f, link.id)[0]).toMatchObject({ outcome: "write-attempt" });
-      expect(f.store.watcherLinks.get(link.id)).toMatchObject({ status: "paused", pauseReason: "write-attempts" });
+      expect(f.store.watcherLinks.get(link.id)).toMatchObject({
+        status: "paused", pauseReason: "write-attempts", pauseDetail: "The watcher tried to edit a file twice during one turn of the main chat.",
+      });
       expect(f.store.agentTurn(feed(f, link.id)[0]!.watcherTurnId!).status).toBe("failed");
     } finally {
       await f.close();
@@ -453,10 +457,7 @@ describe("watcher wake runner", () => {
       await failAttempts(1);
       const paused = f.store.watcherLinks.get(link.id)!;
       expect(paused).toMatchObject({ status: "paused", pauseReason: "route-unavailable" });
-      expect(paused.pauseDetail).toBe(
-        "The watcher's route (codex-app-server harness · OpenAI · gpt-test) isn't ready: Sign in to continue. "
-        + "Check Settings → Agents; it can resume once the route is ready.",
-      );
+      expect(paused.pauseDetail).toBe("The watcher's route (codex-app-server harness · OpenAI · gpt-test) isn't ready: Sign in to continue.");
       expect(f.watcherEvents()).toContainEqual({
         type: "watcher.link.updated",
         link: expect.objectContaining({ id: link.id, status: "paused", pauseReason: "route-unavailable", pauseDetail: paused.pauseDetail }),
@@ -467,7 +468,7 @@ describe("watcher wake runner", () => {
       await f.advance(10 * 60_000);
       expect(readiness.mock.calls.length).toBe(callsWhilePaused);
       expect(watcherRuns()).toBe(1);
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("route isn't ready");
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow(/^Sign in to continue\.$/u);
       ready = true;
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching", pauseReason: null } } });

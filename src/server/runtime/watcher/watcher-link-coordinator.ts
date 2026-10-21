@@ -27,7 +27,7 @@ import type { WatcherRouteReadiness } from "./watcher-route";
 import type { WatcherWakeScheduler } from "./watcher-wake-scheduler";
 
 export const MAX_WATCHER_TITLE_CHARS = 120;
-export const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher's own chat was archived. Unarchive it to resume the watcher.";
+const WATCHER_CHAT_ARCHIVED_DETAIL = "The watcher chat was archived. Unarchive it to resume the watcher.";
 const ATTACHED: readonly WatcherStatus[] = ["watching", "waking", "idle", "paused"];
 const ARCHIVE_PAUSES: readonly WatcherPauseReason[] = ["watched-archived", "watcher-archived"];
 const ENDED: readonly string[] = ["completed", "failed", "cancelled", "interrupted"];
@@ -287,7 +287,7 @@ export class WatcherLinkCoordinator {
     if (link.pauseReason === "usage-limit" || link.pauseReason === "route-unavailable") {
       const watcher = store.conversation(link.watcherConversationId);
       const route = await this.#deps.route(watcher.modelSelection);
-      if (!route.ready) throw new RuntimeRequestError(`The watcher's route isn't ready yet. ${route.message}`);
+      if (!route.ready) throw new RuntimeRequestError(route.message);
     }
     if (link.watchedConversationId !== null
       && (conversationOrNull(store, link.watchedConversationId)?.archivedAt ?? null) !== null) {

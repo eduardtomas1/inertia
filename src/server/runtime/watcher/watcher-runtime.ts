@@ -46,8 +46,8 @@ export const WATCHER_OUTPUT_RECORD_MS = 15_000;
 /** Pending-event counts are republished at most this often per link. */
 export const WATCHER_PENDING_PUBLISH_MS = 1_000;
 const WATCHER_DELETE_REFUSAL = "The watcher is still working. Wait for it to finish or choose Stop watching…, then delete this chat.";
-export const WATCHER_BUDGET_PAUSE_DETAIL =
-  "It used its checks for this turn; it still makes its final check when the turn ends. Resume grants a new set.";
+const WATCHER_BUDGET_PAUSE_DETAIL =
+  "The watcher used its checks for this turn. It still makes the final check, and resumes when the next turn starts or when you choose Resume.";
 
 export type WatcherRuntimeTurns = Pick<
   TurnController,

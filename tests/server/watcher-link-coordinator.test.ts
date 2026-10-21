@@ -17,7 +17,6 @@ import {
   type ProjectWorkspaceCommandDependencies,
 } from "../../src/server/runtime/commands/project-workspace-commands";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
-import { WATCHER_CHAT_ARCHIVED_DETAIL } from "../../src/server/runtime/watcher/watcher-link-coordinator";
 import { WATCHER_PENDING_PUBLISH_MS } from "../../src/server/runtime/watcher/watcher-runtime";
 import { WATCHER_SETTLE_DELAY_MS } from "../../src/server/runtime/watcher/watcher-wake-scheduler";
 import {
@@ -77,7 +76,7 @@ describe("watcher link coordinator", () => {
   it("refuses scratch projects, archived chats, watchers, duplicates and unready or disallowed routes", async () => {
     const f = await createWatcherFixture();
     try {
-      await refused(f, { modelSelection: watcherTestSelection("cursor") }, "can't be a watcher");
+      await refused(f, { modelSelection: watcherTestSelection("cursor") }, "This agent can't run as a watcher.");
       f.setProviderInfo(notReady("codex"));
       await refused(f, {}, "Sign in to continue.");
       f.setProviderInfo(() => WATCHER_TEST_PROVIDERS);
@@ -237,7 +236,7 @@ describe("watcher link coordinator", () => {
 
       f.store.watcherLinks.transition(link.id, ["watching"], { status: "paused", reason: "usage-limit" }, now());
       f.setProviderInfo(notReady("codex"));
-      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow("route isn't ready");
+      await expect(f.command("watcher.resume", { linkId: link.id })).rejects.toThrow(/^Sign in to continue\.$/u);
       f.setProviderInfo(() => WATCHER_TEST_PROVIDERS);
       await expect(f.command("watcher.resume", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { status: "watching" } } });
@@ -424,7 +423,7 @@ describe("watcher link coordinator", () => {
         watchers: f.watchers,
       } as unknown as ConversationCommandDependencies);
       await handler({} as never, { type: "conversation.archive", requestId: randomUUID(), payload: { conversationId: link.watcherConversationId } });
-      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watcher-archived", pauseDetail: WATCHER_CHAT_ARCHIVED_DETAIL });
+      expect(f.linkView(link.id)).toMatchObject({ status: "paused", pauseReason: "watcher-archived", pauseDetail: "The watcher chat was archived. Unarchive it to resume the watcher." });
       await f.startWatchedTurn();
       await f.advance(10 * 60_000);
       expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);

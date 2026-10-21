@@ -43,7 +43,7 @@ export async function watcherRouteReadiness(
     return { ready: false, message: message(error, "The watcher's model route is unavailable.") };
   }
   if (!watcherHarnessAllowed(route.harnessId)) {
-    return { ready: false, message: "This agent can't be a watcher yet." };
+    return { ready: false, message: "This agent can't run as a watcher." };
   }
   const providerId = providerIdForHarness(selection.harnessId);
   if (!providerId || providerId !== route.providerId) {
@@ -62,7 +62,7 @@ export async function watcherRouteReadiness(
   if (!readiness && !provider?.canRun) {
     return {
       ready: false,
-      message: provider?.statusMessage ?? "The watcher's route is not ready. Open Settings to finish setup.",
+      message: provider?.statusMessage ?? "This agent isn't ready. Check Settings → Agents.",
     };
   }
   return {

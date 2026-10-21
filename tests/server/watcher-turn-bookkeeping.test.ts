@@ -541,7 +541,7 @@ describe("watcher check dispatch and settlement", () => {
       expect(attempts).toBe(WATCHER_DISPATCH_FAILURE_LIMIT);
       const paused = f.linkView(link.id);
       expect(paused).toMatchObject({ status: "paused", pauseReason: "route-unavailable" });
-      expect(paused.pauseDetail).toContain("The shared checkout is no longer the project's.");
+      expect(paused.pauseDetail).toBe("The watcher's checks couldn't start 3 times in a row: The shared checkout is no longer the project's.");
       expect(f.watchers.coordinator.feed(link.id).items.map(({ outcome }) => outcome)).toEqual(["failed", "failed", "failed"]);
 
       await f.finishTurn(f.watched.id, "Done.");

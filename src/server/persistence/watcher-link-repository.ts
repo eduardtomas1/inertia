@@ -24,7 +24,6 @@ import {
   type WatcherDetachReason,
   type WatcherFeedItem,
   type WatcherGuardState,
-  type WatcherLinkView,
   type WatcherPauseReason,
   type WatcherPreset,
   type WatcherPrivateConnect,
@@ -32,7 +31,6 @@ import {
   type WatcherStatus,
   type WatcherUsage,
   type WatcherWakeOutcome,
-  type WatcherWakeSummary,
   type WatcherWakeTrigger,
 } from "../../shared/watcher";
 import { measuredProcessedTokens } from "../usage-dashboard";
@@ -55,10 +53,7 @@ import {
   watcherFeedItem,
   watcherPrintableLineOf,
   watcherLinkFromRow,
-  watcherLinkViews,
   watcherWakeFromRow,
-  watcherWakeSummaries,
-  watcherWatchedAccess,
   type WatcherCursor,
   type WatcherLinkRecord,
   type WatcherLinkRow,
@@ -319,10 +314,6 @@ export class WatcherLinkRepository {
   }
 
   /** Renderer-safe shell projection; a row that fails the view contract is withheld. */
-  views(): WatcherLinkView[] {
-    return watcherLinkViews(this.database);
-  }
-
   transition(
     linkId: string,
     expected: readonly WatcherStatus[],
@@ -735,20 +726,11 @@ export class WatcherLinkRepository {
     return { totalTokens };
   }
 
-  wakeSummaries(conversationId: string, turnIds?: readonly string[]): WatcherWakeSummary[] {
-    return watcherWakeSummaries(this.database, conversationId, turnIds) ?? [];
-  }
-
   /** The watcher policy for a conversation, including detached watchers. */
   policyForConversation(conversationId: string): { linkId: string; status: WatcherStatus } | null {
     const row = cachedStatement(this.database, "SELECT id, status FROM watcher_links WHERE watcher_conversation_id = ?")
       .get(conversationId) as { id: string; status: WatcherStatus } | undefined;
     return row ? { linkId: row.id, status: row.status } : null;
-  }
-
-  /** True while `targetConversationId` is an attached watcher of `sourceConversationId` in one project. */
-  watchedAccess(targetConversationId: string, sourceConversationId: string): boolean {
-    return watcherWatchedAccess(this.database, targetConversationId, sourceConversationId);
   }
 
   /** Attached watchers stay in plan mode, supervised access and an allowed harness. */

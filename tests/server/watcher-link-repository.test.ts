@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { watcherWakeSummaries, watcherWatchedAccess } from "../../src/server/persistence/watcher-link-codecs";
 import { WatcherPolicyError, type WatcherLinkDraft } from "../../src/server/persistence/watcher-link-repository";
 import { buildWatcherDigest } from "../../src/server/runtime/watcher/watcher-digest";
 import type { Conversation } from "../../src/shared/contracts";
@@ -136,6 +137,7 @@ function raw<T>(run: (database: Database.Database) => T): T {
 }
 
 const conversationCount = () => store.shellSnapshot().conversations.length;
+const summaries = (conversationId: string) => raw((database) => watcherWakeSummaries(database, conversationId) ?? []);
 
 describe("watcher link repository", () => {
   it("creates the watcher chat, its title lock and the link atomically", () => {
@@ -151,8 +153,8 @@ describe("watcher link repository", () => {
     expect(store.watcherLinks.findActiveByWatched(watched.id)?.id).toBe(link.id);
     expect(store.watcherLinks.policyForConversation(conversation.id)).toEqual({ linkId: link.id, status: "watching" });
     expect(store.watcherLinks.policyForConversation(watched.id)).toBeNull();
-    expect(store.watcherLinks.watchedAccess(conversation.id, watched.id)).toBe(true);
-    expect(store.watcherLinks.watchedAccess(watched.id, conversation.id)).toBe(false);
+    expect(raw((database) => watcherWatchedAccess(database, conversation.id, watched.id))).toBe(true);
+    expect(raw((database) => watcherWatchedAccess(database, watched.id, conversation.id))).toBe(false);
     const views = store.shellSnapshot().watchers ?? [];
     expect(views).toHaveLength(1);
     expect(watcherLinkViewSchema.safeParse(views[0]).success).toBe(true);
@@ -231,7 +233,7 @@ describe("watcher link repository", () => {
     expect(links.transition(link.id, ["detached"], { status: "watching" }, tick())).toBeNull();
     expect(links.updateSettings(link.id, { preset: "explainer" }, tick())).toBeNull();
     expect(links.policyForConversation(link.watcherConversationId)?.status).toBe("detached");
-    expect(links.watchedAccess(link.watcherConversationId, link.watchedConversationId!)).toBe(false);
+    expect(raw((database) => watcherWatchedAccess(database, link.watcherConversationId, link.watchedConversationId!))).toBe(false);
     expect(() => raw((database) => database.prepare("UPDATE watcher_links SET status = 'watching', detached_reason = NULL WHERE id = ?").run(link.id)))
       .toThrow("A detached watcher cannot be attached again.");
     const attached = attach(chat("Second chat")).link;
@@ -610,7 +612,7 @@ describe("watcher link repository", () => {
     }]);
     expect(store.conversationHistory(conversation.id)?.watcherWakes).toHaveLength(1);
     expect(store.conversationDetail(watched.id)).not.toHaveProperty("watcherWakes");
-    expect(links.wakeSummaries(conversation.id, [])).toEqual([]);
+    expect(raw((database) => watcherWakeSummaries(database, conversation.id, []))).toEqual([]);
   });
 
   it("pages the feed newest first with a stable continuation", () => {
@@ -718,8 +720,7 @@ describe("watcher link repository", () => {
         .toEqual({ count: 0 });
       expect(database.prepare("SELECT COUNT(*) AS count FROM agent_turns WHERE id = ?").get(watchedTurn.id)).toEqual({ count: 1 });
     });
-    const summaries = store.watcherLinks.wakeSummaries(conversation.id);
-    expect(new Set(summaries.map(({ turnId }) => turnId))).toEqual(new Set(turns.slice(2)));
+    expect(new Set(summaries(conversation.id).map(({ turnId }) => turnId))).toEqual(new Set(turns.slice(2)));
     expect(store.watcherLinks.usageTotals(link.id)).toEqual({ totalTokens: 502_000 });
   });
 
@@ -751,13 +752,13 @@ describe("watcher link repository", () => {
     ).get(turnId) as { count: number }).count);
     expect(check(link.id).sequence).toBe(501);
     expect(check(link.id).sequence).toBe(502);
-    expect(new Set(store.watcherLinks.wakeSummaries(conversation.id).map(({ turnId }) => turnId))).toEqual(new Set([first.id, second.id]));
+    expect(new Set(summaries(conversation.id).map(({ turnId }) => turnId))).toEqual(new Set([first.id, second.id]));
     expect([messages(first.id), messages(second.id)]).toEqual([1, 1]);
 
     settleTurn(second.id);
     raw((database) => database.prepare("DELETE FROM provider_run_ownership WHERE turn_id = ?").run(first.id));
     check(link.id);
-    expect(store.watcherLinks.wakeSummaries(conversation.id)).toEqual([]);
+    expect(summaries(conversation.id)).toEqual([]);
     expect([messages(first.id), messages(second.id)]).toEqual([0, 0]);
     expect([store.agentTurn(first.id).id, store.agentTurn(second.id).id]).toEqual([first.id, second.id]);
   });

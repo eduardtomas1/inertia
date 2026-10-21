@@ -183,7 +183,7 @@ describe("buildWatcherDigest", () => {
     expect(digest.content).toContain("## Brief — quoted evidence\n> Add a login rate limiter and tests.");
     expect(digest.content).toContain("## New activity — quoted evidence");
     expect(digest.content).toContain("- 10:00:01 · tool (completed): Read src/file-1.ts\n  > detail 1");
-    expect(digest.stats).toMatchObject({ eventsCovered: 2, itemsTruncated: 0, itemsOmitted: 0, commandsRun: 0 });
+    expect(digest.stats).toMatchObject({ eventsCovered: 2, itemsTruncated: 0, itemsOmitted: 0 });
     expect(digest.stats.bytes).toBe(bytes(digest.content));
     expect(digest.cursor).toEqual({
       turnId: TURN, activityAt: at(2), activityId: "act-0002", messageAt: null, messageId: null, pendingRunningIds: [],
@@ -384,16 +384,14 @@ describe("buildWatcherDigest", () => {
       activity(3, { status: "running" }),
     ];
     const first = buildWatcherDigest(source, link(), options())!;
-    expect(first.pendingRunningIds).toEqual(["act-0002", "act-0003"]);
     expect(first.cursor.pendingRunningIds).toEqual(["act-0002", "act-0003"]);
     expect(first.stats.eventsCovered).toBe(1);
 
     source.activities[1] = { ...source.activities[1]!, status: "completed" };
     source.activities.push(activity(4));
     const second = buildWatcherDigest(source, link({ cursor: first.cursor }), options())!;
-    expect(second.pendingRunningIds).toEqual(["act-0003"]);
+    expect(second.cursor.pendingRunningIds).toEqual(["act-0003"]);
     expect(second.stats.eventsCovered).toBe(2);
-    expect(second.stats.commandsRun).toBe(1);
     expect(second.content).toContain("ran a command (completed): npm test");
     expect(second.content.indexOf("npm test")).toBeLessThan(second.content.indexOf("file-4"));
   });
@@ -402,10 +400,10 @@ describe("buildWatcherDigest", () => {
     const source = new FakeSource();
     source.activities = [activity(0), ...Array.from({ length: 100 }, (_, index) => activity(index + 1, { status: "running" }))];
     const digest = buildWatcherDigest(source, link(), options())!;
-    expect(digest.pendingRunningIds).toHaveLength(MAX_WATCHER_PENDING_RUNNING_IDS);
+    expect(digest.cursor.pendingRunningIds).toHaveLength(MAX_WATCHER_PENDING_RUNNING_IDS);
   });
 
-  it("counts settled commands and skips status and reasoning activities", () => {
+  it("skips status and reasoning activities", () => {
     const source = new FakeSource();
     source.activities = [
       activity(1, { kind: "command", title: "git status" }),
@@ -416,7 +414,6 @@ describe("buildWatcherDigest", () => {
       activity(6, { kind: "file", title: "Edited src/a.ts" }),
     ];
     const digest = buildWatcherDigest(source, link({ cursor: seenCursor(0) }), options())!;
-    expect(digest.stats.commandsRun).toBe(2);
     expect(digest.stats.eventsCovered).toBe(4);
     expect(digest.content).toContain("ran a command (failed): rm -rf build");
     expect(digest.content).toContain("error (failed): Provider error");

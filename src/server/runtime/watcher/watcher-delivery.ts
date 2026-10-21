@@ -64,7 +64,7 @@ export interface WatcherNoteQueue {
     watcherNote: WatcherNoteAttribution;
   }): MessageQueueResult;
   /** Removes a waiting or blocked watcher note before the finding is sent again. */
-  withdrawWatcherNote?(conversationId: string, id: string): boolean;
+  withdrawWatcherNote(conversationId: string, id: string): boolean;
 }
 
 export interface WatcherDeliveryDependencies {
@@ -160,7 +160,7 @@ export class WatcherDeliveryService {
     const dismissed = this.#deps.store.watcherLinks.setDelivery(wakeId, { mode: null, state: "dismissed" }, this.#deps.now());
     if (!dismissed) throw new RuntimeRequestError("This finding can no longer be dismissed.");
     if (wake.queuedMessageId !== null && found.link.watchedConversationId !== null) {
-      this.#deps.queue()?.withdrawWatcherNote?.(found.link.watchedConversationId, wake.queuedMessageId);
+      this.#deps.queue()?.withdrawWatcherNote(found.link.watchedConversationId, wake.queuedMessageId);
     }
     this.#deps.changed(linkId);
     return this.#result(linkId, dismissed);
@@ -289,7 +289,7 @@ export class WatcherDeliveryService {
     if (note.length === 0) throw new RuntimeRequestError("This finding has no text to send.");
     if (wake.delivery?.state === "failed" && wake.queuedMessageId !== null && wake.queuedMessageId !== deliveryId) {
       // A note blocked in the queue is withdrawn so sending again never forwards it twice.
-      this.#deps.queue()?.withdrawWatcherNote?.(watchedId, wake.queuedMessageId);
+      this.#deps.queue()?.withdrawWatcherNote(watchedId, wake.queuedMessageId);
     }
     const label = watcherLabel(this.#deps.store, link.watcherConversationId, this.#deps.providerLabels());
     const { providerId } = this.#deps.store.conversation(link.watcherConversationId);

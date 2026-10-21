@@ -79,7 +79,8 @@ import {
 import {
   createDuoCommandHandler,
 } from "./runtime/commands/duo-commands";
-import { createWatcherRuntime, createWatcherTurnPolicy, type WatcherRuntime } from "./runtime/watcher/watcher-runtime";
+import { createWatcherRuntime, type WatcherRuntime } from "./runtime/watcher/watcher-runtime";
+import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
 import {
   createIsolatedReviewCommandHandler,
 } from "./runtime/commands/isolated-review-commands";

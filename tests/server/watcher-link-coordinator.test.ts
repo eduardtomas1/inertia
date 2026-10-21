@@ -136,7 +136,7 @@ describe("watcher link coordinator", () => {
         type: "watcher.link.removed", linkId: link.id, watcherConversationId: link.watcherConversationId, watchedConversationId: f.watched.id,
       });
       expect(f.watchers.isWatcherConversation(link.watcherConversationId)).toBe(false);
-      expect(f.store.watcherLinks.views()).toEqual([]);
+      expect((f.store.shellSnapshot().watchers ?? [])).toEqual([]);
     } finally {
       await f.close();
     }
@@ -167,7 +167,7 @@ describe("watcher link coordinator", () => {
       }]);
       await f.advance(WATCHER_SETTLE_DELAY_MS + 120_000);
       expect(f.provider.inputs.filter(({ conversationId }) => conversationId === link.watcherConversationId)).toEqual([]);
-      expect(f.store.watcherLinks.views()).toEqual([]);
+      expect((f.store.shellSnapshot().watchers ?? [])).toEqual([]);
     } finally {
       await f.close();
     }
@@ -592,7 +592,7 @@ describe("watcher link coordinator", () => {
       expect((updated as { link: object }).link).not.toHaveProperty("instructions");
       expect((updated as { link: object }).link).not.toHaveProperty("usage");
       expect(link.usage).toEqual({ totalTokens: null });
-      expect(f.store.watcherLinks.views()[0]).not.toHaveProperty("instructions");
+      expect((f.store.shellSnapshot().watchers ?? [])[0]).not.toHaveProperty("instructions");
       await expect(f.command("watcher.pause", { linkId: link.id }))
         .resolves.toMatchObject({ result: { link: { instructions: "Watch the error paths.", usage: { totalTokens: null } } } });
       const feed = await f.command("watcher.feed.get", { linkId: link.id });

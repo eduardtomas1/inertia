@@ -512,7 +512,7 @@ export class WatcherWakeRunner {
             }
           : splitWatcherResolvedLine(read.content);
         resolved = reply.resolved;
-        outcome = classifyWatcherReply(reply.text, turn.status);
+        outcome = classifyWatcherReply(reply.text);
         if (outcome === "finding") finding = findingPreview(reply.text);
       }
       const violations = running?.violations ?? [];

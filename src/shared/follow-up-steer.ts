@@ -9,8 +9,6 @@ export const STEERABLE_HARNESS_IDS = [
   "opencode-sdk",
 ] as const;
 
-export type SteerableHarnessId = (typeof STEERABLE_HARNESS_IDS)[number];
-
 export function supportsActiveParentFollowUp(harnessId: string | null): boolean {
   return harnessId !== null && (STEERABLE_HARNESS_IDS as readonly string[]).includes(harnessId);
 }

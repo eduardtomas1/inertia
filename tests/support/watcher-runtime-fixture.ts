@@ -37,11 +37,8 @@ import type { TurnInteractionCommandDependencies } from "../../src/server/runtim
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import type { TurnProviderRuntime, TurnTimerScheduler } from "../../src/server/runtime/turns/turn-controller-types";
-import {
-  createWatcherRuntime,
-  createWatcherTurnPolicy,
-  type WatcherRuntime,
-} from "../../src/server/runtime/watcher/watcher-runtime";
+import { createWatcherRuntime, type WatcherRuntime } from "../../src/server/runtime/watcher/watcher-runtime";
+import { createWatcherTurnPolicy } from "../../src/server/runtime/watcher/watcher-turn-policy";
 import { resolveNativeModelRoute } from "../server/model-route-fixture";
 import { turnControllerTestProviderInfo } from "./turn-controller-runtime";
 

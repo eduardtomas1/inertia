@@ -15,19 +15,11 @@ export const WATCHER_INSTRUCTION_LABEL = "inertia-watcher";
 /** Hard cap for the whole hidden instruction, well under the 16 KiB per-instruction limit. */
 export const MAX_WATCHER_INSTRUCTION_BYTES = 6_000;
 export const MAX_WATCHER_TITLE_CHARS = 200;
-export const WATCHER_SILENT_REPLY = "SILENT";
 export const WATCHER_SILENT_RULE =
   "If nothing needs the user's attention, reply with exactly SILENT and nothing else, except the Resolved line when an earlier finding is now fixed.";
 
 export const WATCHER_COMMAND_RULE =
   "You may run read-only commands such as git diff, git log, git show, git status, rg, grep, cat, head, ls and find, with paths inside the workspace, forward slashes and single quotes; Inertia declines anything else, including redirection, chaining, command substitution and other programs, so do not try them.";
-
-/** One sentence per preset for the attach dialog and the dock. */
-export const WATCHER_PRESET_DESCRIPTIONS: Readonly<Record<WatcherPreset, string>> = Object.freeze({
-  reviewer: "Looks for mistakes and risks in the work as it happens.",
-  "scope-guard": "Checks that the work stays within what the chat asked for.",
-  explainer: "Describes what the main agent is doing and why.",
-});
 
 const PRESET_BODIES: Readonly<Record<WatcherPreset, string>> = Object.freeze({
   reviewer: [

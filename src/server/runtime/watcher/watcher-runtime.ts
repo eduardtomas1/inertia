@@ -8,18 +8,16 @@ import type {
   RuntimeMutationEvent,
   ServerEvent,
 } from "../../../shared/contracts";
-import type { WatcherPrivateConnect } from "../../../shared/watcher";
+import { WATCHER_BUDGET_LIMITS, type WatcherPrivateConnect } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
 import type { CheckoutFingerprint, CheckoutFingerprintOptions } from "../../git/checkout-fingerprint";
 import type { WatcherTurnDiffSnapshot } from "../../persistence/watcher-digest-source";
 import type { WatcherLinkRecord } from "../../persistence/watcher-link-repository";
-import type { ProviderHostToolBridge } from "../../provider/contracts";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type { RuntimeCommandHandler } from "../commands/command-router";
 import type { TurnInteractionCommandDependencies } from "../commands/turn-interaction-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
 import { createWatcherCommandHandler } from "../commands/watcher-commands";
-import type { HiddenProviderInstruction } from "../turns/request-context";
 import type { TurnController } from "../turns/turn-controller";
 import { defaultTurnScheduler } from "../turns/turn-controller-support";
 import type {
@@ -32,14 +30,12 @@ import { WatcherDeliveryService, type WatcherNoteQueue } from "./watcher-deliver
 import { WatcherLinkCoordinator, WatcherLinkIndex } from "./watcher-link-coordinator";
 import { WatcherLiveProjection } from "./watcher-live-projection";
 import { watcherRouteReadiness } from "./watcher-route";
-import type { WatcherTurnPolicy, WatcherTurnSource } from "./watcher-turn-policy";
+import type { WatcherTurnPolicy } from "./watcher-turn-policy";
 import { WatcherWakeRunner } from "./watcher-wake-runner";
 import {
   WatcherWakeScheduler,
   type WatcherWakeSchedulerDependencies,
 } from "./watcher-wake-scheduler";
-
-export { createWatcherTurnPolicy, type WatcherTurnPolicy } from "./watcher-turn-policy";
 
 /** Watched output is written to the link at most this often; the quiet marker needs no finer grain. */
 export const WATCHER_OUTPUT_RECORD_MS = 15_000;
@@ -88,10 +84,7 @@ export interface WatcherRuntime {
   observe(event: RuntimeMutationEvent): void;
   onTurnSettled(turn: AgentTurn): Promise<void>;
   onReadOnlyViolation(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void;
-  hostToolsForTurn(input: WatcherTurnSource): ProviderHostToolBridge | null;
-  harnessInstructionsFor(input: Pick<WatcherTurnSource, "conversation">): readonly HiddenProviderInstruction[] | null;
   isWatcherConversation(conversationId: string): boolean;
-  watcherPolicy: WatcherTurnPolicy;
   /** The Private Connect parent of an attached watcher conversation. */
   watcherParent(conversationId: string): { watchedConversationId: string | null; privateConnect: WatcherPrivateConnect } | null;
   /** A chat was archived: the watcher of an archived chat pauses, and so does a watcher whose own chat was archived. */
@@ -220,8 +213,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     onPendingChanged: (linkId) => {
       if (store.watcherLinks.notePendingEvents(linkId, wakeScheduler.pendingEvents(linkId), now())) publish(linkId);
     },
-    cooldownMs: (linkId) => (store.watcherLinks.get(linkId)?.budgets.cooldownSeconds ?? 45) * 1_000,
-    onError: () => undefined,
+    cooldownMs: (linkId) => (store.watcherLinks.get(linkId)?.budgets.cooldownSeconds ?? WATCHER_BUDGET_LIMITS.cooldownSeconds.default) * 1_000,
   });
   const forget = (linkId: string): void => {
     wakeScheduler.forget(linkId);
@@ -369,10 +361,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     onReadOnlyViolation(turn, violation) {
       if (!disposed) runner.onViolation(turn, violation);
     },
-    hostToolsForTurn: (input) => policy.hostToolsForTurn(input),
-    harnessInstructionsFor: (input) => policy.harnessInstructionsFor(input),
     isWatcherConversation: (conversationId) => policy.isWatcherConversation(conversationId),
-    watcherPolicy: policy,
     watcherParent(conversationId) {
       // Asked once per chat of every Private Connect shell: only attached
       // watcher chats reach the one indexed row read.

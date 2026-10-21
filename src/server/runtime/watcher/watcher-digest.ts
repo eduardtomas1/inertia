@@ -105,8 +105,6 @@ export interface WatcherDigestStats {
   itemsTruncated: number;
   itemsOmitted: number;
   bytes: number;
-  /** Settled command activities of the watched chat this check covers. */
-  commandsRun: number;
   /**
    * The check read as many activities as one check may: more may follow, and
    * a continuation check of the same watched turn reviews them.
@@ -118,7 +116,6 @@ export interface WatcherDigest {
   content: string;
   turnId: string;
   cursor: WatcherCursor;
-  pendingRunningIds: string[];
   /** Stable key of the watched turn's current plan, or null without one. */
   planKey: string | null;
   openReply: WatcherOpenReply | null;
@@ -541,7 +538,6 @@ export function buildWatcherDigest(
   const settled = [...reread, ...fresh]
     .filter((activity) => activity.status !== "running" && RELEVANT_KINDS.has(activity.kind))
     .sort(compareActivities);
-  const commandsRun = settled.filter(({ kind }) => kind === "command").length;
 
   const plan = sharing.activities ? source.plan(watchedId, turn.id) : null;
   const planKey = watcherPlanKey(plan);
@@ -657,9 +653,8 @@ export function buildWatcherDigest(
     content,
     turnId: turn.id,
     cursor,
-    pendingRunningIds,
     planKey,
     openReply: streaming ? { messageId: streaming.id, bytes: streaming.bytes } : null,
-    stats: { eventsCovered, itemsTruncated, itemsOmitted, bytes: bytes(content), commandsRun, moreFollows },
+    stats: { eventsCovered, itemsTruncated, itemsOmitted, bytes: bytes(content), moreFollows },
   };
 }

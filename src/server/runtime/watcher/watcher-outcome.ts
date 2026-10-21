@@ -1,4 +1,3 @@
-import type { AgentTurnStatus } from "../../../shared/contracts";
 import {
   MAX_WATCHER_FINDING_BYTES,
   MAX_WATCHER_NOTE_CHARS,
@@ -44,12 +43,9 @@ function unwrap(value: string): string {
  * turn. Anything else is a finding. Callers map failed, cancelled and
  * usage-limited turns to their own outcomes before asking.
  */
-export function classifyWatcherReply(
-  text: string | null,
-  turnStatus: AgentTurnStatus,
-): WatcherReplyClass {
+export function classifyWatcherReply(text: string | null): WatcherReplyClass {
   const trimmed = (text ?? "").trim();
-  if (trimmed.length === 0) return turnStatus === "completed" ? "silent" : "finding";
+  if (trimmed.length === 0) return "silent";
   if (trimmed.length > MAX_SILENT_CANDIDATE_CHARS) return "finding";
   return SILENT_PATTERN.test(unwrap(trimmed)) ? "silent" : "finding";
 }

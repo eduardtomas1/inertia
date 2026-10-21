@@ -85,10 +85,6 @@ export class WatcherLinkIndex {
     return this.#byWatcher.get(conversationId) ?? null;
   }
 
-  linkIds(): string[] {
-    return [...this.#links.keys()];
-  }
-
   clear(): void {
     this.#byWatched.clear();
     this.#byWatcher.clear();

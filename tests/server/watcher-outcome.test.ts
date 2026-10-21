@@ -20,7 +20,7 @@ describe("classifyWatcherReply", () => {
     "**`SILENT`**",
     "__SILENT__",
   ])("treats %j as silent", (reply) => {
-    expect(classifyWatcherReply(reply, "completed")).toBe("silent");
+    expect(classifyWatcherReply(reply)).toBe("silent");
   });
 
   it.each([
@@ -34,14 +34,12 @@ describe("classifyWatcherReply", () => {
     "S I L E N T",
     "SILENT".repeat(20),
   ])("treats %j as a finding", (reply) => {
-    expect(classifyWatcherReply(reply, "completed")).toBe("finding");
+    expect(classifyWatcherReply(reply)).toBe("finding");
   });
 
-  it("treats an empty reply as silent only on a completed turn", () => {
-    expect(classifyWatcherReply(null, "completed")).toBe("silent");
-    expect(classifyWatcherReply("   \n", "completed")).toBe("silent");
-    expect(classifyWatcherReply(null, "failed")).toBe("finding");
-    expect(classifyWatcherReply("", "interrupted")).toBe("finding");
+  it("treats an empty reply as silent", () => {
+    expect(classifyWatcherReply(null)).toBe("silent");
+    expect(classifyWatcherReply("   \n")).toBe("silent");
   });
 });
 

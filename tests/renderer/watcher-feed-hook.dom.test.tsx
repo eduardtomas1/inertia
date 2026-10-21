@@ -88,16 +88,49 @@ describe("useWatcherFeed", () => {
     await waitFor(() => expect(feed.calls).toHaveLength(3));
     await act(async () => { feed.calls[2]!.resolve(feed.page(LINK_ID, [feedItem(12), feedItem(11)], 11)); });
     expect(result.current.items.map(({ sequence }) => sequence)).toEqual([12, 11, 10, 9, 8, 7]);
-    rerender({ revision: 3 });
     await waitFor(() => expect(feed.calls).toHaveLength(4));
-    await act(async () => { feed.calls[3]!.resolve(feed.page(LINK_ID, [feedItem(20), feedItem(19)], 19)); });
+    await act(async () => { feed.calls[3]!.resolve(feed.page(LINK_ID, [feedItem(10), feedItem(9)], 9)); });
+    await waitFor(() => expect(feed.calls).toHaveLength(5));
+    await act(async () => { feed.calls[4]!.resolve(feed.page(LINK_ID, [feedItem(8), feedItem(7)], 7)); });
+    expect(result.current.items.map(({ sequence }) => sequence)).toEqual([12, 11, 10, 9, 8, 7]);
+    rerender({ revision: 3 });
+    await waitFor(() => expect(feed.calls).toHaveLength(6));
+    await act(async () => { feed.calls[5]!.resolve(feed.page(LINK_ID, [feedItem(20), feedItem(19)], 19)); });
     expect(result.current.items.map(({ sequence }) => sequence)).toEqual([20, 19]);
     expect(result.current.hasMore).toBe(true);
 
     act(() => result.current.loadMore());
-    expect(feed.calls[4]!.before).toBe(19);
-    await act(async () => { feed.calls[4]!.resolve(feed.page(LINK_ID, [feedItem(18), feedItem(17)], 17)); });
+    expect(feed.calls[6]!.before).toBe(19);
+    await act(async () => { feed.calls[6]!.resolve(feed.page(LINK_ID, [feedItem(18), feedItem(17)], 17)); });
     expect(result.current.items.map(({ sequence }) => sequence)).toEqual([20, 19, 18, 17]);
+  });
+
+  it("refreshes loaded earlier pages when the feed revision moves", async () => {
+    const feed = deferredFeed();
+    const actions = feed.actionsFor(LINK_ID);
+    const queued = { mode: "queue", state: "queued", detail: null, at: "2026-10-19T10:40:00.000Z" } as const;
+    const sent = { ...queued, state: "sent", at: "2026-10-19T10:45:00.000Z" } as const;
+    const { result, rerender } = renderHook(({ revision }) => useWatcherFeed(LINK_ID, revision, actions), {
+      initialProps: { revision: 1 },
+    });
+    await act(async () => { feed.calls[0]!.resolve(feed.page(LINK_ID, [feedItem(5), feedItem(4)], 4)); });
+    act(() => result.current.loadMore());
+    await act(async () => { feed.calls[1]!.resolve(feed.page(LINK_ID, [feedItem(3, { delivery: queued }), feedItem(2)])); });
+    rerender({ revision: 2 });
+    await waitFor(() => expect(feed.calls).toHaveLength(3));
+    await act(async () => { feed.calls[2]!.resolve(feed.page(LINK_ID, [feedItem(6), feedItem(5)], 5)); });
+    await waitFor(() => expect(feed.calls).toHaveLength(4));
+    expect(feed.calls[3]!.before).toBe(5);
+    await act(async () => {
+      feed.calls[3]!.resolve(feed.page(LINK_ID, [feedItem(4), feedItem(3, { delivery: sent, resolvedBySequence: 6 })], 3));
+    });
+    await waitFor(() => expect(feed.calls).toHaveLength(5));
+    expect(feed.calls[4]!.before).toBe(3);
+    await act(async () => { feed.calls[4]!.resolve(feed.page(LINK_ID, [feedItem(2)])); });
+    expect(result.current.items.map(({ sequence }) => sequence)).toEqual([6, 5, 4, 3, 2]);
+    expect(result.current.items.find(({ sequence }) => sequence === 3)).toMatchObject({ delivery: sent, resolvedBySequence: 6 });
+    expect(result.current.hasMore).toBe(false);
+    expect(feed.calls).toHaveLength(5);
   });
 
   it("carries the watcher's token use from the newest page, and none while unknown", async () => {

@@ -50,6 +50,24 @@ function mergeHead(previous: Feed | null, result: WatcherFeedResult): Feed {
   };
 }
 
+function mergeRefreshed(
+  previous: Feed,
+  head: WatcherFeedResult,
+  refreshed: WatcherFeedItem[],
+  next: WatcherFeedResult["next"],
+): Feed {
+  if (previous.linkId !== head.linkId) return previous;
+  const oldestHead = head.items.at(-1)?.sequence ?? Number.POSITIVE_INFINITY;
+  const pages = refreshed.filter(({ sequence }) => sequence < oldestHead);
+  const oldest = pages.at(-1)?.sequence ?? oldestHead;
+  const later = next === null ? [] : previous.items.filter(({ sequence }) => sequence < oldest);
+  return {
+    ...previous,
+    items: [...head.items, ...pages, ...later],
+    next: later.length > 0 ? previous.next : next,
+  };
+}
+
 function mergePage(previous: Feed, result: WatcherFeedResult): Feed {
   const known = new Set(previous.items.map(({ wakeId }) => wakeId));
   return {
@@ -80,6 +98,7 @@ export function useWatcherFeed(
 ): WatcherFeedState {
   const visible = useDocumentVisibility();
   const [feed, setFeed] = useState<Feed | null>(null);
+  const feedRef = useRef<Feed | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [overrides, setOverrides] = useState<ReadonlyMap<string, WatcherDelivery>>(() => new Map());
@@ -90,6 +109,11 @@ export function useWatcherFeed(
   useEffect(() => {
     actionsRef.current = actions;
   });
+  const commitFeed = useCallback((update: (previous: Feed | null) => Feed | null): Feed | null => {
+    feedRef.current = update(feedRef.current);
+    setFeed(feedRef.current);
+    return feedRef.current;
+  }, []);
 
   const fetchHead = useCallback((revision: number): void => {
     const state = head.current;
@@ -110,27 +134,40 @@ export function useWatcherFeed(
       state.again = false;
       fetchHead(state.pendingRevision);
     };
-    void load.feed().then((result) => {
+    const refresh = async (): Promise<void> => {
+      const result = await load.feed();
       if (generation.current !== owner) return;
-      setFeed((previous) => mergeHead(previous, result));
+      const merged = commitFeed((previous) => mergeHead(previous, result));
       setError(null);
-      settle();
-    }, (failure: unknown) => {
+      const oldest = merged && merged.pages > 0 ? merged.items.at(-1)?.sequence : undefined;
+      if (oldest === undefined) return;
+      const refreshed: WatcherFeedItem[] = [];
+      let cursor = result.next;
+      while (cursor && cursor.beforeSequence > oldest) {
+        const page = await load.feed(cursor.beforeSequence);
+        if (generation.current !== owner) return;
+        refreshed.push(...page.items);
+        cursor = page.next;
+      }
+      const next = cursor;
+      commitFeed((previous) => previous && mergeRefreshed(previous, result, refreshed, next));
+    };
+    void refresh().then(settle, (failure: unknown) => {
       if (generation.current !== owner) return;
       state.fetchedRevision = -1;
       setError(failure instanceof Error ? failure.message : "The watcher's findings could not be loaded.");
       settle();
     });
-  }, []);
+  }, [commitFeed]);
 
   useEffect(() => {
     generation.current += 1;
     head.current = freshHead();
-    setFeed(null);
+    commitFeed(() => null);
     setError(null);
     setLoadingMore(false);
     setOverrides(new Map());
-  }, [linkId]);
+  }, [commitFeed, linkId]);
 
   const available = actions !== null;
   useEffect(() => {
@@ -147,14 +184,14 @@ export function useWatcherFeed(
     setLoadingMore(true);
     void load.feed(next.beforeSequence).then((result) => {
       if (generation.current !== owner) return;
-      setFeed((previous) => previous?.linkId === result.linkId ? mergePage(previous, result) : previous);
+      commitFeed((previous) => previous?.linkId === result.linkId ? mergePage(previous, result) : previous);
     }, (failure: unknown) => {
       if (generation.current !== owner) return;
       setError(failure instanceof Error ? failure.message : "Earlier checks could not be loaded.");
     }).finally(() => {
       if (generation.current === owner) setLoadingMore(false);
     });
-  }, [loadingMore, next]);
+  }, [commitFeed, loadingMore, next]);
 
   const retry = useCallback((): void => {
     head.current.fetchedRevision = -1;

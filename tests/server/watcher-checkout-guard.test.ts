@@ -78,6 +78,20 @@ describe("watcher checkout guard", () => {
     expect(command("git diff --stat", null)).toBe(false);
   });
 
+  it("classifies the command inside the shell wrapper Codex records", () => {
+    const context = { cwd: "/repo", windows: false };
+    const command = (text: string) => watcherActivityMayWrite(
+      { kind: "command", title: "Command", detail: providerActivityDetailSections({ command: text }) },
+      context,
+    );
+    expect(command("/bin/zsh -lc 'git status --short'")).toBe(false);
+    expect(command("/bin/zsh -lc 'rg -n parse src'")).toBe(false);
+    expect(command("/bin/bash -lc \"cat src/a.ts\"")).toBe(false);
+    expect(command("/bin/zsh -lc 'cat src/a.ts > src/b.ts'")).toBe(true);
+    expect(command("/bin/zsh -lc 'git status' && rm -rf src")).toBe(true);
+    expect(command("/bin/zsh -lc '$0' 'rm -rf src'")).toBe(true);
+  });
+
   it("treats a change another turn on the checkout reported as explained", async () => {
     let root = "";
     const f = await createWatcherFixture({ captureFingerprint: fingerprints(() => root, { "src/a.ts": "1" }, { "src/a.ts": "2" }) });

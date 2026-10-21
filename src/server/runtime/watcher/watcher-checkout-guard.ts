@@ -1,4 +1,4 @@
-import { activityExecutionCategory } from "../../../shared/activity-display";
+import { activityExecutionCategory, unwrapShellCommand } from "../../../shared/activity-display";
 import type { AgentActivity, RuntimeMutationEvent } from "../../../shared/contracts";
 import {
   MAX_WATCHER_GUARD_PATHS,
@@ -99,7 +99,7 @@ export function watcherActivityMayWrite(
   context: ReadOnlyCommandContext,
 ): boolean {
   const title = activity.title.replace(/^Interrupted · /u, "");
-  if (activity.kind === "command") return !classifyReadOnlyCommand(activityCommand(activity, title), context).allowed;
+  if (activity.kind === "command") return !classifyReadOnlyCommand(unwrapShellCommand(activityCommand(activity, title)), context).allowed;
   return activityExecutionCategory({ kind: activity.kind, title, status: "running" }) === "coding";
 }
 

@@ -730,7 +730,10 @@ const http = require("node:http");
 const path = require("node:path");
 fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
 const capture = { calls: [], gitOptionalLocks: process.env.GIT_OPTIONAL_LOCKS ?? null, ripgrepConfigPath: process.env.RIPGREP_CONFIG_PATH ?? null };
-const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(capture));
+const save = () => {
+  fs.writeFileSync(${JSON.stringify(capturePath + ".tmp")}, JSON.stringify(capture));
+  fs.renameSync(${JSON.stringify(capturePath + ".tmp")}, ${JSON.stringify(capturePath)});
+};
 const agentRules = ${JSON.stringify(agentRules)};
 const nativeTools = ${JSON.stringify(OPENCODE_NATIVE_TOOLS)};
 const calls = ${JSON.stringify(scriptedCalls)};

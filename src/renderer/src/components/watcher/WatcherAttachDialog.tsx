@@ -28,10 +28,11 @@ import {
 } from "@shared/watcher";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
-import { usePrivateConnectState } from "../../hooks/usePrivateConnectState";
+import { usePrivateConnectConfigured } from "../../hooks/usePrivateConnectState";
 import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { resultEvent, type CommandWithoutId } from "../../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { watcherErrorText } from "../../utils/watcherCopy";
 import {
   composerRouteReadiness,
   type ComposerRouteRepair,
@@ -75,6 +76,7 @@ export interface WatcherAttachHostProps {
 }
 
 const WATCHER_READ_ONLY_STATEMENT = "It reads and reports: it may run read-only commands and never edits files or changes the workspace.";
+const ATTACH_FAILED = "The watcher could not be attached.";
 const WATCHER_AUTO_SEND_DETAIL = "Each finding is queued as a note from the watcher; your own messages still go first.";
 
 const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string }> = [
@@ -196,10 +198,7 @@ export function WatcherAttachDialog({
   const [initialReview, setInitialReview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const privateConnectState = usePrivateConnectState();
-  const privateConnectConfigured = Boolean(
-    privateConnectState.state?.enabled || (privateConnectState.state?.devices.length ?? 0) > 0,
-  );
+  const privateConnectConfigured = usePrivateConnectConfigured();
   // Kept across an ambiguous timeout so a retry is the same attach, which
   // the runtime recognizes, and replaced only after a definite failure.
   const linkIdRef = useRef<string | null>(null);
@@ -318,7 +317,7 @@ export function WatcherAttachDialog({
       },
     }).then((event) => {
       const { result } = resultEvent(event);
-      if (result.kind !== "watcher.link") throw new Error("The watcher could not be attached.");
+      if (result.kind !== "watcher.link") throw new Error(ATTACH_FAILED);
       if (attachedRef.current) return;
       attachedRef.current = true;
       restoreFocusRef.current = false;
@@ -326,7 +325,7 @@ export function WatcherAttachDialog({
     }).catch((failure: unknown) => {
       if (attachedRef.current) return;
       if (runtimeCommandDelivery(failure) !== "ambiguous") linkIdRef.current = null;
-      setError(failure instanceof Error ? failure.message : "The watcher could not be attached.");
+      setError(watcherErrorText(failure, ATTACH_FAILED));
       setSubmitting(false);
       attachRef.current?.focus({ preventScroll: true });
     });

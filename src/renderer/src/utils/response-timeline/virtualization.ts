@@ -22,7 +22,7 @@ import {
   collapsedUserRequestPreview,
   shouldCollapseUserRequest,
 } from "../userRequestPresentation";
-import { watcherEventsText } from "../watcherLinks";
+import { watcherCheckTitle } from "../watcherLinks";
 
 export const TIMELINE_VIRTUALIZATION_MIN_ROWS = 14;
 export const TIMELINE_VIRTUALIZATION_MIN_WEIGHTED_ROWS = 10;
@@ -735,7 +735,7 @@ export function buildTimelineMinimapMarkers(
     const index = Math.round(marker * (turns.length - 1) / Math.max(1, count - 1));
     const turn = turns[index]!;
     const request = turn.watcherWake
-      ? `Check ${turn.watcherWake.sequence} · ${watcherEventsText(turn.watcherWake.eventsCovered)}`
+      ? watcherCheckTitle(turn.watcherWake)
       : turn.userMessage.content.replace(/\s+/gu, " ").trim();
     return {
       index,

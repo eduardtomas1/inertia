@@ -1,10 +1,8 @@
 import type { WatcherNoteAttribution } from "@shared/watcher";
-import { watcherPresetName } from "../../utils/watcherLinks";
+import { WATCHER_NOTE_TITLE, watcherPresetName } from "../../utils/watcherLinks";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import "./ContextCompactionRow.css";
 import "./ProviderHandoffRow.css";
-
-export const WATCHER_NOTE_TITLE = "Note from watcher";
 
 export function watcherNoteLabel(note: Pick<WatcherNoteAttribution, "preset" | "watcherLabel">): string {
   return `${WATCHER_NOTE_TITLE} · ${watcherPresetName(note.preset)} · ${note.watcherLabel}`;

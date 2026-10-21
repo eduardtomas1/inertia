@@ -28,3 +28,8 @@ export function usePrivateConnectState(): {
   }, [version]);
   return { state, error, retry };
 }
+
+export function usePrivateConnectConfigured(): boolean {
+  const { state } = usePrivateConnectState();
+  return Boolean(state?.enabled || (state?.devices.length ?? 0) > 0);
+}

@@ -68,7 +68,7 @@ import { startChatDrag } from "../utils/chatDrag";
 import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { WatcherWorkRow } from "./sidebar/WatcherWorkRow";
 import { nestWatcherThreads } from "../utils/watcherSidebar";
-import { watcherPresetName } from "../utils/watcherLinks";
+import { watcherRowName } from "../utils/watcherLinks";
 import { loadThreadActions } from "./sidebar/threadActionLoader";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
@@ -769,7 +769,7 @@ function SidebarView({
     const accessibleContext = [
       conversation.title,
       watcherLink
-        ? `Watcher · ${watcherPresetName(watcherLink.preset)}${watcherParent ? `, watching ${watcherParent.title}` : ""}`
+        ? `${watcherRowName(watcherLink.preset)}${watcherParent ? `, watching ${watcherParent.title}` : ""}`
         : null,
       providerLabel,
       projectLabel,

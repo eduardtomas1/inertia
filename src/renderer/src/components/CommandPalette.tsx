@@ -17,6 +17,7 @@ import { watcherEntryFor } from "./watcher/watcherAvailability";
 import { prefetchWatcherAttachDialog } from "./watcher/watcherLoaders";
 import { createWatcherActions } from "../hooks/useWatcherActions";
 import { reportWatcherDockError } from "../hooks/useWatcherDock";
+import { watcherErrorText } from "../utils/watcherCopy";
 
 export type CommandPaletteView = "search" | "new-chat";
 
@@ -79,10 +80,7 @@ function watcherPaletteItems(surface: WatcherSurfaceModel | null, conversations:
       // A failure opens the dock with the error, where Pause can be retried.
       run: () => {
         void createWatcherActions(request, link.id).pause().catch((error: unknown) => {
-          reportWatcherDockError(
-            watched.id,
-            error instanceof Error ? error.message : "The watcher could not be paused.",
-          );
+          reportWatcherDockError(watched.id, watcherErrorText(error, "The watcher could not be paused."));
         });
       },
     }] : []),

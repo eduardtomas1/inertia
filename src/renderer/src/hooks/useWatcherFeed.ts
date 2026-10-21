@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WatcherDelivery, WatcherFeedItem } from "@shared/watcher";
 import type { WatcherActions, WatcherFeedResult } from "./useWatcherActions";
 import { useDocumentVisibility } from "./useDocumentPresence";
+import { watcherErrorText } from "../utils/watcherCopy";
 
 export interface WatcherFeedState {
   /** Newest first. */
@@ -155,7 +156,7 @@ export function useWatcherFeed(
     void refresh().then(settle, (failure: unknown) => {
       if (generation.current !== owner) return;
       state.fetchedRevision = -1;
-      setError(failure instanceof Error ? failure.message : "The watcher's findings could not be loaded.");
+      setError(watcherErrorText(failure, "The watcher's findings could not be loaded."));
       settle();
     });
   }, [commitFeed]);
@@ -187,7 +188,7 @@ export function useWatcherFeed(
       commitFeed((previous) => previous?.linkId === result.linkId ? mergePage(previous, result) : previous);
     }, (failure: unknown) => {
       if (generation.current !== owner) return;
-      setError(failure instanceof Error ? failure.message : "Earlier checks could not be loaded.");
+      setError(watcherErrorText(failure, "Earlier checks could not be loaded."));
     }).finally(() => {
       if (generation.current === owner) setLoadingMore(false);
     });

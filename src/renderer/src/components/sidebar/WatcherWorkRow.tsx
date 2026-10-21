@@ -4,7 +4,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { Conversation } from "@shared/contracts";
 import type { WatcherLinkView } from "@shared/watcher";
 import { useWatcherDock } from "../../hooks/useWatcherDock";
-import { watcherPresetName, watcherUnseenText } from "../../utils/watcherLinks";
+import { watcherRowName, watcherUnseenText } from "../../utils/watcherLinks";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 
 function watcherRowState(link: WatcherLinkView | undefined): string | null {
@@ -52,7 +52,7 @@ export function WatcherWorkRow({
   menu: WatcherWorkRowMenu;
   onActivate: (conversation: Conversation) => void;
 }): React.JSX.Element {
-  const name = link ? `Watcher · ${watcherPresetName(link.preset)}` : conversation.title;
+  const name = link ? watcherRowName(link.preset) : conversation.title;
   const state = watcherRowState(link);
   const dock = useWatcherDock(link?.watchedConversationId ?? null);
   const unseen = link ? watcherUnseenText(link, dock) : null;

@@ -75,6 +75,7 @@ import {
 import { messageContextMenu } from "./messageContextMenu";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { MessageOrigin } from "./MessageOrigin";
+import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
@@ -453,7 +454,7 @@ export function FollowUpRow({
   return (
     <article
       className="turn-follow-up-row"
-      aria-label={entry.message.watcherNote ? "Note from watcher" : "Your follow-up"}
+      aria-label={entry.message.watcherNote ? WATCHER_NOTE_TITLE : "Your follow-up"}
       data-follow-up-message-id={entry.message.id}
       tabIndex={-1}
       {...messageContextMenu(entry.message, entry.message.content)}

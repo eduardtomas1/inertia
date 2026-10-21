@@ -5,6 +5,7 @@ import type { WatcherDeliveryMode, WatcherFeedItem } from "@shared/watcher";
 import type { WatcherActions } from "../../hooks/useWatcherActions";
 import type { WatcherFeedState } from "../../hooks/useWatcherFeed";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
+import { watcherErrorText } from "../../utils/watcherCopy";
 import { LoadingMark } from "../ui";
 import { WatcherFindingCard, type WatcherFindingAction, type WatcherFindingFailure } from "./WatcherFindingCard";
 import { WatcherNoticeLine, WatcherReceiptGroup } from "./WatcherReceiptGroup";
@@ -23,10 +24,6 @@ interface WatcherFeedProps {
 }
 
 type FocusTarget = { kind: "status" | "card"; wakeId: string } | { kind: "heading" };
-
-function failureText(error: unknown): string {
-  return error instanceof Error ? error.message : "The note could not be sent.";
-}
 
 function isFinding(item: WatcherFeedItem): boolean {
   return item.outcome === "finding" && item.finding !== null;
@@ -163,7 +160,7 @@ export function WatcherFeed({
       // An ambiguous timeout keeps the same delivery id so a retry cannot
       // deliver the note twice; a refused or unsent request starts over.
       if (runtimeCommandDelivery(error) !== "ambiguous") deliveryIds.current.delete(item.wakeId);
-      setFailureFor(item.wakeId, { action: "send", message: failureText(error) });
+      setFailureFor(item.wakeId, { action: "send", message: watcherErrorText(error, "The note could not be sent.") });
     }).finally(() => {
       setPendingFor(item.wakeId, null);
     });
@@ -181,7 +178,7 @@ export function WatcherFeed({
     }, (error: unknown) => {
       setFailureFor(item.wakeId, {
         action: "dismiss",
-        message: error instanceof Error ? error.message : "The finding could not be dismissed.",
+        message: watcherErrorText(error, "The finding could not be dismissed."),
       });
       pendingFocus.current = { kind: "status", wakeId: item.wakeId };
     }).finally(() => {

@@ -9,6 +9,7 @@ import { INTERFACE_LOCALE } from "../../lib/locale";
 import { useWatcherLive } from "../../utils/watcherLiveStore";
 import {
   watcherClockTime,
+  watcherErrorText,
   watcherOutcomeText,
   watcherPauseAnnouncement,
   watcherPhaseText,
@@ -40,10 +41,6 @@ interface WatcherBarProps {
 }
 
 type Pending = "pause" | "wake" | "review" | "detach" | "visibility" | "delivery" | null;
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : "The watcher could not be updated.";
-}
 
 const QUIET_OUTCOMES = new Set(["silent", "finding"]);
 
@@ -137,7 +134,7 @@ export function WatcherBar({
     setPending(name);
     void operation().then(
       () => { if (mounted.current) onError(null); },
-      (error: unknown) => { if (mounted.current) onError(errorText(error)); },
+      (error: unknown) => { if (mounted.current) onError(watcherErrorText(error, "The watcher could not be updated.")); },
     ).finally(() => { if (mounted.current) setPending(null); });
   };
   const phase = stateText(link, liveForTurn ? watcherPhaseText(liveForTurn.phase, liveForTurn.label) : null);

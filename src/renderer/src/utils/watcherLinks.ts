@@ -55,9 +55,19 @@ export function watcherPresetName(preset: WatcherPreset): string {
   return WATCHER_PRESET_NAMES[preset] ?? preset;
 }
 
+export function watcherRowName(preset: WatcherPreset): string {
+  return `Watcher · ${watcherPresetName(preset)}`;
+}
+
+export const WATCHER_NOTE_TITLE = "Note from watcher";
+
 /** "1 event" / "9 events"; eager because transcript estimates name checks. */
 export function watcherEventsText(count: number): string {
   return `${count.toLocaleString(INTERFACE_LOCALE)} ${count === 1 ? "event" : "events"}`;
+}
+
+export function watcherCheckTitle(wake: { sequence: number; eventsCovered: number }): string {
+  return `Check ${wake.sequence} · ${watcherEventsText(wake.eventsCovered)}`;
 }
 
 /** "2 new" for findings the user has not seen, "new" when the count is unknown. */

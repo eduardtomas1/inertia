@@ -6,6 +6,7 @@ import type { WatcherReceiptGroup as ReceiptGroup } from "@shared/watcher-feed";
 import { formatBytes } from "../../utils/formatBytes";
 import {
   watcherClockTime,
+  watcherDigestNote,
   watcherOutcomeText,
   watcherTriggerText,
 } from "../../utils/watcherCopy";
@@ -21,14 +22,6 @@ function guardNote(item: WatcherFeedItem): string | null {
   if (item.guardState === "inconclusive") return watcherChangedFilesText(item.guardPaths);
   if (item.guardState === "unavailable") return "No Git fingerprint for this checkout";
   return null;
-}
-
-function digestNote(item: WatcherFeedItem): string | null {
-  const parts = [
-    item.itemsTruncated > 0 ? `${item.itemsTruncated} shortened` : null,
-    item.itemsOmitted > 0 ? `${item.itemsOmitted} left out` : null,
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function sentNote(item: WatcherFeedItem): string | null {
@@ -59,7 +52,7 @@ function WatcherCheckLine({ item }: { item: WatcherFeedItem }): React.JSX.Elemen
     watcherTriggerText(item.trigger),
     watcherEventsText(item.eventsCovered),
     ...commandNotes(item.commandsRun, item.commandsDeclined),
-    digestNote(item),
+    watcherDigestNote(item),
     sentNote(item),
     guardNote(item),
   ].filter((note): note is string => Boolean(note));

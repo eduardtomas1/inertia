@@ -16,7 +16,7 @@ import type { ConversationShell } from "@shared/contracts";
 import type { WatcherLinkView } from "@shared/watcher";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { usePersistedSize } from "../../hooks/usePersistedSize";
-import { usePrivateConnectState } from "../../hooks/usePrivateConnectState";
+import { usePrivateConnectConfigured } from "../../hooks/usePrivateConnectState";
 import { useWatcherActions } from "../../hooks/useWatcherActions";
 import {
   consumeWatcherDockFocus,
@@ -29,7 +29,7 @@ import {
 } from "../../hooks/useWatcherDock";
 import { useWatcherFeed } from "../../hooks/useWatcherFeed";
 import { composerRouteReadiness } from "../../utils/composerReadiness";
-import { watcherPauseText } from "../../utils/watcherCopy";
+import { watcherErrorText, watcherPauseText } from "../../utils/watcherCopy";
 import { watcherAgentLabel } from "@shared/watcher-agent-label";
 import { PaneResizeHandle } from "../PaneResizeHandle";
 import { escapeClosedTooltip } from "../Tooltip";
@@ -212,7 +212,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const visible = useDocumentVisibility();
   const actions = useWatcherActions(surface.request, link.id);
   const feed = useWatcherFeed(link.id, link.feedRevision, surface.online ? actions : null, presence !== "closed");
-  const privateConnect = usePrivateConnectState();
+  const privateConnectConfigured = usePrivateConnectConfigured();
   const [error, setError] = useState<string | null>(null);
   const [confirmingResume, setConfirmingResume] = useState(false);
   const [resuming, setResuming] = useState(false);
@@ -232,9 +232,6 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
   const customBackend = surface.backendProfiles
     .find(({ id }) => id === watcher?.modelSelection.backendProfileId)?.source === "custom";
   const changedPaths = feed.items.find(({ guardState }) => guardState === "changed")?.guardPaths ?? [];
-  const privateConnectConfigured = Boolean(
-    privateConnect.state?.enabled || (privateConnect.state?.devices.length ?? 0) > 0,
-  );
   const resumeBlocked = resumeBlockedReason(link, watched, watcher, surface);
 
   const readFocusToken = useCallback(() => watcherDockFocusToken(watchedId), [watchedId]);
@@ -328,7 +325,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
       () => { if (mounted.current) { setError(null); setConfirmingResume(false); } },
       (failure: unknown) => {
         focusHeadingAfterResume.current = false;
-        if (mounted.current) setError(failure instanceof Error ? failure.message : "The watcher could not resume.");
+        if (mounted.current) setError(watcherErrorText(failure, "The watcher could not resume."));
       },
     ).finally(() => { if (mounted.current) setResuming(false); });
   };

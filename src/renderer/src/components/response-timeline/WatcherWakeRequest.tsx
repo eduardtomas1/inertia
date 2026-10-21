@@ -1,9 +1,10 @@
 import type { ResponseTurn } from "../../utils/response-timeline/model";
 import {
+  watcherDigestNote,
   watcherOutcomeText,
   watcherTriggerText,
 } from "../../utils/watcherCopy";
-import { watcherEventsText } from "../../utils/watcherLinks";
+import { watcherCheckTitle } from "../../utils/watcherLinks";
 import { useAnchoredDetailsToggle } from "./activity";
 import "./WatcherRows.css";
 
@@ -24,13 +25,8 @@ export function WatcherWakeRequest({
   const anchorToggleHandlers = useAnchoredDetailsToggle(onBeforeToggle, onAfterToggle);
   const wake = turn.watcherWake;
   if (!wake) return null;
-  const title = `Check ${wake.sequence} · ${watcherEventsText(wake.eventsCovered)}`;
-  const omitted = wake.itemsTruncated + wake.itemsOmitted > 0
-    ? [
-        wake.itemsTruncated > 0 ? `${wake.itemsTruncated} shortened` : null,
-        wake.itemsOmitted > 0 ? `${wake.itemsOmitted} left out` : null,
-      ].filter(Boolean).join(" · ")
-    : null;
+  const title = watcherCheckTitle(wake);
+  const omitted = watcherDigestNote(wake);
   return (
     <article
       className="turn-user-request watcher-wake-request"

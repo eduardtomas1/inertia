@@ -7,6 +7,7 @@ import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
+import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
 import { finalAnswerIdentityLabel } from "../../utils/finalAnswerIdentity";
 import { sessionRecoveryDetail } from "../../utils/sessionRecovery";
@@ -121,7 +122,7 @@ export function UserRequestLayer({
   return (
     <article
       className={clsx("message is-user turn-user-request", isDocumentLike && "is-document-like")}
-      aria-label={watcherNote ? "Note from watcher" : "Your request"}
+      aria-label={watcherNote ? WATCHER_NOTE_TITLE : "Your request"}
       data-request-layout={isDocumentLike ? "document" : "content"}
       data-turn-layer="user-request"
       data-turn-request-context={turn.id}

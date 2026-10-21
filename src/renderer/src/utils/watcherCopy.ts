@@ -56,6 +56,18 @@ export function watcherTriggerText(trigger: WatcherWakeTrigger): string {
   return TRIGGER_TEXT[trigger];
 }
 
+export function watcherDigestNote({ itemsTruncated, itemsOmitted }: { itemsTruncated: number; itemsOmitted: number }): string | null {
+  const parts = [
+    itemsTruncated > 0 ? `${itemsTruncated} shortened` : null,
+    itemsOmitted > 0 ? `${itemsOmitted} left out` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+export function watcherErrorText(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 const PHASE_TEXT: Readonly<Record<WatcherLivePhase, string>> = {
   starting: "Starting",
   reading: "Reading",

@@ -298,7 +298,7 @@ export class TodoRepository {
     const evicted: string[] = [];
     const oldestDone = todos
       .filter(({ id, completedAt }) => completedAt !== null && id !== keepId)
-      .sort((left, right) => left.completedAt!.localeCompare(right.completedAt!) || left.id.localeCompare(right.id));
+      .sort((left, right) => left.completedAt!.localeCompare(right.completedAt!, "en") || left.id.localeCompare(right.id, "en"));
     for (const todo of oldestDone) {
       if (total <= MAX_TODOS_SERIALIZED_BYTES) break;
       total -= bytes(todo) + 1;

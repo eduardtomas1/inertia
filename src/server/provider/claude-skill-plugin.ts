@@ -115,12 +115,14 @@ async function claudeSkillRoots(
   control: ClaudeSkillOperationControl,
 ): Promise<SkillRoot[]> {
   const links = await claudeLinkPolicy(environment, control);
-  const project = (await claudeProjectDirectories(cwd, control)).map(
+  const directories = await claudeProjectDirectories(cwd, control);
+  const repositoryLinks = { ...links, repository: directories.at(-1) };
+  const project = directories.map(
     (container): SkillRoot => ({
       container,
       skillsDirectory: join(container, ".claude", "skills"),
       scope: "repo",
-      links,
+      links: repositoryLinks,
     }),
   );
   const userHome = await claudeUserConfigHome(environment, control);

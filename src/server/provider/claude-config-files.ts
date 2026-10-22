@@ -21,6 +21,7 @@ export interface ClaudeConfigDirectoryEntry {
 export interface ClaudeLinkPolicy {
   home: string | null;
   configHomes: readonly string[];
+  repository?: string;
 }
 
 export function claudeEnvironmentValue(
@@ -373,6 +374,7 @@ export function claudeLinkTargetAllowed(
   subtree: "skills" | "agents",
 ): boolean {
   return dirname(target) !== target
+    && (policy.repository === undefined || isContainedPath(policy.repository, target))
     && (policy.home === null || !isContainedPath(target, policy.home))
     && policy.configHomes.every((configHome) => {
       const allowed = join(configHome, subtree);

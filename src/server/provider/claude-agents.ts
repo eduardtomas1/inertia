@@ -255,11 +255,13 @@ export async function loadClaudeAgents(
   skillName: (name: string) => string = (name) => name,
 ): Promise<Record<string, AgentDefinition>> {
   const links = await claudeLinkPolicy(environment, control);
-  const roots: AgentRoot[] = (await claudeProjectDirectories(cwd, control)).map(
+  const directories = await claudeProjectDirectories(cwd, control);
+  const repositoryLinks = { ...links, repository: directories.at(-1) };
+  const roots: AgentRoot[] = directories.map(
     (container) => ({
       container,
       agentsDirectory: join(container, ".claude", "agents"),
-      links,
+      links: repositoryLinks,
     }),
   );
   const userHome = await claudeUserConfigHome(environment, control);

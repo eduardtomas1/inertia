@@ -165,13 +165,13 @@ describe("Claude agent loading", () => {
     writeAgent(agentsDirectory, "good.md", ...agentFile("good", "valid"));
     writeAgent(agentsDirectory, "broken.md", "---", "name: broken", "description: [unterminated", "---");
     writeAgent(agentsDirectory, "huge.md", ...agentFile("huge", "too large", "x".repeat(300 * 1024)));
-    const target = writeAgent(outside, "linked.md", ...agentFile("linked", "outside the project"));
+    const target = writeAgent(join(project, "shared"), "linked.md", ...agentFile("linked", "elsewhere in the project"));
     symlinkSync(target, join(agentsDirectory, "linked.md"));
     symlinkSync(outside, join(agentsDirectory, "linked-directory"), "junction");
 
     await expect(loadClaudeAgents(project, {})).resolves.toEqual({
       good: { description: "valid", prompt: "Research carefully." },
-      linked: { description: "outside the project", prompt: "Research carefully." },
+      linked: { description: "elsewhere in the project", prompt: "Research carefully." },
     });
   });
 
@@ -197,6 +197,32 @@ describe("Claude agent loading", () => {
     const agents = await loadClaudeAgents(project, { HOME: home });
 
     expect(Object.keys(agents).sort()).toEqual(["shared", "user-agent"]);
+  });
+
+  it.skipIf(process.platform === "win32")("follows repository agent links only inside the repository and user links anywhere", async () => {
+    const repository = fixtureRoot("Claude agent contained links repository");
+    const home = fixtureRoot("Claude agent contained links home");
+    const elsewhere = fixtureRoot("Claude agent contained links elsewhere");
+    mkdirSync(join(repository, ".git"));
+    const cwd = join(repository, "packages", "app");
+    mkdirSync(cwd, { recursive: true });
+    const vendored = writeAgent(join(repository, "vendor"), "vendored.md", ...agentFile("vendored", "inside the repository"));
+    const foreign = writeAgent(elsewhere, "foreign.md", ...agentFile("foreign", "another repository"));
+    const personal = writeAgent(join(elsewhere, "personal"), "personal.md", ...agentFile("personal", "user link"));
+    const repositoryAgents = join(repository, ".claude", "agents");
+    const nearestAgents = join(cwd, ".claude", "agents");
+    const userAgents = join(home, ".claude", "agents");
+    for (const directory of [repositoryAgents, nearestAgents, userAgents]) {
+      mkdirSync(directory, { recursive: true });
+    }
+    symlinkSync(vendored, join(nearestAgents, "vendored.md"));
+    symlinkSync(foreign, join(repositoryAgents, "foreign.md"));
+    symlinkSync(foreign, join(nearestAgents, "foreign-nearest.md"));
+    symlinkSync(personal, join(userAgents, "personal.md"));
+
+    const agents = await loadClaudeAgents(cwd, { HOME: home });
+
+    expect(Object.keys(agents).sort()).toEqual(["personal", "vendored"]);
   });
 
   it("bounds the number of agent files it reads", async () => {

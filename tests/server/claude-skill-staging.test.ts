@@ -300,6 +300,28 @@ describe("Claude selected-skill staging", () => {
       expect(staged).toBeNull();
     });
 
+    it("follows repository skill links only inside the repository and user links anywhere", async () => {
+      const home = realpathSync.native(portableFixtureRoot("Claude contained linked skills home"));
+      const repository = realpathSync.native(portableFixtureRoot("Claude contained linked skills repository"));
+      const elsewhere = realpathSync.native(portableFixtureRoot("Claude contained linked skills elsewhere"));
+      roots.push(home, repository, elsewhere);
+      mkdirSync(join(repository, ".git"));
+      const cwd = join(repository, "packages", "app");
+      mkdirSync(cwd, { recursive: true });
+      const vendored = skillFolder(join(repository, "vendor", "vendored"), "vendored");
+      const foreign = skillFolder(join(elsewhere, "foreign"), "foreign");
+      const nearestForeign = skillFolder(join(elsewhere, "nearest-foreign"), "nearest-foreign");
+      const personal = skillFolder(join(elsewhere, "personal"), "personal");
+      link(vendored, join(cwd, ".claude", "skills"), "vendored");
+      link(nearestForeign, join(cwd, ".claude", "skills"), "nearest-foreign");
+      link(foreign, join(repository, ".claude", "skills"), "foreign");
+      link(personal, join(home, ".claude", "skills"), "personal");
+
+      const discovered = await discoverClaudeFilesystemSkills(cwd, { HOME: home });
+
+      expect(discovered.map(({ name }) => name).sort()).toEqual(["personal", "vendored"]);
+    });
+
     it("fails revalidation when a link is retargeted after discovery", async () => {
       const project = realpathSync.native(portableFixtureRoot("Claude retargeted linked skill"));
       roots.push(project);

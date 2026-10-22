@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
+import { requestTimelineFocus } from "../../src/renderer/src/utils/timelineFocus";
 import type {
   AgentTurn,
   ChatMessage,
@@ -488,6 +489,59 @@ describe("accepted turn viewport anchoring", () => {
     });
 
     expect(scroll.scrollTop).toBe(3_400);
+    await drainVirtualizerTimers();
+  });
+
+  it("lets an explicit timeline focus release a remembered row restoration", async () => {
+    vi.useFakeTimers();
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    mockRememberedRowLayout(0);
+    rememberTranscriptPosition(conversationId, {
+      rowId: "turn-4",
+      viewportOffset: -40,
+      scrollTop: 520,
+      wasFollowing: false,
+    });
+    const { scrollElementRef } = renderTimeline(
+      vi.fn(),
+      vi.fn(),
+      16,
+      "turn-none",
+    );
+    const scroll = scrollElementRef.current!;
+
+    let position = scroll.scrollTop;
+    const writes: number[] = [];
+    Object.defineProperty(scroll, "scrollTop", {
+      configurable: true,
+      get: () => position,
+      set: (value: number) => {
+        position = value;
+        writes.push(value);
+      },
+    });
+    scroll.scrollTo = ((options?: ScrollToOptions | number) => {
+      if (typeof options === "object" && typeof options.top === "number") scroll.scrollTop = options.top;
+    }) as typeof scroll.scrollTo;
+
+    await act(async () => {
+      requestTimelineFocus({ conversationId, turnId: "turn-15" });
+      scroll.scrollTo({ top: 3_400 });
+      let remaining = 60;
+      while (frames.length > 0 && remaining > 0) {
+        frames.shift()!(performance.now());
+        remaining -= 1;
+        await Promise.resolve();
+      }
+    });
+
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.filter((value) => value < 1_000)).toEqual([]);
     await drainVirtualizerTimers();
   });
 });

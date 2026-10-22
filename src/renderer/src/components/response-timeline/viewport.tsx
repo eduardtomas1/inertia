@@ -938,6 +938,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
+    cancelLayoutAnchorRestoration.current?.();
+    pendingLayoutAnchor.current = null;
     cancelFinalAnswerAnchor();
     onReaderNavigationIntent?.();
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);

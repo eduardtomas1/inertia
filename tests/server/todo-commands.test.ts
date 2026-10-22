@@ -390,6 +390,39 @@ describe("todo command handler", () => {
     expect(store.todos.get(id)?.conversationId).toBe(busy.id);
   });
 
+  it("waits to hand off again while a chat stopped by an app update is set to continue", async () => {
+    const { store, project, creation, run, startPayload, incidentSink } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Updated" });
+    const chat = store.createConversation(project.id, "Updated chat");
+    store.todos.link(id, chat.id);
+    const turnId = randomUUID();
+    store.beginAgentTurn({ id: turnId, runId: randomUUID(), conversationId: chat.id,
+      content: "Updated", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-5", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "auto-edit", configurationRevision: 1,
+      association: "authoritative" });
+    const at = new Date().toISOString();
+    store.updateAgentTurnLifecycle(turnId, { status: "interrupted", terminalReason: "app-update", startedAt: at, completedAt: at });
+    const [plan] = store.restartContinuations.createForConversations([
+      { conversationId: chat.id, interruptedTurnId: turnId, routeIdentity: "route" },
+    ]);
+    const message = "This chat continues after the update. Try again once it has.";
+
+    const waiting = await run("todo.start", startPayload(id, chat.id));
+    expect(waiting.events).toEqual([{ type: "request.error", requestId: waiting.command.requestId, message }]);
+    store.restartContinuations.claim(plan!);
+    const dispatching = await run("todo.start", startPayload(id, chat.id));
+    expect(dispatching.events).toEqual([{ type: "request.error", requestId: dispatching.command.requestId, message }]);
+    expect(creation.create).not.toHaveBeenCalled();
+    expect(store.todos.get(id)?.conversationId).toBe(chat.id);
+
+    store.restartContinuations.cancel(plan!, "The chat moved on before it could continue.");
+    const cancelled = await run("todo.start", startPayload(id, chat.id));
+    expect(cancelled.events.at(-1)).toMatchObject({ type: "request.result", result: { kind: "todo.started" } });
+    expect(incidentSink).not.toHaveBeenCalled();
+  });
+
   it("removes the new chat when the replaced chat starts working while the new one is created", async () => {
     let busyId = "";
     let turnsRef!: { isActive: ReturnType<typeof vi.fn> };

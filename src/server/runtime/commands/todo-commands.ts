@@ -58,6 +58,10 @@ function assertChatIdle(dependencies: TodoCommandDependencies, conversationId: s
     dependencies.turns.isActive(conversationId)
     || (latest !== null && !isAgentTurnTerminalStatus(latest.status))
   ) throw userError("Stop the agent first.");
+  const continuation = dependencies.store.restartContinuations.forConversation(conversationId);
+  if (continuation?.state === "waiting" || continuation?.state === "dispatching") {
+    throw userError("This chat continues after the update. Try again once it has.");
+  }
 }
 
 async function assertRouteReady(

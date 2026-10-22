@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 
 import {
+  DUO_COMPARISON_CHANGED_FILES_MAX_ENTRIES,
+  DUO_COMPARISON_PROMPT_MAX_CHARS,
   isAgentTurnTerminalStatus,
   type AgentTurn,
   type AgentTurnStatus,
@@ -11,8 +13,6 @@ import {
 import type { RuntimeStore } from "../../database";
 
 export const DUO_COMPARISON_SHARED_BRIEF_MAX_CHARS = 3_000;
-export const DUO_COMPARISON_PROMPT_MAX_CHARS = 20_000;
-export const DUO_COMPARISON_CHANGED_FILES_MAX_ENTRIES = 40;
 export const DUO_COMPARISON_CHANGED_FILES_MAX_CHARS = 2_000;
 export const DUO_COMPARISON_LOCATION_MAX_CHARS = 1_000;
 

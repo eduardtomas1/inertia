@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  AgentTurn,
-  AgentTurnStatus,
-  ChatMessage,
-  Conversation,
-  ConversationDetail,
-  TurnGitArtifact,
-  TurnGitArtifactFile,
+import {
+  DUO_COMPARISON_PROMPT_MAX_CHARS,
+  type AgentTurn,
+  type AgentTurnStatus,
+  type ChatMessage,
+  type Conversation,
+  type ConversationDetail,
+  type TurnGitArtifact,
+  type TurnGitArtifactFile,
 } from "../../src/shared/contracts";
 import {
   buildDuoComparisonPrompt,
-  DUO_COMPARISON_PROMPT_MAX_CHARS,
   type DuoComparisonPromptStore,
 } from "../../src/server/runtime/duo/duo-comparison";
 

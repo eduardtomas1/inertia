@@ -5,13 +5,15 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  AccessMode,
-  AppSettings,
-  AppSnapshot,
-  DuoLaunchStatus,
-  ModelSelection,
-  ProviderId,
+import {
+  DUO_COMPARISON_CHANGED_FILES_MAX_ENTRIES,
+  DUO_COMPARISON_PROMPT_MAX_CHARS,
+  type AccessMode,
+  type AppSettings,
+  type AppSnapshot,
+  type DuoLaunchStatus,
+  type ModelSelection,
+  type ProviderId,
 } from "@shared/contracts";
 import { providerIdForHarness } from "../../../shared/model-routing";
 import { accessModeUnavailableReason, effectiveAccessMode } from "../../../shared/access-modes";
@@ -760,15 +762,19 @@ export function MultiSpawnDialog({
             <details className="multi-spawn-lock-contract">
               <summary>What is shared with the judge?</summary>
               <p>
-                Inertia waits for both pinned turns, then sends the shared
-                brief, terminal status, and up to 5,500 characters from each
-                assistant result. It sends no source session,
-                reasoning, tool history, permissions, credentials,
-                attachments, or hidden context.
+                When A and B finish, Inertia sends the judge one message of
+                up to {DUO_COMPARISON_PROMPT_MAX_CHARS.toLocaleString("en-US")}
+                {" "}characters for both chats: the brief, each chat&apos;s
+                status and final answer, where each chat worked, and up to
+                {" "}{DUO_COMPARISON_CHANGED_FILES_MAX_ENTRIES} changed files
+                from each. It sends no source session, reasoning, tool
+                history, permissions, credentials, attachments, or hidden
+                context.
               </p>
               <p>
-                The judge uses only the selected project, route, and access.
-                It does not freeze either source chat or working tree.
+                The judge uses only its own project, model, and access, and
+                may inspect the folders of A and B read-only. They can&apos;t be
+                deleted while the judge runs.
               </p>
             </details>
           </div>

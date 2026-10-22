@@ -181,7 +181,13 @@ describe("Duo third-model comparison dialog", () => {
       .closest("details");
     expect(sharingDetails).not.toHaveAttribute("open");
     fireEvent.click(screen.getByText("What is shared with the judge?"));
-    expect(screen.getByText(/up to 5,500 characters/u)).toBeVisible();
+    const shared = sharingDetails!.textContent ?? "";
+    expect(shared).toContain("up to 20,000 characters for both chats");
+    expect(shared).toContain("up to 40 changed files from each");
+    expect(shared).toContain("where each chat worked");
+    expect(shared).toContain("may inspect the folders of A and B read-only");
+    expect(shared).toContain("They can't be deleted while the judge runs");
+    expect(shared).not.toContain("5,500");
     expect(screen.getByText(/no source session, reasoning, tool history/u))
       .toBeVisible();
     fireEvent.change(screen.getByLabelText("Judge project"), {

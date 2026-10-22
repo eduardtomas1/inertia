@@ -10,6 +10,7 @@ export interface GlobalShortcutActions {
   ) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSettings: () => void;
+  openTasks: () => void;
 }
 
 interface ShortcutTarget {
@@ -140,6 +141,11 @@ export function installGlobalShortcuts(
       event.stopPropagation();
       ownedKeyUps.add(key);
       actions.current.toggleTerminal();
+    } else if (shortcut === "tasks") {
+      event.preventDefault();
+      event.stopPropagation();
+      ownedKeyUps.add(key);
+      actions.current.openTasks();
     } else if (shortcut === "toggle-settings") {
       event.preventDefault();
       event.stopPropagation();

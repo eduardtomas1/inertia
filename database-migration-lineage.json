@@ -752,6 +752,11 @@
       "version": 99,
       "name": "PersistWatcherLinks",
       "digest": "e0f0a8fb4d1ff4b1fbbbba217aafca4619c7b8f17143345e4dab910122434b95"
+    },
+    {
+      "version": 100,
+      "name": "ExtendTodos",
+      "digest": "3f96d67c5b005006ad8f4ee324bca1eca8f44e5fddc34fd3bddd9d8ffb925a9f"
     }
   ]
 }

@@ -33,6 +33,10 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 100) {
+    database.exec("DROP INDEX todos_project_idx");
+    for (const column of ["due_time", "project_id", "linked_at"]) database.exec(`ALTER TABLE todos DROP COLUMN ${column}`);
+  }
   if (version < 99) {
     database.exec(`
       DROP TRIGGER watcher_links_watched_delete;
@@ -132,6 +136,8 @@ describe("database health check for settings and subagent columns", () => {
     { version: 99, sql: "DROP INDEX watcher_wakes_link_idx" },
     { version: 99, sql: "DROP INDEX watcher_links_project_idx" },
     ...watcherTriggers.map((trigger) => ({ version: 99, sql: `DROP TRIGGER ${trigger}` })),
+    { version: 100, sql: "DROP INDEX todos_project_idx" },
+    { version: 100, sql: "ALTER TABLE todos DROP COLUMN linked_at" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });

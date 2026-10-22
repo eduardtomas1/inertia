@@ -1134,6 +1134,33 @@ button.header-breadcrumb-project:hover {
   flex: 1 1 auto;
 }
 
+.header-title-wrap.has-task-link {
+  flex-grow: 0;
+}
+
+.header-task-link {
+  display: inline-flex;
+  height: var(--control-height-small);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  margin-inline-start: -8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease-fade);
+}
+
+.header-task-link:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
 .header-title-wrap h1 {
   display: flex;
   min-width: 0;

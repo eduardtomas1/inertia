@@ -60,6 +60,14 @@
 .sidebar-tasks-action.is-active:hover {
   background: var(--fill-strong);
 }
+.sidebar-tasks-action > .sidebar-tasks-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  overflow: visible;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
 .sidebar-search-wrap {
   position: relative;
   display: flex;

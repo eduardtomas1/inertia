@@ -17,6 +17,7 @@ const macLabel = (action: AppShortcutAction): string => ({
   "new-chat": "⌘N",
   "toggle-sidebar": "⌘B",
   "toggle-terminal": "⌘J",
+  tasks: "⌘T",
 })[action];
 
 const otherLabel = (action: AppShortcutAction): string => macLabel(action).replace("⌘", "Ctrl+");

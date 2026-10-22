@@ -8,7 +8,7 @@ import { usageResultValidators } from "./usage-results-schema";
 import { backgroundTasksResult } from "./background-tasks-schema";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
-import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
+import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, todoCollectionCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
 import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search-schema";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
@@ -1041,8 +1041,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "workspace.git.invalidated":
       return recordWithStrings(value, "requestId", "projectId")
         && nullableStringField(value, "conversationId");
-    case "conversation.detail.invalidated":
-      return stringField(value, "conversationId");
+    case "conversation.detail.invalidated": return stringField(value, "conversationId");
+    case "todos.updated": return Array.isArray(value.todos) && todoCollectionCoherent(value.todos);
     case "conversation.message.persisted":
     case "agent.commentary.persisted":
       return chatMessage(value.message);

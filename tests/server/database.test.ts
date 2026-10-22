@@ -10,6 +10,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { parseAttachments } from "../../src/server/persistence/codecs";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
+import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
 
 const temporaryDirectories: string[] = [];
 let storeTemplateDirectory: string | null = null;
@@ -998,6 +999,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         "new-chat": "y",
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
+        tasks: "k",
       },
     });
     await mkdir(join(workspacePath, ".git"));
@@ -1032,6 +1034,7 @@ describe("RuntimeStore conversation lifecycle", () => {
         "new-chat": "y",
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
+        tasks: "k",
       },
     });
     expect(reopened.project(project.id)).toMatchObject({
@@ -1082,12 +1085,7 @@ describe("RuntimeStore conversation lifecycle", () => {
 
     const reopened = new RuntimeStore(databasePath, workspacePath);
     expect(reopened.snapshot().settings.providerIdentityLabels).toEqual({});
-    expect(reopened.snapshot().settings.keybindings).toEqual({
-      search: "k",
-      "new-chat": "n",
-      "toggle-sidebar": "b",
-      "toggle-terminal": "j",
-    });
+    expect(reopened.snapshot().settings.keybindings).toEqual(DEFAULT_APP_KEYBINDINGS);
     reopened.close();
   });
 

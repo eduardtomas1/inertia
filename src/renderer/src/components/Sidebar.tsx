@@ -75,6 +75,7 @@ import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
 import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadTasksView, loadUsageView } from "./lazySurfaceLoaders";
+import { sidebarTasksLabel, tasksNeedingYou } from "./sidebar/sidebarTaskCount";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
 import { SidebarAurora } from "./sidebar/SidebarAurora";
@@ -333,6 +334,13 @@ function SidebarView({
     ],
   );
   const scopedProjectId = projectScopeId && regularProjects.some(({ id }) => id === projectScopeId) ? projectScopeId : null;
+  const tasksNeedYou = useMemo(() => tasksNeedingYou({
+    todos: snapshot?.todos,
+    conversations: snapshot?.conversations ?? [],
+    threadViews: threadViewsById,
+    projectId: scopedProjectId,
+    now: Date.now(),
+  }), [scopedProjectId, snapshot?.conversations, snapshot?.todos, threadViewsById]);
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return sortSidebarThreadViews(
@@ -1045,9 +1053,10 @@ function SidebarView({
           </button>
           <IconButton label="New duo" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={16} /></IconButton>
         </div>
-        <button type="button" className={clsx("sidebar-primary-action sidebar-tasks-action", view === "tasks" && "is-active")} aria-current={view === "tasks" ? "page" : undefined} onFocus={() => void loadTasksView()} onPointerDown={() => void loadTasksView()} onPointerEnter={() => void loadTasksView()} onClick={() => navigate("tasks")}>
+        <button type="button" className={clsx("sidebar-primary-action sidebar-tasks-action", view === "tasks" && "is-active")} aria-current={view === "tasks" ? "page" : undefined} aria-label={tasksNeedYou > 0 ? sidebarTasksLabel(tasksNeedYou) : undefined} onFocus={() => void loadTasksView()} onPointerDown={() => void loadTasksView()} onPointerEnter={() => void loadTasksView()} onClick={() => navigate("tasks")}>
           <ListTodo size={16} aria-hidden="true" />
           <span>Tasks</span>
+          {tasksNeedYou > 0 && <span className="sidebar-tasks-count" aria-hidden="true">{tasksNeedYou}</span>}
         </button>
         <div className="sidebar-search-wrap">
           <Search size={16} aria-hidden="true" />

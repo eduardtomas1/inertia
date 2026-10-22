@@ -20,6 +20,7 @@ function hostProps() {
       search: vi.fn(),
       usage: vi.fn(),
       "daily-work": vi.fn(),
+      tasks: vi.fn(),
       "welcome-guide": vi.fn(),
     },
     onOpenSettings: vi.fn(),
@@ -230,6 +231,7 @@ describe("Help", () => {
       "new-chat": "⌘N",
       "toggle-sidebar": "⌘B",
       "toggle-terminal": "⌘J",
+      tasks: "⌘T",
     })[action]!);
     const { opener } = renderWithSidebarButton(props);
     const dialog = await openFrom(opener);
@@ -237,7 +239,7 @@ describe("Help", () => {
 
     const panel = within(dialog).getByRole("tabpanel", { name: "Keyboard" });
     expect([...panel.querySelectorAll(".help-guide-entries kbd")].map((key) => key.textContent))
-      .toEqual(["⌘Y", "⌘N", "⌘B", "⌘J"]);
+      .toEqual(["⌘Y", "⌘N", "⌘B", "⌘J", "⌘T"]);
     expect(within(panel).getByText(/⌘, on macOS or Ctrl\+, elsewhere opens and closes Settings\. Search settings finds a setting by name; ↑, ↓ and Enter open it\. Escape clears the search, then leaves Settings\./u)).toBeInTheDocument();
     const demo = panel.querySelector(".welcome-demo");
     expect(demo).toHaveAttribute("aria-hidden", "true");

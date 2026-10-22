@@ -1944,8 +1944,11 @@ describe("server event remaining discriminant and identity boundary", () => {
       note: "",
       priority: null,
       dueDate: null,
+      dueTime: null,
+      projectId: null,
       completedAt: null,
       conversationId: null,
+      linkedAt: null,
       createdAt: checkedAt,
       updatedAt: checkedAt,
     };
@@ -1953,16 +1956,28 @@ describe("server event remaining discriminant and identity boundary", () => {
       type: "snapshot.updated",
       snapshot: snapshot({ todos }),
     });
-    expect(parseTodos([todo, { ...todo, id: "33333333-3333-4333-8333-333333333333", priority: "urgent", dueDate: "2026-10-13" }])).toBeTruthy();
+    expect(parseTodos([todo, { ...todo, id: "33333333-3333-4333-8333-333333333333", priority: "urgent", dueDate: "2026-10-13", dueTime: "15:00", projectId: "project-1", linkedAt: checkedAt }])).toBeTruthy();
+    const todosUpdated = (todos: unknown): unknown => parseServerEvent({
+      type: "runtime.event",
+      sync: { runtimeGeneration: "runtime-1", latestSequence: 1 },
+      scope: { kind: "shell" },
+      event: { type: "todos.updated", todos },
+    });
+    expect(todosUpdated([todo])).toBeTruthy();
+    expect(() => todosUpdated([{ ...todo, dueTime: "15:00" }])).toThrow("Malformed server event");
+    expect(() => todosUpdated({ length: 0 })).toThrow("Malformed server event");
     expect(parseServerEvent({ type: "snapshot.updated", snapshot: snapshot() })).toBeTruthy();
     for (const invalid of [
       [todo, { ...todo }],
       [{ ...todo, dueDate: "2026-02-30" }],
+      [{ ...todo, dueTime: "15:00" }],
+      [{ ...todo, dueDate: "2026-10-13", dueTime: "24:00" }],
+      [{ ...todo, linkedAt: "now" }],
       [{ ...todo, priority: "soon" }],
       [{ ...todo, title: "" }],
       [{ ...todo, filesystemPath: "/private/context.txt" }],
-      Array.from({ length: 201 }, (_, index) => ({ ...todo, id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222` })),
-      Array.from({ length: 50 }, (_, index) => ({ ...todo, id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222`, note: "\u0001".repeat(2_000) })),
+      Array.from({ length: 401 }, (_, index) => ({ ...todo, id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222` })),
+      Array.from({ length: 100 }, (_, index) => ({ ...todo, id: `${String(index).padStart(8, "0")}-2222-4222-8222-222222222222`, note: "\u0001".repeat(2_000) })),
       { length: 0 },
     ]) expect(() => parseTodos(invalid)).toThrow("Malformed server event");
     expect(parseServerEvent(event({ kind: "todo.started", conversationId: conversation.id }))).toBeTruthy();

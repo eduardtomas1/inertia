@@ -749,12 +749,15 @@ describe("client command contract", () => {
         "new-chat": "y",
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
+        tasks: "t",
       } },
     }).success).toBe(true);
     for (const keybindings of [
       { search: "k" },
-      { search: "k", "new-chat": "k", "toggle-sidebar": "b", "toggle-terminal": "j" },
-      { search: "x", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j" },
+      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j" },
+      { search: "k", "new-chat": "k", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t" },
+      { search: "x", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "t" },
+      { search: "k", "new-chat": "n", "toggle-sidebar": "b", "toggle-terminal": "j", tasks: "n" },
     ]) {
       expect(clientCommandSchema.safeParse({
         type: "settings.update",

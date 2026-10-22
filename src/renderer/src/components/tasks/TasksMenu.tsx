@@ -5,7 +5,7 @@ import clsx from "clsx";
 
 import { navigateMenuItems } from "../../utils/menuKeyboard";
 
-export type TasksMenuDismissReason = "selection" | "context-change";
+export type TasksMenuDismissReason = "escape" | "selection" | "outside";
 
 export interface TasksMenuItem {
   id: string;
@@ -13,6 +13,7 @@ export interface TasksMenuItem {
   icon?: ReactNode;
   checked?: boolean;
   danger?: boolean;
+  disabled?: boolean;
   restoreFocus?: boolean;
   onSelect: () => void;
 }
@@ -23,8 +24,12 @@ export interface TasksMenuProps {
   anchor: { x: number; y: number };
   items: readonly TasksMenuItem[];
   radio?: boolean;
+  trigger: HTMLElement | null;
   onDismiss: (reason: TasksMenuDismissReason) => void;
-  onSetPopover: (node: HTMLDivElement | null) => void;
+}
+
+function focusTrigger(trigger: HTMLElement | null): void {
+  if (trigger?.isConnected) trigger.focus({ preventScroll: true });
 }
 
 export function TasksMenu({
@@ -33,14 +38,14 @@ export function TasksMenu({
   anchor,
   items,
   radio = false,
+  trigger,
   onDismiss,
-  onSetPopover,
 }: TasksMenuProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
-  const setMenuRef = useCallback((node: HTMLDivElement | null) => {
-    menuRef.current = node;
-    onSetPopover(node);
-  }, [onSetPopover]);
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+  const triggerRef = useRef(trigger);
+  triggerRef.current = trigger;
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -51,30 +56,60 @@ export function TasksMenu({
     };
     position();
     window.addEventListener("resize", position);
-    const checked = menu.querySelector<HTMLButtonElement>('[aria-checked="true"]');
-    (checked ?? menu.querySelector<HTMLButtonElement>("button"))?.focus({ preventScroll: true });
+    const checked = menu.querySelector<HTMLButtonElement>('[aria-checked="true"]:not(:disabled)');
+    (checked ?? menu.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus({ preventScroll: true });
     return () => window.removeEventListener("resize", position);
   }, [anchor]);
 
   useEffect(() => {
-    const dismissAfterFocusLeaves = (event: FocusEvent): void => {
-      const target = event.target;
-      if (target instanceof Node && !menuRef.current?.contains(target)) {
-        onDismiss("context-change");
-      }
+    const inside = (target: EventTarget | null): boolean => target instanceof Node
+      && (menuRef.current?.contains(target) === true || triggerRef.current?.contains(target) === true);
+    const onFocusIn = (event: FocusEvent): void => {
+      if (!inside(event.target)) dismissRef.current("outside");
     };
-    document.addEventListener("focusin", dismissAfterFocusLeaves);
-    return () => document.removeEventListener("focusin", dismissAfterFocusLeaves);
-  }, [onDismiss]);
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!inside(event.target)) dismissRef.current("outside");
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      focusTrigger(triggerRef.current);
+      dismissRef.current("escape");
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
+
+  const select = useCallback((item: TasksMenuItem): void => {
+    if (item.disabled) return;
+    if (item.restoreFocus !== false) focusTrigger(triggerRef.current);
+    dismissRef.current("selection");
+    item.onSelect();
+  }, []);
 
   return createPortal(
     <div
-      ref={setMenuRef}
+      ref={menuRef}
       id={id}
       className="conversation-menu tasks-menu"
       role="menu"
       aria-label={label}
-      onKeyDown={(event) => navigateMenuItems(event)}
+      onKeyDown={(event) => {
+        if (event.key === "Tab") {
+          event.preventDefault();
+          focusTrigger(triggerRef.current);
+          dismissRef.current("escape");
+          return;
+        }
+        navigateMenuItems(event);
+      }}
     >
       {items.map((item) => (
         <button
@@ -83,11 +118,9 @@ export function TasksMenu({
           role={radio ? "menuitemradio" : "menuitem"}
           aria-checked={radio ? item.checked === true : undefined}
           tabIndex={-1}
+          disabled={item.disabled}
           className={clsx(item.danger && "is-danger")}
-          onClick={() => {
-            onDismiss(item.restoreFocus === false ? "context-change" : "selection");
-            item.onSelect();
-          }}
+          onClick={() => select(item)}
         >
           {item.icon}
           {item.label}

@@ -1,216 +1,37 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TasksView, type TasksViewProps } from "../../src/renderer/src/components/TasksView";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
-import type {
-  AppSnapshot,
-  ConversationShell,
-  Project,
-  ProviderInfo,
-  ServerEvent,
-} from "../../src/shared/contracts";
-import { defaultSettings } from "../../src/shared/contracts";
-import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import type { Todo } from "../../src/shared/todos";
-
-const NOW = new Date(2026, 9, 12, 9);
-const stamp = "2026-10-12T07:00:00.000Z";
-const firstProjectId = "11111111-1111-4111-8111-111111111111";
-const secondProjectId = "22222222-2222-4222-8222-222222222222";
-const createdProjectId = "33333333-3333-4333-8333-333333333333";
-const conversationId = "44444444-4444-4444-8444-444444444444";
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-
-function project(id: string, name: string, overrides: Partial<Project> = {}): Project {
-  return {
-    id,
-    name,
-    path: `/workspace/${name.toLocaleLowerCase("en-US")}`,
-    normalizedPath: `/workspace/${name.toLocaleLowerCase("en-US")}`,
-    repositoryIdentity: null,
-    repositoryRoot: null,
-    repositoryRelativePath: "",
-    groupingMode: null,
-    gitRepositoryLimit: 64,
-    color: "#6366f1",
-    status: "ready",
-    createdAt: stamp,
-    updatedAt: stamp,
-    ...overrides,
-  };
-}
-
-const provider: ProviderInfo = {
-  id: "codex",
-  label: "Codex",
-  command: "codex",
-  available: true,
-  version: "1.0.0",
-  executable: "/opt/bin/codex",
-  installState: "installed",
-  authState: "authenticated",
-  canRun: true,
-  statusMessage: null,
-  models: [{
-    id: "gpt-5.6-sol",
-    label: "GPT-5.6-Sol",
-    description: "Test model",
-    isDefault: true,
-    inputModalities: ["text"],
-    reasoningOptions: [
-      { value: "high", label: "High", description: "Deep reasoning" },
-      { value: "xhigh", label: "Extra high", description: "Maximum reasoning" },
-    ],
-    defaultReasoningEffort: "high",
-    fastMode: { providerValue: "priority", label: "Fast", description: "Faster responses", isDefault: false },
-  }],
-  rateLimits: [],
-  metadataState: {
-    models: {
-      freshness: "fresh",
-      provenance: "provider",
-      updatedAt: stamp,
-      lastAttemptedAt: stamp,
-      refreshing: false,
-    },
-    rateLimits: {
-      freshness: "unavailable",
-      provenance: null,
-      updatedAt: null,
-      lastAttemptedAt: null,
-      refreshing: false,
-    },
-  },
-};
-
-const settings = {
-  ...defaultSettings,
-  defaultProvider: "codex" as const,
-  defaultModel: "gpt-5.6-sol",
-  defaultReasoningEffort: "high",
-  confirmDestructiveActions: false,
-};
-
-function todo(id: string, title: string, overrides: Partial<Todo> = {}): Todo {
-  return {
-    id,
-    title,
-    note: "",
-    priority: null,
-    dueDate: null,
-    completedAt: null,
-    conversationId: null,
-    createdAt: stamp,
-    updatedAt: stamp,
-    ...overrides,
-  };
-}
-
-function conversation(overrides: Partial<ConversationShell> = {}): ConversationShell {
-  return {
-    id: conversationId,
-    projectId: firstProjectId,
-    title: "Clean the downloads folder",
-    providerId: "codex",
-    modelSelection: providerNativeModelSelection({ providerId: "codex" }),
-    continuationIdentity: null,
-    model: "",
-    reasoningEffort: "",
-    interactionMode: "build",
-    accessMode: "supervised",
-    status: "running",
-    attentionKind: null,
-    branch: null,
-    worktreePath: null,
-    providerSessionId: null,
-    archivedAt: null,
-    settledAt: null,
-    completedAt: null,
-    lastViewedAt: stamp,
-    createdAt: stamp,
-    updatedAt: stamp,
-    latestTurn: null,
-    pendingApproval: false,
-    pendingInput: false,
-    ...overrides,
-  };
-}
-
-function snapshot(todos: Todo[], overrides: Partial<AppSnapshot> = {}): AppSnapshot {
-  return {
-    projects: [project(firstProjectId, "Inertia"), project(secondProjectId, "Companion")],
-    conversations: [],
-    runs: [],
-    providers: [provider],
-    backendProfiles: [],
-    backendDefaults: [],
-    settings,
-    todos,
-    activeProjectId: firstProjectId,
-    activeConversationId: null,
-    ...overrides,
-  };
-}
-
-const ok = (): ServerEvent => ({ type: "request.ok", requestId: "request" });
-
-function harness(initial: AppSnapshot, overrides: Partial<TasksViewProps> = {}) {
-  const request = vi.fn(async (_command: CommandWithoutId): Promise<ServerEvent> => ok());
-  const onOpenConversation = vi.fn();
-  const onError = vi.fn();
-  const props = (current: AppSnapshot): TasksViewProps => ({
-    snapshot: current,
-    settings,
-    status: "online",
-    projectScopeId: null,
-    request,
-    onOpenConversation,
-    onError,
-    ...overrides,
-  });
-  const view = render(<TasksView {...props(initial)} />);
-  return {
-    ...view,
-    request,
-    onOpenConversation,
-    onError,
-    update(next: AppSnapshot) {
-      view.rerender(<TasksView {...props(next)} />);
-    },
-  };
-}
-
-type CommandOf<Type extends CommandWithoutId["type"]> = Extract<CommandWithoutId, { type: Type }>;
-
-function sent<Type extends CommandWithoutId["type"]>(
-  request: { mock: { calls: [CommandWithoutId][] } },
-  type: Type,
-): CommandOf<Type>[] {
-  return request.mock.calls
-    .map(([command]) => command)
-    .filter((command): command is CommandOf<Type> => command.type === type);
-}
-
-function row(title: string): HTMLElement {
-  return screen.getByRole("checkbox", { name: title }).closest("li")!;
-}
+import type { ServerEvent } from "../../src/shared/contracts";
+import {
+  check,
+  conversation,
+  conversationId,
+  createdProjectId,
+  firstId,
+  firstProjectId,
+  harness,
+  NOW,
+  ok,
+  project,
+  row,
+  secondId,
+  secondProjectId,
+  sent,
+  snapshot,
+  started,
+  stubMatchMedia,
+  titleButton,
+  todo,
+  uuid,
+} from "./tasks-fixtures";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
-  vi.stubGlobal("matchMedia", vi.fn(() => ({
-    matches: false,
-    media: "",
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })));
+  stubMatchMedia();
 });
 
 afterEach(() => {
@@ -241,6 +62,8 @@ describe("Tasks view", () => {
         note: "",
         priority: null,
         dueDate: null,
+        dueTime: null,
+        projectId: null,
       },
     });
     expect(screen.queryByRole("complementary", { name: "Task details" })).toBeNull();
@@ -282,58 +105,46 @@ describe("Tasks view", () => {
     expect(within(agent).getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
-  it("lists urgent work first and keeps finished work behind a collapsed Done row", async () => {
+  it("keeps finished work behind a collapsed Done row and reopens it from its circle", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([
-      todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes", { createdAt: "2026-10-10T07:00:00.000Z" }),
-      todo("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Fix the login crash", { priority: "urgent", dueDate: "2026-10-13" }),
-      todo("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "Review the design", { priority: "low", dueDate: "2026-10-20" }),
-      todo("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "Book the venue", { completedAt: stamp }),
+      todo(firstId, "Write release notes"),
+      todo(secondId, "Book the venue", { completedAt: doneAt() }),
     ]));
-    expect(screen.getByText("3 to do")).toBeVisible();
-    const list = screen.getByRole("list", { name: "To do" });
-    expect(within(list).getAllByRole("checkbox").map((box) => box.getAttribute("aria-label"))).toEqual([
-      "Fix the login crash",
-      "Review the design",
-      "Write release notes",
-    ]);
-    const urgent = row("Fix the login crash");
-    expect(urgent).toHaveTextContent("Tomorrow");
-    expect(urgent.querySelector(".task-urgent")).toHaveTextContent("!");
-    expect(row("Review the design")).toHaveTextContent("20 Oct");
-    expect(row("Review the design").querySelector(".task-urgent")).toBeNull();
-
+    expect(screen.getByText("1 to do")).toBeVisible();
     const toggle = screen.getByRole("button", { name: "Done 1" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("checkbox", { name: "Book the venue" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Done" })).toBeNull();
     await user.click(toggle);
-    const reopen = screen.getByRole("checkbox", { name: "Book the venue" });
+    const reopen = within(screen.getByRole("list", { name: "Done" }))
+      .getByRole("checkbox", { name: "Mark as not done: Book the venue" });
     expect(reopen).toBeChecked();
     await user.click(reopen);
     expect(sent(view.request, "todo.update")).toEqual([{
       type: "todo.update",
-      payload: { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", patch: { completed: false } },
+      payload: { id: secondId, patch: { completed: false } },
     }]);
+    expect(screen.getByText("2 to do")).toBeVisible();
   });
 
   it("marks a task done from its circle and moves focus to the next task", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([
-      todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "First"),
-      todo("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "Second", { createdAt: "2026-10-12T08:00:00.000Z" }),
+      todo(firstId, "First"),
+      todo(secondId, "Second", { createdAt: "2026-10-12T08:00:00.000Z" }),
     ]));
-    await user.click(screen.getByRole("checkbox", { name: "First" }));
+    await user.click(check("First"));
     expect(sent(view.request, "todo.update")).toEqual([{
       type: "todo.update",
-      payload: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", patch: { completed: true } },
+      payload: { id: firstId, patch: { completed: true } },
     }]);
-    expect(screen.getByRole("checkbox", { name: "Second" })).toHaveFocus();
+    expect(titleButton("Second")).toHaveFocus();
   });
 
   it("opens the row menu with a right-click, Shift+F10 and the actions button", async () => {
     const user = userEvent.setup();
-    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
-    const title = within(row("Write release notes")).getByRole("button", { name: /^Write release notes/u });
+    harness(snapshot([todo(firstId, "Write release notes")]));
+    const title = titleButton("Write release notes");
     fireEvent.contextMenu(title, { clientX: 40, clientY: 50 });
     let menu = screen.getByRole("menu", { name: "Actions for Write release notes" });
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
@@ -353,43 +164,45 @@ describe("Tasks view", () => {
     menu = screen.getByRole("menu", { name: "Actions for Write release notes" });
     expect(menu).toBeVisible();
     await user.keyboard("{Escape}");
+    expect(title).toHaveFocus();
 
     const actions = screen.getByRole("button", { name: "Actions for Write release notes" });
     await user.click(actions);
     expect(actions).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(actions).toHaveFocus();
   });
 
   it("opens the row menu from the circle too, by right-click or the menu keys", async () => {
     const user = userEvent.setup();
-    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
-    const check = screen.getByRole("checkbox", { name: "Write release notes" });
-    fireEvent.contextMenu(check, { clientX: 20, clientY: 50 });
+    harness(snapshot([todo(firstId, "Write release notes")]));
+    const circle = check("Write release notes");
+    fireEvent.contextMenu(circle, { clientX: 20, clientY: 50 });
     expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
 
-    check.focus();
+    circle.focus();
     await user.keyboard("{Shift>}{F10}{/Shift}");
     expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
     await user.keyboard("{Escape}");
 
-    check.focus();
-    fireEvent.keyDown(check, { key: "ContextMenu" });
+    circle.focus();
+    fireEvent.keyDown(circle, { key: "ContextMenu" });
     expect(screen.getByRole("menu", { name: "Actions for Write release notes" })).toBeVisible();
-    expect(check).not.toBeChecked();
+    expect(circle).not.toBeChecked();
   });
 
   it("closes a menu whose task disappeared and keeps focus and Escape working", async () => {
     const user = userEvent.setup();
-    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    const view = harness(snapshot([todo(first, "Write release notes"), todo(second, "Clean the downloads folder")]));
-    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    const view = harness(snapshot([todo(firstId, "Write release notes"), todo(secondId, "Clean the downloads folder")]));
+    await user.click(titleButton("Write release notes"));
     await user.click(screen.getByRole("button", { name: "Actions for Clean the downloads folder" }));
     expect(screen.getByRole("menu", { name: "Actions for Clean the downloads folder" })).toBeVisible();
 
-    view.update(snapshot([todo(first, "Write release notes")]));
+    view.update(snapshot([todo(firstId, "Write release notes")]));
     expect(screen.queryByRole("menu")).toBeNull();
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus());
 
@@ -401,7 +214,7 @@ describe("Tasks view", () => {
   it("moves due labels on at local midnight", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     vi.setSystemTime(new Date(2026, 9, 12, 23, 59, 30));
-    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes", { dueDate: "2026-10-13" })]));
+    harness(snapshot([todo(firstId, "Write release notes", { dueDate: "2026-10-13" })]));
     expect(row("Write release notes")).toHaveTextContent("Tomorrow");
     await act(async () => { vi.advanceTimersByTime(31_000); });
     expect(row("Write release notes")).toHaveTextContent("Today");
@@ -410,16 +223,34 @@ describe("Tasks view", () => {
   it("moves due labels on within a minute when the computer wakes after midnight", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     vi.setSystemTime(new Date(2026, 9, 12, 18, 0, 0));
-    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes", { dueDate: "2026-10-13" })]));
+    harness(snapshot([todo(firstId, "Write release notes", { dueDate: "2026-10-13" })]));
     expect(row("Write release notes")).toHaveTextContent("Tomorrow");
     vi.setSystemTime(new Date(2026, 9, 13, 8, 0, 0));
-    await act(async () => { vi.advanceTimersByTime(60_000); });
+    await act(async () => { vi.advanceTimersByTime(60_001); });
     expect(row("Write release notes")).toHaveTextContent("Today");
+  });
+
+  it("ticks a timed due label into overdue on the next minute and refreshes when the window shows again", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date(2026, 9, 12, 14, 59, 10));
+    harness(snapshot([todo(firstId, "Call the bank", { dueDate: "2026-10-12", dueTime: "15:00" })]));
+    const due = () => row("Call the bank").querySelector(".task-due");
+    expect(due()).toHaveTextContent("Today 3:00 PM");
+    expect(due()).not.toHaveClass("is-overdue");
+    await act(async () => { vi.advanceTimersByTime(51_000); });
+    expect(due()).toHaveClass("is-overdue");
+
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    vi.setSystemTime(new Date(2026, 9, 13, 9, 0, 0));
+    hidden.mockReturnValue("visible");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(due()).toHaveTextContent("Overdue · 1 d");
   });
 
   it("renames from the menu by focusing and selecting the detail title", async () => {
     const user = userEvent.setup();
-    const view = harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
+    const view = harness(snapshot([todo(firstId, "Write release notes")]));
     await user.click(screen.getByRole("button", { name: "Actions for Write release notes" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const title = within(screen.getByRole("complementary", { name: "Task details" })).getByRole("textbox", { name: "Title" });
@@ -429,48 +260,26 @@ describe("Tasks view", () => {
     await user.keyboard("Write the release notes{Enter}");
     expect(sent(view.request, "todo.update")).toEqual([{
       type: "todo.update",
-      payload: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", patch: { title: "Write the release notes" } },
+      payload: { id: firstId, patch: { title: "Write the release notes" } },
     }]);
     fireEvent.change(title, { target: { value: "Write the notes\nfor 0.0.72" } });
     expect(title).toHaveValue("Write the notes for 0.0.72");
   });
 
-  it("deletes from the menu after the destructive-action confirmation", async () => {
+  it("sets priority and note from the detail", async () => {
     const user = userEvent.setup();
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirm);
-    const view = harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]), {
-      settings: { ...settings, confirmDestructiveActions: true },
-    });
-    await user.click(screen.getByRole("button", { name: "Actions for Write release notes" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
-    expect(confirm).toHaveBeenCalledWith("Delete “Write release notes”?");
-    expect(sent(view.request, "todo.delete")).toEqual([{
-      type: "todo.delete",
-      payload: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
-    }]);
-    expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus();
-  });
-
-  it("sets due day, priority and note from the detail", async () => {
-    const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const view = harness(snapshot([todo(id, "Write release notes")]));
-    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    const view = harness(snapshot([todo(firstId, "Write release notes")]));
+    await user.click(titleButton("Write release notes"));
     const detail = screen.getByRole("complementary", { name: "Task details" });
 
-    await user.click(within(detail).getByRole("button", { name: "Due date" }));
-    const due = screen.getByRole("menu", { name: "Due date" });
-    expect(within(due).getAllByRole("menuitemradio").map((item) => item.textContent))
-      .toEqual(["Today", "Tomorrow", "Next week", "No date"]);
-    await user.click(within(due).getByRole("menuitemradio", { name: "Tomorrow" }));
-
-    await user.click(within(detail).getByRole("button", { name: "Priority" }));
+    const priorityChip = within(detail).getByRole("button", { name: "Priority" });
+    await user.click(priorityChip);
     const priority = screen.getByRole("menu", { name: "Priority" });
     expect(within(priority).getAllByRole("menuitemradio").map((item) => item.textContent))
       .toEqual(["Urgent", "High", "Medium", "Low", "No priority"]);
     expect(within(priority).getByRole("menuitemradio", { name: "No priority" })).toHaveAttribute("aria-checked", "true");
     await user.click(within(priority).getByRole("menuitemradio", { name: "Urgent" }));
+    expect(priorityChip).toHaveFocus();
 
     const note = within(detail).getByRole("textbox", { name: "Note" });
     expect(note).toHaveAttribute("placeholder", "Add a note");
@@ -478,23 +287,49 @@ describe("Tasks view", () => {
     await user.tab();
 
     expect(sent(view.request, "todo.update").map((command) => command.payload)).toEqual([
-      { id, patch: { dueDate: "2026-10-13" } },
-      { id, patch: { priority: "urgent" } },
-      { id, patch: { note: "Include the migration" } },
+      { id: firstId, patch: { priority: "urgent" } },
+      { id: firstId, patch: { note: "Include the migration" } },
     ]);
-    view.update(snapshot([todo(id, "Write release notes", { dueDate: "2026-10-13", priority: "urgent", note: "Include the migration" })]));
-    expect(within(detail).getByRole("button", { name: "Due date: Tomorrow" })).toBeVisible();
+    view.update(snapshot([todo(firstId, "Write release notes", { priority: "urgent", note: "Include the migration" })]));
     expect(within(detail).getByRole("button", { name: "Priority: Urgent" })).toBeVisible();
+  });
+
+  it("opens the due picker from the Due chip and saves day and time in one update", async () => {
+    const user = userEvent.setup();
+    const view = harness(snapshot([todo(firstId, "Write release notes", { dueDate: "2026-10-01" })]));
+    await user.click(titleButton("Write release notes"));
+    const detail = screen.getByRole("complementary", { name: "Task details" });
+    const chip = within(detail).getByRole("button", { name: "Due date: Overdue · 11 d" });
+    expect(chip).toHaveClass("is-overdue");
+    expect(chip).toHaveAttribute("aria-haspopup", "dialog");
+    await user.click(chip);
+    const picker = screen.getByRole("dialog", { name: "Due" });
+    await user.click(within(picker).getByRole("button", { name: /^Tomorrow/u }));
+    expect(screen.queryByRole("dialog", { name: "Due" })).toBeNull();
+    expect(sent(view.request, "todo.update")).toEqual([{
+      type: "todo.update",
+      payload: { id: firstId, patch: { dueDate: "2026-10-13", dueTime: null } },
+    }]);
+    view.update(snapshot([todo(firstId, "Write release notes", { dueDate: "2026-10-13", dueTime: "15:00" })]));
+    expect(within(detail).getByRole("button", { name: "Due date: Tomorrow 3:00 PM" })).not.toHaveClass("is-overdue");
+
+    await user.click(within(detail).getByRole("button", { name: "Due date: Tomorrow 3:00 PM" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Due" })).toBeNull();
+    expect(screen.getByRole("complementary", { name: "Task details" })).toBeVisible();
+    expect(sent(view.request, "todo.update")).toHaveLength(1);
   });
 
   it("saves task edits quietly and starts a task as a normal action", async () => {
     const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const view = harness(snapshot([todo(id, "Write release notes")]));
+    const view = harness(snapshot([todo(firstId, "Write release notes")]));
     const add = screen.getByRole("textbox", { name: "Add a task" });
     await user.type(add, "Ship it{Enter}");
-    await user.click(screen.getByRole("checkbox", { name: "Write release notes" }));
-    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    await user.click(check("Write release notes"));
+    await user.click(titleButton("Write release notes"));
+    await user.click(screen.getByRole("button", { name: "Reopen" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Start" })).not.toBeNull());
+    view.update(snapshot([todo(firstId, "Write release notes")]));
     await user.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() => expect(sent(view.request, "todo.start")).toHaveLength(1));
     const options = (view.request.mock.calls as unknown as [CommandWithoutId, unknown][])
@@ -502,46 +337,43 @@ describe("Tasks view", () => {
     expect(options).toEqual([
       ["todo.create", { passive: true }],
       ["todo.update", { passive: true }],
+      ["todo.update", { passive: true }],
       ["todo.start", undefined],
     ]);
   });
 
   it("drops a pending note save for a task that disappeared or was deleted", async () => {
     const user = userEvent.setup();
-    const first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    const view = harness(snapshot([todo(first, "Write release notes"), todo(second, "Clean the downloads folder")]));
-    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    const view = harness(snapshot([todo(firstId, "Write release notes"), todo(secondId, "Clean the downloads folder")]));
+    await user.click(titleButton("Write release notes"));
     await user.type(screen.getByRole("textbox", { name: "Note" }), "Draft");
-    view.update(snapshot([todo(second, "Clean the downloads folder")]));
+    view.update(snapshot([todo(secondId, "Clean the downloads folder")]));
     await waitFor(() => expect(document.querySelector(".task-detail")).toBeNull());
     await new Promise((resolve) => setTimeout(resolve, 700));
 
-    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    await user.click(titleButton("Clean the downloads folder"));
     const note = screen.getByRole("textbox", { name: "Note" });
     await user.type(note, "Gone");
-    fireEvent.contextMenu(row("Clean the downloads folder"));
+    fireEvent.contextMenu(titleButton("Clean the downloads folder"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     fireEvent.blur(note);
-    view.update(snapshot([]));
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await act(async () => { view.unmount(); });
 
-    const commands = view.request.mock.calls.map(([command]) => command);
+    const commands = view.request.mock.calls.map(([command]) => command as CommandWithoutId);
     expect(commands.map(({ type }) => type)).toEqual(["todo.update", "todo.delete"]);
-    expect(commands[0]).toEqual({ type: "todo.update", payload: { id: second, patch: { note: "Gone" } } });
+    expect(commands[0]).toEqual({ type: "todo.update", payload: { id: secondId, patch: { note: "Gone" } } });
   });
 
   it("adopts a newer title and note when the fields were focused without typing", async () => {
     const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const view = harness(snapshot([todo(id, "Write release notes", { note: "Old note" })]));
-    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    const view = harness(snapshot([todo(firstId, "Write release notes", { note: "Old note" })]));
+    await user.click(titleButton("Write release notes"));
     const title = screen.getByRole("textbox", { name: "Title" });
     const note = screen.getByRole("textbox", { name: "Note" });
     await user.click(title);
-    view.update(snapshot([todo(id, "Write the release notes", { note: "Newer note" })]));
+    view.update(snapshot([todo(firstId, "Write the release notes", { note: "Newer note" })]));
     await user.click(note);
-    view.update(snapshot([todo(id, "Write the release notes", { note: "Newest note" })]));
+    view.update(snapshot([todo(firstId, "Write the release notes", { note: "Newest note" })]));
     await user.click(screen.getByRole("textbox", { name: "Add a task" }));
     await new Promise((resolve) => setTimeout(resolve, 700));
 
@@ -550,14 +382,12 @@ describe("Tasks view", () => {
     expect(note).toHaveValue("Newest note");
   });
 
-  it("starts a task in the chosen project and opens its chat", async () => {
+  it("starts a task in the chosen project and stays in Tasks", async () => {
     const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => command.type === "todo.start"
-      ? { type: "request.result", requestId: "request", result: { kind: "todo.started", conversationId } }
-      : ok());
-    const view = harness(snapshot([todo(id, "Clean the downloads folder")]), { request });
-    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> =>
+      command.type === "todo.start" ? started() : ok());
+    const view = harness(snapshot([todo(firstId, "Clean the downloads folder")]), { request });
+    await user.click(titleButton("Clean the downloads folder"));
     const agent = screen.getByRole("group", { name: "Hand it to an agent" });
     expect(within(agent).getByRole("button", { name: /Choose model\..*GPT-5\.6-Sol/u })).toBeVisible();
     expect(within(agent).getByRole("combobox", { name: "Project" })).toHaveValue(firstProjectId);
@@ -568,7 +398,8 @@ describe("Tasks view", () => {
 
     await waitFor(() => expect(sent(request, "todo.start")).toHaveLength(1));
     const [start] = sent(request, "todo.start");
-    expect(start!.payload.id).toBe(id);
+    expect(start!.payload.id).toBe(firstId);
+    expect(start!.payload).not.toHaveProperty("replaces");
     expect(start!.payload.conversation).toMatchObject({
       projectId: secondProjectId,
       providerId: "codex",
@@ -581,33 +412,44 @@ describe("Tasks view", () => {
     });
     expect(start!.payload.conversation).not.toHaveProperty("title");
     expect(sent(request, "project.create")).toHaveLength(0);
-    expect(view.onOpenConversation).not.toHaveBeenCalled();
+
     const chat = conversation({ projectId: secondProjectId });
-    view.update(snapshot([todo(id, "Clean the downloads folder", { conversationId })], { conversations: [chat] }));
-    await waitFor(() => expect(view.onOpenConversation).toHaveBeenCalledWith(chat));
+    view.update(snapshot([todo(firstId, "Clean the downloads folder", {
+      conversationId,
+      linkedAt: NOW.toISOString(),
+      projectId: secondProjectId,
+    })], { conversations: [chat] }));
+    await act(async () => undefined);
+    expect(view.onOpenConversation).not.toHaveBeenCalled();
+    expect(screen.getByRole("main", { name: "Tasks" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open chat" })).toHaveFocus();
   });
 
   it("adds a picked folder as a project before starting, reusing a known one", async () => {
     const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const selectDirectory = vi.fn()
       .mockResolvedValueOnce("/Users/me/Downloads/")
       .mockResolvedValueOnce("C:\\Work\\Studio");
     vi.stubGlobal("inertia", { selectDirectory });
+    let fail = true;
     const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
       if (command.type === "project.create") {
         return { type: "request.result", requestId: "request", result: { kind: "project.created", projectId: createdProjectId } };
       }
       if (command.type === "todo.start") {
-        return { type: "request.result", requestId: "request", result: { kind: "todo.started", conversationId } };
+        if (fail) {
+          fail = false;
+          throw new Error("The agent could not start.");
+        }
+        return started();
       }
       return ok();
     });
     const studio = project(secondProjectId, "Studio", { path: "C:\\work\\studio", normalizedPath: "c:/work/studio" });
-    harness(snapshot([todo(id, "Clean the downloads folder")], {
+    const view = harness(snapshot([todo(firstId, "Clean the downloads folder")], {
       projects: [project(firstProjectId, "Inertia"), studio],
     }), { request });
-    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    await user.click(titleButton("Clean the downloads folder"));
     const agent = screen.getByRole("group", { name: "Hand it to an agent" });
     await user.click(within(agent).getByRole("button", { name: "Folder…" }));
     const target = within(agent).getByRole("combobox", { name: "Project" });
@@ -618,33 +460,34 @@ describe("Tasks view", () => {
     expect(sent(request, "project.create")[0]!.payload).toEqual({ name: "Downloads", path: "/Users/me/Downloads/" });
     expect(sent(request, "todo.start")[0]!.payload.conversation.projectId).toBe(createdProjectId);
 
+    await waitFor(() => expect(view.onError).toHaveBeenCalledWith("The agent could not start."));
+    await waitFor(() => expect(within(agent).getByRole("button", { name: "Start" })).toHaveFocus());
+    expect(agent).toBeVisible();
     await user.click(within(agent).getByRole("button", { name: "Folder…" }));
     await waitFor(() => expect(target).toHaveValue(secondProjectId));
   });
 
   it("reports an unexpected start response and lets Start be pressed again", async () => {
     const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => command.type === "todo.start"
       ? { type: "request.result", requestId: "request", result: { kind: "project.created", projectId: createdProjectId } }
       : ok());
-    const view = harness(snapshot([todo(id, "Clean the downloads folder")]), { request });
-    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    const view = harness(snapshot([todo(firstId, "Clean the downloads folder")]), { request });
+    await user.click(titleButton("Clean the downloads folder"));
     const start = within(screen.getByRole("group", { name: "Hand it to an agent" })).getByRole("button", { name: "Start" });
     await user.click(start);
 
     await waitFor(() => expect(view.onError)
       .toHaveBeenCalledWith("The local service returned an unexpected task response."));
-    expect(start).toBeEnabled();
+    await waitFor(() => expect(start).toBeEnabled());
     expect(view.onOpenConversation).not.toHaveBeenCalled();
   });
 
   it("reports a folder picker failure and keeps the chosen project", async () => {
     const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     vi.stubGlobal("inertia", { selectDirectory: vi.fn().mockRejectedValue(new Error("The folder picker is unavailable.")) });
-    const view = harness(snapshot([todo(id, "Clean the downloads folder")]));
-    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
+    const view = harness(snapshot([todo(firstId, "Clean the downloads folder")]));
+    await user.click(titleButton("Clean the downloads folder"));
     const agent = screen.getByRole("group", { name: "Hand it to an agent" });
     await user.click(within(agent).getByRole("button", { name: "Folder…" }));
 
@@ -653,31 +496,11 @@ describe("Tasks view", () => {
     expect(within(agent).getByRole("button", { name: "Folder…" })).toBeEnabled();
   });
 
-  it("shows a linked task's chat status and opens the chat", async () => {
-    const user = userEvent.setup();
-    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const chat = conversation();
-    const view = harness(snapshot([todo(id, "Clean the downloads folder", { conversationId })], { conversations: [chat] }));
-    expect(row("Clean the downloads folder")).toHaveTextContent("Working");
-    await user.click(screen.getByRole("button", { name: /^Clean the downloads folder/u }));
-    const detail = screen.getByRole("complementary", { name: "Task details" });
-    expect(within(detail).queryByRole("group", { name: "Hand it to an agent" })).toBeNull();
-    expect(within(detail).getByText("Working")).toBeVisible();
-    await user.click(within(detail).getByRole("button", { name: "Open chat" }));
-    expect(view.onOpenConversation).toHaveBeenCalledWith(chat);
-
-    view.update(snapshot([todo(id, "Clean the downloads folder", { conversationId })], {
-      conversations: [conversation({ status: "failed" })],
-    }));
-    expect(row("Clean the downloads folder").querySelector(".task-status")).toHaveTextContent("Failed");
-    expect(row("Clean the downloads folder").querySelector(".task-status")).toHaveClass("is-failed");
-  });
-
   it("offers Open chat instead of Hand to agent in a linked task's row menu", async () => {
     const user = userEvent.setup();
     const chat = conversation();
     const view = harness(snapshot([
-      todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Clean the downloads folder", { conversationId }),
+      todo(firstId, "Clean the downloads folder", { conversationId }),
     ], { conversations: [chat] }));
     await user.click(screen.getByRole("button", { name: "Actions for Clean the downloads folder" }));
     const menu = screen.getByRole("menu", { name: "Actions for Clean the downloads folder" });
@@ -689,14 +512,23 @@ describe("Tasks view", () => {
 
   it("closes the detail with Escape and returns focus to the row", async () => {
     const user = userEvent.setup();
-    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
-    const title = screen.getByRole("button", { name: /^Write release notes/u });
+    harness(snapshot([todo(firstId, "Write release notes")]));
+    const title = titleButton("Write release notes");
     await user.click(title);
     await user.click(within(screen.getByRole("complementary", { name: "Task details" })).getByRole("textbox", { name: "Note" }));
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("complementary", { name: "Task details" })).toBeNull();
     expect(title).toHaveFocus();
     await act(async () => undefined);
+  });
+
+  it("keeps the card open when Escape closes a select inside it", async () => {
+    harness(snapshot([todo(firstId, "Write release notes")]));
+    fireEvent.click(titleButton("Write release notes"));
+    const reasoning = screen.getByRole("combobox", { name: "Reasoning" });
+    reasoning.focus();
+    fireEvent.keyDown(reasoning, { key: "Escape" });
+    expect(screen.getByRole("complementary", { name: "Task details" })).not.toHaveClass("is-leaving");
   });
 
   it("closes the detail with one Escape while the close button's tooltip is showing", async () => {
@@ -714,8 +546,8 @@ describe("Tasks view", () => {
 
   it("lets the closed detail fade out inert before removing it", async () => {
     const user = userEvent.setup();
-    harness(snapshot([todo("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "Write release notes")]));
-    await user.click(screen.getByRole("button", { name: /^Write release notes/u }));
+    harness(snapshot([todo(firstId, "Write release notes")]));
+    await user.click(titleButton("Write release notes"));
     await user.click(screen.getByRole("button", { name: "Close task details" }));
     const leaving = document.querySelector(".task-detail");
     expect(leaving).toHaveClass("is-leaving");
@@ -724,18 +556,78 @@ describe("Tasks view", () => {
     expect(document.querySelector(".tasks-layout")).not.toHaveClass("has-detail");
     await waitFor(() => expect(document.querySelector(".task-detail")).toBeNull());
   });
+
+  it("opens a requested task and focuses the add row on request", async () => {
+    const view = harness(snapshot([
+      todo(firstId, "Write release notes"),
+      todo(secondId, "Book the venue", { completedAt: doneAt() }),
+    ]));
+    view.setProps({ openTaskRequest: { id: secondId, nonce: 1 } });
+    const detail = await screen.findByRole("complementary", { name: "Task details" });
+    expect(within(detail).getByRole("textbox", { name: "Title" })).toHaveValue("Book the venue");
+    expect(screen.getByRole("list", { name: "Done" })).toBeVisible();
+    expect(titleButton("Book the venue")).toHaveAttribute("aria-current", "true");
+
+    view.setProps({ focusAddRequest: 1 });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus());
+  });
+
+  it("acts on open and add requests that are already set when Tasks mounts", async () => {
+    const first = harness(snapshot([todo(firstId, "Write release notes")]), { focusAddRequest: 3 });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus());
+    first.unmount();
+    harness(snapshot([todo(firstId, "Write release notes")]), { openTaskRequest: { id: firstId, nonce: 1 } });
+    expect(await screen.findByRole("complementary", { name: "Task details" })).toBeVisible();
+  });
+
+  it("leaves focus on a row the user reached before the add request's late retry fires", async () => {
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const view = harness(snapshot([todo(firstId, "Write release notes")]));
+      view.setProps({ focusAddRequest: 1 });
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus());
+      titleButton("Write release notes").focus();
+      expect(titleButton("Write release notes")).toHaveFocus();
+      act(() => { for (const frame of frames.splice(0)) frame(0); });
+      expect(titleButton("Write release notes")).toHaveFocus();
+    } finally {
+      raf.mockRestore();
+    }
+  });
 });
+
+function doneAt(): string {
+  return "2026-10-11T07:00:00.000Z";
+}
 
 describe("Tasks stylesheet", () => {
   const css = readFileSync("src/renderer/src/components/TasksView.css", "utf8").replaceAll("\r\n", "\n");
+  const block = (start: string): string => {
+    const from = css.indexOf(start);
+    if (from < 0) return "";
+    let depth = 0;
+    for (let index = css.indexOf("{", from); index < css.length; index += 1) {
+      if (css[index] === "{") depth += 1;
+      if (css[index] === "}") depth -= 1;
+      if (depth === 0) return css.slice(from, index + 1);
+    }
+    return css.slice(from);
+  };
 
   it("uses semantic colour tokens only so preset and custom themes apply", () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/iu);
     expect(css).not.toMatch(/\b(?:rgb|rgba|hsl|hsla|oklch)\(/u);
+    expect(css).toContain("var(--status-failed)");
   });
 
   it("stays plain: no shadows beyond the popover token, uppercase labels or pill shapes", () => {
-    expect(css.match(/box-shadow:[^;]*;/gu) ?? []).toEqual(["box-shadow: var(--shadow-float);"]);
+    const shadows = css.match(/box-shadow:[^;]*;/gu) ?? [];
+    expect(shadows.length).toBeGreaterThan(0);
+    expect(new Set(shadows)).toEqual(new Set(["box-shadow: var(--shadow-float);"]));
     expect(css).not.toMatch(/text-transform|999px/u);
   });
 
@@ -750,9 +642,26 @@ describe("Tasks stylesheet", () => {
     expect(forced).toMatch(/\.task-add:has\(\.task-add-input:focus-visible\) \{\s*outline: 2px solid Highlight;/u);
   });
 
-  it("adapts to narrow containers, reduced motion and forced colours", () => {
-    expect(css).toMatch(/@container tasks-view \(max-width: 760px\)/u);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/u);
-    expect(css).toMatch(/@media \(forced-colors: active\)/u);
+  it("pushes the card over the list in narrow containers and scrolls it inside wide ones", () => {
+    const narrow = block("@container tasks-view (max-width: 760px)");
+    expect(narrow).toMatch(/\.tasks-layout\.has-detail \.tasks-main \{\s*display: none;/u);
+    expect(narrow).toMatch(/\.task-detail \{\s*position: static;\s*width: auto;\s*max-height: none;/u);
+    expect(narrow).toMatch(/transition: none;/u);
+    const card = block(".task-detail {");
+    expect(card).toMatch(/position: sticky;/u);
+    expect(card).toMatch(/max-height: calc\(100vh - 136px\);/u);
+    expect(card).toMatch(/overflow-y: auto;/u);
+  });
+
+  it("keeps status words plain, colouring only failures, and turns off the toast and completion motion", () => {
+    expect(css).not.toMatch(/shimmer|is-live/u);
+    expect(css).not.toMatch(/\.task-(status|well)\.is-(working|approval|input|completed|muted)/u);
+    expect(css).toMatch(/\.task-status\.is-failed,\s*\.task-well\.is-failed \.task-well-headline \{\s*color: var\(--status-failed\);/u);
+    expect(css).toMatch(/\n\.task-well-headline \{[^}]*color: var\(--text-muted\);/u);
+    const reduced = block("@media (prefers-reduced-motion: reduce)");
+    expect(reduced).toMatch(/\.task-row-slot/u);
+    expect(reduced).toMatch(/\.tasks-toast,?\s/u);
+    expect(css).toMatch(/\.task-row-slot\.is-collapsing \{\s*grid-template-rows: 0fr;/u);
+    expect(css).toMatch(/\.tasks-toast \{\s*animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
   });
 });

@@ -18,6 +18,7 @@ const actions = (): { current: GlobalShortcutActions } => ({
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
     toggleSettings: vi.fn(),
+    openTasks: vi.fn(),
   },
 });
 

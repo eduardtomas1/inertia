@@ -122,6 +122,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "resolved_by_sequence",
     "commands_declined",
   ]],
+  [100, "todos", ["due_time", "project_id", "linked_at"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -184,6 +185,7 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [99, "watcher_links_active_watched_idx"],
     [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
+    [100, "todos_project_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -203,6 +205,12 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "update watcher_links",
       "watched_conversation_id = null",
       "where watched_conversation_id = old.id",
+    ]],
+    [100, "todos_count_limit", [
+      "before insert on todos",
+      "when new.completed_at is null",
+      "(select count(*) from todos where completed_at is null) >= 200",
+      "raise(abort,",
     ]],
   ],
 };

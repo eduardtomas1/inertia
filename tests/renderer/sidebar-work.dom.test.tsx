@@ -4,6 +4,7 @@ import { loadThreadActions } from "../../src/renderer/src/components/sidebar/thr
 
 import { Sidebar } from "../../src/renderer/src/components/Sidebar";
 import type { SidebarProps } from "../../src/renderer/src/components/sidebar/SidebarProps";
+import { sidebarTasksLabel, tasksNeedingYou } from "../../src/renderer/src/components/sidebar/sidebarTaskCount";
 import { useProjectScope } from "../../src/renderer/src/hooks/useProjectScope";
 import { currentChatDrag } from "../../src/renderer/src/utils/chatDrag";
 import type {
@@ -13,6 +14,7 @@ import type {
   WorkspaceRun,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
+import type { Todo } from "../../src/shared/todos";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { INTERFACE_LOCALE } from "../../src/renderer/src/lib/locale";
 import { WATCHED_ID, WATCHER_ID, link } from "./watcher-fixtures";
@@ -375,6 +377,72 @@ describe("compact Work sidebar", () => {
     const active = screen.getByRole("button", { name: "Tasks" });
     expect(active).toHaveAttribute("aria-current", "page");
     expect(active).toHaveClass("is-active");
+  });
+
+  it("counts the tasks that need you on the Tasks row and names them", () => {
+    const now = new Date();
+    const ready = conversation("11111111-1111-4111-8111-111111111111", "Clean downloads", now, { status: "completed" });
+    const asking = conversation("22222222-2222-4222-8222-222222222222", "Rename files", now, { status: "needs-input", attentionKind: "approval" });
+    const running = conversation("33333333-3333-4333-8333-333333333333", "Write notes", now, { status: "running" });
+    const task = (id: string, conversationId: string | null, overrides: Partial<Todo> = {}): Todo => ({
+      id,
+      title: `Task ${id.slice(0, 1)}`,
+      note: "",
+      priority: null,
+      dueDate: null,
+      dueTime: null,
+      projectId: null,
+      completedAt: null,
+      conversationId,
+      linkedAt: conversationId ? now.toISOString() : null,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      ...overrides,
+    });
+    const view = renderSidebar([ready, asking, running]);
+    const tasks = () => view.container.querySelector<HTMLButtonElement>(".sidebar-tasks-action")!;
+    const classes = tasks().getAttribute("class");
+    expect(tasks()).toHaveAccessibleName("Tasks");
+    expect(tasks().querySelector(".sidebar-tasks-count")).toBeNull();
+
+    const todos = [
+      task("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ready.id),
+      task("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", asking.id),
+      task("cccccccc-cccc-4ccc-8ccc-cccccccccccc", running.id),
+      task("dddddddd-dddd-4ddd-8ddd-dddddddddddd", null),
+      task("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", ready.id, { completedAt: now.toISOString() }),
+    ];
+    view.rerenderSnapshot({ ...snapshot([ready, asking, running]), todos });
+    expect(tasks()).toHaveAccessibleName("Tasks, 2 need you");
+    const count = tasks().querySelector(".sidebar-tasks-count")!;
+    expect(count).toHaveTextContent(/^2$/u);
+    expect(count).toHaveAttribute("aria-hidden", "true");
+    expect(count.previousElementSibling).toHaveTextContent(/^Tasks$/u);
+    expect(tasks().getAttribute("class")).toBe(classes);
+
+    view.rerenderSnapshot({ ...snapshot([ready, asking, running]), todos: todos.slice(1) });
+    expect(tasks()).toHaveAccessibleName("Tasks, 1 needs you");
+
+    view.rerenderSnapshot({ ...snapshot([ready, asking, { ...running, archivedAt: now.toISOString() }]), todos: todos.slice(2) });
+    expect(tasks()).toHaveAccessibleName("Tasks");
+    expect(tasks()).not.toHaveAttribute("aria-label");
+    expect(tasks().querySelector(".sidebar-tasks-count")).toBeNull();
+  });
+
+  it("counts only the tasks the sidebar's project scope shows", () => {
+    expect(tasksNeedingYou({
+      todos: [
+        { conversationId: "c1", completedAt: null, linkedAt: null, projectId: "studio" },
+        { conversationId: "c2", completedAt: null, linkedAt: null, projectId: "website" },
+        { conversationId: "c3", completedAt: null, linkedAt: null, projectId: null },
+      ] as Todo[],
+      conversations: ["c1", "c2", "c3"].map((id) => conversation(id, id, new Date(), { status: "failed" })),
+      threadViews: new Map([["c1", { status: "failed" }], ["c2", { status: "failed" }], ["c3", { status: "completed" }]]),
+      projectId: "studio",
+      now: Date.now(),
+    })).toBe(2);
+    expect(sidebarTasksLabel(0)).toBe("Tasks");
+    expect(sidebarTasksLabel(3)).toBe("Tasks, 3 need you");
   });
 
   it("keeps the repository label in the original path case for Windows projects", () => {

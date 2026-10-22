@@ -21,6 +21,7 @@ import {
 } from "../utils/connectionMessages";
 import {
   applyConversationShellEvent,
+  applyTodosEvent,
   applyWatcherLinkEvent,
 } from "../utils/runtimeSnapshotProjection";
 import { clearWatcherLive, publishWatcherLive, retainWatcherLive } from "../utils/watcherLiveStore";
@@ -47,7 +48,9 @@ export interface InertiaConnection {
   subscribe: (listener: EventListener) => () => void;
 }
 
-export function useInertiaConnection(): InertiaConnection {
+export function useInertiaConnection(
+  { applyTodos = true }: { applyTodos?: boolean } = {},
+): InertiaConnection {
   const socketRef = useRef<WebSocket | null>(null);
   const pendingRef = useRef(new Map<string, PendingConnectionRequest>());
   const listenersRef = useRef(new Set<EventListener>());
@@ -213,6 +216,11 @@ export function useInertiaConnection(): InertiaConnection {
                   setSnapshot((current) => current
                     ? applyConversationShellEvent(current, shellEvent)
                     : current);
+                } else if (event.type === "todos.updated" && applyTodos) {
+                  const todosEvent = event;
+                  setSnapshot((current) => current
+                    ? applyTodosEvent(current, todosEvent)
+                    : current);
                 } else if (
                   event.type === "watcher.link.updated"
                   || event.type === "watcher.link.removed"
@@ -244,6 +252,11 @@ export function useInertiaConnection(): InertiaConnection {
                 const shellEvent = event;
                 setSnapshot((current) => current
                   ? applyConversationShellEvent(current, shellEvent)
+                  : current);
+              } else if (event.type === "todos.updated" && applyTodos) {
+                const todosEvent = event;
+                setSnapshot((current) => current
+                  ? applyTodosEvent(current, todosEvent)
                   : current);
               }
 
@@ -346,7 +359,7 @@ export function useInertiaConnection(): InertiaConnection {
       socket?.close();
       rejectPending("The Inertia window closed before finishing the request.");
     };
-  }, [rejectPending]);
+  }, [applyTodos, rejectPending]);
 
   const sendCommand = useCallback((command: ClientCommand): Promise<ServerEvent> => {
     if (command.type === "conversation.detail.subscription") {

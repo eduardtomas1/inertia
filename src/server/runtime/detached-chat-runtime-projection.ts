@@ -187,6 +187,7 @@ export function projectRuntimeFrameForAuthority(
         ? frame
         : runtimeCursorFrame(frame);
     }
+    case "todos.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

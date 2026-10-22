@@ -1,10 +1,15 @@
 import type WebSocket from "ws";
 
-import type { ClientCommand, ProviderInfo, ServerEvent } from "../../../shared/contracts";
+import type { ClientCommand, ProviderInfo, RuntimeMutationEvent, ServerEvent } from "../../../shared/contracts";
 import { todoPromptContent, type Todo } from "../../../shared/todos";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import type { RuntimeStore } from "../../database";
-import { TodoRepositoryError } from "../../persistence/todo-repository";
-import { RuntimeRequestError } from "../../runtime-errors";
+import {
+  assertTodoCanHandOff,
+  TODO_MISSING_MESSAGE,
+  TodoRepositoryError,
+} from "../../persistence/todo-repository";
+import { RuntimeRequestError, USER_CORRECTABLE_REQUEST } from "../../runtime-errors";
 import type { BackendProfileController } from "../backends/backend-profile-controller";
 import type {
   ConversationCreatePayload,
@@ -24,11 +29,12 @@ type TodoStartCommand = Extract<ClientCommand, { type: "todo.start" }>;
 export interface TodoCommandDependencies {
   store: RuntimeStore;
   creation: Pick<ConversationCreationService, "create" | "canonicalSelection">;
-  turns: Pick<TurnController, "queue" | "start" | "failBeforeStart">;
+  turns: Pick<TurnController, "queue" | "start" | "failBeforeStart" | "isActive">;
   backendProfileController: Pick<BackendProfileController, "readiness">;
   enableProviders: boolean;
   verifyProviderInstallation?(providerId: ProviderInfo["id"]): Promise<void>;
   providerInfo(): readonly ProviderInfo[];
+  broadcast(event: RuntimeMutationEvent): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
 }
@@ -40,6 +46,22 @@ function conversationTitle(title: string): string {
     result += character;
   }
   return result.trim();
+}
+
+function userError(message: string): RuntimeRequestError {
+  return new RuntimeRequestError(message, USER_CORRECTABLE_REQUEST);
+}
+
+function assertChatIdle(dependencies: TodoCommandDependencies, conversationId: string): void {
+  const latest = dependencies.store.latestAgentTurnForConversation(conversationId);
+  if (
+    dependencies.turns.isActive(conversationId)
+    || (latest !== null && !isAgentTurnTerminalStatus(latest.status))
+  ) throw userError("Stop the agent first.");
+  const continuation = dependencies.store.restartContinuations.forConversation(conversationId);
+  if (continuation?.state === "waiting" || continuation?.state === "dispatching") {
+    throw userError("This chat continues after the update. Try again once it has.");
+  }
 }
 
 async function assertRouteReady(
@@ -68,11 +90,11 @@ export function createTodoCommandHandler(
 
   const start = async (socket: WebSocket, command: TodoStartCommand): Promise<void> => {
     if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+    const { replaces } = command.payload;
     const todo = dependencies.store.todos.get(command.payload.id);
-    if (!todo) throw new RuntimeRequestError("That task no longer exists.");
-    if (todo.conversationId !== null) {
-      throw new RuntimeRequestError("That task is already handed to an agent.");
-    }
+    if (!todo) throw userError(TODO_MISSING_MESSAGE);
+    assertTodoCanHandOff(todo, replaces);
+    if (replaces !== undefined) assertChatIdle(dependencies, replaces);
     const payload = {
       ...command.payload.conversation,
       title: conversationTitle(todo.title),
@@ -84,7 +106,8 @@ export function createTodoCommandHandler(
       let linked: Todo;
       try {
         if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
-        linked = dependencies.store.todos.link(todo.id, conversation.id);
+        if (replaces !== undefined) assertChatIdle(dependencies, replaces);
+        linked = dependencies.store.todos.link(todo.id, conversation.id, { replaces });
       } catch (error) {
         const unlinked = new RuntimeRequestError("The chat was created, but the task could not be linked to it.");
         if (dependencies.store.conversationWorktrees.get(conversation.id)?.ownsWorktree) throw unlinked;
@@ -137,25 +160,35 @@ export function createTodoCommandHandler(
     });
   };
 
+  const settleTodos = (socket: WebSocket, requestId: string): "handled" => {
+    dependencies.broadcast({ type: "todos.updated", todos: dependencies.store.todos.list() });
+    dependencies.send(socket, { type: "request.ok", requestId });
+    return "handled";
+  };
+
   return defineRuntimeCommandHandler([
     "todo.create",
     "todo.update",
     "todo.delete",
+    "todo.clearDone",
     "todo.start",
   ], async (socket, command) => {
     switch (command.type) {
       case "todo.create":
         dependencies.store.todos.create(command.payload);
-        return "mutation";
+        return settleTodos(socket, command.requestId);
       case "todo.update":
         dependencies.store.todos.update(command.payload.id, command.payload.patch);
-        return "mutation";
+        return settleTodos(socket, command.requestId);
       case "todo.delete":
         dependencies.store.todos.delete(command.payload.id);
-        return "mutation";
+        return settleTodos(socket, command.requestId);
+      case "todo.clearDone":
+        dependencies.store.todos.clearDone(command.payload.ids);
+        return settleTodos(socket, command.requestId);
       case "todo.start": {
         const { id } = command.payload;
-        if (starting.has(id)) throw new RuntimeRequestError("That task is already starting.");
+        if (starting.has(id)) throw userError("That task is already starting.");
         starting.add(id);
         try {
           await start(socket, command);

@@ -1,9 +1,11 @@
 import { z } from "zod";
 
-export const MAX_TODOS = 200;
+export const MAX_OPEN_TODOS = 200;
+export const MAX_DONE_TODOS = 200;
+export const MAX_TODOS = MAX_OPEN_TODOS + MAX_DONE_TODOS;
 export const MAX_TODO_TITLE_CHARS = 200;
 export const MAX_TODO_NOTE_CHARS = 2_000;
-export const MAX_TODOS_SERIALIZED_BYTES = 512 * 1_024;
+export const MAX_TODOS_SERIALIZED_BYTES = 1_024 * 1_024;
 
 export const TODO_PRIORITIES = ["urgent", "high", "medium", "low"] as const;
 
@@ -31,18 +33,33 @@ export const todoDueDateSchema = z.string()
       && date.getUTCDate() === day;
   }, "Task due dates must be real calendar days.");
 
-export const todoDraftSchema = z.object({
+export const todoDueTimeSchema = z.string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/u, "Task due times look like 15:00.");
+
+export const TODO_TIME_WITHOUT_DATE_MESSAGE = "Add a day before a time.";
+
+export function dueTimeRequiresDate(value: { dueDate?: string | null; dueTime?: string | null }): boolean {
+  return !value.dueTime || Boolean(value.dueDate);
+}
+
+export const todoDraftFieldsSchema = z.object({
   title: todoTitleSchema,
   note: todoNoteSchema.default(""),
   priority: todoPrioritySchema.nullable().default(null),
   dueDate: todoDueDateSchema.nullable().default(null),
+  dueTime: todoDueTimeSchema.nullable().default(null),
+  projectId: z.string().min(1).nullable().default(null),
 }).strict();
+
+export const todoDraftSchema = todoDraftFieldsSchema.refine(dueTimeRequiresDate, TODO_TIME_WITHOUT_DATE_MESSAGE);
 
 export const todoPatchSchema = z.object({
   title: todoTitleSchema.optional(),
   note: todoNoteSchema.optional(),
   priority: todoPrioritySchema.nullable().optional(),
   dueDate: todoDueDateSchema.nullable().optional(),
+  dueTime: todoDueTimeSchema.nullable().optional(),
+  projectId: z.string().min(1).nullable().optional(),
   completed: z.boolean().optional(),
 }).strict().refine(
   (patch) => Object.values(patch).some((value) => value !== undefined),
@@ -55,11 +72,14 @@ export const todoSchema = z.object({
   note: todoNoteSchema,
   priority: todoPrioritySchema.nullable(),
   dueDate: todoDueDateSchema.nullable(),
+  dueTime: todoDueTimeSchema.nullable(),
+  projectId: z.string().min(1).nullable(),
   completedAt: timestampSchema.nullable(),
   conversationId: z.string().uuid().nullable(),
+  linkedAt: timestampSchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
-}).strict();
+}).strict().refine(dueTimeRequiresDate, TODO_TIME_WITHOUT_DATE_MESSAGE);
 
 export type TodoPriority = z.infer<typeof todoPrioritySchema>;
 export type TodoDraft = z.infer<typeof todoDraftSchema>;
@@ -68,12 +88,24 @@ export type Todo = z.infer<typeof todoSchema>;
 
 const priorityRank: Record<TodoPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-export function compareTodos(left: Todo, right: Todo): number {
+type ComparableTodo = Pick<Todo, "id" | "priority" | "dueDate" | "dueTime" | "createdAt">;
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function todoDueKey(todo: Pick<Todo, "dueDate" | "dueTime">): string {
+  return `${todo.dueDate ?? "9999-12-31"} ${todo.dueTime ?? ""}`;
+}
+
+export function compareTodoBasics(left: ComparableTodo, right: ComparableTodo): number {
   const leftRank = left.priority ? priorityRank[left.priority] : 4;
   const rightRank = right.priority ? priorityRank[right.priority] : 4;
   if (leftRank !== rightRank) return leftRank - rightRank;
-  if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? -1 : 1;
-  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  const due = compareText(todoDueKey(left), todoDueKey(right));
+  if (due !== 0) return due;
+  const created = compareText(left.createdAt, right.createdAt);
+  return created !== 0 ? created : compareText(left.id, right.id);
 }
 
 export function todoPromptContent(todo: Pick<Todo, "title" | "note">): string {

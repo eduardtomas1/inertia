@@ -43,7 +43,7 @@ import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
 import { runRuntimeShutdownPhases, RuntimeShutdownDeadlineError } from "./runtime-shutdown";
 import { createTestShutdownTrace } from "./runtime/test-shutdown-trace";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
-import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
+import { publicRuntimeError as publicError, RuntimeRequestError as RequestError, userCorrectableRuntimeError } from "./runtime-errors";
 import { ScratchWorkspace } from "./runtime/scratch-workspace";
 import { PostReadyWork, shellSnapshotDigest } from "./runtime/post-ready-work";
 import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
@@ -239,7 +239,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
     updatePreparation.track(operation);
   const streamingTrace = createTestStreamingTrace(dataDirectory);
-  const commandIncidents = CommandIncidents.fromSink(options.onIncident, options.runtimeGenerationId ?? null);
+  const commandIncidents = CommandIncidents.fromSink(options.onIncident, options.runtimeGenerationId ?? null, userCorrectableRuntimeError);
   const send = commandIncidents.sender(streamingTrace);
   let onDatabaseBackupCreated = (): void => undefined;
   const testInitialBackupDelayMs = process.env.NODE_ENV === "test" ? Number(process.env.INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS ?? 0) : 0;

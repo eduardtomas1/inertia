@@ -172,6 +172,8 @@ interface AppLayoutProps {
   setDailyWorkOpen: Dispatch<SetStateAction<boolean>>;
   paletteOpen: boolean;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
+  tasksFocusAddRequest?: number;
+  setTasksFocusAddRequest?: Dispatch<SetStateAction<number>>;
   project: Project | null;
   conversation: Conversation | null;
   headerConversation: Conversation | null;
@@ -231,6 +233,16 @@ export function paletteCurrentProjectId(
   return scoped ?? snapshot?.activeProjectId ?? null;
 }
 
+export function conversationLinkedTask(
+  todos: AppSnapshot["todos"],
+  conversationId: string | null,
+): { id: string; title: string } | null {
+  if (!todos || !conversationId) return null;
+  const linked = todos.filter((todo) => todo.conversationId === conversationId);
+  const task = linked.find((todo) => todo.completedAt === null) ?? linked[0];
+  return task ? { id: task.id, title: task.title } : null;
+}
+
 export function conversationDeletionPrompt(
   thread: Pick<Conversation, "title" | "projectId" | "worktreePath">,
   snapshot: AppSnapshot | null,
@@ -286,6 +298,8 @@ export const AppLayout = memo(function AppLayout({
   setDailyWorkOpen,
   paletteOpen,
   setPaletteOpen,
+  tasksFocusAddRequest = 0,
+  setTasksFocusAddRequest,
   project,
   conversation,
   headerConversation,
@@ -309,6 +323,8 @@ export const AppLayout = memo(function AppLayout({
   actions,
 }: AppLayoutProps): React.JSX.Element {
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const [openTaskRequest, setOpenTaskRequest] = useState<{ id: string; nonce: number } | null>(null);
+  if (view !== "tasks" && openTaskRequest !== null) setOpenTaskRequest(null);
   const UsageView = useLoadedSurface(loadUsageView, view === "usage");
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
@@ -484,6 +500,15 @@ export const AppLayout = memo(function AppLayout({
       actions.selectConversation(thread);
       setView("workspace");
     },
+    open: () => setView("tasks"),
+    openTask: (id: string) => {
+      setOpenTaskRequest((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }));
+      setView("tasks");
+    },
+    addTask: () => {
+      setTasksFocusAddRequest?.((request) => request + 1);
+      setView("tasks");
+    },
   });
   const notificationActions = useStableActions({
     activate: (thread: Conversation) => {
@@ -556,6 +581,9 @@ export const AppLayout = memo(function AppLayout({
     }
     setPullRequestDialogOpen(true);
   };
+  const linkedTask = view === "workspace" && isServerConversation
+    ? conversationLinkedTask(connection.snapshot?.todos, headerConversation?.id ?? null)
+    : null;
   const headerConversationMenu: HeaderConversationMenu | null = headerConversation
     && isServerConversation
     ? {
@@ -728,6 +756,8 @@ export const AppLayout = memo(function AppLayout({
             checkoutPath={headerConversation?.worktreePath ?? project?.path ?? null}
             filesAvailable={!workspaceToolsUnavailableReason}
             conversationMenu={headerConversationMenu}
+            linkedTask={linkedTask}
+            onOpenTask={tasksActions.openTask}
             onOpenSidebar={() => {
               if (mobileNavigation) setSidebarOpen(true);
               else setSidebarCollapsed((collapsed) => !collapsed);
@@ -828,6 +858,8 @@ export const AppLayout = memo(function AppLayout({
                   request={tasksActions.request}
                   onOpenConversation={tasksActions.openConversation}
                   onError={setActionError}
+                  openTaskRequest={openTaskRequest}
+                  focusAddRequest={tasksFocusAddRequest}
                 />
               ) : (
                 <div className="workspace-tool-loading tasks-view-loading">
@@ -972,7 +1004,8 @@ export const AppLayout = memo(function AppLayout({
         openNoProjectChat={actions.openNoProjectChat}
         importProject={actions.importProject}
         openSettings={actions.openSettings}
-        openTasks={() => setView("tasks")}
+        openTasks={tasksActions.open}
+        addTask={tasksActions.addTask}
       />
       <AppStatusOverlays
         providerAuth={providerAuth}
@@ -1001,6 +1034,7 @@ export const AppLayout = memo(function AppLayout({
           search: () => setPaletteOpen(true),
           usage: () => setView("usage"),
           "daily-work": () => setDailyWorkOpen(true),
+          tasks: tasksActions.open,
           "welcome-guide": openWelcomeGuide,
         }}
         projects={connection.snapshot?.projects ?? []}

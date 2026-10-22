@@ -98,7 +98,7 @@ describe("watcher link migration", () => {
     try {
       expect((migrated.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version)
         .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
-      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(99);
+      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(99);
       const messages = rows(migrated, "SELECT * FROM messages ORDER BY id");
       expect(withoutNote(messages)).toEqual(before.messages);
       expect(messages.every((row) => row.watcher_note_json === null)).toBe(true);

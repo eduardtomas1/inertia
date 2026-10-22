@@ -19,6 +19,7 @@ import {
 } from "./runtime/attachments/attachment-errors";
 
 export const MESSAGE_ADMISSION_UNAVAILABLE = "message-admission-unavailable";
+export const USER_CORRECTABLE_REQUEST = "user-correctable";
 
 export class RuntimeRequestError extends Error {
   constructor(
@@ -28,6 +29,11 @@ export class RuntimeRequestError extends Error {
   ) {
     super(message);
   }
+}
+
+export function userCorrectableRuntimeError(error: unknown): boolean {
+  return error instanceof TodoRepositoryError
+    || (error instanceof RuntimeRequestError && error.code === USER_CORRECTABLE_REQUEST);
 }
 
 export function publicRuntimeError(error: unknown): string {

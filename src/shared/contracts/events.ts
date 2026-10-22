@@ -67,6 +67,7 @@ import type {
   WorkspaceEntriesPage,
   WorkspaceFilePreview,
 } from "./workspace";
+import type { Todo } from "../todos";
 import type { UsageDashboard } from "./usage-dashboard";
 import type { DailyWorkDashboard } from "./daily-work";
 import type {
@@ -100,6 +101,7 @@ export type RuntimeMutationEvent =
       conversationId: string | null;
     }
   | { type: "conversation.detail.invalidated"; conversationId: string }
+  | { type: "todos.updated"; todos: Todo[] }
   | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }

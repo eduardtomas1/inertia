@@ -198,6 +198,52 @@ describe("Claude turn identity in the harness", () => {
     });
   });
 
+  it("starts a turn with no picked skills when the user skills folder cannot be read", async () => {
+    const home = fixtureRoot("Claude harness unreadable skills home");
+    const project = fixtureRoot("Claude harness unreadable skills project");
+    writeClaudeSkill(home, "personal");
+    const userSkills = join(home, ".claude", "skills");
+    let captured: ClaudeOptions | undefined;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        captured = options;
+        return fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          yield claudeSystem("init", { plugins: [], skills: [] });
+          yield claudeSuccessResult("Done", "completed");
+        })());
+      },
+      skillFilesystem: {
+        beforeOperation: (operation, path) => {
+          if (operation === "opendir" && path === userSkills) {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          }
+        },
+      },
+    });
+
+    const run = harness.start({
+      input: {
+        ...nativeProviderRunInput({
+          providerId: "claude",
+          conversationId: "claude-identity-unreadable-skills",
+          cwd: project,
+          prompt: "Hello",
+          interactionMode: "build",
+          access: "supervised",
+        }),
+        skills: [],
+      },
+      executable: process.execPath,
+      environment: { HOME: home },
+      providerNativeToolsAvailable: true,
+    });
+
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
+    expect(captured).toBeDefined();
+    expect(captured?.plugins).toBeUndefined();
+    expect(captured?.skills).toBeUndefined();
+  });
+
   it("still requires Claude to confirm the picked skills", async () => {
     const project = fixtureRoot("Claude harness picked skill confirmation");
     const picked = writeClaudeSkill(project, "review");

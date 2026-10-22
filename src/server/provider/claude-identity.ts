@@ -68,6 +68,30 @@ async function optionalIdentity<T>(
   }
 }
 
+async function stageIdentitySkills(
+  input: ClaudeTurnIdentityInput,
+  selected: readonly Extract<ProviderSkillInput, { source: "claude-native" }>[],
+  includeDiscovered: boolean,
+): Promise<StagedClaudeSkillPlugin | null> {
+  const deadline = createClaudeSkillDeadline(
+    input.timeoutMs,
+    "Claude selected-skill staging timed out.",
+    input.signal,
+  );
+  try {
+    return await raceClaudeSkillStaging(
+      stageClaudeSkillPlugin(selected, input.cwd, input.environment, {
+        ...input.filesystem,
+        signal: deadline.signal,
+        includeDiscovered,
+      }),
+      deadline.signal,
+    );
+  } finally {
+    deadline.dispose();
+  }
+}
+
 export async function prepareClaudeTurnIdentity(
   input: ClaudeTurnIdentityInput,
 ): Promise<ClaudeTurnIdentity> {
@@ -75,23 +99,12 @@ export async function prepareClaudeTurnIdentity(
     (skill): skill is Extract<ProviderSkillInput, { source: "claude-native" }> =>
       skill.source === "claude-native",
   );
-  const deadline = createClaudeSkillDeadline(
-    input.timeoutMs,
-    "Claude selected-skill staging timed out.",
-    input.signal,
-  );
   let skills: StagedClaudeSkillPlugin | null;
   try {
-    skills = await raceClaudeSkillStaging(
-      stageClaudeSkillPlugin(selected, input.cwd, input.environment, {
-        ...input.filesystem,
-        signal: deadline.signal,
-        includeDiscovered: true,
-      }),
-      deadline.signal,
-    );
-  } finally {
-    deadline.dispose();
+    skills = await stageIdentitySkills(input, selected, true);
+  } catch (error) {
+    if (input.signal.aborted) throw error;
+    skills = await stageIdentitySkills(input, selected, false);
   }
   try {
     const staged = new Set(skills?.skillNames ?? []);

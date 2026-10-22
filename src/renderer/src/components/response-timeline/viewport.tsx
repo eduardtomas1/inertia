@@ -19,7 +19,7 @@ import type {
 } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
-import { isTranscriptReaderNavigationKey } from "../../utils/transcriptNavigation";
+import { isTranscriptReaderNavigationKey, TRANSCRIPT_LATEST_REQUESTED_EVENT } from "../../utils/transcriptNavigation";
 import { applyTerminalTurnProjections } from "../../utils/terminalTurnProjection";
 import {
   buildResponseTimeline,
@@ -837,13 +837,13 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     let attempts = 0;
     let stableFrames = 0;
     let anchorRow: HTMLElement | null = null;
-    const settleUntil = performance.now() + 600;
     const maximumSettleFrames = 30;
     const removeIntentListeners = (): void => {
       scrollElement.removeEventListener("wheel", cancelForUserIntent);
       scrollElement.removeEventListener("touchstart", cancelForUserIntent);
       scrollElement.removeEventListener("pointerdown", cancelForUserIntent);
       scrollElement.removeEventListener("keydown", cancelForUserIntent);
+      scrollElement.removeEventListener(TRANSCRIPT_LATEST_REQUESTED_EVENT, cancelForUserIntent);
     };
     const finishRestoration = (): void => {
       if (cancelled) return;
@@ -869,10 +869,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
         }
         attempts += 1;
-        if (
-          attempts < maximumSettleFrames
-          && performance.now() < settleUntil
-        ) {
+        if (attempts < maximumSettleFrames) {
           window.requestAnimationFrame(restore);
         } else {
           finishRestoration();
@@ -885,11 +882,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
       stableFrames = Math.abs(delta) < 0.5 ? stableFrames + 1 : 0;
       attempts += 1;
-      if (
-        attempts < maximumSettleFrames
-        && performance.now() < settleUntil
-        && stableFrames < 4
-      ) {
+      if (attempts < maximumSettleFrames && stableFrames < 4) {
         window.requestAnimationFrame(restore);
       } else {
         finishRestoration();
@@ -902,6 +895,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
     scrollElement.addEventListener("pointerdown", cancelForUserIntent);
     scrollElement.addEventListener("keydown", cancelForUserIntent);
+    scrollElement.addEventListener(TRANSCRIPT_LATEST_REQUESTED_EVENT, cancelForUserIntent);
     cancelLayoutAnchorRestoration.current = finishRestoration;
     window.requestAnimationFrame(restore);
   };

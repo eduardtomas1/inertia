@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
+import { TRANSCRIPT_LATEST_REQUESTED_EVENT } from "../../src/renderer/src/utils/transcriptNavigation";
 import type {
   AgentTurn,
   ChatMessage,
@@ -351,6 +352,137 @@ describe("accepted turn viewport anchoring", () => {
     expect(settled).toHaveBeenCalledOnce();
     expect(settled).toHaveBeenCalledWith("turn-1");
     expect(cancelled).not.toHaveBeenCalled();
+    await drainVirtualizerTimers();
+  });
+
+  function mockRememberedRowLayout(rowsOffset: number): void {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("anchor-test-scroll") ? 600 : 120;
+      });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("anchor-test-scroll") ? 600 : 120;
+      });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("anchor-test-scroll") ? 4_000 : 120;
+      });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains("anchor-test-scroll")) return rect(0, 600);
+        const item = this.dataset.responseRowId
+          ? this.closest<HTMLElement>(".response-virtual-item")
+          : null;
+        const start = Number(/translateY\((-?[\d.]+)px\)/u.exec(item?.style.transform ?? "")?.[1]);
+        const scroll = this.closest<HTMLElement>(".anchor-test-scroll");
+        return item && Number.isFinite(start)
+          ? rect(rowsOffset + start - (scroll?.scrollTop ?? 0), 120)
+          : rect(0, 120);
+      });
+    vi.spyOn(HTMLElement.prototype, "scrollTo")
+      .mockImplementation(function (
+        this: HTMLElement,
+        options?: ScrollToOptions | number,
+        y?: number,
+      ) {
+        this.scrollTop = typeof options === "number"
+          ? y ?? 0
+          : options?.top ?? this.scrollTop;
+        this.dispatchEvent(new Event("scroll"));
+      });
+  }
+
+  function rememberedRowOffset(
+    scroll: HTMLElement,
+    timeline: HTMLElement,
+    rowId: string,
+  ): number | null {
+    const row = timeline.querySelector<HTMLElement>(`[data-response-row-id="${rowId}"]`);
+    return row
+      ? row.getBoundingClientRect().top - scroll.getBoundingClientRect().top
+      : null;
+  }
+
+  it("restores a remembered row when the first frame arrives after a slow render", async () => {
+    vi.useFakeTimers();
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    mockRememberedRowLayout(90);
+    rememberTranscriptPosition(conversationId, {
+      rowId: "turn-14",
+      viewportOffset: -40,
+      scrollTop: 0,
+      wasFollowing: false,
+    });
+    const { scrollElementRef, timelineElementRef } = renderTimeline(
+      vi.fn(),
+      vi.fn(),
+      16,
+      "turn-none",
+    );
+
+    await act(async () => {
+      let remaining = 60;
+      while (frames.length > 0 && remaining > 0) {
+        now += 1_000;
+        frames.shift()!(now);
+        remaining -= 1;
+        await Promise.resolve();
+      }
+    });
+
+    expect(rememberedRowOffset(
+      scrollElementRef.current!,
+      timelineElementRef.current!,
+      "turn-14",
+    )).toBe(-40);
+    await drainVirtualizerTimers();
+  });
+
+  it("lets an explicit jump to latest release a remembered row restoration", async () => {
+    vi.useFakeTimers();
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    mockRememberedRowLayout(0);
+    rememberTranscriptPosition(conversationId, {
+      rowId: "turn-4",
+      viewportOffset: -40,
+      scrollTop: 520,
+      wasFollowing: false,
+    });
+    const { scrollElementRef } = renderTimeline(
+      vi.fn(),
+      vi.fn(),
+      16,
+      "turn-none",
+    );
+    const scroll = scrollElementRef.current!;
+
+    await act(async () => {
+      scroll.dispatchEvent(new Event(TRANSCRIPT_LATEST_REQUESTED_EVENT));
+      scroll.scrollTo({ top: 3_400 });
+      let remaining = 60;
+      while (frames.length > 0 && remaining > 0) {
+        frames.shift()!(performance.now());
+        remaining -= 1;
+        await Promise.resolve();
+      }
+    });
+
+    expect(scroll.scrollTop).toBe(3_400);
     await drainVirtualizerTimers();
   });
 });

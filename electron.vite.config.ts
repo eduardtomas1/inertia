@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { lifecycleBuildMetadataFromEnvironment } from
@@ -73,7 +73,6 @@ export default defineConfig({
       ),
     },
     plugins: [
-      externalizeDepsPlugin(),
       {
         name: "windows-runtime-job-integrity-snapshot",
         generateBundle() {
@@ -86,6 +85,7 @@ export default defineConfig({
       },
     ],
     build: {
+      externalizeDeps: true,
       target: "node22",
       sourcemap: false,
       rollupOptions: {
@@ -119,8 +119,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       target: "node22",
       sourcemap: false,
       rollupOptions: {

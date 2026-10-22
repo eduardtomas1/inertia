@@ -65,6 +65,10 @@ export function DuoJudgeNoticeSlot({
           void notices.cancel(entry.launchId);
         }}
         onOpenJudge={notices.openJudge}
+        onReadVerdict={(judgeConversationId) => {
+          notices.dismissVerdict(entry.launchId, conversationId);
+          notices.openJudge(judgeConversationId);
+        }}
         onDismiss={() => {
           keepFocus();
           notices.dismissVerdict(entry.launchId, conversationId);

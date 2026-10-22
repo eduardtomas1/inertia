@@ -112,6 +112,7 @@ export function DuoJudgeNotice({
   onRetry,
   onCancel,
   onOpenJudge,
+  onReadVerdict,
   onDismiss,
 }: {
   entry: DuoConversationComparison;
@@ -120,6 +121,7 @@ export function DuoJudgeNotice({
   onRetry: () => void;
   onCancel: () => void;
   onOpenJudge: (conversationId: string) => void;
+  onReadVerdict: (conversationId: string) => void;
   onDismiss: () => void;
 }): React.JSX.Element | null {
   const copy = duoJudgeNoticeCopy(entry, conversationStatus);
@@ -167,7 +169,9 @@ export function DuoJudgeNotice({
             type="button"
             disabled={!judgeConversationId}
             onClick={() => {
-              if (judgeConversationId) onOpenJudge(judgeConversationId);
+              if (!judgeConversationId) return;
+              if (action === "read") onReadVerdict(judgeConversationId);
+              else onOpenJudge(judgeConversationId);
             }}
           >
             {action === "read" ? "Read verdict" : "Open judge"}

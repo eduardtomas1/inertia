@@ -48,6 +48,7 @@ function renderNotice(
     onRetry: vi.fn(),
     onCancel: vi.fn(),
     onOpenJudge: vi.fn(),
+    onReadVerdict: vi.fn(),
     onDismiss: vi.fn(),
   };
   const view = render(
@@ -192,7 +193,7 @@ describe("Duo judge notice", () => {
   );
 
   it("keeps a dismissable Verdict is in notice on a finished side chat", () => {
-    const { onOpenJudge, onDismiss } = renderNotice(entry("side", "completed"));
+    const { onReadVerdict, onDismiss } = renderNotice(entry("side", "completed"));
     const notice = screen.getByRole("status");
     expect(notice).toHaveTextContent("Verdict is in");
     expect(notice).not.toHaveClass("is-failed");
@@ -201,7 +202,7 @@ describe("Duo judge notice", () => {
       button.getAttribute("aria-label") ?? button.textContent))
       .toEqual(["Read verdict", "Dismiss verdict notice"]);
     fireEvent.click(screen.getByRole("button", { name: "Read verdict" }));
-    expect(onOpenJudge).toHaveBeenCalledWith(judgeConversationId);
+    expect(onReadVerdict).toHaveBeenCalledWith(judgeConversationId);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss verdict notice" }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
@@ -249,6 +250,47 @@ describe("Duo judge notice", () => {
     fireEvent.click(within(screen.getByTestId(sourceA)).getByRole("button", {
       name: "Dismiss verdict notice",
     }));
+    expect(dismissed).toEqual(new Set([`${launchId}:${sourceA}`]));
+    expect(screen.getByTestId(sourceA)).toBeEmptyDOMElement();
+    expect(within(screen.getByTestId(sourceB)).getByText("Verdict is in")).toBeVisible();
+  });
+
+  it("treats Read verdict as reading the notice for that chat", async () => {
+    const sourceA = "11111111-1111-4111-8111-111111111111";
+    const sourceB = "22222222-2222-4222-8222-222222222222";
+    const dismissed = new Set<string>();
+    const openJudge = vi.fn();
+    const notices = (): DuoJudgeNotices => ({
+      comparisonForConversation: () => entry("side", "completed"),
+      pendingAction: () => null,
+      retry: vi.fn(async () => undefined),
+      cancel: vi.fn(async () => undefined),
+      openJudge,
+      verdictDismissed: (launch, conversationId) => dismissed.has(`${launch}:${conversationId}`),
+      dismissVerdict: (launch, conversationId) => {
+        dismissed.add(`${launch}:${conversationId}`);
+        view.rerender(tree());
+      },
+      alerts: [],
+      dismissAlert: vi.fn(),
+    });
+    const tree = () => (
+      <DuoJudgeNoticeContext.Provider value={notices()}>
+        {[sourceA, sourceB].map((conversationId) => (
+          <div key={conversationId} data-testid={conversationId}>
+            <DuoJudgeNoticeSlot conversationId={conversationId} conversationStatus="idle" />
+          </div>
+        ))}
+      </DuoJudgeNoticeContext.Provider>
+    );
+    const view = render(tree());
+    await screen.findAllByText("Verdict is in");
+
+    fireEvent.click(within(screen.getByTestId(sourceA)).getByRole("button", {
+      name: "Read verdict",
+    }));
+
+    expect(openJudge).toHaveBeenCalledWith(judgeConversationId);
     expect(dismissed).toEqual(new Set([`${launchId}:${sourceA}`]));
     expect(screen.getByTestId(sourceA)).toBeEmptyDOMElement();
     expect(within(screen.getByTestId(sourceB)).getByText("Verdict is in")).toBeVisible();

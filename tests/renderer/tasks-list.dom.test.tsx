@@ -336,6 +336,32 @@ describe("Task list keyboard", () => {
     expect(sent(view.request, "todo.delete")).toEqual([]);
   });
 
+  it("brings deleted and cleared tasks back when the delayed request fails", async () => {
+    const user = userEvent.setup();
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "todo.delete" || command.type === "todo.clearDone") throw new Error("Not connected.");
+      return ok();
+    });
+    const tasks = () => [
+      todo(firstId, "Keep me"),
+      todo(secondId, "Other"),
+      todo(thirdId, "Old one", { completedAt: doneAt }),
+    ];
+    const view = harness(snapshot(tasks()), { request });
+    titleButton("Keep me").focus();
+    await user.keyboard("{Delete}");
+    await user.click(screen.getByRole("button", { name: "Done actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Clear done" }));
+    expect(openTitles()).toEqual(["Other"]);
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(openTitles()).toEqual(["Keep me", "Other"]));
+    expect(screen.getByRole("button", { name: "Done 1" })).toBeVisible();
+
+    view.update(snapshot(tasks()));
+    expect(openTitles()).toEqual(["Keep me", "Other"]);
+    expect(screen.getByRole("button", { name: "Done 1" })).toBeVisible();
+  });
+
   it("clears only the done tasks it showed when another task finishes before the toast closes", async () => {
     const user = userEvent.setup();
     const view = harness(snapshot([

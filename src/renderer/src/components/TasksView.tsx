@@ -152,7 +152,7 @@ export function TasksView({
   const pendingFocus = useRef<PendingFocus | null>(null);
   const handledOpenRequest = useRef<number | null>(null);
   const handledFocusAddRequest = useRef(0);
-  const deletedIds = useRef(new Set<string>());
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
   const liveIds = useRef<ReadonlySet<string>>(new Set());
   const nowMs = useMinuteClock(true);
   const now = useMemo(() => new Date(nowMs), [nowMs]);
@@ -160,8 +160,10 @@ export function TasksView({
   const todos = snapshot?.todos ?? EMPTY_TODOS;
   const todosLoaded = snapshot?.todos !== undefined;
 
-  const send = useCallback((command: CommandWithoutId): void => {
-    void request(command, { passive: true }).catch(() => undefined);
+  const send = useCallback((command: CommandWithoutId, ids: readonly string[]): void => {
+    void request(command, { passive: true }).catch(() => {
+      setDeletedIds((current) => new Set([...current].filter((id) => !ids.includes(id))));
+    });
   }, [request]);
 
   const {
@@ -171,9 +173,9 @@ export function TasksView({
     undo: popDelete,
     commitAll: commitDeletes,
   } = usePendingDeletes(useCallback((entry: PendingDelete) => {
-    for (const id of entry.ids) deletedIds.current.add(id);
-    if (entry.clear) send({ type: "todo.clearDone", payload: { ids: [...entry.ids] } });
-    else for (const id of entry.ids) send({ type: "todo.delete", payload: { id } });
+    setDeletedIds((current) => new Set([...current, ...entry.ids]));
+    if (entry.clear) send({ type: "todo.clearDone", payload: { ids: [...entry.ids] } }, entry.ids);
+    else for (const id of entry.ids) send({ type: "todo.delete", payload: { id } }, [id]);
   }, [send]));
 
   const effectiveTodos = useMemo(() => todos.map((todo) => {
@@ -182,8 +184,8 @@ export function TasksView({
     return { ...todo, completedAt: desired ? new Date().toISOString() : null };
   }), [optimistic, todos]);
   const knownTodos = useMemo(() => new Map(effectiveTodos
-    .filter(({ id }) => !hiddenIds.has(id) && !deletedIds.current.has(id))
-    .map((todo) => [todo.id, todo])), [effectiveTodos, hiddenIds]);
+    .filter(({ id }) => !hiddenIds.has(id) && !deletedIds.has(id))
+    .map((todo) => [todo.id, todo])), [deletedIds, effectiveTodos, hiddenIds]);
   const visibleTodos = useMemo(
     () => [...knownTodos.values()].filter((todo) => todoInScope(todo, projectScopeId)),
     [knownTodos, projectScopeId],
@@ -261,10 +263,10 @@ export function TasksView({
   const detailTodo = selected ?? (detailPresent && detailId ? knownTodos.get(detailId) ?? null : null);
 
   useEffect(() => {
-    for (const id of deletedIds.current) {
-      if (!todos.some((todo) => todo.id === id)) deletedIds.current.delete(id);
-    }
     const byId = new Map(todos.map((todo) => [todo.id, todo]));
+    setDeletedIds((current) => [...current].every((id) => byId.has(id))
+      ? current
+      : new Set([...current].filter((id) => byId.has(id))));
     setOptimistic((current) => {
       let next = current;
       for (const [id, desired] of current) {
@@ -332,7 +334,7 @@ export function TasksView({
   }, [selectedId]);
 
   const updateTodo = useCallback(async (id: string, patch: TodoPatch): Promise<boolean> => {
-    if (deletedIds.current.has(id) || !liveIds.current.has(id)) return true;
+    if (!liveIds.current.has(id)) return true;
     try {
       await request({ type: "todo.update", payload: { id, patch } }, { passive: true });
       return true;

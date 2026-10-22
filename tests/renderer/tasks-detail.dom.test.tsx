@@ -227,7 +227,6 @@ describe("Starting from the card", () => {
     await user.click(within(card).getByRole("button", { name: "Start" }));
 
     expect(well(card).querySelector(".task-well-headline")).toHaveTextContent("Starting…");
-    expect(well(card).querySelector(".task-well-headline")).toHaveClass("is-live");
     expect(row("Clean the downloads folder").querySelector(".task-status")).toHaveTextContent("Starting…");
     const openChat = within(card).getByRole("button", { name: "Open chat" });
     expect(openChat).toHaveAttribute("aria-disabled", "true");

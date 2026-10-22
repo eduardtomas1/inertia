@@ -30,7 +30,6 @@ interface Well {
   headline: string;
   detail: string | null;
   tone: string | null;
-  live: boolean;
 }
 
 const NEED_HEADLINES: Record<TaskNeed, string> = {
@@ -50,37 +49,34 @@ function wellFor(
     case "todo":
       return null;
     case "starting":
-      return { headline: "Starting…", detail: null, tone: "muted", live: true };
+      return { headline: "Starting…", detail: null, tone: "muted" };
     case "working":
-      return { headline: `${providerLabel} is working on it`, detail: null, tone: "working", live: false };
+      return { headline: `${providerLabel} is working on it`, detail: null, tone: "working" };
     case "needs":
       return {
         headline: `${providerLabel} ${NEED_HEADLINES[status.need ?? "approval"]}`,
         detail: null,
         tone: status.tone,
-        live: false,
       };
     case "review":
       return {
         headline: finishedLabel(shell?.latestTurn?.completedAt ?? shell?.completedAt ?? null, now),
         detail: null,
         tone: "completed",
-        live: false,
       };
     case "failed":
-      return { headline: "Failed", detail: status.reason, tone: "failed", live: false };
+      return { headline: "Failed", detail: status.reason, tone: "failed" };
     case "stopped":
-      return { headline: "Stopped", detail: null, tone: "muted", live: false };
+      return { headline: "Stopped", detail: null, tone: "muted" };
     case "archived":
-      return { headline: "This chat was archived.", detail: null, tone: "muted", live: false };
+      return { headline: "This chat was archived.", detail: null, tone: "muted" };
     case "parked":
-      return { headline: "The chat never started.", detail: null, tone: "muted", live: false };
+      return { headline: "The chat never started.", detail: null, tone: "muted" };
     case "done":
       return {
         headline: todo.completedAt ? `Done · ${formatTaskDay(todo.completedAt, new Date(now))}` : "Done",
         detail: null,
         tone: "muted",
-        live: false,
       };
   }
 }
@@ -133,7 +129,7 @@ export function TaskAgentPanel({
     <div className="task-agent">
       {well && (
         <div className={clsx("task-well", well.tone && `is-${well.tone}`)}>
-          <p className={clsx("task-well-headline", well.live && "is-live")}>{well.headline}</p>
+          <p className="task-well-headline">{well.headline}</p>
           {well.detail && <p className="task-well-detail">{well.detail}</p>}
         </div>
       )}

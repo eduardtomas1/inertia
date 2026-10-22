@@ -85,7 +85,6 @@ describe("deriveTaskStatus", () => {
   ] as const)("%s", (_name, value, kind, word, tone, bucket) => {
     const status = deriveTaskStatus(value);
     expect([status.kind, status.word, status.tone, status.bucket]).toEqual([kind, word, tone, bucket]);
-    expect(status.live).toBe(kind === "working" || kind === "starting");
   });
 
   it("keeps the failure code out of the reason and carries the need kind", () => {

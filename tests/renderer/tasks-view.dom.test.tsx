@@ -602,9 +602,7 @@ describe("Tasks stylesheet", () => {
   it("uses semantic colour tokens only so preset and custom themes apply", () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/iu);
     expect(css).not.toMatch(/\b(?:rgb|rgba|hsl|hsla|oklch)\(/u);
-    for (const token of ["working", "approval", "input", "failed", "completed"]) {
-      expect(css).toContain(`var(--status-${token})`);
-    }
+    expect(css).toContain("var(--status-failed)");
   });
 
   it("stays plain: no shadows beyond the popover token, uppercase labels or pill shapes", () => {
@@ -636,15 +634,14 @@ describe("Tasks stylesheet", () => {
     expect(card).toMatch(/overflow-y: auto;/u);
   });
 
-  it("turns off the shimmer, toast and completion motion under reduced motion and forced colours", () => {
+  it("keeps status words plain, colouring only failures, and turns off the toast and completion motion", () => {
+    expect(css).not.toMatch(/shimmer|is-live/u);
+    expect(css).not.toMatch(/\.task-(status|well)\.is-(working|approval|input|completed|muted)/u);
+    expect(css).toMatch(/\.task-status\.is-failed,\s*\.task-well\.is-failed \.task-well-headline \{\s*color: var\(--status-failed\);/u);
+    expect(css).toMatch(/\n\.task-well-headline \{[^}]*color: var\(--text-muted\);/u);
     const reduced = block("@media (prefers-reduced-motion: reduce)");
     expect(reduced).toMatch(/\.task-row-slot/u);
     expect(reduced).toMatch(/\.tasks-toast,?\s/u);
-    expect(reduced).toMatch(/\.task-status\.is-live,\s*\.task-well-headline\.is-live \{\s*animation: none;\s*background: none;\s*-webkit-text-fill-color: currentColor;/u);
-    const forced = block("@media (forced-colors: active)");
-    expect(forced).toMatch(/\.task-status\.is-live,\s*\.task-well-headline\.is-live \{\s*animation: none;/u);
-    expect(css).toMatch(/animation: task-status-shimmer 2s steps\(40, end\) infinite;/u);
-    expect(css).toMatch(/\.app-shell\[data-document-visible="false"\] \.task-status\.is-live/u);
     expect(css).toMatch(/\.task-row-slot\.is-collapsing \{\s*grid-template-rows: 0fr;/u);
     expect(css).toMatch(/\.tasks-toast \{\s*animation: dialog-surface-in var\(--dur\) var\(--ease\) backwards;/u);
   });

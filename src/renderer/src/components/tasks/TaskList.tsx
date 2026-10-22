@@ -2,7 +2,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -57,25 +56,8 @@ function menuKey(event: ReactKeyboardEvent<HTMLElement>): boolean {
   return event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
 }
 
-function useSyncedAnimation(ref: RefObject<HTMLElement | null>, live: boolean): void {
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!live || !element || typeof element.getAnimations !== "function") return;
-    for (const animation of element.getAnimations()) animation.startTime = 0;
-  }, [live, ref]);
-}
-
 function TaskStatusWord({ status }: { status: TaskStatus }): React.JSX.Element {
-  const ref = useRef<HTMLSpanElement>(null);
-  useSyncedAnimation(ref, status.live);
-  return (
-    <span
-      ref={ref}
-      className={clsx("task-status", status.tone && `is-${status.tone}`, status.live && "is-live")}
-    >
-      {status.word}
-    </span>
-  );
+  return <span className={clsx("task-status", status.tone && `is-${status.tone}`)}>{status.word}</span>;
 }
 
 export interface TaskRowHandlers {

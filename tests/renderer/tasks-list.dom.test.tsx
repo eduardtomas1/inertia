@@ -91,10 +91,9 @@ describe("Task rows", () => {
 
     const word = (title: string) => row(title).querySelector(".task-status");
     expect(word("Agent working")).toHaveTextContent("Working…");
-    expect(word("Agent working")).toHaveClass("is-working", "is-live");
+    expect(word("Agent working")).toHaveClass("is-working");
     expect(word("Agent ready")).toHaveTextContent("Ready for you");
     expect(word("Agent ready")).toHaveClass("is-completed");
-    expect(word("Agent ready")).not.toHaveClass("is-live");
     expect(word("Agent failed")).toHaveTextContent("Failed");
     expect(word("Agent failed")).toHaveClass("is-failed");
     expect(word("Agent asks")).toHaveTextContent("Needs your OK");
@@ -128,26 +127,6 @@ describe("Task rows", () => {
     expect(screen.getByText("All done")).toBeVisible();
     view.update(snapshot([]));
     expect(screen.getByText("Add anything you need to do")).toBeVisible();
-  });
-
-  it("phase-aligns live words so working rows pulse together", () => {
-    const startTimes: number[] = [];
-    const proto = HTMLElement.prototype as unknown as { getAnimations?: () => Animation[] };
-    const original = proto.getAnimations;
-    proto.getAnimations = function getAnimations() {
-      const animation = { startTime: 123 } as unknown as Animation;
-      queueMicrotask(() => startTimes.push(animation.startTime as number));
-      return [animation];
-    };
-    try {
-      harness(snapshot([
-        todo(firstId, "One", { conversationId: chatId(1) }),
-        todo(secondId, "Two", { conversationId: chatId(2) }),
-      ], { conversations: [chat(chatId(1)), chat(chatId(2))] }));
-    } finally {
-      proto.getAnimations = original;
-    }
-    return Promise.resolve().then(() => expect(startTimes).toEqual([0, 0]));
   });
 });
 

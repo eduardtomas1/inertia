@@ -216,53 +216,9 @@
   color: var(--text);
 }
 
-.task-status.is-working,
-.task-well.is-working .task-well-headline {
-  color: var(--status-working);
-}
-
-.task-status.is-approval,
-.task-well.is-approval .task-well-headline {
-  color: var(--status-approval);
-}
-
-.task-status.is-input,
-.task-well.is-input .task-well-headline {
-  color: var(--status-input);
-}
-
 .task-status.is-failed,
 .task-well.is-failed .task-well-headline {
   color: var(--status-failed);
-}
-
-.task-status.is-completed,
-.task-well.is-completed .task-well-headline {
-  color: var(--status-completed);
-}
-
-.task-status.is-muted,
-.task-well.is-muted .task-well-headline {
-  color: var(--text-muted);
-}
-
-.task-status.is-live,
-.task-well-headline.is-live {
-  background: linear-gradient(
-    90deg,
-    currentColor 40%,
-    color-mix(in srgb, currentColor 20%, var(--bg)) 50%,
-    currentColor 60%
-  ) 100% 0 / 300% 100% no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: task-status-shimmer 2s steps(40, end) infinite;
-}
-
-.app-shell[data-document-visible="false"] .task-status.is-live,
-.app-shell[data-document-visible="false"] .task-well-headline.is-live {
-  animation-play-state: paused;
 }
 
 .task-title .task-urgent,
@@ -699,6 +655,7 @@
 
 .task-well-headline {
   justify-self: start;
+  color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-chrome);
 }
@@ -836,15 +793,6 @@
   }
 }
 
-@keyframes task-status-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0 0;
-  }
-}
-
 .task-row,
 .task-add,
 .task-chip,
@@ -943,23 +891,9 @@
   .tasks-toast {
     animation: none;
   }
-
-  .task-status.is-live,
-  .task-well-headline.is-live {
-    animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
-  }
 }
 
 @media (forced-colors: active) {
-  .task-status.is-live,
-  .task-well-headline.is-live {
-    animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
-  }
-
   .task-well,
   .tasks-toast,
   .task-detail,

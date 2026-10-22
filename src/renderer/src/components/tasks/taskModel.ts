@@ -108,7 +108,6 @@ export function sameTaskStatus(left: TaskStatus, right: TaskStatus): boolean {
     && left.bucket === right.bucket
     && left.word === right.word
     && left.tone === right.tone
-    && left.live === right.live
     && left.need === right.need
     && left.reason === right.reason;
 }

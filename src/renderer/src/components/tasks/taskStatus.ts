@@ -26,7 +26,6 @@ export interface TaskStatus {
   bucket: TaskBucket;
   word: string | null;
   tone: TaskStatusTone | null;
-  live: boolean;
   need: TaskNeed | null;
   reason: string | null;
 }
@@ -50,9 +49,9 @@ function status(
   bucket: TaskBucket,
   word: string | null,
   tone: TaskStatusTone | null,
-  extra: Partial<Pick<TaskStatus, "live" | "need" | "reason">> = {},
+  extra: Partial<Pick<TaskStatus, "need" | "reason">> = {},
 ): TaskStatus {
-  return { kind, bucket, word, tone, live: extra.live ?? false, need: extra.need ?? null, reason: extra.reason ?? null };
+  return { kind, bucket, word, tone, need: extra.need ?? null, reason: extra.reason ?? null };
 }
 
 function withinStartGrace(linkedAt: string | null, now: number): boolean {
@@ -63,27 +62,27 @@ function withinStartGrace(linkedAt: string | null, now: number): boolean {
 
 export function deriveTaskStatus({ todo, status: chat, shell, now, starting }: TaskStatusInput): TaskStatus {
   if (todo.completedAt !== null) return status("done", "done", null, null);
-  if (starting) return status("starting", "working", "Starting…", "muted", { live: true });
+  if (starting) return status("starting", "working", "Starting…", "muted");
   if (todo.conversationId === null) return status("todo", "to-do", null, null);
   const turn = shell?.latestTurn ?? null;
   const fresh = withinStartGrace(todo.linkedAt, now);
   if (!shell || chat === null) {
     return fresh
-      ? status("starting", "working", "Starting…", "muted", { live: true })
+      ? status("starting", "working", "Starting…", "muted")
       : status("parked", "to-do", "Not started", "muted");
   }
   if (shell.archivedAt !== null) return status("archived", "to-do", "Chat archived", "muted");
   if (chat === "approval" || chat === "input" || chat === "limited") {
     return status("needs", "needs-you", NEED_WORDS[chat], chat === "input" ? "input" : "approval", { need: chat });
   }
-  if (chat === "working") return status("working", "working", "Working…", "working", { live: true });
+  if (chat === "working") return status("working", "working", "Working…", "working");
   if (chat === "failed") {
     return status("failed", "needs-you", "Failed", "failed");
   }
   if (chat === "completed") return status("review", "needs-you", "Ready for you", "completed");
   if (!turn) {
     return fresh
-      ? status("starting", "working", "Starting…", "muted", { live: true })
+      ? status("starting", "working", "Starting…", "muted")
       : status("parked", "to-do", "Not started", "muted");
   }
   if (turn.status === "completed") return status("review", "needs-you", "Ready for you", "completed");
@@ -93,7 +92,7 @@ export function deriveTaskStatus({ todo, status: chat, shell, now, starting }: T
   if (turn.status === "failed") {
     return status("failed", "needs-you", "Failed", "failed");
   }
-  return status("working", "working", "Working…", "working", { live: true });
+  return status("working", "working", "Working…", "working");
 }
 
 const BUCKET_RANK: Record<TaskStatusKind, number> = {

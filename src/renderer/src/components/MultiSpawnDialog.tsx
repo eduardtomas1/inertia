@@ -5,16 +5,18 @@ import {
   useRef,
   useState,
 } from "react";
+import type {
+  AccessMode,
+  AppSettings,
+  AppSnapshot,
+  DuoLaunchStatus,
+  ModelSelection,
+  ProviderId,
+} from "@shared/contracts";
 import {
   DUO_COMPARISON_CHANGED_FILES_MAX_ENTRIES,
   DUO_COMPARISON_PROMPT_MAX_CHARS,
-  type AccessMode,
-  type AppSettings,
-  type AppSnapshot,
-  type DuoLaunchStatus,
-  type ModelSelection,
-  type ProviderId,
-} from "@shared/contracts";
+} from "../../../shared/contracts/duo";
 import { providerIdForHarness } from "../../../shared/model-routing";
 import { accessModeUnavailableReason, effectiveAccessMode } from "../../../shared/access-modes";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";

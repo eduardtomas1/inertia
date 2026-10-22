@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  DUO_PENDING_MAX_PAGES,
-  type AppSnapshot,
-  type DuoComparisonStatus,
-  type DuoStatusResult,
-  type ServerEvent,
-  type ThreadStatus,
+import type {
+  AppSnapshot,
+  DuoComparisonStatus,
+  DuoStatusResult,
+  ServerEvent,
+  ThreadStatus,
 } from "@shared/contracts";
+import { DUO_PENDING_MAX_PAGES } from "../../../shared/contracts/duo";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import {

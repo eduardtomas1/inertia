@@ -198,3 +198,45 @@ export function cleanupFailureMessage(
       : []))];
   return failures.length === 0 ? null : `${prefix}: ${failures.join(" ")}`;
 }
+
+/**
+ * Reconciles durable launch state before providers or clients are admitted.
+ * Requested cancellations are finalized after turn recovery has detached the
+ * providers. Dispatch claims are never replayed. Only worktrees that this
+ * launch created and never attached to a conversation are compensated.
+ */
+export async function reconcileInterruptedDuoLaunches(
+  store: RuntimeStore,
+  options: { worktrees?: DuoWorktreeOperations } = {},
+): Promise<void> {
+  const worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
+  store.recoverRequestedPairedLaunchCancellations();
+  const recovered = store.recoverInterruptedPairedLaunches();
+  for (const launch of recovered) {
+    if (launch.state === "interrupted") continue;
+    const cleanup = await Promise.allSettled(launch.plans.map((plan) =>
+      cleanupUnadoptedOwnedWorktree(
+        store,
+        launch.launchId,
+        plan.ordinal,
+        worktrees,
+      )));
+    const failure = cleanupFailureMessage(
+      cleanup,
+      "Duo restart cleanup needs attention",
+    );
+    if (failure) {
+      store.failPairedLaunch(
+        launch.launchId,
+        "recovery-required",
+        failure,
+      );
+    } else {
+      store.failPairedLaunch(
+        launch.launchId,
+        "failed",
+        "Duo preparation was interrupted before dispatch. Worktrees no chat had adopted were removed, and no agent was started or retried.",
+      );
+    }
+  }
+}

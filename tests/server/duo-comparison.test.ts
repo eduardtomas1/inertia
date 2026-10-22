@@ -1813,6 +1813,77 @@ describe("Duo third-model comparison", () => {
     reopened.close();
   });
 
+  it("releases an interrupted judge whose turn still needs settling while the delete holds its folder", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["First", "Second"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("running");
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspace,
+      { recoverInterruptedRuns: false },
+    );
+    confirmPriorRuntimeCleanup(reopened);
+    const provider = new PairProvider();
+    const controller = new TurnController(
+      reopened,
+      provider,
+      new Map(),
+      new Map(),
+      new Map(),
+      {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [providerInfo()],
+      },
+    );
+    const restarted = new DuoLaunchCoordinator(
+      reopened,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {} as never,
+      controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+    );
+    await restarted.resumeComparisons();
+    const judgeConversationId = prepared.comparison!.conversationId;
+    expect(restarted.status(prepared.launchId).comparison?.state).toBe("interrupted");
+    const judgeTurn = reopened.agentTurn(
+      restarted.status(prepared.launchId).comparison!.turnId!,
+    );
+    expect(["completed", "failed", "cancelled", "interrupted"]).not.toContain(judgeTurn.status);
+    provider.cleanupReceipts.set(judgeConversationId, {
+      runId: judgeTurn.runId,
+      turnId: judgeTurn.id,
+    });
+    const deletionReservationId = "conversation-delete:test";
+    expect(reopened.conversationWork.reserveAtCheckout(
+      deletionReservationId,
+      runtime.projectId,
+      runtime.workspace,
+    )).toBe(true);
+
+    await expect(restarted.reconcileConversationDeletion(
+      judgeConversationId,
+      deletionReservationId,
+    )).resolves.toBe(true);
+
+    expect(restarted.status(prepared.launchId).comparison?.state).toBe("cancelled");
+    expect(() => reopened.assertConversationDeletionAllowed(judgeConversationId))
+      .not.toThrow();
+    reopened.conversationWork.release(deletionReservationId);
+    await controller.dispose();
+    reopened.close();
+  });
+
   it("reconciles a running judge as interrupted after restart without an automatic retry", async () => {
     const runtime = await createRuntime();
     const launches = comparisonCoordinator(runtime);

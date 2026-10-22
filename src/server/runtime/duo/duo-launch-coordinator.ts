@@ -57,6 +57,7 @@ import {
 } from "./duo-worktree-recovery";
 
 export type { DuoWorktreeOperations } from "./duo-worktree-recovery";
+export { reconcileInterruptedDuoLaunches } from "./duo-worktree-recovery";
 
 type DuoPrepareCommand = Extract<ClientCommand, { type: "duo.prepare" }>;
 type DuoPreparePayload = DuoPrepareCommand["payload"];
@@ -337,7 +338,10 @@ export class DuoLaunchCoordinator {
       { conversationId },
       MAX_DUO_DELETION_RECOVERIES,
     );
-    await this.releaseSettledComparisons(related.launchIds);
+    await this.releaseSettledComparisons(
+      related.launchIds,
+      [authorizedCheckoutReservationId],
+    );
     return reconcileDuoDeletionLaunches(
       this.store,
       this.turns,
@@ -354,7 +358,10 @@ export class DuoLaunchCoordinator {
       { projectId },
       MAX_DUO_DELETION_RECOVERIES,
     );
-    await this.releaseSettledComparisons(related.launchIds);
+    await this.releaseSettledComparisons(
+      related.launchIds,
+      authorizedCheckoutReservationIds,
+    );
     return reconcileDuoDeletionLaunches(
       this.store,
       this.turns,
@@ -365,6 +372,7 @@ export class DuoLaunchCoordinator {
 
   private async releaseSettledComparisons(
     launchIds: readonly string[],
+    authorizedCheckoutReservationIds: readonly string[],
   ): Promise<void> {
     for (const launchId of launchIds) {
       this.releasingComparisons.add(launchId);
@@ -372,7 +380,10 @@ export class DuoLaunchCoordinator {
         this.judgeRetries.clear(launchId);
         await this.comparisonTasks.get(launchId)?.catch(() => undefined);
         if (comparisonReleasableOnDeletion(this.store, launchId)) {
-          await this.cancelComparison(launchId);
+          await this.cancelComparison(
+            launchId,
+            authorizedCheckoutReservationIds,
+          );
         }
       } finally {
         this.releasingComparisons.delete(launchId);
@@ -459,12 +470,15 @@ export class DuoLaunchCoordinator {
     return this.startComparison(launchId, true);
   }
 
-  async cancelComparison(launchId: string): Promise<DuoLaunchStatus> {
+  async cancelComparison(
+    launchId: string,
+    authorizedCheckoutReservationIds: readonly string[] = [],
+  ): Promise<DuoLaunchStatus> {
     const launch = this.store.pairedLaunch(launchId);
-    if (!await this.reconcileInactiveLaunchTurns(
-      launch,
-      true,
-    )) {
+    if (!await reconcileInactiveDuoLaunchTurns(this.store, this.turns, launch, {
+      comparisonOnly: true,
+      authorizedCheckoutReservationIds,
+    })) {
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
     this.cancelComparisonTurn(this.store.pairedLaunch(launchId));
@@ -1201,47 +1215,5 @@ export class DuoLaunchCoordinator {
           }
         : {}),
     };
-  }
-}
-
-/**
- * Reconciles durable launch state before providers or clients are admitted.
- * Requested cancellations are finalized after turn recovery has detached the
- * providers. Dispatch claims are never replayed. Only worktrees that this
- * launch created and never attached to a conversation are compensated.
- */
-export async function reconcileInterruptedDuoLaunches(
-  store: RuntimeStore,
-  options: { worktrees?: DuoWorktreeOperations } = {},
-): Promise<void> {
-  const worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
-  store.recoverRequestedPairedLaunchCancellations();
-  const recovered = store.recoverInterruptedPairedLaunches();
-  for (const launch of recovered) {
-    if (launch.state === "interrupted") continue;
-    const cleanup = await Promise.allSettled(launch.plans.map((plan) =>
-      cleanupUnadoptedOwnedWorktree(
-        store,
-        launch.launchId,
-        plan.ordinal,
-        worktrees,
-      )));
-    const failure = cleanupFailureMessage(
-      cleanup,
-      "Duo restart cleanup needs attention",
-    );
-    if (failure) {
-      store.failPairedLaunch(
-        launch.launchId,
-        "recovery-required",
-        failure,
-      );
-    } else {
-      store.failPairedLaunch(
-        launch.launchId,
-        "failed",
-        "Duo preparation was interrupted before dispatch. Worktrees no chat had adopted were removed, and no agent was started or retried.",
-      );
-    }
   }
 }

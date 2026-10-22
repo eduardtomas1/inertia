@@ -920,6 +920,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     cancelLayoutAnchorRestoration.current?.();
     pendingLayoutAnchor.current = null;
   }, [props.conversationId]);
+  useLayoutEffect(() => {
+    if (!props.followsLatest) return;
+    cancelLayoutAnchorRestoration.current?.();
+    pendingLayoutAnchor.current = null;
+  }, [props.followsLatest]);
 
   useEffect(() => {
     if (props.detailLoading || timeline.length === 0) return;

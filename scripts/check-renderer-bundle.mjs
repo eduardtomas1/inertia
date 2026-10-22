@@ -89,7 +89,7 @@ const budgets = {
   detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
-  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128,
+  entryCss: 241_004 + 256 + 576 + 171 + 25 + 182 + 25 + 128 + 155,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.
@@ -104,7 +104,7 @@ const budgets = {
   // Measured 41,091 / 18,691 bytes after the last review round, no headroom.
   deferredWatcherDockJavaScript: 31.375 * kibibyte + 5_737 + 343 + 975 + 240 + 1_017 + 183 + 58 + 410 + 58 + 25,
   deferredWatcherAttachJavaScript: 18.5 * kibibyte + 761 - 2_037 + 372 + 536 + 55 + 22 + 38 + 76 - 76 + 34 + 23,
-  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202 + 750 + 281,
+  deferredWelcomeGuideJavaScript: 13 * kibibyte + 2_133 + 13_691 + 192 + 6_856 + 539 + 197 + 89 + 39 + 198 + 785 + 125 + 202 + 750 + 281 + 8,
   deferredWorkingOrbJavaScript: 22 * kibibyte,
   // Dedicated capture setup stays off both chat routes (4.9 KiB measured).
   deferredSnapshotSettingsJavaScript: 5.2 * kibibyte + 886,

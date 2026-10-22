@@ -340,6 +340,15 @@ describe("compact Work sidebar", () => {
     expect(screen.getByRole("button", { name: "Daily work" })).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("names the Duo trigger New duo and shows it as a tooltip", async () => {
+    renderSidebar([]);
+    const trigger = screen.getByRole("button", { name: "New duo" });
+    expect(trigger).toHaveClass("multi-spawn-button");
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+    await waitFor(() => expect(document.querySelector('[role="tooltip"]')).toHaveTextContent(/^New duo$/u));
+    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+  });
+
   it("opens Tasks from its own labelled row between New chat and Search", () => {
     const view = renderSidebar([]);
     const primaryRow = view.container.querySelector<HTMLElement>(".sidebar-primary-row")!;
@@ -354,7 +363,7 @@ describe("compact Work sidebar", () => {
     const order = [...view.container.querySelectorAll<HTMLElement>("button, input")]
       .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim());
     const start = order.indexOf("New chat");
-    expect(order.slice(start, start + 4)).toEqual(["New chat", "Launch two chats", "Tasks", "Search projects and conversations"]);
+    expect(order.slice(start, start + 4)).toEqual(["New chat", "New duo", "Tasks", "Search projects and conversations"]);
     expect(tasks).not.toHaveAttribute("aria-current");
     expect(tasks).not.toHaveClass("is-active");
     fireEvent.click(tasks);

@@ -2,6 +2,7 @@ import type WebSocket from "ws";
 
 import type { DuoStatusResult, ServerEvent } from "../../../shared/contracts";
 import type { DuoLaunchCoordinator } from "../duo/duo-launch-coordinator";
+import { RuntimeRequestError } from "../../runtime-errors";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -18,6 +19,9 @@ function statusResult(
 ): DuoStatusResult {
   return { kind: "duo.status", ...status };
 }
+
+const DUO_CHAT_STILL_BUSY =
+  "A chat in this Duo is still working, or Inertia has not confirmed its agent stopped. Let it finish or stop it, then try again.";
 
 export function createDuoCommandHandler(
   dependencies: DuoCommandDependencies,
@@ -94,6 +98,9 @@ export function createDuoCommandHandler(
           command.payload.launchId,
         );
         dependencies.broadcastSnapshot();
+        if (status.state === "interrupted") {
+          throw new RuntimeRequestError(DUO_CHAT_STILL_BUSY);
+        }
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,
@@ -118,6 +125,13 @@ export function createDuoCommandHandler(
           command.payload.launchId,
         );
         dependencies.broadcastSnapshot();
+        if (
+          status.comparison
+          && status.comparison.state !== "cancelled"
+          && status.comparison.state !== "completed"
+        ) {
+          throw new RuntimeRequestError(DUO_CHAT_STILL_BUSY);
+        }
         dependencies.send(socket, {
           type: "request.result",
           requestId: command.requestId,

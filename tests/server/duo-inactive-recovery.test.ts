@@ -752,7 +752,7 @@ describe("inactive Duo turn recovery", () => {
     )(
       {} as never,
       deleteConversationCommand(prepared.conversations.sides[0].id),
-    )).rejects.toThrow(/Cancel the active Duo launch/u);
+    )).rejects.toThrow(/still running or needs attention/u);
     expect(runtime.store.agentTurn(targetTurn.id).status).toBe("queued");
     expect(runtime.store.workspaceRun(targetTurn.runId)).toMatchObject({
       status: "running",
@@ -811,7 +811,7 @@ describe("inactive Duo turn recovery", () => {
     )(
       {} as never,
       deleteConversationCommand(targetConversationId),
-    )).rejects.toThrow(/Cancel the active Duo launch/u);
+    )).rejects.toThrow(/still running or needs attention/u);
     expect(runtime.store.conversation(targetConversationId).id)
       .toBe(targetConversationId);
     expect(runtime.store.workspaceRun(siblingTurn.runId).status)
@@ -973,7 +973,7 @@ describe("inactive Duo turn recovery", () => {
         requestId: randomUUID(),
         payload: { projectId: runtime.projectId },
       },
-    )).rejects.toThrow(/Cancel the active Duo launch/u);
+    )).rejects.toThrow(/still running or needs attention/u);
     const statuses = ghosts.flatMap(({ queued }) => queued.map(({ turn }) =>
       runtime.store.agentTurn(turn.id).status));
     expect(statuses.filter((status) => status === "cancelled")).toHaveLength(32);

@@ -572,10 +572,10 @@ export class RuntimeStore {
     launchId: string,
     turnId: string,
     status: Parameters<PairedLaunchRepository["settleComparisonTurn"]>[2],
-    now = new Date().toISOString(),
+    cause: string | null = null,
   ): StoredPairedLaunch {
     return this.pairedLaunchRepository.settleComparisonTurn(
-      launchId, turnId, status, now,
+      launchId, turnId, status, new Date().toISOString(), cause,
     );
   }
 
@@ -587,6 +587,8 @@ export class RuntimeStore {
   ): StoredPairedLaunch {
     return this.pairedLaunchRepository.failComparison(launchId, state, message, now);
   }
+
+  notePairedLaunchComparisonWaiting(launchId: string, message: string, requeue: boolean): StoredPairedLaunch { return this.pairedLaunchRepository.noteComparisonWaiting(launchId, message, requeue, new Date().toISOString()); }
 
   cancelPairedLaunchComparison(
     launchId: string,

@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   clearPendingMultiSpawnLaunchId,
   initialMultiSpawnDraft,
+  judgeDefaultSelection,
   multiSpawnConversationPayload,
+  multiSpawnDraftIssue,
   MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
   MULTI_SPAWN_PRESET_STORAGE_KEY,
   projectsShareLocalCheckout,
   readMultiSpawnPreset,
   refreshMultiSpawnSelection,
+  secondSideDefaultSelection,
   selectionFromPreset,
   validateMultiSpawnDraft,
   writePendingMultiSpawnLaunchId,
@@ -57,7 +60,7 @@ const draft: MultiSpawnDraft = {
     enabled: false,
     side: {
       projectId: "11111111-1111-4111-8111-111111111111",
-      title: "Duo comparison",
+      title: "Duo verdict",
       selection: codexSelection,
       accessMode: "supervised",
       interactionMode: "plan",
@@ -216,7 +219,7 @@ describe("multi-spawn preset", () => {
     expect(raw).not.toContain("projectId");
     expect(raw).not.toContain("Review this implementation");
     expect(readMultiSpawnPreset(target)?.comparison).toEqual({
-      title: "Duo comparison",
+      title: "Duo verdict",
       route: {
         harnessId: codexSelection.harnessId,
         backendProfileId: codexSelection.backendProfileId,
@@ -396,11 +399,11 @@ describe("multi-spawn preset", () => {
   it("validates the shared prompt and both chat names", () => {
     expect(validateMultiSpawnDraft(draft)).toBeNull();
     expect(validateMultiSpawnDraft({ ...draft, prompt: " " }))
-      .toBe("Write one prompt for both chats.");
+      .toBe("Write the brief first.");
     expect(validateMultiSpawnDraft({
       ...draft,
       sides: [{ ...draft.sides[0], title: "" }, draft.sides[1]],
-    })).toBe("Name chat 1.");
+    })).toBe("Name chat A.");
   });
 
   it("recognizes distinct project records in one local checkout", () => {
@@ -432,6 +435,162 @@ describe("multi-spawn preset", () => {
     expect(projectsShareLocalCheckout(projects, "root", "module")).toBe(true);
     expect(projectsShareLocalCheckout(projects, "module", "other")).toBe(false);
     expect(projectsShareLocalCheckout(projects, "missing", "other")).toBe(false);
+  });
+});
+
+function readyRoute(
+  providerId: "codex" | "claude" | "cursor",
+  modelId: string,
+  ready = true,
+): ComposerModelRoute {
+  const selection = providerNativeModelSelection({ providerId, modelId, alias: modelId });
+  return {
+    key: `${selection.harnessId}:${selection.backendProfileId}:${modelId}`,
+    displayName: modelId,
+    harnessId: selection.harnessId,
+    harnessLabel: providerId,
+    backendProfileId: selection.backendProfileId,
+    backendProfileName: providerId,
+    modelId,
+    alias: modelId,
+    providerLabel: providerId,
+    source: "built-in",
+    routeTerms: [],
+    reasoningEffort: null,
+    reasoningOptions: [],
+    selectable: ready,
+    unavailableReason: ready ? null : "Unavailable.",
+    selection,
+    continuationIdentity: {
+      harnessId: selection.harnessId,
+      backendProfileId: selection.backendProfileId,
+      backendConfigurationRevision: selection.backendConfigurationRevision,
+      modelIdentity: modelId,
+      endpointIdentity: null,
+    },
+    compatibility: { state: "verified", allowsModelSwitchWithinSession: true },
+    rowCompatibility: null,
+    providerId,
+    providerReady: ready,
+  };
+}
+
+describe("Duo smart defaults", () => {
+  const codexSol = readyRoute("codex", "gpt-5.6-sol");
+  const codexAlt = readyRoute("codex", "gpt-5.5");
+  const codexDefault = readyRoute("codex", "provider-default");
+  const claudeOpus = readyRoute("claude", "opus");
+  const cursorAuto = readyRoute("cursor", "auto");
+  const offlineClaude = readyRoute("claude", "sonnet", false);
+  const providerOf = (selection: { harnessId: string }) => selection.harnessId;
+
+  it("gives chat B the first ready route from another provider", () => {
+    expect(secondSideDefaultSelection(
+      [codexSol, offlineClaude, codexAlt, claudeOpus, cursorAuto],
+      codexSol.selection,
+    ).modelId).toBe("opus");
+  });
+
+  it("falls back to another model of A's provider, never its provider default", () => {
+    expect(secondSideDefaultSelection(
+      [codexDefault, codexSol, offlineClaude, codexAlt],
+      codexSol.selection,
+    ).modelId).toBe("gpt-5.5");
+    expect(secondSideDefaultSelection(
+      [codexDefault, codexSol, codexAlt],
+      codexDefault.selection,
+    ).modelId).toBe("provider-default");
+  });
+
+  it("reuses A's route when nothing else is ready", () => {
+    const selection = secondSideDefaultSelection([codexSol, offlineClaude], codexSol.selection);
+    expect(selection).toEqual(codexSol.selection);
+    expect(selection).not.toBe(codexSol.selection);
+  });
+
+  it("gives the judge a third provider, then any third route, then A's", () => {
+    expect(judgeDefaultSelection(
+      [codexSol, claudeOpus, codexAlt, cursorAuto],
+      codexSol.selection,
+      claudeOpus.selection,
+    ).modelId).toBe("auto");
+    expect(judgeDefaultSelection(
+      [codexSol, claudeOpus, codexAlt],
+      codexSol.selection,
+      claudeOpus.selection,
+    ).modelId).toBe("gpt-5.5");
+    expect(judgeDefaultSelection(
+      [codexSol, codexDefault, offlineClaude],
+      codexSol.selection,
+      codexSol.selection,
+    )).toEqual(codexSol.selection);
+  });
+
+  it("builds a mixed duo with a third-model judge and keeps saved pairings first", () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const settings = { ...defaultSettings, defaultProvider: "codex" as const, defaultModel: "gpt-5.6-sol" };
+    const snapshot = {
+      projects: [],
+      conversations: [],
+      providers: [],
+      backendProfiles: [],
+      backendDefaults: [],
+      runs: [],
+      settings,
+      activeProjectId: projectId,
+      activeConversationId: null,
+    } satisfies AppSnapshot;
+    const routes = [codexSol, codexAlt, claudeOpus, cursorAuto];
+    const initial = (preset: Parameters<typeof initialMultiSpawnDraft>[0]["preset"]) =>
+      initialMultiSpawnDraft({ snapshot, settings, activeProjectId: projectId, routesForSelection: () => routes, preset });
+
+    const fresh = initial(null);
+    expect([...fresh.sides.map(({ selection }) => selection.modelId), fresh.comparison.side.selection.modelId])
+      .toEqual(["gpt-5.6-sol", "opus", "auto"]);
+    expect(fresh.sides.map(({ title }) => title)).toEqual(["Duo A", "Duo B"]);
+    expect(fresh.comparison.side.title).toBe("Duo verdict");
+    expect(new Set([...fresh.sides, fresh.comparison.side].map(({ selection }) => providerOf(selection))).size).toBe(3);
+
+    const reference = (route: ComposerModelRoute) => ({
+      harnessId: route.harnessId,
+      backendProfileId: route.backendProfileId,
+      modelId: route.modelId,
+      reasoningEffort: null,
+    });
+    const saved = initial({
+      version: 2,
+      sides: [
+        { title: "Left", route: reference(codexSol), accessMode: "supervised" },
+        { title: "Right", route: reference(codexAlt), accessMode: "supervised" },
+      ],
+      comparison: { title: "Referee", route: reference(codexSol), accessMode: "supervised" },
+    });
+    expect([...saved.sides.map(({ selection }) => selection.modelId), saved.comparison.side.selection.modelId])
+      .toEqual(["gpt-5.6-sol", "gpt-5.5", "gpt-5.6-sol"]);
+  });
+});
+
+describe("Duo draft issues", () => {
+  it("names the field to focus and the reason to show", () => {
+    expect(multiSpawnDraftIssue(draft)).toBeNull();
+    expect(multiSpawnDraftIssue({ ...draft, prompt: " " }))
+      .toEqual({ field: "prompt", message: "Write the brief first." });
+    expect(multiSpawnDraftIssue({
+      ...draft,
+      sides: [draft.sides[0], { ...draft.sides[1], title: " " }],
+    })).toEqual({ field: "title-1", message: "Name chat B." });
+    expect(multiSpawnDraftIssue({
+      ...draft,
+      sides: [{ ...draft.sides[0], projectId: "" }, draft.sides[1]],
+    })).toEqual({ field: "project-0", message: "Choose a project for chat A." });
+    expect(multiSpawnDraftIssue({
+      ...draft,
+      comparison: { enabled: true, side: { ...draft.comparison.side, title: "" } },
+    })).toEqual({ field: "title-2", message: "Name the judge." });
+    expect(multiSpawnDraftIssue({
+      ...draft,
+      comparison: { enabled: false, side: { ...draft.comparison.side, title: "" } },
+    })).toBeNull();
   });
 });
 

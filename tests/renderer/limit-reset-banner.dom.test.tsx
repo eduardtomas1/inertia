@@ -71,7 +71,7 @@ describe("quota reset banner", () => {
     expect(action).toContain("min-height: calc(var(--control-height-small) - 4px);");
     expect(action).toContain("font-size: var(--text-sm);");
     const styles = readFileSync(join(process.cwd(), "src/renderer/src/styles.css"), "utf8");
-    expect(/\n\.pending-input-notice button \{([^}]*)\}/u.exec(styles)?.[1]).toContain("min-height: calc(var(--control-height-small) - 4px);");
+    expect(/\n\.pending-input-notice button(?:,\r?\n[^{]*)? \{([^}]*)\}/u.exec(styles)?.[1]).toContain("min-height: calc(var(--control-height-small) - 4px);");
   });
   it("drops a late response from a different chat", async () => {
     let resolve!: (value: LimitResetResult) => void;

@@ -1,6 +1,12 @@
 .multi-spawn-dialog {
   --dialog-width: 980px;
-  max-height: min(860px, calc(100dvh - 48px));
+  align-self: start;
+  max-height: min(860px, calc(100dvh - 72px));
+  margin-top: 24px;
+}
+
+:root[data-platform="win32"] .multi-spawn-dialog {
+  margin-top: 0;
 }
 
 .multi-spawn-dialog-body {
@@ -142,6 +148,12 @@
   background: var(--surface);
   font: inherit;
   font-weight: 400;
+}
+
+.multi-spawn-field :is(input, select)[aria-invalid="true"],
+.multi-spawn-prompt-zone textarea[aria-invalid="true"],
+.multi-spawn-route[data-invalid="true"] .selected-model-chip {
+  border-color: var(--danger);
 }
 
 .multi-spawn-route .model-chooser-anchor {
@@ -354,34 +366,32 @@
   line-height: var(--leading-chrome);
 }
 
-.multi-spawn-dialog-status.is-error {
+.multi-spawn-dialog-status > p {
+  margin: 0;
+}
+
+.multi-spawn-dialog-error {
   color: var(--danger);
 }
 
 .multi-spawn-recovery-status,
-.multi-spawn-recovery-guidance,
-.multi-spawn-comparison-status {
+.multi-spawn-recovery-guidance {
   display: grid;
+  min-width: 0;
   gap: 8px;
+  color: var(--text);
+}
+
+:is(.multi-spawn-recovery-status, .multi-spawn-recovery-guidance):not(:first-child) {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--line-soft);
-  color: var(--text);
 }
 
 .multi-spawn-recovery-status > strong,
 .multi-spawn-recovery-guidance li > strong {
+  color: var(--text);
   font-weight: 500;
-}
-
-.multi-spawn-comparison-status > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.multi-spawn-comparison-status p {
-  margin: 0;
 }
 
 .multi-spawn-recovery-status p,
@@ -391,30 +401,113 @@
   line-height: var(--leading-chrome);
 }
 
-.multi-spawn-recovery-status dl,
-.multi-spawn-recovery-guidance dl,
-.multi-spawn-comparison-status dl {
+.multi-spawn-status-rows,
+.multi-spawn-comparison-status {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.multi-spawn-comparison-status {
+  margin-top: 4px;
+}
+
+.multi-spawn-dialog .multi-spawn-comparison-status > h3 {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.multi-spawn-status-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 14px max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 10px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
+.multi-spawn-status-row::before {
+  width: 6px;
+  height: 6px;
+  justify-self: center;
+  border-radius: 50%;
+  background: var(--text-muted);
+  content: "";
+}
+
+.multi-spawn-status-row[data-tone="done"]::before {
+  background: var(--status-completed);
+}
+
+.multi-spawn-status-row[data-tone="active"]::before {
+  background: var(--accent);
+}
+
+.multi-spawn-status-row[data-tone="warning"]::before {
+  background: var(--warning);
+}
+
+.multi-spawn-status-row[data-tone="danger"]::before {
+  background: var(--danger);
+}
+
+.multi-spawn-status-row > span:first-of-type,
+.multi-spawn-status-attempt {
+  color: var(--text-muted);
+}
+
+.multi-spawn-status-row > span:nth-of-type(2) {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.multi-spawn-status-detail,
+.multi-spawn-status-link {
+  grid-column: 3;
+  justify-self: start;
+  min-width: 0;
+}
+
+.multi-spawn-status-detail {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.multi-spawn-status-detail.is-danger {
+  color: var(--danger);
+}
+
+.multi-spawn-status-row > .multi-spawn-status-link {
+  min-height: 0;
+  padding: 0;
+}
+
+.multi-spawn-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.multi-spawn-recovery-guidance .multi-spawn-lock-contract > p {
+  margin-top: 4px;
+}
+
+.multi-spawn-recovery-guidance dl {
   display: grid;
   min-width: 0;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 12px;
-  margin: 0;
+  margin: 8px 0 0;
 }
 
-.multi-spawn-recovery-status dl > div,
-.multi-spawn-comparison-status dl > div {
-  display: contents;
-}
-
-.multi-spawn-recovery-status dt,
-.multi-spawn-recovery-guidance dt,
-.multi-spawn-comparison-status dt {
+.multi-spawn-recovery-guidance dt {
   color: var(--text-muted);
 }
 
-.multi-spawn-recovery-status dd,
-.multi-spawn-recovery-guidance dd,
-.multi-spawn-comparison-status dd {
+.multi-spawn-recovery-guidance dd {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
@@ -423,7 +516,7 @@
 .multi-spawn-recovery-guidance ol {
   display: grid;
   gap: 8px;
-  margin: 0;
+  margin: 8px 0 0;
   padding-left: 20px;
 }
 
@@ -444,9 +537,7 @@
   user-select: text;
 }
 
-.multi-spawn-recovery-status .secondary-button,
-.multi-spawn-recovery-guidance .secondary-button,
-.multi-spawn-comparison-status .secondary-button {
+.multi-spawn-recovery-guidance .secondary-button {
   width: max-content;
   max-width: 100%;
 }
@@ -476,16 +567,38 @@
   line-height: var(--leading-chrome);
 }
 
+.multi-spawn-footer-status {
+  min-width: 0;
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+  text-align: right;
+}
+
 .multi-spawn-launch {
   gap: 8px;
   min-width: 124px;
 }
 
-@media (max-width: 620px) {
+@media (max-height: 560px) {
+  .multi-spawn-dialog {
+    max-height: min(860px, calc(100dvh - 48px));
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 820px) {
   .multi-spawn-sides {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .multi-spawn-preset-toggle small {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
   .multi-spawn-judge-config > .multi-spawn-side {
     grid-template-columns: minmax(0, 1fr);
   }

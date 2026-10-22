@@ -10,6 +10,7 @@ import {
 
 const sourceAnswerGate = "multi-spawn-source-answer-ready";
 const judgeAnswerGate = "multi-spawn-judge-answer-ready";
+const neighbourAnswerGate = "multi-spawn-neighbour-answer-ready";
 
 const multiSpawnAppServer = `
 const fs = require("node:fs");
@@ -114,11 +115,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     .map((item) => item.text || "")
     .join("\\n");
   const isJudge = inputText.includes("# Independent Duo comparison");
+  const isNeighbour = inputText.includes("Stay busy in this folder");
   const answer = isJudge
     ? "Multi-spawn judge response from " + path.basename(process.cwd()) + "."
     : "Multi-spawn source response from " + path.basename(process.cwd()) + ".";
   waitForGate(
-    isJudge ? "${judgeAnswerGate}" : "${sourceAnswerGate}",
+    isJudge
+      ? "${judgeAnswerGate}"
+      : isNeighbour ? "${neighbourAnswerGate}" : "${sourceAnswerGate}",
     () => {
       if (responseSettled) return;
       responseSettled = true;
@@ -160,36 +164,48 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", { name: "Launch two chats" }).click();
+  await sidebar.getByRole("button", { name: "New duo" }).click();
 
   const dialog = page.getByRole("dialog", {
-    name: "Launch a duo",
+    name: "New duo",
   });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Ready", { exact: true })).toHaveCount(2);
-  await dialog.getByRole("textbox", { name: "Shared prompt" })
+  await dialog.getByRole("textbox", { name: "Brief for both chats" })
     .fill("Compare the lifecycle and propose the safest implementation.");
-  await dialog.getByRole("textbox", { name: "Chat 1 name" })
+  await dialog.getByRole("textbox", { name: "Chat A name" })
     .fill("Lifecycle review");
-  await dialog.getByRole("textbox", { name: "Chat 2 name" })
+  await dialog.getByRole("textbox", { name: "Chat B name" })
     .fill("Independent review");
-  await dialog.getByRole("combobox", { name: "Chat 2 project" })
+  await dialog.getByRole("combobox", { name: "Chat B project" })
     .selectOption({ label: "Companion" });
-  await dialog.getByRole("combobox", { name: "Chat 2 access" })
+  await dialog.getByRole("combobox", { name: "Chat B access" })
     .selectOption("full");
+  const settledTop = async (): Promise<number> => {
+    await dialog.evaluate(async (element) => {
+      await Promise.all(element.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)));
+    });
+    return (await dialog.boundingBox())!.y;
+  };
+  const anchoredTop = await settledTop();
+  expect(anchoredTop).toBeGreaterThanOrEqual(40);
+  expect(anchoredTop).toBeLessThanOrEqual(72);
   await dialog.getByRole("switch", { name: "Add an independent judge" })
     .click();
   const judgeConfiguration = dialog.locator(".multi-spawn-judge-config");
   await expect(judgeConfiguration).not.toHaveAttribute("open", "");
   await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
-  await dialog.getByRole("textbox", { name: "Comparison chat name" })
+  expect(Math.abs(await settledTop() - anchoredTop)).toBeLessThan(2);
+  await dialog.getByRole("textbox", { name: "Judge name" })
     .fill("Independent judge");
-  await dialog.getByRole("combobox", { name: "Comparison chat project" })
+  await dialog.getByRole("combobox", { name: "Judge project" })
     .selectOption({ label: "Companion" });
-  await dialog.getByRole("combobox", { name: "Comparison chat access" })
+  await dialog.getByRole("combobox", { name: "Judge access" })
     .selectOption("full");
   await expect(judgeConfiguration).toHaveAttribute("open", "");
-  await expect(dialog.getByRole("textbox", { name: "Comparison chat name" }))
+  await expect(dialog.getByRole("textbox", { name: "Judge name" }))
     .toBeVisible();
   const sharingDisclosure = dialog.getByText(
     "What is shared with the judge?",
@@ -235,17 +251,18 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   });
   await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
   await judgeConfiguration.scrollIntoViewIfNeeded();
-  await expect(dialog.getByRole("button", { name: "Launch duo" }))
+  await expect(dialog.getByRole("button", { name: "Start duo" }))
     .toBeVisible();
   const routeCards = dialog.locator(".multi-spawn-sides > .multi-spawn-side");
   const routeCardBounds = await routeCards.evaluateAll((cards) => cards.map((card) => {
     const bounds = card.getBoundingClientRect();
-    return { left: bounds.left, top: bounds.top, right: bounds.right };
+    return { left: bounds.left, top: bounds.top };
   }));
   expect(routeCardBounds).toHaveLength(2);
-  expect(Math.abs(routeCardBounds[0].top - routeCardBounds[1].top))
+  expect(Math.abs(routeCardBounds[0].left - routeCardBounds[1].left))
     .toBeLessThanOrEqual(1);
-  expect(routeCardBounds[0].right).toBeLessThan(routeCardBounds[1].left);
+  expect(routeCardBounds[0].top).toBeLessThan(routeCardBounds[1].top);
+  await expect(dialog.locator(".multi-spawn-preset-toggle small")).toBeHidden();
   await app.expectNoViewportOverflow();
   const darkNarrow = testInfo.outputPath("multi-spawn-dark-narrow.png");
   await page.screenshot({
@@ -259,7 +276,7 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   });
 
   await app.resizeWindow(1320, 900);
-  await dialog.getByRole("button", { name: "Launch duo" }).click();
+  await dialog.getByRole("button", { name: "Start duo" }).click();
 
   const split = page.getByRole("main", {
     name: "Split conversation workspace",
@@ -310,6 +327,11 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   await expect(secondaryAnswers).toContainText(
     "Multi-spawn source response from Companion.",
   );
+  const comparingNotices = split.locator(".duo-judge-notice")
+    .filter({ hasText: "Judge is comparing both chats" });
+  await expect(comparingNotices).toHaveCount(2);
+  await expect(comparingNotices.first().getByRole("button", { name: "Open judge" }))
+    .toBeEnabled();
   await app.expectNoViewportOverflow();
 
   const splitResult = testInfo.outputPath("multi-spawn-split-result.png");
@@ -329,13 +351,101 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   );
   const judgeRow = sidebar.locator("button.activity-thread-select")
     .filter({ hasText: "Independent judge" });
+  const verdictNotices = split.locator(".duo-judge-notice")
+    .filter({ hasText: "Verdict is in" });
+  await expect(verdictNotices).toHaveCount(2, { timeout: 20_000 });
+  await expect(split).toBeVisible();
+  await expect(judgeRow).not.toHaveAttribute("aria-current", "page");
+  await verdictNotices.first().getByRole("button", { name: "Read verdict" }).click();
   await expect(judgeRow).toHaveAttribute("aria-current", "page");
+  await expect(split).toBeHidden();
   const judgeAnswer = page.locator(
     '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
   ).filter({ hasText: "Multi-spawn judge response from Companion." });
   await expect(judgeAnswer).toBeVisible();
   const judgeTurn = page.locator(".response-turn").filter({ has: judgeAnswer });
   await expect(judgeTurn.locator('[data-turn-status="completed"]'))
+    .toBeVisible();
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("starts the judge while another chat is busy in the judge's folder", async () => {
+  const sidebar = page.getByRole("complementary", {
+    name: "Project navigation",
+  });
+  const companionRow = sidebar.locator("button.activity-thread-select")
+    .filter({ hasText: "multi-spawn companion" });
+  await companionRow.click();
+  await expect(companionRow).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("main", { name: "Split conversation workspace" }))
+    .toHaveCount(0);
+  const busyBrief = "Stay busy in this folder until the neighbour gate opens.";
+  const messageBox = page.getByRole("textbox", { name: "Message" });
+  await expect(messageBox).toHaveCount(1);
+  await messageBox.fill(busyBrief);
+  await expect(messageBox).toHaveValue(busyBrief);
+  const sendButton = page.getByRole("button", { name: "Send message", exact: true });
+  await expect(sendButton).toBeEnabled();
+  await sendButton.click();
+  await expect(page.getByRole("button", { name: "Stop agent" }))
+    .toBeVisible({ timeout: 15_000 });
+
+  await sidebar.getByRole("button", { name: "New duo" }).click();
+  const dialog = page.getByRole("dialog", { name: "New duo" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("textbox", { name: "Brief for both chats" })
+    .fill("Review the folder while a neighbour keeps working.");
+  await dialog.getByRole("textbox", { name: "Chat A name" })
+    .fill("Neighbour left");
+  await dialog.getByRole("textbox", { name: "Chat B name" })
+    .fill("Neighbour right");
+  await dialog.getByRole("combobox", { name: "Chat B project" })
+    .selectOption({ label: "Companion" });
+  const judgeSwitch = dialog.getByRole("switch", {
+    name: "Add an independent judge",
+  });
+  if (await judgeSwitch.getAttribute("aria-checked") !== "true") {
+    await judgeSwitch.click();
+  }
+  const judgeConfiguration = dialog.locator(".multi-spawn-judge-config");
+  if (await judgeConfiguration.getAttribute("open") === null) {
+    await judgeConfiguration.getByText("Configure judge", { exact: true }).click();
+  }
+  await dialog.getByRole("textbox", { name: "Judge name" })
+    .fill("Neighbour judge");
+  await dialog.getByRole("combobox", { name: "Judge project" })
+    .selectOption({ label: "Companion" });
+  await dialog.getByRole("combobox", { name: "Judge access" })
+    .selectOption("supervised");
+  await dialog.getByRole("button", { name: "Start duo" }).click();
+
+  const judgeRow = sidebar.locator("button.activity-thread-select")
+    .filter({ hasText: "Neighbour judge" });
+  const verdictNotice = page.locator(".duo-judge-notice")
+    .filter({ hasText: "Verdict is in" })
+    .first();
+  await expect(verdictNotice).toBeVisible({ timeout: 20_000 });
+  await expect(judgeRow).not.toHaveAttribute("aria-current", "page");
+  await verdictNotice.getByRole("button", { name: "Read verdict" }).click();
+  await expect(judgeRow).toHaveAttribute("aria-current", "page");
+  await expect(page.locator(
+    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+  ).filter({ hasText: "Multi-spawn judge response from Companion." }))
+    .toBeVisible();
+  await expect(page.locator(".duo-judge-notice")).toHaveCount(0);
+
+  await companionRow.click();
+  await expect(companionRow).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "Stop agent" }))
+    .toBeVisible();
+  await writeFile(
+    join(app.testDirectory, "data", neighbourAnswerGate),
+    "ready\n",
+    "utf8",
+  );
+  await expect(page.locator(
+    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+  ).filter({ hasText: "Multi-spawn source response from Companion." }))
     .toBeVisible();
   expect(app.rendererErrors).toEqual([]);
 });

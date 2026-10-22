@@ -690,7 +690,7 @@ describe("provider host-tool injection", { concurrent: false }, () => {
     }));
     expect(claudeResult.status).toBe("completed");
     expect(claudeOptions?.mcpServers).toBeUndefined();
-    expect(claudeOptions?.strictMcpConfig).toBeUndefined();
+    expect(claudeOptions?.strictMcpConfig).toBe(true);
 
     const cursorCapture = join(cursorRoot, "capture.json");
     const openCodeCapture = join(openCodeRoot, "capture.json");

@@ -249,14 +249,14 @@ function multiSpawnDraft(): MultiSpawnDraft {
     sides: [
       {
         projectId: firstProjectId,
-        title: "First perspective",
+        title: "Duo A",
         selection,
         accessMode: "supervised",
         interactionMode: "build",
       },
       {
         projectId: secondProjectId,
-        title: "Second perspective",
+        title: "Duo B",
         selection,
         accessMode: "full",
         interactionMode: "build",
@@ -266,7 +266,7 @@ function multiSpawnDraft(): MultiSpawnDraft {
       enabled: false,
       side: {
         projectId: firstProjectId,
-        title: "Duo comparison",
+        title: "Duo verdict",
         selection,
         accessMode: "supervised",
         interactionMode: "plan",
@@ -359,26 +359,27 @@ describe("multi-spawn", () => {
     );
 
     expect(screen.getByRole("dialog", {
-      name: "Launch a duo",
+      name: "New duo",
     })).toBeVisible();
-    expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
+    expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(1);
+    expect(screen.getAllByText("GPT-5.5")).toHaveLength(1);
     expect(screen.getByText(
       /Both agents will share this project checkout/u,
     )).toBeVisible();
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare the provider lifecycle." },
     });
-    fireEvent.change(screen.getByLabelText("Chat 1 name"), {
+    fireEvent.change(screen.getByLabelText("Chat A name"), {
       target: { value: "Lifecycle" },
     });
-    fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+    fireEvent.change(screen.getByLabelText("Chat B project"), {
       target: { value: secondProjectId },
     });
-    fireEvent.change(screen.getByLabelText("Chat 2 access"), {
+    fireEvent.change(screen.getByLabelText("Chat B access"), {
       target: { value: "full" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start duo" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0]![0]).toMatchObject({
       prompt: "Compare the provider lifecycle.",
@@ -417,7 +418,7 @@ describe("multi-spawn", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+    fireEvent.change(screen.getByLabelText("Chat B project"), {
       target: { value: secondProjectId },
     });
 
@@ -441,26 +442,29 @@ describe("multi-spawn", () => {
         onOpenBackendSetup={vi.fn()}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare model behavior." },
     });
 
-    fireEvent.click(screen.getAllByRole("button", {
-      name: /Choose model\..*GPT-5\.6-Sol/u,
-    })[1]!);
-    expect(screen.getByRole("dialog", { name: "Choose model" })).toBeVisible();
-    const result = screen.getByRole("grid", { name: "Model results" })
-      .querySelector<HTMLElement>(".model-chooser-row-option[data-model-route-key*='gpt-5.5']");
-    if (!result) throw new Error("Expected the GPT-5.5 result action.");
-    fireEvent.click(result);
-    expect(screen.getAllByText("GPT-5.5")).toHaveLength(1);
+    const choose = (current: RegExp, index: number, modelKey: string) => {
+      fireEvent.click(screen.getAllByRole("button", { name: current })[index]!);
+      expect(screen.getByRole("dialog", { name: "Choose model" })).toBeVisible();
+      const result = screen.getByRole("grid", { name: "Model results" })
+        .querySelector<HTMLElement>(`.model-chooser-row-option[data-model-route-key*='${modelKey}']`);
+      if (!result) throw new Error(`Expected the ${modelKey} result action.`);
+      fireEvent.click(result);
+    };
+    choose(/Choose model\..*GPT-5\.5/u, 0, "gpt-5.6-sol");
+    expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
+    expect(screen.queryByText("GPT-5.5")).not.toBeInTheDocument();
+    choose(/Choose model\..*GPT-5\.6-Sol/u, 0, "gpt-5.5");
 
-    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start duo" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0]![0].sides[0].selection.modelId)
-      .toBe("gpt-5.6-sol");
-    expect(onSubmit.mock.calls[0]![0].sides[1].selection.modelId)
       .toBe("gpt-5.5");
+    expect(onSubmit.mock.calls[0]![0].sides[1].selection.modelId)
+      .toBe("gpt-5.6-sol");
   });
 
   it("closes only the model chooser on Escape and keeps the duo brief", async () => {
@@ -478,12 +482,12 @@ describe("multi-spawn", () => {
         onOpenBackendSetup={vi.fn()}
       />,
     );
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare model behavior." },
     });
-    const trigger = screen.getAllByRole("button", {
-      name: /Choose model\..*GPT-5\.6-Sol/u,
-    })[1]!;
+    const trigger = screen.getByRole("button", {
+      name: /Choose model\..*GPT-5\.5/u,
+    });
     fireEvent.click(trigger);
     const chooser = screen.getByRole("dialog", { name: "Choose model" });
     const search = within(chooser).getByRole("combobox", { name: "Search models" });
@@ -492,7 +496,7 @@ describe("multi-spawn", () => {
 
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Shared prompt")).toHaveValue("Compare model behavior.");
+    expect(screen.getByLabelText("Brief for both chats")).toHaveValue("Compare model behavior.");
     await waitFor(() => expect(trigger).toHaveFocus());
 
     fireEvent.keyDown(trigger, { key: "Escape" });
@@ -521,17 +525,17 @@ describe("multi-spawn", () => {
     expect(screen.getAllByRole("button", {
       name: /Choose model\..*Provider default/u,
     })).toHaveLength(2);
-    expect(screen.queryByText("Model route unavailable")).not.toBeInTheDocument();
-    const reasoning = screen.getByLabelText("Chat 1 reasoning");
+    expect(screen.queryByText("Model unavailable")).not.toBeInTheDocument();
+    const reasoning = screen.getByLabelText("Chat A reasoning");
     expect(reasoning).toHaveValue("");
     fireEvent.change(reasoning, { target: { value: "high" } });
     expect(reasoning).toHaveValue("high");
     fireEvent.change(reasoning, { target: { value: "" } });
     expect(reasoning).toHaveValue("");
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare the default route." },
     });
-    expect(screen.getByRole("button", { name: "Launch duo" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start duo" })).toBeEnabled();
   });
 
   it("does not reset an open setup when provider metadata refreshes", () => {
@@ -548,10 +552,10 @@ describe("multi-spawn", () => {
     const view = render(
       <MultiSpawnDialog {...props} snapshot={snapshot} />,
     );
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Keep this prompt through reconnect." },
     });
-    fireEvent.change(screen.getByLabelText("Chat 1 name"), {
+    fireEvent.change(screen.getByLabelText("Chat A name"), {
       target: { value: "Kept title" },
     });
 
@@ -565,10 +569,10 @@ describe("multi-spawn", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Shared prompt")).toHaveValue(
+    expect(screen.getByLabelText("Brief for both chats")).toHaveValue(
       "Keep this prompt through reconnect.",
     );
-    expect(screen.getByLabelText("Chat 1 name")).toHaveValue("Kept title");
+    expect(screen.getByLabelText("Chat A name")).toHaveValue("Kept title");
   });
 
   it("rebinds open drafts when a backend configuration is revised", async () => {
@@ -596,10 +600,10 @@ describe("multi-spawn", () => {
     const view = render(
       <MultiSpawnDialog {...props} snapshot={customSnapshot(4)} />,
     );
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare the revised backend." },
     });
-    fireEvent.change(screen.getByLabelText("Chat 1 name"), {
+    fireEvent.change(screen.getByLabelText("Chat A name"), {
       target: { value: "Keep this title" },
     });
 
@@ -608,16 +612,17 @@ describe("multi-spawn", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Launch duo" })).toBeEnabled());
-    expect(screen.getByLabelText("Shared prompt")).toHaveValue(
+      expect(screen.getByRole("button", { name: "Start duo" })).toBeEnabled());
+    expect(screen.getByLabelText("Brief for both chats")).toHaveValue(
       "Compare the revised backend.",
     );
-    expect(screen.getByLabelText("Chat 1 name")).toHaveValue("Keep this title");
-    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+    expect(screen.getByLabelText("Chat A name")).toHaveValue("Keep this title");
+    fireEvent.click(screen.getByRole("button", { name: "Start duo" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0]![0].sides.map(
-      ({ selection }) => selection.backendConfigurationRevision,
-    )).toEqual([5, 5]);
+    expect(onSubmit.mock.calls[0]![0].sides[0].selection).toMatchObject({
+      backendProfileId: customSelection.backendProfileId,
+      backendConfigurationRevision: 5,
+    });
   });
 
   it("restores focus to the launch trigger when the dialog closes", async () => {
@@ -648,7 +653,7 @@ describe("multi-spawn", () => {
     );
     view = render(renderDialog(true));
     await waitFor(() =>
-      expect(screen.getByLabelText("Shared prompt")).toHaveFocus());
+      expect(screen.getByLabelText("Brief for both chats")).toHaveFocus());
 
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -687,7 +692,7 @@ describe("multi-spawn", () => {
         />,
       );
 
-      const secondName = screen.getByLabelText("Chat 2 name");
+      const secondName = screen.getByLabelText("Chat B name");
       secondName.focus();
       act(() => {
         for (const frame of frames.splice(0)) frame(performance.now());
@@ -722,7 +727,7 @@ describe("multi-spawn", () => {
         fireEvent.keyDown(document, { key: "Escape" });
       } else if (route === "close button") {
         fireEvent.click(screen.getByRole("button", {
-          name: "Close multi-spawn",
+          name: "Close new duo",
         }));
       } else {
         fireEvent.click(screen.getByRole("button", { name: "Cancel launch" }));
@@ -750,13 +755,13 @@ describe("multi-spawn", () => {
       />,
     );
 
-    const close = screen.getByRole("button", { name: "Close multi-spawn" });
+    const close = screen.getByRole("button", { name: "Close new duo" });
     const cancel = screen.getByRole("button", { name: "Cancelling…" });
-    const launch = screen.getByRole("button", { name: "Launch duo" });
+    const launch = screen.getByRole("button", { name: "Start duo" });
     expect(close).toBeDisabled();
     expect(cancel).toBeDisabled();
     expect(launch).toBeDisabled();
-    expect(screen.getByLabelText("Shared prompt")).toBeDisabled();
+    expect(screen.getByLabelText("Brief for both chats")).toBeDisabled();
 
     fireEvent.click(close);
     fireEvent.click(cancel);
@@ -797,11 +802,11 @@ describe("multi-spawn", () => {
       />
     );
     view = render(renderDialog(true));
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare focus behavior." },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start duo" }));
 
     await waitFor(() => expect(workspace).toHaveFocus());
     expect(trigger).not.toHaveFocus();
@@ -833,15 +838,16 @@ describe("multi-spawn", () => {
     expect(screen.getAllByRole("button", {
       name: /Choose model\..*Provider default/u,
     })).toHaveLength(2);
-    expect(screen.queryByText("Model route unavailable"))
+    expect(screen.queryByText("Model unavailable"))
       .not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare the safe fallback route." },
     });
-    expect(screen.getByRole("button", { name: "Launch duo" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start duo" })).toBeEnabled();
   });
 
-  it("blocks launch and exposes route-specific setup when a route is unavailable", () => {
+  it("explains an unavailable route on Start and exposes route-specific setup", () => {
+    const onSubmit = vi.fn(async () => undefined);
     render(
       <MultiSpawnDialog
         open
@@ -859,18 +865,25 @@ describe("multi-spawn", () => {
         submitting={false}
         error={null}
         onClose={vi.fn()}
-        onSubmit={vi.fn(async () => undefined)}
+        onSubmit={onSubmit}
         onOpenProviderSetup={vi.fn()}
         onOpenBackendSetup={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Launch duo" })).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "Open setup" }))
       .toHaveLength(2);
-    expect(screen.getByText(
-      "Choose two ready routes before launching the duo.",
-    )).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
+      target: { value: "Compare the unavailable route." },
+    });
+    const start = screen.getByRole("button", { name: "Start duo" });
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(document.querySelector(".multi-spawn-footer-status"))
+      .toHaveTextContent("Choose a ready model for chat A.");
+    expect(document.querySelector('[data-route-side="a"] .multi-spawn-route button'))
+      .toHaveFocus();
   });
 
   it("renders safe copyable recovery commands with exact topology on Windows and metacharacter paths", () => {
@@ -920,9 +933,11 @@ describe("multi-spawn", () => {
     );
 
     const guidance = screen.getByRole("region", {
-      name: "Manual Git recovery for route 1",
+      name: "Git worktree details for chat A",
     });
-    expect(guidance).toHaveTextContent("Inspect this exact topology");
+    expect(guidance.querySelector("details")).not.toHaveAttribute("open");
+    expect(guidance).toHaveTextContent("Git worktree details · Chat A");
+    expect(guidance).toHaveTextContent("Check this worktree before changing anything.");
     expect(guidance).toHaveTextContent(repositoryPath);
     expect(guidance).toHaveTextContent(`Expected commit${"a".repeat(40)}`);
     expect(guidance).toHaveTextContent(`Observed branch${branch}`);
@@ -961,8 +976,8 @@ describe("multi-spawn", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Launch duo" })).toBeDisabled();
-    expect(screen.getAllByText("Team gateway needs a probe")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Start duo" })).toBeEnabled();
+    expect(screen.getAllByText("Team gateway needs a probe")).toHaveLength(1);
     fireEvent.click(
       screen.getAllByRole("button", { name: "Open setup" })[0]!,
     );
@@ -1076,7 +1091,7 @@ describe("multi-spawn", () => {
         sides: [
           {
             projectId: firstProjectId,
-            title: "First perspective",
+            title: "Duo A",
             accessMode: "supervised",
             interactionMode: "build",
             modelSelection: {
@@ -1086,7 +1101,7 @@ describe("multi-spawn", () => {
           },
           {
             projectId: secondProjectId,
-            title: "Second perspective",
+            title: "Duo B",
             accessMode: "full",
             interactionMode: "build",
             modelSelection: {
@@ -1097,7 +1112,7 @@ describe("multi-spawn", () => {
         ],
         comparison: {
           projectId: thirdProjectId,
-          title: "Duo comparison",
+          title: "Duo verdict",
           accessMode: "supervised",
           interactionMode: "plan",
           modelSelection: {
@@ -1265,7 +1280,7 @@ describe("multi-spawn", () => {
       }
       if (command.type === "duo.prepare") {
         throw new RuntimeCommandError(
-          "Chat 2 route is unavailable. Neither chat was launched.",
+          "Chat B route is unavailable. Neither chat was launched.",
           "rejected",
         );
       }
@@ -1311,7 +1326,7 @@ describe("multi-spawn", () => {
       recoveredState: "cancelled",
       recoveredError: null,
       expectedStored: false,
-      expectedError: "The duo launch was cancelled before both providers began.",
+      expectedError: "The duo was cancelled before both chats started.",
     },
     {
       recoveredState: "recovery-required",
@@ -2405,7 +2420,7 @@ describe("multi-spawn", () => {
       MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
     )).toBeNull();
     expect(hook.result.current.error).toBe(
-      "The duo launch was cancelled before both providers began.",
+      "The duo was cancelled before both chats started.",
     );
     expect(hook.result.current.recoveryGuidance).toEqual([]);
     expect(hook.result.current.recoveryStatus?.state).toBe("cancelled");

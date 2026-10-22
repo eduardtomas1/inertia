@@ -136,12 +136,13 @@ describe("Duo third-model comparison dialog", () => {
         onOpenBackendSetup={vi.fn()}
       />,
     );
-    const dialog = screen.getByRole("dialog", { name: "Launch a duo" });
+    const dialog = screen.getByRole("dialog", { name: "New duo" });
     expect(dialog.querySelector(".dialog-shell-header")?.querySelectorAll("svg")).toHaveLength(1);
-    expect(dialog).toHaveAccessibleDescription("Send one brief to two independent agents with separate routes and permissions.");
-    expect(dialog).toHaveTextContent("Saves names, routes, reasoning, access, and the compare toggle locally — never prompts or projects.");
+    expect(dialog.querySelector(".dialog-shell-heading > p")).toBeNull();
+    expect(screen.getByRole("button", { name: "Close new duo" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Keeps names, models, access and the judge. Not the brief or the projects.");
     expect(dialog.querySelectorAll(".multi-spawn-side-number, .multi-spawn-side > header svg, .multi-spawn-field svg")).toHaveLength(0);
-    expect(screen.getByRole("heading", { level: 3, name: "Route A" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Chat A" })).toBeInTheDocument();
     expect(screen.getAllByText("Ready", { exact: true })).toHaveLength(2);
     const judge = screen.getByRole("switch", { name: "Add an independent judge" });
     expect(judge).toHaveClass("switch-control");
@@ -183,20 +184,20 @@ describe("Duo third-model comparison dialog", () => {
     expect(screen.getByText(/up to 5,500 characters/u)).toBeVisible();
     expect(screen.getByText(/no source session, reasoning, tool history/u))
       .toBeVisible();
-    fireEvent.change(screen.getByLabelText("Comparison chat project"), {
+    fireEvent.change(screen.getByLabelText("Judge project"), {
       target: { value: secondProjectId },
     });
-    fireEvent.change(screen.getByLabelText("Chat 2 project"), {
+    fireEvent.change(screen.getByLabelText("Chat B project"), {
       target: { value: secondProjectId },
     });
-    fireEvent.change(screen.getByLabelText("Comparison chat access"), {
+    fireEvent.change(screen.getByLabelText("Judge access"), {
       target: { value: "full" },
     });
     expect(screen.getByText("Judge can edit a source checkout")).toBeVisible();
-    fireEvent.change(screen.getByLabelText("Shared prompt"), {
+    fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Audit the lifecycle." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Launch duo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start duo" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0]![0]).toMatchObject({
@@ -204,7 +205,7 @@ describe("Duo third-model comparison dialog", () => {
         enabled: true,
         side: {
           projectId: secondProjectId,
-          title: "Duo comparison",
+          title: "Duo verdict",
           accessMode: "full",
           interactionMode: "plan",
         },
@@ -257,17 +258,135 @@ describe("Duo third-model comparison dialog", () => {
       />,
     );
 
-    expect(screen.getByRole("region", {
-      name: "Third-model comparison status",
-    })).toHaveTextContent("explicit retry available");
+    const judge = screen.getByRole("region", { name: "Judge status" });
+    expect(judge).toHaveTextContent("Didn't finish");
+    expect(judge.querySelector(".multi-spawn-status-detail.is-danger"))
+      .toHaveTextContent("The judge turn failed.");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const failedDuo = screen.getByRole("region", { name: "Duo status" });
+    expect(failedDuo).toHaveTextContent("AStarted");
+    expect(failedDuo.querySelector("strong")).toHaveTextContent("The judge didn't finish");
     fireEvent.click(screen.getByRole("button", {
-      name: "Retry judge explicitly",
+      name: "Retry judge",
     }));
     fireEvent.click(screen.getByRole("button", {
-      name: "Cancel comparison and release lock",
+      name: "Cancel judge",
     }));
     expect(onRetryComparison).toHaveBeenCalledTimes(1);
     expect(onCancelComparison).toHaveBeenCalledTimes(1);
+  });
+
+  it("describes recovery in plain rows with the judge's folder wait and actions", () => {
+    const onOpenJudge = vi.fn();
+    const onClose = vi.fn();
+    const folderNotice = "The judge is waiting for its folder.";
+    const { rerender } = render(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error={folderNotice}
+        recoveryStatus={{
+          launchId: crypto.randomUUID(),
+          state: "running",
+          error: null,
+          sides: [
+            { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "started" },
+            { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "uncertain" },
+          ],
+          comparison: {
+            state: "waiting",
+            conversationId: comparisonConversationId,
+            turnId: null,
+            attempt: 2,
+            error: folderNotice,
+          },
+        }}
+        onClose={onClose}
+        onSubmit={vi.fn(async () => undefined)}
+        onRecheckRecovery={vi.fn(async () => undefined)}
+        onCancelComparison={vi.fn(async () => undefined)}
+        onOpenJudge={onOpenJudge}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const duo = screen.getByRole("region", { name: "Duo status" });
+    expect(duo.querySelector("strong")).toHaveTextContent("A duo is still running");
+    expect(duo).not.toHaveTextContent(/atomic/u);
+    expect(Array.from(duo.querySelectorAll(".multi-spawn-status-rows > .multi-spawn-status-row"))
+      .map((row) => [row.textContent, row.getAttribute("data-tone")]))
+      .toEqual([
+        ["AStarted", "done"],
+        ["BUnknown — check the chat", "warning"],
+      ]);
+    const judge = screen.getByRole("region", { name: "Judge status" });
+    expect(judge.querySelector("h3")).toHaveTextContent("Judge");
+    expect(judge).toHaveTextContent("Waiting for its folder · attempt 2");
+    expect(judge.querySelector(".multi-spawn-status-detail")).toHaveTextContent(folderNotice);
+    expect(judge.querySelector(".is-danger")).toBeNull();
+    expect(Array.from(duo.querySelectorAll(".multi-spawn-recovery-actions button"))
+      .map((button) => button.textContent))
+      .toEqual(["Cancel judge", "Check again"]);
+    fireEvent.click(screen.getByRole("button", { name: "Open judge" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onOpenJudge).toHaveBeenCalledWith(comparisonConversationId);
+
+    rerender(
+      <MultiSpawnDialog
+        open
+        snapshot={snapshot}
+        settings={settings}
+        submitting={false}
+        error={null}
+        recoveryStatus={{
+          launchId: crypto.randomUUID(),
+          state: "interrupted",
+          error: null,
+          sides: [
+            { ordinal: 0, conversationId: firstConversationId, turnId: firstTurnId, dispatchState: "claimed" },
+            { ordinal: 1, conversationId: secondConversationId, turnId: secondTurnId, dispatchState: "failed" },
+          ],
+          comparison: {
+            state: "failed",
+            conversationId: null,
+            turnId: null,
+            attempt: 1,
+            error: "The judge could not start: no route.",
+          },
+        }}
+        acknowledgingRecovery
+        onClose={onClose}
+        onSubmit={vi.fn(async () => undefined)}
+        onRecheckRecovery={vi.fn(async () => undefined)}
+        onAcknowledgeRecovery={vi.fn(async () => undefined)}
+        onRetryComparison={vi.fn(async () => undefined)}
+        onCancelComparison={vi.fn(async () => undefined)}
+        onOpenJudge={onOpenJudge}
+        onOpenProviderSetup={vi.fn()}
+        onOpenBackendSetup={vi.fn()}
+      />,
+    );
+    const interrupted = screen.getByRole("region", { name: "Duo status" });
+    expect(interrupted.querySelector("strong")).toHaveTextContent("Dispatch was interrupted");
+    expect(interrupted).toHaveTextContent(
+      "One provider may have started before the other failed. Check both chats before continuing.",
+    );
+    expect(interrupted).toHaveTextContent("AStarting…");
+    expect(interrupted).toHaveTextContent("BDidn't start");
+    const failedJudge = screen.getByRole("region", { name: "Judge status" });
+    expect(failedJudge).toHaveTextContent("Didn't finish");
+    expect(failedJudge).not.toHaveTextContent("attempt");
+    expect(failedJudge.querySelector(".multi-spawn-status-detail.is-danger"))
+      .toHaveTextContent("The judge could not start: no route.");
+    expect(failedJudge).toHaveTextContent("The judge hasn't started yet");
+    expect(screen.queryByRole("button", { name: "Open judge" })).toBeNull();
+    expect(Array.from(interrupted.querySelectorAll(".multi-spawn-recovery-actions button"))
+      .map((button) => button.textContent))
+      .toEqual(["Retry judge", "Continuing…", "Cancel judge", "Check again"]);
   });
 
   it("disables only Launch while a waiting comparison holds the lock", async () => {
@@ -303,11 +422,13 @@ describe("Duo third-model comparison dialog", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Launch duo" }))
+    expect(await screen.findByRole("button", { name: "Start duo" }))
       .toBeDisabled();
     expect(screen.getByRole("button", {
-      name: "Cancel comparison and release lock",
+      name: "Cancel judge",
     })).toBeEnabled();
+    expect(screen.getByRole("region", { name: "Judge status" }))
+      .toHaveTextContent("Waiting for both chats to finish");
   });
 
   it("blocks a new launch while a running cancellation finishes cleanup", async () => {
@@ -373,7 +494,7 @@ describe("Duo third-model comparison dialog", () => {
 
     expect(hook.result.current.launchBlocked).toBe(false);
     expect(hook.result.current.recoveryStatus?.state).toBe("cancelled");
-    expect(hook.result.current.error).toContain("cancelled before both providers");
+    expect(hook.result.current.error).toContain("cancelled before both chats started");
   });
 
   it("re-enables the dialog when a judge retry is closed mid-flight", async () => {
@@ -511,7 +632,13 @@ describe("Duo third-model comparison dialog", () => {
       type: "duo.status",
       payload: { launchId },
     });
-    expect(setActionError).toHaveBeenCalledWith(judgeError);
+    expect(setActionError).not.toHaveBeenCalledWith(judgeError);
+    expect(hook.result.current.judgeNotices.alerts).toEqual([{
+      launchId,
+      conversationId: comparisonConversationId,
+      title: null,
+      state: "failed",
+    }]);
     expect(hook.result.current.recoveryStatus).toBeNull();
   });
 
@@ -741,7 +868,7 @@ describe("Duo third-model comparison dialog", () => {
 
     await act(async () => hook.result.current.openDialog());
 
-    expect(hook.result.current.error).toMatch(/comparison is still waiting/i);
+    expect(hook.result.current.error).toMatch(/judge is still waiting/i);
     expect(hook.result.current.error).toMatch(/cancel.*release.*lock/i);
     expect(hook.result.current.launchBlocked).toBe(true);
   });

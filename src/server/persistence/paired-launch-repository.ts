@@ -310,6 +310,7 @@ export class PairedLaunchRepository {
                 )
               )
           )
+          OR launch.comparison_state IN ('waiting', 'failed', 'interrupted')
         )
       ORDER BY launch.created_at ASC, launch.id ASC
       LIMIT ?
@@ -456,7 +457,7 @@ export class PairedLaunchRepository {
     `).get(conversationId, authorizedLaunchId ?? null, authorizedLaunchId ?? null);
     if (blocked) {
       throw new Error(
-        "This judge chat is reserved for its locked Duo comparison. Retry or cancel the comparison before sending other work.",
+        "This judge chat is reserved for its locked Duo comparison. Retry or cancel the judge before sending other work.",
       );
     }
   }
@@ -950,6 +951,7 @@ export class PairedLaunchRepository {
     turnId: string,
     status: AgentTurnTerminalStatus,
     now: string,
+    cause: string | null = null,
   ): StoredPairedLaunch {
     const state: DuoComparisonState = status === "completed"
       ? "completed"
@@ -961,8 +963,8 @@ export class PairedLaunchRepository {
     const failure = status === "completed" || status === "cancelled"
       ? null
       : status === "interrupted"
-        ? "The judge turn was interrupted. It was not retried automatically."
-        : "The judge turn failed. Retry explicitly or cancel the locked comparison.";
+        ? `The judge turn was interrupted${cause ? `: ${cause}.` : "."} It was not retried automatically.`
+        : `The judge turn failed${cause ? `: ${cause}.` : "."} Retry it or cancel the judge.`;
     this.database.prepare(`
       UPDATE paired_launches
       SET comparison_state = ?, comparison_failure_message = ?, updated_at = ?
@@ -985,6 +987,17 @@ export class PairedLaunchRepository {
       WHERE id = ?
         AND comparison_state IN ('waiting', 'dispatching', 'running')
     `).run(state, boundedFailure(message), now, launchId);
+    return this.get(launchId);
+  }
+
+  noteComparisonWaiting(launchId: string, message: string, requeue: boolean, now: string): StoredPairedLaunch {
+    this.database.prepare(`
+      UPDATE paired_launches
+      SET comparison_state = 'waiting', comparison_turn_id = NULL,
+        comparison_failure_message = ?, updated_at = ?
+      WHERE id = ? AND cancel_requested = 0 AND comparison_conversation_id IS NOT NULL
+        AND (comparison_state = 'waiting' OR (? = 1 AND comparison_state IN ('failed', 'interrupted')))
+    `).run(boundedFailure(message), now, launchId, requeue ? 1 : 0);
     return this.get(launchId);
   }
 

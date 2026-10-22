@@ -116,6 +116,7 @@ async function queryClaudeSkills(
         spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
         settingSources: [],
         managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
+        strictMcpConfig: true,
         plugins: [{ type: "local", path: staged.path, skipMcpDiscovery: true }],
         skills: "all",
       },

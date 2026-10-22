@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const DIALOG_EXIT_MS = 90;
+const DIALOG_EXIT_MS = 120;
 
 export function useDialogPresence(open: boolean): boolean {
   const [mounted, setMounted] = useState(open);

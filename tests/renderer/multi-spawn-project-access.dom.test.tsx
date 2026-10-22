@@ -66,7 +66,7 @@ function renderDialog(activeProjectId: string): void {
   );
 }
 
-function chooseProject(chat: 1 | 2, projectId: string): void {
+function chooseProject(chat: "A" | "B", projectId: string): void {
   fireEvent.change(screen.getByLabelText(`Chat ${chat} project`), { target: { value: projectId } });
 }
 
@@ -94,26 +94,26 @@ describe("duo access when a chat's project changes", () => {
 
   it("does not carry one project's default access into a project without one", () => {
     renderDialog(fullAccessProjectId);
-    expect(screen.getByLabelText("Chat 2 access")).toHaveValue("full");
-    chooseProject(2, plainProjectId);
-    expect(screen.getByLabelText("Chat 2 access")).toHaveValue("supervised");
-    expect(screen.getByLabelText("Chat 1 access")).toHaveValue("full");
+    expect(screen.getByLabelText("Chat B access")).toHaveValue("full");
+    chooseProject("B", plainProjectId);
+    expect(screen.getByLabelText("Chat B access")).toHaveValue("supervised");
+    expect(screen.getByLabelText("Chat A access")).toHaveValue("full");
   });
 
   it("uses the new project's default access instead of the global default", () => {
     renderDialog(plainProjectId);
-    expect(screen.getByLabelText("Chat 1 access")).toHaveValue("supervised");
-    chooseProject(1, fullAccessProjectId);
-    expect(screen.getByLabelText("Chat 1 access")).toHaveValue("full");
+    expect(screen.getByLabelText("Chat A access")).toHaveValue("supervised");
+    chooseProject("A", fullAccessProjectId);
+    expect(screen.getByLabelText("Chat A access")).toHaveValue("full");
   });
 
   it("keeps explicitly chosen access across project changes", () => {
     renderDialog(fullAccessProjectId);
-    fireEvent.change(screen.getByLabelText("Chat 2 access"), { target: { value: "auto-edit" } });
-    chooseProject(2, plainProjectId);
-    expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
-    chooseProject(2, fullAccessProjectId);
-    expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
+    fireEvent.change(screen.getByLabelText("Chat B access"), { target: { value: "auto-edit" } });
+    chooseProject("B", plainProjectId);
+    expect(screen.getByLabelText("Chat B access")).toHaveValue("auto-edit");
+    chooseProject("B", fullAccessProjectId);
+    expect(screen.getByLabelText("Chat B access")).toHaveValue("auto-edit");
   });
 
   it("keeps remembered access across project changes", () => {
@@ -126,8 +126,8 @@ describe("duo access when a chat's project changes", () => {
       comparison: { enabled: false, side: { ...side, accessMode: "supervised", interactionMode: "plan" } },
     });
     renderDialog(fullAccessProjectId);
-    expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
-    chooseProject(2, plainProjectId);
-    expect(screen.getByLabelText("Chat 2 access")).toHaveValue("auto-edit");
+    expect(screen.getByLabelText("Chat B access")).toHaveValue("auto-edit");
+    chooseProject("B", plainProjectId);
+    expect(screen.getByLabelText("Chat B access")).toHaveValue("auto-edit");
   });
 });

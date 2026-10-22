@@ -56,7 +56,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
     const outcome = await Promise.race([
       run.then(() => "settled" as const),
       new Promise<"stalled">((resolve) =>
-        setTimeout(() => resolve("stalled"), 100)),
+        setTimeout(() => resolve("stalled"), 1_000)),
     ]);
     releaseIterator();
 

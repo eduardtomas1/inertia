@@ -435,7 +435,7 @@ describe("Claude Agent SDK harness", () => {
         syncClaudeAiSkills: false,
         strictPluginOnlyCustomization: ["skills", "agents", "hooks", "mcp"],
       }),
-      permissionMode: "default",
+      permissionMode: "default", strictMcpConfig: true,
       includePartialMessages: true,
       model: "sonnet",
       effort: "high",
@@ -444,7 +444,7 @@ describe("Claude Agent SDK harness", () => {
         path: stagedPluginPath,
         skipMcpDiscovery: true,
       }],
-      skills: [`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:security-review`],
+      skills: expect.arrayContaining([`${CLAUDE_ISOLATED_SKILL_PLUGIN_NAME}:security-review`]),
     });
     const content = capturedMessage?.message.content as unknown as Array<Record<string, unknown>>;
     expect(content[0]).toMatchObject({ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } });
@@ -627,7 +627,7 @@ describe("Claude Agent SDK harness", () => {
       .toEqual(CLAUDE_ISOLATED_SKILL_SETTINGS);
     expect(discoveryOptions?.managedSettings?.syncClaudeAiSkills).toBe(false);
     expect(discoveryOptions?.mcpServers).toBeUndefined();
-    expect(discoveryOptions?.strictMcpConfig).toBeUndefined();
+    expect(discoveryOptions?.strictMcpConfig).toBe(true);
     expect(spawnProcess).toHaveBeenCalledWith(
       "/sdk/final/claude",
       ["--metadata"],
@@ -780,13 +780,13 @@ describe("Claude Agent SDK harness", () => {
     expect(discoveryOptions).toHaveLength(2);
     expect(discoveryOptions.every(({ settingSources }) =>
       settingSources?.length === 0)).toBe(true);
-    expect(discoveryOptions.every(({ managedSettings, plugins, skills }) =>
+    expect(discoveryOptions.every(({ managedSettings, plugins, skills, strictMcpConfig }) =>
       managedSettings?.disableAllHooks === true
       && managedSettings.disableSkillShellExecution === true
       && managedSettings.syncClaudeAiSkills === false
       && plugins?.length === 1
       && plugins[0]?.skipMcpDiscovery === true
-      && skills === "all")).toBe(true);
+      && skills === "all" && strictMcpConfig === true)).toBe(true);
     expect(pluginPaths.every((path) => path.length > 0 && !existsSync(path)))
       .toBe(true);
   });

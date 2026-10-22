@@ -184,7 +184,7 @@ export function createProjectWorkspaceCommandHandler(
             )
           ) {
             throw new RuntimeRequestError(
-              "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before removing this project.",
+              "A Duo in this project is still running or needs attention. Let its chats finish or stop them, or resolve it from the Duo dialog (the two-chats button in the sidebar), then remove the project again.",
             );
           }
           const latestConversations = dependencies.store.shellSnapshot()

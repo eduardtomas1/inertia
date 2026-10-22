@@ -581,7 +581,7 @@ describe("Duo third-model comparison", () => {
       .toBe("waiting");
     expect(runtime.provider.inputs).toHaveLength(2);
 
-    await settleNextProvider(runtime, "B".repeat(8_000));
+    await settleNextProvider(runtime, "B".repeat(30_000));
     await launches.onTurnSettled(
       runtime.store.agentTurn(prepared.sides[1].turnId),
     );
@@ -594,10 +594,10 @@ describe("Duo third-model comparison", () => {
     expect(runtime.provider.inputs).toHaveLength(3);
     const judgePrompt = runtime.provider.inputs[2]!.prompt;
     expect(judgePrompt.length).toBeLessThanOrEqual(20_000);
-    expect(judgePrompt).toContain("## Source A — quoted evidence");
+    expect(judgePrompt).toContain("## A — quoted evidence");
     expect(judgePrompt).toContain("Source A result");
-    expect(judgePrompt).toContain("## Source B — quoted evidence");
-    expect(judgePrompt).toContain("Source B assistant result truncated by Inertia");
+    expect(judgePrompt).toContain("## B — quoted evidence");
+    expect(judgePrompt).toContain("B assistant result truncated by Inertia");
     expect(judgePrompt).toContain("Authoritative terminal status: completed");
     expect(judgePrompt).not.toContain("source-session-must-not-cross");
     expect(judgePrompt).not.toContain("hidden-tool-history-must-not-cross");
@@ -720,10 +720,11 @@ describe("Duo third-model comparison", () => {
     runtime.store.close();
   });
 
-  it("fails the judge once bounded checkout acquisition expires", async () => {
+  it("keeps the judge waiting while its folder is held and starts it once released", async () => {
     const runtime = await createRuntime();
     const launches = comparisonCoordinator(runtime, {
       comparisonCheckoutAcquireTimeoutMs: 20,
+      judgeRetryInitialDelayMs: 20,
     });
     const prepared = await launches.prepare(comparisonPreparePayload(runtime));
     await launches.dispatch(prepared.launchId);
@@ -738,13 +739,234 @@ describe("Duo third-model comparison", () => {
     );
 
     expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "waiting",
+      attempt: 0,
+      error: expect.stringContaining("starts by itself as soon as the folder is free"),
+    });
+    expect(runtime.provider.inputs).toHaveLength(2);
+    await new Promise<void>((resolve) => setTimeout(resolve, 80));
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("waiting");
+
+    runtime.store.conversationWork.release(prepared.sides[1].conversationId);
+    await vi.waitFor(() => {
+      expect(launches.status(prepared.launchId).comparison).toMatchObject({
+        state: "running",
+        attempt: 1,
+        error: null,
+      });
+    }, { timeout: 5_000 });
+    expect(runtime.provider.inputs).toHaveLength(3);
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+  });
+
+  it("starts the judge while another chat is busy in the same folder", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    const neighbour = runtime.store.createConversation(
+      runtime.projectId,
+      "Unrelated chat in the same folder",
+      { activate: false },
+    );
+    const busy = runtime.controller.queue({
+      conversationId: neighbour.id,
+      content: "Keep working here.",
+    });
+    expect(runtime.controller.start(busy.turn.id)).toBe(true);
+    await vi.waitFor(() => expect(runtime.provider.inputs).toHaveLength(3));
+    expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(true);
+
+    await settleNextProvider(runtime, "Source A");
+    await settleNextProvider(runtime, "Source B");
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "running",
+      attempt: 1,
+      error: null,
+    });
+    expect(runtime.provider.inputs).toHaveLength(4);
+    expect(runtime.controller.isActive(neighbour.id)).toBe(true);
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+  });
+
+  it("keeps the real cause when the judge cannot start", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    vi.spyOn(runtime.controller, "queue").mockImplementationOnce(() => {
+      throw new Error("The judge route lost its credentials.");
+    });
+
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
       state: "failed",
       attempt: 1,
       error:
-        "The judge could not be queued and was not retried automatically.",
+        "The judge could not start: The judge route lost its credentials. Retry it or cancel the judge.",
     });
+    runtime.store.close();
+  });
+
+  it("releases a failed comparison when one of its chats is deleted", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    vi.spyOn(runtime.controller, "queue").mockImplementationOnce(() => {
+      throw new Error("Judge unavailable.");
+    });
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(() => runtime.store.assertConversationDeletionAllowed(
+      prepared.sides[0].conversationId,
+    )).toThrow(/locked comparison/u);
+
+    await expect(launches.reconcileConversationDeletion(
+      prepared.sides[0].conversationId,
+      "conversation-delete:test",
+    )).resolves.toBe(true);
+
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("cancelled");
+    runtime.store.deleteConversation(prepared.sides[0].conversationId);
+    expect(runtime.store.conversation(prepared.sides[1].conversationId)).toBeTruthy();
+    runtime.store.close();
+  });
+
+  it("releases a judge waiting for its folder when its chat is deleted", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime, {
+      comparisonCheckoutAcquireTimeoutMs: 0,
+      judgeRetryInitialDelayMs: 60_000,
+    });
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(runtime.store.conversationWork.reserve(
+      prepared.sides[0].conversationId,
+    )).toBe(true);
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("waiting");
+
+    await expect(launches.reconcileConversationDeletion(
+      prepared.comparison!.conversationId,
+      "conversation-delete:test",
+    )).resolves.toBe(true);
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "cancelled",
+      error: null,
+    });
+    runtime.store.deleteConversation(prepared.comparison!.conversationId);
+    runtime.store.conversationWork.release(prepared.sides[0].conversationId);
     expect(runtime.provider.inputs).toHaveLength(2);
-    runtime.store.conversationWork.release(prepared.sides[1].conversationId);
+    runtime.store.close();
+  });
+
+  it("keeps the provider's reason when the judge turn fails", async () => {
+    let launches!: DuoLaunchCoordinator;
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    await settleNextProvider(runtime, "Source A");
+    await settleNextProvider(runtime, "Source B");
+    await runtime.controller.drainSettlementTasks();
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("running");
+
+    await settleNextProvider(runtime, "", "failed");
+    await runtime.controller.drainSettlementTasks();
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "failed",
+      error: expect.stringMatching(/^The judge turn failed: .*Expected provider failure.* Retry it or cancel the judge\.$/u),
+    });
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+  });
+
+  it("lets deletion interrupt a judge start that is still waiting for its folder", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime, {
+      comparisonCheckoutAcquireTimeoutMs: 10_000,
+    });
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(runtime.store.conversationWork.reserve(
+      prepared.sides[0].conversationId,
+    )).toBe(true);
+    const starting = launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+    const startedAt = Date.now();
+    await expect(launches.reconcileConversationDeletion(
+      prepared.comparison!.conversationId,
+      "conversation-delete:test",
+    )).resolves.toBe(true);
+    await starting;
+
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("cancelled");
+    expect(runtime.provider.inputs).toHaveLength(2);
+    runtime.store.conversationWork.release(prepared.sides[0].conversationId);
+    runtime.store.close();
+  });
+
+  it("puts an explicit retry back to waiting while the judge folder is held", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime, {
+      comparisonCheckoutAcquireTimeoutMs: 0,
+      judgeRetryInitialDelayMs: 20,
+    });
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    vi.spyOn(runtime.controller, "queue").mockImplementationOnce(() => {
+      throw new Error("Transient queue failure.");
+    });
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("failed");
+
+    expect(runtime.store.conversationWork.reserve(
+      prepared.sides[0].conversationId,
+    )).toBe(true);
+    expect(await launches.retryComparison(prepared.launchId)).toMatchObject({
+      comparison: { state: "waiting", attempt: 1, turnId: null },
+    });
+    runtime.store.conversationWork.release(prepared.sides[0].conversationId);
+    await vi.waitFor(() => {
+      expect(launches.status(prepared.launchId).comparison).toMatchObject({
+        state: "running",
+        attempt: 2,
+      });
+    }, { timeout: 5_000 });
+    await runtime.controller.dispose("runtime-shutdown");
     runtime.store.close();
   });
 

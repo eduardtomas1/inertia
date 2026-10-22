@@ -636,7 +636,7 @@ export function createConversationCommandHandler(
             )
           ) {
             throw new RuntimeRequestError(
-              "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before deleting this thread.",
+              "This chat belongs to a Duo that is still running or needs attention. Let its chats finish or stop them, or resolve it from the Duo dialog (the two-chats button in the sidebar), then delete again.",
             );
           }
           if (

@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
 
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { defineConfig } from "electron-vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       target: "node22",
       emptyOutDir: false,
       rollupOptions: {

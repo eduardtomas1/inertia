@@ -313,6 +313,12 @@ describe("accepted turn viewport anchoring", () => {
       });
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get")
       .mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("anchor-test-scroll") ? 600 : 120;
+      });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLElement) {
         const scroll = this.closest<HTMLElement>(".anchor-test-scroll");
@@ -367,6 +373,8 @@ describe("accepted turn viewport anchoring", () => {
         return this.classList.contains("anchor-test-scroll") ? 600 : 120;
       });
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get")
       .mockImplementation(function (this: HTMLElement) {
@@ -988,6 +996,12 @@ describe("completed answer positioning", () => {
         return this.classList.contains("anchor-test-scroll") ? 600 : 120;
       });
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("anchor-test-scroll") ? 600 : 120;
+      });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(800);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLElement) {

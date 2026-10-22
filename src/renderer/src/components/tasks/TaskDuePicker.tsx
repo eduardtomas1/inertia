@@ -74,7 +74,6 @@ export function TaskDuePicker({ dueDate, dueTime, now, onCommit, onClose }: Task
   const weekdays = useMemo(() => weekdayNames(weekStart), [weekStart]);
   const [selected, setSelected] = useState<string | null>(dueDate);
   const [focused, setFocused] = useState<string>(dueDate ?? todayKey);
-  const [time, setTime] = useState<string | null>(dueDate ? dueTime : null);
   const [timeText, setTimeText] = useState(dueDate && dueTime ? formatTodoTime(dueTime) : "");
   const [timeInvalid, setTimeInvalid] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -106,7 +105,6 @@ export function TaskDuePicker({ dueDate, dueTime, now, onCommit, onClose }: Task
   const settleTime = (): string | null | undefined => {
     const text = timeText.trim();
     if (!text) {
-      setTime(null);
       setTimeInvalid(false);
       return null;
     }
@@ -115,7 +113,6 @@ export function TaskDuePicker({ dueDate, dueTime, now, onCommit, onClose }: Task
       setTimeInvalid(true);
       return undefined;
     }
-    setTime(parsed);
     setTimeText(formatTodoTime(parsed));
     setTimeInvalid(false);
     return parsed;
@@ -185,7 +182,10 @@ export function TaskDuePicker({ dueDate, dueTime, now, onCommit, onClose }: Task
                 key={preset}
                 className="task-due-preset"
                 aria-label={`${TODO_DUE_PRESET_LABELS[preset]}, ${formatTodoDay(day)}`}
-                onClick={() => commit(day, time)}
+                onClick={() => {
+                  const nextTime = settleTime();
+                  if (nextTime !== undefined) commit(day, nextTime);
+                }}
               >
                 <span aria-hidden="true">{TODO_DUE_PRESET_LABELS[preset]}</span>
                 <span className="task-due-preset-day" aria-hidden="true">{formatTodoDay(day)}</span>
@@ -281,7 +281,6 @@ export function TaskDuePicker({ dueDate, dueTime, now, onCommit, onClose }: Task
               className="task-due-clear"
               onClick={() => {
                 setTimeText("");
-                setTime(null);
                 setTimeInvalid(false);
                 timeRef.current?.focus({ preventScroll: true });
               }}

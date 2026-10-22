@@ -115,6 +115,20 @@ describe("TaskDuePicker", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("commits a preset with the typed time and refuses one that does not parse", async () => {
+    const { user, onCommit } = renderPicker({ dueDate: "2026-11-05", dueTime: "09:30" });
+    await user.clear(timeInput());
+    await user.type(timeInput(), "25");
+    await user.click(screen.getByRole("button", { name: "Tomorrow, Thu 22 Oct" }));
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Use a time like 15:00");
+
+    fireEvent.change(timeInput(), { target: { value: "3pm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next week, Mon 26 Oct" }));
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith({ dueDate: "2026-10-26", dueTime: "15:00" });
+  });
+
   it("clears both fields with No date", async () => {
     const { user, onCommit } = renderPicker({ dueDate: "2026-11-05", dueTime: "15:00" });
     await user.click(screen.getByRole("button", { name: "No date" }));

@@ -22,6 +22,7 @@ import {
   type ProviderRunInput,
   type ProviderRunResult,
 } from "../../src/server/provider/contracts";
+import { createConversationCommandHandler } from "../../src/server/runtime/commands/conversation-commands";
 import {
   DuoLaunchCoordinator,
   reconcileInterruptedDuoLaunches,
@@ -844,6 +845,42 @@ describe("Duo third-model comparison", () => {
     expect(launches.status(prepared.launchId).comparison?.state).toBe("cancelled");
     runtime.store.deleteConversation(prepared.sides[0].conversationId);
     expect(runtime.store.conversation(prepared.sides[1].conversationId)).toBeTruthy();
+    runtime.store.close();
+  });
+
+  it("keeps a failed comparison when deleting one of its chats is refused for another reason", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    vi.spyOn(runtime.controller, "queue").mockImplementationOnce(() => {
+      throw new Error("Judge unavailable.");
+    });
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("failed");
+    vi.spyOn(runtime.store, "hasRecordedActiveWorkspaceRunForConversation")
+      .mockImplementation((id) => id === prepared.sides[0].conversationId);
+    const handler = createConversationCommandHandler({
+      store: runtime.store,
+      duoLaunches: launches,
+      providerTerminalResumes: {
+        acquireAtCheckout: () => true,
+        release: () => undefined,
+      },
+    } as never);
+
+    await expect(handler({} as never, {
+      type: "conversation.delete",
+      requestId: randomUUID(),
+      payload: { conversationId: prepared.sides[0].conversationId },
+    })).rejects.toThrow("Stop the active run or review before deleting this thread.");
+
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("failed");
+    expect(runtime.store.conversation(prepared.sides[0].conversationId)).toBeTruthy();
     runtime.store.close();
   });
 

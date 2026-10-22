@@ -1,6 +1,10 @@
 import type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol.js";
 import {
+  type LinuxCgroupContainment,
+  validLinuxCgroupContainment,
+} from "./runtime-owned-process-linux-cgroup.js";
+import {
   RUNTIME_OWNED_PROCESS_SESSION_VERSION as SCHEMA_VERSION,
   type RuntimeOwnedProcessSession,
 } from "./runtime-owned-process-session-journal.js";
@@ -164,7 +168,14 @@ export function parseRuntimeOwnedProcessRecord(
     ]) || exactKeys(record.process, [
       "guardianExecutableDevice", "guardianExecutableInode",
       "parentPid", "pid", "processGroupId", "startTimeTicks",
-    ]))
+    ]) || (exactKeys(record.process, [
+      "cgroupNamespace", "cgroupPath",
+      "guardianExecutableDevice", "guardianExecutableInode",
+      "parentPid", "pid", "processGroupId", "startTimeTicks",
+    ]) && validLinuxCgroupContainment(
+      (identity as Partial<LinuxCgroupContainment>).cgroupPath,
+      (identity as Partial<LinuxCgroupContainment>).cgroupNamespace,
+    )))
       && validPid(identity.pid)
       && validPid((identity as Partial<LinuxProcessIdentity>).parentPid)
       && validPid(identity.processGroupId)

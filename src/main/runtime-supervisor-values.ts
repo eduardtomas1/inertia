@@ -64,7 +64,7 @@ export function unconfirmedRuntimeCleanupMessage(
   _systemBootId: string,
   prefix: string,
 ): string {
-  return `${prefix} Inertia kept the affected work unchanged and will retry exact cleanup when its local service starts again.`;
+  return `${prefix} Inertia kept the affected work unchanged and will retry exact cleanup when its local service starts again. If this keeps happening, restart your computer: Inertia can then confirm the old processes are gone and start normally.`;
 }
 
 export function isRuntimeMascotStatusMessage(value: unknown): boolean {

@@ -23,6 +23,8 @@ import {
   linuxGuardianTerminalAuthority,
   recoverLinuxGuardianTerminalExact,
 } from "../node/runtime-owned-process-linux.js";
+import { linuxGuardianProcessTreeGone } from
+  "../node/runtime-owned-process-linux-cgroup.js";
 export { readDarwinProcessIdentity } from "../node/runtime-owned-processes.js";
 
 type Kill = (pid: number, signal?: NodeJS.Signals | number) => true;
@@ -46,6 +48,7 @@ export interface RuntimeOwnedProcessRecoveryOptions {
   readonly waitForProcessGroupDrain?: (durationMs: number) => Promise<void>;
   readonly linuxTerminalAuthority?: typeof linuxGuardianTerminalAuthority;
   readonly recoverLinuxGuardian?: typeof recoverLinuxGuardianTerminalExact;
+  readonly linuxGuardianTreeGone?: typeof linuxGuardianProcessTreeGone;
 }
 
 function exactPidAbsent(pid: number, kill: Kill): boolean {
@@ -292,6 +295,8 @@ export function recoverRuntimeOwnedProcesses(
     ?? linuxGuardianTerminalAuthority;
   const recoverLinuxGuardian = options.recoverLinuxGuardian
     ?? recoverLinuxGuardianTerminalExact;
+  const linuxGuardianTreeGone = options.linuxGuardianTreeGone
+    ?? linuxGuardianProcessTreeGone;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
   const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
     platform,
@@ -478,7 +483,20 @@ export function recoverRuntimeOwnedProcesses(
             waitForProcessGroupDrain,
           )
         ) continue;
-        if (platform === "linux" && options.darwinGuardianPath) return false;
+        if (platform === "linux" && options.darwinGuardianPath) {
+          if (
+            !("startTimeTicks" in record.process)
+            || !linuxGuardianTreeGone(record.process, null)
+            || !await releaseRuntimeOwnedProcessClaimAfterProof(
+              journal,
+              runtimeGenerationId,
+              record.ownershipId,
+              options.deadlineAt,
+              waitForProcessGroupDrain,
+            )
+          ) return false;
+          continue;
+        }
         if (platform === "darwin") {
           // A missing guardian and an empty birth session do not prove that a
           // fork-tainted descendant is gone: it may have double-forked,
@@ -514,7 +532,24 @@ export function recoverRuntimeOwnedProcesses(
         ) return false;
         continue;
       }
-      if (!RuntimeOwnedProcessJournal.identityMatches(record, identity)) return false;
+      if (!RuntimeOwnedProcessJournal.identityMatches(record, identity)) {
+        if (
+          platform !== "linux"
+          || !options.darwinGuardianPath
+          || !("startTimeTicks" in identity)
+          || !("startTimeTicks" in record.process)
+          || identity.startTimeTicks === record.process.startTimeTicks
+          || !linuxGuardianTreeGone(record.process, identity.startTimeTicks)
+          || !await releaseRuntimeOwnedProcessClaimAfterProof(
+            journal,
+            runtimeGenerationId,
+            record.ownershipId,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          )
+        ) return false;
+        continue;
+      }
       if (
         platform === "linux"
         && (record.state === "preauth" || record.state === "owned")

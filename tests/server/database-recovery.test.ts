@@ -1794,6 +1794,18 @@ describe("database backup and startup recovery", () => {
           SELECT RAISE(ABORT, 'task count limit exceeded');
         END;
     `);
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      DROP TRIGGER todos_count_limit;
+      CREATE TRIGGER todos_count_limit
+        BEFORE INSERT ON todos
+        WHEN NEW.completed_at IS NULL
+          AND (SELECT COUNT(*) FROM todos WHERE completed_at IS NULL) >= 200
+        BEGIN
+          SELECT RAISE(ABORT, 'task count limit exceeded');
+        END;
+    `);
     await expect(manager.createBackup()).resolves.toMatchObject({
       filename: expect.stringMatching(/\.sqlite$/u),
     });

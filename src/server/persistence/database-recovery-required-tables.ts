@@ -182,10 +182,10 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [94, "agent_context_reads_identity_idx"],
     [94, "agent_context_reads_target_idx"],
     [96, "todos_conversation_idx"],
-    [100, "todos_project_idx"],
     [99, "watcher_links_active_watched_idx"],
     [99, "watcher_links_project_idx"],
     [99, "watcher_wakes_link_idx"],
+    [100, "todos_project_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -205,6 +205,12 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "update watcher_links",
       "watched_conversation_id = null",
       "where watched_conversation_id = old.id",
+    ]],
+    [100, "todos_count_limit", [
+      "before insert on todos",
+      "when new.completed_at is null",
+      "(select count(*) from todos where completed_at is null) >= 200",
+      "raise(abort,",
     ]],
   ],
 };

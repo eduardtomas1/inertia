@@ -311,6 +311,24 @@ describe("Starting from the card", () => {
     expect(within(card).getByRole("button", { name: "Try again" })).toHaveFocus();
   });
 
+  it("cancels the retry form with Escape and closes the card with the next one", async () => {
+    const user = userEvent.setup();
+    harness(snapshot([linked()], {
+      conversations: [conversation({ status: "failed", latestTurn: turn({ status: "failed" }) })],
+    }));
+    const card = openCard();
+    await user.click(within(card).getByRole("button", { name: "Try again" }));
+    const form = within(card).getByRole("group", { name: "Hand it to an agent" });
+    await waitFor(() => expect(within(form).getByRole("button", { name: "Start" })).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("complementary", { name: "Task details" })).toBe(card);
+    expect(within(card).queryByRole("group", { name: "Hand it to an agent" })).toBeNull();
+    expect(within(card).getByRole("button", { name: "Try again" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary", { name: "Task details" })).toBeNull();
+  });
+
   it("never offers the hand-off on a done task", () => {
     harness(snapshot([todo(firstId, "Clean the downloads folder", { completedAt: "2026-10-11T07:00:00.000Z" })]));
     fireEvent.click(screen.getByRole("button", { name: "Done 1" }));

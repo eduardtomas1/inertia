@@ -138,7 +138,16 @@ export function TaskAgentPanel({
         </div>
       )}
       {formMounted && (
-        <div className="task-agent-form" hidden={!formVisible || undefined}>
+        <div
+          className="task-agent-form"
+          hidden={!formVisible || undefined}
+          onKeyDown={(event) => {
+            if (!retrying || event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+            if (event.target instanceof HTMLSelectElement) return;
+            event.preventDefault();
+            cancelRetry();
+          }}
+        >
           {renderHandoff({
             retry: retrying && canRetry,
             onCancel: kind === "todo" ? undefined : cancelRetry,

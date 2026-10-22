@@ -12,7 +12,12 @@ import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/
 import { todosCountLimitTriggerIsValid } from "../../src/server/persistence/todos-schema";
 import { TodoRepository, TodoRepositoryError } from "../../src/server/persistence/todo-repository";
 import { publicRuntimeError } from "../../src/server/runtime-errors";
-import { MAX_DONE_TODOS, MAX_OPEN_TODOS } from "../../src/shared/todos";
+import {
+  MAX_DONE_TODOS,
+  MAX_OPEN_TODOS,
+  MAX_TODOS_SERIALIZED_BYTES,
+  todosSerializedBytes,
+} from "../../src/shared/todos";
 
 const temporaryDirectories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -444,6 +449,71 @@ describe("RuntimeStore tasks", () => {
     store.todos.update(last.id, { note: "" });
     expect(() => store.todos.update(last.id, { note })).not.toThrow();
     expect(() => store.todos.create({ id: randomUUID(), title: "Overflow", note })).toThrow("Tasks exceed the safe local storage limit.");
+  });
+
+  it("drops the oldest done tasks to make room before it refuses a task", async () => {
+    const { store } = await openStore();
+    const note = "\u4efb".repeat(2_000);
+    const finished: string[] = [];
+    for (let index = 0; index < MAX_DONE_TODOS; index += 1) {
+      const created = store.todos.create({ id: randomUUID(), title: "T".repeat(200), note });
+      store.todos.update(created.id, { completed: true });
+      finished.push(created.id);
+    }
+    const kept = store.todos.list();
+    expect(kept.length).toBeLessThan(MAX_DONE_TODOS);
+    expect(todosSerializedBytes(kept)).toBeLessThanOrEqual(MAX_TODOS_SERIALIZED_BYTES);
+    expect(kept.map(({ id }) => id)).toEqual(finished.slice(-kept.length));
+
+    const open = store.todos.create({ id: randomUUID(), title: "Short" });
+    expect(store.todos.get(open.id)).toMatchObject({ completedAt: null });
+    expect(store.todos.get(finished.at(-1)!)).not.toBeNull();
+    expect(todosSerializedBytes(store.todos.list())).toBeLessThanOrEqual(MAX_TODOS_SERIALIZED_BYTES);
+  });
+
+  it("completes a task when the open tasks fill the bound", async () => {
+    const { store } = await openStore();
+    const note = "\u4efb".repeat(2_000);
+    const ids: string[] = [];
+    let failure: unknown;
+    while (!failure) {
+      try {
+        ids.push(store.todos.create({ id: randomUUID(), title: "T", note }).id);
+      } catch (error) {
+        failure = error;
+      }
+    }
+    expect((failure as Error).message).toBe("Tasks exceed the safe local storage limit.");
+    const create = (): string | null => {
+      try {
+        return store.todos.create({ id: randomUUID(), title: "x" }).id;
+      } catch {
+        return null;
+      }
+    };
+    let filler = create();
+    if (!filler) {
+      store.todos.update(ids.at(-1)!, { note: "\u4efb".repeat(1_800) });
+      filler = create()!;
+    }
+    let fits = 0;
+    let refused = 2_000;
+    while (refused - fits > 1) {
+      const length = Math.floor((fits + refused) / 2);
+      try {
+        store.todos.update(filler, { note: "\u4efb".repeat(length) });
+        fits = length;
+      } catch {
+        refused = length;
+      }
+    }
+    store.todos.update(filler, { note: "\u4efb".repeat(fits) });
+    expect(() => store.todos.update(filler, { note: "\u4efb".repeat(fits + 1) }))
+      .toThrow("Tasks exceed the safe local storage limit.");
+
+    expect(store.todos.update(ids[0]!, { completed: true }).completedAt).not.toBeNull();
+    expect(store.todos.update(ids[0]!, { completed: false }).completedAt).toBeNull();
+    expect(todosSerializedBytes(store.todos.list())).toBeLessThanOrEqual(MAX_TODOS_SERIALIZED_BYTES);
   });
 
   it("rejects rows that bypass the schema at the database boundary", async () => {

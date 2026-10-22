@@ -52,6 +52,8 @@ const TODO_COLUMNS = `
   conversation_id, linked_at, created_at, updated_at
 `;
 
+const COMPLETED_AT_PLACEHOLDER = new Date(0).toISOString();
+
 const warnedRowIds = new Set<string>();
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -144,7 +146,7 @@ export class TodoRepository {
         createdAt: timestamp,
         updatedAt: timestamp,
       });
-      this.assertSerializedBound([...this.list(), todo]);
+      this.makeRoom([...this.list(), todo], todo.id);
       this.database.prepare(`
         INSERT INTO todos (${TODO_COLUMNS})
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
@@ -259,7 +261,7 @@ export class TodoRepository {
 
   private write(current: readonly Todo[], candidate: Todo): Todo {
     const next = parse(todoSchema, { ...candidate, updatedAt: this.now() });
-    this.assertSerializedBound(current.map((todo) => todo.id === next.id ? next : todo));
+    this.makeRoom(current.map((todo) => todo.id === next.id ? next : todo), next.id);
     this.database.prepare(`
       UPDATE todos SET
         title = ?, note = ?, priority = ?, due_date = ?, due_time = ?,
@@ -288,9 +290,24 @@ export class TodoRepository {
     return todo;
   }
 
-  private assertSerializedBound(todos: readonly Todo[]): void {
-    if (todosSerializedBytes(todos) > MAX_TODOS_SERIALIZED_BYTES) {
+  private makeRoom(todos: readonly Todo[], keepId: string): void {
+    const bytes = (todo: Todo): number => todosSerializedBytes([
+      todo.completedAt === null ? { ...todo, completedAt: COMPLETED_AT_PLACEHOLDER } : todo,
+    ]) - 2;
+    let total = todos.reduce((sum, todo) => sum + bytes(todo) + 1, 1);
+    const evicted: string[] = [];
+    const oldestDone = todos
+      .filter(({ id, completedAt }) => completedAt !== null && id !== keepId)
+      .sort((left, right) => left.completedAt!.localeCompare(right.completedAt!) || left.id.localeCompare(right.id));
+    for (const todo of oldestDone) {
+      if (total <= MAX_TODOS_SERIALIZED_BYTES) break;
+      total -= bytes(todo) + 1;
+      evicted.push(todo.id);
+    }
+    if (total > MAX_TODOS_SERIALIZED_BYTES) {
       throw new TodoRepositoryError("Tasks exceed the safe local storage limit.");
     }
+    const remove = this.database.prepare("DELETE FROM todos WHERE id = ?");
+    for (const id of evicted) remove.run(id);
   }
 }

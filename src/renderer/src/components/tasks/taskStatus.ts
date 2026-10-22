@@ -27,7 +27,6 @@ export interface TaskStatus {
   word: string | null;
   tone: TaskStatusTone | null;
   need: TaskNeed | null;
-  reason: string | null;
 }
 
 export interface TaskStatusInput {
@@ -49,9 +48,9 @@ function status(
   bucket: TaskBucket,
   word: string | null,
   tone: TaskStatusTone | null,
-  extra: Partial<Pick<TaskStatus, "need" | "reason">> = {},
+  need: TaskNeed | null = null,
 ): TaskStatus {
-  return { kind, bucket, word, tone, need: extra.need ?? null, reason: extra.reason ?? null };
+  return { kind, bucket, word, tone, need };
 }
 
 function withinStartGrace(linkedAt: string | null, now: number): boolean {
@@ -73,7 +72,7 @@ export function deriveTaskStatus({ todo, status: chat, shell, now, starting }: T
   }
   if (shell.archivedAt !== null) return status("archived", "to-do", "Chat archived", "muted");
   if (chat === "approval" || chat === "input" || chat === "limited") {
-    return status("needs", "needs-you", NEED_WORDS[chat], chat === "input" ? "input" : "approval", { need: chat });
+    return status("needs", "needs-you", NEED_WORDS[chat], chat === "input" ? "input" : "approval", chat);
   }
   if (chat === "working") return status("working", "working", "Working…", "working");
   if (chat === "failed") {

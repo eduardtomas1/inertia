@@ -444,7 +444,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Tasks",
-        detail: "Open Tasks. Press it again in Tasks to add a task.",
+        detail: "Open Tasks with the cursor in the add row.",
         shortcut: "tasks",
         jump: "Open Settings → Keyboard",
       },

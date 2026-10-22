@@ -259,7 +259,7 @@ export function TaskDuePicker({ dueDate, dueTime, now, onCommit, onClose }: Task
             inputMode="numeric"
             autoComplete="off"
             spellCheck={false}
-            placeholder={selected ? "Add time" : "Pick a day first"}
+            placeholder="Add time"
             disabled={!selected}
             value={selected ? timeText : ""}
             aria-invalid={timeInvalid || undefined}

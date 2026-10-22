@@ -101,14 +101,14 @@ describe("Task card wells", () => {
     {
       name: "archived",
       chat: { status: "running", archivedAt: longAgo },
-      headline: "This chat was archived.",
+      headline: "Chat archived",
       actions: [["Open chat", false], ["Hand off again", true]],
       tone: "is-muted",
     },
     {
       name: "parked",
       chat: { status: "idle", latestTurn: null },
-      headline: "The chat never started.",
+      headline: "Not started",
       actions: [["Open chat", false], ["Hand off again", true]],
       tone: "is-muted",
     },
@@ -141,9 +141,6 @@ describe("Task card wells", () => {
       expect(well(card).querySelector(".task-well-headline")).toHaveTextContent(entry.headline);
       expect(actionNames(card)).toEqual(entry.actions);
       expect(within(card).queryByRole("group", { name: "Hand it to an agent" })).toBeNull();
-      if (entry.name === "failed") {
-        expect(well(card).querySelector(".task-well-detail")).toBeNull();
-      }
     });
   }
 

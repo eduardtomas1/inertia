@@ -35,7 +35,7 @@ describe("TaskDuePicker", () => {
     expect(screen.getAllByRole("gridcell").filter((cell) => cell.getAttribute("aria-selected") === "true")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "No date" })).toBeNull();
     expect(timeInput()).toBeDisabled();
-    expect(timeInput()).toHaveAttribute("placeholder", "Pick a day first");
+    expect(timeInput()).toHaveAttribute("placeholder", "Add time");
   });
 
   it("opens on the selected day and its month", () => {

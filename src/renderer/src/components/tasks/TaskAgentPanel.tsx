@@ -28,7 +28,6 @@ export interface TaskAgentPanelProps {
 
 interface Well {
   headline: string;
-  detail: string | null;
   tone: string | null;
 }
 
@@ -49,33 +48,30 @@ function wellFor(
     case "todo":
       return null;
     case "starting":
-      return { headline: "Starting…", detail: null, tone: "muted" };
+      return { headline: "Starting…", tone: "muted" };
     case "working":
-      return { headline: `${providerLabel} is working on it`, detail: null, tone: "working" };
+      return { headline: `${providerLabel} is working on it`, tone: "working" };
     case "needs":
       return {
         headline: `${providerLabel} ${NEED_HEADLINES[status.need ?? "approval"]}`,
-        detail: null,
         tone: status.tone,
       };
     case "review":
       return {
         headline: finishedLabel(shell?.latestTurn?.completedAt ?? shell?.completedAt ?? null, now),
-        detail: null,
         tone: "completed",
       };
     case "failed":
-      return { headline: "Failed", detail: status.reason, tone: "failed" };
+      return { headline: "Failed", tone: "failed" };
     case "stopped":
-      return { headline: "Stopped", detail: null, tone: "muted" };
+      return { headline: "Stopped", tone: "muted" };
     case "archived":
-      return { headline: "This chat was archived.", detail: null, tone: "muted" };
+      return { headline: "Chat archived", tone: "muted" };
     case "parked":
-      return { headline: "The chat never started.", detail: null, tone: "muted" };
+      return { headline: "Not started", tone: "muted" };
     case "done":
       return {
         headline: todo.completedAt ? `Done · ${formatTaskDay(todo.completedAt, new Date(now))}` : "Done",
-        detail: null,
         tone: "muted",
       };
   }
@@ -130,7 +126,6 @@ export function TaskAgentPanel({
       {well && (
         <div className={clsx("task-well", well.tone && `is-${well.tone}`)}>
           <p className="task-well-headline">{well.headline}</p>
-          {well.detail && <p className="task-well-detail">{well.detail}</p>}
         </div>
       )}
       {formMounted && (

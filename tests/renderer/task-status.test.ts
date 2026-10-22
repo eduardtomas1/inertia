@@ -87,8 +87,7 @@ describe("deriveTaskStatus", () => {
     expect([status.kind, status.word, status.tone, status.bucket]).toEqual([kind, word, tone, bucket]);
   });
 
-  it("keeps the failure code out of the reason and carries the need kind", () => {
-    expect(deriveTaskStatus(input({ status: "failed", turn: failedTurn })).reason).toBeNull();
+  it("carries the need kind", () => {
     expect(deriveTaskStatus(input({ status: "input" })).need).toBe("input");
   });
 

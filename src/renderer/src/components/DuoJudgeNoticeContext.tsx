@@ -1,4 +1,11 @@
-import { createContext, lazy, Suspense, useContext } from "react";
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useContext,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import type { ThreadStatus } from "@shared/contracts";
 import type { DuoJudgeNotices } from "../hooks/useDuoLaunchWatch";
 
@@ -21,6 +28,19 @@ export function DuoJudgeNoticeSlot({
 }): React.JSX.Element | null {
   const notices = useDuoJudgeNotices();
   const entry = notices?.comparisonForConversation(conversationId) ?? null;
+  const pendingAction = entry ? notices?.pendingAction(entry.launchId) ?? null : null;
+  const focusRegion = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    const region = focusRegion.current;
+    if (!region || pendingAction) return;
+    focusRegion.current = null;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    (region.querySelector<HTMLElement>(".duo-judge-notice button:not(:disabled)")
+      ?? region.querySelector<HTMLElement>("textarea"))?.focus();
+  });
+  const keepFocus = (): void => {
+    focusRegion.current = document.activeElement?.closest(".composer-region") ?? null;
+  };
   if (
     !notices
     || !entry
@@ -35,11 +55,20 @@ export function DuoJudgeNoticeSlot({
       <DuoJudgeNotice
         entry={entry}
         conversationStatus={conversationStatus}
-        pendingAction={notices.pendingAction(entry.launchId)}
-        onRetry={() => { void notices.retry(entry.launchId); }}
-        onCancel={() => { void notices.cancel(entry.launchId); }}
+        pendingAction={pendingAction}
+        onRetry={() => {
+          keepFocus();
+          void notices.retry(entry.launchId);
+        }}
+        onCancel={() => {
+          keepFocus();
+          void notices.cancel(entry.launchId);
+        }}
         onOpenJudge={notices.openJudge}
-        onDismiss={() => notices.dismissVerdict(entry.launchId, conversationId)}
+        onDismiss={() => {
+          keepFocus();
+          notices.dismissVerdict(entry.launchId, conversationId);
+        }}
       />
     </Suspense>
   );

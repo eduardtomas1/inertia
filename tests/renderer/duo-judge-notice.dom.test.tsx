@@ -274,6 +274,89 @@ describe("Duo judge notice", () => {
     expect(container.querySelectorAll(".duo-judge-notice")).toHaveLength(1);
   });
 
+  describe("keeps keyboard focus after a notice action", () => {
+    const sideConversationId = "11111111-1111-4111-8111-111111111111";
+
+    function focusHarness(role: "judge" | "side") {
+      const conversationId = role === "judge" ? judgeConversationId : sideConversationId;
+      let current = entry(role, "failed", "The judge turn failed: provider exited. Retry it or cancel the judge.");
+      let pending: "retry" | "cancel" | null = null;
+      let dismissed = false;
+      const notices = (): DuoJudgeNotices => ({
+        comparisonForConversation: () => current,
+        pendingAction: () => pending,
+        retry: vi.fn(async () => undefined),
+        cancel: vi.fn(async () => undefined),
+        openJudge: vi.fn(),
+        verdictDismissed: () => dismissed,
+        dismissVerdict: () => {
+          dismissed = true;
+          view.rerender(tree());
+        },
+        alerts: [],
+        dismissAlert: vi.fn(),
+      });
+      const tree = () => (
+        <DuoJudgeNoticeContext.Provider value={notices()}>
+          <div className="composer-region">
+            <DuoJudgeNoticeSlot conversationId={conversationId} conversationStatus="idle" />
+            <textarea aria-label="Message" />
+          </div>
+        </DuoJudgeNoticeContext.Provider>
+      );
+      const view = render(tree());
+      const update = (
+        state: DuoComparisonState,
+        nextPending: "retry" | "cancel" | null = null,
+      ): void => {
+        current = entry(role, state, state === "failed" ? "The judge turn failed: again." : null);
+        pending = nextPending;
+        view.rerender(tree());
+      };
+      const press = async (name: string, nextPending: "retry" | "cancel" | null = null): Promise<void> => {
+        const button = await screen.findByRole("button", { name });
+        button.focus();
+        fireEvent.click(button);
+        if (nextPending) {
+          button.blur();
+          pending = nextPending;
+          view.rerender(tree());
+        }
+      };
+      return { press, update };
+    }
+
+    it("moves focus to the composer when Retry removes the judge chat's notice", async () => {
+      const { press, update } = focusHarness("judge");
+      await press("Retry", "retry");
+      update("running");
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    });
+
+    it("moves focus to Open judge when Retry starts the judge from a side chat", async () => {
+      const { press, update } = focusHarness("side");
+      await press("Retry", "retry");
+      update("running");
+      expect(screen.getByRole("button", { name: "Open judge" })).toHaveFocus();
+    });
+
+    it("returns focus to Retry when the judge fails again", async () => {
+      const { press, update } = focusHarness("judge");
+      await press("Retry", "retry");
+      update("failed");
+      expect(screen.getByRole("button", { name: "Retry" })).toHaveFocus();
+    });
+
+    it("moves focus to the composer when the verdict notice is dismissed", async () => {
+      const { press, update } = focusHarness("side");
+      update("completed");
+      await press("Dismiss verdict notice");
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    });
+  });
+
   it("renders nothing without a Duo context", () => {
     const { container } = render(
       <DuoJudgeNoticeSlot

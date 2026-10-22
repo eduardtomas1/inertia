@@ -121,6 +121,7 @@ export function useMultiSpawn({
   workspaceVisible = true,
   splitConversationId = null,
   splitConversationIds,
+  detachedConversationIds,
   splitSelectionTransitionsRef,
   updateSplitConversationId,
   showWorkspace,
@@ -144,6 +145,7 @@ export function useMultiSpawn({
   workspaceVisible?: boolean;
   splitConversationId?: string | null;
   splitConversationIds?: ReadonlySet<string>;
+  detachedConversationIds?: ReadonlySet<string>;
   splitSelectionTransitionsRef: MutableRefObject<number>;
   updateSplitConversationId: (conversationId: string | null) => void;
   showWorkspace: () => void;
@@ -180,12 +182,21 @@ export function useMultiSpawn({
   const watchedStatusesRef = useRef<Readonly<Record<string, DuoStatusResult>>>({});
   splitConversationIdRef.current = splitConversationId;
   const activeConversationId = snapshot?.activeConversationId ?? null;
-  const visibleConversationIds = useMemo(() => workspaceVisible
-    ? [
-        ...(activeConversationId ? [activeConversationId] : []),
-        ...(splitConversationIds ?? (splitConversationId ? [splitConversationId] : [])),
-      ]
-    : [], [activeConversationId, splitConversationId, splitConversationIds, workspaceVisible]);
+  const visibleConversationIds = useMemo(() => [
+    ...(workspaceVisible
+      ? [
+          ...(activeConversationId ? [activeConversationId] : []),
+          ...(splitConversationIds ?? (splitConversationId ? [splitConversationId] : [])),
+        ]
+      : []),
+    ...(detachedConversationIds ?? []),
+  ], [
+    activeConversationId,
+    detachedConversationIds,
+    splitConversationId,
+    splitConversationIds,
+    workspaceVisible,
+  ]);
 
   const presentRecoveryStatus = useCallback((
     status: DuoStatusResult | null,

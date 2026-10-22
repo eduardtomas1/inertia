@@ -70,6 +70,8 @@ import { cachedAppSettings } from "./utils/cachedSettings";
 import { useMarkRunSeen } from "./hooks/useMarkRunSeen";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
 import { WatcherContext } from "./components/watcher/watcherContext";
+import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
+import { useDuoLaunchWatch } from "./hooks/useDuoLaunchWatch";
 import { useWatcherSurfaceController } from "./hooks/useWatcherSurface";
 import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
 import { loadResponseTimeline } from "./components/chatSurfaceLoaders";
@@ -98,6 +100,7 @@ const NO_BACKEND_PROFILES: ModelBackendProfileView[] = [];
 const NO_CONTEXT_PACKETS: readonly ConversationContextPacketSummary[] = [];
 const NO_CONTEXT_SOURCES: readonly ConversationContextSourceOption[] = [];
 const resolveProviderMaintenance = (): Promise<void> => Promise.resolve();
+const ignoreDuoStatusUpdate = (): void => undefined;
 const openProviderUpdateInstructions = (url: string): void => {
   void window.inertia.openExternal(url).catch(() => undefined);
 };
@@ -545,6 +548,23 @@ export default function DetachedChatApp({
     request: null,
     primaryConversationId: conversationId,
   });
+  const duoVisibleConversationIds = useMemo(() => [conversationId], [conversationId]);
+  const runAction = runtimeActions.run;
+  const openDuoConversation = useCallback((targetId: string): void => {
+    void runAction("duo:open-judge", {
+      type: "conversation.select",
+      payload: { conversationId: targetId },
+    });
+  }, [runAction]);
+  const duoLaunches = useDuoLaunchWatch({
+    snapshot: connection.snapshot,
+    request,
+    startupSweep: connection.status === "online",
+    visibleConversationIds: duoVisibleConversationIds,
+    onStatusUpdate: ignoreDuoStatusUpdate,
+    onError: setActionError,
+    openConversation: openDuoConversation,
+  });
   const namedContextRequestId = [...contextRequests.inputRequests].reverse().find(
     ({ conversationContextRequest }) => conversationContextRequest !== undefined,
   )?.id ?? null;
@@ -553,6 +573,7 @@ export default function DetachedChatApp({
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <WatcherContext.Provider value={watchers.surface}>
+    <DuoJudgeNoticeContext.Provider value={duoLaunches.notices}>
     <div
       className={`detached-chat-shell platform-${window.inertia?.getPlatform?.() ?? "unknown"}`}
       data-interface-scale={settings.interfaceScale}
@@ -727,6 +748,7 @@ export default function DetachedChatApp({
         </div>
       )}
     </div>
+    </DuoJudgeNoticeContext.Provider>
     </WatcherContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>

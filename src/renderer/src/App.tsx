@@ -398,6 +398,7 @@ export default function App(): React.JSX.Element {
     workspaceVisible: view === "workspace",
     splitConversationId,
     splitConversationIds: split.splitConversationIds,
+    detachedConversationIds: detachedChats.conversationIds,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
     showWorkspace: () => setView("workspace"),

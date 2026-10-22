@@ -139,6 +139,7 @@ function setup({
   slotConversationId = null,
   activeConversationId = null,
   conversations = snapshot.conversations,
+  detachedConversationIds,
 }: {
   run?: Handler;
   request: Handler;
@@ -146,6 +147,7 @@ function setup({
   slotConversationId?: string | null;
   activeConversationId?: string | null;
   conversations?: AppSnapshot["conversations"];
+  detachedConversationIds?: ReadonlySet<string>;
 }) {
   const run = vi.fn(async (_key: string, command: CommandWithoutId) =>
     runHandler(command));
@@ -170,6 +172,7 @@ function setup({
       discardDraftConversation: vi.fn(),
       setActionError,
       startupSweep,
+      detachedConversationIds,
     });
     controller.current = multiSpawn;
     return (
@@ -334,13 +337,15 @@ describe("Duo launch watch", () => {
   });
 
   it.each([
-    { visible: false, toast: true },
-    { visible: true, toast: false },
-  ])("announces a judge that fails later through the named toast only when no Duo chat is visible: $toast", async ({ visible, toast }) => {
+    { visible: "none", toast: true },
+    { visible: "active", toast: false },
+    { visible: "detached", toast: false },
+  ] as const)("announces a judge that fails later through the named toast only when no Duo chat is visible: $visible", async ({ visible, toast }) => {
     vi.useFakeTimers();
     let polls = 0;
     const { hook, setActionError } = setup({
-      activeConversationId: visible ? conversationIdFor(launchA, "1") : null,
+      activeConversationId: visible === "active" ? conversationIdFor(launchA, "1") : null,
+      detachedConversationIds: new Set(visible === "detached" ? [conversationIdFor(launchA, "0")] : []),
       run: (command) => {
         if (command.type === "duo.pending") return pending([launchA]);
         if (command.type === "duo.status") return duoStatus(launchA, { state: "running" });

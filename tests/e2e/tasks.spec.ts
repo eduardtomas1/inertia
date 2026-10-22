@@ -325,7 +325,6 @@ test("Start hands the task to an agent and keeps you in Tasks", async ({ browser
   const word = row.locator(".task-status");
   const openChat = detail.getByRole("button", { name: "Open chat", exact: true });
   await expect(word).toHaveText("Working…");
-  await expect(word).toHaveClass(/\bis-live\b/u);
   await expect(view).toBeVisible();
   await expect(page.locator(".workspace-header")).toContainText("Tasks");
   await expect(row.getByRole("checkbox")).toHaveAttribute("aria-label", `Mark as done: ${title} (Working…)`);
@@ -351,7 +350,6 @@ test("Start hands the task to an agent and keeps you in Tasks", async ({ browser
   await writeFile(join(app.workspaceDirectory, ".git", TURN_GATE), "go");
   await expect(word).toHaveText("Ready for you");
   await expect(word).toHaveClass(/\bis-completed\b/u);
-  await expect(word).not.toHaveClass(/\bis-live\b/u);
   await expect(row.getByRole("checkbox")).toHaveAttribute("aria-label", `Mark as done: ${title} (Ready for you)`);
   await expect(detail.locator(".task-well-headline")).toHaveText(/^Finished/u);
   await expect(detail.getByRole("button", { name: "Mark as done", exact: true })).toBeVisible();

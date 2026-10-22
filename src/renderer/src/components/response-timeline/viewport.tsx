@@ -837,7 +837,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     let attempts = 0;
     let stableFrames = 0;
     let anchorRow: HTMLElement | null = null;
-    const settleUntil = performance.now() + 600;
     const maximumSettleFrames = 30;
     const removeIntentListeners = (): void => {
       scrollElement.removeEventListener("wheel", cancelForUserIntent);
@@ -869,10 +868,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           virtualizer.scrollToIndex(anchorIndex, { align: "start", behavior: "auto" });
         }
         attempts += 1;
-        if (
-          attempts < maximumSettleFrames
-          && performance.now() < settleUntil
-        ) {
+        if (attempts < maximumSettleFrames) {
           window.requestAnimationFrame(restore);
         } else {
           finishRestoration();
@@ -885,11 +881,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       if (Math.abs(delta) >= 0.5) scrollElement.scrollTop += delta;
       stableFrames = Math.abs(delta) < 0.5 ? stableFrames + 1 : 0;
       attempts += 1;
-      if (
-        attempts < maximumSettleFrames
-        && performance.now() < settleUntil
-        && stableFrames < 4
-      ) {
+      if (attempts < maximumSettleFrames && stableFrames < 4) {
         window.requestAnimationFrame(restore);
       } else {
         finishRestoration();
@@ -926,6 +918,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     cancelLayoutAnchorRestoration.current?.();
     pendingLayoutAnchor.current = null;
   }, [props.conversationId]);
+  useLayoutEffect(() => {
+    if (!props.followsLatest) return;
+    cancelLayoutAnchorRestoration.current?.();
+    pendingLayoutAnchor.current = null;
+  }, [props.followsLatest]);
 
   useEffect(() => {
     if (props.detailLoading || timeline.length === 0) return;
@@ -941,6 +938,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, [props.conversationId, props.detailLoading, props.scrollElementRef, props.timelineElementRef, timeline.length]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
+    cancelLayoutAnchorRestoration.current?.();
+    pendingLayoutAnchor.current = null;
     cancelFinalAnswerAnchor();
     onReaderNavigationIntent?.();
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);

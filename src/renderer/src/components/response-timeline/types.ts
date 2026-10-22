@@ -60,6 +60,7 @@ export interface ResponseTimelineProps {
   checkpointRestoreDisabled: boolean;
   omittedTurnIds?: readonly string[];
   turnAnchorId?: string | null;
+  followsLatest?: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
   timelineElementRef?: RefObject<HTMLDivElement | null>;
   onTurnAnchorSettled?: (turnId: string) => void;

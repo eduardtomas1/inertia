@@ -1025,6 +1025,7 @@ export function ChatWorkspace({
               detailLoading={detailLoading}
               compactingSince={compacting.get(conversationId) ?? null}
               turnAnchorId={turnAnchorId}
+              followsLatest={transcriptNavigationFollowsContent(activeNavigation)}
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}

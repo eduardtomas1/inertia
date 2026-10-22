@@ -940,6 +940,32 @@ describe("draft turn anchoring", () => {
     expect(screen.getByRole("button", { name: "Jump to latest" })).toBeVisible();
   });
 
+  it("tells the timeline when the reader returns to the latest content", async () => {
+    const activeConversation = conversation("conversation-reading-returns-latest");
+    HTMLElement.prototype.scrollTo = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => null)}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    expect(timelineRenderedProps.values.at(-1)).toMatchObject({ followsLatest: true });
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 5_000 },
+      scrollTop: { configurable: true, writable: true, value: 2_000 },
+    });
+    fireEvent.wheel(transcript);
+    fireEvent.scroll(transcript);
+    expect(timelineRenderedProps.values.at(-1)).toMatchObject({ followsLatest: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+
+    expect(timelineRenderedProps.values.at(-1)).toMatchObject({ followsLatest: true });
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).not.toBeInTheDocument();
+  });
+
   it("keeps following new content after a final answer settles at the latest message", async () => {
     const activeConversation = conversation("conversation-final-answer-already-following");
     const scrollTo = vi.fn();

@@ -279,6 +279,77 @@ describe("omitted history turns", () => {
   });
 });
 
+function historyTurn(id: string, at: string): { turn: AgentTurn; request: ChatMessage } {
+  const turn = { id, conversationId: "chat", runId: `${id}-run`, userMessageId: `${id}-request`,
+    terminalAssistantMessageId: null, providerId: "codex",
+    modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-test", reasoningEffort: "high" }),
+    continuationIdentity: { harnessId: "codex-app-server", backendProfileId: "native:codex:app-server",
+      backendConfigurationRevision: 1, modelIdentity: "gpt-test", endpointIdentity: null },
+    harnessId: "codex-app-server", backendProfileId: "native:codex:app-server", model: "gpt-test", modelAlias: null,
+    reasoningEffort: "high", interactionMode: "build", accessMode: "supervised", providerSessionBefore: null,
+    providerSessionAfter: null, requestedAt: at, startedAt: at, completedAt: at, status: "completed",
+    terminalReason: "provider-completed", checkpointId: null, usageAtStart: null, usageAtCompletion: null,
+    configurationRevision: 1, association: "authoritative", createdAt: at, updatedAt: at } as AgentTurn;
+  const request: ChatMessage = { id: `${id}-request`, conversationId: "chat", turnId: id, role: "user",
+    content: `Request ${id}`, attachments: [], createdAt: at };
+  return { turn, request };
+}
+
+describe("older history prepend restoration", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it("stops holding the reader's place once the latest content is requested", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const older = historyTurn("older", "2030-01-01T00:00:00.000Z");
+    const recent = historyTurn("recent", "2030-01-01T00:01:00.000Z");
+    const documentTops = new Map([["recent", 0]]);
+    const scrollElementRef = { current: null as HTMLDivElement | null };
+    const timelineElementRef = { current: null as HTMLDivElement | null };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const scrollTop = scrollElementRef.current?.scrollTop ?? 0;
+      const rowId = this.dataset.responseRowId;
+      const top = this === scrollElementRef.current ? 0 : rowId ? (documentTops.get(rowId) ?? 0) - scrollTop : 0;
+      const height = this === scrollElementRef.current ? 600 : 200;
+      return { x: 0, y: top, top, left: 0, right: 800, bottom: top + height, width: 800, height, toJSON: () => ({}) };
+    });
+    const timeline = (turns: { turn: AgentTurn; request: ChatMessage }[], followsLatest: boolean) => (
+      <div ref={scrollElementRef}>
+        <div ref={timelineElementRef}>
+          <ResponseTimeline turns={turns.map(({ turn }) => turn)} messages={turns.map(({ request }) => request)}
+            activities={[]} reasonings={[]} plans={[]} checkpoints={[]} projectRoot="/workspace" projectId="project"
+            conversationId="chat" streamingText="" streamingReasoning="" approvals={[]} inputRequests={[]}
+            showTimestamps={false} showThinking={false} defaultCodeWrap={false} autoCollapseWorkLog
+            showChangedFileSummaries={false} checkpointRestoreDisabled followsLatest={followsLatest}
+            scrollElementRef={scrollElementRef} timelineElementRef={timelineElementRef}
+            onRespondToApproval={async () => undefined} onRespondToInput={async () => undefined}
+            onRevertCheckpoint={() => undefined} onOpenTurnDiff={() => undefined}
+            onCompareTurnArtifacts={() => undefined} onOpenTurnFile={() => undefined} onStop={() => undefined} />
+        </div>
+      </div>
+    );
+    const runFrames = async (): Promise<void> => {
+      await act(async () => { while (frames.length > 0) frames.shift()!(performance.now()); });
+    };
+    const view = render(timeline([recent], false));
+    await runFrames();
+    const scroll = scrollElementRef.current!;
+    Object.defineProperty(scroll, "clientHeight", { configurable: true, value: 600 });
+    Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 2_000 });
+    scroll.scrollTop = 0;
+
+    act(() => prepareConversationHistoryPrepend("chat"));
+    documentTops.set("older", 0).set("recent", 400);
+    view.rerender(timeline([older, recent], false));
+    scroll.scrollTop = 1_400;
+    view.rerender(timeline([older, recent], true));
+    await runFrames();
+
+    expect(scroll.scrollTop).toBe(1_400);
+  });
+});
+
 type PageCursor = { at: string; id: string; kind: "turn" };
 const pageCursor = (page: number): PageCursor => ({ at: `2030-01-01T00:00:${String(60 - page).padStart(2, "0")}.000Z`, id: `cursor-${page}`, kind: "turn" });
 

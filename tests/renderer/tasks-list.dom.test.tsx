@@ -272,8 +272,10 @@ describe("Task list keyboard", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Deleted “First”");
 
     const field = screen.getByRole("textbox", { name: "Add a task" });
+    fireEvent.change(field, { target: { value: "Draft" } });
     fireEvent.keyDown(field, { key: "z", metaKey: true });
     expect(openTitles()).toEqual(["Second", "Third"]);
+    fireEvent.change(field, { target: { value: "" } });
 
     await act(async () => { vi.advanceTimersByTime(5_900); });
     expect(sent(view.request, "todo.delete")).toEqual([]);
@@ -285,6 +287,18 @@ describe("Task list keyboard", () => {
     ]));
     await act(async () => { vi.advanceTimersByTime(200); });
     expect(document.querySelector(".tasks-toast")).toBeNull();
+  });
+
+  it("undoes with Cmd/Ctrl+Z after deleting the last open task leaves focus in the empty add field", async () => {
+    const user = userEvent.setup();
+    harness(snapshot([todo(firstId, "Only")]));
+    titleButton("Only").focus();
+    await user.keyboard("{Delete}");
+    expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus();
+    expect(openTitles()).toEqual([]);
+    await user.keyboard("{Meta>}z{/Meta}");
+    expect(openTitles()).toEqual(["Only"]);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
   it("sends a pending delete when the toast is dismissed, the page hides or Tasks closes", async () => {

@@ -693,7 +693,8 @@ export function TasksView({
       aria-labelledby="tasks-view-heading"
       onKeyDown={(event) => {
         if (event.key.toLowerCase() !== "z" || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-        if (isTextEntry(event.target) || pendingEntries.length === 0) return;
+        const emptyAdd = event.target === addInputRef.current && addInputRef.current.value === "";
+        if ((isTextEntry(event.target) && !emptyAdd) || pendingEntries.length === 0) return;
         event.preventDefault();
         undoDelete();
       }}

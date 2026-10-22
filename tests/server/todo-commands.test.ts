@@ -153,12 +153,19 @@ describe("todo command handler", () => {
     expect(updated.events).toEqual([{ type: "request.ok", requestId: updated.command.requestId }]);
 
     const other = randomUUID();
+    const unshown = randomUUID();
     await run("todo.create", { id: other, title: "Keep" });
+    await run("todo.create", { id: unshown, title: "Finished after the list was cleared" });
     await run("todo.update", { id, patch: { completed: true } });
-    const cleared = await run("todo.clearDone", {});
+    await run("todo.update", { id: unshown, patch: { completed: true } });
+    const cleared = await run("todo.clearDone", { ids: [id, other] });
     expect(cleared.order).toEqual(["todos.updated", "request.ok"]);
-    expect(cleared.broadcasts).toEqual([{ type: "todos.updated", todos: [expect.objectContaining({ id: other })] }]);
+    expect(cleared.broadcasts).toEqual([{
+      type: "todos.updated",
+      todos: [expect.objectContaining({ id: other }), expect.objectContaining({ id: unshown })],
+    }]);
     expect(store.todos.get(id)).toBeNull();
+    await run("todo.delete", { id: unshown });
 
     const deleted = await run("todo.delete", { id: other });
     expect(deleted.order).toEqual(["todos.updated", "request.ok"]);

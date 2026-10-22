@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   dueTimeRequiresDate,
+  MAX_TODOS,
   TODO_TIME_WITHOUT_DATE_MESSAGE,
   todoDraftFieldsSchema,
   todoPatchSchema,
@@ -32,7 +33,11 @@ export const todoCommandSchemas = [
     type: z.literal("todo.delete"),
     payload: z.object({ id: z.string().uuid() }).strict(),
   }).strict(),
-  z.object({ ...requestBase, type: z.literal("todo.clearDone"), payload: z.object({}).strict() }).strict(),
+  z.object({
+    ...requestBase,
+    type: z.literal("todo.clearDone"),
+    payload: z.object({ ids: z.array(z.string().uuid()).max(MAX_TODOS) }).strict(),
+  }).strict(),
   z.object({
     ...requestBase,
     type: z.literal("todo.start"),

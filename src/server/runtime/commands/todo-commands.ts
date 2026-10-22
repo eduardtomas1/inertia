@@ -180,7 +180,7 @@ export function createTodoCommandHandler(
         dependencies.store.todos.delete(command.payload.id);
         return settleTodos(socket, command.requestId);
       case "todo.clearDone":
-        dependencies.store.todos.clearDone();
+        dependencies.store.todos.clearDone(command.payload.ids);
         return settleTodos(socket, command.requestId);
       case "todo.start": {
         const { id } = command.payload;

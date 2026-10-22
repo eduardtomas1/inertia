@@ -172,7 +172,7 @@ export function TasksView({
     commitAll: commitDeletes,
   } = usePendingDeletes(useCallback((entry: PendingDelete) => {
     for (const id of entry.ids) deletedIds.current.add(id);
-    if (entry.clear) send({ type: "todo.clearDone", payload: {} });
+    if (entry.clear) send({ type: "todo.clearDone", payload: { ids: [...entry.ids] } });
     else for (const id of entry.ids) send({ type: "todo.delete", payload: { id } });
   }, [send]));
 
@@ -434,16 +434,14 @@ export function TasksView({
     if (offline) return;
     const ids = doneRows.map(({ todo }) => todo.id);
     if (ids.length === 0) return;
-    const everyDone = todos.every((todo) => todo.completedAt === null || ids.includes(todo.id)
-      || hiddenIds.has(todo.id) || deletedIds.current.has(todo.id));
     pushDelete({
       ids,
       label: `Cleared ${ids.length} done task${ids.length === 1 ? "" : "s"}`,
-      clear: everyDone,
+      clear: true,
     });
     if (selectedId && ids.includes(selectedId)) setSelectedId(null);
     pendingFocus.current = { kind: "add" };
-  }, [doneRows, hiddenIds, offline, pushDelete, selectedId, todos]);
+  }, [doneRows, offline, pushDelete, selectedId]);
 
   const undoDelete = useCallback((): void => {
     const entry = popDelete();

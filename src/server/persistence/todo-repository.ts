@@ -223,10 +223,12 @@ export class TodoRepository {
     })();
   }
 
-  clearDone(): number {
-    return this.database.prepare(
-      "DELETE FROM todos WHERE completed_at IS NOT NULL",
-    ).run().changes;
+  clearDone(todoIds: readonly string[]): number {
+    const remove = this.database.prepare(
+      "DELETE FROM todos WHERE id = ? AND completed_at IS NOT NULL",
+    );
+    return this.database.transaction(() =>
+      todoIds.reduce((count, todoId) => count + remove.run(todoId).changes, 0))();
   }
 
   private openCount(): number {

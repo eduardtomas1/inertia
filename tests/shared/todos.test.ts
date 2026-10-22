@@ -5,6 +5,7 @@ import {
   compareTodoBasics,
   MAX_TODO_NOTE_CHARS,
   MAX_TODO_TITLE_CHARS,
+  MAX_TODOS,
   todoDraftSchema,
   todoDueDateSchema,
   todoDueTimeSchema,
@@ -116,8 +117,12 @@ describe("task schemas", () => {
     expect(command("todo.update", { id: ID, patch: { completed: true } }).success).toBe(true);
     expect(command("todo.update", { id: ID, patch: {} }).success).toBe(false);
     expect(command("todo.delete", { id: ID }).success).toBe(true);
-    expect(command("todo.clearDone", {}).success).toBe(true);
+    expect(command("todo.clearDone", { ids: [ID] }).success).toBe(true);
+    expect(command("todo.clearDone", { ids: [] }).success).toBe(true);
+    expect(command("todo.clearDone", {}).success).toBe(false);
     expect(command("todo.clearDone", { id: ID }).success).toBe(false);
+    expect(command("todo.clearDone", { ids: ["task-1"] }).success).toBe(false);
+    expect(command("todo.clearDone", { ids: Array.from({ length: MAX_TODOS + 1 }, () => ID) }).success).toBe(false);
     expect(command("todo.create", { id: ID, title: "Task", dueDate: "2026-10-21", dueTime: "15:00", projectId: PROJECT }).success).toBe(true);
     expect(command("todo.create", { id: ID, title: "Task", dueTime: "15:00" }).success).toBe(false);
     expect(command("todo.start", { id: ID, conversation: { projectId: PROJECT }, replaces: PROJECT }).success).toBe(true);

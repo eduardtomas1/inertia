@@ -681,7 +681,7 @@ describe("detached chat runtime authority", () => {
       requestId: REQUEST,
       payload: { presetId: REQUEST, expectedRevision: 1 },
     })).not.toBeNull();
-    const clearDone: ClientCommand = { type: "todo.clearDone", requestId: REQUEST, payload: {} };
+    const clearDone: ClientCommand = { type: "todo.clearDone", requestId: REQUEST, payload: { ids: [] } };
     expect(rejection(clearDone)).not.toBeNull();
     expect(mainRejection(clearDone)).toBeNull();
     for (const command of [

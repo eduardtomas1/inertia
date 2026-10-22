@@ -332,7 +332,25 @@ describe("Task list keyboard", () => {
     await user.keyboard("{Shift>}{F10}{/Shift}");
     await user.click(screen.getByRole("menuitem", { name: "Clear done" }));
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(sent(view.request, "todo.clearDone")).toEqual([{ type: "todo.clearDone", payload: {} }]);
+    expect(sent(view.request, "todo.clearDone")).toEqual([{ type: "todo.clearDone", payload: { ids: [secondId, thirdId] } }]);
+    expect(sent(view.request, "todo.delete")).toEqual([]);
+  });
+
+  it("clears only the done tasks it showed when another task finishes before the toast closes", async () => {
+    const user = userEvent.setup();
+    const view = harness(snapshot([
+      todo(firstId, "Open"),
+      todo(secondId, "Old one", { completedAt: doneAt }),
+    ]));
+    await user.click(screen.getByRole("button", { name: "Done actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Clear done" }));
+    await user.click(check("Open"));
+    view.update(snapshot([
+      todo(firstId, "Open", { completedAt: "2026-10-12T09:00:00.000Z" }),
+      todo(secondId, "Old one", { completedAt: doneAt }),
+    ]));
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(sent(view.request, "todo.clearDone")).toEqual([{ type: "todo.clearDone", payload: { ids: [secondId] } }]);
     expect(sent(view.request, "todo.delete")).toEqual([]);
   });
 
@@ -345,8 +363,8 @@ describe("Task list keyboard", () => {
     await user.click(screen.getByRole("button", { name: "Done actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Clear done" }));
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(sent(view.request, "todo.clearDone")).toEqual([]);
-    expect(sent(view.request, "todo.delete")).toEqual([{ type: "todo.delete", payload: { id: firstId } }]);
+    expect(sent(view.request, "todo.clearDone")).toEqual([{ type: "todo.clearDone", payload: { ids: [firstId] } }]);
+    expect(sent(view.request, "todo.delete")).toEqual([]);
   });
 
   it("does nothing destructive with the keys while offline and disables menu items except Open chat", async () => {

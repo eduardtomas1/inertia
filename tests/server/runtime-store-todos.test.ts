@@ -373,12 +373,26 @@ describe("RuntimeStore tasks", () => {
       expect(done).toContain(doneIds[1]);
       expect(repository.get(open.id)).toMatchObject({ completedAt: null });
 
-      expect(repository.clearDone()).toBe(MAX_DONE_TODOS);
+      expect(repository.clearDone([...done, open.id])).toBe(MAX_DONE_TODOS);
       expect(repository.list().map(({ id }) => id)).toEqual([open.id]);
-      expect(repository.clearDone()).toBe(0);
+      expect(repository.clearDone([...done, open.id])).toBe(0);
     } finally {
       raw.close();
     }
+  });
+
+  it("clears exactly the done tasks it is given and nothing without ids", async () => {
+    const { store } = await openStore();
+    const shown = store.todos.create({ id: randomUUID(), title: "Shown" });
+    const later = store.todos.create({ id: randomUUID(), title: "Finished later" });
+    const open = store.todos.create({ id: randomUUID(), title: "Open" });
+    store.todos.update(shown.id, { completed: true });
+    store.todos.update(later.id, { completed: true });
+
+    expect(store.todos.clearDone([])).toBe(0);
+    expect(store.todos.list()).toHaveLength(3);
+    expect(store.todos.clearDone([shown.id, open.id, randomUUID()])).toBe(1);
+    expect(store.todos.list().map(({ id }) => id).sort()).toEqual([later.id, open.id].sort());
   });
 
   it("leaves a corrupt row out of the list and warns once about it", async () => {

@@ -385,11 +385,11 @@ test("Start hands the task to an agent and keeps you in Tasks", async ({ browser
   await expect(doneList.getByRole("checkbox", { name: `Mark as not done: ${title}` })).toBeChecked();
   await expect(destination).toHaveAccessibleName("Tasks");
   await expect(detail.locator(".task-well-headline")).toHaveText(/^Done · /u);
-  expect(readTodo(title).completedAt).not.toBeNull();
+  await expect.poll(() => readTodo(title).completedAt).not.toBeNull();
   await detail.getByRole("button", { name: "Reopen", exact: true }).click();
   await expect(word).toHaveText("Ready for you");
   await expect(doneList.locator(".task-row", { hasText: title })).toHaveCount(0);
-  expect(readTodo(title).completedAt).toBeNull();
+  await expect.poll(() => readTodo(title).completedAt).toBeNull();
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.locator(".activity-thread-select", { hasText: title }).first().click({ button: "right" });
@@ -400,7 +400,7 @@ test("Start hands the task to an agent and keeps you in Tasks", async ({ browser
   await row.getByRole("button", { name: new RegExp(`^${title}`, "u") }).click();
   await expect(detail.getByRole("group", { name: "Hand it to an agent" })).toBeVisible();
   await expect(openChat).toHaveCount(0);
-  expect(readTodo(title).conversationId).toBeNull();
+  await expect.poll(() => readTodo(title).conversationId).toBeNull();
   expect(conversationExists(conversationId)).toBe(false);
   expect(app.rendererErrors).toEqual([]);
 });
@@ -463,7 +463,7 @@ test("the due picker sets a day and a time", async ({ browserName: _browserName 
   await page.keyboard.press("Escape");
   await expect(picker).toBeHidden();
   await expect(chip).toBeFocused();
-  expect(readTodo(title).dueDate).toBeNull();
+  await expect.poll(() => readTodo(title).dueDate).toBeNull();
 
   await chip.click();
   await picker.getByRole("button", { name: "Friday 16 October 2026", exact: true }).click();

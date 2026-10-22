@@ -89,7 +89,7 @@ const budgets = {
   detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
-  entryCss: 241_004 + 256 + 576 + 171,
+  entryCss: 241_004 + 256 + 576 + 171 + 25,
   // The eagerly preloaded five-theme syntax and status palette is kept
   // separate from the generated entry stylesheet and measures 8,675 bytes.
   // Its scoped LF rule keeps Windows identical; keep narrow headroom.

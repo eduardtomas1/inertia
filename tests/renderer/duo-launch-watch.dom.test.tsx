@@ -302,15 +302,26 @@ describe("Duo launch watch", () => {
   });
 
   it("dismisses a startup toast for the rest of the session", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
     const { hook } = setup({
       startupSweep: true,
-      request: (command) => command.type === "duo.pending"
-        ? pending([launchA])
-        : duoStatus(launchA, { state: "interrupted" }),
+      request: (command) => {
+        if (command.type === "duo.pending") return pending([launchA]);
+        reads += 1;
+        return duoStatus(launchA, { state: "interrupted" }, { cancelRequested: true });
+      },
     });
-    fireEvent.click(await screen.findByRole("button", {
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(screen.getByRole("button", {
       name: "Dismiss Duo judge notice",
     }));
+    expect(screen.queryByText("“Updater verdict” was interrupted.")).not.toBeInTheDocument();
+    const readsAtDismissal = reads;
+
+    await act(async () => vi.advanceTimersByTimeAsync(3 * 750));
+
+    expect(reads).toBeGreaterThan(readsAtDismissal);
     expect(screen.queryByText("“Updater verdict” was interrupted.")).not.toBeInTheDocument();
     expect(hook().judgeNotices.alerts).toEqual([]);
     expect(hook().judgeNotices.comparisonForConversation(conversationIdFor(launchA, "j"))

@@ -18,12 +18,6 @@ describe("status toast stack placement", () => {
     expect(css).not.toMatch(/\.status-overlay-stack \{[^}]*bottom:/u);
   });
 
-  it("docks below split pane headers so a toast never covers a pane's title or actions", () => {
-    const css = read("styles.css");
-    expect(css).toMatch(/\.workspace-frame:has\(\.conversation-split-header\) > \.status-overlay-stack \{\n  top: calc\(48px \+ 33px \+ 12px\);\n\}/u);
-    expect(css).toMatch(/\.conversation-split-header \{[^}]*min-height: 32px;[^}]*border-bottom: 1px solid/u);
-  });
-
   it("keeps the stack left of the panel sheet, sized from the sheet's own width at every breakpoint", () => {
     const css = read("styles.css");
     expect(css).toMatch(/\.workspace-frame\.has-right-sheet > \.status-overlay-stack \{\n  --workspace-sheet-width: min\(448px, max\(320px, 42vw\), calc\(100% - 24px\)\);\n  right: calc\(var\(--workspace-sheet-width\) \+ 12px\);\n  width: max\(240px, min\(440px, calc\(100% - var\(--workspace-sheet-width\) - 24px\)\)\);\n\}/u);

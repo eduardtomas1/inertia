@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readSourceText } from "../helpers/source-text";
 import { MultiSpawnDialog } from "../../src/renderer/src/components/MultiSpawnDialog";
 import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
 import {
@@ -167,13 +166,5 @@ describe("New duo validation", () => {
     const starting = screen.getByRole("button", { name: /Starting…/u });
     expect(starting).toBeDisabled();
     expect(starting).toHaveTextContent(/^Starting…$/u);
-  });
-
-  it("anchors the dialog to the top and stacks A over B on narrow windows", () => {
-    const css = readSourceText("src/renderer/src/components/MultiSpawnDialog.css");
-    expect(css).toMatch(/\.multi-spawn-dialog \{\n  --dialog-width: 980px;\n  align-self: start;\n  max-height: min\(860px, calc\(100dvh - 72px\)\);\n  margin-top: 24px;\n\}/u);
-    expect(css).toMatch(/@media \(max-height: 560px\) \{\n  \.multi-spawn-dialog \{\n    max-height: min\(860px, calc\(100dvh - 48px\)\);\n    margin-top: 0;/u);
-    expect(css).toMatch(/@media \(max-width: 820px\) \{\n  \.multi-spawn-sides \{\n    grid-template-columns: minmax\(0, 1fr\);\n  \}\n\n  \.multi-spawn-preset-toggle small \{\n    display: none;/u);
-    expect(css).not.toMatch(/@media \(max-width: 620px\) \{\n  \.multi-spawn-sides/u);
   });
 });

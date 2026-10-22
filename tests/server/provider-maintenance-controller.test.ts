@@ -22,6 +22,7 @@ import { providerInstallationIdentity } from
   "../../src/server/provider/installation-lease";
 import { providerMaintenanceJournalTestDouble } from
   "../support/provider-maintenance-journal";
+import { npmPackumentResponse } from "../support/npm-registry-packument";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -113,7 +114,7 @@ describe("ProviderMaintenanceController", () => {
   it("retains the installation restriction when a release check fails and recovers on forced refresh", async () => {
     const fetch = vi.fn()
       .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValue(new Response(JSON.stringify({ version: "2.0.0" })));
+      .mockResolvedValue(npmPackumentResponse("2.0.0"));
     const latest = new ProviderLatestVersionCache({ fetch });
     const controller = new ProviderMaintenanceController({
       maintenanceJournal: providerMaintenanceJournalTestDouble(),
@@ -149,7 +150,7 @@ describe("ProviderMaintenanceController", () => {
       target: () => installed,
       refreshTarget: async () => installed,
       latestVersions: new ProviderLatestVersionCache({
-        fetch: async () => new Response(JSON.stringify({ version })),
+        fetch: async () => npmPackumentResponse(version),
       }),
       resolveCapabilities: async () => ({
         ...capabilities("opencode", "native:opencode", "opencode-ai"),
@@ -197,7 +198,7 @@ describe("ProviderMaintenanceController", () => {
       target: (providerId) => target(providerId, "1.4.0"),
       refreshTarget: async (providerId) => target(providerId, "1.4.0"),
       latestVersions: new ProviderLatestVersionCache({
-        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+        fetch: async () => npmPackumentResponse("2.0.0"),
       }),
       resolveCapabilities: async () => await resolveProviderMaintenanceCapabilities(
         target("opencode", "1.4.0", "/home/ada/.npm-global/lib/node_modules/opencode-ai/bin/opencode"),
@@ -235,7 +236,7 @@ describe("ProviderMaintenanceController", () => {
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       latestVersions: new ProviderLatestVersionCache({
-        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+        fetch: async () => npmPackumentResponse("2.0.0"),
       }),
       resolveCapabilities: async () => ({
         ...capabilities("codex", "npm", "@openai/codex"),
@@ -249,7 +250,7 @@ describe("ProviderMaintenanceController", () => {
     const [status] = await controller.refresh(["codex"]);
     expect(status).toMatchObject({
       updateAvailability: "instructions-only",
-      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@latest",
+      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@2.0.0",
       message: "Version 2.0.0 is available. Your account cannot write this installation.",
     });
   });
@@ -261,7 +262,7 @@ describe("ProviderMaintenanceController", () => {
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       latestVersions: new ProviderLatestVersionCache({
-        fetch: async () => new Response(JSON.stringify({ version: "2.0.0" })),
+        fetch: async () => npmPackumentResponse("2.0.0"),
       }),
       resolveCapabilities: async ({ providerId }) => ({
         ...capabilities(providerId, "native:claude", "@anthropic-ai/claude-code"),
@@ -287,7 +288,7 @@ describe("ProviderMaintenanceController", () => {
   });
 
   it("compares a Homebrew installation with what Homebrew can install instead of npm", async () => {
-    const fetch = vi.fn(async () => new Response(JSON.stringify({ version: "9.9.9" })));
+    const fetch = vi.fn(async () => npmPackumentResponse("9.9.9"));
     const homebrewInfo = vi.fn(async () => JSON.stringify({ casks: [{ version: "1.1.0" }] }));
     const controller = new ProviderMaintenanceController({
       maintenanceJournal: providerMaintenanceJournalTestDouble(),
@@ -378,10 +379,7 @@ describe("ProviderMaintenanceController", () => {
     const operations: ProviderMaintenanceOperation[] = [];
     const statuses: string[] = [];
     const latest = new ProviderLatestVersionCache({
-      fetch: (async () => new Response(
-        JSON.stringify({ version: "2.0.0" }),
-        { status: 200 },
-      )) as typeof fetch,
+      fetch: (async () => npmPackumentResponse("2.0.0")) as typeof fetch,
     });
     const controller = new ProviderMaintenanceController({
       maintenanceJournal: providerMaintenanceJournalTestDouble(),
@@ -709,5 +707,163 @@ describe("ProviderMaintenanceController", () => {
     await expect(controller.dispose()).rejects.toThrow(
       "Provider maintenance process cleanup could not be confirmed.",
     );
+  });
+});
+
+describe("ProviderMaintenanceController release cooldown", () => {
+  const npmCodex = "/home/ada/.npm-global/lib/node_modules/@openai/codex/bin/codex.js";
+
+  function npmCapabilities(subject: ProviderMaintenanceTarget) {
+    return resolveProviderMaintenanceCapabilities(subject, {
+      platform: "linux",
+      home: "/home/ada",
+      environment: async () => ({ env: {}, pathEntries: [] }),
+      realpath: async (path) => path === "/home/ada/.npm-global/bin/codex" ? npmCodex : path,
+      access: async () => undefined,
+      executableCandidates: async (command) => command === "/home/ada/.npm-global/bin/npm"
+        ? ["/home/ada/.npm-global/lib/node_modules/npm/bin/npm-cli.js"]
+        : command === "/home/ada/.npm-global/bin/node" ? [command] : [],
+    });
+  }
+
+  function cooldownController(
+    installedVersion: string,
+    fetch: typeof globalThis.fetch,
+    options: { now?: () => number } = {},
+  ) {
+    let installed = target("codex", installedVersion, npmCodex);
+    const operations: ProviderMaintenanceOperation[] = [];
+    const runAction = vi.fn(async (action: ProviderMaintenanceUpdateAction) => {
+      const exact = action.args.at(-1)?.split("@").at(-1) ?? installedVersion;
+      installed = target("codex", exact, npmCodex);
+      return success();
+    });
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: () => installed,
+      refreshTarget: async () => installed,
+      latestVersions: new ProviderLatestVersionCache({
+        fetch,
+        successTtlMs: 60_000,
+        ...(options.now ? { now: options.now } : {}),
+      }),
+      resolveCapabilities: npmCapabilities,
+      runAction: async (action) => await runAction(action),
+      operationId: operationIds(),
+      onOperation: (operation) => operations.push(operation),
+    });
+    return { controller, operations, runAction };
+  }
+
+  it("installs the exact release that has cleared the cooldown instead of the floating dist-tag", async () => {
+    const { controller, operations, runAction } = cooldownController(
+      "1.0.0",
+      (async () => npmPackumentResponse("2.1.0", {
+        "1.0.0": { hoursAgo: 900 },
+        "2.0.0": { hoursAgo: 96 },
+        "2.1.0": { hoursAgo: 1 },
+      })) as typeof fetch,
+    );
+
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({
+      latestVersion: "2.0.0",
+      versionStatus: "update-available",
+      updateAvailability: "available",
+      manualCommand: "npm install -g --prefix ~/.npm-global @openai/codex@2.0.0",
+      message: "Version 2.0.0 is available. Version 2.1.0 will be offered once it has been public for 72 hours.",
+    });
+    const started = await controller.startUpdate("codex");
+    const terminal = await waitForTerminal(operations, started.id);
+
+    expect(terminal).toMatchObject({ status: "succeeded", targetVersion: "2.0.0", afterVersion: "2.0.0" });
+    expect(runAction).toHaveBeenCalledTimes(1);
+    const args = runAction.mock.calls[0]![0].args;
+    expect(args.slice(1)).toEqual([
+      "install", "-g", "--prefix", "/home/ada/.npm-global", "@openai/codex@2.0.0",
+    ]);
+    expect(args.some((argument) => argument.endsWith("@latest"))).toBe(false);
+    expect(controller.hasBlockingAuthority("codex")).toBe(false);
+  });
+
+  it("reports an installation at or past the cooled-down release as current without reinstalling it", async () => {
+    const { controller, operations, runAction } = cooldownController(
+      "2.1.0",
+      (async () => npmPackumentResponse("2.1.0", {
+        "2.0.0": { hoursAgo: 96 },
+        "2.1.0": { hoursAgo: 1 },
+      })) as typeof fetch,
+    );
+
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({
+      latestVersion: "2.0.0",
+      versionStatus: "current",
+      message: "Provider CLI is current.",
+    });
+    const started = await controller.startUpdate("codex");
+    const terminal = await waitForTerminal(operations, started.id);
+
+    expect(terminal).toMatchObject({
+      status: "succeeded",
+      afterVersion: "2.1.0",
+      message: "Provider CLI is current.",
+    });
+    expect(runAction).not.toHaveBeenCalled();
+    expect(controller.hasBlockingAuthority("codex")).toBe(false);
+  });
+
+  it.each([
+    ["the registry cannot be reached", async () => { throw new Error("offline"); }],
+    ["every release is too new", async () => npmPackumentResponse("2.0.0", { "2.0.0": { hoursAgo: 3 } })],
+  ] as const)("fails safe when %s", async (_case, fetch) => {
+    const { controller, operations, runAction } = cooldownController(
+      "1.0.0",
+      fetch as typeof globalThis.fetch,
+    );
+
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({
+      latestVersion: null,
+      updateAvailability: "instructions-only",
+      updateLabel: null,
+      manualCommand: null,
+    });
+    expect(status?.message).toContain("at least 72 hours");
+    const started = await controller.startUpdate("codex");
+    const terminal = await waitForTerminal(operations, started.id);
+
+    expect(terminal).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("only installs releases that have been public for at least 72 hours"),
+    });
+    expect(runAction).not.toHaveBeenCalled();
+    expect(controller.hasBlockingAuthority("codex")).toBe(false);
+  });
+
+  it("does not install a last-known release once the registry stops answering", async () => {
+    let now = 2_000_000_000_000;
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(npmPackumentResponse("2.0.0", { "2.0.0": {} }, now))
+      .mockRejectedValue(new Error("offline"));
+    const { controller, operations, runAction } = cooldownController(
+      "1.0.0",
+      fetch as typeof globalThis.fetch,
+      { now: () => now },
+    );
+    await controller.refresh(["codex"]);
+    now += 61_000;
+
+    const [status] = await controller.refresh(["codex"]);
+    expect(status).toMatchObject({
+      latestVersion: "2.0.0",
+      freshness: "stale",
+      updateAvailability: "instructions-only",
+    });
+    const started = await controller.startUpdate("codex");
+    const terminal = await waitForTerminal(operations, started.id);
+
+    expect(terminal.status).toBe("failed");
+    expect(runAction).not.toHaveBeenCalled();
   });
 });

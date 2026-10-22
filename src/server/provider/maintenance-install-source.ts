@@ -19,6 +19,8 @@ import { cursorAgentCommandArgs } from "./cursor-command";
 const MAX_SCRIPT_BYTES = 16 * 1024;
 const SAFE_TOKEN = /^[A-Za-z0-9._/~@+=:-]+$/u;
 const SNAP_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u;
+const EXACT_REGISTRY_VERSION =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;
 
 export const PROVIDER_MAINTENANCE_ENVIRONMENT_KEYS = [
   "BUN_INSTALL",
@@ -37,6 +39,11 @@ export interface ProviderMaintenanceVersionPin {
   command: string | null;
 }
 
+export interface ProviderRegistryPackage {
+  name: string;
+  range: string;
+}
+
 export interface ProviderInstallUpdateAction {
   executable: string;
   args: readonly string[];
@@ -46,6 +53,7 @@ export interface ProviderInstallUpdateAction {
   installMethod: ProviderMaintenanceInstallMethod;
   label: string;
   versionPin?: ProviderMaintenanceVersionPin;
+  registryPackage?: ProviderRegistryPackage;
 }
 
 export interface HomebrewLatestSource {
@@ -83,11 +91,6 @@ export interface ProviderInstallSourceDependencies {
   readScript?: (path: string) => Promise<string | null>;
   readlink?: (path: string) => Promise<string>;
   executableCandidates?: typeof executableCandidates;
-  packageSpec?: (
-    providerId: ProviderMaintenanceProviderId,
-    packageName: string,
-    spec: string,
-  ) => string;
 }
 
 interface HomebrewName {
@@ -191,6 +194,12 @@ export function providerInstallPackageName(
   providerId: ProviderMaintenanceProviderId,
 ): string | null {
   return DEFINITIONS[providerId].packageName;
+}
+
+export function providerInstallPackageRange(
+  providerId: ProviderMaintenanceProviderId,
+): string {
+  return DEFINITIONS[providerId].packageRange;
 }
 
 async function boundedScript(path: string): Promise<string | null> {
@@ -318,10 +327,12 @@ class InstallSourceContext {
       [".exe", ".cmd", ".bat", ""].map((extension) => `${command}${extension}`));
   }
 
+  registryPackage(): ProviderRegistryPackage {
+    return { name: this.definition.packageName!, range: this.definition.packageRange };
+  }
+
   spec(): string {
-    const packageName = this.definition.packageName!;
-    const spec = `${packageName}@${this.definition.packageRange}`;
-    return this.dependencies.packageSpec?.(this.input.providerId, packageName, spec) ?? spec;
+    return `${this.definition.packageName!}@${this.definition.packageRange}`;
   }
 
   display(path: string): string | null {
@@ -457,6 +468,7 @@ async function bunSource(
     args,
     environment: { BUN_INSTALL: bunHome },
     lockKey: `bun-global:${bunHome}`,
+    registryPackage: context.registryPackage(),
   }, "bun", manualCommand);
 }
 
@@ -512,6 +524,7 @@ async function pnpmSource(
     args,
     environment: { PNPM_HOME: pnpmHome },
     lockKey: `pnpm-global:${pnpmHome}`,
+    registryPackage: context.registryPackage(),
   }, "pnpm", manualCommand);
 }
 
@@ -540,6 +553,7 @@ async function yarnSource(
     executable: yarn,
     args,
     lockKey: `yarn-global:${globalDirectory}`,
+    registryPackage: context.registryPackage(),
   }, "yarn", manualCommand);
 }
 
@@ -596,6 +610,7 @@ async function voltaSource(
     args,
     environment: { VOLTA_HOME: voltaHome },
     lockKey: `volta:${voltaHome}`,
+    registryPackage: context.registryPackage(),
   }, "Volta", manualCommand);
 }
 
@@ -755,6 +770,7 @@ async function npmSource(
     ],
     environmentPathPrefix: runtime?.pathPrefix ?? location.binDirectory,
     lockKey: `npm-global:${context.key(location.prefix)}`,
+    registryPackage: context.registryPackage(),
   }, "npm", manualCommand);
 }
 
@@ -861,21 +877,42 @@ export async function classifyProviderInstallSource(
     ?? manual("manual", `Inertia could not tell how ${context.definition.label} was installed. Update it the way you installed it.`);
 }
 
+function registrySpec(registryPackage: ProviderRegistryPackage): string {
+  return `${registryPackage.name}@${registryPackage.range}`;
+}
+
 export function pinnedProviderUpdateAction(
   action: ProviderInstallUpdateAction,
   version: string | null,
 ): ProviderInstallUpdateAction | null {
   const pin = action.versionPin;
-  if (!pin) return action;
+  const registry = action.registryPackage;
+  if (!pin && !registry) return action;
+  let pinned = action;
+  if (registry) {
+    const floating = registrySpec(registry);
+    if (
+      !version
+      || !EXACT_REGISTRY_VERSION.test(version)
+      || !action.args.includes(floating)
+    ) return null;
+    pinned = {
+      ...action,
+      args: action.args.map((argument) => argument === floating
+        ? `${registry.name}@${version}`
+        : argument),
+    };
+  }
+  if (!pin) return pinned;
   const match = version ? /^(\d+)\.\d+\.\d+$/u.exec(version) : null;
   if (!match || Number(match[1]) !== pin.major) return null;
-  if (pin.argumentIndex === null) return action;
+  if (pin.argumentIndex === null) return pinned;
   return {
-    ...action,
+    ...pinned,
     args: [
-      ...action.args.slice(0, pin.argumentIndex),
+      ...pinned.args.slice(0, pin.argumentIndex),
       version!,
-      ...action.args.slice(pin.argumentIndex),
+      ...pinned.args.slice(pin.argumentIndex),
     ],
   };
 }
@@ -884,10 +921,22 @@ export function pinnedManualCommand(
   manualCommand: string | null,
   action: ProviderInstallUpdateAction | null,
   version: string | null,
+  registryPackage: ProviderRegistryPackage | null = action?.registryPackage ?? null,
 ): string | null {
+  let command = manualCommand;
+  if (command && registryPackage) {
+    const floating = registrySpec(registryPackage);
+    const tokens = command.split(" ");
+    if (tokens.includes(floating)) {
+      if (!version || !EXACT_REGISTRY_VERSION.test(version)) return null;
+      command = tokens.map((token) => token === floating
+        ? `${registryPackage.name}@${version}`
+        : token).join(" ");
+    }
+  }
   const pin = action?.versionPin;
-  if (!action || !pin) return manualCommand;
+  if (!action || !pin) return command;
   const pinned = pinnedProviderUpdateAction(action, version);
   if (!pinned) return null;
-  return pin.command ? [pin.command, ...pinned.args].join(" ") : manualCommand;
+  return pin.command ? [pin.command, ...pinned.args].join(" ") : command;
 }

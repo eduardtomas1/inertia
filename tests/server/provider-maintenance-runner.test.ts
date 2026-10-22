@@ -114,7 +114,7 @@ describe("provider maintenance runner", () => {
     });
     const result = await runProviderMaintenanceAction(action({
       executable: `${nvmRoot}/bin/node`,
-      args: [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", "/home/ada/.local", "@openai/codex@latest"],
+      args: [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", "/home/ada/.local", "@openai/codex@2.0.0"],
       environmentPathPrefix: `${nvmRoot}/bin`,
       lockKey: "package-manager:npm-global",
       installMethod: "npm-global",
@@ -135,7 +135,7 @@ describe("provider maintenance runner", () => {
     expect(spawnedEnvironment?.PATH)
       .toBe(`${nvmRoot}/bin:/usr/bin:/bin`);
     expect(spawn).toHaveBeenCalledWith(`${nvmRoot}/bin/node`,
-      [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", "/home/ada/.local", "@openai/codex@latest"],
+      [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`, "install", "-g", "--prefix", "/home/ada/.local", "@openai/codex@2.0.0"],
       expect.objectContaining({ shell: false }));
     expect(spawnedEnvironment).not.toHaveProperty("NPM_CONFIG_PREFIX");
     expect(spawnedEnvironment).not.toHaveProperty("npm_config_prefix");
@@ -157,7 +157,7 @@ describe("provider maintenance runner", () => {
 
     const result = await runProviderMaintenanceAction(action({
       executable: "C:\\Users\\Ada\\AppData\\Roaming\\npm\\npm.cmd",
-      args: ["install", "-g", "@openai/codex@latest"],
+      args: ["install", "-g", "@openai/codex@2.0.0"],
       environmentPathPrefix: "C:\\Users\\Ada\\AppData\\Roaming\\npm",
       lockKey: "package-manager:npm-global",
       installMethod: "npm-global",
@@ -181,7 +181,7 @@ describe("provider maintenance runner", () => {
       "/v:off",
       "/c",
     ]);
-    expect(calls[0]?.args[4]).toContain("@openai/codex@latest");
+    expect(calls[0]?.args[4]).toContain("@openai/codex@2.0.0");
     expect(calls[0]?.options).toMatchObject({
       detached: false,
       shell: false,
@@ -320,7 +320,7 @@ describe("provider maintenance runner", () => {
     });
     const promise = runProviderMaintenanceAction(action({
       executable: "C:\\Users\\Ada\\AppData\\Roaming\\npm\\npm.cmd",
-      args: ["install", "-g", "@openai/codex@latest"],
+      args: ["install", "-g", "@openai/codex@2.0.0"],
       lockKey: "package-manager:npm-global",
       installMethod: "npm-global",
     }), {

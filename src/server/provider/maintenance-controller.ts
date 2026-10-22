@@ -22,9 +22,12 @@ import {
 import {
   pinnedManualCommand,
   pinnedProviderUpdateAction,
+  providerInstallPackageRange,
+  type ProviderRegistryPackage,
 } from "./maintenance-install-source";
 import {
   compareProviderVersions,
+  PROVIDER_CLI_RELEASE_COOLDOWN_HOURS,
   ProviderLatestVersionCache,
 } from "./maintenance-latest";
 import {
@@ -52,6 +55,9 @@ const PIN_REFUSED_MESSAGE =
   "Inertia could not confirm that the latest release is one it supports.";
 const GATE_REFUSED_MESSAGE =
   "Inertia has not verified this installation, so it will not run the update.";
+const COOLDOWN_REFUSED_MESSAGE =
+  `Inertia only installs releases that have been public for at least ${PROVIDER_CLI_RELEASE_COOLDOWN_HOURS} hours, and could not confirm one right now.`;
+const CURRENT_MESSAGE = "Provider CLI is current.";
 
 export const PROVIDER_UPDATE_UNCHANGED_MESSAGE = "Update completed, but the installed version still appears unchanged.";
 
@@ -193,9 +199,27 @@ function statusMessage(
   if (status === "current") {
     return hasStaleData
       ? "Installed version matches the last known release."
-      : "Provider CLI is current.";
+      : CURRENT_MESSAGE;
   }
   return error;
+}
+
+function heldReleaseMessage(
+  installedVersion: string | null,
+  heldVersion: string | null,
+): string | null {
+  const comparison = compareProviderVersions(installedVersion, heldVersion);
+  return comparison !== null && comparison < 0
+    ? `Version ${heldVersion} will be offered once it has been public for ${PROVIDER_CLI_RELEASE_COOLDOWN_HOURS} hours.`
+    : null;
+}
+
+function installableVersion(
+  action: ProviderMaintenanceUpdateAction | null,
+  version: string | null,
+  freshness: ProviderMaintenanceStatus["freshness"],
+): string | null {
+  return action?.registryPackage && freshness !== "fresh" ? null : version;
 }
 
 export class ProviderMaintenanceController {
@@ -443,20 +467,29 @@ export class ProviderMaintenanceController {
   ): Promise<ProviderMaintenanceStatus> {
     const target = this.options.target(providerId);
     const capabilities = await this.capabilities(target);
+    const registryPackage: ProviderRegistryPackage | null = capabilities.packageName
+      ? { name: capabilities.packageName, range: providerInstallPackageRange(providerId) }
+      : null;
     const latest = capabilities.homebrew && target.installed
       ? await this.latestVersions.homebrew(capabilities.homebrew, force)
-      : capabilities.packageName && target.installed
-      ? await this.latestVersions.latest(capabilities.packageName, force)
+      : registryPackage && target.installed
+      ? await this.latestVersions.latest(registryPackage.name, registryPackage.range, force)
       : {
           version: null,
+          heldVersion: null,
           freshness: "unavailable" as const,
           checkedAt: null,
           error: target.installed && providerId === "cursor"
             ? "Cursor does not publish a machine-readable latest-version source."
             : null,
         };
+    const pinVersion = installableVersion(
+      capabilities.update,
+      latest.version,
+      latest.freshness,
+    );
     const pinRefused = capabilities.update !== null
-      && pinnedProviderUpdateAction(capabilities.update, latest.version) === null;
+      && pinnedProviderUpdateAction(capabilities.update, pinVersion) === null;
     const gateRefused = capabilities.update !== null
       && this.options.capabilityAvailable !== undefined
       && !this.options.capabilityAvailable(target, capabilities);
@@ -484,14 +517,22 @@ export class ProviderMaintenanceController {
         latest.version,
         latest.freshness === "stale",
         latest.error,
+      ), heldReleaseMessage(
+        target.installedVersion,
+        latest.heldVersion,
       ), capabilities.message, pinRefused
-        ? PIN_REFUSED_MESSAGE
+        ? capabilities.update?.registryPackage
+          ? COOLDOWN_REFUSED_MESSAGE
+          : PIN_REFUSED_MESSAGE
         : gateRefused ? GATE_REFUSED_MESSAGE : null]
         .filter(Boolean).join(" ") || null,
       manualCommand: pinnedManualCommand(
         capabilities.manualCommand ?? null,
         capabilities.update,
-        latest.version,
+        capabilities.update
+          ? pinVersion
+          : latest.freshness === "fresh" ? latest.version : null,
+        registryPackage,
       ),
     };
     this.statuses.set(providerId, status);
@@ -535,12 +576,33 @@ export class ProviderMaintenanceController {
       }
 
       const advisory = await this.refreshOne(providerId, false);
-      const pinnedAction = pinnedProviderUpdateAction(
+      const pinVersion = installableVersion(
         action,
         advisory.latestVersion,
+        advisory.freshness,
       );
+      const installedComparison = compareProviderVersions(
+        active.operation.beforeVersion,
+        pinVersion,
+      );
+      if (
+        action.registryPackage
+        && installedComparison !== null
+        && installedComparison >= 0
+      ) {
+        this.finishOperation(active, {
+          status: "succeeded",
+          afterVersion: active.operation.beforeVersion,
+          targetVersion: pinVersion,
+          message: CURRENT_MESSAGE,
+        });
+        return;
+      }
+      const pinnedAction = pinnedProviderUpdateAction(action, pinVersion);
       if (!pinnedAction) {
-        throw new ProviderMaintenanceError(PIN_REFUSED_MESSAGE);
+        throw new ProviderMaintenanceError(
+          action.registryPackage ? COOLDOWN_REFUSED_MESSAGE : PIN_REFUSED_MESSAGE,
+        );
       }
       result = await this.coordinator.run(
         action.lockKey,
@@ -550,7 +612,7 @@ export class ProviderMaintenanceController {
           this.updateOperation(active, {
             status: "running",
             startedAt: this.isoNow(),
-            targetVersion: advisory.latestVersion,
+            targetVersion: pinVersion,
             message: "Updating provider.",
           });
           return await this.runAction(pinnedAction, active);

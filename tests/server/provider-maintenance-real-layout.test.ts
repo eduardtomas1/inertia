@@ -28,6 +28,7 @@ import type {
   ProviderMaintenanceProviderId,
 } from "../../src/shared/provider-maintenance";
 import { providerMaintenanceJournalTestDouble } from "../support/provider-maintenance-journal";
+import { npmPackumentResponse } from "../support/npm-registry-packument";
 
 const nodeBin = dirname(process.execPath);
 const npmCli = [
@@ -106,7 +107,7 @@ interface UpdateScenario {
   pathEntries: string[];
   executable: () => Promise<string>;
   version: () => Promise<string>;
-  packageSpec?: string;
+  localTarball?: string;
   replacementBoundary?: string;
   env?: NodeJS.ProcessEnv;
 }
@@ -137,12 +138,11 @@ async function runUpdate(scenario: UpdateScenario) {
       return current;
     },
     latestVersions: new ProviderLatestVersionCache({
-      fetch: async () => new Response(JSON.stringify({ version: "1.0.1" })),
+      fetch: async () => npmPackumentResponse("1.0.1"),
     }),
     resolveCapabilities: async (subject) => await resolveProviderMaintenanceCapabilities(subject, {
       home: scenario.home,
       environment: async () => environment,
-      ...(scenario.packageSpec ? { packageSpec: () => scenario.packageSpec! } : {}),
     }),
     installationIdentity: (subject) => providerInstallationIdentity({
       providerId: subject.providerId,
@@ -155,10 +155,13 @@ async function runUpdate(scenario: UpdateScenario) {
         : {}),
     }),
     runAction: async (action, options) => {
-      if (scenario.packageSpec && action.args.at(-1) !== scenario.packageSpec) {
-        throw new Error("The update would not install the local stub package.");
+      if (scenario.localTarball && action.args.at(-1) !== "@openai/codex@1.0.1") {
+        throw new Error("The update would not install the exact cooled-down release.");
       }
-      return await runProviderMaintenanceAction(action, {
+      const local = scenario.localTarball
+        ? { ...action, args: [...action.args.slice(0, -1), scenario.localTarball] }
+        : action;
+      return await runProviderMaintenanceAction(local, {
         environment: environment.env,
         cwd: scenario.home,
         signal: options.signal,
@@ -217,7 +220,7 @@ describe("provider maintenance on real installation layouts", () => {
         pathEntries: [join(prefix, "bin"), npmBin!],
         executable: async () => await realpath(join(prefix, "bin/codex")),
         version: async () => await versionOf(manifest),
-        packageSpec: join(tarballs, "openai-codex-1.0.1.tgz"),
+        localTarball: join(tarballs, "openai-codex-1.0.1.tgz"),
       });
 
       expect(status).toMatchObject({
@@ -248,7 +251,7 @@ describe("provider maintenance on real installation layouts", () => {
     });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
     expect(await records(record)).toEqual([{
-      argv: ["add", "-g", "--allow-build=@anthropic-ai/claude-code", "@anthropic-ai/claude-code@latest"],
+      argv: ["add", "-g", "--allow-build=@anthropic-ai/claude-code", "@anthropic-ai/claude-code@1.0.1"],
       env: { CI: "1", PNPM_HOME: pnpmHome },
     }]);
   });
@@ -270,7 +273,7 @@ describe("provider maintenance on real installation layouts", () => {
     });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
     expect(await records(record)).toEqual([{
-      argv: ["add", "-g", "--trust", "@moonshot-ai/kimi-code@latest"],
+      argv: ["add", "-g", "--trust", "@moonshot-ai/kimi-code@1.0.1"],
       env: { BUN_INSTALL: bunHome, CI: "1" },
     }]);
   });
@@ -311,7 +314,7 @@ describe("provider maintenance on real installation layouts", () => {
     });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
     expect(await records(record)).toEqual([{
-      argv: ["install", "opencode-ai@1"],
+      argv: ["install", "opencode-ai@1.0.1"],
       env: { CI: "1", VOLTA_HOME: voltaHome },
     }]);
   });
@@ -331,7 +334,7 @@ describe("provider maintenance on real installation layouts", () => {
       version: async () => await versionOf(join(packageRoot, "package.json")),
     });
     expect(terminal).toMatchObject({ status: "succeeded", afterVersion: "1.0.1" });
-    expect(await records(record)).toEqual([{ argv: ["global", "add", "@openai/codex@latest"], env: { CI: "1" } }]);
+    expect(await records(record)).toEqual([{ argv: ["global", "add", "@openai/codex@1.0.1"], env: { CI: "1" } }]);
   });
 
   posixIt("upgrades a Homebrew cask with the brew that owns the keg", async () => {

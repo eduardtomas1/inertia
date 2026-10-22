@@ -65,10 +65,10 @@ describe("Settings provider maintenance", () => {
     const { rerender } = render(<ProviderMaintenanceNotice {...props} status={{
       ...status,
       message: "Your account cannot write this installation.",
-      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@latest",
+      manualCommand: "sudo npm install -g --prefix /usr @openai/codex@1.1.0",
     }} />);
     expect(screen.getByText(/Your account cannot write this installation\./u)).toBeInTheDocument();
-    expect(screen.getByText("sudo npm install -g --prefix /usr @openai/codex@latest").tagName).toBe("CODE");
+    expect(screen.getByText("sudo npm install -g --prefix /usr @openai/codex@1.1.0").tagName).toBe("CODE");
     expect(screen.queryByRole("button", { name: /Update/u })).not.toBeInTheDocument();
 
     rerender(<ProviderMaintenanceNotice {...props} status={{
@@ -77,7 +77,7 @@ describe("Settings provider maintenance", () => {
       versionStatus: "update-available",
       updateAvailability: "available",
       message: null,
-      manualCommand: "npm install -g --prefix ~/.npm-global @openai/codex@latest",
+      manualCommand: "npm install -g --prefix ~/.npm-global @openai/codex@1.1.0",
     }} />);
     expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
     expect(screen.queryByText(/npm install/u)).not.toBeInTheDocument();

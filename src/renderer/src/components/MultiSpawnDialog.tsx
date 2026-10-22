@@ -670,7 +670,6 @@ export function MultiSpawnDialog({
           value={draft.prompt}
           maxLength={20_000}
           disabled={busy}
-          placeholder="Ask both agents to inspect, implement, compare, or review the same work…"
           onChange={(event) => setDraft({
             ...draft,
             prompt: event.currentTarget.value,
@@ -722,9 +721,6 @@ export function MultiSpawnDialog({
             <h3 id="multi-spawn-comparison-title">
               <label htmlFor="multi-spawn-comparison-switch">Add an independent judge</label>
             </h3>
-            <span>
-              Runs after both agents finish and receives bounded results only.
-            </span>
           </span>
         </div>
 
@@ -783,9 +779,7 @@ export function MultiSpawnDialog({
 
       {sharesLocalCheckout && (
         <div className="multi-spawn-dialog-status" role="status">
-          Both agents will share this project checkout. Concurrent edits can
-          overlap; choose different projects or enable isolated worktrees in
-          Settings when you need independent changes.
+          A and B will share this project folder, so their edits can overlap.
         </div>
       )}
 

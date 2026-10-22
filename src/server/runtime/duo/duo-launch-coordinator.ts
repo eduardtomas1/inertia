@@ -994,7 +994,7 @@ export class DuoLaunchCoordinator {
   ): Promise<PreflightComparison> {
     const selection = await this.readySelection(payload, {
       backend: "The selected judge backend is unavailable.",
-      route: "The judge route is not ready. Open Settings to finish setup.",
+      route: "The judge's model is not ready. Open Settings to finish setup.",
     });
     this.store.projectPath(payload.projectId);
     return {
@@ -1010,7 +1010,7 @@ export class DuoLaunchCoordinator {
   ): Promise<PreflightSide> {
     const selection = await this.readySelection(payload, {
       backend: "The selected model backend is unavailable.",
-      route: "This agent is not ready. Open Settings to finish setup.",
+      route: "This chat's model is not ready. Open Settings to finish setup.",
     });
 
     const repositoryPath = this.store.projectPath(payload.projectId);

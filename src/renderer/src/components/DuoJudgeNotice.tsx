@@ -21,11 +21,15 @@ function sideTurnFinished(
     && conversationStatus !== "needs-input";
 }
 
-function failureCause(error: string | null): string {
-  if (!error) return "Retry it or cancel the judge.";
+function failureCause(error: string | null): string | null {
+  if (!error) return null;
   return error
     .replace(/^The judge (?:turn failed|could not start|input could not be assembled): /u, "")
     .replace(/ Retry it or cancel the judge\.$/u, "");
+}
+
+function interruptionCause(error: string | null): string | null {
+  return error?.replace(/ It was not retried automatically\.$/u, "") || null;
 }
 
 export function duoJudgeNoticeCopy(
@@ -50,7 +54,7 @@ export function duoJudgeNoticeCopy(
       return {
         tone: "warning",
         title: "Judge is waiting for its folder",
-        detail: "Another operation is using it; it starts as soon as the folder is free.",
+        detail: null,
         actions: [judge ? "cancel" : "open"],
       };
     }
@@ -66,13 +70,13 @@ export function duoJudgeNoticeCopy(
       ? {
           tone: "muted",
           title: "Waiting for both chats to finish",
-          detail: "The judge starts by itself.",
+          detail: null,
           actions: ["cancel"],
         }
       : {
           tone: "muted",
           title: "Waiting for the other chat",
-          detail: "The judge compares both when it finishes.",
+          detail: null,
           actions: ["open"],
         };
   }
@@ -98,7 +102,7 @@ export function duoJudgeNoticeCopy(
     return {
       tone: "warning",
       title: "Judge was interrupted",
-      detail: "Inertia couldn't confirm the result.",
+      detail: interruptionCause(error),
       actions: ["retry", "cancel"],
     };
   }

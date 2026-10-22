@@ -364,8 +364,10 @@ describe("multi-spawn", () => {
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(1);
     expect(screen.getAllByText("GPT-5.5")).toHaveLength(1);
     expect(screen.getByText(
-      /Both agents will share this project checkout/u,
+      /^A and B will share this project folder, so their edits can overlap\.$/u,
     )).toBeVisible();
+    expect(screen.getByLabelText("Brief for both chats")).not.toHaveAttribute("placeholder");
+    expect(screen.getByRole("dialog", { name: "New duo" })).not.toHaveTextContent(/agents/iu);
     fireEvent.change(screen.getByLabelText("Brief for both chats"), {
       target: { value: "Compare the provider lifecycle." },
     });
@@ -423,7 +425,7 @@ describe("multi-spawn", () => {
     });
 
     expect(screen.getByText(
-      /Both agents will share this project checkout/u,
+      /^A and B will share this project folder, so their edits can overlap\.$/u,
     )).toBeVisible();
   });
 

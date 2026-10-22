@@ -74,8 +74,8 @@ describe("Duo judge notice", () => {
     expect(notice).not.toHaveClass("is-warning");
     expect(notice).not.toHaveClass("is-failed");
     expect(container.querySelector("svg.lucide-columns-2")).not.toBeNull();
-    expect(notice).toHaveTextContent("Waiting for both chats to finish");
-    expect(notice).toHaveTextContent("The judge starts by itself.");
+    expect(notice.querySelector("strong")).toHaveTextContent(/^Waiting for both chats to finish$/u);
+    expect(notice.querySelector("small")).toBeNull();
     expect(noticeButtons()).toEqual(["Cancel judge"]);
     fireEvent.click(screen.getByRole("button", { name: "Cancel judge" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -83,9 +83,9 @@ describe("Duo judge notice", () => {
 
   it("tells a finished side chat it is waiting for the other chat", () => {
     const { onOpenJudge } = renderNotice(entry("side", "waiting"));
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Waiting for the other chatThe judge compares both when it finishes.",
-    );
+    const notice = screen.getByRole("status");
+    expect(notice.querySelector("strong")).toHaveTextContent(/^Waiting for the other chat$/u);
+    expect(notice.querySelector("small")).toBeNull();
     expect(noticeButtons()).toEqual(["Open judge"]);
     fireEvent.click(screen.getByRole("button", { name: "Open judge" }));
     expect(onOpenJudge).toHaveBeenCalledWith(judgeConversationId);
@@ -114,10 +114,8 @@ describe("Duo judge notice", () => {
     renderNotice(entry("judge", "waiting", notice));
     const judge = screen.getByRole("status");
     expect(judge).toHaveClass("is-warning");
-    expect(judge).toHaveTextContent("Judge is waiting for its folder");
-    expect(judge).toHaveTextContent(
-      "Another operation is using it; it starts as soon as the folder is free.",
-    );
+    expect(judge.querySelector("strong")).toHaveTextContent(/^Judge is waiting for its folder$/u);
+    expect(judge.querySelector("small")).toBeNull();
     expect(noticeButtons()).toEqual(["Cancel judge"]);
 
     renderNotice(entry("side", "waiting", notice));
@@ -157,14 +155,23 @@ describe("Duo judge notice", () => {
     },
   );
 
-  it("explains an interrupted judge", () => {
-    renderNotice(entry("judge", "interrupted"));
+  it("shows an interrupted judge's saved cause", () => {
+    renderNotice(entry(
+      "judge",
+      "interrupted",
+      "The judge started, but its outcome became uncertain: the app closed. It was not retried automatically.",
+    ));
     const notice = screen.getByRole("status");
     expect(notice).toHaveClass("is-warning");
-    expect(notice).toHaveTextContent(
-      "Judge was interruptedInertia couldn't confirm the result.",
-    );
+    expect(notice.querySelector("strong")).toHaveTextContent(/^Judge was interrupted$/u);
+    expect(notice.querySelector("small"))
+      .toHaveTextContent(/^The judge started, but its outcome became uncertain: the app closed\.$/u);
     expect(noticeButtons()).toEqual(["Retry", "Cancel judge"]);
+  });
+
+  it.each(["failed", "interrupted"] as const)("shows only the status when a %s judge has no saved cause", (state) => {
+    renderNotice(entry("judge", state));
+    expect(screen.getByRole("status").querySelector("small")).toBeNull();
   });
 
   it("shows busy labels and disables both actions while one runs", () => {

@@ -436,18 +436,6 @@
   content: "";
 }
 
-.multi-spawn-status-row[data-tone="done"]::before {
-  background: var(--status-completed);
-}
-
-.multi-spawn-status-row[data-tone="active"]::before {
-  background: var(--accent);
-}
-
-.multi-spawn-status-row[data-tone="warning"]::before {
-  background: var(--warning);
-}
-
 .multi-spawn-status-row[data-tone="danger"]::before {
   background: var(--danger);
 }

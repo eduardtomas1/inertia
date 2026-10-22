@@ -1,7 +1,7 @@
 import type { RuntimeStore } from "../../database";
 
 export const JUDGE_CHECKOUT_BUSY_NOTICE =
-  "Another operation is using the judge's folder, such as a resumed terminal, a run or a review. The judge starts by itself as soon as the folder is free.";
+  "Another operation, such as a resumed terminal, a run or a review, is using the judge's folder.";
 
 const CHECKOUT_ACQUIRE_POLL_MS = 50;
 

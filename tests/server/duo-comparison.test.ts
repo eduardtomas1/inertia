@@ -742,7 +742,7 @@ describe("Duo third-model comparison", () => {
     expect(launches.status(prepared.launchId).comparison).toMatchObject({
       state: "waiting",
       attempt: 0,
-      error: expect.stringContaining("starts by itself as soon as the folder is free"),
+      error: "Another operation, such as a resumed terminal, a run or a review, is using the judge's folder.",
     });
     expect(runtime.provider.inputs).toHaveLength(2);
     await new Promise<void>((resolve) => setTimeout(resolve, 80));

@@ -53,6 +53,28 @@ afterEach(async () => {
 });
 
 describe("pending Duo launch discovery", () => {
+  it("pages through pending launches newest first", async () => {
+    const fixture = await runtime();
+    try {
+      const launchIds = [randomUUID(), randomUUID(), randomUUID()];
+      launchIds.forEach((launchId, index) => createPending(
+        fixture.store,
+        launchId,
+        [fixture.projectId, fixture.projectId],
+        `2026-08-02T10:0${index}:00.000Z`,
+      ));
+
+      expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 2))
+        .toEqual({ launchIds: [launchIds[2], launchIds[1]], hasMore: true });
+      expect(fixture.store.pendingPairedLaunchIds([fixture.projectId], 2, 1))
+        .toEqual({ launchIds: [launchIds[0]], hasMore: false });
+      expect(() => fixture.store.pendingPairedLaunchIds([fixture.projectId], 2, 8))
+        .toThrow("The pending Duo lookup bounds are invalid.");
+    } finally {
+      fixture.store.close();
+    }
+  });
+
   it("rediscovers a running cancellation until provider cleanup releases it", async () => {
     const fixture = await runtime();
     try {

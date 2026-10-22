@@ -522,10 +522,11 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.find(launchId);
   }
 
-  pendingPairedLaunchIds(projectIds: readonly string[], limit: number) {
+  pendingPairedLaunchIds(projectIds: readonly string[], limit: number, page = 0) {
     return this.pairedLaunchRepository.pendingLaunchIdsForProjects(
       projectIds,
       limit,
+      page,
     );
   }
   pairedLaunchIdsForDeletionRecovery(scope: { conversationId: string } | { projectId: string }, limit: number) { return this.pairedLaunchRepository.deletionRecoveryLaunchIds(scope, limit); }

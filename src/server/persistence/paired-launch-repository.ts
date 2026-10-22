@@ -1,11 +1,12 @@
 import type Database from "better-sqlite3";
 
-import type {
-  AgentTurnTerminalStatus,
-  DuoComparisonState,
-  DuoDispatchState,
-  DuoLaunchState,
-  DuoLaunchStatus,
+import {
+  DUO_PENDING_MAX_PAGES,
+  type AgentTurnTerminalStatus,
+  type DuoComparisonState,
+  type DuoDispatchState,
+  type DuoLaunchState,
+  type DuoLaunchStatus,
 } from "../../shared/contracts";
 import { RecordNotFoundError } from "./errors";
 import type { PairedLaunchRow, PairedLaunchSideRow } from "./rows";
@@ -193,6 +194,7 @@ export class PairedLaunchRepository {
   pendingLaunchIdsForProjects(
     projectIds: readonly string[],
     limit: number,
+    page = 0,
   ): PendingPairedLaunchIds {
     const exactProjectIds = [...new Set(projectIds)];
     if (
@@ -201,6 +203,9 @@ export class PairedLaunchRepository {
       || !Number.isInteger(limit)
       || limit < 1
       || limit > 32
+      || !Number.isInteger(page)
+      || page < 0
+      || page >= DUO_PENDING_MAX_PAGES
     ) {
       throw new Error("The pending Duo lookup bounds are invalid.");
     }
@@ -233,11 +238,12 @@ export class PairedLaunchRepository {
           )
         )
       ORDER BY launch.created_at DESC, launch.id ASC
-      LIMIT ?
+      LIMIT ? OFFSET ?
     `).all(
       ...exactProjectIds,
       ...exactProjectIds,
       limit + 1,
+      page * limit,
     ) as Array<{ id: string }>;
     return {
       launchIds: rows.slice(0, limit).map(({ id }) => id),

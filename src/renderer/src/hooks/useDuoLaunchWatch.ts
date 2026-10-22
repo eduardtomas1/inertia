@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  AppSnapshot,
-  DuoComparisonStatus,
-  DuoStatusResult,
-  ServerEvent,
-  ThreadStatus,
+import {
+  DUO_PENDING_MAX_PAGES,
+  type AppSnapshot,
+  type DuoComparisonStatus,
+  type DuoStatusResult,
+  type ServerEvent,
+  type ThreadStatus,
 } from "@shared/contracts";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
@@ -345,16 +346,20 @@ export function useDuoLaunchWatch({
     const sweep = async (projectIds: readonly string[]): Promise<void> => {
       const launchIds = new Set<string>();
       for (let index = 0; index < projectIds.length; index += PENDING_PROJECT_BATCH) {
-        const event = resultEvent(await requestRef.current({
-          type: "duo.pending",
-          payload: {
-            projectIds: projectIds.slice(index, index + PENDING_PROJECT_BATCH),
-          },
-        }));
-        if (event.result.kind !== "duo.pending") {
-          throw new Error(INVALID_DUO_RESPONSE);
+        for (let page = 0; page < DUO_PENDING_MAX_PAGES; page += 1) {
+          const event = resultEvent(await requestRef.current({
+            type: "duo.pending",
+            payload: {
+              projectIds: projectIds.slice(index, index + PENDING_PROJECT_BATCH),
+              ...(page > 0 ? { page } : {}),
+            },
+          }));
+          if (event.result.kind !== "duo.pending") {
+            throw new Error(INVALID_DUO_RESPONSE);
+          }
+          for (const launchId of event.result.launchIds) launchIds.add(launchId);
+          if (!event.result.hasMore) break;
         }
-        for (const launchId of event.result.launchIds) launchIds.add(launchId);
       }
       const storedLaunchId = readPendingMultiSpawnLaunchId(window.localStorage);
       if (storedLaunchId) launchIds.add(storedLaunchId);
@@ -393,14 +398,24 @@ export function useDuoLaunchWatch({
     [snapshot?.projects],
   );
   const snapshotReady = Boolean(snapshot);
+  const [sweepAttempt, setSweepAttempt] = useState(0);
+  const sweepRetryTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!startupSweep || !snapshotReady || sweptRef.current) return;
     sweptRef.current = true;
     void engine.sweep(sweepProjectIds ? sweepProjectIds.split("\n") : [])
       .catch(() => {
         sweptRef.current = false;
+        if (!mountedRef.current) return;
+        sweepRetryTimerRef.current = window.setTimeout(() => {
+          sweepRetryTimerRef.current = null;
+          setSweepAttempt((attempt) => attempt + 1);
+        }, POLL_RETRY_DELAY_MS);
       });
-  }, [engine, snapshotReady, startupSweep, sweepProjectIds]);
+  }, [engine, snapshotReady, startupSweep, sweepProjectIds, sweepAttempt]);
+  useEffect(() => () => {
+    if (sweepRetryTimerRef.current !== null) window.clearTimeout(sweepRetryTimerRef.current);
+  }, []);
 
   const conversations = snapshot?.conversations;
   useEffect(() => {

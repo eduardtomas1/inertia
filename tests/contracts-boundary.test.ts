@@ -63,6 +63,12 @@ describe("shared contracts boundary", () => {
       ...projectIds,
       "55555555-5555-4555-8555-555555555555",
     ])).success).toBe(false);
+    for (const [page, valid] of [[0, true], [7, true], [8, false], [-1, false], [1.5, false]] as const) {
+      expect(clientCommandSchema.safeParse({
+        ...command(projectIds),
+        payload: { projectIds, page },
+      }).success, String(page)).toBe(valid);
+    }
   });
 });
 

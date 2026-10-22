@@ -366,6 +366,59 @@ describe("Duo launch watch", () => {
     expect(screen.queryByText("“Updater verdict” didn't finish.") !== null).toBe(toast);
   });
 
+  it("follows pending pages up to the page bound", async () => {
+    const { request, hook } = setup({
+      startupSweep: true,
+      request: (command) => {
+        if (command.type === "duo.pending") {
+          const page = command.payload.page ?? 0;
+          if (command.payload.projectIds.includes(projectIds[3])) {
+            return { ...pending([]), result: { kind: "duo.pending", launchIds: [], hasMore: true } };
+          }
+          return {
+            ...pending([]),
+            result: { kind: "duo.pending", launchIds: [page === 0 ? launchA : launchB], hasMore: page === 0 },
+          };
+        }
+        if (command.type !== "duo.status") {
+          throw new Error(`Unexpected command: ${command.type}`);
+        }
+        return duoStatus(command.payload.launchId, { state: "waiting", attempt: 0 });
+      },
+    });
+    await waitFor(() => expect(hook().judgeNotices.comparisonForConversation(conversationIdFor(launchB, "0")))
+      .not.toBeNull());
+    expect(hook().judgeNotices.comparisonForConversation(conversationIdFor(launchA, "0"))).not.toBeNull();
+    const pages = commandsOf(request).flatMap((command) => command.type === "duo.pending"
+      ? [`${command.payload.projectIds.length}:${command.payload.page ?? 0}`]
+      : []);
+    expect(pages).toEqual(["3:0", "3:1", ...Array.from({ length: 8 }, (_, page) => `1:${page}`)]);
+  });
+
+  it("retries a failed startup sweep on the next poll tick", async () => {
+    vi.useFakeTimers();
+    let failures = 1;
+    const { hook } = setup({
+      startupSweep: true,
+      request: (command) => {
+        if (command.type === "duo.pending") {
+          if (failures > 0) {
+            failures -= 1;
+            throw new RuntimeCommandError("Connection interrupted.", "ambiguous");
+          }
+          return pending(command.payload.projectIds.includes(projectIds[0]) ? [launchA] : []);
+        }
+        return duoStatus(launchA, { state: "interrupted" });
+      },
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(hook().judgeNotices.comparisonForConversation(conversationIdFor(launchA, "j"))).toBeNull();
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_250));
+    expect(hook().judgeNotices.comparisonForConversation(conversationIdFor(launchA, "j"))
+      ?.comparison.state).toBe("interrupted");
+  });
+
   it("does not sweep or toast before the runtime is ready", async () => {
     const { request } = setup({
       request: () => pending([launchA]),

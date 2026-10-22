@@ -320,13 +320,14 @@ export class DuoLaunchCoordinator {
     );
   }
 
-  pending(projectIds: readonly string[]): {
+  pending(projectIds: readonly string[], page = 0): {
     launchIds: string[];
     hasMore: boolean;
   } {
     return this.store.pendingPairedLaunchIds(
       projectIds,
       MAX_PENDING_DUO_LAUNCHES,
+      page,
     );
   }
 

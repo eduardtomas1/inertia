@@ -80,7 +80,10 @@ export function createDuoCommandHandler(
           requestId: command.requestId,
           result: {
             kind: "duo.pending",
-            ...dependencies.coordinator.pending(command.payload.projectIds),
+            ...dependencies.coordinator.pending(
+              command.payload.projectIds,
+              command.payload.page,
+            ),
           },
         });
         return "handled";

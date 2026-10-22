@@ -36,6 +36,7 @@ export type DuoComparisonState = typeof DUO_COMPARISON_STATES[number];
 
 export const DUO_COMPARISON_PROMPT_MAX_CHARS = 20_000;
 export const DUO_COMPARISON_CHANGED_FILES_MAX_ENTRIES = 40;
+export const DUO_PENDING_MAX_PAGES = 8;
 
 export interface DuoComparisonStatus {
   state: DuoComparisonState;

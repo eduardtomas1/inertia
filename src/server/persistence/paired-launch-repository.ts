@@ -203,9 +203,7 @@ export class PairedLaunchRepository {
       || !Number.isInteger(limit)
       || limit < 1
       || limit > 32
-      || !Number.isInteger(page)
-      || page < 0
-      || page >= DUO_PENDING_MAX_PAGES
+      || !(Number.isInteger(page) && page >= 0 && page < DUO_PENDING_MAX_PAGES)
     ) {
       throw new Error("The pending Duo lookup bounds are invalid.");
     }

@@ -12,7 +12,7 @@ import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import {
   clearPendingMultiSpawnLaunchId,
   readPendingMultiSpawnLaunchId,
-} from "../utils/multiSpawn";
+} from "../utils/duoPendingLaunch";
 import {
   comparisonMutationConfirmed,
   comparisonNeedsAttention,

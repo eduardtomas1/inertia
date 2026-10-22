@@ -131,6 +131,7 @@ describe("Claude turn identity in the harness", () => {
       "name: erp-researcher",
       "description: Researches ERP code.",
       "permissionMode: bypassPermissions",
+      "memory: project",
       "mcpServers:",
       "  - github:",
       "      command: npx",
@@ -190,6 +191,7 @@ describe("Claude turn identity in the harness", () => {
     expect(captured?.mcpServers).toBeUndefined();
     expect(captured?.agents?.["erp-researcher"]).not.toHaveProperty("permissionMode");
     expect(captured?.agents?.["erp-researcher"]).not.toHaveProperty("mcpServers");
+    expect(captured?.agents?.["erp-researcher"]).not.toHaveProperty("memory");
     expect(captured?.additionalDirectories).not.toContain(home);
     expect(captured?.additionalDirectories).not.toContain(join(home, ".claude"));
     expect(captured?.systemPrompt).toMatchObject({

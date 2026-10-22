@@ -36,7 +36,6 @@ const MAX_AGENT_LIST_ITEMS = 128;
 const MAX_AGENT_LIST_ITEM_CHARS = 512;
 const MAX_AGENT_MODEL_CHARS = 128;
 const AGENT_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
-const AGENT_MEMORY_SCOPES = ["user", "project", "local"] as const;
 const AGENT_FIELDS = [
   "name",
   "description",
@@ -46,7 +45,6 @@ const AGENT_FIELDS = [
   "effort",
   "skills",
   "maxTurns",
-  "memory",
   "omitClaudeMd",
   "background",
 ] as const;
@@ -123,12 +121,6 @@ function agentMaxTurns(value: ClaudeFrontmatterValue | undefined): number | unde
     : undefined;
 }
 
-function agentMemory(
-  value: ClaudeFrontmatterValue | undefined,
-): AgentDefinition["memory"] {
-  return AGENT_MEMORY_SCOPES.find((scope) => scope === value);
-}
-
 function agentModel(value: ClaudeFrontmatterValue | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const model = value.trim();
@@ -159,7 +151,6 @@ export function claudeAgentDefinition(
   const model = agentModel(fields.get("model"));
   const effort = agentEffort(fields.get("effort"));
   const maxTurns = agentMaxTurns(fields.get("maxTurns"));
-  const memory = agentMemory(fields.get("memory"));
   const omitClaudeMd = agentBoolean(fields.get("omitClaudeMd"));
   const background = agentBoolean(fields.get("background"));
   return {
@@ -173,7 +164,6 @@ export function claudeAgentDefinition(
       ...(effort !== undefined ? { effort } : {}),
       ...(skills !== undefined && skills.length > 0 ? { skills } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
-      ...(memory !== undefined ? { memory } : {}),
       ...(omitClaudeMd ? { omitClaudeMd } : {}),
       ...(background ? { background } : {}),
     },

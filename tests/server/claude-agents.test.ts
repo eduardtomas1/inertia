@@ -69,7 +69,7 @@ describe("Claude agent loading", () => {
     expect(Object.keys(agents)).toEqual(["nested"]);
   });
 
-  it("keeps only the allowed fields and drops permission, hook, and MCP fields", () => {
+  it("keeps only the allowed fields and drops permission, hook, memory, and MCP fields", () => {
     const agent = claudeAgentDefinition([
       "---",
       "name: erp-researcher",
@@ -116,7 +116,6 @@ describe("Claude agent loading", () => {
         effort: "high",
         skills: ["inertia-selected-skills:erp-conventions", "inertia-selected-skills:erp-glossary"],
         maxTurns: 12,
-        memory: "project",
         omitClaudeMd: true,
         background: true,
       },

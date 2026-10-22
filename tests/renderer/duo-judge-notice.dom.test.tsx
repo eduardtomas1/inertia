@@ -23,11 +23,13 @@ function entry(
   state: DuoComparisonState,
   error: string | null = null,
   conversationId: string | null = judgeConversationId,
+  othersFinished = false,
 ): DuoConversationComparison {
   return {
     launchId,
     role,
     sideStarted: role === "side",
+    othersFinished,
     comparison: { state, conversationId, turnId: null, attempt: 1, error },
   };
 }
@@ -86,6 +88,17 @@ describe("Duo judge notice", () => {
     expect(noticeButtons()).toEqual(["Open judge"]);
     fireEvent.click(screen.getByRole("button", { name: "Open judge" }));
     expect(onOpenJudge).toHaveBeenCalledWith(judgeConversationId);
+  });
+
+  it.each([
+    ["judge", "Cancel judge"],
+    ["side", "Open judge"],
+  ] as const)("says the judge is starting on the %s chat once both chats finished", (role, action) => {
+    renderNotice(entry(role, "waiting", null, judgeConversationId, true));
+    const notice = screen.getByRole("status");
+    expect(notice.querySelector("strong")).toHaveTextContent(/^Judge is starting$/u);
+    expect(notice.querySelector("small")).toBeNull();
+    expect(noticeButtons()).toEqual([action]);
   });
 
   it("stays hidden on a side chat until its own turn finishes", () => {

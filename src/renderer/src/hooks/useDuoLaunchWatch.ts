@@ -4,6 +4,7 @@ import type {
   DuoComparisonStatus,
   DuoStatusResult,
   ServerEvent,
+  ThreadStatus,
 } from "@shared/contracts";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
@@ -30,6 +31,7 @@ export interface DuoConversationComparison {
   launchId: string;
   role: "judge" | "side";
   sideStarted: boolean;
+  othersFinished: boolean;
   comparison: DuoComparisonStatus;
 }
 
@@ -79,7 +81,15 @@ function comparisonIsLive(comparison: DuoComparisonStatus): boolean {
 
 function indexConversationComparisons(
   statuses: Readonly<Record<string, DuoStatusResult>>,
+  threadStatus: ReadonlyMap<string, ThreadStatus>,
 ): Map<string, DuoConversationComparison> {
+  const sideFinished = (side: DuoStatusResult["sides"][number]): boolean => {
+    const status = side.conversationId ? threadStatus.get(side.conversationId) : undefined;
+    return side.dispatchState === "started"
+      && status !== undefined
+      && status !== "running"
+      && status !== "needs-input";
+  };
   const index = new Map<string, DuoConversationComparison>();
   const place = (conversationId: string | null, entry: DuoConversationComparison) => {
     if (!conversationId) return;
@@ -98,6 +108,7 @@ function indexConversationComparisons(
         launchId: status.launchId,
         role: "side",
         sideStarted: side.dispatchState === "started",
+        othersFinished: status.sides.every((other) => other === side || sideFinished(other)),
         comparison,
       });
     }
@@ -105,6 +116,7 @@ function indexConversationComparisons(
       launchId: status.launchId,
       role: "judge",
       sideStarted: false,
+      othersFinished: status.sides.every(sideFinished),
       comparison,
     });
   }
@@ -483,7 +495,14 @@ export function useDuoLaunchWatch({
     }
   }, [engine]);
 
-  const index = useMemo(() => indexConversationComparisons(statuses), [statuses]);
+  const threadStatus = useMemo(
+    () => new Map((conversations ?? []).map(({ id, status }) => [id, status])),
+    [conversations],
+  );
+  const index = useMemo(
+    () => indexConversationComparisons(statuses, threadStatus),
+    [statuses, threadStatus],
+  );
   const comparisonForConversation = useCallback(
     (conversationId: string): DuoConversationComparison | null =>
       index.get(conversationId) ?? null,

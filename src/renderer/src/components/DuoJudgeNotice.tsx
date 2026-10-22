@@ -54,6 +54,14 @@ export function duoJudgeNoticeCopy(
         actions: [judge ? "cancel" : "open"],
       };
     }
+    if (entry.othersFinished) {
+      return {
+        tone: "muted",
+        title: "Judge is starting",
+        detail: null,
+        actions: [judge ? "cancel" : "open"],
+      };
+    }
     return judge
       ? {
           tone: "muted",

@@ -138,12 +138,14 @@ function setup({
   startupSweep = false,
   slotConversationId = null,
   activeConversationId = null,
+  conversations = snapshot.conversations,
 }: {
   run?: Handler;
   request: Handler;
   startupSweep?: boolean;
   slotConversationId?: string | null;
   activeConversationId?: string | null;
+  conversations?: AppSnapshot["conversations"];
 }) {
   const run = vi.fn(async (_key: string, command: CommandWithoutId) =>
     runHandler(command));
@@ -156,7 +158,7 @@ function setup({
   let currentActiveConversationId = activeConversationId;
   function Harness(): React.JSX.Element {
     const multiSpawn = useMultiSpawn({
-      snapshot: { ...snapshot, activeConversationId: currentActiveConversationId },
+      snapshot: { ...snapshot, conversations, activeConversationId: currentActiveConversationId },
       settings: defaultSettings,
       run,
       request,
@@ -272,6 +274,28 @@ describe("Duo launch watch", () => {
     expect(screen.queryByText("“Updater verdict” didn't finish.")).not.toBeInTheDocument();
     expect(commandsOf(request).some((command) => command.type === "duo.cancel"))
       .toBe(false);
+  });
+
+  it("knows when the other chats of a waiting Duo have finished", async () => {
+    const sourceA = conversationIdFor(launchA, "0");
+    const sourceB = conversationIdFor(launchA, "1");
+    const judge = conversationIdFor(launchA, "j");
+    const { hook } = setup({
+      startupSweep: true,
+      conversations: [
+        { id: sourceA, projectId: projectIds[0], title: "Duo A", status: "completed" },
+        { id: sourceB, projectId: projectIds[0], title: "Duo B", status: "running" },
+        { id: judge, projectId: projectIds[0], title: judgeTitle, status: "idle" },
+      ] as AppSnapshot["conversations"],
+      request: (command) => command.type === "duo.pending"
+        ? pending([launchA])
+        : duoStatus(launchA, { state: "waiting", attempt: 0 }),
+    });
+    await waitFor(() => expect(hook().judgeNotices.comparisonForConversation(sourceB))
+      .not.toBeNull());
+    expect(hook().judgeNotices.comparisonForConversation(sourceA)?.othersFinished).toBe(false);
+    expect(hook().judgeNotices.comparisonForConversation(sourceB)?.othersFinished).toBe(true);
+    expect(hook().judgeNotices.comparisonForConversation(judge)?.othersFinished).toBe(false);
   });
 
   it("dismisses a startup toast for the rest of the session", async () => {

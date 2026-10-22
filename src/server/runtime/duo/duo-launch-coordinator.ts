@@ -634,14 +634,17 @@ export class DuoLaunchCoordinator {
         retry,
       ));
     }
-    this.judgeRetries.clear(launchId);
     transitionReserved = reservation.kind === "reserved";
+    const claimState = this.store.pairedLaunch(launchId).comparison?.state;
+    const claimRetry = retry
+      && (claimState === "failed" || claimState === "interrupted");
     let comparisonClaimed = false;
     try {
-      if (!this.store.claimPairedLaunchComparison(launchId, retry)) {
+      if (!this.store.claimPairedLaunchComparison(launchId, claimRetry)) {
         return publicStatus(this.store, this.store.pairedLaunch(launchId));
       }
       comparisonClaimed = true;
+      this.judgeRetries.clear(launchId);
       if (reservation.kind === "unavailable") throw reservation.error;
       const queued = this.turns.queue({
         conversationId: comparison.conversationId,

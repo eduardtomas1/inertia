@@ -970,6 +970,44 @@ describe("Duo third-model comparison", () => {
     runtime.store.close();
   });
 
+  it("starts the judge when a second retry lands while the first waits for its folder", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime, {
+      comparisonCheckoutAcquireTimeoutMs: 100,
+      judgeRetryInitialDelayMs: 60_000,
+    });
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    vi.spyOn(runtime.controller, "queue").mockImplementationOnce(() => {
+      throw new Error("Transient queue failure.");
+    });
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("failed");
+    expect(runtime.store.conversationWork.reserve(
+      prepared.sides[0].conversationId,
+    )).toBe(true);
+
+    const first = launches.retryComparison(prepared.launchId);
+    const second = launches.retryComparison(prepared.launchId);
+    setTimeout(() => {
+      runtime.store.conversationWork.release(prepared.sides[0].conversationId);
+    }, 150);
+    await Promise.all([first, second]);
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "running",
+      attempt: 2,
+      error: null,
+    });
+    expect(runtime.provider.inputs).toHaveLength(3);
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+  });
+
   it("leaves checkout-blocked judge admission waiting during shutdown", async () => {
     const runtime = await createRuntime();
     const launches = comparisonCoordinator(runtime);

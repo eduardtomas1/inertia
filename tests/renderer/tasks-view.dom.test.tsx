@@ -579,6 +579,25 @@ describe("Tasks view", () => {
     harness(snapshot([todo(firstId, "Write release notes")]), { openTaskRequest: { id: firstId, nonce: 1 } });
     expect(await screen.findByRole("complementary", { name: "Task details" })).toBeVisible();
   });
+
+  it("leaves focus on a row the user reached before the add request's late retry fires", async () => {
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const view = harness(snapshot([todo(firstId, "Write release notes")]));
+      view.setProps({ focusAddRequest: 1 });
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Add a task" })).toHaveFocus());
+      titleButton("Write release notes").focus();
+      expect(titleButton("Write release notes")).toHaveFocus();
+      act(() => { for (const frame of frames.splice(0)) frame(0); });
+      expect(titleButton("Write release notes")).toHaveFocus();
+    } finally {
+      raf.mockRestore();
+    }
+  });
 });
 
 function doneAt(): string {

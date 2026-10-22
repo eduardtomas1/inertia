@@ -552,8 +552,12 @@ export function TasksView({
     if (listHidden()) setSelectedId(null);
     const input = addInputRef.current;
     input?.focus();
-    if (!input || document.activeElement !== input) pendingFocus.current = { kind: "add" };
-    const frame = window.requestAnimationFrame(() => addInputRef.current?.focus());
+    if (input && document.activeElement === input) return;
+    pendingFocus.current = { kind: "add" };
+    const frame = window.requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || !viewRef.current?.contains(active)) addInputRef.current?.focus();
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [focusAddRequest]);
 

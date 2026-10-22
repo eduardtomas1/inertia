@@ -316,7 +316,7 @@
     "@vitest/coverage-v8": "5.0.5",
     "electron": "^44.9.3",
     "electron-builder": "26.17.0",
-    "electron-vite": "^5.0.0",
+    "electron-vite": "^6.0.0",
     "happy-dom": "21.0.3",
     "oxlint": "^1.88.0",
     "oxlint-tsgolint": "7.0.2004",

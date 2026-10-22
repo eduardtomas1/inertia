@@ -3,10 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { RunningRuntime } from "../../src/server";
 import type { AppSnapshot, ServerEvent } from "../../src/shared/contracts";
+import type { Todo } from "../../src/shared/todos";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 import { connectRuntime } from "../support/runtime-event-queue";
 import { startTestRuntime } from "../support/test-runtime";
@@ -47,48 +49,97 @@ async function request(client: Client, type: string, payload: unknown): Promise<
     && event.requestId === requestId, `request ${type}`);
 }
 
-async function snapshot(client: Client, matches: (snapshot: AppSnapshot) => boolean): Promise<AppSnapshot> {
-  const event = await client.events.next((candidate): candidate is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-    candidate.type === "snapshot.updated" && matches(candidate.snapshot), "a matching snapshot");
-  expect(parseServerEvent(event)).toBeTruthy();
-  return event.snapshot;
+async function todosUpdated(client: Client, matches: (todos: Todo[]) => boolean): Promise<Todo[]> {
+  const event = await client.events.next((candidate): candidate is Extract<ServerEvent, { type: "todos.updated" }> =>
+    candidate.type === "todos.updated" && matches(candidate.todos), "a matching task list");
+  return event.todos;
+}
+
+function recordFrames(client: Client): string[] {
+  const types: string[] = [];
+  client.socket.on("message", (data) => {
+    const frame = JSON.parse(data.toString()) as ServerEvent;
+    if (frame.type === "runtime.event") {
+      expect(parseServerEvent(frame)).toBeTruthy();
+      types.push(frame.event.type);
+    } else {
+      types.push(frame.type);
+    }
+  });
+  return types;
 }
 
 describe("task commands through the runtime", () => {
-  it("routes task commands, publishes tasks in snapshots and keeps them across a restart", async () => {
+  it("routes task commands, publishes the task list without full snapshots and keeps tasks across a restart", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-todo-runtime-"));
     directories.push(root);
     mkdirSync(join(root, "workspace"));
     const runtime = await start(root);
     const client = await connectRuntime(runtime.websocketUrl);
     expect((await welcome(client)).todos).toEqual([]);
+    const frames = recordFrames(client);
 
     const id = randomUUID();
     expect(await request(client, "todo.create", { id, title: "Ship the board", priority: "urgent", dueDate: "2026-10-13" }))
       .toMatchObject({ type: "request.ok" });
-    await snapshot(client, (candidate) => candidate.todos?.some((todo) => todo.id === id) === true);
+    await todosUpdated(client, (todos) => todos.some((todo) => todo.id === id));
 
-    expect(await request(client, "todo.update", { id, patch: { note: "Before Friday.", completed: true } }))
+    expect(await request(client, "todo.update", { id, patch: { note: "Before Friday.", dueTime: "15:00", completed: true } }))
       .toMatchObject({ type: "request.ok" });
-    const updated = await snapshot(client, (candidate) => candidate.todos?.[0]?.note === "Before Friday.");
-    expect(updated.todos?.[0]).toMatchObject({ id, title: "Ship the board", priority: "urgent", dueDate: "2026-10-13" });
-    expect(updated.todos?.[0]?.completedAt).not.toBeNull();
+    const updated = await todosUpdated(client, (todos) => todos[0]?.note === "Before Friday.");
+    expect(updated[0]).toMatchObject({ id, title: "Ship the board", priority: "urgent", dueDate: "2026-10-13", dueTime: "15:00" });
+    expect(updated[0]?.completedAt).not.toBeNull();
+    expect(frames.filter((type) => type === "todos.updated")).toHaveLength(2);
+    expect(frames).not.toContain("snapshot.updated");
 
     expect(await request(client, "todo.update", { id, patch: { dueDate: "2026-02-30" } }))
       .toMatchObject({ type: "request.error", message: "Invalid command." });
-    expect(await request(client, "todo.start", {
+    const timeOnly = await request(client, "todo.update", { id, patch: { dueDate: null, dueTime: "09:00" } });
+    expect(timeOnly).toMatchObject({ type: "request.error", message: "Add a day before a time." });
+    expect(timeOnly).not.toHaveProperty("diagnosticId");
+    const missing = await request(client, "todo.start", {
       id: randomUUID(),
       conversation: { projectId: randomUUID() },
-    })).toMatchObject({ type: "request.error", message: "That task no longer exists." });
+    });
+    expect(missing).toMatchObject({ type: "request.error", message: "That task no longer exists." });
+    expect(missing).not.toHaveProperty("diagnosticId");
 
     client.socket.close();
     await runtimes.pop()!.close();
     const restarted = await start(root);
     const reconnected = await connectRuntime(restarted.websocketUrl);
-    expect((await welcome(reconnected)).todos).toEqual(updated.todos);
+    expect((await welcome(reconnected)).todos).toEqual(updated);
 
     expect(await request(reconnected, "todo.delete", { id })).toMatchObject({ type: "request.ok" });
-    await snapshot(reconnected, (candidate) => candidate.todos?.length === 0);
+    await todosUpdated(reconnected, (todos) => todos.length === 0);
     reconnected.socket.close();
+  });
+
+  it("reports the open task limit plainly, without a diagnostics incident", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-todo-runtime-"));
+    directories.push(root);
+    mkdirSync(join(root, "workspace"));
+    const runtime = await start(root);
+    const client = await connectRuntime(runtime.websocketUrl);
+    await welcome(client);
+    const raw = new Database(join(root, "data", "inertia.sqlite"));
+    try {
+      const at = new Date().toISOString();
+      const insert = raw.prepare(`
+        INSERT INTO todos (id, title, note, created_at, updated_at) VALUES (?, ?, '', ?, ?)
+      `);
+      raw.transaction(() => {
+        for (let index = 0; index < 200; index += 1) insert.run(randomUUID(), `Task ${index}`, at, at);
+      })();
+    } finally {
+      raw.close();
+    }
+    const capped = await request(client, "todo.create", { id: randomUUID(), title: "One more" });
+    expect(capped).toEqual({
+      type: "request.error",
+      requestId: expect.any(String),
+      message: "You have 200 open tasks. Finish or delete some first.",
+    });
+    client.socket.close();
   });
 });

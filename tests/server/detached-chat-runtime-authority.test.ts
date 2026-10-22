@@ -308,6 +308,12 @@ describe("detached chat runtime authority", () => {
         providers: [],
       },
     })).toEqual({ type: "runtime.cursor", sync });
+    expect(frame({
+      type: "runtime.event",
+      sync,
+      scope: { kind: "shell" },
+      event: { type: "todos.updated", todos: [] },
+    })).toEqual({ type: "runtime.cursor", sync });
   });
 
   it("passes watcher link removals and live phases only when the link touches the detached chat", () => {
@@ -675,8 +681,11 @@ describe("detached chat runtime authority", () => {
       requestId: REQUEST,
       payload: { presetId: REQUEST, expectedRevision: 1 },
     })).not.toBeNull();
+    const clearDone: ClientCommand = { type: "todo.clearDone", requestId: REQUEST, payload: {} };
+    expect(rejection(clearDone)).not.toBeNull();
+    expect(mainRejection(clearDone)).toBeNull();
     for (const command of [
-      { type: "todo.create", requestId: REQUEST, payload: { id: REQUEST, title: "Task", note: "", priority: null, dueDate: null } },
+      { type: "todo.create", requestId: REQUEST, payload: { id: REQUEST, title: "Task", note: "", priority: null, dueDate: null, dueTime: null, projectId: null } },
       { type: "todo.update", requestId: REQUEST, payload: { id: REQUEST, patch: { completed: true } } },
       { type: "todo.delete", requestId: REQUEST, payload: { id: REQUEST } },
       { type: "todo.start", requestId: REQUEST, payload: { id: REQUEST, conversation: { projectId: PROJECT } } },

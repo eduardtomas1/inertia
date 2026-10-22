@@ -60,7 +60,7 @@ function setup({ palette = false, detached = false, online = true, available = t
         selectConversation={navigation.selectConversation}
         selectMessage={(hit, signal) => navigation.selectMessage(hit, () => setView("workspace"), signal)}
         sendCommand={select} selectProject={vi.fn()} createConversation={vi.fn()} createConversationIn={vi.fn()}
-        importProject={async () => undefined} openSettings={vi.fn()} openTasks={vi.fn()} />
+        importProject={async () => undefined} openSettings={vi.fn()} openTasks={vi.fn()} addTask={vi.fn()} />
     </>;
   }
   return { ...render(<Harness />), focused, focus, select, error };

@@ -9,6 +9,7 @@ type ConversationShellEvent = Extract<
   RuntimeMutationEvent,
   { type: "conversation.shell.updated" }
 >;
+type TodosEvent = Extract<RuntimeMutationEvent, { type: "todos.updated" }>;
 
 function descendingTimestamp(
   left: { id: string; startedAt?: string; updatedAt?: string },
@@ -61,6 +62,14 @@ export function applyConversationShellEvent(
     conversations,
     runs,
   };
+}
+
+export function applyTodosEvent(
+  snapshot: AppSnapshot,
+  event: TodosEvent,
+): AppSnapshot {
+  if (structurallyEqual(snapshot.todos, event.todos)) return snapshot;
+  return { ...snapshot, todos: event.todos };
 }
 
 type WatcherLinkEvent = Extract<

@@ -7,7 +7,9 @@ import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
-import { publicRuntimeError, RuntimeRequestError } from "../../src/server/runtime-errors";
+import { publicRuntimeError, RuntimeRequestError, userCorrectableRuntimeError } from "../../src/server/runtime-errors";
+import { CommandIncidents } from "../../src/server/runtime/command-incidents";
+import type { IncidentObservation } from "../../src/node/application-incidents";
 import {
   createRuntimeCommandExecutor,
   defineRuntimeCommandHandler,
@@ -15,10 +17,10 @@ import {
 } from "../../src/server/runtime/commands/command-router";
 import { createTodoCommandHandler, type TodoCommandDependencies } from "../../src/server/runtime/commands/todo-commands";
 import { ConversationCreationService } from "../../src/server/runtime/conversation-creation-service";
-import type { ClientCommand, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
+import type { ClientCommand, ProviderInfo, RuntimeMutationEvent, ServerEvent } from "../../src/shared/contracts";
 import { clientCommandSchema } from "../../src/shared/contracts/client-command";
 import { providerIdForHarness, providerNativeModelSelection } from "../../src/shared/model-routing";
-import { todoPromptContent } from "../../src/shared/todos";
+import { MAX_OPEN_TODOS, todoPromptContent } from "../../src/shared/todos";
 import { hold, isHeld, release, UPDATE_HOLD_MESSAGE } from "../../src/server/runtime/update-hold";
 
 const roots: string[] = [];
@@ -69,8 +71,12 @@ function fixture(options: {
     queue: vi.fn((_request: { conversationId: string; content: string }) => ({ turn: { id: "turn-1" } })),
     start: vi.fn(() => options.start ?? true),
     failBeforeStart: vi.fn(() => true),
+    isActive: vi.fn((_conversationId: string) => false),
   };
   const events: ServerEvent[] = [];
+  const broadcasts: RuntimeMutationEvent[] = [];
+  const incidentSink = vi.fn<(observation: IncidentObservation) => unknown>();
+  const incidents = new CommandIncidents(incidentSink, "generation-1", userCorrectableRuntimeError);
   const dependencies = {
     store,
     creation,
@@ -79,10 +85,15 @@ function fixture(options: {
     enableProviders: options.enableProviders ?? false,
     verifyProviderInstallation: vi.fn(async () => { order.push("verify"); }),
     providerInfo: () => (options.providers ?? []) as ProviderInfo[],
+    broadcast: vi.fn((event: RuntimeMutationEvent) => {
+      order.push(event.type);
+      broadcasts.push(event);
+    }),
     broadcastSnapshot: vi.fn(() => { order.push("snapshot"); }),
     send: vi.fn((_socket: WebSocket, event: ServerEvent) => {
-      order.push(event.type);
-      events.push(event);
+      const observed = incidents.observe(event);
+      order.push(observed.type);
+      events.push(observed);
     }),
   } as unknown as TodoCommandDependencies;
   const handler = createTodoCommandHandler(dependencies);
@@ -97,49 +108,86 @@ function fixture(options: {
     send: dependencies.send,
     broadcastSnapshot: dependencies.broadcastSnapshot,
     publicError: publicRuntimeError,
+    onFailure: incidents.noteFailure,
   });
   const run = async (type: ClientCommand["type"], payload: unknown) => {
     const command = clientCommandSchema.parse({ type, requestId: randomUUID(), payload });
     events.length = 0;
     order.length = 0;
-    await execute(socket, command);
-    return { command, events: [...events], order: [...order] };
+    broadcasts.length = 0;
+    await incidents.run(command, () => execute(socket, command));
+    return { command, events: [...events], order: [...order], broadcasts: [...broadcasts] };
   };
-  const startPayload = (id: string) => ({
+  const startPayload = (id: string, replaces?: string) => ({
     id,
+    ...(replaces ? { replaces } : {}),
     conversation: {
       projectId: project.id,
       modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5", alias: "gpt-5", reasoningEffort: "high" }),
       accessMode: "auto-edit",
     },
   });
-  return { store, project, creation, turns, dependencies, handler, run, startPayload };
+  return { store, project, creation, turns, dependencies, handler, run, startPayload, incidentSink };
 }
 
 describe("todo command handler", () => {
   it("owns exactly the task commands", () => {
     const { handler } = fixture();
-    expect([...(handler.commandTypes ?? [])].sort()).toEqual(["todo.create", "todo.delete", "todo.start", "todo.update"]);
+    expect([...(handler.commandTypes ?? [])].sort()).toEqual(["todo.clearDone", "todo.create", "todo.delete", "todo.start", "todo.update"]);
   });
 
-  it("creates, updates and deletes tasks as snapshot mutations", async () => {
-    const { store, run } = fixture();
+  it("publishes the task list instead of a full snapshot after create, update, delete and clear done", async () => {
+    const { store, project, dependencies, run } = fixture();
     const id = randomUUID();
-    const created = await run("todo.create", { id, title: "Write notes", priority: "high" });
-    expect(created.order).toEqual(["snapshot", "request.ok"]);
-    expect(store.snapshot().todos).toEqual([expect.objectContaining({ id, title: "Write notes", priority: "high", note: "" })]);
+    const created = await run("todo.create", { id, title: "Write notes", priority: "high", projectId: project.id });
+    expect(created.order).toEqual(["todos.updated", "request.ok"]);
+    expect(created.broadcasts).toEqual([{ type: "todos.updated", todos: store.todos.list() }]);
+    expect(store.snapshot().todos).toEqual([expect.objectContaining({ id, title: "Write notes", priority: "high", note: "", projectId: project.id })]);
 
-    const updated = await run("todo.update", { id, patch: { note: "Short.", completed: true } });
-    expect(updated.order).toEqual(["snapshot", "request.ok"]);
-    expect(store.todos.get(id)).toMatchObject({ note: "Short." });
-    expect(store.todos.get(id)?.completedAt).not.toBeNull();
+    const updated = await run("todo.update", { id, patch: { note: "Short.", dueDate: "2026-10-22", dueTime: "15:00" } });
+    expect(updated.order).toEqual(["todos.updated", "request.ok"]);
+    expect(updated.broadcasts).toEqual([{
+      type: "todos.updated",
+      todos: [expect.objectContaining({ id, note: "Short.", dueDate: "2026-10-22", dueTime: "15:00" })],
+    }]);
+    expect(updated.events).toEqual([{ type: "request.ok", requestId: updated.command.requestId }]);
 
-    const deleted = await run("todo.delete", { id });
-    expect(deleted.order).toEqual(["snapshot", "request.ok"]);
+    const other = randomUUID();
+    await run("todo.create", { id: other, title: "Keep" });
+    await run("todo.update", { id, patch: { completed: true } });
+    const cleared = await run("todo.clearDone", {});
+    expect(cleared.order).toEqual(["todos.updated", "request.ok"]);
+    expect(cleared.broadcasts).toEqual([{ type: "todos.updated", todos: [expect.objectContaining({ id: other })] }]);
+    expect(store.todos.get(id)).toBeNull();
+
+    const deleted = await run("todo.delete", { id: other });
+    expect(deleted.order).toEqual(["todos.updated", "request.ok"]);
+    expect(deleted.broadcasts).toEqual([{ type: "todos.updated", todos: [] }]);
     expect(store.snapshot().todos).toEqual([]);
+    expect(dependencies.broadcastSnapshot).not.toHaveBeenCalled();
 
     const missing = await run("todo.delete", { id });
-    expect(missing.events).toEqual([expect.objectContaining({ type: "request.error", message: "That task no longer exists." })]);
+    expect(missing.events).toEqual([{ type: "request.error", requestId: missing.command.requestId, message: "That task no longer exists." }]);
+    expect(missing.broadcasts).toEqual([]);
+  });
+
+  it("reports task validation errors plainly, without an incident", async () => {
+    const { store, run, incidentSink } = fixture();
+    for (let index = 0; index < MAX_OPEN_TODOS; index += 1) {
+      store.todos.create({ id: randomUUID(), title: `Task ${index}` });
+    }
+    const capped = await run("todo.create", { id: randomUUID(), title: "One more" });
+    expect(capped.events).toEqual([{
+      type: "request.error",
+      requestId: capped.command.requestId,
+      message: "You have 200 open tasks. Finish or delete some first.",
+    }]);
+    const id = store.todos.list()[0]!.id;
+    const timeOnly = await run("todo.update", { id, patch: { dueTime: "15:00" } });
+    expect(timeOnly.events).toEqual([{ type: "request.error", requestId: timeOnly.command.requestId, message: "Add a day before a time." }]);
+    const project = await run("todo.update", { id, patch: { projectId: randomUUID() } });
+    expect(project.events).toEqual([{ type: "request.error", requestId: project.command.requestId, message: "That project no longer exists." }]);
+    expect(incidentSink).not.toHaveBeenCalled();
   });
 
   it("starts a chat for the task, links it and dispatches the task as the first turn", async () => {
@@ -147,7 +195,6 @@ describe("todo command handler", () => {
     const id = randomUUID();
     const title = `${"x".repeat(119)}😀 and more`;
     store.todos.create({ id, title, note: "  Check the Linux lane.  " });
-    store.todos.update(id, { completed: true });
     const activeBefore = store.shellSnapshot().activeConversationId;
 
     const { command, events, order } = await run("todo.start", startPayload(id));
@@ -168,7 +215,8 @@ describe("todo command handler", () => {
       modelSelection: expect.objectContaining({ modelId: "gpt-5", reasoningEffort: "high" }),
     });
     expect(store.shellSnapshot().activeConversationId).toBe(activeBefore);
-    expect(store.todos.get(id)).toMatchObject({ conversationId: conversation.id, completedAt: null });
+    expect(store.todos.get(id)).toMatchObject({ conversationId: conversation.id, completedAt: null, projectId: project.id });
+    expect(store.todos.get(id)?.linkedAt).toBeTruthy();
     expect(store.conversationTitleLocked(conversation.id)).toBe(true);
     expect(dependencies.verifyProviderInstallation).toHaveBeenCalledWith("codex");
     expect(turns.queue).toHaveBeenCalledWith({
@@ -259,21 +307,102 @@ describe("todo command handler", () => {
     }]);
   });
 
-  it("rejects starting a missing or already linked task without creating a chat", async () => {
-    const { store, project, creation, turns, run, startPayload } = fixture();
+  it("rejects starting a missing, done or already linked task without creating a chat", async () => {
+    const { store, project, creation, turns, run, startPayload, incidentSink } = fixture();
     const missing = await run("todo.start", startPayload(randomUUID()));
-    expect(missing.events).toEqual([expect.objectContaining({ type: "request.error", message: "That task no longer exists." })]);
+    expect(missing.events).toEqual([{ type: "request.error", requestId: missing.command.requestId, message: "That task no longer exists." }]);
+
+    const done = randomUUID();
+    store.todos.create({ id: done, title: "Done" });
+    store.todos.update(done, { completed: true });
+    const finished = await run("todo.start", startPayload(done));
+    expect(finished.events).toEqual([{ type: "request.error", requestId: finished.command.requestId, message: "Reopen the task before handing it off." }]);
+    expect(store.todos.get(done)?.completedAt).not.toBeNull();
 
     const id = randomUUID();
     store.todos.create({ id, title: "Linked" });
     const existing = store.createConversation(project.id, "Existing");
     store.todos.link(id, existing.id);
     const linked = await run("todo.start", startPayload(id));
-    expect(linked.events).toEqual([expect.objectContaining({ type: "request.error", message: "That task is already handed to an agent." })]);
+    expect(linked.events).toEqual([{ type: "request.error", requestId: linked.command.requestId, message: "That task is already handed to an agent." }]);
+    const elsewhere = await run("todo.start", startPayload(id, randomUUID()));
+    expect(elsewhere.events).toEqual([{
+      type: "request.error",
+      requestId: elsewhere.command.requestId,
+      message: "This task was handed off somewhere else in the meantime.",
+    }]);
 
+    expect(incidentSink).not.toHaveBeenCalled();
     expect(creation.create).not.toHaveBeenCalled();
     expect(turns.queue).not.toHaveBeenCalled();
     expect(store.shellSnapshot().conversations.map(({ id: conversationId }) => conversationId)).toEqual([existing.id]);
+  });
+
+  it("hands a task off again to a new chat and leaves the replaced chat as it was", async () => {
+    const { store, project, creation, turns, run, startPayload } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Try again" });
+    const first = await run("todo.start", startPayload(id));
+    const original = (first.events.at(-1) as Extract<ServerEvent, { type: "request.result" }>).result as { conversationId: string };
+    const before = store.todos.get(id)!;
+    const originalShell = store.conversationShell(original.conversationId);
+    const second = await run("todo.start", startPayload(id, original.conversationId));
+
+    expect(second.order).toEqual(["verify", "snapshot", "request.result"]);
+    const replacement = (second.events.at(-1) as Extract<ServerEvent, { type: "request.result" }>).result as { conversationId: string };
+    expect(replacement.conversationId).not.toBe(original.conversationId);
+    expect(creation.create).toHaveBeenCalledTimes(2);
+    expect(turns.queue).toHaveBeenLastCalledWith(expect.objectContaining({ conversationId: replacement.conversationId, content: "Try again" }));
+    expect(store.todos.get(id)).toMatchObject({ conversationId: replacement.conversationId, projectId: project.id });
+    expect(store.todos.get(id)!.linkedAt! >= before.linkedAt!).toBe(true);
+    expect(store.conversationShell(original.conversationId)).toEqual(originalShell);
+    expect(store.shellSnapshot().conversations.map(({ id: conversationId }) => conversationId).sort())
+      .toEqual([original.conversationId, replacement.conversationId].sort());
+  });
+
+  it("asks to stop the agent before handing off again from a chat that is still working", async () => {
+    const { store, project, creation, turns, run, startPayload, incidentSink } = fixture(providersOn);
+    const id = randomUUID();
+    store.todos.create({ id, title: "Busy" });
+    const busy = store.createConversation(project.id, "Busy chat");
+    store.todos.link(id, busy.id);
+    turns.isActive.mockImplementation((conversationId) => conversationId === busy.id);
+
+    const active = await run("todo.start", startPayload(id, busy.id));
+    expect(active.events).toEqual([{ type: "request.error", requestId: active.command.requestId, message: "Stop the agent first." }]);
+
+    turns.isActive.mockImplementation(() => false);
+    store.beginAgentTurn({ id: randomUUID(), runId: randomUUID(), conversationId: busy.id,
+      content: "Busy", providerId: "codex", harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server", model: "gpt-5", reasoningEffort: "high",
+      interactionMode: "build", accessMode: "auto-edit", configurationRevision: 1,
+      association: "authoritative" });
+    const recorded = await run("todo.start", startPayload(id, busy.id));
+    expect(recorded.events).toEqual([{ type: "request.error", requestId: recorded.command.requestId, message: "Stop the agent first." }]);
+
+    expect(creation.create).not.toHaveBeenCalled();
+    expect(incidentSink).not.toHaveBeenCalled();
+    expect(store.todos.get(id)?.conversationId).toBe(busy.id);
+  });
+
+  it("removes the new chat when the replaced chat starts working while the new one is created", async () => {
+    let busyId = "";
+    let turnsRef!: { isActive: ReturnType<typeof vi.fn> };
+    const context = fixture({ ...providersOn, beforeCreate: () => { turnsRef.isActive.mockImplementation((conversationId: string) => conversationId === busyId); } });
+    turnsRef = context.turns;
+    const id = randomUUID();
+    context.store.todos.create({ id, title: "Raced" });
+    const busy = context.store.createConversation(context.project.id, "Old chat");
+    busyId = busy.id;
+    context.store.todos.link(id, busy.id);
+
+    const { events } = await context.run("todo.start", context.startPayload(id, busy.id));
+
+    expect(events).toEqual([expect.objectContaining({ type: "request.error", message: "Stop the agent first." })]);
+    expect(context.creation.create).toHaveBeenCalledOnce();
+    expect(context.store.shellSnapshot().conversations.map(({ id: conversationId }) => conversationId)).toEqual([busy.id]);
+    expect(context.store.todos.get(id)?.conversationId).toBe(busy.id);
+    expect(context.turns.queue).not.toHaveBeenCalled();
   });
 
   it("fails the first turn and keeps the linked chat when the turn cannot start", async () => {
@@ -443,6 +572,7 @@ describe("todo command handler", () => {
     const { events } = await context.run("todo.start", context.startPayload(id));
 
     expect(events).toEqual([expect.objectContaining({ type: "request.error", message: "Sign in to Codex first." })]);
+    expect(events[0]).toHaveProperty("diagnosticId", expect.any(String));
     expect(context.creation.create).not.toHaveBeenCalled();
     expect(context.store.todos.get(id)?.conversationId).toBeNull();
   });

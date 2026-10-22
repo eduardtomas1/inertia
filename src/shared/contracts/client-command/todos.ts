@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import { todoDraftSchema, todoPatchSchema } from "../../todos";
+import {
+  dueTimeRequiresDate,
+  TODO_TIME_WITHOUT_DATE_MESSAGE,
+  todoDraftFieldsSchema,
+  todoPatchSchema,
+} from "../../todos";
 import { requestBase } from "./common";
 import { conversationCreatePayloadSchema } from "./conversation-create";
 
@@ -14,7 +19,8 @@ export const todoCommandSchemas = [
   z.object({
     ...requestBase,
     type: z.literal("todo.create"),
-    payload: todoDraftSchema.extend({ id: z.string().uuid() }),
+    payload: todoDraftFieldsSchema.extend({ id: z.string().uuid() })
+      .refine(dueTimeRequiresDate, TODO_TIME_WITHOUT_DATE_MESSAGE),
   }).strict(),
   z.object({
     ...requestBase,
@@ -26,12 +32,14 @@ export const todoCommandSchemas = [
     type: z.literal("todo.delete"),
     payload: z.object({ id: z.string().uuid() }).strict(),
   }).strict(),
+  z.object({ ...requestBase, type: z.literal("todo.clearDone"), payload: z.object({}).strict() }).strict(),
   z.object({
     ...requestBase,
     type: z.literal("todo.start"),
     payload: z.object({
       id: z.string().uuid(),
       conversation: todoStartConversationSchema,
+      replaces: z.string().uuid().optional(),
     }).strict(),
   }).strict(),
 ] as const;

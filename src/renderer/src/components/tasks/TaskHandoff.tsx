@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import clsx from "clsx";
 import type { AppSettings, AppSnapshot, ModelSelection } from "@shared/contracts";
@@ -27,9 +27,20 @@ export interface TaskHandoffProps {
   snapshot: AppSnapshot;
   settings: AppSettings;
   defaultProjectId: string | null;
+  initialSelection?: ModelSelection | null;
+  autoFocusStart?: boolean;
   disabled: boolean;
   onStart: (target: TaskStartTarget, selection: ModelSelection) => Promise<void>;
+  onCancel?: () => void;
   onError: (message: string) => void;
+}
+
+function copySelection(selection: ModelSelection): ModelSelection {
+  return {
+    ...selection,
+    providerOptions: { ...selection.providerOptions },
+    capabilities: selection.capabilities.map((capability) => ({ ...capability })),
+  };
 }
 
 function capitalized(value: string): string {
@@ -40,17 +51,25 @@ export function TaskHandoff({
   snapshot,
   settings,
   defaultProjectId,
+  initialSelection = null,
+  autoFocusStart = false,
   disabled,
   onStart,
+  onCancel,
   onError,
 }: TaskHandoffProps): React.JSX.Element {
   const labelId = useId();
+  const groupRef = useRef<HTMLDivElement>(null);
+  const startRef = useRef<HTMLButtonElement>(null);
+  const [refocus, setRefocus] = useState(autoFocusStart);
   const projects = useMemo(
     () => snapshot.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch"),
     [snapshot.projects],
   );
   const [chosenTarget, setChosenTarget] = useState<TaskStartTarget | null>(null);
-  const [chosenSelection, setChosenSelection] = useState<ModelSelection | null>(null);
+  const [chosenSelection, setChosenSelection] = useState<ModelSelection | null>(
+    () => initialSelection ? copySelection(initialSelection) : null,
+  );
   const [starting, setStarting] = useState(false);
   const target: TaskStartTarget | null = chosenTarget?.kind === "folder"
     || (chosenTarget && projects.some(({ id }) => id === chosenTarget.projectId))
@@ -89,6 +108,17 @@ export function TaskHandoff({
   const fastAvailable = route?.supportsNativeFastModeControl === true
     && routeSupportsNativeFastModeIdentity(selection);
   const busy = disabled || starting;
+  const startDisabled = busy || !target || !ready;
+
+  useEffect(() => {
+    if (!refocus || starting) return;
+    setRefocus(false);
+    if (startDisabled) {
+      groupRef.current?.querySelector<HTMLElement>("button:not(:disabled), select:not(:disabled)")?.focus();
+    } else {
+      startRef.current?.focus();
+    }
+  }, [refocus, startDisabled, starting]);
 
   const report = (error: unknown): void => {
     onError(error instanceof Error ? error.message : "That action could not be completed.");
@@ -104,22 +134,25 @@ export function TaskHandoff({
   const start = (): void => {
     if (!target || !ready) return;
     setStarting(true);
-    void onStart(target, selection).catch(report).finally(() => setStarting(false));
+    void onStart(target, selection).then(
+      () => setStarting(false),
+      (error: unknown) => {
+        report(error);
+        setStarting(false);
+        setRefocus(true);
+      },
+    );
   };
 
   return (
-    <div className="task-handoff" role="group" aria-labelledby={labelId}>
+    <div className="task-handoff" role="group" aria-labelledby={labelId} ref={groupRef}>
       <p className="task-handoff-label" id={labelId}>Hand it to an agent</p>
       <div className="task-handoff-grid">
         <ModelChooser
           routes={routes}
           selectedRoute={selectedModelSearchRoute(routes, selection)}
           disabled={busy}
-          onSelect={(next) => setChosenSelection({
-            ...next.selection,
-            providerOptions: { ...next.selection.providerOptions },
-            capabilities: next.selection.capabilities.map((capability) => ({ ...capability })),
-          })}
+          onSelect={(next) => setChosenSelection(copySelection(next.selection))}
         />
         <select
           aria-label="Reasoning"
@@ -177,10 +210,17 @@ export function TaskHandoff({
         </button>
       </div>
       <div className="task-handoff-actions">
+        {onCancel && (
+          <button type="button" className="secondary-button" disabled={starting} onClick={onCancel}>
+            Cancel
+          </button>
+        )}
         <button
+          ref={startRef}
           type="button"
           className="primary-button"
-          disabled={busy || !target || !ready}
+          data-task-start=""
+          disabled={startDisabled}
           aria-busy={starting || undefined}
           onClick={start}
         >

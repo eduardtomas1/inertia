@@ -46,6 +46,7 @@ function actions(createConversation: () => void): GlobalShortcutActions {
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
     toggleSettings: vi.fn(),
+    openTasks: vi.fn(),
   };
 }
 
@@ -110,7 +111,7 @@ describe("global shortcuts", () => {
       current,
       "darwin",
     );
-    const repeats = ["n", "b", "j", ","].flatMap((key) => [
+    const repeats = ["n", "b", "j", "t", ","].flatMap((key) => [
       new ShortcutEvent("keydown", key, { metaKey: true }),
       new ShortcutEvent("keydown", key, { metaKey: true, repeat: true }),
       new ShortcutEvent("keydown", key, { metaKey: true, repeat: true }),
@@ -122,6 +123,7 @@ describe("global shortcuts", () => {
     expect(createConversation).toHaveBeenCalledOnce();
     expect(current.current.setSidebarCollapsed).toHaveBeenCalledOnce();
     expect(current.current.toggleTerminal).toHaveBeenCalledOnce();
+    expect(current.current.openTasks).toHaveBeenCalledOnce();
     expect(current.current.toggleSettings).toHaveBeenCalledOnce();
     expect(repeats.every((event) => event.defaultPrevented && event.cancelBubble)).toBe(true);
     expect(keyUp.defaultPrevented).toBe(true);
@@ -154,6 +156,7 @@ describe("global shortcuts", () => {
         "new-chat": "y",
         "toggle-sidebar": "g",
         "toggle-terminal": "h",
+        tasks: "t",
       } as const,
     } };
     const dispose = installGlobalShortcuts(

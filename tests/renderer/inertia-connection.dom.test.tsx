@@ -756,3 +756,80 @@ describe("useInertiaConnection", () => {
     expect(socket.close).not.toHaveBeenCalled();
   });
 });
+
+describe("todos.updated", () => {
+  const todo = {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    title: "Clean the downloads folder",
+    note: "",
+    priority: null,
+    dueDate: "2026-10-22",
+    dueTime: "15:00",
+    projectId: null,
+    completedAt: null,
+    conversationId: null,
+    linkedAt: null,
+    createdAt: "2026-10-21T10:00:00.000Z",
+    updatedAt: "2026-10-21T10:00:00.000Z",
+  };
+
+  async function connectWithTodo(applyTodos?: boolean) {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection: vi.fn().mockResolvedValue({ websocketUrl: "ws://127.0.0.1:12345/runtime/test" }),
+        onRuntimeReady: vi.fn(() => vi.fn()),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const hook = renderHook(() => useInertiaConnection(applyTodos === undefined ? undefined : { applyTodos }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const socket = FakeWebSocket.instances[0]!;
+    const runtimeGeneration = "runtime-todos";
+    const welcome = { runtimeGeneration, latestSequence: 0 };
+    act(() => {
+      socket.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({
+          type: "server.welcome",
+          protocolVersion: 1,
+          snapshot: {
+            projects: [], conversations: [], runs: [], providers: [], settings: defaultSettings,
+            activeProjectId: null, activeConversationId: null, todos: [], sync: welcome,
+          },
+          sync: welcome,
+        }),
+      }));
+      socket.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({ type: "runtime.sync.completed", sync: welcome }),
+      }));
+    });
+    await waitFor(() => expect(hook.result.current.status).toBe("online"));
+    const initial = hook.result.current.snapshot;
+    const delivered = vi.fn();
+    hook.result.current.subscribe(delivered);
+    act(() => {
+      socket.dispatchEvent(new MessageEvent("message", {
+        data: JSON.stringify({
+          type: "runtime.event",
+          sync: { runtimeGeneration, latestSequence: 1 },
+          scope: { kind: "shell" },
+          event: { type: "todos.updated", todos: [todo] },
+        }),
+      }));
+    });
+    await waitFor(() => expect(delivered).toHaveBeenCalledWith({ type: "todos.updated", todos: [todo] }));
+    return { hook, initial };
+  }
+
+  it("replaces the snapshot's tasks in the main window", async () => {
+    const { hook, initial } = await connectWithTodo();
+    expect(hook.result.current.snapshot?.todos).toEqual([todo]);
+    expect(hook.result.current.snapshot?.conversations).toBe(initial?.conversations);
+  });
+
+  it("leaves a detached chat window's snapshot alone", async () => {
+    const { hook, initial } = await connectWithTodo(false);
+    expect(hook.result.current.snapshot).toBe(initial);
+    expect(hook.result.current.snapshot?.todos).toEqual([]);
+  });
+});

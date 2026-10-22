@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CalendarDays, Flag, X } from "lucide-react";
+import { CalendarDays, Ellipsis, Flag, FolderOpen, X } from "lucide-react";
 import clsx from "clsx";
 import {
   MAX_TODO_NOTE_CHARS,
@@ -10,30 +10,36 @@ import {
 
 import { todoDueLabel } from "../../utils/todoDates";
 import { IconButton } from "../ui";
-import { TASK_PRIORITY_LABELS, type TaskStatusWord } from "./taskModel";
+import { TaskDuePicker } from "./TaskDuePicker";
+import { TASK_PRIORITY_LABELS } from "./taskModel";
 import type { TaskMenuAnchor } from "./TaskList";
 
-export type TaskDetailMenu = "due" | "priority";
-export type TaskFocusTarget = "title" | "agent";
+export type TaskDetailMenu = "priority" | "project" | "more";
+export type TaskFocusTarget = "title" | "agent" | "chat";
 
 const NOTE_SAVE_DELAY_MS = 600;
 const FOCUSABLE = "button:not(:disabled), select:not(:disabled), input:not(:disabled)";
 
+export const TASK_DETAIL_MENU_IDS: Record<TaskDetailMenu, string> = {
+  priority: "task-priority-menu",
+  project: "task-project-menu",
+  more: "task-more-menu",
+};
+
 export interface TaskDetailProps {
   todo: Todo;
-  now: Date;
+  now: number;
   leaving: boolean;
-  status: TaskStatusWord | null;
-  canOpenChat: boolean;
+  offline: boolean;
+  projectName: string | null;
   focusTarget: TaskFocusTarget | null;
   openMenu: TaskDetailMenu | null;
-  handoff: ReactNode;
+  agent: ReactNode;
   onFocusHandled: () => void;
-  onUpdate: (patch: TodoPatch) => void;
+  onUpdate: (patch: TodoPatch) => Promise<boolean>;
   onClose: () => void;
-  onOpenChat: () => void;
-  onToggleMenu: (menu: TaskDetailMenu, anchor: TaskMenuAnchor) => void;
-  setMenuTrigger: (menu: TaskDetailMenu, node: HTMLButtonElement | null) => void;
+  onSubmit: () => void;
+  onToggleMenu: (menu: TaskDetailMenu, anchor: TaskMenuAnchor, trigger: HTMLElement) => void;
 }
 
 function anchorBelow(element: HTMLElement): TaskMenuAnchor {
@@ -41,46 +47,61 @@ function anchorBelow(element: HTMLElement): TaskMenuAnchor {
   return { x: bounds.left, y: bounds.bottom + 4 };
 }
 
+function useLatest<Value>(value: Value): { readonly current: Value } {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
+}
+
 export function TaskDetail({
   todo,
   now,
   leaving,
-  status,
-  canOpenChat,
+  offline,
+  projectName,
   focusTarget,
   openMenu,
-  handoff,
+  agent,
   onFocusHandled,
   onUpdate,
   onClose,
-  onOpenChat,
+  onSubmit,
   onToggleMenu,
-  setMenuTrigger,
 }: TaskDetailProps): React.JSX.Element {
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const agentRef = useRef<HTMLDivElement>(null);
   const [title, setTitle] = useState(todo.title);
   const [note, setNote] = useState(todo.note);
+  const [dueOpen, setDueOpen] = useState(false);
   const savedTitle = useRef(todo.title);
   const savedNote = useRef(todo.note);
+  const pendingTitle = useRef<string | null>(null);
+  const pendingNote = useRef<string | null>(null);
   const titleDirty = useRef(false);
   const noteDirty = useRef(false);
   const noteTimer = useRef<number | null>(null);
+  const titleDraft = useRef(todo.title);
   const noteDraft = useRef(todo.note);
-  const update = useRef(onUpdate);
-  update.current = onUpdate;
+  const update = useLatest(onUpdate);
+  const latestTodo = useLatest(todo);
+
+  const showTitle = (value: string): void => {
+    titleDraft.current = value;
+    setTitle(value);
+  };
+  const showNote = (value: string): void => {
+    noteDraft.current = value;
+    setNote(value);
+  };
 
   useEffect(() => {
     savedTitle.current = todo.title;
-    if (!titleDirty.current) setTitle(todo.title);
+    if (!titleDirty.current && pendingTitle.current === null) showTitle(todo.title);
   }, [todo.title]);
 
   useEffect(() => {
     savedNote.current = todo.note;
-    if (!noteDirty.current) {
-      noteDraft.current = todo.note;
-      setNote(todo.note);
-    }
+    if (!noteDirty.current && pendingNote.current === null) showNote(todo.note);
   }, [todo.note]);
 
   const flushNote = (): void => {
@@ -88,41 +109,89 @@ export function TaskDetail({
     noteTimer.current = null;
     if (!noteDirty.current) return;
     noteDirty.current = false;
-    if (noteDraft.current === savedNote.current) return;
-    savedNote.current = noteDraft.current;
-    update.current({ note: noteDraft.current });
+    const next = noteDraft.current;
+    if (next === (pendingNote.current ?? savedNote.current)) return;
+    pendingNote.current = next;
+    void update.current({ note: next }).then((saved) => {
+      if (pendingNote.current !== next) return;
+      pendingNote.current = null;
+      if (saved) {
+        savedNote.current = next;
+      } else if (!noteDirty.current) {
+        showNote(latestTodo.current.note);
+      }
+    });
   };
-  const flushNoteRef = useRef(flushNote);
-  flushNoteRef.current = flushNote;
-  useEffect(() => () => flushNoteRef.current(), []);
 
   const saveTitle = (): void => {
+    const base = pendingTitle.current ?? savedTitle.current;
     if (!titleDirty.current) {
-      setTitle(savedTitle.current);
+      showTitle(base);
       return;
     }
     titleDirty.current = false;
-    const next = title.trim();
+    const next = titleDraft.current.trim();
     if (!next) {
-      setTitle(savedTitle.current);
+      showTitle(base);
       return;
     }
-    setTitle(next);
-    if (next === savedTitle.current) return;
-    savedTitle.current = next;
-    onUpdate({ title: next });
+    showTitle(next);
+    if (next === base) return;
+    pendingTitle.current = next;
+    void update.current({ title: next }).then((saved) => {
+      if (pendingTitle.current !== next) return;
+      pendingTitle.current = null;
+      if (saved) {
+        savedTitle.current = next;
+      } else if (!titleDirty.current) {
+        showTitle(latestTodo.current.title);
+      }
+    });
   };
+
+  const flushRef = useLatest(() => {
+    saveTitle();
+    flushNote();
+  });
+  const finalFlushRef = useLatest(() => {
+    if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
+    if (!noteDirty.current) return;
+    noteDirty.current = false;
+    if (noteDraft.current !== (pendingNote.current ?? savedNote.current)) {
+      void update.current({ note: noteDraft.current });
+    }
+  });
+
+  useEffect(() => {
+    const flush = (): void => flushRef.current();
+    const finalFlush = finalFlushRef;
+    const onVisibility = (): void => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      finalFlush.current();
+    };
+  }, [finalFlushRef, flushRef]);
 
   useEffect(() => {
     if (!focusTarget) return;
     if (focusTarget === "title") {
       titleRef.current?.focus();
       titleRef.current?.select();
-    } else {
-      agentRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+      onFocusHandled();
+      return;
     }
+    const target = agentRef.current?.querySelector<HTMLElement>(
+      focusTarget === "chat" ? "[data-task-chat]" : FOCUSABLE,
+    );
+    if (!target) return;
+    target.focus();
     onFocusHandled();
-  }, [focusTarget, onFocusHandled]);
+  });
 
   const close = (): void => {
     saveTitle();
@@ -130,8 +199,15 @@ export function TaskDetail({
     onClose();
   };
 
-  const dueLabel = todo.dueDate ? todoDueLabel(todo.dueDate, now) : null;
+  const due = todoDueLabel(todo, new Date(now));
   const priorityLabel = todo.priority ? TASK_PRIORITY_LABELS[todo.priority] : null;
+  const menuChip = (menu: TaskDetailMenu) => ({
+    "aria-haspopup": "menu" as const,
+    "aria-expanded": openMenu === menu,
+    "aria-controls": openMenu === menu ? TASK_DETAIL_MENU_IDS[menu] : undefined,
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) =>
+      onToggleMenu(menu, anchorBelow(event.currentTarget), event.currentTarget),
+  });
 
   return (
     <aside
@@ -140,7 +216,16 @@ export function TaskDetail({
       aria-hidden={leaving || undefined}
       inert={leaving || undefined}
       onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+        if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+        if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          saveTitle();
+          flushNote();
+          onSubmit();
+          return;
+        }
+        if (event.key !== "Escape" || event.target instanceof HTMLSelectElement) return;
         event.preventDefault();
         close();
       }}
@@ -153,18 +238,26 @@ export function TaskDetail({
           value={title}
           maxLength={MAX_TODO_TITLE_CHARS}
           rows={1}
+          readOnly={offline}
           onBlur={saveTitle}
           onChange={(event) => {
             titleDirty.current = true;
-            setTitle(event.currentTarget.value.replace(/[\r\n]+/gu, " "));
+            showTitle(event.currentTarget.value.replace(/[\r\n]+/gu, " "));
           }}
           onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+            if (event.key !== "Enter" || event.nativeEvent.isComposing || event.metaKey || event.ctrlKey) return;
             event.preventDefault();
             saveTitle();
           }}
         />
-        <IconButton label="Close task details" className="task-detail-close" onClick={close}>
+        <IconButton
+          label={`More actions for ${todo.title}`}
+          className="task-detail-icon"
+          {...menuChip("more")}
+        >
+          <Ellipsis size={14} aria-hidden="true" />
+        </IconButton>
+        <IconButton label="Close task details" className="task-detail-icon task-detail-close" onClick={close}>
           <X size={14} aria-hidden="true" />
         </IconButton>
       </div>
@@ -175,12 +268,11 @@ export function TaskDetail({
         value={note}
         maxLength={MAX_TODO_NOTE_CHARS}
         rows={1}
+        readOnly={offline}
         onBlur={flushNote}
         onChange={(event) => {
-          const value = event.currentTarget.value;
           noteDirty.current = true;
-          setNote(value);
-          noteDraft.current = value;
+          showNote(event.currentTarget.value);
           if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
           noteTimer.current = window.setTimeout(flushNote, NOTE_SAVE_DELAY_MS);
         }}
@@ -188,43 +280,54 @@ export function TaskDetail({
       <div className="task-detail-chips">
         <button
           type="button"
-          ref={(node) => setMenuTrigger("due", node)}
-          className={clsx("task-chip", dueLabel && "is-set")}
-          aria-label={dueLabel ? `Due date: ${dueLabel}` : "Due date"}
-          aria-haspopup="menu"
-          aria-expanded={openMenu === "due"}
-          aria-controls={openMenu === "due" ? "task-due-menu" : undefined}
-          onClick={(event) => onToggleMenu("due", anchorBelow(event.currentTarget))}
+          className={clsx("task-chip", due && "is-set", due?.overdue && "is-overdue")}
+          aria-label={due ? `Due date: ${due.text}` : "Due date"}
+          aria-haspopup="dialog"
+          aria-expanded={dueOpen}
+          disabled={offline}
+          onClick={() => setDueOpen(true)}
         >
           <CalendarDays size={14} aria-hidden="true" />
-          {dueLabel ?? "Due"}
+          {due?.text ?? "Due"}
         </button>
         <button
           type="button"
-          ref={(node) => setMenuTrigger("priority", node)}
           className={clsx("task-chip", priorityLabel && "is-set", todo.priority === "urgent" && "is-urgent")}
           aria-label={priorityLabel ? `Priority: ${priorityLabel}` : "Priority"}
-          aria-haspopup="menu"
-          aria-expanded={openMenu === "priority"}
-          aria-controls={openMenu === "priority" ? "task-priority-menu" : undefined}
-          onClick={(event) => onToggleMenu("priority", anchorBelow(event.currentTarget))}
+          disabled={offline}
+          {...menuChip("priority")}
         >
           {todo.priority === "urgent"
             ? <span className="task-urgent" aria-hidden="true">!</span>
             : <Flag size={14} aria-hidden="true" />}
           {priorityLabel ?? "Priority"}
         </button>
+        <button
+          type="button"
+          className={clsx("task-chip task-project-chip", projectName && "is-set")}
+          aria-label={projectName ? `Project: ${projectName}` : "Project"}
+          disabled={offline}
+          {...menuChip("project")}
+        >
+          <FolderOpen size={14} aria-hidden="true" />
+          <span className="task-chip-text">{projectName ?? "Project"}</span>
+        </button>
       </div>
       <div className="task-detail-agent" ref={agentRef}>
-        {todo.conversationId ? (
-          <div className="task-linked">
-            {status && <span className={clsx("task-status", status === "Failed" && "is-failed")}>{status}</span>}
-            <button type="button" className="secondary-button" disabled={!canOpenChat} onClick={onOpenChat}>
-              Open chat
-            </button>
-          </div>
-        ) : handoff}
+        {agent}
       </div>
+      {dueOpen && (
+        <TaskDuePicker
+          dueDate={todo.dueDate}
+          dueTime={todo.dueTime}
+          now={new Date(now)}
+          onCommit={(value) => {
+            setDueOpen(false);
+            if (value.dueDate !== todo.dueDate || value.dueTime !== todo.dueTime) void onUpdate(value);
+          }}
+          onClose={() => setDueOpen(false)}
+        />
+      )}
     </aside>
   );
 }

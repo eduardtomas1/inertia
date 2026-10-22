@@ -18,6 +18,7 @@ interface Operation {
   code: "command.failed" | "git.command-failed" | "terminal.command-failed";
   incidentId: string;
   reported: boolean;
+  plain: boolean;
   metadata: DiagnosticMetadata;
 }
 
@@ -61,6 +62,7 @@ export class CommandIncidents {
   constructor(
     private readonly sink: (observation: IncidentObservation) => unknown,
     private readonly generation: string | null = null,
+    private readonly userCorrectable: (error: unknown) => boolean = () => false,
   ) {}
 
   readonly report = (observation: IncidentObservation): unknown => {
@@ -87,8 +89,12 @@ export class CommandIncidents {
     return this.sink(observation);
   };
 
-  static fromSink(sink: IncidentSink | undefined, generation: string | null): CommandIncidents {
-    return new CommandIncidents(createIncidentReporter(sink, generation), generation);
+  static fromSink(
+    sink: IncidentSink | undefined,
+    generation: string | null,
+    userCorrectable?: (error: unknown) => boolean,
+  ): CommandIncidents {
+    return new CommandIncidents(createIncidentReporter(sink, generation), generation, userCorrectable);
   }
 
   sender(trace: StreamingTrace): typeof sendRuntimeEvent {
@@ -122,7 +128,7 @@ export class CommandIncidents {
       : command.type.startsWith("terminal.") ? "terminal.command-failed" : "command.failed";
     return this.operations.run({ requestId: command.requestId, context, code,
       incidentId: stableCommandIncidentId(this.generation, code, command.type, context),
-      reported: false, metadata: {},
+      reported: false, plain: false, metadata: {},
     }, execute);
   }
 
@@ -130,6 +136,10 @@ export class CommandIncidents {
   readonly noteFailure = (command: ClientCommand, error: unknown): void => {
     const operation = this.operations.getStore();
     if (!operation || operation.requestId !== command.requestId) return;
+    if (this.userCorrectable(error)) {
+      operation.plain = true;
+      return;
+    }
     const exitCode = failureExitCode(error);
     if (exitCode !== null) operation.metadata = { ...operation.metadata, exitCode };
   };
@@ -138,6 +148,7 @@ export class CommandIncidents {
     if (event.type !== "request.error") return event;
     const operation = this.operations.getStore();
     if (!operation || operation.requestId !== event.requestId) return event;
+    if (operation.plain) return event;
     if (!operation.reported) {
       operation.reported = true;
       this.report({ id: operation.incidentId, correlationId: operation.requestId,

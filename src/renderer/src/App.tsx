@@ -130,6 +130,8 @@ export default function App(): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [dailyWorkOpen, setDailyWorkOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [tasksFocusAddRequest, setTasksFocusAddRequest] = useState(0);
+  if (view !== "tasks" && tasksFocusAddRequest !== 0) setTasksFocusAddRequest(0);
   const helpOpen = useHelpGuideOpen();
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
@@ -687,6 +689,10 @@ export default function App(): React.JSX.Element {
     setPaletteOpen,
     setSidebarCollapsed,
     setSidebarOpen,
+    openTasks: () => {
+      setTasksFocusAddRequest((request) => request + 1);
+      if (view !== "tasks") navigateToView("tasks");
+    },
   });
   useSnapshotQueue(setActionError, {
     hasChat: Boolean(conversation || draftConversation.conversation),
@@ -1109,6 +1115,8 @@ export default function App(): React.JSX.Element {
       setDailyWorkOpen={setDailyWorkOpen}
       paletteOpen={paletteOpen}
       setPaletteOpen={setPaletteOpen}
+      tasksFocusAddRequest={tasksFocusAddRequest}
+      setTasksFocusAddRequest={setTasksFocusAddRequest}
       project={composerProject}
       conversation={conversation}
       headerConversation={draftConversation.conversation ?? conversation}

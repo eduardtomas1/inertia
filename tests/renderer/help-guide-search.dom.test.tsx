@@ -12,6 +12,7 @@ const LABELS: Record<AppShortcutAction, string> = {
   "new-chat": "⌘N",
   "toggle-sidebar": "⌘B",
   "toggle-terminal": "⌘J",
+  tasks: "⌘T",
 };
 
 function hostProps() {
@@ -22,6 +23,7 @@ function hostProps() {
       search: vi.fn(),
       usage: vi.fn(),
       "daily-work": vi.fn(),
+      tasks: vi.fn(),
       "welcome-guide": vi.fn(),
     },
     onOpenSettings: vi.fn(),

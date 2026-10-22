@@ -256,6 +256,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "terminal.resize": shortMutation,
+  "todo.clearDone": shortMutation,
   "todo.create": shortMutation,
   "todo.delete": shortMutation,
   "todo.start": gitMutation,

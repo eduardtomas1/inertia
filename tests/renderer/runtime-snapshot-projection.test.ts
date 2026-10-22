@@ -7,7 +7,8 @@ import {
   type WorkspaceRun,
 } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
-import { applyConversationShellEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
+import { applyConversationShellEvent, applyTodosEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
+import type { Todo } from "../../src/shared/todos";
 
 function conversation(id: string, updatedAt: string): ConversationShell {
   return {
@@ -202,5 +203,44 @@ describe("bounded conversation shell projection", () => {
       .not.toBe(snapshot);
     expect(event({ ...primary, pendingApproval: true }, [primaryRun]))
       .not.toBe(snapshot);
+  });
+});
+
+describe("task list projection", () => {
+  const task: Todo = {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    title: "Clean the downloads folder",
+    note: "",
+    priority: null,
+    dueDate: null,
+    dueTime: null,
+    projectId: null,
+    completedAt: null,
+    conversationId: null,
+    linkedAt: null,
+    createdAt: "2026-10-21T10:00:00.000Z",
+    updatedAt: "2026-10-21T10:00:00.000Z",
+  };
+  const snapshot: AppSnapshot = {
+    projects: [],
+    conversations: [conversation("primary", "2026-07-30T10:00:00.000Z")],
+    runs: [],
+    providers: [],
+    settings: { ...defaultSettings },
+    activeProjectId: null,
+    activeConversationId: null,
+    todos: [task],
+  };
+
+  it("replaces the tasks and keeps every other collection", () => {
+    const done = { ...task, completedAt: "2026-10-21T11:00:00.000Z" };
+    const next = applyTodosEvent(snapshot, { type: "todos.updated", todos: [done] });
+    expect(next.todos).toEqual([done]);
+    expect(next.conversations).toBe(snapshot.conversations);
+    expect(applyTodosEvent({ ...snapshot, todos: undefined }, { type: "todos.updated", todos: [] }).todos).toEqual([]);
+  });
+
+  it("keeps the snapshot identity when the tasks did not change", () => {
+    expect(applyTodosEvent(snapshot, { type: "todos.updated", todos: [{ ...task }] })).toBe(snapshot);
   });
 });

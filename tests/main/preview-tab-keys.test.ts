@@ -60,7 +60,7 @@ describe("Browser page reload keys", () => {
   it("leaves other keys and the reload key with Alt to the page", async () => {
     const { contents, reload } = await loadedPage();
 
-    expect(press(contents, { key: "t" }).preventDefault).not.toHaveBeenCalled();
+    expect(press(contents, { key: "e" }).preventDefault).not.toHaveBeenCalled();
     expect(press(contents, { alt: true }).preventDefault).not.toHaveBeenCalled();
     expect(press(contents, { type: "keyUp" }).preventDefault).not.toHaveBeenCalled();
     await Promise.resolve();

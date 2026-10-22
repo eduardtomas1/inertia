@@ -57,6 +57,7 @@ function hostProps() {
       search: vi.fn(),
       usage: vi.fn(),
       "daily-work": vi.fn(),
+      tasks: vi.fn(),
       "welcome-guide": vi.fn(),
     },
     onOpenSettings: vi.fn(),
@@ -86,6 +87,7 @@ function PaletteAndHelp({ props }: { props: ReturnType<typeof hostProps> }): Rea
         importProject={async () => undefined}
         openSettings={vi.fn()}
         openTasks={vi.fn()}
+        addTask={vi.fn()}
       />
       <HelpGuideHost projects={[]} currentProjectId={null} {...props} />
     </>

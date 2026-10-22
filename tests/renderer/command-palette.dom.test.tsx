@@ -424,6 +424,27 @@ describe("CommandPalette behavior", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("adds a task from an action after Open tasks", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const onOpenTasks = vi.fn();
+    const onAddTask = vi.fn();
+    render(
+      <CommandPalette open currentProjectId={project.id} projects={[project]}
+        conversations={[]} newThreadShortcut="⌘N" onClose={onClose} onSelectProject={noOp}
+        onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={noOp}
+        onAddProject={noOp} onOpenSettings={noOp} onOpenTasks={onOpenTasks} onAddTask={onAddTask} />,
+    );
+    const labels = screen.getAllByRole("option").map((option) => option.querySelector("strong")?.textContent);
+    expect(labels.indexOf("Add a task")).toBe(labels.indexOf("Open tasks") + 1);
+    expect(screen.getByRole("option", { name: /Add a task/u }).querySelector(".lucide-plus")).not.toBeNull();
+    await user.type(screen.getByRole("combobox", { name: "Search commands, projects, chats, and messages" }), "add a task");
+    await user.keyboard("{Enter}");
+    expect(onAddTask).toHaveBeenCalledOnce();
+    expect(onOpenTasks).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("lists actions by name only, ends without a hint band and says no matches in one line", async () => {
     const user = userEvent.setup();
     render(

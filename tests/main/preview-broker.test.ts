@@ -31,6 +31,7 @@ describe("preview broker isolation", () => {
 
     expect(previewAppShortcutKey(input, "darwin")).toBe("k");
     expect(previewAppShortcutKey({ ...input, meta: false, control: true }, "darwin")).toBe("k");
+    expect(previewAppShortcutKey({ ...input, key: "T" }, "darwin")).toBe("t");
     expect(previewAppShortcutKey({ ...input, key: "w" }, "darwin")).toBe("w");
     expect(previewAppShortcutKey({ ...input, key: "w", meta: false, control: true }, "linux")).toBe("w");
     expect(previewAppShortcutKey({ ...input, key: "w", shift: true }, "darwin")).toBeNull();

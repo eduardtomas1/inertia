@@ -139,7 +139,7 @@ function promptPresetCollectionCoherent(value: unknown): boolean {
       <= MAX_PROMPT_PRESETS_SERIALIZED_BYTES;
 }
 
-function todoCollectionCoherent(value: unknown): boolean {
+export function todoCollectionCoherent(value: unknown): boolean {
   if (value === undefined) return true;
   if (!Array.isArray(value) || value.length > MAX_TODOS) return false;
   const parsed = value.map((entry) => todoSchema.safeParse(entry));
@@ -338,6 +338,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
   switch (event.type) {
     case "snapshot.updated":
     case "conversation.shell.updated":
+    case "todos.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
     case "provider.maintenance.operation":

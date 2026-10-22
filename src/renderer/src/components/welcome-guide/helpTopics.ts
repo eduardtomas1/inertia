@@ -8,6 +8,7 @@ export const HELP_COMMANDS = [
   "search",
   "usage",
   "daily-work",
+  "tasks",
   "welcome-guide",
 ] as const;
 
@@ -174,6 +175,38 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     jumps: [
       { label: "Open Daily work", command: "daily-work" },
       { label: "Open Settings → Notifications", settings: "notifications" },
+    ],
+  },
+  {
+    id: "tasks",
+    title: "Tasks",
+    summary: "Keep a short list and hand items to an agent.",
+    entries: [
+      {
+        name: "Add a task",
+        detail: "Type in the add row and press Enter. Press Tab instead to hand it to an agent straight away.",
+        shortcut: "tasks",
+        jump: "Open Tasks",
+      },
+      {
+        name: "Due dates and times",
+        detail: "Choose Today, Tomorrow or Next week, or pick any day and add a time. Overdue tasks turn red and move to the top.",
+      },
+      {
+        name: "Hand a task to an agent",
+        detail: "Start opens a chat with the task as its first message and keeps you in Tasks. The row says what the agent is doing; Ready for you means it finished and is waiting for you to mark the task done.",
+      },
+      {
+        name: "Keyboard",
+        detail: "Arrows move between tasks, Space marks done, Enter opens the details, F2 renames, Delete removes with undo. Cmd/Ctrl+Enter starts the hand-off.",
+      },
+      {
+        name: "Limits",
+        detail: "Up to 200 open tasks. The last 200 done tasks are kept; Clear done removes them.",
+      },
+    ],
+    jumps: [
+      { label: "Open Tasks", command: "tasks" },
     ],
   },
   {
@@ -407,6 +440,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         name: "Terminal",
         detail: "Show or hide the terminal.",
         shortcut: "toggle-terminal",
+        jump: "Open Settings → Keyboard",
+      },
+      {
+        name: "Tasks",
+        detail: "Open Tasks. Press it again in Tasks to add a task.",
+        shortcut: "tasks",
         jump: "Open Settings → Keyboard",
       },
       { name: "Settings", detail: "⌘, on macOS or Ctrl+, elsewhere opens and closes Settings. Search settings finds a setting by name; ↑, ↓ and Enter open it. Escape clears the search, then leaves Settings." },

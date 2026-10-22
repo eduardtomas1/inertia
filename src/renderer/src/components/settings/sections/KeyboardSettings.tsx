@@ -20,6 +20,7 @@ const SHORTCUT_ROWS: ReadonlyArray<readonly [AppShortcutAction, string]> = [
   ["new-chat", "New chat"],
   ["toggle-sidebar", "Toggle project navigation"],
   ["toggle-terminal", "Toggle terminal"],
+  ["tasks", "Open tasks"],
 ];
 
 function keybindingsFingerprint(value: AppKeybindings): string {

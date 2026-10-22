@@ -24,6 +24,7 @@ function ShortcutHarness({ onTerminalKeyUp }: {
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
     toggleSettings: vi.fn(),
+    openTasks: vi.fn(),
   });
   return (
     <>
@@ -65,6 +66,7 @@ function StableListenerHarness(): React.JSX.Element {
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
     toggleSettings: vi.fn(),
+    openTasks: vi.fn(),
   });
   return (
     <button type="button" onClick={() => setCount((value) => value + 1)}>
@@ -86,6 +88,7 @@ function ImmediateShortcutOwner({ createConversation }: {
     setSidebarCollapsed: vi.fn(),
     setSidebarOpen: vi.fn(),
     toggleSettings: vi.fn(),
+    openTasks: vi.fn(),
   });
   return null;
 }
@@ -142,6 +145,7 @@ function SuspendedShortcutHarness({
     setSidebarCollapsed,
     setSidebarOpen: vi.fn(),
     toggleSettings: vi.fn(),
+    openTasks: vi.fn(),
   });
   return <textarea aria-label="Duo prompt" />;
 }
@@ -268,6 +272,7 @@ describe("global shortcut DOM integration", () => {
         setSidebarCollapsed,
         setSidebarOpen: vi.fn(),
         toggleSettings: vi.fn(),
+        openTasks: vi.fn(),
       });
       return (
         <CommandPalette
@@ -327,7 +332,7 @@ describe("terminal and platform shortcut ownership", () => {
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
       mobileNavigation: false, suspended: false, toggleTerminal: invoke,
-      setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke,
+      setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke, openTasks: invoke,
     } };
     render(<div className="xterm"><textarea aria-label="Shell input" /></div>);
     const dispose = installGlobalShortcuts(window, actions, "linux");
@@ -345,7 +350,7 @@ describe("terminal and platform shortcut ownership", () => {
     const actions = { current: {
       keybindings: DEFAULT_APP_KEYBINDINGS, createConversation: invoke,
       mobileNavigation: false, suspended: false, toggleTerminal: invoke,
-      setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke,
+      setPaletteOpen: invoke, setSidebarCollapsed: invoke, setSidebarOpen: invoke, toggleSettings: invoke, openTasks: invoke,
     } };
     const dispose = installGlobalShortcuts(window, actions, "darwin");
     try {

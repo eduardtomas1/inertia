@@ -2,8 +2,11 @@ import type Database from "better-sqlite3";
 import type { z } from "zod";
 
 import {
+  MAX_DONE_TODOS,
+  MAX_OPEN_TODOS,
   MAX_TODOS,
   MAX_TODOS_SERIALIZED_BYTES,
+  TODO_TIME_WITHOUT_DATE_MESSAGE,
   todoDraftSchema,
   todoPatchSchema,
   todoSchema,
@@ -18,15 +21,38 @@ interface TodoRow {
   note: string;
   priority: string | null;
   due_date: string | null;
+  due_time: string | null;
+  project_id: string | null;
   completed_at: string | null;
   conversation_id: string | null;
+  linked_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type TodoCreateInput = z.input<typeof todoDraftSchema> & { id: string };
 
+export interface TodoLinkOptions {
+  replaces?: string;
+}
+
+export const TODO_OPEN_LIMIT_MESSAGE =
+  `You have ${MAX_OPEN_TODOS} open tasks. Finish or delete some first.`;
+export const TODO_MISSING_MESSAGE = "That task no longer exists.";
+export const TODO_PROJECT_MISSING_MESSAGE = "That project no longer exists.";
+export const TODO_ALREADY_LINKED_MESSAGE = "That task is already handed to an agent.";
+export const TODO_HANDED_OFF_ELSEWHERE_MESSAGE =
+  "This task was handed off somewhere else in the meantime.";
+export const TODO_DONE_HANDOFF_MESSAGE = "Reopen the task before handing it off.";
+
 export class TodoRepositoryError extends Error {}
+
+const TODO_COLUMNS = `
+  id, title, note, priority, due_date, due_time, project_id, completed_at,
+  conversation_id, linked_at, created_at, updated_at
+`;
+
+const warnedRowIds = new Set<string>();
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const parsed = schema.safeParse(value);
@@ -36,18 +62,42 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   return parsed.data;
 }
 
-function todoFromRow(row: TodoRow): Todo {
-  return todoSchema.parse({
+function warnMalformedRow(id: unknown): void {
+  const label = JSON.stringify(String(id).slice(0, 64));
+  if (warnedRowIds.has(label) || warnedRowIds.size >= MAX_TODOS) return;
+  warnedRowIds.add(label);
+  console.warn(`A malformed task row ${label} was left out of the task list.`);
+}
+
+function todoFromRow(row: TodoRow): Todo | null {
+  const parsed = todoSchema.safeParse({
     id: row.id,
     title: row.title,
     note: row.note,
     priority: row.priority,
     dueDate: row.due_date,
+    dueTime: row.due_time,
+    projectId: row.project_id,
     completedAt: row.completed_at,
     conversationId: row.conversation_id,
+    linkedAt: row.linked_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
+  if (parsed.success) return parsed.data;
+  warnMalformedRow(row.id);
+  return null;
+}
+
+export function assertTodoCanHandOff(todo: Todo, replaces: string | undefined): void {
+  if (todo.completedAt !== null) throw new TodoRepositoryError(TODO_DONE_HANDOFF_MESSAGE);
+  if (replaces === undefined) {
+    if (todo.conversationId !== null) throw new TodoRepositoryError(TODO_ALREADY_LINKED_MESSAGE);
+    return;
+  }
+  if (todo.conversationId !== replaces) {
+    throw new TodoRepositoryError(TODO_HANDED_OFF_ELSEWHERE_MESSAGE);
+  }
 }
 
 export class TodoRepository {
@@ -58,17 +108,15 @@ export class TodoRepository {
 
   list(): Todo[] {
     return (this.database.prepare(`
-      SELECT id, title, note, priority, due_date, completed_at,
-        conversation_id, created_at, updated_at
+      SELECT ${TODO_COLUMNS}
       FROM todos
       ORDER BY created_at ASC, id ASC
-    `).all() as TodoRow[]).map(todoFromRow);
+    `).all() as TodoRow[]).flatMap((row) => todoFromRow(row) ?? []);
   }
 
   get(todoId: string): Todo | null {
     const row = this.database.prepare(`
-      SELECT id, title, note, priority, due_date, completed_at,
-        conversation_id, created_at, updated_at
+      SELECT ${TODO_COLUMNS}
       FROM todos
       WHERE id = ?
     `).get(todoId) as TodoRow | undefined;
@@ -79,34 +127,35 @@ export class TodoRepository {
     const { id, ...fields } = input;
     const draft = parse(todoDraftSchema, fields);
     return this.database.transaction(() => {
-      const current = this.list();
-      if (current.length >= MAX_TODOS) {
-        throw new TodoRepositoryError(`Tasks are limited to ${MAX_TODOS}.`);
+      if (this.openCount() >= MAX_OPEN_TODOS) {
+        throw new TodoRepositoryError(TODO_OPEN_LIMIT_MESSAGE);
       }
-      if (current.some((todo) => todo.id === id)) {
+      if (this.database.prepare("SELECT 1 FROM todos WHERE id = ?").get(id)) {
         throw new TodoRepositoryError("That task already exists.");
       }
+      this.assertProject(draft.projectId);
       const timestamp = this.now();
       const todo = parse(todoSchema, {
         ...draft,
         id,
         completedAt: null,
         conversationId: null,
+        linkedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       });
-      this.assertSerializedBound([...current, todo]);
+      this.assertSerializedBound([...this.list(), todo]);
       this.database.prepare(`
-        INSERT INTO todos (
-          id, title, note, priority, due_date, completed_at,
-          conversation_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+        INSERT INTO todos (${TODO_COLUMNS})
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
       `).run(
         todo.id,
         todo.title,
         todo.note,
         todo.priority,
         todo.dueDate,
+        todo.dueTime,
+        todo.projectId,
         todo.createdAt,
         todo.updatedAt,
       );
@@ -122,33 +171,88 @@ export class TodoRepository {
       const completedAt = completed === undefined
         ? existing.completedAt
         : completed ? existing.completedAt ?? this.now() : null;
-      return this.write(current, {
+      if (existing.completedAt !== null && completedAt === null
+        && this.openCount() >= MAX_OPEN_TODOS) {
+        throw new TodoRepositoryError(TODO_OPEN_LIMIT_MESSAGE);
+      }
+      const dueDate = patch.dueDate === undefined ? existing.dueDate : patch.dueDate;
+      const dueTime = patch.dueTime !== undefined
+        ? patch.dueTime
+        : patch.dueDate === null ? null : existing.dueTime;
+      if (dueTime !== null && dueDate === null) {
+        throw new TodoRepositoryError(TODO_TIME_WITHOUT_DATE_MESSAGE);
+      }
+      if (patch.projectId !== undefined) this.assertProject(patch.projectId);
+      const next = this.write(current, {
         ...existing,
         title: patch.title ?? existing.title,
         note: patch.note ?? existing.note,
         priority: patch.priority === undefined ? existing.priority : patch.priority,
-        dueDate: patch.dueDate === undefined ? existing.dueDate : patch.dueDate,
+        dueDate,
+        dueTime,
+        projectId: patch.projectId === undefined ? existing.projectId : patch.projectId,
         completedAt,
       });
+      if (existing.completedAt === null && completedAt !== null) this.pruneDone();
+      return next;
     })();
   }
 
-  link(todoId: string, conversationId: string): Todo {
+  link(todoId: string, conversationId: string, options: TodoLinkOptions = {}): Todo {
     return this.database.transaction(() => {
       const current = this.list();
       const existing = this.require(current, todoId);
-      if (existing.conversationId !== null) {
-        throw new TodoRepositoryError("That task is already handed to an agent.");
-      }
-      return this.write(current, { ...existing, conversationId, completedAt: null });
+      assertTodoCanHandOff(existing, options.replaces);
+      const conversation = this.database.prepare(
+        "SELECT project_id FROM conversations WHERE id = ?",
+      ).get(conversationId) as { project_id: string | null } | undefined;
+      return this.write(current, {
+        ...existing,
+        conversationId,
+        linkedAt: this.now(),
+        projectId: conversation?.project_id ?? existing.projectId,
+      });
     })();
   }
 
   delete(todoId: string): void {
     this.database.transaction(() => {
-      this.require(this.list(), todoId);
-      this.database.prepare("DELETE FROM todos WHERE id = ?").run(todoId);
+      if (this.database.prepare("DELETE FROM todos WHERE id = ?").run(todoId).changes === 0) {
+        throw new TodoRepositoryError(TODO_MISSING_MESSAGE);
+      }
     })();
+  }
+
+  clearDone(): number {
+    return this.database.prepare(
+      "DELETE FROM todos WHERE completed_at IS NOT NULL",
+    ).run().changes;
+  }
+
+  private openCount(): number {
+    return (this.database.prepare(
+      "SELECT COUNT(*) AS count FROM todos WHERE completed_at IS NULL",
+    ).get() as { count: number }).count;
+  }
+
+  private pruneDone(): void {
+    this.database.prepare(`
+      DELETE FROM todos
+      WHERE completed_at IS NOT NULL
+        AND id NOT IN (
+          SELECT id FROM todos
+          WHERE completed_at IS NOT NULL
+          ORDER BY completed_at DESC, id DESC
+          LIMIT ?
+        )
+    `).run(MAX_DONE_TODOS);
+  }
+
+  private assertProject(projectId: string | null): void {
+    if (projectId === null) return;
+    if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
+      throw new TodoRepositoryError(TODO_PROJECT_MISSING_MESSAGE);
+    }
   }
 
   private write(current: readonly Todo[], candidate: Todo): Todo {
@@ -156,16 +260,20 @@ export class TodoRepository {
     this.assertSerializedBound(current.map((todo) => todo.id === next.id ? next : todo));
     this.database.prepare(`
       UPDATE todos SET
-        title = ?, note = ?, priority = ?, due_date = ?, completed_at = ?,
-        conversation_id = ?, updated_at = ?
+        title = ?, note = ?, priority = ?, due_date = ?, due_time = ?,
+        project_id = ?, completed_at = ?, conversation_id = ?, linked_at = ?,
+        updated_at = ?
       WHERE id = ?
     `).run(
       next.title,
       next.note,
       next.priority,
       next.dueDate,
+      next.dueTime,
+      next.projectId,
       next.completedAt,
       next.conversationId,
+      next.linkedAt,
       next.updatedAt,
       next.id,
     );
@@ -174,7 +282,7 @@ export class TodoRepository {
 
   private require(todos: readonly Todo[], todoId: string): Todo {
     const todo = todos.find(({ id }) => id === todoId);
-    if (!todo) throw new TodoRepositoryError("That task no longer exists.");
+    if (!todo) throw new TodoRepositoryError(TODO_MISSING_MESSAGE);
     return todo;
   }
 

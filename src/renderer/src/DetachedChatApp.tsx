@@ -218,7 +218,7 @@ export default function DetachedChatApp({
   const [pinning, setPinning] = useState(false);
   const nativeTitleRef = useRef<string | null>(null);
   const documentPresence = useDocumentPresence();
-  const connection = useStableController(useInertiaConnection());
+  const connection = useStableController(useInertiaConnection({ applyTodos: false }));
   const conversationId = windowContext.conversationId;
   const subscribe = connection.subscribe;
   useEffect(() => {

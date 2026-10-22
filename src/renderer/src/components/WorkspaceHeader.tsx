@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import {
   ChevronDown,
   Ellipsis,
+  ListTodo,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -97,6 +98,8 @@ type WorkspaceHeaderProps = {
   checkoutPath?: string | null;
   filesAvailable?: boolean;
   conversationMenu?: HeaderConversationMenu | null;
+  linkedTask?: { id: string; title: string } | null;
+  onOpenTask?: (taskId: string) => void;
   onOpenSidebar: () => void;
   onOpenSettings: () => void;
   onCloseSettings: () => void;
@@ -141,6 +144,8 @@ export function WorkspaceHeader({
   checkoutPath = null,
   filesAvailable = true,
   conversationMenu = null,
+  linkedTask = null,
+  onOpenTask,
   onOpenSidebar,
   onOpenSettings,
   onCloseSettings,
@@ -256,6 +261,7 @@ export function WorkspaceHeader({
     && conversation !== null
     && isServerConversation
     && conversationMenu !== null;
+  const taskLink = view === "workspace" && conversation !== null && !renaming && onOpenTask ? linkedTask : null;
 
   const startRename = (): void => {
     if (!conversation || !onRenameConversation) return;
@@ -352,7 +358,7 @@ export function WorkspaceHeader({
               <span className="header-breadcrumb-separator" aria-hidden="true">/</span>
             </>
           )}
-          <div className="header-title-wrap">
+          <div className={taskLink ? "header-title-wrap has-task-link" : "header-title-wrap"}>
             {renaming ? (
               <input
                 autoFocus
@@ -408,6 +414,17 @@ export function WorkspaceHeader({
               <span id={titleHintId} className="visually-hidden">Chat actions · double-click to rename</span>
             )}
           </div>
+          {taskLink && onOpenTask && (
+            <TooltipButton
+              type="button"
+              className="header-task-link"
+              tooltip={taskLink.title}
+              onClick={() => onOpenTask(taskLink.id)}
+            >
+              <ListTodo size={14} aria-hidden="true" />
+              <span>Task</span>
+            </TooltipButton>
+          )}
         </nav>
       </div>
 

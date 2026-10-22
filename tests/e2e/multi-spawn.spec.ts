@@ -281,7 +281,7 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   const split = page.getByRole("main", {
     name: "Split conversation workspace",
   });
-  await expect(split).toBeVisible({ timeout: 15_000 });
+  await expect(split).toBeVisible();
   await expect(page.getByRole("region", {
     name: "Primary chat: Inertia · Lifecycle review",
   })).toBeVisible();
@@ -353,7 +353,7 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     .filter({ hasText: "Independent judge" });
   const verdictNotices = split.locator(".duo-judge-notice")
     .filter({ hasText: "Verdict is in" });
-  await expect(verdictNotices).toHaveCount(2, { timeout: 20_000 });
+  await expect(verdictNotices).toHaveCount(2);
   await expect(split).toBeVisible();
   await expect(judgeRow).not.toHaveAttribute("aria-current", "page");
   await verdictNotices.first().getByRole("button", { name: "Read verdict" }).click();
@@ -388,7 +388,7 @@ test("starts the judge while another chat is busy in the judge's folder", async 
   await expect(sendButton).toBeEnabled();
   await sendButton.click();
   await expect(page.getByRole("button", { name: "Stop agent" }))
-    .toBeVisible({ timeout: 15_000 });
+    .toBeVisible();
 
   await sidebar.getByRole("button", { name: "New duo" }).click();
   const dialog = page.getByRole("dialog", { name: "New duo" });
@@ -424,7 +424,7 @@ test("starts the judge while another chat is busy in the judge's folder", async 
   const verdictNotice = page.locator(".duo-judge-notice")
     .filter({ hasText: "Verdict is in" })
     .first();
-  await expect(verdictNotice).toBeVisible({ timeout: 20_000 });
+  await expect(verdictNotice).toBeVisible();
   await expect(judgeRow).not.toHaveAttribute("aria-current", "page");
   await verdictNotice.getByRole("button", { name: "Read verdict" }).click();
   await expect(judgeRow).toHaveAttribute("aria-current", "page");

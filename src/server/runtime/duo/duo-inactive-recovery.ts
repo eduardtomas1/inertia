@@ -88,6 +88,23 @@ export async function reconcileInactiveDuoLaunchTurns(
   return results.every(Boolean);
 }
 
+export function comparisonReleasableOnDeletion(
+  store: RuntimeStore,
+  launchId: string,
+): boolean {
+  try {
+    const launch = store.pairedLaunch(launchId);
+    const state = launch.comparison?.state;
+    if (state === "failed" || state === "interrupted") return true;
+    return state === "waiting"
+      && launch.state === "running"
+      && launch.sides.every(({ turnId }) => turnId !== null
+        && isAgentTurnTerminalStatus(store.agentTurn(turnId).status));
+  } catch {
+    return false;
+  }
+}
+
 export async function reconcileDuoDeletionLaunches(
   store: RuntimeStore,
   turns: TurnController,

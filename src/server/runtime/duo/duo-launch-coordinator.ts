@@ -34,10 +34,20 @@ import {
 } from "../worktree-source-identity";
 import { buildDuoComparisonPrompt } from "./duo-comparison";
 import {
+  JUDGE_CHECKOUT_BUSY_NOTICE,
+  JudgeRetrySchedule,
+  reserveJudgeCheckout,
+} from "./duo-comparison-admission";
+import {
+  comparisonReleasableOnDeletion,
   reconcileDuoDeletionLaunches,
   reconcileInactiveDuoLaunchTurns,
 } from "./duo-inactive-recovery";
-import { publicDuoLaunchStatus as publicStatus } from "./duo-launch-status";
+import {
+  causeSentence,
+  judgeTurnFailureCause,
+  publicDuoLaunchStatus as publicStatus,
+} from "./duo-launch-status";
 import {
   cleanupFailureMessage,
   cleanupUnadoptedOwnedWorktree,
@@ -47,6 +57,7 @@ import {
 } from "./duo-worktree-recovery";
 
 export type { DuoWorktreeOperations } from "./duo-worktree-recovery";
+export { reconcileInterruptedDuoLaunches } from "./duo-worktree-recovery";
 
 type DuoPrepareCommand = Extract<ClientCommand, { type: "duo.prepare" }>;
 type DuoPreparePayload = DuoPrepareCommand["payload"];
@@ -60,7 +71,8 @@ const MAX_DUO_DELETION_RECOVERIES = 16;
 // at two more. Leave scheduling headroom so this local handoff can drain
 // without retrying a provider or leaving the comparison waiting forever.
 const DEFAULT_COMPARISON_CHECKOUT_ACQUIRE_TIMEOUT_MS = 10_000;
-const COMPARISON_CHECKOUT_ACQUIRE_POLL_MS = 50;
+const DEFAULT_JUDGE_RETRY_INITIAL_DELAY_MS = 2_000;
+const JUDGE_RETRY_MAXIMUM_DELAY_MS = 30_000;
 
 export interface PreparedDuoLaunch {
   launchId: string;
@@ -118,9 +130,11 @@ export class DuoLaunchCoordinator {
   >();
   /** Launch ids needing another comparison pass, and whether it is an explicit retry. */
   private readonly comparisonRechecks = new Map<string, boolean>();
+  private readonly releasingComparisons = new Set<string>();
   private readonly worktrees: DuoWorktreeOperations;
   private readonly workspaceRuns: DuoSourceControlOperations | null;
   private readonly comparisonCheckoutAcquireTimeoutMs: number;
+  private readonly judgeRetries: JudgeRetrySchedule;
   private readonly runtimeClosed: () => boolean;
 
   constructor(
@@ -134,6 +148,7 @@ export class DuoLaunchCoordinator {
       worktrees?: DuoWorktreeOperations;
       workspaceRuns?: DuoSourceControlOperations;
       comparisonCheckoutAcquireTimeoutMs?: number;
+      judgeRetryInitialDelayMs?: number;
       runtimeClosed?: () => boolean;
     } = {},
   ) {
@@ -147,6 +162,10 @@ export class DuoLaunchCoordinator {
           ?? DEFAULT_COMPARISON_CHECKOUT_ACQUIRE_TIMEOUT_MS,
         DEFAULT_COMPARISON_CHECKOUT_ACQUIRE_TIMEOUT_MS,
       ),
+    );
+    this.judgeRetries = new JudgeRetrySchedule(
+      options.judgeRetryInitialDelayMs ?? DEFAULT_JUDGE_RETRY_INITIAL_DELAY_MS,
+      JUDGE_RETRY_MAXIMUM_DELAY_MS,
     );
   }
 
@@ -211,6 +230,12 @@ export class DuoLaunchCoordinator {
       started,
       failure,
     );
+    if (finished.state === "running" && finished.cancelRequested) {
+      for (const { conversationId } of finished.sides) {
+        if (conversationId) this.turns.cancel(conversationId);
+      }
+      return this.cancel(launchId);
+    }
     if (finished.state === "running") {
       // Synchronous settlements may have observed the pre-finish state.
       return this.startComparison(launchId, false);
@@ -295,44 +320,76 @@ export class DuoLaunchCoordinator {
     );
   }
 
-  pending(projectIds: readonly string[]): {
+  pending(projectIds: readonly string[], page = 0): {
     launchIds: string[];
     hasMore: boolean;
   } {
     return this.store.pendingPairedLaunchIds(
       projectIds,
       MAX_PENDING_DUO_LAUNCHES,
+      page,
     );
   }
 
-  reconcileConversationDeletion(
+  async reconcileConversationDeletion(
     conversationId: string,
     authorizedCheckoutReservationId: string,
   ): Promise<boolean> {
+    const related = this.store.pairedLaunchIdsForDeletionRecovery(
+      { conversationId },
+      MAX_DUO_DELETION_RECOVERIES,
+    );
+    await this.releaseSettledComparisons(
+      related.launchIds,
+      [authorizedCheckoutReservationId],
+    );
     return reconcileDuoDeletionLaunches(
       this.store,
       this.turns,
-      this.store.pairedLaunchIdsForDeletionRecovery(
-        { conversationId },
-        MAX_DUO_DELETION_RECOVERIES,
-      ),
+      related,
       [authorizedCheckoutReservationId],
     );
   }
 
-  reconcileProjectDeletion(
+  async reconcileProjectDeletion(
     projectId: string,
     authorizedCheckoutReservationIds: readonly string[] = [],
   ): Promise<boolean> {
+    const related = this.store.pairedLaunchIdsForDeletionRecovery(
+      { projectId },
+      MAX_DUO_DELETION_RECOVERIES,
+    );
+    await this.releaseSettledComparisons(
+      related.launchIds,
+      authorizedCheckoutReservationIds,
+    );
     return reconcileDuoDeletionLaunches(
       this.store,
       this.turns,
-      this.store.pairedLaunchIdsForDeletionRecovery(
-        { projectId },
-        MAX_DUO_DELETION_RECOVERIES,
-      ),
+      related,
       authorizedCheckoutReservationIds,
     );
+  }
+
+  private async releaseSettledComparisons(
+    launchIds: readonly string[],
+    authorizedCheckoutReservationIds: readonly string[],
+  ): Promise<void> {
+    for (const launchId of launchIds) {
+      this.releasingComparisons.add(launchId);
+      try {
+        this.judgeRetries.clear(launchId);
+        await this.comparisonTasks.get(launchId)?.catch(() => undefined);
+        if (comparisonReleasableOnDeletion(this.store, launchId)) {
+          await this.cancelComparison(
+            launchId,
+            authorizedCheckoutReservationIds,
+          );
+        }
+      } finally {
+        this.releasingComparisons.delete(launchId);
+      }
+    }
   }
 
   async onTurnSettled(turn: AgentTurn): Promise<void> {
@@ -345,7 +402,13 @@ export class DuoLaunchCoordinator {
         owner.launchId,
         turn.id,
         turn.status,
+        judgeTurnFailureCause(this.store, turn),
       );
+      return;
+    }
+    const launch = this.store.pairedLaunch(owner.launchId);
+    if (launch.cancelRequested && launch.state === "running") {
+      await this.cancel(owner.launchId);
       return;
     }
     await this.startComparison(owner.launchId, false);
@@ -369,35 +432,31 @@ export class DuoLaunchCoordinator {
           this.store.failPairedLaunchComparison(
             launchId,
             "interrupted",
-            "The judge dispatch was interrupted before its durable turn identity was recorded. It was not retried automatically.",
+            "The judge dispatch was interrupted before its durable turn identity was recorded.",
           );
           continue;
         }
         try {
           const turn = this.store.agentTurn(comparison.turnId);
-          if (
-            turn.status === "completed"
-            || turn.status === "failed"
-            || turn.status === "cancelled"
-            || turn.status === "interrupted"
-          ) {
+          if (isAgentTurnTerminalStatus(turn.status)) {
             this.store.settlePairedLaunchComparisonTurn(
               launchId,
               turn.id,
               turn.status,
+              judgeTurnFailureCause(this.store, turn),
             );
           } else {
             this.store.failPairedLaunchComparison(
               launchId,
               "interrupted",
-              "The judge dispatch remained nonterminal after runtime recovery. It was not retried automatically.",
+              "The judge dispatch remained nonterminal after runtime recovery.",
             );
           }
         } catch {
           this.store.failPairedLaunchComparison(
             launchId,
             "interrupted",
-            "The judge dispatch could not be reconciled and was not retried automatically.",
+            "The judge dispatch could not be reconciled.",
           );
         }
         continue;
@@ -412,15 +471,18 @@ export class DuoLaunchCoordinator {
     return this.startComparison(launchId, true);
   }
 
-  async cancelComparison(launchId: string): Promise<DuoLaunchStatus> {
+  async cancelComparison(
+    launchId: string,
+    authorizedCheckoutReservationIds: readonly string[] = [],
+  ): Promise<DuoLaunchStatus> {
     const launch = this.store.pairedLaunch(launchId);
-    if (!await this.reconcileInactiveLaunchTurns(
-      launch,
-      true,
-    )) {
+    if (!await reconcileInactiveDuoLaunchTurns(this.store, this.turns, launch, {
+      comparisonOnly: true,
+      authorizedCheckoutReservationIds,
+    })) {
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
-    this.cancelComparisonTurn(launch);
+    this.cancelComparisonTurn(this.store.pairedLaunch(launchId));
     return publicStatus(this.store, this.store.pairedLaunch(launchId));
   }
 
@@ -470,6 +532,7 @@ export class DuoLaunchCoordinator {
   ): void {
     const comparison = launch.comparison;
     if (!comparison) return;
+    this.judgeRetries.clear(launch.launchId);
     this.store.cancelPairedLaunchComparison(launch.launchId);
     this.cancelComparisonProviderTurn(launch);
   }
@@ -518,6 +581,13 @@ export class DuoLaunchCoordinator {
       return publicStatus(this.store, launch);
     }
     if (
+      comparison.state !== "waiting"
+      && !(retry && (comparison.state === "failed" || comparison.state === "interrupted"))
+    ) {
+      this.judgeRetries.clear(launchId);
+      return publicStatus(this.store, launch);
+    }
+    if (
       launch.state !== "running"
       || launch.sides.some(({ dispatchState }) => dispatchState !== "started")
     ) {
@@ -535,53 +605,62 @@ export class DuoLaunchCoordinator {
       return publicStatus(this.store, launch);
     }
 
-    let prompt: string;
-    try {
-      prompt = buildDuoComparisonPrompt(this.store, launch);
-    } catch {
-      return publicStatus(this.store, this.store.failPairedLaunchComparison(
-        launchId,
-        "failed",
-        "The bounded judge input could not be assembled. Retry explicitly or cancel the comparison.",
-      ));
-    }
     const sourceConversationIds = launch.sides
       .map(({ conversationId }) => conversationId)
       .filter((id): id is string => id !== null);
     await this.turns.waitForProviderCleanup(sourceConversationIds);
+    await this.turns.waitForGitArtifacts(sourceConversationIds);
     // Shutdown settlements stay waiting so startup can recover them.
     if (this.runtimeClosed() || this.turns.isClosing())
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
 
+    let prompt: string;
+    try {
+      prompt = buildDuoComparisonPrompt(this.store, this.store.pairedLaunch(launchId));
+    } catch (error) {
+      return publicStatus(this.store, this.store.failPairedLaunchComparison(
+        launchId,
+        "failed",
+        `The judge input could not be assembled: ${causeSentence(error)}`,
+      ));
+    }
+
     let turnId: string | null = null;
     let startAccepted = false;
     let transitionReserved = false;
-    const checkoutPath = this.store.conversationPath(
+    const reservation = await reserveJudgeCheckout(
+      this.store,
       comparison.conversationId,
+      this.comparisonCheckoutAcquireTimeoutMs,
+      () => this.runtimeClosed()
+        || this.turns.isClosing()
+        || this.releasingComparisons.has(launchId),
     );
-    const reservation = await this.reserveComparisonCheckout(
-      comparison.conversationId,
-    );
-    if (reservation === "closing") {
+    if (reservation.kind === "closing") {
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
     }
-    transitionReserved = reservation === "reserved";
+    if (reservation.kind === "busy") {
+      this.judgeRetries.schedule(launchId, () => {
+        void this.startComparison(launchId, false).catch(() => undefined);
+      });
+      return publicStatus(this.store, this.store.notePairedLaunchComparisonWaiting(
+        launchId,
+        JUDGE_CHECKOUT_BUSY_NOTICE,
+        retry,
+      ));
+    }
+    transitionReserved = reservation.kind === "reserved";
+    const claimState = this.store.pairedLaunch(launchId).comparison?.state;
+    const claimRetry = retry
+      && (claimState === "failed" || claimState === "interrupted");
     let comparisonClaimed = false;
     try {
-      if (!this.store.claimPairedLaunchComparison(launchId, retry)) {
+      if (!this.store.claimPairedLaunchComparison(launchId, claimRetry)) {
         return publicStatus(this.store, this.store.pairedLaunch(launchId));
       }
       comparisonClaimed = true;
-      if (reservation !== "reserved") {
-        throw new Error(
-          "The judge checkout is already owned by another provider or workspace operation.",
-        );
-      }
-      if (this.turns.hasActiveCheckout(checkoutPath)) {
-        throw new Error(
-          "Another agent is already working in the judge checkout.",
-        );
-      }
+      this.judgeRetries.clear(launchId);
+      if (reservation.kind === "unavailable") throw reservation.error;
       const queued = this.turns.queue({
         conversationId: comparison.conversationId,
         authorizedDuoComparisonLaunchId: launchId,
@@ -601,7 +680,7 @@ export class DuoLaunchCoordinator {
         return publicStatus(this.store, this.store.failPairedLaunchComparison(
           launchId,
           "failed",
-          "The locked Duo judge turn could not start. Retry explicitly or cancel the comparison.",
+          "The judge turn could not start.",
         ));
       }
       launch = this.store.markPairedLaunchComparisonRunning(
@@ -615,40 +694,14 @@ export class DuoLaunchCoordinator {
       return publicStatus(this.store, this.store.failPairedLaunchComparison(
         launchId,
         startAccepted ? "interrupted" : "failed",
-        `${startAccepted
-          ? "The judge start outcome became uncertain"
-          : "The judge could not be queued"} and was not retried automatically.`,
+        startAccepted
+          ? `The judge started, but its outcome became uncertain: ${causeSentence(error)}`
+          : `The judge could not start: ${causeSentence(error)}`,
       ));
     } finally {
       if (transitionReserved) {
         this.store.conversationWork.release(comparison.conversationId);
       }
-    }
-  }
-
-  private async reserveComparisonCheckout(
-    conversationId: string,
-  ): Promise<"reserved" | "busy" | "closing"> {
-    const deadlineAt = Date.now()
-      + this.comparisonCheckoutAcquireTimeoutMs;
-    while (true) {
-      if (this.runtimeClosed() || this.turns.isClosing()) return "closing";
-      try {
-        if (this.store.conversationWork.reserve(conversationId)) {
-          return "reserved";
-        }
-      } catch {
-        return "busy";
-      }
-      const remainingMs = deadlineAt - Date.now();
-      if (remainingMs <= 0) return "busy";
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(
-          resolve,
-          Math.min(COMPARISON_CHECKOUT_ACQUIRE_POLL_MS, remainingMs),
-        );
-        timer.unref();
-      });
     }
   }
 
@@ -908,9 +961,10 @@ export class DuoLaunchCoordinator {
     );
   }
 
-  private async preflightComparison(
-    payload: DuoComparisonPayload,
-  ): Promise<PreflightComparison> {
+  private async readySelection(
+    payload: DuoSidePayload | DuoComparisonPayload,
+    unavailable: { backend: string; route: string },
+  ): Promise<ModelSelection> {
     const settings = this.store.shellSnapshot().settings;
     const selection = this.backendProfiles.validateSelection(
       payload.modelSelection ?? providerNativeModelSelection({
@@ -927,16 +981,21 @@ export class DuoLaunchCoordinator {
     const provider = this.providerInfo().find(({ id }) => id === providerId);
     const readiness = await this.backendProfiles.readiness(selection, provider);
     if (readiness && !readiness.ready) {
-      throw new Error(
-        readiness.message ?? "The selected judge backend is unavailable.",
-      );
+      throw new Error(readiness.message ?? unavailable.backend);
     }
     if (!readiness && !provider?.canRun) {
-      throw new Error(
-        provider?.statusMessage
-          ?? "The judge route is not ready. Open Settings to finish setup.",
-      );
+      throw new Error(provider?.statusMessage ?? unavailable.route);
     }
+    return selection;
+  }
+
+  private async preflightComparison(
+    payload: DuoComparisonPayload,
+  ): Promise<PreflightComparison> {
+    const selection = await this.readySelection(payload, {
+      backend: "The selected judge backend is unavailable.",
+      route: "The judge's model is not ready. Open Settings to finish setup.",
+    });
     this.store.projectPath(payload.projectId);
     return {
       payload,
@@ -949,32 +1008,10 @@ export class DuoLaunchCoordinator {
     payload: DuoSidePayload,
     ordinal: 0 | 1,
   ): Promise<PreflightSide> {
-    const settings = this.store.shellSnapshot().settings;
-    const selection = this.backendProfiles.validateSelection(
-      payload.modelSelection ?? providerNativeModelSelection({
-        providerId: payload.providerId ?? settings.defaultProvider,
-        modelId: payload.model || settings.defaultModel || "provider-default",
-        alias: payload.model || settings.defaultModel || null,
-        reasoningEffort: payload.reasoningEffort
-          ?? settings.defaultReasoningEffort
-          ?? null,
-      }),
-    );
-    this.providers.resolveModelRoute(selection);
-    const providerId = providerIdForHarness(selection.harnessId);
-    const provider = this.providerInfo().find(({ id }) => id === providerId);
-    const readiness = await this.backendProfiles.readiness(selection, provider);
-    if (readiness && !readiness.ready) {
-      throw new Error(
-        readiness.message ?? "The selected model backend is unavailable.",
-      );
-    }
-    if (!readiness && !provider?.canRun) {
-      throw new Error(
-        provider?.statusMessage
-          ?? "This agent is not ready. Open Settings to finish setup.",
-      );
-    }
+    const selection = await this.readySelection(payload, {
+      backend: "The selected model backend is unavailable.",
+      route: "This chat's model is not ready. Open Settings to finish setup.",
+    });
 
     const repositoryPath = this.store.projectPath(payload.projectId);
     if (payload.useWorktree && payload.worktreePath) {
@@ -1179,47 +1216,5 @@ export class DuoLaunchCoordinator {
           }
         : {}),
     };
-  }
-}
-
-/**
- * Reconciles durable launch state before providers or clients are admitted.
- * Requested cancellations are finalized after turn recovery has detached the
- * providers. Dispatch claims are never replayed. Only worktrees that this
- * launch created and never attached to a conversation are compensated.
- */
-export async function reconcileInterruptedDuoLaunches(
-  store: RuntimeStore,
-  options: { worktrees?: DuoWorktreeOperations } = {},
-): Promise<void> {
-  const worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
-  store.recoverRequestedPairedLaunchCancellations();
-  const recovered = store.recoverInterruptedPairedLaunches();
-  for (const launch of recovered) {
-    if (launch.state === "interrupted") continue;
-    const cleanup = await Promise.allSettled(launch.plans.map((plan) =>
-      cleanupUnadoptedOwnedWorktree(
-        store,
-        launch.launchId,
-        plan.ordinal,
-        worktrees,
-      )));
-    const failure = cleanupFailureMessage(
-      cleanup,
-      "Duo restart cleanup needs attention",
-    );
-    if (failure) {
-      store.failPairedLaunch(
-        launch.launchId,
-        "recovery-required",
-        failure,
-      );
-    } else {
-      store.failPairedLaunch(
-        launch.launchId,
-        "failed",
-        "Duo preparation was interrupted before dispatch. Owned worktrees are absent and no provider was retried.",
-      );
-    }
   }
 }

@@ -337,6 +337,13 @@ export class TurnController {
     );
   }
 
+  async waitForGitArtifacts(conversationIds: readonly string[]): Promise<void> {
+    await Promise.allSettled(conversationIds.flatMap((conversationId) => {
+      const barrier = this.gitArtifactBarriers.get(conversationId);
+      return barrier ? [barrier] : [];
+    }));
+  }
+
   async acquireTurnAdmission(conversationId: string, timeoutMs: number): Promise<TurnAdmissionLease | null> { return await this.admissions.acquire(conversationId, timeoutMs); }
 
   async reconcileInactiveDuoTurn(

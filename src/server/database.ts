@@ -522,12 +522,7 @@ export class RuntimeStore {
     return this.pairedLaunchRepository.find(launchId);
   }
 
-  pendingPairedLaunchIds(projectIds: readonly string[], limit: number) {
-    return this.pairedLaunchRepository.pendingLaunchIdsForProjects(
-      projectIds,
-      limit,
-    );
-  }
+  pendingPairedLaunchIds(projectIds: readonly string[], limit: number, page = 0) { return this.pairedLaunchRepository.pendingLaunchIdsForProjects(projectIds, limit, page); }
   pairedLaunchIdsForDeletionRecovery(scope: { conversationId: string } | { projectId: string }, limit: number) { return this.pairedLaunchRepository.deletionRecoveryLaunchIds(scope, limit); }
   assertConversationDeletionAllowed(conversationId: string): void {
     this.pairedLaunchRepository.assertConversationDeletionAllowed(
@@ -572,10 +567,10 @@ export class RuntimeStore {
     launchId: string,
     turnId: string,
     status: Parameters<PairedLaunchRepository["settleComparisonTurn"]>[2],
-    now = new Date().toISOString(),
+    cause: string | null = null,
   ): StoredPairedLaunch {
     return this.pairedLaunchRepository.settleComparisonTurn(
-      launchId, turnId, status, now,
+      launchId, turnId, status, new Date().toISOString(), cause,
     );
   }
 
@@ -587,6 +582,8 @@ export class RuntimeStore {
   ): StoredPairedLaunch {
     return this.pairedLaunchRepository.failComparison(launchId, state, message, now);
   }
+
+  notePairedLaunchComparisonWaiting(launchId: string, message: string, requeue: boolean): StoredPairedLaunch { return this.pairedLaunchRepository.noteComparisonWaiting(launchId, message, requeue, new Date().toISOString()); }
 
   cancelPairedLaunchComparison(
     launchId: string,

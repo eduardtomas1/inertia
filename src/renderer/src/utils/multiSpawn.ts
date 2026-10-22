@@ -18,10 +18,15 @@ import {
 import type { ComposerModelRoute } from "./modelChooserRoutes";
 import { defaultSelectionForProject } from "./defaultConversationSelection";
 
+export {
+  clearPendingMultiSpawnLaunchId,
+  MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
+  readPendingMultiSpawnLaunchId,
+  writePendingMultiSpawnLaunchId,
+} from "./duoPendingLaunch";
+
 export const MULTI_SPAWN_PRESET_STORAGE_KEY =
   "inertia:multi-spawn:preset:v1";
-export const MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY =
-  "inertia:multi-spawn:pending-launch:v1";
 
 export type IdentifiedDuoRecoveryGuidance = DuoWorktreeRecoveryGuidance & {
   launchId: string;
@@ -71,29 +76,6 @@ export interface MultiSpawnDraft {
     side: MultiSpawnSideDraft;
   };
   rememberPreset: boolean;
-}
-
-export function writePendingMultiSpawnLaunchId(
-  storage: Pick<Storage, "setItem">,
-  launchId: string,
-): boolean {
-  try {
-    storage.setItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY, launchId);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function clearPendingMultiSpawnLaunchId(
-  storage: Pick<Storage, "removeItem">,
-): boolean {
-  try {
-    storage.removeItem(MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function localCheckoutIdentity(project: Project): string {
@@ -339,6 +321,53 @@ function currentDefaultSelection(
   return cloneSelection(refreshed);
 }
 
+function routeMayRepeatModel(
+  route: ComposerModelRoute,
+  selection: ModelSelection,
+): boolean {
+  return route.providerId === providerIdForHarness(selection.harnessId)
+    && (
+      route.modelId === selection.modelId
+      || route.modelId === "provider-default"
+      || selection.modelId === "provider-default"
+    );
+}
+
+function readyRoutes(
+  routes: readonly ComposerModelRoute[],
+): ComposerModelRoute[] {
+  return routes.filter(({ selectable, providerReady }) =>
+    selectable && providerReady);
+}
+
+export function secondSideDefaultSelection(
+  routes: readonly ComposerModelRoute[],
+  first: ModelSelection,
+): ModelSelection {
+  const firstProviderId = providerIdForHarness(first.harnessId);
+  const ready = readyRoutes(routes);
+  const route = ready.find(({ providerId }) => providerId !== firstProviderId)
+    ?? ready.find((candidate) => !routeMayRepeatModel(candidate, first));
+  return cloneSelection(route?.selection ?? first);
+}
+
+export function judgeDefaultSelection(
+  routes: readonly ComposerModelRoute[],
+  first: ModelSelection,
+  second: ModelSelection,
+): ModelSelection {
+  const usedProviderIds = new Set([
+    providerIdForHarness(first.harnessId),
+    providerIdForHarness(second.harnessId),
+  ]);
+  const distinct = readyRoutes(routes).filter((route) =>
+    !routeMayRepeatModel(route, first)
+    && !routeMayRepeatModel(route, second));
+  const route = distinct.find(({ providerId }) => !usedProviderIds.has(providerId))
+    ?? distinct[0];
+  return cloneSelection(route?.selection ?? first);
+}
+
 export function initialMultiSpawnDraft(input: {
   snapshot: AppSnapshot;
   settings: AppSettings;
@@ -358,15 +387,16 @@ export function initialMultiSpawnDraft(input: {
   const side = (
     index: 0 | 1,
     defaultTitle: string,
+    defaultSelection: ModelSelection,
   ): MultiSpawnSideDraft => {
     const saved = input.preset?.sides[index];
     const selection = saved
       ? selectionFromPreset(
           routes,
           saved.route,
-          resolvedFallback,
+          defaultSelection,
         )
-      : cloneSelection(resolvedFallback);
+      : cloneSelection(defaultSelection);
     return {
       projectId: input.activeProjectId,
       title: saved?.title ?? defaultTitle,
@@ -378,24 +408,32 @@ export function initialMultiSpawnDraft(input: {
       interactionMode: input.settings.defaultInteractionMode,
     };
   };
+  const first = side(0, "Duo A", resolvedFallback);
+  const second = side(
+    1,
+    "Duo B",
+    secondSideDefaultSelection(routes, first.selection),
+  );
+  const judgeSelection = judgeDefaultSelection(
+    routes,
+    first.selection,
+    second.selection,
+  );
   return {
     prompt: "",
-    sides: [
-      side(0, "First perspective"),
-      side(1, "Second perspective"),
-    ],
+    sides: [first, second],
     comparison: {
       enabled: Boolean(input.preset?.comparison),
       side: {
-        ...side(0, "Duo comparison"),
-        title: input.preset?.comparison?.title ?? "Duo comparison",
+        ...first,
+        title: input.preset?.comparison?.title ?? "Duo verdict",
         selection: input.preset?.comparison
           ? selectionFromPreset(
               routes,
               input.preset.comparison.route,
-              resolvedFallback,
+              judgeSelection,
             )
-          : cloneSelection(resolvedFallback),
+          : judgeSelection,
         accessMode: input.preset?.comparison?.accessMode ?? "supervised",
         interactionMode: "plan",
       },
@@ -441,30 +479,63 @@ export function multiSpawnComparisonPayload(
   return payload;
 }
 
-export function validateMultiSpawnDraft(
+export type MultiSpawnDraftField =
+  | "prompt"
+  | `title-${0 | 1 | 2}`
+  | `project-${0 | 1 | 2}`;
+
+export interface MultiSpawnDraftIssue {
+  field: MultiSpawnDraftField;
+  message: string;
+}
+
+export function multiSpawnDraftIssue(
   draft: MultiSpawnDraft,
-): string | null {
-  if (!draft.prompt.trim()) return "Write one prompt for both chats.";
-  if (draft.prompt.trim().length > 20_000) {
-    return "The shared prompt must be 20,000 characters or fewer.";
+): MultiSpawnDraftIssue | null {
+  const prompt = draft.prompt.trim();
+  if (!prompt) return { field: "prompt", message: "Write the brief first." };
+  if (prompt.length > 20_000) {
+    return {
+      field: "prompt",
+      message: "The brief must be 20,000 characters or fewer.",
+    };
   }
   for (const [index, side] of draft.sides.entries()) {
+    const letter = index === 0 ? "A" : "B";
     const title = side.title.trim();
-    if (!title) return `Name chat ${index + 1}.`;
+    const ordinal = index as 0 | 1;
+    if (!title) return { field: `title-${ordinal}`, message: `Name chat ${letter}.` };
     if (title.length > MAX_TITLE_LENGTH) {
-      return `Chat ${index + 1} name must be ${MAX_TITLE_LENGTH} characters or fewer.`;
+      return {
+        field: `title-${ordinal}`,
+        message: `Chat ${letter}'s name must be ${MAX_TITLE_LENGTH} characters or fewer.`,
+      };
     }
-    if (!side.projectId) return `Choose a project for chat ${index + 1}.`;
+    if (!side.projectId) {
+      return {
+        field: `project-${ordinal}`,
+        message: `Choose a project for chat ${letter}.`,
+      };
+    }
   }
   if (draft.comparison.enabled) {
     const title = draft.comparison.side.title.trim();
-    if (!title) return "Name the comparison chat.";
+    if (!title) return { field: "title-2", message: "Name the judge." };
     if (title.length > MAX_TITLE_LENGTH) {
-      return `Comparison chat name must be ${MAX_TITLE_LENGTH} characters or fewer.`;
+      return {
+        field: "title-2",
+        message: `The judge's name must be ${MAX_TITLE_LENGTH} characters or fewer.`,
+      };
     }
     if (!draft.comparison.side.projectId) {
-      return "Choose a project for the comparison chat.";
+      return { field: "project-2", message: "Choose a project for the judge." };
     }
   }
   return null;
+}
+
+export function validateMultiSpawnDraft(
+  draft: MultiSpawnDraft,
+): string | null {
+  return multiSpawnDraftIssue(draft)?.message ?? null;
 }

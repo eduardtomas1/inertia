@@ -2355,7 +2355,8 @@ button.header-breadcrumb-project:hover {
   z-index: 25;
 }
 
-.pending-input-notice {
+.pending-input-notice,
+.duo-judge-notice {
   display: flex;
   width: min(var(--composer-max-width), calc(100% - 36px));
   min-width: 0;
@@ -2369,7 +2370,8 @@ button.header-breadcrumb-project:hover {
   background: var(--surface-raised);
 }
 
-.pending-input-notice > span {
+.pending-input-notice > span,
+.duo-judge-notice > span {
   display: flex;
   min-width: 0;
   flex: 1;
@@ -2378,10 +2380,13 @@ button.header-breadcrumb-project:hover {
   gap: 0 8px;
 }
 
-.pending-input-notice strong { color: var(--text); font-size: var(--text-xs); font-weight: 500; }
-.pending-input-notice small { color: var(--text-muted); font-size: var(--text-xs); }
+.pending-input-notice strong,
+.duo-judge-notice strong { color: var(--text); font-size: var(--text-xs); font-weight: 500; }
+.pending-input-notice small,
+.duo-judge-notice small { color: var(--text-muted); font-size: var(--text-xs); }
 
-.pending-input-notice button {
+.pending-input-notice button,
+.duo-judge-notice button {
   display: inline-flex;
   min-height: calc(var(--control-height-small) - 4px);
   flex: 0 0 auto;
@@ -2400,14 +2405,31 @@ button.header-breadcrumb-project:hover {
   transition: background-color var(--dur-fast) var(--ease), scale var(--dur-fast) var(--ease);
 }
 
-.pending-input-notice button:hover {
+.pending-input-notice button:hover,
+.duo-judge-notice button:hover:not(:disabled) {
   background: var(--fill);
 }
 
-.pending-input-notice button:active {
+.pending-input-notice button:active,
+.duo-judge-notice button:active:not(:disabled) {
   background: var(--fill-strong);
   scale: 0.97;
 }
+
+.duo-judge-notice > .icon-button {
+  width: calc(var(--control-height-small) - 4px);
+  justify-content: center;
+  padding: 0;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.duo-judge-notice > svg { flex: 0 0 auto; }
+.duo-judge-notice.is-failed > svg { color: var(--danger); }
+.duo-judge-notice.is-warning > svg { color: var(--warning); }
+.duo-judge-notice > span { flex-direction: column; align-items: flex-start; gap: 0; }
+.duo-judge-notice strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duo-judge-notice small { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 
 .provider-maintenance-notice {
   display: flex;
@@ -7760,6 +7782,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   gap: 8px;
 }
 
+.workspace-frame:has(.conversation-split-header) > .status-overlay-stack {
+  top: calc(48px + 33px + 12px);
+}
+
 .workspace-frame.has-right-panel > .status-overlay-stack {
   right: calc(var(--workspace-tools-width) + 12px);
   width: min(440px, calc(100% - var(--workspace-tools-width) - 24px));
@@ -7850,6 +7876,10 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .error-toast > svg {
   flex: 0 0 auto;
   color: var(--danger);
+}
+
+.duo-judge-toast > svg {
+  color: var(--warning);
 }
 
 :where(.database-recovery-notice, .error-toast, .provider-quota-notice) {

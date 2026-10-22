@@ -49,6 +49,7 @@ import { useConversationPaneLayout } from "./hooks/useConversationPaneLayout";
 import { useSplitPanes } from "./hooks/useSplitPanes";
 import { useSplitPaneScenes } from "./hooks/useSplitPaneScenes";
 import { useMultiSpawn } from "./hooks/useMultiSpawn";
+import { DuoJudgeNoticeContext } from "./components/DuoJudgeNoticeContext";
 import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
@@ -388,7 +389,7 @@ export default function App(): React.JSX.Element {
     request,
     subscribe: connection.subscribe,
   }));
-  const multiSpawn = useMultiSpawn({
+  const { judgeNotices: duoJudgeNotices, ...multiSpawn } = useMultiSpawn({
     snapshot: connection.snapshot,
     settings,
     run,
@@ -396,7 +397,8 @@ export default function App(): React.JSX.Element {
     selectConversationCommand,
     workspaceVisible: view === "workspace",
     splitConversationId,
-    conversationSelectionGenerationRef,
+    splitConversationIds: split.splitConversationIds,
+    detachedConversationIds: detachedChats.conversationIds,
     splitSelectionTransitionsRef,
     updateSplitConversationId,
     showWorkspace: () => setView("workspace"),
@@ -404,6 +406,7 @@ export default function App(): React.JSX.Element {
     focusWorkspace: () => window.requestAnimationFrame(() => document.getElementById("main-workspace")?.focus({ preventScroll: true })),
     discardDraftConversation,
     setActionError,
+    startupSweep: connection.status === "online",
   });
   const workspaceToolsUnavailableReason = draftWorkspaceToolsUnavailableReason(draftConversation.requiresWorkspaceMaterialization);
   const workspaceToolsUnavailable = Boolean(workspaceToolsUnavailableReason);
@@ -1049,6 +1052,7 @@ export default function App(): React.JSX.Element {
     acknowledgeRecovery: multiSpawn.acknowledgeRecovery,
     retryComparison: multiSpawn.retryComparison,
     cancelComparison: multiSpawn.cancelComparison,
+    openJudge: multiSpawn.openJudge,
   });
   const layoutMultiSpawn = useStableController({
     ...multiSpawn,
@@ -1078,6 +1082,7 @@ export default function App(): React.JSX.Element {
     <UsageLimitsProvider request={request} status={connection.status}>
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
+    <DuoJudgeNoticeContext.Provider value={duoJudgeNotices}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
     <WatcherContext.Provider value={watchers.surface}>
     <WatcherAttachHost target={watchers.attach.target} snapshot={connection.snapshot} settings={settings} request={request}
@@ -1125,6 +1130,7 @@ export default function App(): React.JSX.Element {
       actions={layoutActions}
     />
     </WatcherContext.Provider>
+    </DuoJudgeNoticeContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>

@@ -932,6 +932,7 @@ export const AppLayout = memo(function AppLayout({
             submitting={multiSpawn.submitting}
             cancelling={multiSpawn.cancelling}
             launchBlocked={multiSpawn.launchBlocked}
+            offline={connection.status !== "online"}
             error={multiSpawn.error}
             recoveryGuidance={multiSpawn.recoveryGuidance}
             recoveryStatus={multiSpawn.recoveryStatus}
@@ -945,6 +946,7 @@ export const AppLayout = memo(function AppLayout({
             onAcknowledgeRecovery={multiSpawn.acknowledgeRecovery}
             onRetryComparison={multiSpawn.retryComparison}
             onCancelComparison={multiSpawn.cancelComparison}
+            onOpenJudge={multiSpawn.openJudge}
             onOpenProviderSetup={actions.openProviderSetup}
             onOpenBackendSetup={actions.openBackendSetup}
           />

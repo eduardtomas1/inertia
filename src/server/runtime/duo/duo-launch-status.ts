@@ -1,4 +1,5 @@
 import type {
+  AgentTurn,
   DuoGitRecoveryAction,
   DuoLaunchStatus,
   DuoWorktreeRecoveryGuidance,
@@ -94,4 +95,29 @@ export function publicDuoLaunchStatus(
       : {}),
     recoveryGuidance: recoveryGuidance(store, status),
   };
+}
+
+export function judgeTurnFailureCause(
+  store: Pick<RuntimeStore, "conversation" | "workspaceRun">,
+  turn: Pick<AgentTurn, "conversationId" | "runId" | "status">,
+): string | null {
+  if (turn.status !== "failed" && turn.status !== "interrupted") return null;
+  try {
+    const detail = store.workspaceRun(turn.runId).detail?.trim();
+    if (!detail || detail === store.conversation(turn.conversationId).title) {
+      return null;
+    }
+    return withoutClosingPunctuation(detail).slice(0, 600);
+  } catch {
+    return null;
+  }
+}
+
+function withoutClosingPunctuation(text: string): string {
+  return text.trim().replace(/[.\s]+$/u, "");
+}
+
+export function causeSentence(error: unknown): string {
+  const text = error instanceof Error ? withoutClosingPunctuation(error.message) : "";
+  return text ? `${text}.` : "No reason was reported.";
 }

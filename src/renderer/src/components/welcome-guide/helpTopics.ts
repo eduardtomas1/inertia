@@ -226,7 +226,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         name: "Duo",
-        detail: "Launch two chats in the sidebar sends one brief to two agents. Turn on Add an independent judge to compare both results with a third model.",
+        detail: "New duo in the sidebar sends one brief to two chats, A and B. Turn on Add an independent judge to have a third model compare them when both finish.",
       },
       {
         name: "Watcher",

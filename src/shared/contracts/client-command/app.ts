@@ -20,6 +20,7 @@ import {
   isCompletionSoundLibrary,
 } from "../../completion-sound";
 import { RUNTIME_DETAIL_SUBSCRIPTION_OWNERS } from "../../runtime-detail-subscriptions";
+import { DUO_PENDING_MAX_PAGES } from "../duo";
 
 import {
   modelBackendProfileIdSchema,
@@ -232,6 +233,7 @@ export const appCommandSchemas = [
       type: z.literal("duo.pending"),
       payload: z.object({
         projectIds: z.array(z.string().uuid()).min(1).max(3),
+        page: z.number().int().min(0).max(DUO_PENDING_MAX_PAGES - 1).optional(),
       }).strict(),
     })
     .strict(),

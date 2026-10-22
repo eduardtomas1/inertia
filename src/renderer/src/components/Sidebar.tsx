@@ -1043,7 +1043,7 @@ function SidebarView({
             <span>New chat</span>
             {newChatShortcut && <kbd id={newChatShortcutId} aria-hidden="true">{newChatShortcut}</kbd>}
           </button>
-          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={16} /></IconButton>
+          <IconButton label="New duo" className="multi-spawn-button" disabled={connectionStatus !== "online" || !regularProjects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Columns2 size={16} /></IconButton>
         </div>
         <button type="button" className={clsx("sidebar-primary-action sidebar-tasks-action", view === "tasks" && "is-active")} aria-current={view === "tasks" ? "page" : undefined} onFocus={() => void loadTasksView()} onPointerDown={() => void loadTasksView()} onPointerEnter={() => void loadTasksView()} onClick={() => navigate("tasks")}>
           <ListTodo size={16} aria-hidden="true" />

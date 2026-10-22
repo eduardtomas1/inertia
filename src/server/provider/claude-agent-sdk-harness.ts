@@ -53,13 +53,14 @@ import {
 import {
   CLAUDE_ISOLATED_SKILL_SETTINGS,
   claudePluginLoadedSelectedSkills,
-  stageClaudeSkillPlugin,
+  type StagedClaudeSkillPlugin,
 } from "./claude-skill-plugin";
+import type { ClaudeSkillFilesystemTestSeam } from "./claude-skill-operation";
 import {
-  createClaudeSkillDeadline,
-  raceClaudeSkillStaging,
-  type ClaudeSkillFilesystemTestSeam,
-} from "./claude-skill-operation";
+  CLAUDE_IDENTITY_ENVIRONMENT,
+  claudeIdentityOptions,
+  prepareClaudeTurnIdentity,
+} from "./claude-identity";
 import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import {
@@ -235,9 +236,7 @@ function startClaudeRun(
   let contextUsageGeneration = 0;
   let latestContextUsage: unknown;
   let contextUsageRequest: Promise<void> | null = null;
-  let stagedSkillPlugin: Awaited<ReturnType<
-    typeof stageClaudeSkillPlugin
-  >> = null;
+  let stagedSkillPlugin: StagedClaudeSkillPlugin | null = null;
   let selectedSkillsVerified = false;
   const requestedFastMode = options.input.modelSelection.providerOptions.fastMode;
   if (requestedFastMode !== undefined && requestedFastMode !== "fast") {
@@ -339,29 +338,16 @@ function startClaudeRun(
       if (!promptChannel.push(prompt, promptReservation)) {
         return finishResult("cancelled");
       }
-      const selectedClaudeSkills = (options.input.skills ?? []).filter(
-        (skill) => skill.source === "claude-native",
-      );
-      const skillDeadline = createClaudeSkillDeadline(
-        CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,
-        "Claude selected-skill staging timed out.",
-        preparationAbortController.signal,
-      );
-      const staging = stageClaudeSkillPlugin(
-        selectedClaudeSkills,
-        options.input.cwd,
-        options.environment,
-        { ...skillFilesystem, signal: skillDeadline.signal },
-      );
-      try {
-        stagedSkillPlugin = await raceClaudeSkillStaging(
-          staging,
-          skillDeadline.signal,
-        );
-      } finally {
-        skillDeadline.dispose();
-      }
-      selectedSkillsVerified = stagedSkillPlugin === null;
+      const identity = await prepareClaudeTurnIdentity({
+        skills: options.input.skills ?? [],
+        cwd: options.input.cwd,
+        environment: options.environment,
+        timeoutMs: CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS,
+        signal: preparationAbortController.signal,
+        filesystem: skillFilesystem,
+      });
+      stagedSkillPlugin = identity.skills;
+      selectedSkillsVerified = !stagedSkillPlugin?.selectedSkillNames.length;
       query = createQuery({
         prompt: promptChannel,
         options: {
@@ -388,7 +374,7 @@ function startClaudeRun(
           // here would let a repository's .claude/settings.json install hooks
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
-          systemPrompt: { type: "preset", preset: "claude_code", snapshot: true },
+          ...claudeIdentityOptions(identity),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
           ...(supportsFastMode
             ? {
@@ -409,27 +395,15 @@ function startClaudeRun(
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool: permissions.canUseTool,
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
+          strictMcpConfig: true,
           ...(claudeHostTools
-            ? {
-                mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
-                strictMcpConfig: true,
-              }
+            ? { mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config } }
             : {}),
           ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
           ...(options.input.model ? { model: options.input.model } : {}),
           // Custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL instead.
           ...(usesNativeAnthropic && claudeEffort(options.input.reasoningEffort)
             ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
-          ...(stagedSkillPlugin
-            ? {
-                plugins: [{
-                  type: "local" as const,
-                  path: stagedSkillPlugin.path,
-                  skipMcpDiscovery: true,
-                }],
-                skills: stagedSkillPlugin.skillNames,
-              }
-            : {}),
         },
       });
       acceptingFollowUps = true;
@@ -525,7 +499,7 @@ function startClaudeRun(
           }
         }
         if (
-          stagedSkillPlugin
+          stagedSkillPlugin?.selectedSkillNames.length
           && message.type === "system"
           && message.subtype === "init"
         ) {
@@ -1119,6 +1093,7 @@ function claudeRunEnvironment(
     ...CLAUDE_STARTUP_FAILURE_RESULTS,
     ...CLAUDE_TRANSCRIPT_FLUSH,
     ...(environment ?? process.env),
+    ...CLAUDE_IDENTITY_ENVIRONMENT,
   };
   return readOnlyProfile === "watcher" ? watcherCommandEnvironment(run) : run;
 }

@@ -629,17 +629,6 @@ export function createConversationCommandHandler(
             );
           }
           if (
-            dependencies.duoLaunches
-            && !await dependencies.duoLaunches.reconcileConversationDeletion(
-              conversation.id,
-              deletionReservationId,
-            )
-          ) {
-            throw new RuntimeRequestError(
-              "Cancel the active Duo launch, acknowledge an interrupted dispatch, or cancel the locked comparison before deleting this thread.",
-            );
-          }
-          if (
             dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
               conversation.id,
             )
@@ -647,17 +636,6 @@ export function createConversationCommandHandler(
             throw new RuntimeRequestError(
               "Stop the active run or review before deleting this thread.",
             );
-          }
-          try {
-            dependencies.store.assertConversationDeletionAllowed(
-              conversation.id,
-            );
-          } catch (error) {
-            if (
-              error instanceof Error
-              && error.message.includes("Cancel the active Duo launch")
-            ) throw new RuntimeRequestError(error.message);
-            throw error;
           }
           if (ownership?.creationState === "creating") {
             const creation = await inspectUnacknowledgedWorktreeCreation(
@@ -676,15 +654,40 @@ export function createConversationCommandHandler(
               );
             }
           }
-          if (ownership?.ownsWorktree) {
-            if (
+          if (
+            ownership?.ownsWorktree
+            && (
               conversation.worktreePath === null
               || resolve(conversation.worktreePath) !== resolve(ownership.path)
-            ) {
-              throw new RuntimeRequestError(
-                "The isolated worktree no longer matches this thread's ownership receipt.",
-              );
-            }
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "The isolated worktree no longer matches this thread's ownership receipt.",
+            );
+          }
+          if (
+            dependencies.duoLaunches
+            && !await dependencies.duoLaunches.reconcileConversationDeletion(
+              conversation.id,
+              deletionReservationId,
+            )
+          ) {
+            throw new RuntimeRequestError(
+              "This chat belongs to a Duo that is still running or needs attention. Let its chats finish or stop them, or resolve it from the Duo dialog (the two-chats button in the sidebar), then delete again.",
+            );
+          }
+          try {
+            dependencies.store.assertConversationDeletionAllowed(
+              conversation.id,
+            );
+          } catch (error) {
+            if (
+              error instanceof Error
+              && error.message.includes("Cancel the active Duo launch")
+            ) throw new RuntimeRequestError(error.message);
+            throw error;
+          }
+          if (ownership?.ownsWorktree) {
             const sharedCheckout = dependencies.store.shellSnapshot()
               .conversations.find((candidate) => (
                 candidate.id !== conversation.id

@@ -1,11 +1,12 @@
 import { lazy, Suspense, type ComponentProps } from "react";
-import { CircleAlert, ShieldAlert, X } from "lucide-react";
+import { CircleAlert, Columns2, ShieldAlert, X } from "lucide-react";
 import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 
 import type { useAppUpdate } from "../hooks/useAppUpdate";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
+import { useDuoJudgeNotices } from "./DuoJudgeNoticeContext";
 import { IconButton } from "./ui";
 import { loadProviderAuthDialog } from "./lazySurfaceLoaders";
 import { diagnosticErrorReference, navigateDiagnosticContext } from "../utils/diagnosticNavigation";
@@ -39,6 +40,7 @@ export function AppStatusOverlays({
   error,
   databaseRecoveryNotice,
 }: AppStatusOverlaysProps): React.JSX.Element {
+  const duoJudgeAlerts = useDuoJudgeNotices()?.alerts.length ?? 0;
   // Own preview suspension from this always-loaded boundary. The credential
   // dialog itself remains lazy, so waiting for its chunk would briefly leave
   // native preview content above the trusted authentication flow.
@@ -47,6 +49,7 @@ export function AppStatusOverlays({
       || databaseRecoveryNotice
       || appUpdate.error
       || providerQuotaNotices.notices.length > 0
+      || duoJudgeAlerts > 0
       || error,
   ));
   return (
@@ -72,7 +75,9 @@ export function StatusToastStack({
 }: Pick<AppStatusOverlaysProps, "appUpdate" | "providerQuotaNotices" | "error"> & DatabaseRecoveryNoticeProps & {
   onDismissError: () => void;
 }): React.JSX.Element | null {
-  if (!databaseRecoveryNotice && !appUpdate.error && providerQuotaNotices.notices.length === 0 && !error) return null;
+  const duoJudgeNotices = useDuoJudgeNotices();
+  const duoJudgeAlerts = duoJudgeNotices?.alerts ?? [];
+  if (!databaseRecoveryNotice && !appUpdate.error && providerQuotaNotices.notices.length === 0 && duoJudgeAlerts.length === 0 && !error) return null;
   const diagnosticError = error ? diagnosticErrorReference(error) : null;
   return (
     <div className="status-overlay-stack">
@@ -104,6 +109,19 @@ export function StatusToastStack({
         notices={providerQuotaNotices.notices}
         onDismiss={providerQuotaNotices.dismiss}
       />
+      {duoJudgeNotices && duoJudgeAlerts.map(({ launchId, conversationId, title, state }) => (
+        <div key={launchId} className="error-toast duo-judge-toast" role="alert">
+          <Columns2 size={14} aria-hidden="true" />
+          <span>{`${title ? `“${title}”` : "The Duo judge"} ${state === "interrupted" ? "was interrupted." : "didn't finish."}`}</span>
+          {conversationId && <button type="button" className="text-button" onClick={() => {
+            duoJudgeNotices.dismissAlert(launchId);
+            duoJudgeNotices.openJudge(conversationId);
+          }}>Open judge</button>}
+          <IconButton label="Dismiss Duo judge notice" onClick={() => duoJudgeNotices.dismissAlert(launchId)}>
+            <X size={14} />
+          </IconButton>
+        </div>
+      ))}
       {appUpdate.error && (
         <div className="error-toast" role="alert">
           <CircleAlert size={14} aria-hidden="true" />

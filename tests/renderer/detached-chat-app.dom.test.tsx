@@ -522,6 +522,50 @@ describe("detached chat window", () => {
     expect(counting.composerRenders).toBe(0);
   });
 
+  it("shows the Duo judge notice on a Duo chat in its own window", async () => {
+    const launchId = "63636363-6363-4363-8363-636363636363";
+    const judgeId = "64646464-6464-4464-8464-646464646464";
+    const duoCommand: InertiaConnection["sendCommand"] = async (command) => {
+      if (command.type === "duo.pending") {
+        return {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "duo.pending", launchIds: [launchId], hasMore: false },
+        };
+      }
+      if (command.type === "duo.status") {
+        return {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "duo.status",
+            launchId,
+            state: "running",
+            error: null,
+            sides: [
+              { ordinal: 0, conversationId, turnId: null, dispatchState: "started" },
+              { ordinal: 1, conversationId: "65656565-6565-4565-8565-656565656565", turnId: null, dispatchState: "started" },
+            ],
+            comparison: {
+              state: "failed",
+              conversationId: judgeId,
+              turnId: null,
+              attempt: 1,
+              error: "The judge turn failed: provider exited.",
+            },
+          },
+        } as ServerEvent;
+      }
+      return await sendCommand(command);
+    };
+    harness.connection = { ...connectionFor(snapshot), sendCommand: duoCommand };
+    const { default: DetachedChatApp } = await import("../../src/renderer/src/DetachedChatApp");
+    render(<DetachedChatApp initialWindowContext={context} />);
+
+    expect(await screen.findByText("Judge didn't finish")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
   it("closes the window with Command+W only when it has no panel tab to close", async () => {
     const closes: string[] = [];
     const bridge = window.inertia as unknown as object;

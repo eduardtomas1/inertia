@@ -40,7 +40,10 @@ describe("DialogPresence", () => {
     expect(presence).toHaveAttribute("inert");
     expect(screen.getByText("Closing")).toBeInTheDocument();
 
-    await act(async () => vi.advanceTimersByTime(90));
+    await act(async () => vi.advanceTimersByTime(119));
+    expect(screen.getByText("Closing")).toBeInTheDocument();
+
+    await act(async () => vi.advanceTimersByTime(1));
     expect(view.container).toBeEmptyDOMElement();
   });
 
@@ -70,7 +73,7 @@ describe("DialogPresence", () => {
       <DialogPresence open><div role="dialog">Reopened</div></DialogPresence>,
     );
 
-    await act(async () => vi.advanceTimersByTime(90));
+    await act(async () => vi.advanceTimersByTime(120));
 
     expect(screen.getByRole("dialog")).toHaveTextContent("Reopened");
     expect(view.container.querySelector(".dialog-presence"))

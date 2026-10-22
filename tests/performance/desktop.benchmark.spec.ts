@@ -1780,10 +1780,10 @@ async function rendererInteractionMeasurement(
 
 async function coldIntentDialogMeasurement(page: Page): Promise<number> {
   const elapsed = await rendererInteractionMeasurement(page, {
-    triggerSelector: 'button[aria-label="Launch two chats"]',
+    triggerSelector: 'button[aria-label="New duo"]',
     targetSelector: '.multi-spawn-dialog[role="dialog"]',
   });
-  await page.getByRole("button", { name: "Close multi-spawn" }).click();
+  await page.getByRole("button", { name: "Close new duo" }).click();
   return elapsed;
 }
 

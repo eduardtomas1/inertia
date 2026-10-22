@@ -70,6 +70,7 @@ import {
   type TerminalTurnProjections,
 } from "../utils/terminalTurnProjection";
 import { revealAgentInputRequest } from "../utils/agentInputNavigation";
+import { DuoJudgeNoticeSlot } from "./DuoJudgeNoticeContext";
 import {
   initialTranscriptNavigation,
   isTranscriptReaderNavigationKey,
@@ -1072,6 +1073,10 @@ export function ChatWorkspace({
             </button>
           </div>
         )}
+        <DuoJudgeNoticeSlot
+          conversationId={conversation.id}
+          conversationStatus={conversation.status}
+        />
         {maintenanceStatus && (maintenanceOperation
           || maintenanceStatus.versionStatus === "update-available") && (
           <Suspense fallback={null}>

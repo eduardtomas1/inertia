@@ -9,7 +9,6 @@ interface NoticeCopy {
   tone: "muted" | "warning" | "failed";
   title: string;
   detail: string | null;
-  fullDetail?: string;
   actions: NoticeAction[];
 }
 
@@ -84,7 +83,6 @@ export function duoJudgeNoticeCopy(
       tone: "failed",
       title: "Judge didn't finish",
       detail: failureCause(error),
-      ...(error ? { fullDetail: error } : {}),
       actions: ["retry", "cancel"],
     };
   }
@@ -131,7 +129,7 @@ export function DuoJudgeNotice({
       <Columns2 size={14} aria-hidden="true" />
       <span>
         <strong>{copy.title}</strong>
-        {copy.detail && <small title={copy.fullDetail ?? copy.detail}>{copy.detail}</small>}
+        {copy.detail && <small>{copy.detail}</small>}
       </span>
       {copy.actions.map((action) => {
         if (action === "retry") {

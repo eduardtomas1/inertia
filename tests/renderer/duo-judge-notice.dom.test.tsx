@@ -133,7 +133,7 @@ describe("Duo judge notice", () => {
       const notice = screen.getByRole("status");
       expect(notice).toHaveClass("is-failed");
       expect(notice).toHaveTextContent("Judge didn't finish");
-      expect(notice.querySelector("small")).toHaveAttribute("title", cause);
+      expect(notice.querySelector("small")).not.toHaveAttribute("title");
       expect(notice.querySelector("small")).toHaveTextContent(/^provider exited\.$/u);
       expect(noticeButtons()).toEqual(["Retry", "Cancel judge"]);
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));

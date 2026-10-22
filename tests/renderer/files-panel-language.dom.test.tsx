@@ -192,6 +192,10 @@ describe("FilesPanel language presentation", () => {
       .mockImplementation(function (this: HTMLElement) {
         return this.classList.contains("file-preview-code") ? 480 : 0;
       });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("file-preview-code") ? 480 : 0;
+      });
     const dense = "\n".repeat(1_048_576);
     const panel = (content: string, digest: string): React.JSX.Element => (
       <FilesPanel

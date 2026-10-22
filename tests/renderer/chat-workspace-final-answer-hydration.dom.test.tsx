@@ -293,6 +293,11 @@ function installGeometry(targetAnswerId: string): {
       return this.classList.contains("message-scroll") ? 600 : 120;
     });
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(800);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("message-scroll") ? 600 : 120;
+    });
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
     .mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains("message-scroll")) return rect(100, 600);

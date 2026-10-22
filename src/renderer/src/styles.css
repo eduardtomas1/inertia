@@ -2427,8 +2427,8 @@ button.header-breadcrumb-project:hover {
 .duo-judge-notice > svg { flex: 0 0 auto; }
 .duo-judge-notice.is-failed > svg { color: var(--danger); }
 .duo-judge-notice.is-warning > svg { color: var(--warning); }
-.duo-judge-notice > span { flex-wrap: nowrap; }
-.duo-judge-notice strong { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duo-judge-notice > span { flex-direction: column; align-items: flex-start; gap: 0; }
+.duo-judge-notice strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .duo-judge-notice small { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 
 .provider-maintenance-notice {

@@ -101,6 +101,8 @@ let app!: AppFixture;
 
 test.beforeAll(async () => {
   app = await createAppFixture({ name: "tasks", initialState: "conversation", codexAppServerSource: tasksAppServer });
+  const session = await app.page.context().newCDPSession(app.page);
+  await session.send("Emulation.setTimezoneOverride", { timezoneId: "UTC" });
   await app.page.clock.setFixedTime(FIXED_NOW);
 });
 

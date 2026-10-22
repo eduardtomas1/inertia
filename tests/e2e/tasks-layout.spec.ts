@@ -39,6 +39,8 @@ test.beforeAll(async () => {
       }
     },
   });
+  const session = await app.page.context().newCDPSession(app.page);
+  await session.send("Emulation.setTimezoneOverride", { timezoneId: "UTC" });
   await app.page.clock.setFixedTime(FIXED_NOW);
 });
 

@@ -80,6 +80,34 @@ describe("ProviderLatestVersionCache", () => {
     expect(cached).toEqual(first);
   });
 
+  it("aborts a registry lookup with its maintenance operation and caches nothing", async () => {
+    const now = 1_000_000_000;
+    const request = vi.fn((_url: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+      }));
+    const cache = new ProviderLatestVersionCache({
+      fetch: request as typeof fetch,
+      now: () => now,
+      timeoutMs: 60_000,
+    });
+    const operation = new AbortController();
+    const bound = cache.latest("@openai/codex", "latest", true, operation.signal);
+    operation.abort(new Error("Maintenance cancelled."));
+
+    await expect(bound).rejects.toThrow("Maintenance cancelled.");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    await expect(cache.latest("@openai/codex", "latest", false, operation.signal))
+      .rejects.toThrow("Maintenance cancelled.");
+    expect(request).toHaveBeenCalledTimes(1);
+
+    request.mockResolvedValueOnce(npmPackumentResponse("2.3.4", { "2.3.4": {} }, now));
+    await expect(cache.latest("@openai/codex", "latest"))
+      .resolves.toMatchObject({ version: "2.3.4", freshness: "fresh", error: null });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the last known valid version stale after a transient failure", async () => {
     let now = 1_000_000_000;
     const request = vi.fn()

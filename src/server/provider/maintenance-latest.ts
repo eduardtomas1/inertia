@@ -197,11 +197,13 @@ export class ProviderLatestVersionCache {
     packageName: string,
     spec: string,
     force = false,
+    signal?: AbortSignal,
   ): Promise<LatestVersionResult> {
     return await this.cached(
       `npm\0${packageName}\0${spec}`,
       force,
-      async () => await this.fetchRelease(packageName, spec),
+      async () => await this.fetchRelease(packageName, spec, signal),
+      signal,
     );
   }
 
@@ -226,12 +228,15 @@ export class ProviderLatestVersionCache {
     key: string,
     force: boolean,
     read: () => Promise<ProviderReleaseSelection>,
+    signal?: AbortSignal,
   ): Promise<LatestVersionResult> {
+    signal?.throwIfAborted();
     const now = this.now();
     const cached = this.entries.get(key);
     if (!force && cached && cached.expiresAt > now) {
       return this.result(cached, cached.lastError ? "stale" : "fresh");
     }
+    if (signal) return await this.resolve(key, cached, read, signal);
     const active = this.requests.get(key);
     if (active) return await active;
     const request = this.resolve(key, cached, read)
@@ -244,6 +249,7 @@ export class ProviderLatestVersionCache {
     key: string,
     previous: LatestVersionCacheEntry | undefined,
     read: () => Promise<ProviderReleaseSelection>,
+    signal?: AbortSignal,
   ): Promise<LatestVersionResult> {
     try {
       const { version, heldVersion } = await read();
@@ -258,6 +264,7 @@ export class ProviderLatestVersionCache {
       this.remember(key, entry);
       return this.result(entry, "fresh");
     } catch (error) {
+      if (signal?.aborted) throw error;
       const checkedAt = this.now();
       const entry: LatestVersionCacheEntry = {
         version: previous?.version ?? null,
@@ -277,6 +284,7 @@ export class ProviderLatestVersionCache {
   private async fetchRelease(
     packageName: string,
     spec: string,
+    signal?: AbortSignal,
   ): Promise<ProviderReleaseSelection> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -285,7 +293,9 @@ export class ProviderLatestVersionCache {
       const response = await this.fetchImplementation(
         `https://registry.npmjs.org/${encodeURIComponent(packageName)}`,
         {
-          signal: controller.signal,
+          signal: signal
+            ? AbortSignal.any([controller.signal, signal])
+            : controller.signal,
           headers: { accept: "application/json" },
           redirect: "error",
         },

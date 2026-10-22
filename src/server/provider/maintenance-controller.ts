@@ -464,6 +464,7 @@ export class ProviderMaintenanceController {
   private async refreshOne(
     providerId: ProviderMaintenanceProviderId,
     force: boolean,
+    signal?: AbortSignal,
   ): Promise<ProviderMaintenanceStatus> {
     const target = this.options.target(providerId);
     const capabilities = await this.capabilities(target);
@@ -473,7 +474,7 @@ export class ProviderMaintenanceController {
     const latest = capabilities.homebrew && target.installed
       ? await this.latestVersions.homebrew(capabilities.homebrew, force)
       : registryPackage && target.installed
-      ? await this.latestVersions.latest(registryPackage.name, registryPackage.range, force)
+      ? await this.latestVersions.latest(registryPackage.name, registryPackage.range, force, signal)
       : {
           version: null,
           heldVersion: null,
@@ -575,7 +576,7 @@ export class ProviderMaintenanceController {
         return;
       }
 
-      const advisory = await this.refreshOne(providerId, false);
+      const advisory = await this.refreshOne(providerId, false, active.abort.signal);
       const pinVersion = installableVersion(
         action,
         advisory.latestVersion,
@@ -820,7 +821,7 @@ export class ProviderMaintenanceController {
       });
       return null;
     }
-    const advisory = await this.refreshOne(active.operation.providerId, true);
+    const advisory = await this.refreshOne(active.operation.providerId, true, active.abort.signal);
     const targetReached = advisory.versionStatus === "current";
     const versionChanged = compareProviderVersions(
       refreshed.installedVersion,

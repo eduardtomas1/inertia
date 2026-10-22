@@ -299,6 +299,18 @@ describe("Starting from the card", () => {
     expect(well(card)).toHaveTextContent("Starting…");
   });
 
+  it("returns focus to the retry button when the form is cancelled", async () => {
+    const user = userEvent.setup();
+    harness(snapshot([linked()], {
+      conversations: [conversation({ status: "failed", latestTurn: turn({ status: "failed" }) })],
+    }));
+    const card = openCard();
+    await user.click(within(card).getByRole("button", { name: "Try again" }));
+    await user.click(within(card).getByRole("button", { name: "Cancel" }));
+    expect(within(card).queryByRole("group", { name: "Hand it to an agent" })).toBeNull();
+    expect(within(card).getByRole("button", { name: "Try again" })).toHaveFocus();
+  });
+
   it("never offers the hand-off on a done task", () => {
     harness(snapshot([todo(firstId, "Clean the downloads folder", { completedAt: "2026-10-11T07:00:00.000Z" })]));
     fireEvent.click(screen.getByRole("button", { name: "Done 1" }));

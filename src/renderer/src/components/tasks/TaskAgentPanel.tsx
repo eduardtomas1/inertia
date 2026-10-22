@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import type { ConversationShell } from "@shared/contracts";
 import type { Todo } from "@shared/todos";
@@ -100,12 +100,25 @@ export function TaskAgentPanel({
   onReopen,
 }: TaskAgentPanelProps): React.JSX.Element {
   const [retrying, setRetrying] = useState(false);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const focusRetry = useRef(false);
   const kind = status.kind;
   const canRetry = taskCanHandOffAgain(kind);
 
   useEffect(() => {
     if (!canRetry && kind !== "starting") setRetrying(false);
   }, [canRetry, kind]);
+
+  useLayoutEffect(() => {
+    if (retrying || !focusRetry.current) return;
+    focusRetry.current = false;
+    retryRef.current?.focus();
+  }, [retrying]);
+
+  const cancelRetry = (): void => {
+    focusRetry.current = true;
+    setRetrying(false);
+  };
 
   const formVisible = kind === "todo" || (retrying && canRetry);
   const formMounted = formVisible || (startingLocally && kind === "starting");
@@ -128,7 +141,7 @@ export function TaskAgentPanel({
         <div className="task-agent-form" hidden={!formVisible || undefined}>
           {renderHandoff({
             retry: retrying && canRetry,
-            onCancel: kind === "todo" ? undefined : () => setRetrying(false),
+            onCancel: kind === "todo" ? undefined : cancelRetry,
           })}
         </div>
       )}
@@ -161,6 +174,7 @@ export function TaskAgentPanel({
           {canRetry && (
             <button
               key="retry"
+              ref={retryRef}
               type="button"
               className="primary-button"
               disabled={offline}

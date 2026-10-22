@@ -19,7 +19,7 @@ import type {
 } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
-import { isTranscriptReaderNavigationKey, TRANSCRIPT_LATEST_REQUESTED_EVENT } from "../../utils/transcriptNavigation";
+import { isTranscriptReaderNavigationKey } from "../../utils/transcriptNavigation";
 import { applyTerminalTurnProjections } from "../../utils/terminalTurnProjection";
 import {
   buildResponseTimeline,
@@ -843,7 +843,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       scrollElement.removeEventListener("touchstart", cancelForUserIntent);
       scrollElement.removeEventListener("pointerdown", cancelForUserIntent);
       scrollElement.removeEventListener("keydown", cancelForUserIntent);
-      scrollElement.removeEventListener(TRANSCRIPT_LATEST_REQUESTED_EVENT, cancelForUserIntent);
     };
     const finishRestoration = (): void => {
       if (cancelled) return;
@@ -895,7 +894,6 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     scrollElement.addEventListener("touchstart", cancelForUserIntent, { passive: true });
     scrollElement.addEventListener("pointerdown", cancelForUserIntent);
     scrollElement.addEventListener("keydown", cancelForUserIntent);
-    scrollElement.addEventListener(TRANSCRIPT_LATEST_REQUESTED_EVENT, cancelForUserIntent);
     cancelLayoutAnchorRestoration.current = finishRestoration;
     window.requestAnimationFrame(restore);
   };

@@ -1,7 +1,5 @@
 import type { MessageSendAcceptance } from "@shared/contracts";
 
-export const TRANSCRIPT_LATEST_REQUESTED_EVENT = "inertia:transcript-latest-requested";
-
 export type TranscriptMessageSendAcceptance = MessageSendAcceptance & {
   materializedFromConversationId?: string;
 };

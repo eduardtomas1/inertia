@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
 import { forgetTranscriptPosition, rememberTranscriptPosition } from "../../src/renderer/src/utils/transcriptPosition";
-import { TRANSCRIPT_LATEST_REQUESTED_EVENT } from "../../src/renderer/src/utils/transcriptNavigation";
 import type {
   AgentTurn,
   ChatMessage,
@@ -117,7 +116,7 @@ describe("accepted turn viewport anchoring", () => {
   ) {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
-    render(
+    const view = (followsLatest: boolean): React.JSX.Element => (
       <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
           <ResponseTimeline
@@ -141,6 +140,7 @@ describe("accepted turn viewport anchoring", () => {
             showChangedFileSummaries={false}
             checkpointRestoreDisabled={false}
             turnAnchorId={turnAnchorId}
+            followsLatest={followsLatest}
             scrollElementRef={scrollElementRef}
             timelineElementRef={timelineElementRef}
             onTurnAnchorSettled={onTurnAnchorSettled}
@@ -154,9 +154,14 @@ describe("accepted turn viewport anchoring", () => {
             onStop={() => undefined}
           />
         </div>
-      </div>,
+      </div>
     );
-    return { scrollElementRef, timelineElementRef };
+    const { rerender } = render(view(false));
+    return {
+      scrollElementRef,
+      timelineElementRef,
+      followLatest: () => rerender(view(true)),
+    };
   }
 
   it("opens a virtualized chat at its latest turn and returns to a remembered reading position", () => {
@@ -463,7 +468,7 @@ describe("accepted turn viewport anchoring", () => {
       scrollTop: 520,
       wasFollowing: false,
     });
-    const { scrollElementRef } = renderTimeline(
+    const { scrollElementRef, followLatest } = renderTimeline(
       vi.fn(),
       vi.fn(),
       16,
@@ -472,7 +477,7 @@ describe("accepted turn viewport anchoring", () => {
     const scroll = scrollElementRef.current!;
 
     await act(async () => {
-      scroll.dispatchEvent(new Event(TRANSCRIPT_LATEST_REQUESTED_EVENT));
+      followLatest();
       scroll.scrollTo({ top: 3_400 });
       let remaining = 60;
       while (frames.length > 0 && remaining > 0) {

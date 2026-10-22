@@ -73,7 +73,6 @@ import { revealAgentInputRequest } from "../utils/agentInputNavigation";
 import {
   initialTranscriptNavigation,
   isTranscriptReaderNavigationKey,
-  TRANSCRIPT_LATEST_REQUESTED_EVENT,
   type TranscriptMessageSendAcceptance,
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
@@ -619,7 +618,6 @@ export function ChatWorkspace({
     clearReaderIntent();
     clearPendingFinalAnswerNavigation();
     forgetTranscriptPosition(conversationId);
-    scrollRef.current?.dispatchEvent(new Event(TRANSCRIPT_LATEST_REQUESTED_EVENT));
     dispatchNavigation({
       type: "latest.requested",
       conversationId,

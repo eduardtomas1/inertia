@@ -35,9 +35,12 @@ function readablePdf(): number[] {
 
 function incidentLog(): string {
   const lines: string[] = [];
-  for (let index = 0; lines.join("\n").length < 1_200_000; index += 1) {
+  let length = -1;
+  for (let index = 0; length < 1_200_000; index += 1) {
     const second = String(index % 60).padStart(2, "0");
-    lines.push(`2026-09-30T14:${String(Math.floor(index / 60) % 60).padStart(2, "0")}:${second}Z INFO  api-gateway request_id=${(index * 7919).toString(16).padStart(8, "0")} route=/v1/attachments status=200 duration_ms=${(index * 37) % 900}`);
+    const line = `2026-09-30T14:${String(Math.floor(index / 60) % 60).padStart(2, "0")}:${second}Z INFO  api-gateway request_id=${(index * 7919).toString(16).padStart(8, "0")} route=/v1/attachments status=200 duration_ms=${(index * 37) % 900}`;
+    lines.push(line);
+    length += line.length + 1;
   }
   return lines.join("\n");
 }
@@ -102,6 +105,26 @@ async function dropFiles(page: Page, files: { name: string; type: string; bytes?
   }, files);
 }
 
+function attachmentList(page: Page): Locator {
+  return page.getByRole("list", { name: "Attachments", exact: true });
+}
+
+async function attachFiles(page: Page, files: Parameters<typeof dropFiles>[1]): Promise<void> {
+  await dropFiles(page, files);
+  for (const { name } of files) {
+    await expect(attachmentList(page).getByRole("button", { name: `Preview attachment ${name}` })).toBeEnabled();
+  }
+}
+
+async function clearAttachments(page: Page): Promise<void> {
+  const remove = attachmentList(page).getByRole("button", { name: /^Remove attachment /u });
+  for (let count = await remove.count(); count > 0; count -= 1) {
+    await remove.first().click();
+    await expect(remove).toHaveCount(count - 1);
+  }
+  await expect(attachmentList(page)).toHaveCount(0);
+}
+
 async function pasteText(page: Page, text: string): Promise<void> {
   await page.getByRole("textbox", { name: "Message" }).evaluate((element, value) => {
     const transfer = new DataTransfer();
@@ -136,11 +159,18 @@ async function releaseCommits(app: AppFixture): Promise<void> {
   });
 }
 
+const BINARY_FILE = { name: BINARY_NAME, type: "application/zstd", bytes: [40, 181, 47, 253, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8] };
+const LONG_LOG_FILE = { name: LONG_LOG_NAME, type: "text/plain", text: incidentLog() };
+
 let app!: AppFixture;
 
 test.beforeAll(async () => {
   app = await createAppFixture({ name: "large-file-attachments", initialState: "conversation" });
   await app.page.clock.setFixedTime(FIXED_NOW);
+});
+
+test.beforeEach(async () => {
+  await clearAttachments(app.page);
 });
 
 test.afterAll(async () => {
@@ -151,17 +181,14 @@ test("composer holds mixed files, a folded paste, an upload in flight and a reje
   const page = app.page;
   await app.resizeWindow(1440, 920);
   await setAppearanceInPlace(app, "dark");
-  await dropFiles(page, [
+  await attachFiles(page, [
     { name: "dashboard-review.png", type: "image/png", image: true },
     { name: "q4-roadmap.pdf", type: "application/pdf", bytes: readablePdf() },
     { name: "release-notes.md", type: "text/markdown", text: "# Release notes\n\n- Streamed attachments\n- Retained file paths\n" },
-    { name: BINARY_NAME, type: "application/zstd", bytes: [40, 181, 47, 253, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8] },
-    { name: LONG_LOG_NAME, type: "text/plain", text: incidentLog() },
+    BINARY_FILE,
+    LONG_LOG_FILE,
   ]);
-  const attachments = page.getByRole("list", { name: "Attachments", exact: true });
-  for (const name of ["dashboard-review.png", "q4-roadmap.pdf", "release-notes.md", BINARY_NAME, LONG_LOG_NAME]) {
-    await expect(attachments.getByRole("button", { name: `Preview attachment ${name}` })).toBeEnabled();
-  }
+  const attachments = attachmentList(page);
   const binaryChip = attachments.getByRole("listitem").filter({ hasText: BINARY_NAME });
   await expect(binaryChip).toContainText("File · 14 B");
   await expect(binaryChip.locator("svg.lucide-file")).toHaveCount(1);
@@ -219,8 +246,8 @@ test("previews a truncated text file with a visible notice", async ({ browserNam
   const page = app.page;
   await app.resizeWindow(1440, 920);
   await setAppearanceInPlace(app, "dark");
-  const attachments = page.getByRole("list", { name: "Attachments", exact: true });
-  const trigger = attachments.getByRole("button", { name: `Preview attachment ${LONG_LOG_NAME}` });
+  await attachFiles(page, [LONG_LOG_FILE]);
+  const trigger = attachmentList(page).getByRole("button", { name: `Preview attachment ${LONG_LOG_NAME}` });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: LONG_LOG_NAME });
   await expect(dialog.getByLabel(`Text preview of ${LONG_LOG_NAME}`)).toBeVisible();
@@ -250,8 +277,8 @@ test("previews an opaque file as stored, not as a failure", async ({ browserName
   const page = app.page;
   await app.resizeWindow(1440, 920);
   await setAppearanceInPlace(app, "dark");
-  const attachments = page.getByRole("list", { name: "Attachments", exact: true });
-  const trigger = attachments.getByRole("button", { name: `Preview attachment ${BINARY_NAME}` });
+  await attachFiles(page, [BINARY_FILE]);
+  const trigger = attachmentList(page).getByRole("button", { name: `Preview attachment ${BINARY_NAME}` });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: BINARY_NAME });
   await expect(dialog).toContainText("File · 14 B");

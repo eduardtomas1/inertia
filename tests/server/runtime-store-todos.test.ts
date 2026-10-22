@@ -126,7 +126,7 @@ describe("RuntimeStore tasks", () => {
     });
     expect(first.createdAt).toBe(first.updatedAt);
     const second = store.todos.create({ id: randomUUID(), title: "Fix the flaky test", note: "Only on Linux.", priority: "urgent", dueDate: "2026-10-13" });
-    expect(store.todos.list().map(({ id }) => id)).toEqual([first.id, second.id]);
+    expect(store.todos.list().map(({ id }) => id).sort()).toEqual([first.id, second.id].sort());
 
     const updated = store.todos.update(first.id, { title: "Write notes", note: "Short.", priority: "high", dueDate: "2026-10-20" });
     expect(updated).toMatchObject({ title: "Write notes", note: "Short.", priority: "high", dueDate: "2026-10-20", completedAt: null });

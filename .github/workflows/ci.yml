@@ -194,6 +194,9 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Audit all dependencies, including the shipped Electron runtime
+        run: npm audit --audit-level=high
+
       - name: Keep core failure diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -559,6 +562,10 @@ jobs:
       - name: Audit production dependencies
         if: runner.os == 'Linux' && matrix.arch == 'x64'
         run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit all dependencies, including the shipped Electron runtime
+        if: runner.os == 'Linux' && matrix.arch == 'x64'
+        run: npm audit --audit-level=high
 
       # The one build in the job. It carries the generated third-party notices
       # and the runtime guardian that packaging requires, but not the typecheck

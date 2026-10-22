@@ -9,6 +9,8 @@ updates:
       time: "06:00"
       timezone: Europe/Madrid
     open-pull-requests-limit: 8
+    cooldown:
+      default-days: 3
     versioning-strategy: increase
     commit-message:
       prefix: deps
@@ -78,6 +80,8 @@ updates:
       time: "06:30"
       timezone: Europe/Madrid
     open-pull-requests-limit: 4
+    cooldown:
+      default-days: 3
     commit-message:
       prefix: ci
     groups:

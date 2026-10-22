@@ -5,6 +5,7 @@ import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages"
 import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "./runtimeQueueClient";
 import { setRuntimeQueueLength } from "./runtimeQueueEvents";
 import { IconButton } from "../ui";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 
 const pendingLoads = new WeakMap<QueueCommandRunner, Map<string, Promise<MessageQueueResult>>>();
 function loadQueue(run: QueueCommandRunner, conversationId: string): Promise<MessageQueueResult> {
@@ -40,21 +41,25 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
   owner.current = conversationId;
   useEffect(() => {
     let current = true;
+    let refused = false;
     const refresh = (): void => {
-      if (document.visibilityState === "hidden") return;
+      if (refused || document.visibilityState === "hidden") return;
       const requestedRevision = revision.current;
       void loadQueue(onCommand, conversationId).then((result) => {
         if (current && revision.current === requestedRevision && document.visibilityState !== "hidden") {
           updateQueue(result.entries);
           if (latestError.current !== null && result.entries[0]?.id !== errorEntry.current) setError(null);
         }
-      }, () => undefined);
+      }, (failure: unknown) => {
+        if (current && revision.current === requestedRevision && runtimeCommandDelivery(failure) === "rejected") refused = true;
+      });
     };
     updateQueue([]); setError(null); setBusy(false);
     refresh();
     const changed = (event: Event): void => {
       if ((event as CustomEvent<unknown>).detail === conversationId) {
         revision.current += 1;
+        refused = false;
         pendingLoads.get(onCommand)?.delete(conversationId);
         refresh();
       }

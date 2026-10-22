@@ -33,6 +33,7 @@ import {
   type DarwinProcessIdentity,
 } from "./runtime-owned-process-darwin.js";
 import { readLinuxGuardianReady } from "./runtime-owned-process-linux.js";
+import { readLinuxProcessCgroup } from "./runtime-owned-process-linux-cgroup.js";
 
 const CLAIM_PREFIX = ".runtime-owned-child-";
 const CONTAINMENT_PREFIX = ".runtime-owned-process-containment-";
@@ -648,7 +649,7 @@ export class RuntimeOwnedProcessJournal {
         && "sessionId" in identity
         && identity.sessionId !== pid)
     ) throw new Error("The spawned process ownership could not be proven.");
-    const claim: RuntimeOwnedProcessClaim = {
+    const baseClaim: RuntimeOwnedProcessClaim = {
       version: pending.version,
       state: this.platform === "linux" ? "preauth" : "owned",
       ownershipId: pending.ownershipId,
@@ -656,6 +657,16 @@ export class RuntimeOwnedProcessJournal {
       systemBootId: pending.systemBootId,
       process: identity,
     };
+    const linuxCgroup = linuxIdentity ? readLinuxProcessCgroup(pid) : null;
+    const containedClaim: RuntimeOwnedProcessClaim | null =
+      linuxIdentity && linuxCgroup
+        ? { ...baseClaim, process: { ...linuxIdentity, ...linuxCgroup } }
+        : null;
+    const claim = containedClaim
+      && stored({ ...containedClaim, state: "retiring" }).byteLength
+        <= MAX_RECORD_BYTES
+      ? containedClaim
+      : baseClaim;
     const claimBytes = stored(claim);
     if (!parseRecord(claimBytes)) {
       throw new Error("The spawned process ownership could not be proven.");

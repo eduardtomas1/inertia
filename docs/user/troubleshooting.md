@@ -20,7 +20,9 @@ Open **Settings → Agents**, choose the provider and open **Details** to see wh
 
 ## Update an agent's CLI
 
-**Settings → Agents** offers **Update** when Inertia can tell what installed the CLI and your account can write it: the provider's own installer, npm (also through nvm or fnm), pnpm, bun, Yarn, Volta or Homebrew. Otherwise it shows the command to run in a terminal, such as `sudo npm install -g --prefix /usr @openai/codex@latest` for a system npm prefix or `sudo snap refresh <name>` for a snap. OpenCode updates stay on 1.x.
+**Settings → Agents** offers **Update** when Inertia can tell what installed the CLI and your account can write it: the provider's own installer, npm (also through nvm or fnm), pnpm, bun, Yarn, Volta or Homebrew. Otherwise it shows the command to run in a terminal, such as `sudo npm install -g --prefix /usr @openai/codex@1.2.3` for a system npm prefix or `sudo snap refresh <name>` for a snap. OpenCode updates stay on 1.x.
+
+When the CLI comes from npm, pnpm, bun, Yarn or Volta, Inertia installs the newest release that has been public for at least 72 hours, so a hijacked publish has time to be caught and withdrawn. A newer release shows up as an update once it is old enough. If Inertia cannot reach the npm registry, or no release is old enough yet, it does not update and says why.
 
 ## I can't open another chat window
 

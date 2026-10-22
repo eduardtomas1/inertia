@@ -16,6 +16,10 @@ import {
   resolveProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilityDependencies,
 } from "../../src/server/provider/maintenance-capabilities";
+import {
+  pinnedManualCommand,
+  pinnedProviderUpdateAction,
+} from "../../src/server/provider/maintenance-install-source";
 import type { ProviderMaintenanceProviderId } from "../../src/shared/provider-maintenance";
 
 const posixIt = it.skipIf(process.platform === "win32");
@@ -124,10 +128,22 @@ describe("provider install source classification", () => {
         lockKey: `npm-global:${prefix}`,
         installMethod: "npm-global",
         label: expect.stringMatching(/ with npm$/u),
+        registryPackage: { name: packageName, range: providerId === "opencode" ? "1" : "latest" },
         ...(providerId === "opencode"
           ? { versionPin: { major: 1, argumentIndex: null, command: null } }
           : {}),
       });
+      const pinned = pinnedProviderUpdateAction(capabilities.update!, "1.2.3");
+      expect(pinned?.args).toEqual([
+        join(prefix, "lib/node_modules/npm/bin/npm-cli.js"), "install", "-g", "--prefix", prefix,
+        ...tail.slice(0, -1), `${packageName}@1.2.3`,
+      ]);
+      expect(pinnedManualCommand(capabilities.manualCommand ?? null, capabilities.update, "1.2.3"))
+        .toBe(["npm install -g --prefix ~/.npm-global", ...tail.slice(0, -1), `${packageName}@1.2.3`].join(" "));
+      for (const unresolved of [null, "latest", "1", "1.2.3 --ignore-scripts=false"]) {
+        expect(pinnedProviderUpdateAction(capabilities.update!, unresolved)).toBeNull();
+        expect(pinnedManualCommand(capabilities.manualCommand ?? null, capabilities.update, unresolved)).toBeNull();
+      }
     },
   );
 

@@ -2,7 +2,31 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.75 — 2026-10-22
+
+Security updates for Electron and for agent CLI updates, a clean start after
+Linux runs out of memory, and a read-only watcher that can review a chat while
+it works.
+
+### Security
+
+- Updated Electron to 44.9.3. It distrusts the compromised eMudhra
+  intermediate certificates (GHSA-jr5w-w6x2-84p9, high severity), which
+  someone able to intercept your network traffic could have used to pose as a
+  site Inertia connects to. It also brings upstream security fixes for
+  Chromium, V8, Skia, ANGLE and PDFium.
+- Agent CLI updates installed from inside Inertia now wait until a release
+  has been public for at least 72 hours, and skip releases the publisher has
+  withdrawn, so a hijacked release isn't installed the moment it appears. If
+  Inertia can't confirm a suitable release, it doesn't update and tells you
+  why.
+
+### Reliability
+
+- If your computer runs out of memory and closes Inertia on Linux, Inertia
+  now checks that everything from the closed session has stopped and starts
+  normally, without moving files by hand. If it still can't confirm that,
+  restarting your computer clears it.
 
 ### Watchers
 
@@ -63,6 +87,12 @@ The useful changes in each Inertia release, in plain language.
   unless you hide it from paired devices. Stopping a watcher turns it into an
   ordinary chat, and deleting the main chat detaches its watcher. See
   [Watcher](docs/user/watcher.md).
+
+### Chats
+
+- A chat opened in its own window now shows and answers a context request
+  that names one source chat; other requests still go to the main window.
+  Focus returns to the message box when the request card closes.
 
 ## 0.0.74 — 2026-10-20
 

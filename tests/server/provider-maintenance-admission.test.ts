@@ -15,6 +15,7 @@ import {
   type ProviderInstallationIdentity,
 } from "../../src/server/provider/installation-lease";
 import { providerMaintenanceJournalTestDouble } from "../support/provider-maintenance-journal";
+import { npmPackumentResponse } from "../support/npm-registry-packument";
 
 const PACKAGE = "@anthropic-ai/claude-code";
 
@@ -98,7 +99,7 @@ function updateController(
       return current;
     },
     latestVersions: new ProviderLatestVersionCache({
-      fetch: (async () => new Response(JSON.stringify({ version: "2.0.0" }))) as typeof fetch,
+      fetch: (async () => npmPackumentResponse("2.0.0")) as typeof fetch,
     }),
     resolveCapabilities: async () => capabilities,
     runAction,

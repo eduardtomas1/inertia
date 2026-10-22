@@ -53,6 +53,43 @@ describe("runtime queue presentation and durable draft identity", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("stops polling a queue the service refuses until the chat's queue or turn changes", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn<QueueCommandRunner>().mockRejectedValue(new RuntimeCommandError("Conversation not found.", "rejected"));
+      const props = { conversationId, onCommand: run, canSend: true, latestTurnStatus: null, queueHost: null };
+      const view = render(<RuntimeComposerQueuedActions {...props} latestTurnId={null} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(run).toHaveBeenCalledTimes(1);
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(run).toHaveBeenCalledTimes(1);
+      run.mockResolvedValue(response());
+      await act(async () => { window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })); await vi.advanceTimersByTimeAsync(0); });
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Next task")).toBeTruthy();
+      run.mockRejectedValue(new RuntimeCommandError("Conversation not found.", "rejected"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(run).toHaveBeenCalledTimes(3);
+      run.mockResolvedValue(response());
+      view.rerender(<RuntimeComposerQueuedActions {...props} latestTurnId="first" />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(run).toHaveBeenCalledTimes(5);
+      view.unmount();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps polling after a read whose delivery is unknown", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn<QueueCommandRunner>().mockRejectedValue(new RuntimeCommandError("Timed out.", "ambiguous"));
+      const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
+        latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(run).toHaveBeenCalledTimes(4);
+      view.unmount();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps a second pending draft's identity when the first acknowledgement arrives", () => {
     const first = queueIntent(conversationId, "First", []);
     const second = queueIntent(conversationId, "Second", []);

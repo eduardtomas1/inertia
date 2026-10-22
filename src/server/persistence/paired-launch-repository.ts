@@ -967,8 +967,8 @@ export class PairedLaunchRepository {
     const failure = status === "completed" || status === "cancelled"
       ? null
       : status === "interrupted"
-        ? `The judge turn was interrupted${cause ? `: ${cause}.` : "."} It was not retried automatically.`
-        : `The judge turn failed${cause ? `: ${cause}.` : "."} Retry it or cancel the judge.`;
+        ? `The judge turn was interrupted${cause ? `: ${cause}.` : "."}`
+        : `The judge turn failed${cause ? `: ${cause}.` : "."}`;
     this.database.prepare(`
       UPDATE paired_launches
       SET comparison_state = ?, comparison_failure_message = ?, updated_at = ?

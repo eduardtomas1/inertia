@@ -241,7 +241,7 @@ describe("Duo launch watch", () => {
         if (command.payload.launchId === launchA) {
           return duoStatus(launchA, {
             state: "failed",
-            error: "The judge could not start: provider missing. Retry it or cancel the judge.",
+            error: "The judge could not start: provider missing.",
           });
         }
         if (command.payload.launchId === launchB) {
@@ -366,7 +366,7 @@ describe("Duo launch watch", () => {
         polls += 1;
         return duoStatus(launchA, {
           state: "failed",
-          error: "The judge turn failed: crash. Retry it or cancel the judge.",
+          error: "The judge turn failed: crash.",
         });
       },
     });
@@ -637,7 +637,7 @@ describe("Duo launch watch", () => {
         }
         return duoStatus(launchA, {
           state: "failed",
-          error: "The judge could not start: provider missing. Retry it or cancel the judge.",
+          error: "The judge could not start: provider missing.",
         });
       },
     });

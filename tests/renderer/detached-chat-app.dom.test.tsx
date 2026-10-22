@@ -551,7 +551,7 @@ describe("detached chat window", () => {
               conversationId: judgeId,
               turnId: null,
               attempt: 1,
-              error: "The judge turn failed: provider exited. Retry it or cancel the judge.",
+              error: "The judge turn failed: provider exited.",
             },
           },
         } as ServerEvent;

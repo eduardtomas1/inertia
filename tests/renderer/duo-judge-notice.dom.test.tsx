@@ -140,7 +140,7 @@ describe("Duo judge notice", () => {
   it.each(["judge", "side"] as const)(
     "offers retry and cancel on the %s chat when the judge failed",
     (role) => {
-      const cause = "The judge turn failed: provider exited. Retry it or cancel the judge.";
+      const cause = "The judge turn failed: provider exited.";
       const { onRetry, onCancel } = renderNotice(entry(role, "failed", cause));
       const notice = screen.getByRole("status");
       expect(notice).toHaveClass("is-failed");
@@ -159,7 +159,7 @@ describe("Duo judge notice", () => {
     renderNotice(entry(
       "judge",
       "interrupted",
-      "The judge started, but its outcome became uncertain: the app closed. It was not retried automatically.",
+      "The judge started, but its outcome became uncertain: the app closed.",
     ));
     const notice = screen.getByRole("status");
     expect(notice).toHaveClass("is-warning");
@@ -341,7 +341,7 @@ describe("Duo judge notice", () => {
 
     function focusHarness(role: "judge" | "side") {
       const conversationId = role === "judge" ? judgeConversationId : sideConversationId;
-      let current = entry(role, "failed", "The judge turn failed: provider exited. Retry it or cancel the judge.");
+      let current = entry(role, "failed", "The judge turn failed: provider exited.");
       let pending: "retry" | "cancel" | null = null;
       let dismissed = false;
       const notices = (): DuoJudgeNotices => ({

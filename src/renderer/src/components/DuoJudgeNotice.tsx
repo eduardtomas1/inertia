@@ -24,12 +24,11 @@ function sideTurnFinished(
 function failureCause(error: string | null): string | null {
   if (!error) return null;
   return error
-    .replace(/^The judge (?:turn failed|could not start|input could not be assembled): /u, "")
-    .replace(/ Retry it or cancel the judge\.$/u, "");
+    .replace(/^The judge (?:turn failed|could not start|input could not be assembled): /u, "");
 }
 
 function interruptionCause(error: string | null): string | null {
-  return error?.replace(/ It was not retried automatically\.$/u, "") || null;
+  return error || null;
 }
 
 export function duoJudgeNoticeCopy(

@@ -432,7 +432,7 @@ export class DuoLaunchCoordinator {
           this.store.failPairedLaunchComparison(
             launchId,
             "interrupted",
-            "The judge dispatch was interrupted before its durable turn identity was recorded. It was not retried automatically.",
+            "The judge dispatch was interrupted before its durable turn identity was recorded.",
           );
           continue;
         }
@@ -449,14 +449,14 @@ export class DuoLaunchCoordinator {
             this.store.failPairedLaunchComparison(
               launchId,
               "interrupted",
-              "The judge dispatch remained nonterminal after runtime recovery. It was not retried automatically.",
+              "The judge dispatch remained nonterminal after runtime recovery.",
             );
           }
         } catch {
           this.store.failPairedLaunchComparison(
             launchId,
             "interrupted",
-            "The judge dispatch could not be reconciled and was not retried automatically.",
+            "The judge dispatch could not be reconciled.",
           );
         }
         continue;
@@ -621,7 +621,7 @@ export class DuoLaunchCoordinator {
       return publicStatus(this.store, this.store.failPairedLaunchComparison(
         launchId,
         "failed",
-        `The judge input could not be assembled: ${causeSentence(error)} Retry it or cancel the judge.`,
+        `The judge input could not be assembled: ${causeSentence(error)}`,
       ));
     }
 
@@ -680,7 +680,7 @@ export class DuoLaunchCoordinator {
         return publicStatus(this.store, this.store.failPairedLaunchComparison(
           launchId,
           "failed",
-          "The judge turn could not start. Retry it or cancel the judge.",
+          "The judge turn could not start.",
         ));
       }
       launch = this.store.markPairedLaunchComparisonRunning(
@@ -695,8 +695,8 @@ export class DuoLaunchCoordinator {
         launchId,
         startAccepted ? "interrupted" : "failed",
         startAccepted
-          ? `The judge started, but its outcome became uncertain: ${causeSentence(error)} It was not retried automatically.`
-          : `The judge could not start: ${causeSentence(error)} Retry it or cancel the judge.`,
+          ? `The judge started, but its outcome became uncertain: ${causeSentence(error)}`
+          : `The judge could not start: ${causeSentence(error)}`,
       ));
     } finally {
       if (transitionReserved) {

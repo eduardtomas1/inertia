@@ -815,7 +815,7 @@ describe("Duo third-model comparison", () => {
       state: "failed",
       attempt: 1,
       error:
-        "The judge could not start: The judge route lost its credentials. Retry it or cancel the judge.",
+        "The judge could not start: The judge route lost its credentials.",
     });
     runtime.store.close();
   });
@@ -935,7 +935,7 @@ describe("Duo third-model comparison", () => {
 
     expect(launches.status(prepared.launchId).comparison).toMatchObject({
       state: "failed",
-      error: expect.stringMatching(/^The judge turn failed: .*Expected provider failure.* Retry it or cancel the judge\.$/u),
+      error: expect.stringMatching(/^The judge turn failed: .*Expected provider failure.*\.$/u),
     });
     await runtime.controller.dispose("runtime-shutdown");
     runtime.store.close();

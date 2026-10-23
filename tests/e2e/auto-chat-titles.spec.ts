@@ -40,8 +40,10 @@ const answerTitle = (titleThreadId, turnId) => {
     threadId: titleThreadId, turnId, completedAtMs: Date.now(),
     item: { type: "agentMessage", id: "title-message", text: JSON.stringify({ title: ${JSON.stringify(generatedTitle)} }), phase: "final_answer" },
   } });
-  send({ method: "turn/completed", params: { threadId: titleThreadId, turn: turn(turnId, "completed") } });
+  // Terminal acceptance can immediately terminate this provider process.
+  // Persist the evidence before publishing the terminal notification.
   record({ method: "title/answered" });
+  send({ method: "turn/completed", params: { threadId: titleThreadId, turn: turn(turnId, "completed") } });
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -108,8 +110,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   send({ method: "item/agentMessage/delta", params: {
     threadId, turnId, itemId: "answer-" + turnSequence, delta: ${JSON.stringify(providerOutput)},
   } });
-  send({ method: "turn/completed", params: { threadId, turn: turn(turnId, "completed") } });
   record({ method: "chat/turn/completed" });
+  send({ method: "turn/completed", params: { threadId, turn: turn(turnId, "completed") } });
 });
 `;
 

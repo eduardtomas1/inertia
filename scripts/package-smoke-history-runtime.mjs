@@ -7,11 +7,42 @@ const conversationKeys = ["id", "projectId", "title", "providerId", "modelSelect
 const select = (value, keys) => Object.fromEntries(keys.map((key) => [key, value[key]]));
 export const historySettings = { theme: "dark", compactSidebar: true, terminalFontSize: 15 };
 
-export function packagedCodexDiscoveryReady(provider) {
+function packagedCodexCatalogReady(provider) {
   return provider?.id === "codex" && provider.installState === "installed"
     && provider.canRun === true && Array.isArray(provider.models)
     && provider.models.some((model) => model?.id === "package-smoke-model")
     && provider.metadataState?.models?.freshness === "fresh";
+}
+
+async function waitForPackagedCodexDiscovery(client) {
+  let refreshedCache = false;
+  while (true) {
+    const providers = client.snapshot()?.providers;
+    const provider = Array.isArray(providers)
+      ? providers.find((candidate) => candidate?.id === "codex") : null;
+    if (packagedCodexCatalogReady(provider)) {
+      const models = provider.metadataState.models;
+      if (models.provenance === "provider") return provider;
+      // N-1 and N share the metadata cache. Only after startup discovery has
+      // produced its complete cached catalog, request one current-process
+      // read. Never replace an unfinished cold probe or accept cached proof.
+      if (!refreshedCache && models.provenance === "persistent-cache"
+        && models.refreshing === false) {
+        refreshedCache = true;
+        await client.request("provider.refresh", { providerId: "codex" });
+        continue;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+export async function readPackagedCodexDiscovery(websocketUrl, deadlineAt = Date.now() + 8_000) {
+  const client = runtimeClient(websocketUrl, deadlineAt);
+  try {
+    await client.welcome;
+    return await waitForPackagedCodexDiscovery(client);
+  } finally { client.close(); }
 }
 
 // This client speaks existing public runtime commands. It grants no filesystem
@@ -226,16 +257,10 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
   });
   try {
     await client.welcome;
-    // The first client starts discovery. Its executable can be ready before
-    // its model catalog; join that same result instead of claiming another
-    // refresh and superseding the in-flight startup probe's publication.
+    // Join the first client's discovery before considering a cached-catalog
+    // refresh. Executable readiness alone does not establish model readiness.
     markPhase("provider-ready");
-    while (true) {
-      const providers = client.snapshot()?.providers;
-      if (Array.isArray(providers)
-        && providers.some(packagedCodexDiscoveryReady)) break;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+    await waitForPackagedCodexDiscovery(client);
     let conversationId;
     if (baseline) {
       markPhase("historical-detail");

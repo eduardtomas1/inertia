@@ -2,12 +2,10 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.77 — 2026-10-23
+## 0.0.76 — 2026-10-23
 
 Tasks that follow the agent without marking your work done for you, a more
 dependable Duo judge, and Claude's own agents, skills and instructions.
-Includes the changes prepared for 0.0.76, which was held during Windows ARM64
-release validation and was never published.
 
 ### Tasks
 
@@ -80,16 +78,11 @@ release validation and was never published.
 ### Release verification
 
 - Windows upgrade checks wait for the initial agent discovery and model
-  catalog instead of starting competing probes inside the history check.
+  catalog, then require a catalog read by the current process before proceeding.
 - Keep the full 12,000-file checkpoint validation in the native performance
   gate, alongside a small line-ending regression in the ordinary test suite.
 - Retain bounded shutdown-owner diagnostics if the delayed-answer transcript
   scenario fails during cleanup.
-
-## 0.0.76 — 2026-10-23 (unpublished)
-
-Held after Windows ARM64 release validation failed. Its changes are included
-in 0.0.77; its original release tag remains unchanged.
 
 ## 0.0.75 — 2026-10-22
 

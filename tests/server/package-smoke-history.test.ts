@@ -11,7 +11,8 @@ import WebSocket, { WebSocketServer } from "ws";
 
 const discoveryFixture = vi.hoisted(() => ({ directory: "" }));
 const readyCodex = { id: "codex", installState: "installed", canRun: true,
-  models: [{ id: "package-smoke-model" }], metadataState: { models: { freshness: "fresh" } } };
+  models: [{ id: "package-smoke-model" }],
+  metadataState: { models: { freshness: "fresh", provenance: "provider", refreshing: false } } };
 
 vi.mock("../../src/server/environment", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/server/environment")>();
@@ -49,6 +50,7 @@ const storageUrl = pathToFileURL(resolve("scripts/package-smoke-history-storage.
 const pathUrl = pathToFileURL(resolve("scripts/package-smoke-path.mjs")).href;
 async function modules() {
   const runtime = await import(runtimeUrl) as {
+    readPackagedCodexDiscovery: (url: string, deadlineAt?: number) => Promise<unknown>;
     runPackagedHistorySmoke: (options: { websocketUrl: string; workspaceDirectory: string;
       baseline?: Baseline; deadlineAt?: number }) => Promise<Proof>;
     completedTurnProof: (detail: unknown, acceptance: unknown, challenge: string) => Proof | null;
@@ -303,6 +305,48 @@ it("waits for the startup model catalog before admitting the history proof", asy
     })).rejects.toThrow("entered history proof");
     expect(prematureCommand).toBe(false);
     expect(commands).toEqual(["settings.update"]);
+  } finally {
+    clearTimeout(timer);
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  }
+});
+
+it.each([false, true])("requires a current-process catalog after cached startup (published: %s)", async (publishCurrentCatalog) => {
+  const smoke = await modules();
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  let refreshes = 0;
+  let startupSettled = false;
+  let prematureRefresh = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cached = (refreshing: boolean) => ({ ...readyCodex,
+    metadataState: { models: { freshness: "fresh", provenance: "persistent-cache", refreshing } } });
+  try {
+    await new Promise<void>((resolveListen) => server.once("listening", resolveListen));
+    server.on("connection", (socket) => {
+      socket.send(JSON.stringify({ type: "server.welcome", snapshot: { providers: [cached(true)] } }));
+      timer = setTimeout(() => {
+        startupSettled = true;
+        socket.send(JSON.stringify({ type: "snapshot.updated", snapshot: { providers: [cached(false)] } }));
+      }, 50);
+      socket.on("message", (bytes) => {
+        const command = JSON.parse(bytes.toString("utf8")) as { type: string; requestId: string };
+        expect(command.type).toBe("provider.refresh");
+        refreshes += 1;
+        if (!startupSettled) prematureRefresh = true;
+        if (publishCurrentCatalog) {
+          socket.send(JSON.stringify({ type: "snapshot.updated", snapshot: { providers: [readyCodex] } }));
+        }
+        socket.send(JSON.stringify({ type: "request.ok", requestId: command.requestId }));
+      });
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No fixture port.");
+    const discovery = smoke.readPackagedCodexDiscovery(`ws://127.0.0.1:${address.port}`, Date.now() + 1_000);
+    if (publishCurrentCatalog) await expect(discovery).resolves.toEqual(readyCodex);
+    else await expect(discovery).rejects.toThrow("exceeded its deadline");
+    expect(prematureRefresh).toBe(false);
+    expect(refreshes).toBe(1);
   } finally {
     clearTimeout(timer);
     for (const socket of server.clients) socket.terminate();

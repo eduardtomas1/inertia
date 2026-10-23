@@ -5,9 +5,8 @@ import { access, copyFile, lstat, mkdtemp, mkdir, open, readFile, realpath, rm, 
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import WebSocket from "ws";
 import { parseDocument } from "yaml";
-import { packagedCodexDiscoveryReady, runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
+import { readPackagedCodexDiscovery, runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { packageSmokePath } from "./package-smoke-path.mjs";
 import { packageSmokeImageBytes } from "./package-smoke-image.mjs";
 import { verifyPackagedLegalResources } from "./package-smoke-legal-resources.mjs";
@@ -826,49 +825,10 @@ async function createImageFixture(root) {
 
 async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   const canonicalExpectedExecutable = await realpath(expectedExecutable);
-  await new Promise((resolveCodex, rejectCodex) => {
-    const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
-    let lastProviderState = "no provider snapshot";
-    let settled = false;
-    const finish = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.close();
-      if (error) rejectCodex(error);
-      else resolveCodex();
-    };
-    const timer = setTimeout(() => {
-      finish(new Error(`Packaged runtime did not discover the Windows Codex shim and model catalog (${lastProviderState}).`));
-    }, 8_000);
-    socket.once("error", finish);
-    socket.once("close", () => {
-      if (!settled) finish(new Error("Packaged runtime closed before Codex discovery completed."));
-    });
-    socket.on("message", (data) => {
-      let frame;
-      try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
-      const event = frame?.type === "runtime.event" ? frame.event : frame;
-      if (event?.type !== "server.welcome" && event?.type !== "snapshot.updated") return;
-      const provider = event.snapshot?.providers?.find(({ id }) => id === "codex");
-      lastProviderState = provider
-        ? `${provider.installState}/${provider.authState}/canRun=${provider.canRun}`
-        : "Codex missing from snapshot";
-      if (!provider || provider.installState === "checking") {
-        return;
-      }
-      if (provider.installState !== "installed" || provider.canRun !== true) {
-        finish(new Error(`Packaged Codex discovery reported ${provider.statusMessage || provider.installState}.`));
-        return;
-      }
-      if (resolve(provider.executable || "").toLocaleLowerCase("en-US") !== resolve(canonicalExpectedExecutable).toLocaleLowerCase("en-US")) {
-        finish(new Error(`Packaged Codex discovery selected an unexpected executable: ${provider.executable || "none"}.`));
-        return;
-      }
-      if (!packagedCodexDiscoveryReady(provider)) return;
-      finish();
-    });
-  });
+  const provider = await readPackagedCodexDiscovery(websocketUrl);
+  if (resolve(provider.executable || "").toLocaleLowerCase("en-US") !== resolve(canonicalExpectedExecutable).toLocaleLowerCase("en-US")) {
+    throw new Error(`Packaged Codex discovery selected an unexpected executable: ${provider.executable || "none"}.`);
+  }
 }
 
 async function requireLifecycleMarker(

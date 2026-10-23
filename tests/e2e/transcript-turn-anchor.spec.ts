@@ -82,6 +82,7 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
   const app = await createAppFixture({
     name: "turn-anchor",
     initialState: "conversation",
+    additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" },
     codexAppServerSource: delayedAnchorAppServer,
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(

@@ -75,6 +75,15 @@ dependable Duo judge, and Claude's own agents, skills and instructions.
 - Update electron-vite to 6.0.0 and adapt the build configuration to its
   supported dependency externalization options.
 
+### Release verification
+
+- Windows upgrade checks wait for the initial agent discovery and model
+  catalog, then require a catalog read by the current process before proceeding.
+- Keep the full 12,000-file checkpoint validation in the native performance
+  gate, alongside a small line-ending regression in the ordinary test suite.
+- Retain bounded shutdown-owner diagnostics if the delayed-answer transcript
+  scenario fails during cleanup.
+
 ## 0.0.75 — 2026-10-22
 
 Security updates for Electron and for agent CLI updates, a clean start after

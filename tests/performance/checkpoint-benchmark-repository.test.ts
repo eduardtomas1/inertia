@@ -12,7 +12,7 @@ import { createCheckpointBenchmarkRepository } from
 const execFileAsync = promisify(execFile);
 
 describe("checkpoint benchmark repository", () => {
-  it("commits 12,000 files without Git output when the user configuration converts line endings", async () => {
+  it("commits without Git output when the user configuration converts line endings", async () => {
     const root = await mkdtemp(join(tmpdir(), "inertia-checkpoint-fixture-"));
     try {
       const globalConfig = join(root, "gitconfig");
@@ -24,7 +24,9 @@ describe("checkpoint benchmark repository", () => {
       };
       const repository = join(root, "repository");
 
-      const result = await createCheckpointBenchmarkRepository(repository, 12_000, env);
+      // Conversion warnings need only a small fixture. The native checkpoint
+      // benchmark retains the full 12,000-file count and quiet-Git assertions.
+      const result = await createCheckpointBenchmarkRepository(repository, 200, env);
 
       expect(result.stderr).toBe("");
       const tracked = await execFileAsync("git", ["ls-files", "-z"], {
@@ -32,7 +34,7 @@ describe("checkpoint benchmark repository", () => {
         env,
         maxBuffer: 4 * 1_048_576,
       });
-      expect(tracked.stdout.split("\0").filter(Boolean)).toHaveLength(12_000);
+      expect(tracked.stdout.split("\0").filter(Boolean)).toHaveLength(200);
     } finally {
       await rm(root, {
         recursive: true,
@@ -42,5 +44,5 @@ describe("checkpoint benchmark repository", () => {
           : {}),
       });
     }
-  }, 120_000);
+  });
 });

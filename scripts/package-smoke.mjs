@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 import { parseDocument } from "yaml";
-import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
+import { packagedCodexDiscoveryReady, runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { packageSmokePath } from "./package-smoke-path.mjs";
 import { packageSmokeImageBytes } from "./package-smoke-image.mjs";
 import { verifyPackagedLegalResources } from "./package-smoke-legal-resources.mjs";
@@ -828,9 +828,6 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
   const canonicalExpectedExecutable = await realpath(expectedExecutable);
   await new Promise((resolveCodex, rejectCodex) => {
     const socket = new WebSocket(websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
-    const refreshRequestId = randomUUID();
-    let refreshRequested = false;
-    let refreshAcknowledged = false;
     let lastProviderState = "no provider snapshot";
     let settled = false;
     const finish = (error) => {
@@ -842,7 +839,7 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
       else resolveCodex();
     };
     const timer = setTimeout(() => {
-      finish(new Error(`Packaged runtime did not discover the Windows Codex shim (${lastProviderState}; refresh requested: ${refreshRequested}; acknowledged: ${refreshAcknowledged}).`));
+      finish(new Error(`Packaged runtime did not discover the Windows Codex shim and model catalog (${lastProviderState}).`));
     }, 8_000);
     socket.once("error", finish);
     socket.once("close", () => {
@@ -852,28 +849,12 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
       let frame;
       try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
       const event = frame?.type === "runtime.event" ? frame.event : frame;
-      if (event?.type === "request.ok" && event.requestId === refreshRequestId) {
-        refreshAcknowledged = true;
-        return;
-      }
-      if (event?.type === "request.error" && event.requestId === refreshRequestId) {
-        finish(new Error(`Packaged Codex refresh failed: ${event.message || "unknown error"}.`));
-        return;
-      }
       if (event?.type !== "server.welcome" && event?.type !== "snapshot.updated") return;
       const provider = event.snapshot?.providers?.find(({ id }) => id === "codex");
       lastProviderState = provider
         ? `${provider.installState}/${provider.authState}/canRun=${provider.canRun}`
         : "Codex missing from snapshot";
       if (!provider || provider.installState === "checking") {
-        if (!refreshRequested) {
-          refreshRequested = true;
-          socket.send(JSON.stringify({
-            type: "provider.refresh",
-            requestId: refreshRequestId,
-            payload: { providerId: "codex" },
-          }));
-        }
         return;
       }
       if (provider.installState !== "installed" || provider.canRun !== true) {
@@ -884,6 +865,7 @@ async function requirePackagedCodex(websocketUrl, expectedExecutable) {
         finish(new Error(`Packaged Codex discovery selected an unexpected executable: ${provider.executable || "none"}.`));
         return;
       }
+      if (!packagedCodexDiscoveryReady(provider)) return;
       finish();
     });
   });

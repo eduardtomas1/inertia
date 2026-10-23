@@ -7,9 +7,11 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WebSocketServer } from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 
 const discoveryFixture = vi.hoisted(() => ({ directory: "" }));
+const readyCodex = { id: "codex", installState: "installed", canRun: true,
+  models: [{ id: "package-smoke-model" }], metadataState: { models: { freshness: "fresh" } } };
 
 vi.mock("../../src/server/environment", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/server/environment")>();
@@ -227,6 +229,87 @@ async function seedHistory() {
   return { f, smoke, oldProof, image, bytes, baseline, unchangedBaseline };
 }
 
+it("proves history without repeating discovery of the already-verified provider", async () => {
+  const f = await fixture();
+  const smoke = await modules();
+  const runtime = await f.launch();
+  const proxy = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  const upstreams = new Set<WebSocket>();
+  let redundantRefreshes = 0;
+  try {
+    await new Promise<void>((resolveListen) => proxy.once("listening", resolveListen));
+    proxy.on("connection", (socket) => {
+      const upstream = new WebSocket(runtime.websocketUrl, { headers: { Origin: "http://127.0.0.1" } });
+      upstreams.add(upstream);
+      upstream.on("message", (bytes) => {
+        if (socket.readyState === WebSocket.OPEN) socket.send(bytes.toString("utf8"));
+      });
+      upstream.on("error", () => socket.terminate());
+      socket.on("close", () => upstream.close());
+      socket.on("message", (bytes) => {
+        const command = JSON.parse(bytes.toString("utf8")) as { type: string };
+        // A second cold probe can outlive the fixed proof deadline on ARM64.
+        // Keep the real runtime/turn proof, but make redundant discovery stall.
+        if (command.type === "provider.refresh") { redundantRefreshes += 1; return; }
+        upstream.send(bytes.toString("utf8"));
+      });
+    });
+    const address = proxy.address();
+    if (!address || typeof address === "string") throw new Error("No fixture port.");
+    const proof = await smoke.runPackagedHistorySmoke({
+      websocketUrl: `ws://127.0.0.1:${address.port}`, workspaceDirectory: f.workspaceDirectory,
+    });
+    expect(proof.agentTurns).toHaveLength(1);
+    expect(proof.agentTurns[0]?.status).toBe("completed");
+    expect(redundantRefreshes).toBe(0);
+  } finally {
+    for (const socket of proxy.clients) socket.terminate();
+    for (const socket of upstreams) socket.terminate();
+    await new Promise<void>((resolveClose) => proxy.close(() => resolveClose()));
+  }
+});
+
+it("waits for the startup model catalog before admitting the history proof", async () => {
+  const smoke = await modules();
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  const commands: string[] = [];
+  let catalogReady = false;
+  let prematureCommand = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>((resolveListen) => server.once("listening", resolveListen));
+    server.on("connection", (socket) => {
+      socket.send(JSON.stringify({ type: "server.welcome", snapshot: { providers: [{
+        ...readyCodex, models: [], metadataState: { models: { freshness: "unavailable" } },
+      }] } }));
+      timer = setTimeout(() => {
+        catalogReady = true;
+        socket.send(JSON.stringify({ type: "snapshot.updated", snapshot: { providers: [readyCodex] } }));
+      }, 50);
+      socket.on("message", (bytes) => {
+        const command = JSON.parse(bytes.toString("utf8")) as { type: string; requestId: string };
+        commands.push(command.type);
+        if (!catalogReady) prematureCommand = true;
+        if (command.type === "provider.refresh") return;
+        socket.send(JSON.stringify({ type: "request.error", requestId: command.requestId,
+          message: "entered history proof" }));
+      });
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No fixture port.");
+    await expect(smoke.runPackagedHistorySmoke({
+      websocketUrl: `ws://127.0.0.1:${address.port}`, workspaceDirectory: tmpdir(),
+      deadlineAt: Date.now() + 1_000,
+    })).rejects.toThrow("entered history proof");
+    expect(prematureCommand).toBe(false);
+    expect(commands).toEqual(["settings.update"]);
+  } finally {
+    clearTimeout(timer);
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  }
+});
+
 describe("installed history across runtime restarts", () => {
   let seeded: Awaited<ReturnType<typeof seedHistory>>;
   // Seed each scenario independently. A predecessor launch, an upgrade and a
@@ -399,6 +482,7 @@ it.each([false, true])("bounds a terminal turn whose public runtime ownership ne
         type: "server.welcome",
         snapshot: {
           projects: [], settings: {},
+          providers: [readyCodex],
           conversations: [{ id: conversationId, status: malformedState ? "PRIVATE status" : "completed",
             latestTurn: { id: "turn-terminal-not-idle", status: "completed" },
             title: "PRIVATE conversation text" }],
@@ -537,6 +621,7 @@ it("reports the pending proof phase without exposing malformed snapshot state", 
     await new Promise<void>((resolveListen) => server.once("listening", resolveListen));
     server.on("connection", (socket) => {
       socket.send(JSON.stringify({ type: "server.welcome", snapshot: {
+        providers: [readyCodex],
         conversations: [null, { status: "PRIVATE status", id: "PRIVATE id" }],
         runs: "PRIVATE run data", providerOutput: "PRIVATE output",
         lifecycleDiagnostics: { ownedResources: {
@@ -554,8 +639,8 @@ it("reports the pending proof phase without exposing malformed snapshot state", 
     const message = (error as Error).message;
     const diagnostic = JSON.parse(message.split(" Proof state: ")[1]!);
     expect(diagnostic).toMatchObject({
-      phase: "provider-refresh", turnNumber: 0, completedTurns: 0,
-      pendingCommands: ["provider.refresh"], turnStatus: "unknown", conversationStatus: "unknown",
+      phase: "settings-update", turnNumber: 0, completedTurns: 0,
+      pendingCommands: ["settings.update"], turnStatus: "unknown", conversationStatus: "unknown",
       latestTurnMatches: false, runStatus: "unknown", runCanStop: null,
       ownedResources: { providerRuns: null, turns: null, workspaceRuns: null, interactions: null },
     });
@@ -575,7 +660,9 @@ it.each(["stall", "close", "malformed"] as const)("fails closed when the history
     server.on("connection", (socket) => {
       if (mode === "close") socket.close();
       else if (mode === "malformed") socket.send("invalid JSON");
-      else socket.send(JSON.stringify({ type: "server.welcome", snapshot: {} }));
+      else socket.send(JSON.stringify({ type: "server.welcome", snapshot: {
+        providers: [readyCodex],
+      } }));
     });
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("No fixture port.");

@@ -7,6 +7,13 @@ const conversationKeys = ["id", "projectId", "title", "providerId", "modelSelect
 const select = (value, keys) => Object.fromEntries(keys.map((key) => [key, value[key]]));
 export const historySettings = { theme: "dark", compactSidebar: true, terminalFontSize: 15 };
 
+export function packagedCodexDiscoveryReady(provider) {
+  return provider?.id === "codex" && provider.installState === "installed"
+    && provider.canRun === true && Array.isArray(provider.models)
+    && provider.models.some((model) => model?.id === "package-smoke-model")
+    && provider.metadataState?.models?.freshness === "fresh";
+}
+
 // This client speaks existing public runtime commands. It grants no filesystem
 // or attachment capabilities and has one deadline for the complete proof.
 function runtimeClient(url, deadlineAt, describeDeadline) {
@@ -219,8 +226,16 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
   });
   try {
     await client.welcome;
-    markPhase("provider-refresh");
-    await client.request("provider.refresh", { providerId: "codex" });
+    // The first client starts discovery. Its executable can be ready before
+    // its model catalog; join that same result instead of claiming another
+    // refresh and superseding the in-flight startup probe's publication.
+    markPhase("provider-ready");
+    while (true) {
+      const providers = client.snapshot()?.providers;
+      if (Array.isArray(providers)
+        && providers.some(packagedCodexDiscoveryReady)) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     let conversationId;
     if (baseline) {
       markPhase("historical-detail");

@@ -2,6 +2,79 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.76 — 2026-10-23
+
+Tasks that follow the agent without marking your work done for you, a more
+dependable Duo judge, and Claude's own agents, skills and instructions.
+
+### Tasks
+
+- A handed-off task shows its chat's status, including **Needs your OK**,
+  **Asked you a question**, **Hit a usage limit** and **Ready for you**.
+  Finishing an agent turn leaves the task open until you mark it done.
+  Tasks that need you appear first, and the sidebar shows their count.
+- Start an agent without leaving Tasks. **Open chat** takes you to its work,
+  and the chat's **Task** link brings you back. Failed, stopped or archived
+  hand-offs offer **Try again** or **Hand off again**, creating a fresh chat
+  while keeping the old one.
+- Set a due date with a keyboard-accessible calendar, **Today**, **Tomorrow**
+  or **Next week**, and an optional time. The list shows timed due dates,
+  overdue tasks and high-priority flags.
+- Tasks follow the sidebar's project, including unassigned tasks; new tasks
+  inherit the selected project. In narrow windows, the detail card opens as
+  its own view and returns you to the list when closed.
+- Open Tasks with **Cmd/Ctrl+T**, or choose **Add a task** in the command
+  palette. Use arrow keys to move through tasks, **Space** to complete,
+  **Enter** to open, **F2** to rename and **Delete** to remove with Undo.
+- **Clear done** removes only the completed tasks you saw when choosing it.
+  Failed deletions restore the rows, rejected edits restore the saved value,
+  and the 200-task cap counts open tasks only. Older completed tasks make
+  room when the stored list fills up.
+
+### Duo
+
+- The judge no longer refuses to start just because another chat is working
+  in the same folder. If a terminal, run or review holds the folder, it waits
+  and retries automatically. A failed start or comparison explains its cause.
+- Both chats show the judge's state and offer **Retry**, **Cancel judge** or
+  **Open judge**, including in separate chat windows. When the verdict is
+  ready, **Read verdict** lets you open it when you choose, without switching
+  away from your work automatically.
+- Failed or interrupted comparisons no longer leave chats stuck behind a
+  deletion guard. Cancelling a Duo while its chats are starting finishes
+  cancelling once they settle.
+- The judge receives each chat's working folder and changed files. Long
+  results keep their beginning and end, shorter results leave room for the
+  other chat, and incomplete results are identified.
+- **New duo** uses consistent A, B and judge names, prefers different ready
+  providers or models, and stacks the two chat settings in narrow windows.
+  Starting with missing information focuses the field and explains it.
+
+### Claude
+
+- Claude can use your user and project agents and skills, including skills
+  that delegate to an agent, and follow your user and project `CLAUDE.md`
+  instructions and user rules. Symlinked skill and agent folders are
+  supported; repository links must stay inside the repository.
+- Claude still ignores `settings.json` files and user MCP servers. Imported
+  agents cannot add hooks, MCP servers, permission overrides or agent memory.
+  If extra skills cannot be loaded, the turn can continue with the skills
+  you selected.
+
+### Chats
+
+- Reopening a chat restores the remembered reading position reliably on
+  slower machines.
+- **Jump to latest**, search results and other explicit transcript navigation
+  stop an older scroll restoration from pulling you back into history.
+
+### Dependencies
+
+- Update the Claude Agent SDK to 0.3.303, OpenCode SDK to 1.19.3, ACP SDK to
+  1.9.0, keyring to 2.1.2, React Virtual to 3.14.21 and Lucide to 1.59.0.
+- Update electron-vite to 6.0.0 and adapt the build configuration to its
+  supported dependency externalization options.
+
 ## 0.0.75 — 2026-10-22
 
 Security updates for Electron and for agent CLI updates, a clean start after

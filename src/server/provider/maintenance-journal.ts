@@ -477,9 +477,13 @@ implements ProviderMaintenanceJournalAuthority {
     // succeed on every retry before ownership can be retired.
     for (const record of this.pending()) {
       if (record.runtimeCleanupConfirmed) continue;
+      const priorBootConfirmed = reconciliation.priorBootCleanupConfirmed
+        && record.systemBootId !== "unavailable"
+        && validSystemBootId(reconciliation.currentSystemBootId)
+        && reconciliation.currentSystemBootId !== "unavailable"
+        && record.systemBootId !== reconciliation.currentSystemBootId;
       if (!reconciliation.confirmedRuntimeGenerationIds.has(record.runtimeGenerationId)
-        && !(reconciliation.priorBootCleanupConfirmed
-          && record.systemBootId !== reconciliation.currentSystemBootId)) continue;
+        && !priorBootConfirmed) continue;
       const owning = this.exactOperation(record.operationId)?.owning;
       if (!owning || !this.publish({
         ...this.payload(owning.record),

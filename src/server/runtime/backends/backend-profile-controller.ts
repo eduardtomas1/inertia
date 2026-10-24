@@ -36,6 +36,7 @@ import {
 import type { ProviderManagerOptions } from "../../provider/contracts";
 import { ProviderManager } from "../../providers";
 import { probeBackendCompatibility } from "./backend-compatibility-probe";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../../shared/provider-maintenance";
 
 import {
   PROVIDER_IDS,
@@ -713,7 +714,9 @@ export class BackendProfileController {
     ) {
       return {
         ready: false,
-        message: "The selected agent harness is not installed or could not be started.",
+        message: provider?.installState === "recovery-required"
+          ? provider.statusMessage ?? PROVIDER_MAINTENANCE_RECOVERY_MESSAGE
+          : "The selected agent harness is not installed or could not be started.",
       };
     }
     if (backendProfileUsesCredential(record.profile)) {

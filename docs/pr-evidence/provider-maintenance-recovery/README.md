@@ -29,6 +29,11 @@ unlink leaves a usable cleanup checkpoint, including when `owning` was already
 removed. Publication failure prevents receipt acknowledgement and closes the
 persistent stores. Missing processes or missing leases never create cleanup proof.
 
+Prior-boot proof requires two known, valid boot identities. An unavailable boot
+identity requires exact generation cleanup authority. Installation recovery can
+complete while signed out; normal account readiness still controls execution.
+Custom backend errors retain the provider's recovery guidance.
+
 Existing `owning`/`verified` journals remain readable; there is no database
 migration. An older build will fail closed if a new `cleaned` checkpoint remains.
 

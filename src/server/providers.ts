@@ -1033,7 +1033,7 @@ export class ProviderManager {
     });
     if (
       !detection.available
-      || !detection.canRun
+      || !(detection.protocolVerified ?? detection.canRun)
       || !detection.executable
       || !detection.version
       || !detection.cleanupConfirmed
@@ -1043,7 +1043,7 @@ export class ProviderManager {
         "The provider installation failed its native protocol conformance probe.",
       );
     }
-    await this.metadata(providerId, cwd, { ...context, force: true });
+    if (detection.canRun) await this.metadata(providerId, cwd, { ...context, force: true });
     if (!this.providerCapabilityContract(providerId).installationVerified) {
       throw new ProviderRuntimeError(
         "invalid_input",

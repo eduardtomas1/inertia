@@ -32,6 +32,7 @@ const roots: string[] = [];
 const FIRST_GENERATION = "00000000-0000-4000-8000-000000000001:1";
 const SECOND_GENERATION = "00000000-0000-4000-8000-000000000002:1";
 const BOOT_ID = "test:00000000-0000-4000-8000-000000000001";
+const NEXT_BOOT_ID = "test:00000000-0000-4000-8000-000000000002";
 
 function root(): string {
   const value = mkdtempSync(join(tmpdir(), "inertia-maintenance-journal-"));
@@ -182,9 +183,30 @@ describe("ProviderMaintenanceJournal", () => {
       priorBootCleanupConfirmed,
     })[0]!;
     expect(reconcile(SECOND_GENERATION).runtimeCleanupConfirmed).toBe(false);
-    expect(reconcile(SECOND_GENERATION, `${BOOT_ID}-other`).runtimeCleanupConfirmed).toBe(false);
-    expect(reconcile(SECOND_GENERATION, `${BOOT_ID}-other`, true).runtimeCleanupConfirmed).toBe(true);
+    expect(reconcile(SECOND_GENERATION, NEXT_BOOT_ID).runtimeCleanupConfirmed).toBe(false);
+    expect(reconcile(SECOND_GENERATION, NEXT_BOOT_ID, true).runtimeCleanupConfirmed).toBe(true);
     expect(subject.abandonUnadmitted("cleanup-checkpoint", identity())).toBe(false);
+  });
+
+  it.each([
+    ["unavailable", BOOT_ID],
+    [BOOT_ID, "unavailable"],
+    ["unavailable", "unavailable"],
+    [BOOT_ID, "invalid-boot-id"],
+  ])("requires exact generation cleanup when boot identity is unknown (%s -> %s)", (recordBootId, currentBootId) => {
+    const dataDirectory = root();
+    const subject = new ProviderMaintenanceJournal(dataDirectory, {
+      runtimeGenerationId: FIRST_GENERATION, systemBootId: recordBootId,
+    });
+    expect(subject.begin("unknown-boot", identity())).toBe(true);
+    const reconciliation = {
+      confirmedRuntimeGenerationIds: new Set<string>(),
+      currentSystemBootId: currentBootId, priorBootCleanupConfirmed: true,
+    };
+    expect(subject.reconcile(reconciliation)[0]?.runtimeCleanupConfirmed).toBe(false);
+    expect(subject.reconcile({
+      ...reconciliation, confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+    })[0]?.runtimeCleanupConfirmed).toBe(true);
   });
 
   it.each(["owning", "cleaned"])("retains cleanup proof when retirement of %s is interrupted", (phase) => {

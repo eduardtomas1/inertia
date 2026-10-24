@@ -48,13 +48,15 @@ function profile(installationIdentity?: ProviderInstallationIdentity) {
   return { dataDirectory, defaultWorkspacePath, runtimeGenerationId, systemBootId, priorGeneration, journal };
 }
 
-function mockProviderDiscovery() {
+function mockProviderDiscovery(claudeNeedsSignIn = false, claudeProtocolVerified = true) {
   const originalFactory = ProviderManager.createProduction;
   const detect = vi.fn(async (id: keyof typeof PROVIDER_INFO) => ({
     provider: PROVIDER_INFO[id], available: true, version: "1.0.0",
     executable: process.execPath, installState: "installed" as const,
-    authState: "authenticated" as const, canRun: true,
-    protocolVerified: true, cleanupConfirmed: true,
+    authState: id === "claude" && claudeNeedsSignIn ? "unauthenticated" as const : "authenticated" as const,
+    canRun: id !== "claude" || !claudeNeedsSignIn,
+    statusMessage: id === "claude" && claudeNeedsSignIn ? "Sign in required" : "Connected",
+    protocolVerified: id !== "claude" || claudeProtocolVerified, cleanupConfirmed: true,
   }));
   vi.spyOn(ProviderManager, "createProduction").mockImplementation((options, registry) =>
     originalFactory({ ...options, detectProvider: detect }, registry));
@@ -117,6 +119,34 @@ it("reopens the recovered provider only after native verification and durable re
       event.type === "snapshot.updated" && event.snapshot.providers.some(({ id, canRun }) => id === "claude" && canRun));
     expect(refreshed.snapshot.providers.find(({ id }) => id === "claude")?.installState).toBe("installed");
     expect(refreshed.snapshot.lifecycleDiagnostics?.startupBlockerCodes).toEqual([]);
+  } finally {
+    client.socket.close();
+  }
+});
+
+it.each([true, false])("keeps sign-in separate from installation recovery (protocol verified: %s)", async (protocolVerified) => {
+  const seedManager = ProviderManager.createProduction({
+    installationLeases: new ProviderInstallationLeaseCoordinator(),
+    conversationProviderGate: () => undefined,
+  });
+  const identity = seedManager.providerInstallationIdentityForMaintenance("claude", process.execPath, "1.0.0");
+  await seedManager.disposeAll();
+  const paths = profile(identity);
+  mockProviderDiscovery(true, protocolVerified);
+  const runtime = await startRuntime({
+    ...paths, confirmedTerminatedRuntimeGenerationIds: [paths.priorGeneration],
+  });
+  cleanup.runtimes.push(runtime);
+  expect(paths.journal.pending()).toHaveLength(protocolVerified ? 0 : 1);
+  const client = await connectRuntime(runtime.websocketUrl);
+  try {
+    await runtime.startPostReadyWork();
+    const refreshed = await client.events.next((event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+      event.type === "snapshot.updated" && event.snapshot.providers.some(({ id, canRun }) => id === "codex" && canRun));
+    expect(refreshed.snapshot.providers.find(({ id }) => id === "claude")).toMatchObject(protocolVerified
+      ? { installState: "installed", authState: "unauthenticated", canRun: false, statusMessage: "Sign in required" }
+      : { installState: "recovery-required", canRun: false });
+    expect(vi.mocked(ProviderManager.prototype.metadata).mock.calls.some(([id]) => id === "claude")).toBe(false);
   } finally {
     client.socket.close();
   }

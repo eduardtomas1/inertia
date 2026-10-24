@@ -196,6 +196,20 @@ afterEach(async () => {
 });
 
 describe("model backend profile controller", () => {
+  it("preserves recovery guidance when an external backend's harness is blocked", async () => {
+    const runtimeStore = await store();
+    try {
+      const profile = runtimeStore.saveModelBackendProfile(persistedCredentialProfile()).profile;
+      const controller = BackendProfileController.open({ store: runtimeStore });
+      const message = "Provider update recovery requires attention. Restart Inertia to retry recovery.";
+      await expect(controller.readiness(modelSelectionForBackendProfile(profile, "credential-model"), {
+        ...nativeProvider(), id: "claude", installState: "recovery-required",
+        available: false, canRun: false, executable: null, statusMessage: message,
+      })).resolves.toEqual({ ready: false, message });
+    } finally {
+      runtimeStore.close();
+    }
+  });
   it("reads credential status without mutating a recovery-blocked harness", async () => {
     const runtimeStore = await store();
     try {

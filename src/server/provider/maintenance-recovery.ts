@@ -13,6 +13,7 @@ import type {
 
 export interface ProviderMaintenanceRecoveryRuntime {
   invalidateInstallationEvidence(providerId: ProviderId): void;
+  /** Verify the native installation independently of account sign-in readiness. */
   verifyInstallationConformance(
     providerId: ProviderId,
     cwd: string,

@@ -4,6 +4,7 @@ import type { TestInfo } from "@playwright/test";
 import WebSocket from "ws";
 import type { AppSnapshot } from "../../../src/shared/contracts";
 import type { AppFixture } from "./app-fixture";
+import { settleOperationBounded } from "./electron-app-lifecycle";
 
 // Diagnostic branch only. Observe existing public snapshots without changing
 // admission, test assertions, provider replies, or application deadlines.
@@ -20,7 +21,9 @@ export async function attachReleaseFailureObservation(app: AppFixture, info: Tes
   } catch { /* a provider may not have reached its first recorded phase */ }
   let socket: WebSocket | undefined;
   try {
-    const supervisor = await app.runtimeSnapshot();
+    const observedSupervisor = await settleOperationBounded(app.runtimeSnapshot(), 2_000);
+    if (observedSupervisor.status !== "fulfilled") throw new Error("supervisor observation unavailable");
+    const supervisor = observedSupervisor.value;
     if (!supervisor.websocketUrl) return;
     const snapshot = await new Promise<AppSnapshot>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("snapshot observation deadline")), 2_000);
@@ -43,9 +46,15 @@ export async function attachReleaseFailureObservation(app: AppFixture, info: Tes
       providers: snapshot.providers.slice(0, 10).map((p) => ({ id: p.id, installState: p.installState, canRun: p.canRun,
         models: p.metadataState.models })),
       conversations: snapshot.conversations.slice(0, 30).map((c) => ({ status: c.status,
-        latestTurnStatus: c.latestTurn?.status })),
+        latestTurnStatus: c.latestTurn?.status,
+        latestTurnRequestedAt: c.latestTurn?.requestedAt,
+        latestTurnStartedAt: c.latestTurn?.startedAt,
+        latestTurnCompletedAt: c.latestTurn?.completedAt,
+      })),
       runs: snapshot.runs.slice(0, 40).map((r) => ({ kind: r.kind, status: r.status, canStop: r.canStop })),
       ownedResources: snapshot.lifecycleDiagnostics?.ownedResources,
+      startupBlockerCodes: snapshot.lifecycleDiagnostics?.startupBlockerCodes,
+      actionableState: snapshot.lifecycleDiagnostics?.actionableState,
     };
     const path = info.outputPath("runtime-state.json");
     await writeFile(path, JSON.stringify(report, null, 2));

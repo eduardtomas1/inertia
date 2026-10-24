@@ -1,4 +1,4 @@
-name: Release76 focused lifecycle diagnosis
+name: Release76 desktop sequence diagnosis
 
 on:
   workflow_dispatch:
@@ -19,26 +19,27 @@ jobs:
   investigate:
     name: Diagnose ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 85
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: Windows ARM64 watcher
+          - label: Windows ARM64 desktop sequence
             runner: windows-11-arm
-            mode: watcher
-          - label: macOS ARM64 shutdown
+            mode: windows-context
+            workers: 1
+          - label: macOS ARM64 desktop sequence
             runner: macos-15
-            mode: shutdown
-          - label: macOS ARM64 Duo
-            runner: macos-15
-            mode: duo
+            mode: macos-context
+            workers: 2
     defaults:
       run:
         shell: bash
     env:
       CI: "true"
       INERTIA_DIAGNOSTIC_KEEP_PASS: "1"
+      INERTIA_CI_TIMINGS: "true"
+      INERTIA_E2E_WORKERS: ${{ matrix.workers }}
     steps:
       - name: Check out diagnostic source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,23 +59,27 @@ jobs:
         uses: ./.github/actions/install-dependencies
       - name: Build exact diagnostic app
         run: npm run build:packaged
-      - name: Probe Windows watcher startup with fixed existing assertions
-        if: matrix.mode == 'watcher'
+      - name: Observe host before the desktop sequence
+        run: node -e 'const os=require("node:os");console.log(JSON.stringify({at:Date.now(),phase:"before-desktop",memoryFree:os.freemem(),memoryTotal:os.totalmem(),load:os.loadavg(),cpus:os.availableParallelism()}))'
+      - name: Match release desktop benchmark precondition
+        timeout-minutes: 10
+        run: npm run benchmark:desktop:built
+      - name: Match release foreground phase before isolated apps
         timeout-minutes: 25
-        run: node node_modules/@playwright/test/cli.js test tests/e2e/watcher.spec.ts --project=isolated --workers=1 --repeat-each=5 --retries=0
-      - name: Probe macOS native exit with existing cleanup bounds
-        if: matrix.mode == 'shutdown'
-        timeout-minutes: 25
-        run: node node_modules/@playwright/test/cli.js test tests/e2e/app-update-viability.spec.ts tests/e2e/layout.spec.ts --project=isolated --workers=2 --repeat-each=10 --retries=0 -g 'the real update validator|searches Help, moves'
-      - name: Probe macOS Duo ownership with fixed existing assertions
-        if: matrix.mode == 'duo'
-        timeout-minutes: 25
-        run: node node_modules/@playwright/test/cli.js test tests/e2e/multi-spawn.spec.ts --project=isolated --workers=2 --repeat-each=5 --retries=0
+        run: node node_modules/@playwright/test/cli.js test --project=display-sensitive --output=test-results/display-sensitive --retries=0
+      - name: Observe host before the isolated sequence
+        run: node -e 'const os=require("node:os");console.log(JSON.stringify({at:Date.now(),phase:"before-isolated",memoryFree:os.freemem(),memoryTotal:os.totalmem(),load:os.loadavg(),cpus:os.availableParallelism()}))'
+      - name: Probe complete isolated sequence with release worker and deadline settings
+        timeout-minutes: 45
+        run: node node_modules/@playwright/test/cli.js test --project=isolated --output=test-results/isolated --retries=0
       - name: Retain focused failure and process diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release76-focused-${{ matrix.mode }}-${{ github.run_attempt }}
-          path: test-results
+          path: |
+            test-results
+            ci-test-timings
+            performance-results
           if-no-files-found: warn
           retention-days: 7

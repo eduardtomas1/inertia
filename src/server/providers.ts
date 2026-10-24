@@ -233,6 +233,7 @@ export class ProviderManager {
     this.backendProbeNow = options.backendProbeNow ?? (() => new Date());
     this.installationLeases = options.installationLeases;
     this.installationAuthority = new ProviderManagerInstallationAuthority({
+      providerRecoveryPending: options.providerRecoveryPending,
       leases: this.installationLeases,
       metadataCache: this.metadataCache,
       operationId: options.installationOperationId ?? randomUUID,
@@ -636,6 +637,8 @@ export class ProviderManager {
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
+    const blocked = !installationVerificationAuthority && this.installationAuthority.recoveryDetection(providerId);
+    if (blocked) return blocked;
     if (detectionOptions.refreshEnvironment) await providerEnvironment(true);
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
@@ -832,6 +835,7 @@ export class ProviderManager {
 
   authLaunch(providerId: ProviderId, cwd = process.cwd()): Promise<ProviderAuthLaunch> {
     return this.trackAuxiliary(async () => {
+      this.installationAuthority.assertRecoveryComplete(providerId);
       let executable = this.resolvedCommands.get(providerId);
       if (!executable) executable = (await this.detect(providerId, { cwd, refreshEnvironment: true })).executable;
       if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name.replace(/ CLI$/u, "")} CLI is not installed.`);
@@ -850,6 +854,7 @@ export class ProviderManager {
     sessionId: string,
     cwd: string,
   ): Promise<ProviderTerminalResumeLaunch> {
+    this.installationAuthority.assertRecoveryComplete(providerId);
     this.conversationProviderGate?.(conversationId, providerId);
     const detection = await this.detect(providerId, {
       cwd,
@@ -952,6 +957,7 @@ export class ProviderManager {
     } = options;
     const signal = this.lifetimeSignal;
     if (signal.aborted) return this.metadataCache.current(providerId);
+    if (!installationVerificationAuthority) this.installationAuthority.assertRecoveryComplete(providerId);
     let executable = this.resolvedCommands.get(providerId);
     if (!executable) executable = (await this.detect(providerId, {
       signal,
@@ -1070,6 +1076,7 @@ export class ProviderManager {
     forceReload: boolean,
     context: ProviderInstallationReadContext = {},
   ): Promise<Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>> {
+    if (!context.installationVerificationAuthority) this.installationAuthority.assertRecoveryComplete("claude");
     let executable = this.resolvedCommands.get("claude");
     if (!executable) executable = (await this.detect("claude", { ...context, cwd })).executable;
     if (!executable) {
@@ -1121,6 +1128,7 @@ export class ProviderManager {
     input: ProviderRunInput,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderRunResult> {
+    this.installationAuthority.assertRecoveryComplete(input.providerId);
     return this.runCoordinator.run(input, callbacks);
   }
 
@@ -1129,6 +1137,7 @@ export class ProviderManager {
     instruction?: string,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderCompactionResult> {
+    this.installationAuthority.assertRecoveryComplete(input.providerId);
     return this.runCoordinator.compact(input, instruction, callbacks);
   }
 

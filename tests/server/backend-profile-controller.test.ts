@@ -196,6 +196,24 @@ afterEach(async () => {
 });
 
 describe("model backend profile controller", () => {
+  it("reads credential status without mutating a recovery-blocked harness", async () => {
+    const runtimeStore = await store();
+    try {
+      const profile = runtimeStore.saveModelBackendProfile(persistedCredentialProfile()).profile;
+      const status = vi.fn(async () => ({ hasSecret: false, credentialGeneration: "generation:new" }));
+      const controller = BackendProfileController.open({
+        store: runtimeStore,
+        credentials: { resolve: async () => null, status, forget: async () => true },
+      });
+      controller.attachProviderMutationGuard((providerId) => providerId === "claude");
+      await controller.initialize(new Set(["claude"]));
+      expect(status).toHaveBeenCalled();
+      expect(controller.profiles([]).find(({ id }) => id === profile.id)?.authState).toBe("missing");
+      expect(runtimeStore.modelBackendProfile(profile.id).profile).toEqual(profile);
+    } finally {
+      runtimeStore.close();
+    }
+  });
   it("defers startup credential reconciliation until maintenance is recovered", async () => {
     const runtimeStore = await store();
     const profile = runtimeStore.saveModelBackendProfile(

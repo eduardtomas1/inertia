@@ -82,6 +82,7 @@ describe("ProviderMaintenanceJournal", () => {
       runtimeGenerationId: FIRST_GENERATION,
       systemBootId: BOOT_ID,
       verifiedIdentity: null,
+      runtimeCleanupConfirmed: false,
     }]);
     expect(reopened.markVerified("maintenance-1", observed)).toBe(true);
     expect(journal(dataDirectory).pending()[0]?.verifiedIdentity).toEqual(observed);
@@ -171,6 +172,61 @@ describe("ProviderMaintenanceJournal", () => {
     expect(subject.abandonUnadmitted("maintenance-2", owning)).toBe(false);
     expect(subject.pending()).toHaveLength(1);
   });
+
+  it("checkpoints only exact generation or confirmed prior-boot cleanup", () => {
+    const subject = journal(root());
+    expect(subject.begin("cleanup-checkpoint", identity())).toBe(true);
+    const reconcile = (generation: string, boot = BOOT_ID, priorBootCleanupConfirmed = false) => subject.reconcile({
+      confirmedRuntimeGenerationIds: new Set([generation]),
+      currentSystemBootId: boot,
+      priorBootCleanupConfirmed,
+    })[0]!;
+    expect(reconcile(SECOND_GENERATION).runtimeCleanupConfirmed).toBe(false);
+    expect(reconcile(SECOND_GENERATION, `${BOOT_ID}-other`).runtimeCleanupConfirmed).toBe(false);
+    expect(reconcile(SECOND_GENERATION, `${BOOT_ID}-other`, true).runtimeCleanupConfirmed).toBe(true);
+    expect(subject.abandonUnadmitted("cleanup-checkpoint", identity())).toBe(false);
+  });
+
+  it.each(["owning", "cleaned"])("retains cleanup proof when retirement of %s is interrupted", (phase) => {
+    const dataDirectory = root();
+    const subject = journal(dataDirectory);
+    expect(subject.begin("interrupted-retirement", identity())).toBe(true);
+    subject.reconcile({
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID,
+      priorBootCleanupConfirmed: false,
+    });
+    expect(subject.markVerified("interrupted-retirement", identity())).toBe(true);
+    const interrupted = journal(dataDirectory, SECOND_GENERATION, {
+      beforeUnlink: (path) => {
+        if (path.endsWith(`.${phase}.json`)) throw new Error("injected unlink failure");
+      },
+    });
+    expect(interrupted.retireVerified("interrupted-retirement", identity())).toBe(false);
+    const reopened = journal(dataDirectory, SECOND_GENERATION);
+    expect(reopened.pending()).toEqual([expect.objectContaining({ runtimeCleanupConfirmed: true })]);
+    expect(() => validateProviderMaintenanceJournalStorage(dataDirectory)).not.toThrow();
+    expect(reopened.markVerified("interrupted-retirement", identity())).toBe(true);
+    expect(reopened.retireVerified("interrupted-retirement", identity())).toBe(true);
+    expect(reopened.pending()).toEqual([]);
+  });
+
+  it("keeps ownership unconfirmed when cleanup checkpoint publication is interrupted", () => {
+    const dataDirectory = root();
+    expect(journal(dataDirectory).begin("interrupted-checkpoint", identity())).toBe(true);
+    const interrupted = journal(dataDirectory, SECOND_GENERATION, {
+      afterTemporaryFileClosed: (path) => {
+        if (path.endsWith(".cleaned.publish.tmp")) throw new Error("injected publication failure");
+      },
+    });
+    expect(() => interrupted.reconcile({
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID, priorBootCleanupConfirmed: false,
+    })).toThrow("cleanup proof could not be persisted");
+    expect(journal(dataDirectory).pending()).toEqual([
+      expect.objectContaining({ runtimeCleanupConfirmed: false }),
+    ]);
+  });
 });
 
 describe("provider maintenance startup recovery", () => {
@@ -257,6 +313,45 @@ describe("provider maintenance startup recovery", () => {
     })).resolves.toHaveLength(1);
     expect(leases.isQuarantined(owning)).toBe(true);
     expect(journal(dataDirectory, SECOND_GENERATION).pending()).toHaveLength(1);
+  });
+
+  it("retries failed conformance after restart without the consumed cleanup receipt", async () => {
+    const dataDirectory = root();
+    expect(journal(dataDirectory).begin("retry-after-restart", identity())).toBe(true);
+    const options = {
+      journal: journal(dataDirectory, SECOND_GENERATION),
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      runtime: runtime(vi.fn(async () => { throw new Error("temporary verification failure"); })),
+      cwd: "/workspace",
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID,
+      priorBootCleanupConfirmed: false,
+    };
+    await expect(recoverProviderMaintenanceJournal(options)).resolves.toHaveLength(1);
+    const verify = vi.fn(async () => identity());
+    await expect(recoverProviderMaintenanceJournal({
+      ...options,
+      journal: journal(dataDirectory, "00000000-0000-4000-8000-000000000003:1"),
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      runtime: runtime(verify),
+      confirmedRuntimeGenerationIds: new Set(),
+    })).resolves.toEqual([]);
+    expect(verify).toHaveBeenCalledOnce();
+  });
+
+  it("does not verify a checkpointed installation when provider execution is disabled", async () => {
+    const dataDirectory = root();
+    expect(journal(dataDirectory).begin("disabled-recovery", identity())).toBe(true);
+    const verify = vi.fn(async () => identity());
+    await expect(recoverProviderMaintenanceJournal({
+      journal: journal(dataDirectory, SECOND_GENERATION),
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      runtime: runtime(verify), cwd: "/workspace",
+      confirmedRuntimeGenerationIds: new Set([FIRST_GENERATION]),
+      currentSystemBootId: BOOT_ID, priorBootCleanupConfirmed: false,
+      verificationEnabled: false,
+    })).resolves.toHaveLength(1);
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it("retires a verified record left unretired and reopens admission only after startup recovery", async () => {

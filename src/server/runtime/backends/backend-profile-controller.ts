@@ -751,11 +751,14 @@ export class BackendProfileController {
     return { ready: true, message: null };
   }
 
-  async initialize(): Promise<void> {
+  async initialize(recoveryBlockedProviders: ReadonlySet<ProviderInfo["id"]> = new Set()): Promise<void> {
     for (const builtIn of this.runtime.builtInProfiles()) {
       if (builtIn.preset !== "kimi-code") continue;
-      this.runtime.assertConfigurationMutable("claude-agent-sdk");
       const status = await this.runtime.credentialStatus(builtIn.id, true);
+      // Credential status is read-only. Keep it truthful even while recovery
+      // forbids changing the affected harness's profile or installation.
+      if (recoveryBlockedProviders.has("claude")) continue;
+      this.runtime.assertConfigurationMutable("claude-agent-sdk");
       let existing: StoredModelBackendProfile | undefined;
       try {
         existing = this.store.modelBackendProfile(builtIn.id);
@@ -782,6 +785,13 @@ export class BackendProfileController {
     }
 
     for (let stored of this.store.listModelBackendProfiles()) {
+      const providerId = providerIdForHarness(stored.profile.harnessId);
+      if (providerId && recoveryBlockedProviders.has(providerId)) {
+        if (backendProfileUsesCredential(stored.profile)) {
+          await this.runtime.credentialStatus(stored.profile.id, true);
+        }
+        continue;
+      }
       this.runtime.assertConfigurationMutable(stored.profile.harnessId);
       if (backendProfileUsesCredential(stored.profile)) {
         const status = await this.runtime.credentialStatus(

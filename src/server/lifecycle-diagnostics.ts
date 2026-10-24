@@ -233,9 +233,9 @@ export function runtimeLifecycleDiagnosticSnapshot(
       workspaceRuns: boundedCount(activeWorkspaceRuns),
       interactions: boundedCount(input.interactionCount),
       maintenanceOperations: boundedCount(
-        activeMaintenance
-          + quarantinedMaintenance
-          + providerMaintenanceRecoveryCount,
+        // Recovery records are also projected as quarantined provider states.
+        // Count each operation once, retaining the recovery count as a fallback.
+        Math.max(activeMaintenance + quarantinedMaintenance, providerMaintenanceRecoveryCount),
       ),
     },
     activeProviders,

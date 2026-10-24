@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Verify production source matches the frozen candidate
         run: git diff --exit-code 3262f37a957a910fb8a50d2c3a12b8a75c125861 -- src scripts package.json package-lock.json CHANGELOG.md
       - name: Prepare Windows isolation

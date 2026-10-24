@@ -9,7 +9,7 @@ import { settleOperationBounded } from "./electron-app-lifecycle";
 // Diagnostic branch only. Observe existing public snapshots without changing
 // admission, test assertions, provider replies, or application deadlines.
 export async function attachReleaseFailureObservation(app: AppFixture, info: TestInfo): Promise<void> {
-  if (info.status === info.expectedStatus && process.env.INERTIA_DIAGNOSTIC_KEEP_PASS !== "1") return;
+  if (info.status === info.expectedStatus && process.env.INERTIA_DIAGNOSTIC_RETAIN_BASELINES !== "1") return;
   await mkdir(info.outputDir, { recursive: true });
   const journal = join(app.testDirectory, "data", "provider-phases.jsonl");
   try {

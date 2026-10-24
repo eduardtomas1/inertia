@@ -1,3 +1,4 @@
+import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { redactHostToolPayload } from "./host-tool-redaction";
 
 const CREDENTIAL_ENVIRONMENT_KEY =
@@ -40,6 +41,23 @@ export class AcpSecretRedactor {
 
   payload<T>(value: T): T {
     return redactHostToolPayload(value, this.secrets);
+  }
+
+  /** Stream text must reach assistantChunk/reasoningChunk before masking. */
+  streamNotification(notification: SessionNotification): SessionNotification {
+    const update = notification.update;
+    if ((update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk")
+      && update.content.type === "text") {
+      // Masking a shorter credential inside one delta can destroy the match
+      // for a longer credential spanning deltas. Keep only this validated text
+      // for the boundary redactor; redact all surrounding metadata as usual.
+      const { text, ...metadata } = update.content;
+      const safe = this.payload({
+        ...notification, update: { ...update, content: { ...metadata, text: "" } },
+      });
+      return { ...safe, update: { ...safe.update, content: { ...safe.update.content, text } } };
+    }
+    return this.payload(notification);
   }
 
   assistantChunk(value: string): string {
@@ -151,12 +169,12 @@ class BoundarySecretRedactor {
         continue;
       }
       if (!final) break;
-      if (lastTerminal >= 0) {
-        output += "[redacted]";
-        cursor = lastTerminal;
-      } else if (scan > cursor && redactsPartialSecret(redactPartial, scan - cursor, node)) {
+      if (scan > cursor && redactsPartialSecret(redactPartial, scan - cursor, node)) {
         output += "[redacted]";
         cursor = scan;
+      } else if (lastTerminal >= 0) {
+        output += "[redacted]";
+        cursor = lastTerminal;
       } else {
         output += this.pending[cursor]!;
         cursor += 1;

@@ -33,6 +33,25 @@ describe("ACP diagnostic stream redaction", () => {
     expect(output).not.toContain(prefix);
   });
 
+  it.each(["assistant", "reasoning", "stderr"] as const)(
+    "redacts the whole held %s prefix when a shorter credential also matches",
+    (stream) => {
+      const secret = "overlapping-credential-value";
+      const redactor = new AcpSecretRedactor({
+        LONG_TOKEN: secret,
+        PREFIX_TOKEN: secret.slice(0, 8),
+      });
+      const prefix = `safe:${secret.slice(0, -1)}`;
+      const output = stream === "assistant"
+        ? redactor.assistantChunk(prefix) + redactor.finishAssistant()
+        : stream === "reasoning"
+          ? redactor.reasoningChunk(prefix) + redactor.finishReasoning()
+          : redactor.stderrChunk(prefix) + redactor.finishStderr();
+
+      expect(output).toBe("safe:[redacted]");
+    },
+  );
+
   it("keeps paths and ordinary configuration out of the secret inventory", () => {
     const redactor = new AcpSecretRedactor({
       KIMI_API_KEY: "kimi-credential",

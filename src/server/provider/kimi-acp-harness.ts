@@ -304,7 +304,7 @@ function startKimiRun(
       }
     }, ({ params: rawParams }) => {
       try {
-        const params = redactHostMcpPayload(rawParams);
+        const params = secretRedactor.streamNotification(rawParams);
         if (
           cancelRequested
           || !sessionId

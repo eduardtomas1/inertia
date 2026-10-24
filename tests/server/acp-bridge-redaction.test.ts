@@ -16,7 +16,7 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 const BRIDGE_TOKEN = "Tk9q7Zr2Wv5Nx8Lm4Pc6Hy3Jd1";
 const BRIDGE_URL = "http://127.0.0.1:65001/qzx-mcp";
 
-type Scenario = "echo" | "stderr-error" | "provider-cancel" | "local-cancel";
+type Scenario = "echo" | "echo-prefix" | "stderr-error" | "provider-cancel" | "local-cancel";
 
 const PROVIDERS = [
   { providerId: "cursor" as const, executableName: "cursor-agent", agentName: "Cursor", create: createCursorAcpHarness as (options: object) => AgentHarness },
@@ -99,7 +99,11 @@ describe("ACP host bridge credential redaction", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  async function bridgeRun(provider: typeof PROVIDERS[number], scenario: Scenario) {
+  async function bridgeRun(
+    provider: typeof PROVIDERS[number],
+    scenario: Scenario,
+    environment: NodeJS.ProcessEnv = {},
+  ) {
     const root = portableFixtureRoot(`${provider.providerId} bridge ${scenario}`);
     roots.push(root);
     const executable = bridgeEchoAgent(root, provider.executableName, provider.agentName, scenario);
@@ -122,7 +126,7 @@ describe("ACP host bridge credential redaction", () => {
         access: "supervised",
       }),
       executable,
-      environment: { ...process.env },
+      environment: { ...process.env, ...environment },
       providerNativeToolsAvailable: true,
       hostTools: { definitions: [], invoke: async () => ({ success: true, text: "{}" }) },
       callbacks: {
@@ -159,6 +163,28 @@ describe("ACP host bridge credential redaction", () => {
 
       expect(result).toMatchObject({ status: "failed" });
       expect(leaked(JSON.stringify({ result, events }))).toEqual([]);
+    });
+
+    it.each([
+      ["prefix", BRIDGE_TOKEN.slice(0, 8)],
+      ["suffix", BRIDGE_TOKEN.slice(-8)],
+      ["single character", "1"],
+    ])("keeps bridge streams private with an overlapping %s credential", async (_kind, overlapping) => {
+      const echo = expectedEcho().replaceAll(overlapping, "[redacted]");
+      for (const scenario of ["echo", "echo-prefix", "provider-cancel"] as const) {
+        const { result, events, text, reasoning } = await bridgeRun(provider, scenario, {
+          OTHER_API_TOKEN: overlapping,
+        });
+
+        expect(result.status).toBe(scenario === "provider-cancel" ? "cancelled" : "completed");
+        expect(leaked(JSON.stringify({ result, events }))).toEqual([]);
+        if (scenario !== "provider-cancel") {
+          const tail = scenario === "echo-prefix" ? "tail [redacted]" : "";
+          expect(text).toBe(`Starting ${echo}${tail}`);
+          expect(result.text).toBe(text);
+          expect(reasoning).toBe(`${echo}${tail}`);
+        }
+      }
     });
 
     it.each(["provider-cancel", "local-cancel"] as const)("never emits a held bridge credential prefix on %s", async (scenario) => {

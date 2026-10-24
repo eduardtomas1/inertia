@@ -75,6 +75,12 @@ dependable Duo judge, and Claude's own agents, skills and instructions.
 - Update electron-vite to 6.0.0 and adapt the build configuration to its
   supported dependency externalization options.
 
+### Security
+
+- Keep Cursor and Kimi's local tool-bridge credentials out of replies and
+  reasoning when another credential shares part of their value, including
+  responses split across multiple updates.
+
 ### Release verification
 
 - Windows upgrade checks wait for the initial agent discovery and model

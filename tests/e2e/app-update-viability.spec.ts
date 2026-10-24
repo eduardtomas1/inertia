@@ -14,7 +14,7 @@ test("the real update validator decodes Electron message envelopes and acknowled
   // Preserve the platform's fixture setup/teardown allowance in addition to
   // both sequential 30-second probes and their two-second exit-proof bounds.
   test.setTimeout(test.info().timeout + 2 * (30_000 + 2_000));
-  const fixture = await createAppFixture({ name: "update-viability-transport", initialState: "empty" });
+  const fixture = await createAppFixture({ name: "update-viability-transport", initialState: "empty", additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" } });
   try {
     const data = join(fixture.testDirectory, "candidate-data");
     await mkdir(data, { mode: 0o700 });

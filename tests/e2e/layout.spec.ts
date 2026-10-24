@@ -12,7 +12,7 @@ let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "layout", initialState: "conversation" });
+  app = await createAppFixture({ name: "layout", initialState: "conversation", additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" } });
   page = app.page;
   rendererErrors = app.rendererErrors;
   resizeWindow = app.resizeWindow;

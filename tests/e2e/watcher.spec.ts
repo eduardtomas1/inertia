@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { attachReleaseFailureObservation } from "./support/release-failure-observation";
 import { setAppearanceInPlace } from "./support/appearance";
 import { closeWorkspaceTools, ensureWorkspaceTools, selectWorkspaceTool } from "./support/workspace-tools";
 
@@ -29,6 +30,11 @@ if (process.argv[2] === "--help") {
   process.exit(0);
 }
 const dataDirectory = path.resolve(process.cwd(), "..", "data");
+const recordPhase = (phase, detail = {}) => {
+  try { fs.appendFileSync(path.join(dataDirectory, "provider-phases.jsonl"),
+    JSON.stringify({ phase, at: Date.now(), pid: process.pid, ...detail }) + "\\n"); } catch { /* advisory only */ }
+};
+recordPhase("boot");
 const steps = [
   ["main-step-1", "rg -n parseLine src", "src/parser.ts:12:export function parseLine(line) {"],
   ["main-step-2", "git diff --stat", " src/parser.ts | 9 +++------"],
@@ -40,6 +46,7 @@ let active = null;
 let sequence = 0;
 const finish = (turn, status, text) => {
   if (turn.settled) return;
+  recordPhase("terminal", { status });
   turn.settled = true;
   if (turn.timer) clearTimeout(turn.timer);
   if (text && status === "completed") {
@@ -88,6 +95,9 @@ const runSteps = (turn, index) => {
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
+  if (["initialize", "thread/start", "thread/resume", "turn/start"].includes(message.method)) {
+    recordPhase("request", { method: message.method });
+  }
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "watcher-fixture" } });
   if (message.method === "initialized") return;
   if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
@@ -112,6 +122,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   send({ id: message.id, result: { turn: { id: turn.id, status: "inProgress", items: [], error: null } } });
   send({ method: "turn/started", params: { threadId, turn: { id: turn.id, status: "inProgress", items: [], error: null } } });
   const text = (message.params.input || []).filter((item) => item && item.type === "text").map((item) => item.text || "").join("\\n");
+  recordPhase("turn-role", { watcher: text.includes("[inertia-watcher]"), note: text.includes("[inertia-watcher-note]") });
   if (message.params.outputSchema) return finish(turn, "completed", JSON.stringify({ title: "Parser cleanup" }));
   if (text.includes("[inertia-watcher]")) return waitFor(turn, claimReply, (reply) => finish(turn, "completed", reply));
   if (text.includes("[inertia-watcher-note]")) return finish(turn, "completed", ${JSON.stringify(NOTE_ANSWER)});
@@ -129,6 +140,7 @@ test.describe("watcher on the fake Codex route", () => {
   test.beforeAll(async () => {
     app = await createAppFixture({
       name: "watcher",
+      additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" },
       initialState: "conversation",
       codexAppServerSource: watcherAppServer,
       beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
@@ -155,6 +167,10 @@ test.describe("watcher on the fake Codex route", () => {
     await app.page.getByRole("textbox", { name: "Message" }).waitFor();
     await app.resizeWindow(1440, 900);
     await setAppearanceInPlace(app, "light");
+  });
+
+  test.afterEach(async () => {
+    await attachReleaseFailureObservation(app, test.info());
   });
 
   test.afterAll(async () => {

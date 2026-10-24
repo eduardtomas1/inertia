@@ -7,6 +7,7 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { attachReleaseFailureObservation } from "./support/release-failure-observation";
 
 const sourceAnswerGate = "multi-spawn-source-answer-ready";
 const judgeAnswerGate = "multi-spawn-judge-answer-ready";
@@ -31,11 +32,18 @@ let responseSettled = false;
 // test-only Electron variables do not cross that boundary. Both seeded
 // project checkouts are direct children of the fixture root.
 const dataDirectory = path.resolve(process.cwd(), "..", "data");
+const recordPhase = (phase, detail = {}) => {
+  try { fs.appendFileSync(path.join(dataDirectory, "provider-phases.jsonl"),
+    JSON.stringify({ phase, at: Date.now(), pid: process.pid, ...detail }) + "\\n"); } catch { /* advisory only */ }
+};
+recordPhase("boot");
 const waitForGate = (gate, callback) => {
+  recordPhase("gate-wait", { gate });
   const deadlineAt = Date.now() + 30000;
   const inspect = () => {
     if (responseSettled) return;
     if (fs.existsSync(path.join(dataDirectory, gate))) {
+      recordPhase("gate-ready", { gate });
       callback();
       return;
     }
@@ -58,6 +66,9 @@ const waitForGate = (gate, callback) => {
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
+  if (["initialize", "thread/start", "thread/resume", "turn/start"].includes(message.method)) {
+    recordPhase("request", { method: message.method });
+  }
   if (message.method === "initialize") {
     send({ id: message.id, result: { userAgent: "multi-spawn-fixture" } });
     return;
@@ -116,6 +127,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     .join("\\n");
   const isJudge = inputText.includes("# Independent Duo comparison");
   const isNeighbour = inputText.includes("Stay busy in this folder");
+  recordPhase("turn-role", { judge: isJudge, neighbour: isNeighbour });
   const answer = isJudge
     ? "Multi-spawn judge response from " + path.basename(process.cwd()) + "."
     : "Multi-spawn source response from " + path.basename(process.cwd()) + ".";
@@ -147,9 +159,14 @@ test.beforeAll(async () => {
     name: "multi-spawn",
     initialState: "conversation",
     seedSecondProject: true,
+    additionalEnvironment: { INERTIA_RUNTIME_SHUTDOWN_TRACE: "1" },
     codexAppServerSource: multiSpawnAppServer,
   });
   page = app.page;
+});
+
+test.afterEach(async () => {
+  await attachReleaseFailureObservation(app, test.info());
 });
 
 test.afterAll(async () => {

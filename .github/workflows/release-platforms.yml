@@ -1,4 +1,4 @@
-name: Release76 desktop sequence diagnosis
+name: Release76 unit-prefix lifecycle diagnosis
 
 on:
   workflow_dispatch:
@@ -19,19 +19,23 @@ jobs:
   investigate:
     name: Diagnose ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 85
+    timeout-minutes: ${{ matrix.job_minutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: Windows ARM64 desktop sequence
+          - label: Windows ARM64 unit prefix
             runner: windows-11-arm
-            mode: windows-context
+            mode: windows-unit-prefix
             workers: 1
-          - label: macOS ARM64 desktop sequence
+            unit_minutes: 100
+            job_minutes: 220
+          - label: macOS ARM64 unit prefix
             runner: macos-15
-            mode: macos-context
+            mode: macos-unit-prefix
             workers: 2
+            unit_minutes: 35
+            job_minutes: 155
     defaults:
       run:
         shell: bash
@@ -58,20 +62,53 @@ jobs:
       - name: Install reviewed dependencies
         uses: ./.github/actions/install-dependencies
       - name: Build exact diagnostic app
+        timeout-minutes: 10
         run: npm run build:packaged
-      - name: Observe host before the desktop sequence
-        run: node -e 'const os=require("node:os");console.log(JSON.stringify({at:Date.now(),phase:"before-desktop",memoryFree:os.freemem(),memoryTotal:os.totalmem(),load:os.loadavg(),cpus:os.availableParallelism()}))'
+      - name: Observe host before the baseline
+        run: node tests/support/release76-host-observation.mjs before-baseline
       - name: Match release desktop benchmark precondition
         timeout-minutes: 10
         run: npm run benchmark:desktop:built
+      - name: Capture same-runner lifecycle baseline before unit workload
+        timeout-minutes: 10
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            node node_modules/@playwright/test/cli.js test tests/e2e/watcher.spec.ts --project=isolated --output=test-results/pre-unit --retries=0
+          else
+            node node_modules/@playwright/test/cli.js test tests/e2e/app-update-viability.spec.ts tests/e2e/layout.spec.ts tests/e2e/multi-spawn.spec.ts --project=isolated --output=test-results/pre-unit --retries=0 -g 'the real update validator|searches Help, moves|launches two truthful routes|starts the judge while'
+          fi
+      - name: Prepare checksum-verified NSIS unit-test compiler
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: node -e "require('app-builder-lib/out/toolsets/windows').getMakeNsisPath(undefined).then(() => console.log('NSIS test compiler ready'))"
+      - name: Observe host immediately before the unit workload
+        run: node tests/support/release76-host-observation.mjs before-unit
+      - name: Reproduce complete native unit workload without changing its tests
+        id: native_unit
+        timeout-minutes: ${{ matrix.unit_minutes }}
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            npm test -- --maxWorkers=2
+          else
+            npm test
+          fi
+      - name: Observe host after unit workload or failure
+        if: always()
+        run: node tests/support/release76-host-observation.mjs after-unit-or-failure
+      - name: Rebuild the same production bundle after unit workload as in release
+        timeout-minutes: 10
+        run: npm run build:packaged
       - name: Match release foreground phase before isolated apps
         timeout-minutes: 25
         run: node node_modules/@playwright/test/cli.js test --project=display-sensitive --output=test-results/display-sensitive --retries=0
       - name: Observe host before the isolated sequence
-        run: node -e 'const os=require("node:os");console.log(JSON.stringify({at:Date.now(),phase:"before-isolated",memoryFree:os.freemem(),memoryTotal:os.totalmem(),load:os.loadavg(),cpus:os.availableParallelism()}))'
+        run: node tests/support/release76-host-observation.mjs before-isolated
       - name: Probe complete isolated sequence with release worker and deadline settings
         timeout-minutes: 45
         run: node node_modules/@playwright/test/cli.js test --project=isolated --output=test-results/isolated --retries=0
+      - name: Observe host after desktop sequence or failure
+        if: always()
+        run: node tests/support/release76-host-observation.mjs after-desktop-or-failure
       - name: Retain focused failure and process diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

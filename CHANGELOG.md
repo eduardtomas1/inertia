@@ -80,6 +80,8 @@ dependable Duo judge, and Claude's own agents, skills and instructions.
 - Keep Cursor and Kimi's local tool-bridge credentials out of replies and
   reasoning when another credential shares part of their value, including
   responses split across multiple updates.
+- Update HTTP request parsing and URI/IP validation libraries to patched
+  releases, along with the affected development dependencies.
 
 ### Release verification
 

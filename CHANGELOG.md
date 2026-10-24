@@ -2,11 +2,50 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Watcher
+
+- Choose the watcher's access when adding it: **Read-only** by default, or
+  chat access with its own mode, access, reasoning and speed.
+- Every agent can be a watcher. When you choose a route, the dialog says how
+  strictly that agent keeps a read-only watcher read-only.
+- Read-only checks on Claude Code no longer stop because of its plan mode.
+  A declined command tells the watcher why, and a check stops after five
+  declined requests.
+- A plan from the watcher becomes a finding, and watcher notes ask the main
+  agent to act on them.
+
+### Agents
+
+- An update interrupted when Inertia closed now blocks only the agent being
+  updated. It shows **Recovery required** until a restart verifies its
+  installation, and the composer explains this without offering **Refresh**.
+- Proof that the interrupted update stopped is saved before Inertia lets go of
+  the cleanup record, so a failed check can retry after another restart.
+- A signed-out agent can finish recovery and then asks you to sign in. One
+  that answers but cannot run for another reason stays in recovery.
+
+### Chats
+
+- Keep Copy and Snooze submenus open while the pointer crosses the gap from
+  their chat-menu row into the submenu.
+
+### Security
+
+- Keep Cursor and Kimi's local tool-bridge credentials out of replies,
+  reasoning and diagnostics when another credential shares part of their value
+  or overlaps their start or end, including responses split across updates.
+- Update HTTP request parsing and URI/IP validation libraries to patched
+  releases, along with the affected development dependencies.
+- Run CI and release builds on Node 22.23.4 with its October security fixes,
+  and update electron-updater to 6.8.11, which refuses missing or path-valued
+  cached update file names.
+
 ## 0.0.76 — 2026-10-23
 
-Tasks that follow the agent without marking your work done for you, watchers
-with the access you choose, a more dependable Duo judge, and Claude's own
-agents, skills and instructions.
+Tasks that follow the agent without marking your work done for you, a more
+dependable Duo judge, and Claude's own agents, skills and instructions.
 
 ### Tasks
 
@@ -31,18 +70,6 @@ agents, skills and instructions.
   Failed deletions restore the rows, rejected edits restore the saved value,
   and the 200-task cap counts open tasks only. Older completed tasks make
   room when the stored list fills up.
-
-### Watcher
-
-- Choose the watcher's access when adding it: **Read-only** by default, or
-  chat access with its own mode, access, reasoning and speed.
-- Every agent can be a watcher. When you choose a route, the dialog says how
-  strictly that agent keeps a read-only watcher read-only.
-- Read-only checks on Claude Code no longer stop because of its plan mode.
-  A declined command tells the watcher why, and a check stops after five
-  declined requests.
-- A plan from the watcher becomes a finding, and watcher notes ask the main
-  agent to act on them.
 
 ### Duo
 
@@ -74,24 +101,12 @@ agents, skills and instructions.
   If extra skills cannot be loaded, the turn can continue with the skills
   you selected.
 
-### Agents
-
-- An update interrupted when Inertia closed now blocks only the agent being
-  updated. It shows **Recovery required** until a restart verifies its
-  installation, and the composer explains this without offering **Refresh**.
-- Proof that the interrupted update stopped is saved before Inertia lets go of
-  the cleanup record, so a failed check can retry after another restart.
-- A signed-out agent can finish recovery and then asks you to sign in. One
-  that answers but cannot run for another reason stays in recovery.
-
 ### Chats
 
 - Reopening a chat restores the remembered reading position reliably on
   slower machines.
 - **Jump to latest**, search results and other explicit transcript navigation
   stop an older scroll restoration from pulling you back into history.
-- Keep Copy and Snooze submenus open while the pointer crosses the gap from
-  their chat-menu row into the submenu.
 
 ### Dependencies
 
@@ -99,17 +114,6 @@ agents, skills and instructions.
   1.9.0, keyring to 2.1.2, React Virtual to 3.14.21 and Lucide to 1.59.0.
 - Update electron-vite to 6.0.0 and adapt the build configuration to its
   supported dependency externalization options.
-
-### Security
-
-- Keep Cursor and Kimi's local tool-bridge credentials out of replies,
-  reasoning and diagnostics when another credential shares part of their value
-  or overlaps their start or end, including responses split across updates.
-- Update HTTP request parsing and URI/IP validation libraries to patched
-  releases, along with the affected development dependencies.
-- Run CI and release builds on Node 22.23.4 with its October security fixes,
-  and update electron-updater to 6.8.11, which refuses missing or path-valued
-  cached update file names.
 
 ### Release verification
 

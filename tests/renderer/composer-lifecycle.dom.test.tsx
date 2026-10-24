@@ -981,13 +981,35 @@ describe("composer asynchronous ownership", () => {
         <Composer {...composerProps(current)} />
       </WatcherContext.Provider>,
     );
-    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toHaveTextContent(/^Read-only watcher · Plan · Supervised$/u);
+    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toHaveTextContent(/^Read-only watcher$/u);
+    expect(screen.queryByRole("button", { name: /^Choose project access/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Choose work mode/u })).not.toBeInTheDocument();
     view.rerender(
       <WatcherContext.Provider value={surfaceModel({ watchers: [] })}>
         <Composer {...composerProps(current)} />
       </WatcherContext.Provider>,
     );
     expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toBeNull();
+  });
+
+  it("gives a watcher with chat access the ordinary mode and access menus", async () => {
+    const current = conversation(WATCHER_ID);
+    const onUpdateConversation = vi.fn(async () => undefined);
+    const view = render(
+      <WatcherContext.Provider value={surfaceModel({ watchers: [link({ readOnly: false })] })}>
+        <Composer {...composerProps(current, { onUpdateConversation })} />
+      </WatcherContext.Provider>,
+    );
+    expect(view.container.querySelector('[data-composer-setting="run-lock"]')).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Choose project access/u }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Full access/u }));
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledWith({ accessMode: "full" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Choose work mode/u }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Plan/u }));
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledWith({ interactionMode: "plan" }));
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "/b" } });
+    expect(await screen.findByRole("option", { name: /\/build/u })).toBeEnabled();
   });
 
   it("keeps /compact available in an attached watcher's composer", async () => {

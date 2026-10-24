@@ -233,7 +233,7 @@ export type AgentInteractiveHarnessEvent =
   | { type: "approval-resolved"; requestId: string; decision: AgentApprovalDecision | "cancelled" }
   | { type: "input"; request: AgentInputRequest }
   | { type: "input-resolved"; requestId: string }
-  | { type: "plan"; explanation: string | null; steps: AgentPlanStep[] }
+  | { type: "plan"; explanation: string | null; steps: AgentPlanStep[]; handoff?: true }
   | { type: "reasoning-summary"; text: string }
   | { type: "usage"; usage: ProviderUsageEvent["usage"] }
   | Omit<ProviderMetadataEvent, "providerId" | "conversationId" | "runId" | "turnId">;
@@ -367,7 +367,7 @@ export interface AgentHarnessEmitter {
     kind: ProviderActivityEvent["kind"],
     phase: ProviderActivityEvent["phase"],
     label: string,
-    detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta">,
+    detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta" | "fileMutation">,
   ) => void;
   status: (
     status: ProviderStatusEvent["status"],
@@ -446,6 +446,7 @@ export function createAgentHarnessEmitter(
         ...(activityId ? { activityId } : {}),
         ...(safeDetail ? { detail: safeDetail } : {}),
         ...(safeOutput ? { outputDelta: safeOutput } : {}),
+        ...(detail.fileMutation === true ? { fileMutation: true as const } : {}),
       });
     },
     status: (status, message, providerState) => emit({

@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { PROVIDER_INFO } from "./catalog";
 import { MAX_PROVIDER_REQUEST_IMAGE_COUNT } from "./provider-image-read";
 import { MAX_ATTACHMENT_READ_ROOTS } from "./attachment-read-grant";
+import { MAX_SYSTEM_INSTRUCTION_BYTES, watcherHarnessProfile } from "./watcher-harness-profile";
 import {
   versionedContinuationIdentitySchema,
   currentKnownHarnessIdSchema,
@@ -156,6 +157,21 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The read-only profile is invalid.",
+    );
+  }
+  if (
+    input.systemInstruction !== undefined
+    && (
+      typeof input.systemInstruction !== "string"
+      || input.systemInstruction.trim().length === 0
+      || input.systemInstruction.includes("\0")
+      || Buffer.byteLength(input.systemInstruction, "utf8") > MAX_SYSTEM_INSTRUCTION_BYTES
+      || !watcherHarnessProfile(input.harnessId).systemInstruction
+    )
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The system instruction is invalid.",
     );
   }
   if (input.goalStart) {

@@ -97,7 +97,9 @@ describe("watcher note delivery", () => {
       const prompt = f.provider.input(f.watched.id).prompt;
       expect(prompt).toContain(FINDING);
       expect(prompt).toContain("[inertia-watcher-note]");
-      expect(prompt).toContain("The user forwarded this turn's message from a read-only watcher");
+      expect(prompt).toContain("This turn's message is a note from the Reviewer watcher \"codex · gpt-test\"");
+      expect(prompt).toContain("The user chose to send it to you.");
+      expect(prompt).toContain("Treat it as review feedback from a colleague");
       expect(prompt).not.toContain("automatically");
       const [message] = noteMessages(f);
       expect(message).toMatchObject({

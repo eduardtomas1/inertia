@@ -13,6 +13,7 @@ import type {
 
 export interface ProviderMaintenanceRecoveryRuntime {
   invalidateInstallationEvidence(providerId: ProviderId): void;
+  /** Verify the native installation independently of account sign-in readiness. */
   verifyInstallationConformance(
     providerId: ProviderId,
     cwd: string,
@@ -28,17 +29,7 @@ export interface ProviderMaintenanceStartupRecoveryOptions {
   confirmedRuntimeGenerationIds: ReadonlySet<string>;
   currentSystemBootId: string;
   priorBootCleanupConfirmed: boolean;
-}
-
-function cleanupConfirmedFor(
-  record: ProviderMaintenanceRecoveryRecord,
-  options: ProviderMaintenanceStartupRecoveryOptions,
-): boolean {
-  return options.confirmedRuntimeGenerationIds.has(record.runtimeGenerationId)
-    || (
-      options.priorBootCleanupConfirmed
-      && record.systemBootId !== options.currentSystemBootId
-    );
+  verificationEnabled?: boolean;
 }
 
 function quarantineRecord(
@@ -77,7 +68,7 @@ export async function recoverProviderMaintenanceJournal(
     priorBootCleanupConfirmed: options.priorBootCleanupConfirmed,
   });
   for (const record of records) {
-    if (!cleanupConfirmedFor(record, options)) {
+    if (!record.runtimeCleanupConfirmed || options.verificationEnabled === false) {
       quarantineRecord(
         record,
         options.installationLeases,

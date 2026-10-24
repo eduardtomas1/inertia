@@ -2,7 +2,9 @@ import { z } from "zod";
 
 import { providerIdSchema } from "./contracts/client-command/common";
 
-export const WATCHER_HARNESS_IDS = ["claude-agent-sdk", "codex-app-server", "opencode-sdk"] as const;
+export const WATCHER_HARNESS_IDS = [
+  "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-cli",
+] as const;
 export const WATCHER_PRESETS = ["reviewer", "scope-guard", "explainer"] as const;
 export const WATCHER_STATUSES = ["watching", "waking", "paused", "detached"] as const;
 export const WATCHER_PAUSE_REASONS = [
@@ -21,7 +23,7 @@ export const WATCHER_DELIVERY_MODES = ["queue", "steer"] as const;
 export const WATCHER_DELIVERY_STATES = ["queued", "sent", "dismissed", "failed"] as const;
 export const WATCHER_PRIVATE_CONNECT_VISIBILITIES = ["inherit", "hidden"] as const;
 export const WATCHER_DELIVERY_POLICIES = ["manual", "auto"] as const;
-export const WATCHER_LIVE_PHASES = ["starting", "reading", "searching", "thinking", "writing"] as const;
+export const WATCHER_LIVE_PHASES = ["starting", "reading", "searching", "thinking", "writing", "approval", "question"] as const;
 
 export const WATCHER_PRESET_LABELS: Readonly<Record<(typeof WATCHER_PRESETS)[number], string>> = {
   reviewer: "Reviewer",
@@ -224,6 +226,7 @@ export const watcherLinkViewSchema = z.strictObject({
   budgets: watcherBudgetsSchema,
   privateConnect: watcherPrivateConnectSchema,
   delivery: watcherDeliveryPolicySchema,
+  readOnly: z.boolean(),
   status: watcherStatusSchema,
   pauseReason: watcherPauseReasonSchema.nullable(),
   pauseDetail: z.string().max(MAX_WATCHER_PAUSE_DETAIL_CHARS)
@@ -356,6 +359,21 @@ export function clampWatcherBudgets(input: Partial<Record<WatcherBudgetKey, unkn
     digestKiB: clamp("digestKiB"),
     contextReadsPerWake: clamp("contextReadsPerWake"),
   };
+}
+
+export type WatcherReadOnlyEnforcement = "inertia" | "approvals" | "provider";
+
+export const WATCHER_READ_ONLY_ENFORCEMENT: Readonly<Record<string, WatcherReadOnlyEnforcement>> = Object.freeze({
+  "claude-agent-sdk": "inertia",
+  "codex-app-server": "inertia",
+  "opencode-sdk": "inertia",
+  "cursor-acp": "approvals",
+  "kimi-acp": "approvals",
+  "antigravity-cli": "provider",
+});
+
+export function watcherReadOnlyEnforcement(harnessId: string): WatcherReadOnlyEnforcement | null {
+  return Object.hasOwn(WATCHER_READ_ONLY_ENFORCEMENT, harnessId) ? WATCHER_READ_ONLY_ENFORCEMENT[harnessId]! : null;
 }
 
 export function watcherHarnessAllowed(harnessId: string): harnessId is WatcherHarnessId {

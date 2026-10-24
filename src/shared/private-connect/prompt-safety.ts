@@ -1,4 +1,6 @@
 import { CURRENT_KNOWN_HARNESS_IDS, type HarnessId } from "../model-routing";
+import { watcherAccessLabel } from "../access-labels";
+import type { AccessMode, InteractionMode } from "../contracts/app";
 
 export type PrivateConnectNetworkPolicy =
   | "disabled"
@@ -147,21 +149,41 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
 export const READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE =
   "Read-only watcher · approvals are declined automatically";
 
+export interface PrivateConnectWatcherAccess {
+  readOnly: boolean;
+  interactionMode: InteractionMode;
+  accessMode: AccessMode;
+}
+
 export function privateConnectPromptSafetyForHarness(
   harnessId: HarnessId | null | undefined,
-  options: { watcher?: boolean } = {},
+  options: { watcher?: boolean | PrivateConnectWatcherAccess | null } = {},
 ): PrivateConnectPromptSafety {
   if (typeof harnessId !== "string") return UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY;
   const safety = PRIVATE_CONNECT_PROMPT_SAFETY[harnessId] ?? UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY;
-  if (options.watcher !== true || !safety.supported) return safety;
+  const watcher = options.watcher === true
+    ? { readOnly: true }
+    : typeof options.watcher === "object" && options.watcher !== null ? options.watcher : null;
+  if (watcher === null || !safety.supported) return safety;
+  if (!watcher.readOnly && "accessMode" in watcher) {
+    const label = watcherAccessLabel(watcher, watcher);
+    return {
+      ...safety,
+      headline: `Watcher · ${label}`,
+      explanation:
+        `This chat is a watcher with chat access: it runs in ${label}, the mode and access `
+        + "the user chose for it, and its approvals follow that access like any chat. "
+        + safety.explanation,
+    };
+  }
   return {
     ...safety,
     headline: READ_ONLY_WATCHER_PROMPT_SAFETY_HEADLINE,
     explanation:
-      "This chat is a read-only watcher. It runs in Plan mode with Supervised access, and "
-      + "Inertia declines every approval it requests without asking, so a Private Connect "
-      + "prompt cannot make it edit files or run commands that need approval. Project "
-      + "reads remain provider-controlled, and its answer can include project-derived text.",
+      "This chat is a read-only watcher. Inertia declines every approval it requests "
+      + "without asking, so a Private Connect prompt cannot make it edit files or run "
+      + "commands that need approval. Project reads remain provider-controlled, and its "
+      + "answer can include project-derived text.",
   };
 }
 

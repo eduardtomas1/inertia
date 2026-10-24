@@ -11,6 +11,7 @@ export interface CodexControlContext {
   installationUse: ProviderInstallationUseTransfer;
 }
 export async function codexUsageContext(cwd: string, resolveExecutable: () => Promise<string | undefined>, installation: ProviderManagerInstallationAuthority, rememberEnvironment: (env: NodeJS.ProcessEnv) => void): Promise<CodexControlContext> {
+  installation.assertRecoveryComplete("codex");
   const executable = await resolveExecutable();
   if (!executable) throw new ProviderRuntimeError("invalid_input", "Codex CLI is not installed.");
   const { env } = await providerEnvironment(); rememberEnvironment(env);
@@ -18,6 +19,7 @@ export async function codexUsageContext(cwd: string, resolveExecutable: () => Pr
     installationUse: installation.transfer(installation.acquire("codex", executable, providerNativeBackendProfile("codex"), "provider-server", installation.operationIdentity("provider-server"))) };
 }
 export async function readManagedClaudeUsage(executable: string | undefined, cwd: string, installation: ProviderManagerInstallationAuthority, signal: AbortSignal): ReturnType<typeof readClaudeAgentSdkMetadata> {
+  installation.assertRecoveryComplete("claude");
   if (!executable) throw new Error("Claude CLI is unavailable.");
   const { env } = await providerEnvironment();
   const admission = installation.acquire("claude", executable, providerNativeBackendProfile("claude"), "metadata-discovery", installation.operationIdentity("metadata-discovery"));
@@ -43,6 +45,7 @@ export async function readManagedClaudeUsage(executable: string | undefined, cwd
 
 export async function readManagedOpenCodeAccount(executable: string | undefined, cwd: string, model: string | undefined,
   installation: ProviderManagerInstallationAuthority, signal: AbortSignal): Promise<{ token: string; scope: string } | null> {
+  installation.assertRecoveryComplete("opencode");
   if (!executable || (model && !model.startsWith("opencode-go/"))) return null;
   const { readOpenCodeSdkInventory } = await import("./opencode-sdk-metadata");
   const { env } = await providerEnvironment();

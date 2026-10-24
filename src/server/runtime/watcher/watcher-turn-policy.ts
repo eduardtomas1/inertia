@@ -1,4 +1,6 @@
 import type { AgentTurn, Conversation } from "../../../shared/contracts";
+import type { PrivateConnectWatcherAccess } from "../../../shared/private-connect/prompt-safety";
+import { watcherReadOnlyEnforcement } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
 import type { ProviderHostToolBridge } from "../../provider/contracts";
 import type { AgentContextWatcherPolicy } from "../agent-context-tool";
@@ -13,6 +15,7 @@ export interface WatcherTurnSource {
 
 export interface WatcherTurnPolicy extends AgentContextWatcherPolicy {
   isWatcherConversation(conversationId: string): boolean;
+  privateConnectWatcher(conversation: Conversation): PrivateConnectWatcherAccess | null;
   hostToolsForTurn(source: WatcherTurnSource): ProviderHostToolBridge | null;
   harnessInstructionsFor(input: { conversation: Conversation }): readonly HiddenProviderInstruction[] | null;
   watcherInstructionsFor(input: { conversation: Conversation; hostTools: boolean }): readonly HiddenProviderInstruction[];
@@ -40,6 +43,11 @@ export function createWatcherTurnPolicy(
   };
   return {
     isWatcherConversation,
+    privateConnectWatcher(conversation) {
+      const policy = store.watcherLinks.policyForConversation(conversation.id);
+      if (!policy || policy.status === "detached") return null;
+      return { readOnly: policy.readOnly, interactionMode: conversation.interactionMode, accessMode: conversation.accessMode };
+    },
     watchedConversationFor(conversationId) {
       const link = store.watcherLinks.findByWatcher(conversationId);
       return link && link.status !== "detached" ? link.watchedConversationId : null;
@@ -64,7 +72,10 @@ export function createWatcherTurnPolicy(
       if (!link || link.status === "detached" || link.watchedConversationId === null) return [];
       const watched = conversationOrNull(store, link.watchedConversationId);
       if (!watched) return [];
-      return [watcherInstruction(link, { title: watched.title, id: watched.id }, { contextAccess: hostTools })];
+      return [watcherInstruction(link, { title: watched.title, id: watched.id }, {
+        contextAccess: hostTools,
+        enforcement: watcherReadOnlyEnforcement(conversation.modelSelection.harnessId),
+      })];
     },
     forgetTurn(turnId) {
       reads.delete(turnId);

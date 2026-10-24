@@ -16,7 +16,9 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 const BRIDGE_TOKEN = "Tk9q7Zr2Wv5Nx8Lm4Pc6Hy3Jd1";
 const BRIDGE_URL = "http://127.0.0.1:65001/qzx-mcp";
 
-type Scenario = "echo" | "stderr-error" | "provider-cancel" | "local-cancel";
+type Scenario = "echo" | "echo-prefix" | "echo-chain" | "stderr-error" | "stderr-chain" | "provider-cancel" | "local-cancel";
+const CHAIN_HEAD = "k3yTk9q7";
+const CHAIN_TAIL = "Jd1XYZW";
 
 const PROVIDERS = [
   { providerId: "cursor" as const, executableName: "cursor-agent", agentName: "Cursor", create: createCursorAcpHarness as (options: object) => AgentHarness },
@@ -53,6 +55,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       process.stderr.write("bridge " + token.slice(0, 7));
       setTimeout(() => process.stderr.write(token.slice(7) + " at " + server.url + "\\n"), 10);
     }
+    if (scenario === "stderr-chain") {
+      process.stderr.write("chain k3y" + token.slice(0, 5));
+      setTimeout(() => process.stderr.write(token.slice(5) + "XYZW done\\n"), 10);
+    }
     return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
   }
   if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
@@ -61,6 +67,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method !== "session/prompt") return;
   promptId = message.id;
+  if (scenario === "stderr-chain") {
+    return setTimeout(() => send({ jsonrpc: "2.0", id: promptId, error: { code: -32000, message: "Bridge failed." } }), 30);
+  }
+  if (scenario === "echo-chain") {
+    for (const kind of ["agent_message_chunk", "agent_thought_chunk"]) {
+      chunk(kind, "one k3y" + secrets[0] + " two k3y");
+      chunk(kind, secrets[0].slice(0, 9));
+      chunk(kind, secrets[0].slice(9) + "XYZW three " + secrets[0] + "XYZW\\n");
+    }
+    return send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "end_turn" } });
+  }
   if (scenario === "stderr-error") {
     return setTimeout(() => send({ jsonrpc: "2.0", id: promptId, error: { code: -32000, message: "Bridge " + secrets[0] + " at " + secrets[1] + " failed." } }), 30);
   }
@@ -99,7 +116,11 @@ describe("ACP host bridge credential redaction", () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  async function bridgeRun(provider: typeof PROVIDERS[number], scenario: Scenario) {
+  async function bridgeRun(
+    provider: typeof PROVIDERS[number],
+    scenario: Scenario,
+    environment: NodeJS.ProcessEnv = {},
+  ) {
     const root = portableFixtureRoot(`${provider.providerId} bridge ${scenario}`);
     roots.push(root);
     const executable = bridgeEchoAgent(root, provider.executableName, provider.agentName, scenario);
@@ -122,7 +143,7 @@ describe("ACP host bridge credential redaction", () => {
         access: "supervised",
       }),
       executable,
-      environment: { ...process.env },
+      environment: { ...process.env, ...environment },
       providerNativeToolsAvailable: true,
       hostTools: { definitions: [], invoke: async () => ({ success: true, text: "{}" }) },
       callbacks: {
@@ -159,6 +180,53 @@ describe("ACP host bridge credential redaction", () => {
 
       expect(result).toMatchObject({ status: "failed" });
       expect(leaked(JSON.stringify({ result, events }))).toEqual([]);
+    });
+
+    it.each([
+      ["prefix", BRIDGE_TOKEN.slice(0, 8)],
+      ["suffix", BRIDGE_TOKEN.slice(-8)],
+      ["single character", "1"],
+    ])("keeps bridge streams private with an overlapping %s credential", async (_kind, overlapping) => {
+      const echo = expectedEcho().replaceAll(overlapping, "[redacted]").replace(/(?:\[redacted\])+/gu, "[redacted]");
+      for (const scenario of ["echo", "echo-prefix", "provider-cancel"] as const) {
+        const { result, events, text, reasoning } = await bridgeRun(provider, scenario, {
+          OTHER_API_TOKEN: overlapping,
+        });
+
+        expect(result.status).toBe(scenario === "provider-cancel" ? "cancelled" : "completed");
+        expect(leaked(JSON.stringify({ result, events }))).toEqual([]);
+        if (scenario !== "provider-cancel") {
+          const tail = scenario === "echo-prefix" ? "tail [redacted]" : "";
+          expect(text).toBe(`Starting ${echo}${tail}`);
+          expect(result.text).toBe(text);
+          expect(reasoning).toBe(`${echo}${tail}`);
+        }
+      }
+    });
+
+    it("redacts credentials that overlap the bridge token at either end as one run", async () => {
+      const { result, events, text, reasoning } = await bridgeRun(provider, "echo-chain", {
+        OTHER_API_TOKEN: CHAIN_HEAD,
+        THIRD_API_TOKEN: CHAIN_TAIL,
+      });
+      const echoed = "one [redacted] two [redacted] three [redacted]\n";
+
+      expect(result).toMatchObject({ status: "completed" });
+      expect(leaked(JSON.stringify({ result, events }))).toEqual([]);
+      expect(text).toBe(echoed);
+      expect(reasoning).toBe(echoed);
+    });
+
+    it("redacts an overlapping credential chain split across stderr writes", async () => {
+      const { result, events } = await bridgeRun(provider, "stderr-chain", {
+        OTHER_API_TOKEN: CHAIN_HEAD,
+        THIRD_API_TOKEN: CHAIN_TAIL,
+      });
+      const serialized = JSON.stringify({ result, events });
+
+      expect(result).toMatchObject({ status: "failed" });
+      expect(leaked(serialized)).toEqual([]);
+      expect(serialized).toContain("chain [redacted] done");
     });
 
     it.each(["provider-cancel", "local-cancel"] as const)("never emits a held bridge credential prefix on %s", async (scenario) => {

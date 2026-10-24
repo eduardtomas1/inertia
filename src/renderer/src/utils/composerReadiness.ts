@@ -4,6 +4,7 @@ import type {
   ProviderInfo,
 } from "@shared/contracts";
 import { providerNativeBackendProfile } from "../../../shared/model-routing";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../../shared/provider-maintenance";
 
 export type ComposerRouteRepair =
   | "install"
@@ -91,6 +92,14 @@ function providerInstallReadiness(
       `${harness} CLI not found`,
       provider.statusMessage ?? "Install the selected harness CLI to use this route.",
       "install",
+    );
+  }
+  if (provider.installState === "recovery-required") {
+    return unavailable(
+      "Recovery required",
+      `${harness} needs recovery`,
+      provider.statusMessage ?? PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      null,
     );
   }
   if (provider.installState === "unresponsive") {

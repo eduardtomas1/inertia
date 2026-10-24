@@ -970,6 +970,7 @@ export async function openCodexTurn({
       : {}),
     ...(modelProvider ? { modelProvider: modelProvider.providerId } : {}),
     ...(providerConfig || watcherConfig ? { config: { ...watcherConfig, ...providerConfig } } : {}),
+    ...(options.developerInstructions ? { developerInstructions: options.developerInstructions } : {}),
   };
   let opened: JsonObject;
   if (options.sessionId) {

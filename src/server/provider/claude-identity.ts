@@ -124,19 +124,21 @@ export async function prepareClaudeTurnIdentity(
 
 export function claudeIdentityOptions(
   identity: ClaudeTurnIdentity,
+  systemInstruction?: string,
 ): Pick<
   ClaudeOptions,
   "systemPrompt" | "additionalDirectories" | "agents" | "plugins" | "skills"
 > {
   const { skills, agents, instructions } = identity;
+  const append = [instructions.systemPromptAppend, systemInstruction ?? ""]
+    .filter((section) => section.length > 0)
+    .join("\n\n");
   return {
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      snapshot: true,
-      ...(instructions.systemPromptAppend
-        ? { append: instructions.systemPromptAppend }
-        : {}),
+      snapshot: systemInstruction === undefined,
+      ...(append ? { append } : {}),
     },
     ...(instructions.additionalDirectories.length > 0
       ? { additionalDirectories: instructions.additionalDirectories }

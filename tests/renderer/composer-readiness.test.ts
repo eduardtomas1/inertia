@@ -12,6 +12,7 @@ import type {
   ModelBackendProfileView,
   ProviderInfo,
 } from "../../src/shared/contracts";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../src/shared/provider-maintenance";
 
 function provider(
   overrides: Partial<ProviderInfo> = {},
@@ -377,6 +378,43 @@ describe("composer route readiness", () => {
       badge: "Connection issue",
       action: "refresh",
     });
+  });
+
+  it("shows provider recovery without offering a refresh that cannot repair it", () => {
+    const recovering = provider({
+      id: "claude",
+      label: "Claude",
+      command: "claude",
+      available: false,
+      executable: null,
+      installState: "recovery-required",
+      authState: "unknown",
+      canRun: false,
+      statusMessage: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+    });
+    const expected = {
+      ready: false,
+      transient: false,
+      badge: "Recovery required",
+      title: "Claude harness needs recovery",
+      detail: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+      action: null,
+    };
+    expect(composerRouteReadiness({
+      provider: recovering,
+      profile: undefined,
+      selection: providerNativeModelSelection({ providerId: "claude" }),
+    })).toEqual(expected);
+    expect(composerRouteReadiness({
+      provider: recovering,
+      profile: profile(),
+      selection: customSelection(),
+    })).toEqual(expected);
+    expect(composerRouteReadiness({
+      provider: { ...recovering, statusMessage: null },
+      profile: undefined,
+      selection: providerNativeModelSelection({ providerId: "claude" }),
+    })).toEqual(expected);
   });
 
   it("keeps Kimi probe failure optional while naming a missing Kimi key", () => {

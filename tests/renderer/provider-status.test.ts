@@ -7,8 +7,21 @@ import {
   providerVersionLabel,
 } from "../../src/renderer/src/utils/providerStatus";
 import type { ProviderInfo } from "../../src/shared/contracts";
+import { initialProviderSnapshots } from "../../src/server/runtime-snapshots";
 
 describe("provider compatibility status", () => {
+  it("explains interrupted maintenance without suggesting sign-in or showing checking", () => {
+    const providers = initialProviderSnapshots(true, {}, new Set(["claude"]));
+    const claude = providers.find(({ id }) => id === "claude")!;
+    expect(claude.canRun).toBe(false);
+    expect(claude.authState).toBe("unknown");
+    expect(providerStateLabel(claude)).toBe("Recovery required");
+    expect(providerStateDetail(claude)).toContain("Restart Inertia");
+    expect(providerSetupAction(claude)).toBeNull();
+    expect(providers.find(({ id }) => id === "codex")?.installState).toBe("checking");
+    expect(initialProviderSnapshots(false, {}, new Set(["claude"]))
+      .find(({ id }) => id === "claude")?.canRun).toBe(false);
+  });
   it("offers refresh instead of sign-in when an authenticated Codex CLI needs an update", () => {
     const provider: ProviderInfo = {
       id: "codex",

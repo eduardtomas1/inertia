@@ -173,9 +173,11 @@ export const WATCHER_TEST_PROVIDERS: ProviderInfo[] = [
   providerInfo("claude", "claude-agent-sdk"),
   providerInfo("opencode", "opencode-sdk"),
   providerInfo("cursor", "cursor-acp"),
+  providerInfo("kimi", "kimi-acp"),
+  providerInfo("antigravity", "antigravity-cli"),
 ];
 
-export function watcherTestSelection(providerId: "codex" | "claude" | "opencode" | "cursor" = "codex"): ModelSelection {
+export function watcherTestSelection(providerId: ProviderInfo["id"] = "codex"): ModelSelection {
   return providerNativeModelSelection({ providerId, modelId: "gpt-test", reasoningEffort: "high" });
 }
 
@@ -244,6 +246,7 @@ export async function createWatcherFixture(options: WatcherFixtureOptions = {}) 
     },
     captureGitArtifacts: ({ turn }) => { gitArtifacts.push(turn.id); },
     onReadOnlyViolation: (turn, violation) => watchers?.onReadOnlyViolation(turn, violation),
+    onPlanHandoff: (turn, text) => watchers?.onPlanHandoff(turn, text),
     onTurnSettled: async (turn) => {
       queue?.onTurnSettled(turn);
       await watchers?.onTurnSettled(turn);

@@ -4,6 +4,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../shared/provider-maintenance";
 import { FILE_OPEN_NO_FOLLOW } from "../../node/platform-file-open-flags";
 import type { UsageAccount, UsageResetConfirmation, UsageResetOutcome } from "../../shared/provider-usage-limits";
 import { usageResetOutcomeSchema } from "../../shared/provider-usage-limits";
@@ -57,12 +58,15 @@ export class NativeUsageReader {
       windows: usageWindows(info.rateLimits), updatedAt: info.metadataState.rateLimits.updatedAt, checkedAt: new Date().toISOString(), credits: null, canReset: false };
     // Shell readiness precedes provider discovery. An explicit Limits read must
     // finish the normal bounded check before caching an unverified placeholder.
-    if (!info.canRun && (info.id === "codex" || info.id === "claude")
+    if (!info.canRun && info.installState !== "recovery-required" && (info.id === "codex" || info.id === "claude")
       && (info.installState === "checking" || info.authState === "checking")) {
       this.signal.throwIfAborted();
       const detection = await this.providers.detect(info.id, { cwd, timeoutMs: 4000, signal: this.signal });
-      info = { ...info, canRun: detection.canRun, authState: detection.authState };
+      info = { ...info, canRun: detection.canRun, authState: detection.authState,
+        installState: detection.installState, statusMessage: detection.statusMessage ?? null };
     }
+    if (info.installState === "recovery-required") return { ...base, windows: [], updatedAt: null,
+      detail: info.statusMessage ?? PROVIDER_MAINTENANCE_RECOVERY_MESSAGE };
     if (!info.canRun) return { ...base, detail: `${info.label} is ${info.authState === "unauthenticated" ? "not signed in" : "not ready"}.` };
     if (info.id !== "codex" && info.id !== "claude") return this.subscriptions.read(base, model, this.signal, cwd, interactive);
     if (info.id === "claude") {

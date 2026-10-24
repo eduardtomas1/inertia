@@ -175,6 +175,10 @@
   animation: watcher-label-shimmer 1.4s linear infinite;
 }
 
+.watcher-bar-state[data-phase="attention"] .watcher-bar-phase-text {
+  color: var(--warning);
+}
+
 :root[data-document-visible="false"] .watcher-bar-state[data-phase="waking"] .watcher-bar-phase-text {
   animation-play-state: paused;
 }

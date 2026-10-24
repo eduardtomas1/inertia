@@ -245,7 +245,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseAssets).toContain("inertia:release-source-sha");
     expect(releaseAssets).toContain("inertia:package-lock-sha256");
     expect(releaseAssets).toContain("inertia:electron-version");
-    expect(workflow.match(/node-version: 22\.23\.2/gu)).toHaveLength(2);
+    expect(workflow.match(/node-version: 22\.23\.4/gu)).toHaveLength(2);
     expect(workflow).toContain(
       "group: release-${{ inputs.release_tag || github.ref_name }}",
     );

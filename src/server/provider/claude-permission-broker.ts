@@ -6,15 +6,12 @@ import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
 import { claudeQuestions } from "./claude-questions";
-import { readOnlyCommandPathProblem } from "../runtime/watcher/read-only-command-paths";
-import {
-  classifyReadOnlyCommand,
-  ripgrepWithoutConfig,
-  type ReadOnlyCommandContext,
-} from "../runtime/watcher/read-only-commands";
+import { claudeWatcherDecision } from "./claude-watcher-permissions";
 import type { ProviderRunInput } from "./contracts";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import type { AgentApprovalDecision, AgentInputRequest, AgentPlanStep } from "./interactions";
+
+type ClaudeToolOptions = Parameters<CanUseTool>[2];
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
@@ -68,6 +65,15 @@ export class ClaudePermissionBroker {
     if (CLAUDE_CHECKLIST_TOOLS.has(toolName) && !mcpServer) {
       return { behavior: "allow", updatedInput: toolInput };
     }
+    const watcher = input.readOnlyProfile === "watcher";
+    if (toolName === "ExitPlanMode") {
+      const plan = stringValue(toolInput.plan) ?? stringValue(toolInput.content);
+      if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan), handoff: true });
+      if (!watcher) return deny("The proposed plan was returned to the user for review.");
+    }
+    if (watcher) {
+      return await this.watcherDecision(toolName, toolInput, callbackOptions);
+    }
     if (toolName === "AskUserQuestion") {
       if (this.inputs.size >= MAX_PENDING_INTERACTIONS) {
         return deny("Claude exceeded the bounded question budget.", true);
@@ -94,34 +100,56 @@ export class ClaudePermissionBroker {
       return { behavior: "allow", updatedInput: { questions: toolInput.questions, answers: sdkAnswers } };
     }
 
-    if (toolName === "ExitPlanMode") {
-      const plan = stringValue(toolInput.plan) ?? stringValue(toolInput.content);
-      if (plan) emitter.rich({ type: "plan", explanation: plan, steps: planSteps(plan) });
-      return deny("The proposed plan was returned to the user for review.");
-    }
-
-    const watcherCommand = input.readOnlyProfile === "watcher"
-      && toolName === "Bash"
-      && !mcpServer
-      && callbackOptions.blockedPath === undefined
-      ? allowedWatcherCommand(toolInput, input.cwd)
-      : null;
-    if (watcherCommand !== null) {
-      const problem = await readOnlyCommandPathProblem(watcherCommand.command, watcherCommand.context);
-      if (callbackOptions.signal.aborted || this.options.cancelled()) return deny("User cancelled the request.", true);
-      if (problem) return deny(problem);
-      return { behavior: "allow", updatedInput: { ...toolInput, command: ripgrepWithoutConfig(watcherCommand.command, watcherCommand.context) } };
-    }
-
     if (
       (input.access === "full" && input.interactionMode !== "plan")
       || claudeAttachmentReadAllowed(toolName, toolInput, callbackOptions.blockedPath, input.attachmentReadRoots)
     ) return { behavior: "allow", updatedInput: toolInput };
+    const decision = await this.requestApproval(toolName, toolInput, callbackOptions);
+    if ("behavior" in decision) return decision;
+    if (decision.decision === "approve") {
+      return {
+        behavior: "allow",
+        updatedInput: toolInput,
+      } satisfies PermissionResult;
+    }
+    return deny(decision.decision === "cancel" ? "User cancelled tool execution." : "User declined tool execution.", decision.decision === "cancel");
+  };
+
+  private async watcherDecision(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    callbackOptions: ClaudeToolOptions,
+  ): Promise<PermissionResult> {
+    if (claudeAttachmentReadAllowed(toolName, toolInput, callbackOptions.blockedPath, this.options.input.attachmentReadRoots)) {
+      return { behavior: "allow", updatedInput: toolInput };
+    }
+    const decision = await claudeWatcherDecision({
+      toolName,
+      toolInput,
+      cwd: this.options.input.cwd,
+      mcpServer: callbackOptions.mcpServer !== undefined,
+      blockedPath: callbackOptions.blockedPath,
+    });
+    if (callbackOptions.signal.aborted || this.options.cancelled()) return deny("User cancelled the request.", true);
+    if (decision.kind === "allow") return { behavior: "allow", updatedInput: decision.updatedInput };
+    if (decision.kind === "deny") return deny(decision.message);
+    const outcome = await this.requestApproval(toolName, toolInput, callbackOptions, decision.approval);
+    if ("behavior" in outcome) return outcome.behavior === "deny" && outcome.interrupt !== true ? deny(decision.message) : outcome;
+    return deny(decision.message, outcome.decision === "cancel");
+  }
+
+  private async requestApproval(
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    callbackOptions: ClaudeToolOptions,
+    kind?: "command" | "file-change" | "permissions",
+  ): Promise<PermissionResult | { decision: AgentApprovalDecision }> {
+    const { emitter, input } = this.options;
     const approvalTitle = callbackOptions.title
       ?? `Claude wants to use ${toolName}`;
     const approvalDetail = callbackOptions.description
       ?? summarizeInput(toolInput);
-    const approvalCommand = toolName === "Bash"
+    const approvalCommand = (toolName === "Bash" || toolName === "PowerShell")
       && typeof toolInput.command === "string"
       ? toolInput.command
       : undefined;
@@ -157,7 +185,7 @@ export class ClaudePermissionBroker {
         type: "approval",
         request: {
           requestId,
-          kind: toolName === "Bash" ? "command" : /edit|write|notebook/iu.test(toolName) ? "file-change" : "permissions",
+          kind: kind ?? (toolName === "Bash" ? "command" : /edit|write|notebook/iu.test(toolName) ? "file-change" : "permissions"),
           title: bounded(approvalTitle),
           detail: bounded(approvalDetail),
           ...(approvalCommand !== undefined
@@ -175,14 +203,8 @@ export class ClaudePermissionBroker {
     if (callbackOptions.signal.aborted || this.options.cancelled()) {
       return deny("User cancelled the request.", true);
     }
-    if (decision === "approve") {
-      return {
-        behavior: "allow",
-        updatedInput: toolInput,
-      } satisfies PermissionResult;
-    }
-    return deny(decision === "cancel" ? "User cancelled tool execution." : "User declined tool execution.", decision === "cancel");
-  };
+    return { decision };
+  }
 
   settleApproval(requestId: string, decision: AgentApprovalDecision): boolean {
     const pending = this.approvals.get(requestId);
@@ -213,19 +235,6 @@ export class ClaudePermissionBroker {
       pending.resolve({});
     }
   }
-}
-
-function allowedWatcherCommand(
-  toolInput: Record<string, unknown>,
-  cwd: string,
-): { command: string; context: ReadOnlyCommandContext } | null {
-  const context = { cwd, windows: process.platform === "win32" };
-  return typeof toolInput.command === "string"
-    && toolInput.run_in_background !== true
-    && toolInput.dangerouslyDisableSandbox !== true
-    && classifyReadOnlyCommand(toolInput.command, context).allowed
-    ? { command: toolInput.command, context }
-    : null;
 }
 
 function planSteps(markdown: string): AgentPlanStep[] {

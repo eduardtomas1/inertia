@@ -22,6 +22,7 @@ import {
   antigravityAuthRequired,
   antigravityDeclinedNotice,
   antigravityFailure,
+  antigravityFileMutationTool,
   antigravityResultFailure,
   antigravitySessionId,
   antigravityUserLine,
@@ -213,6 +214,7 @@ function startAntigravityRun(
       emitter.activity("tool", event.phase, event.label, {
         activityId: `antigravity:${input.runId}:${event.id}`,
         ...(event.detail ? { detail: event.detail } : {}),
+        ...(antigravityFileMutationTool(event.label) ? { fileMutation: true as const } : {}),
       });
     } else {
       if (!adoptSession(event.result.conversationId)) return;

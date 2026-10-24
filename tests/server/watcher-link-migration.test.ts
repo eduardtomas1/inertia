@@ -245,4 +245,59 @@ describe("watcher link migration", () => {
       store.close();
     }
   });
+
+  it("upgrades a published database through schema 100 to schema 101 and keeps an existing link read-only", async () => {
+    const before = await schema98Database();
+    const projectId = "77777777-0000-4000-8000-000000000001";
+    const watchedId = "77777777-0000-4000-8000-000000000002";
+    const watcherId = "77777777-0000-4000-8000-000000000003";
+    const at = "2026-10-03T00:00:00.000Z";
+    const seeded = new Database(before.databasePath);
+    try {
+      migrateRuntimeDatabase(seeded, 100);
+      seeded.pragma("foreign_keys = ON");
+      cloneRow(seeded, "projects", "fixture-project-006", {
+        id: projectId, path: before.workspacePath, normalized_path: before.workspacePath.toLowerCase(),
+      });
+      cloneRow(seeded, "conversations", "fixture-conversation-006", { id: watchedId, project_id: projectId, title: "Main chat" });
+      cloneRow(seeded, "conversations", "fixture-conversation-006", {
+        id: watcherId, project_id: projectId, title: "Watcher · Reviewer · Main chat", interaction_mode: "plan", access_mode: "supervised",
+      });
+      seeded.prepare(`
+        INSERT INTO watcher_links (
+          id, watcher_conversation_id, watched_conversation_id, project_id, preset, sharing_json, budgets_json,
+          status, wake_allowance, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'reviewer', ?, ?, 'watching', 30, ?, ?)
+      `).run(note.linkId, watcherId, watchedId, projectId, JSON.stringify(DEFAULT_WATCHER_SHARING), JSON.stringify(DEFAULT_WATCHER_BUDGETS), at, at);
+      expect((seeded.pragma("table_info(watcher_links)") as { name: string }[]).some(({ name }) => name === "read_only")).toBe(false);
+      expect((seeded.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version).toBe(100);
+    } finally {
+      seeded.close();
+    }
+    const store = new RuntimeStore(before.databasePath, before.workspacePath, { recoverInterruptedRuns: false });
+    try {
+      expect(store.watcherLinks.get(note.linkId)).toMatchObject({ readOnly: true, status: "watching" });
+      expect(store.watcherLinks.policyForConversation(watcherId)).toEqual({ linkId: note.linkId, status: "watching", readOnly: true });
+    } finally {
+      store.close();
+    }
+    const migrated = new Database(before.databasePath);
+    try {
+      expect((migrated.prepare("SELECT MAX(version) AS version FROM schema_migrations").get() as { version: number }).version)
+        .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+      expect(CURRENT_DATABASE_SCHEMA_VERSION).toBe(101);
+      const column = (migrated.pragma("table_info(watcher_links)") as { name: string; type: string; notnull: number; dflt_value: string | null }[])
+        .find(({ name }) => name === "read_only");
+      expect(column).toMatchObject({ type: "INTEGER", notnull: 1, dflt_value: "1" });
+      expect(migrated.prepare("SELECT read_only FROM watcher_links WHERE id = ?").get(note.linkId)).toEqual({ read_only: 1 });
+      const setAccess = migrated.prepare("UPDATE watcher_links SET read_only = ? WHERE id = ?");
+      expect(() => setAccess.run(0, note.linkId)).not.toThrow();
+      expect(() => setAccess.run(2, note.linkId)).toThrow(/CHECK constraint failed/u);
+      expect(() => setAccess.run(null, note.linkId)).toThrow(/NOT NULL constraint failed/u);
+      expect(migrated.pragma("foreign_key_check")).toEqual([]);
+      expect(migrated.pragma("integrity_check", { simple: true })).toBe("ok");
+    } finally {
+      migrated.close();
+    }
+  });
 });

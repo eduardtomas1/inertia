@@ -37,10 +37,11 @@ export function useWatcherSurface(): WatcherSurfaceModel | null {
 
 export function useWatcherRunLock(conversationId: string | null | undefined): boolean {
   const surface = useContext(WatcherContext);
-  return Boolean(conversationId && surface?.links.byWatcher.has(conversationId));
+  const link = conversationId ? surface?.links.byWatcher.get(conversationId) : undefined;
+  return link !== undefined && link.readOnly !== false;
 }
 
-export const WATCHER_RUN_LOCK_LABEL = "Read-only watcher · Plan · Supervised";
+export const WATCHER_RUN_LOCK_LABEL = "Read-only watcher";
 
 export function watcherDockId(watchedId: string): string {
   return `watcher-dock-${watchedId}`;

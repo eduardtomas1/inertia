@@ -5,10 +5,13 @@ import {
   RefreshCw,
   Wrench,
 } from "lucide-react";
+import { ACCESS_MODE_LABELS } from "@shared/access-labels";
 import type { AccessMode } from "@shared/contracts";
 import { LoadingMark } from "../ui";
 import type { ComposerRouteRepair } from "../../utils/composerReadiness";
 import type { ComposerMenu } from "./types";
+
+export { ACCESS_MODE_LABELS, INTERACTION_MODE_LABELS } from "@shared/access-labels";
 
 export const RESPONSE_SPEED_LABEL = "Response speed";
 
@@ -19,17 +22,17 @@ export const accessOptions: Array<{
 }> = [
   {
     value: "supervised",
-    label: "Supervised",
+    label: ACCESS_MODE_LABELS.supervised,
     description: "Use this provider's restricted mode and native approvals",
   },
   {
     value: "auto-edit",
-    label: "Auto-accept edits",
+    label: ACCESS_MODE_LABELS["auto-edit"],
     description: "Allow edits; other actions follow the provider's policy",
   },
   {
     value: "full",
-    label: "Full access",
+    label: ACCESS_MODE_LABELS.full,
     description: "Bypass provider approval and sandbox protections",
   },
 ];

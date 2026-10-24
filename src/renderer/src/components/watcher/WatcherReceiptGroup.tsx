@@ -28,9 +28,9 @@ function sentNote(item: WatcherFeedItem): string | null {
     : null;
 }
 
-function commandsNote(count: number | null | undefined): string | null {
+function commandsNote(count: number | null | undefined, readOnly: boolean): string | null {
   if (typeof count !== "number" || count <= 0) return null;
-  return `ran ${count} read-only ${count === 1 ? "command" : "commands"}`;
+  return `ran ${count} ${readOnly ? "read-only " : ""}${count === 1 ? "command" : "commands"}`;
 }
 
 function declinedNote(declined: number, ran: string | null): string | null {
@@ -39,16 +39,16 @@ function declinedNote(declined: number, ran: string | null): string | null {
   return `${declined} ${declined === 1 ? "command" : "commands"} declined`;
 }
 
-function commandNotes(ran: number | null | undefined, declined: number): string[] {
-  const commands = commandsNote(ran);
+function commandNotes(ran: number | null | undefined, declined: number, readOnly: boolean): string[] {
+  const commands = commandsNote(ran, readOnly);
   return [commands, declinedNote(declined, commands)].filter((note): note is string => Boolean(note));
 }
 
-function WatcherCheckLine({ item }: { item: WatcherFeedItem }): React.JSX.Element {
+function WatcherCheckLine({ item, readOnly }: { item: WatcherFeedItem; readOnly: boolean }): React.JSX.Element {
   const notes = [
     watcherTriggerText(item.trigger),
     watcherEventsText(item.eventsCovered),
-    ...commandNotes(item.commandsRun, item.commandsDeclined),
+    ...commandNotes(item.commandsRun, item.commandsDeclined, readOnly),
     watcherDigestNote(item),
     sentNote(item),
     guardNote(item),
@@ -73,10 +73,10 @@ function receiptTimes(group: ReceiptGroup): string {
   return `${firstPeriod && firstPeriod === lastPeriod ? firstClock : first}–${last}`;
 }
 
-function receiptSummary(group: ReceiptGroup): string {
+function receiptSummary(group: ReceiptGroup, readOnly: boolean): string {
   const times = group.count === 1 ? "once" : `${group.count} times`;
   const declined = group.items.reduce((sum, { commandsDeclined }) => sum + commandsDeclined, 0);
-  return [`Checked ${times}`, receiptTimes(group), "nothing to report", ...commandNotes(group.commandsRun, declined)].join(" · ");
+  return [`Checked ${times}`, receiptTimes(group), "nothing to report", ...commandNotes(group.commandsRun, declined, readOnly)].join(" · ");
 }
 
 function enterProps(enter: boolean, onEntered: () => void) {
@@ -92,11 +92,13 @@ function enterProps(enter: boolean, onEntered: () => void) {
 
 export function WatcherReceiptGroup({
   group,
+  readOnly,
   motionIndex,
   enter,
   onEntered,
 }: {
   group: ReceiptGroup;
+  readOnly: boolean;
   motionIndex: number;
   enter: boolean;
   onEntered: () => void;
@@ -108,12 +110,12 @@ export function WatcherReceiptGroup({
       {...enterProps(enter, onEntered)}
     >
       <summary>
-        <span className="watcher-receipt-summary">{receiptSummary(group)}</span>
+        <span className="watcher-receipt-summary">{receiptSummary(group, readOnly)}</span>
         <ChevronRight className="watcher-receipt-chevron" size={14} aria-hidden="true" />
       </summary>
       <ol className="watcher-receipt-checks">
         {group.items.map((item) => (
-          <li key={item.wakeId}><WatcherCheckLine item={item} /></li>
+          <li key={item.wakeId}><WatcherCheckLine item={item} readOnly={readOnly} /></li>
         ))}
       </ol>
     </details>
@@ -122,11 +124,13 @@ export function WatcherReceiptGroup({
 
 export function WatcherNoticeLine({
   item,
+  readOnly,
   motionIndex,
   enter,
   onEntered,
 }: {
   item: WatcherFeedItem;
+  readOnly: boolean;
   motionIndex: number;
   enter: boolean;
   onEntered: () => void;
@@ -141,7 +145,7 @@ export function WatcherNoticeLine({
     >
       <span className="watcher-notice-line">
         <span className="watcher-notice-line-title">{outcome === null ? `Check ${item.sequence}` : watcherOutcomeText(outcome)}</span>
-        {outcome !== null && <WatcherCheckLine item={item} />}
+        {outcome !== null && <WatcherCheckLine item={item} readOnly={readOnly} />}
       </span>
     </div>
   );

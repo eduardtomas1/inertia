@@ -1,3 +1,4 @@
+import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { redactHostToolPayload } from "./host-tool-redaction";
 
 const CREDENTIAL_ENVIRONMENT_KEY =
@@ -40,6 +41,23 @@ export class AcpSecretRedactor {
 
   payload<T>(value: T): T {
     return redactHostToolPayload(value, this.secrets);
+  }
+
+  /** Stream text must reach assistantChunk/reasoningChunk before masking. */
+  streamNotification(notification: SessionNotification): SessionNotification {
+    const update = notification.update;
+    if ((update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk")
+      && update.content.type === "text") {
+      // Masking a shorter credential inside one delta can destroy the match
+      // for a longer credential spanning deltas. Keep only this validated text
+      // for the boundary redactor; redact all surrounding metadata as usual.
+      const { text, ...metadata } = update.content;
+      const safe = this.payload({
+        ...notification, update: { ...update, content: { ...metadata, text: "" } },
+      });
+      return { ...safe, update: { ...safe.update, content: { ...safe.update.content, text } } };
+    }
+    return this.payload(notification);
   }
 
   assistantChunk(value: string): string {
@@ -117,54 +135,64 @@ class BoundarySecretRedactor {
 
   private drain(final: boolean, redactPartial?: PartialSecretRedaction): string {
     const root = this.root ??= secretTrie(this.secrets());
+    const text = this.pending;
     if (root.children.size === 0) {
-      const output = this.pending;
       this.pending = "";
-      return output;
+      return text;
     }
-    let cursor = 0;
-    let output = "";
-    while (cursor < this.pending.length) {
+    const runs: SecretRun[] = [];
+    let held = text.length;
+    for (let start = 0; start < held; start += 1) {
       let node = root;
-      let scan = cursor;
-      let lastTerminal = -1;
-      while (scan < this.pending.length) {
-        const next = node.children.get(this.pending[scan]!);
+      let scan = start;
+      let end = -1;
+      while (scan < text.length) {
+        const next = node.children.get(text[scan]!);
         if (!next) break;
         node = next;
         scan += 1;
-        if (node.terminal) lastTerminal = scan;
+        if (node.terminal) end = scan;
       }
-      if (scan < this.pending.length) {
-        if (lastTerminal >= 0) {
-          output += "[redacted]";
-          cursor = lastTerminal;
-        } else {
-          output += this.pending[cursor]!;
-          cursor += 1;
-        }
-        continue;
+      if (scan === text.length && node.children.size > 0) {
+        if (!final) held = start;
+        else if (redactsPartialSecret(redactPartial, scan - start, node)) end = scan;
       }
-      if (node.terminal && (final || node.children.size === 0)) {
-        output += "[redacted]";
-        cursor = scan;
-        continue;
-      }
-      if (!final) break;
-      if (lastTerminal >= 0) {
-        output += "[redacted]";
-        cursor = lastTerminal;
-      } else if (scan > cursor && redactsPartialSecret(redactPartial, scan - cursor, node)) {
-        output += "[redacted]";
-        cursor = scan;
-      } else {
-        output += this.pending[cursor]!;
-        cursor += 1;
+      if (end < 0 || start >= held) continue;
+      const last = runs.at(-1);
+      if (last && start <= last.end) last.end = Math.max(last.end, end);
+      else runs.push({ start, end });
+    }
+    if (!final) {
+      while (runs.length > 0 && runs.at(-1)!.end >= held) held = Math.min(held, runs.pop()!.start);
+      if (held > 0 && isHighSurrogate(text, held - 1) && (held === text.length || isLowSurrogate(text, held))) {
+        held -= 1;
       }
     }
-    this.pending = this.pending.slice(cursor);
+    let output = "";
+    let cursor = 0;
+    for (const run of runs) {
+      output += `${text.slice(cursor, run.start)}[redacted]`;
+      cursor = run.end;
+    }
+    output += text.slice(cursor, held);
+    this.pending = text.slice(held);
     return output;
   }
+}
+
+interface SecretRun {
+  start: number;
+  end: number;
+}
+
+function isHighSurrogate(text: string, index: number): boolean {
+  const unit = text.charCodeAt(index);
+  return unit >= 0xd800 && unit <= 0xdbff;
+}
+
+function isLowSurrogate(text: string, index: number): boolean {
+  const unit = text.charCodeAt(index);
+  return unit >= 0xdc00 && unit <= 0xdfff;
 }
 
 type PartialSecretRedaction = "all" | "significant";

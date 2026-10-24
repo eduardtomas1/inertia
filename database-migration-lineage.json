@@ -757,6 +757,11 @@
       "version": 100,
       "name": "ExtendTodos",
       "digest": "3f96d67c5b005006ad8f4ee324bca1eca8f44e5fddc34fd3bddd9d8ffb925a9f"
+    },
+    {
+      "version": 101,
+      "name": "PersistWatcherAccess",
+      "digest": "313548d431a9d54010e8563c1a3200d1b051e773c68c107d2bf1fd8aa8bdf4cd"
     }
   ]
 }

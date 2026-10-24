@@ -408,6 +408,7 @@ export function WatcherDock({ watchedId, link, surface, dock }: WatcherDockProps
               watchedRunning={watchedRunning}
               steerable={steerable}
               online={surface.online}
+              readOnly={link.readOnly}
             />
           </div>
         </aside>

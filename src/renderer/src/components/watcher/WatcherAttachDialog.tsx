@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
+import { accessModeUnavailableReason } from "@shared/access-modes";
 import type {
+  AccessMode,
   AppSettings,
   AppSnapshot,
+  InteractionMode,
   ModelSelection,
   ProviderId,
   ServerEvent,
 } from "@shared/contracts";
-import { providerIdForHarness } from "@shared/model-routing";
+import {
+  fastModeProviderValue,
+  providerIdForHarness,
+  withModelSelectionFastMode,
+} from "@shared/model-routing";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import {
   clampWatcherBudgets,
@@ -19,11 +26,13 @@ import {
   WATCHER_PRESET_LABELS,
   WATCHER_PRESETS,
   watcherHarnessAllowed,
+  watcherReadOnlyEnforcement,
   type WatcherBudgets,
   type WatcherDeliveryPolicy,
   type WatcherLinkView,
   type WatcherPreset,
   type WatcherPrivateConnect,
+  type WatcherReadOnlyEnforcement,
   type WatcherSharing,
 } from "@shared/watcher";
 import { INTERFACE_LOCALE } from "../../lib/locale";
@@ -42,10 +51,12 @@ import {
   selectedModelSearchRoute,
   type ComposerModelRoute,
 } from "../../utils/modelChooserRoutes";
+import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import { captureModalFocus, trapModalFocus } from "../../utils/modalFocus";
 import { DialogPresence } from "../DialogPresence";
 import { DialogShell } from "../DialogShell";
 import { ModelChooser } from "../ModelChooser";
+import { ACCESS_MODE_LABELS, INTERACTION_MODE_LABELS } from "../composer/config";
 import { LoadingMark, Switch } from "../ui";
 import type { WatcherAttachTarget } from "../../hooks/useWatcherSurface";
 import "./WatcherAttachDialog.css";
@@ -76,6 +87,35 @@ export interface WatcherAttachHostProps {
 
 const WATCHER_READ_ONLY_STATEMENT = "It reads and reports: it may run read-only commands and never edits files or changes the workspace.";
 const ATTACH_FAILED = "The watcher could not be attached.";
+const READ_ONLY_ACCESS_NOTE = "Reads the chat and the project's files. Can't change them.";
+const CHAT_ACCESS_NOTE = "The watcher can use its tools like a chat. Approvals appear in the watcher chat.";
+const READ_ONLY_UNAVAILABLE = "Read-only isn't available on this agent.";
+const ACCESS_FROM_FAVORITE = "Set from the favorite.";
+
+function readOnlyStatement(tier: WatcherReadOnlyEnforcement, agent: string, harnessId: string): string {
+  if (tier === "inertia" && harnessId === "codex-app-server") {
+    return `Inertia enforces it: approvals are declined, ${agent} runs its own known-safe commands inside its read-only sandbox, and a change to files pauses the watcher.`;
+  }
+  if (tier === "inertia") {
+    return "Inertia enforces it: approvals are declined, commands come from a read-only allowlist, and a change to files pauses the watcher.";
+  }
+  if (tier === "approvals") {
+    return `Inertia declines what ${agent} reports and pauses the watcher if files change. ${agent} controls its own reads and commands; there is no sandbox.`;
+  }
+  return `${agent} runs in its own plan mode. Inertia can't decline its actions; it stops a check after an edit it sees and pauses the watcher if files change. It can't read more of the main chat.`;
+}
+
+type WatcherAccess = "read-only" | AccessMode;
+type WatcherSpeed = "standard" | "fast";
+
+const ACCESS_CHOICES: readonly WatcherAccess[] = ["read-only", "supervised", "auto-edit", "full"];
+const MODE_CHOICES: readonly InteractionMode[] = ["build", "plan"];
+const SPEED_CHOICES: readonly WatcherSpeed[] = ["standard", "fast"];
+const SPEED_LABELS: Readonly<Record<WatcherSpeed, string>> = { standard: "Standard", fast: "Fast" };
+
+function accessLabel(access: WatcherAccess): string {
+  return access === "read-only" ? "Read-only" : ACCESS_MODE_LABELS[access];
+}
 
 const SHARING_FIELDS: ReadonlyArray<{ key: keyof WatcherSharing; label: string }> = [
   { key: "brief", label: "The brief" },
@@ -161,6 +201,63 @@ function initialSelection(
   return ready ? cloneSelection(ready.route.selection) : fallback;
 }
 
+function WatcherChoiceGroup<T extends string>({
+  id,
+  title,
+  options,
+  value,
+  label,
+  disabled,
+  unavailable,
+  description,
+  note,
+  onPick,
+}: {
+  id: string;
+  title: string;
+  options: readonly T[];
+  value: T;
+  label: (option: T) => string;
+  disabled: boolean;
+  unavailable?: T | null;
+  description?: string;
+  note?: string | null;
+  onPick: (option: T) => void;
+}): React.JSX.Element {
+  const available = useMemo(() => options.filter((option) => option !== unavailable), [options, unavailable]);
+  const radios = useRovingRadios(available, value, onPick);
+  const labelId = `${id}-label`;
+  const descriptionId = `${id}-description`;
+  const noteId = `${id}-note`;
+  const describedBy = [description ? descriptionId : null, note ? noteId : null].filter(Boolean).join(" ");
+  return (
+    <section className="watcher-attach-section" aria-labelledby={labelId}>
+      <h3 id={labelId}>{title}</h3>
+      <div
+        className="watcher-attach-choices"
+        role="radiogroup"
+        aria-labelledby={labelId}
+        aria-describedby={describedBy || undefined}
+        {...radios.groupProps}
+      >
+        {options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            className="watcher-attach-preset"
+            disabled={disabled || option === unavailable}
+            {...radios.radioProps(option)}
+          >
+            {label(option)}
+          </button>
+        ))}
+      </div>
+      {description && <p id={descriptionId} className="watcher-attach-hint">{description}</p>}
+      {note && <p id={noteId} className="watcher-attach-hint">{note}</p>}
+    </section>
+  );
+}
+
 function WatcherBudgetFields({
   drafts,
   budgets,
@@ -234,6 +331,12 @@ export function WatcherAttachDialog({
   const [privateConnect, setPrivateConnect] = useState<WatcherPrivateConnect>("inherit");
   const [delivery, setDelivery] = useState<WatcherDeliveryPolicy>("manual");
   const [initialReview, setInitialReview] = useState(false);
+  const [access, setAccess] = useState<WatcherAccess>(() =>
+    selection && watcherReadOnlyEnforcement(selection.harnessId) === null ? "supervised" : "read-only");
+  const [accessFromFavorite, setAccessFromFavorite] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const [mode, setMode] = useState<InteractionMode>(() =>
+    selection && watcherReadOnlyEnforcement(selection.harnessId) === null ? "plan" : "build");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const privateConnectConfigured = usePrivateConnectConfigured();
@@ -253,6 +356,33 @@ export function WatcherAttachDialog({
   const selectedRoute = selection
     ? selectedModelSearchRoute(choices.map(({ route }) => route), selection)
     : null;
+  const routeProviderId = selection ? providerIdForHarness(selection.harnessId) : null;
+  const watchedProviderId = watched?.providerId ?? null;
+  const routeState = useMemo(() => {
+    const conversationProviderId = routeProviderId ?? watchedProviderId;
+    return selection && conversationProviderId ? resolveComposerRouteState({
+      conversationProviderId,
+      selection,
+      providers: snapshot.providers,
+      profiles: snapshot.backendProfiles ?? [],
+    }) : null;
+  }, [routeProviderId, selection, snapshot.backendProfiles, snapshot.providers, watchedProviderId]);
+  const routeModel = routeState?.model;
+  const reasoningOptions = routeModel?.reasoningOptions;
+  const reasoningValues = useMemo(() => reasoningOptions?.map(({ value }) => value) ?? [], [reasoningOptions]);
+  const defaultReasoning = routeModel?.defaultReasoningEffort ?? "";
+  const selectedReasoning = selection?.reasoningEffort ?? defaultReasoning;
+  const fastMode = routeModel?.fastMode ?? null;
+  const speed: WatcherSpeed = selection && fastModeProviderValue(selection) !== null ? "fast" : "standard";
+  const readOnly = access === "read-only";
+  const tier = selection ? watcherReadOnlyEnforcement(selection.harnessId) : null;
+  const agentName = selectedChoice?.route.providerLabel ?? selectedRoute?.providerLabel ?? "This agent";
+  const supervisionUnavailable = access === "supervised" && routeProviderId
+    ? accessModeUnavailableReason(routeProviderId, access)
+    : null;
+  const accessNote = readOnly
+    ? tier && selection ? `${READ_ONLY_ACCESS_NOTE} ${readOnlyStatement(tier, agentName, selection.harnessId)}` : READ_ONLY_ACCESS_NOTE
+    : [tier === null ? READ_ONLY_UNAVAILABLE : null, CHAT_ACCESS_NOTE, supervisionUnavailable].filter(Boolean).join(" ");
   const budgets = clampWatcherBudgets(Object.fromEntries(
     BUDGET_FIELDS.map(({ key }) => [key, budgetDrafts[key].trim() === "" ? undefined : Number(budgetDrafts[key])]),
   ) as Partial<Record<keyof WatcherBudgets, number>>);
@@ -348,6 +478,9 @@ export function WatcherAttachDialog({
         privateConnect,
         delivery,
         initialReview: initialReview && hasReviewableTurn,
+        ...(readOnly
+          ? { readOnly: true }
+          : { readOnly: false, interactionMode: mode, accessMode: access }),
       },
     }).then((event) => {
       const { result } = resultEvent(event);
@@ -372,7 +505,7 @@ export function WatcherAttachDialog({
       bodyClassName="watcher-attach-body"
       titleId="watcher-attach-title"
       title="Add a watcher"
-      description={WATCHER_READ_ONLY_STATEMENT}
+      description={readOnly && tier === "inertia" ? WATCHER_READ_ONLY_STATEMENT : undefined}
       closeLabel="Close"
       closeInert={submitting}
       onClose={onClose}
@@ -428,9 +561,27 @@ export function WatcherAttachDialog({
           <ModelChooser
             routes={choices.map(({ route }) => route)}
             selectedRoute={selectedRoute}
+            configuration={readOnly ? undefined : {
+              accessMode: access,
+              interactionMode: mode,
+              fastMode: speed === "fast",
+            }}
             disabled={submitting}
             onSelect={(route) => {
-              if (route.selectable) setSelection(cloneSelection(route.selection));
+              if (!route.selectable) return;
+              setSelection(cloneSelection(route.selection));
+              if (route.configuration) {
+                const favoriteAccess = route.configuration.accessMode;
+                setAccess(favoriteAccess);
+                setMode(route.configuration.interactionMode);
+                if (watcherReadOnlyEnforcement(route.harnessId) === null) return;
+                setAccessFromFavorite(true);
+                const text = `Access set to ${accessLabel(favoriteAccess)} from the favorite.`;
+                setAnnouncement((current) => current === text ? text.slice(0, -1) : text);
+              } else if (readOnly && watcherReadOnlyEnforcement(route.harnessId) === null) {
+                setAccess("supervised");
+                setMode("plan");
+              }
             }}
           />
         ) : null}
@@ -450,6 +601,63 @@ export function WatcherAttachDialog({
           </div>
         )}
       </section>
+
+      <WatcherChoiceGroup
+        id="watcher-attach-access"
+        title="Access"
+        options={ACCESS_CHOICES}
+        value={access}
+        label={accessLabel}
+        disabled={submitting}
+        unavailable={tier === null ? "read-only" : null}
+        description={accessNote}
+        note={accessFromFavorite ? ACCESS_FROM_FAVORITE : null}
+        onPick={(option) => {
+          setAccess(option);
+          setAccessFromFavorite(false);
+        }}
+      />
+
+      {!readOnly && (
+        <WatcherChoiceGroup
+          id="watcher-attach-mode"
+          title="Mode"
+          options={MODE_CHOICES}
+          value={mode}
+          label={(option) => INTERACTION_MODE_LABELS[option]}
+          disabled={submitting}
+          onPick={setMode}
+        />
+      )}
+
+      {reasoningOptions && reasoningOptions.length > 0 && (
+        <WatcherChoiceGroup
+          id="watcher-attach-reasoning"
+          title="Reasoning"
+          options={reasoningValues}
+          value={selectedReasoning}
+          label={(value) => {
+            const name = reasoningOptions.find((option) => option.value === value)?.label ?? value;
+            return value === defaultReasoning ? `${name} · Default` : name;
+          }}
+          disabled={submitting}
+          onPick={(reasoningEffort) => setSelection((current) => current ? { ...current, reasoningEffort } : current)}
+        />
+      )}
+
+      {fastMode && (
+        <WatcherChoiceGroup
+          id="watcher-attach-speed"
+          title="Speed"
+          options={SPEED_CHOICES}
+          value={speed}
+          label={(option) => SPEED_LABELS[option]}
+          disabled={submitting}
+          onPick={(option) => setSelection((current) => current
+            ? withModelSelectionFastMode(current, option === "fast" ? fastMode.providerValue : null)
+            : current)}
+        />
+      )}
 
       <section className="watcher-attach-section">
         <label className="watcher-attach-label" htmlFor="watcher-attach-instructions">
@@ -528,6 +736,7 @@ export function WatcherAttachDialog({
       </details>
 
       {error && <p className="watcher-attach-error" role="alert">{error}</p>}
+      <p className="visually-hidden" role="status" aria-live="polite">{announcement}</p>
     </DialogShell>
   );
 }

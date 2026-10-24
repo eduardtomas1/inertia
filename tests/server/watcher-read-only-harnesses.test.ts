@@ -11,15 +11,29 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentTurn, ModelSelection, ProviderId, ServerEvent } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { DEFAULT_WATCHER_BUDGETS, DEFAULT_WATCHER_SHARING } from "../../src/shared/watcher";
+import { codexAccessPolicy } from "../../src/server/codex/app-server-config";
+import { codexAutoApprovesFileChange } from "../../src/server/codex/approvals";
 import { CODEX_WATCHER_DISABLED_CONFIG_KEYS } from "../../src/server/codex/read-only-thread-config";
 import { RuntimeStore } from "../../src/server/database";
 import { captureCheckoutFingerprint } from "../../src/server/git/checkout-fingerprint";
 import { validateProviderRunInput } from "../../src/server/provider/adapters";
-import { CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS, createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
+import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
+import {
+  CLAUDE_WATCHER_PLAN_REFUSAL,
+  CLAUDE_WATCHER_QUESTION_REFUSAL,
+  CLAUDE_WATCHER_WRITE_REFUSAL,
+} from "../../src/server/provider/claude-watcher-permissions";
+import { readOnlyCommandReminder } from "../../src/server/runtime/watcher/read-only-commands";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
 import { openCodePermissions, openCodeWatcherCommandAllowed } from "../../src/server/provider/opencode-host-tools";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
+import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED } from "../../src/server/provider/acp-watcher";
+import { createAntigravityCliHarness } from "../../src/server/provider/antigravity-cli-harness";
+import { antigravityArguments, antigravityFileMutationTool } from "../../src/server/provider/antigravity-stream";
+import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
+import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
+import { watcherReplyDefersToPlan } from "../../src/server/runtime/watcher/watcher-outcome";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import { watcherActivityMayWrite } from "../../src/server/runtime/watcher/watcher-checkout-guard";
@@ -31,6 +45,7 @@ import {
   portableNodeExecutable,
   removePortableFixture,
   waitFor,
+  writeNodeFlagExecutable,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput, resolveNativeModelRoute } from "./model-route-fixture";
@@ -87,6 +102,7 @@ interface WatcherHarnessRuntime {
   inputs: ProviderRunInput[];
   events: ServerEvent[];
   violations: ReadOnlyWatcherViolation[];
+  handoffs: string[];
   startCheck(): AgentTurn;
   settled(turnId: string): Promise<AgentTurn>;
   activities(): Array<{ kind: string; status: string; title: string }>;
@@ -119,6 +135,7 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
   const inputs: ProviderRunInput[] = [];
   const events: ServerEvent[] = [];
   const violations: ReadOnlyWatcherViolation[] = [];
+  const handoffs: string[] = [];
   const provider: TurnProviderRuntime = {
     resolveModelRoute: resolveNativeModelRoute,
     harnessIdFor: (input) => manager.harnessIdFor(input),
@@ -142,6 +159,7 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
     broadcastSnapshot: () => undefined,
     providerInfo: () => [],
     onReadOnlyViolation: (_turn, violation) => { violations.push(violation); },
+    onPlanHandoff: (_turn, text) => { handoffs.push(text); },
   }, {
     scheduler: { setTimeout: (callback, delayMs) => setTimeout(callback, delayMs), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) },
     clock: () => new Date(),
@@ -162,6 +180,7 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
     inputs,
     events,
     violations,
+    handoffs,
     startCheck() {
       expect(store.watcherLinks.transition(link.id, ["watching", "waking"], { status: "waking" }, now())).not.toBeNull();
       const wake = store.watcherLinks.createWake({
@@ -180,6 +199,7 @@ function watcherHarnessRuntime(root: string, repo: string, manager: ProviderMana
         content: "Check 1 for \"Fix the parser\". Review src/parser.ts.",
         authorizedWatcherWakeId: wake!.wakeId,
         activateConversation: false,
+        systemInstructions: [{ label: "inertia-watcher", text: WATCHER_ROLE }],
       });
       store.watcherLinks.attachWakeTurn(wake!.wakeId, queued.turn.id, now());
       expect(controller.start(queued.turn.id)).toBe(true);
@@ -205,9 +225,11 @@ function expectWatcherRunInput(input: ProviderRunInput | undefined, providerId: 
   expect(input).toMatchObject({ providerId, interactionMode: "plan", access: "supervised", readOnlyProfile: "watcher" });
 }
 
-const CLAUDE_PLAN_MODE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Grep", "Glob"]);
+const WATCHER_ROLE = "You are the fixture watcher. Answer SILENT or a finding.";
+const CLAUDE_DEFAULT_MODE_READ_TOOLS: ReadonlySet<string> = new Set(["Read", "Grep", "Glob", "LS"]);
 
 interface ClaudeQueryOptions {
+  systemPrompt?: { type?: string; append?: string; snapshot?: boolean };
   permissionMode?: string;
   planModeInstructions?: string;
   allowDangerouslySkipPermissions?: boolean;
@@ -267,7 +289,7 @@ function claudeManager(script: (sdk: ClaudeScript) => AsyncGenerator<SDKMessage>
       const sdk: ClaudeScript = {
         options: queryOptions,
         permission: async (tool, input, toolUseId) => {
-          if (queryOptions.permissionMode === "plan" && CLAUDE_PLAN_MODE_READ_TOOLS.has(tool)) {
+          if (queryOptions.permissionMode === "default" && CLAUDE_DEFAULT_MODE_READ_TOOLS.has(tool)) {
             return { behavior: "allow", updatedInput: input };
           }
           return await queryOptions.canUseTool!(tool, input, { signal, toolUseID: toolUseId, requestId: toolUseId })
@@ -295,7 +317,7 @@ function grepRepository(repo: string, pattern: string): string {
 }
 
 describe("watcher turns on the Claude Agent SDK harness", () => {
-  it("runs in plan mode, reads without a prompt and declines a write through the read-only policy", async () => {
+  it("runs in default mode, reads without a prompt and declines writes, questions and plan hand-offs with their reasons", async () => {
     const root = portableFixtureRoot("watcher claude");
     roots.push(root);
     const repo = repository(root, []);
@@ -316,9 +338,17 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
         outputs.push(output);
         yield claudeToolResult(id, output);
       }
-      const write = { file_path: parserPath, content: OVERWRITE };
-      decisions.Write = await sdk.permission("Write", write, "toolu-write");
-      if (decisions.Write.behavior === "allow") writeFileSync(parserPath, OVERWRITE);
+      for (const [id, tool, input] of [
+        ["toolu-write", "Write", { file_path: parserPath, content: OVERWRITE }],
+        ["toolu-ask", "AskUserQuestion", { questions: [{ question: "Which file?", header: "Scope", options: [{ label: "A", description: "a" }], multiSelect: false }] }],
+        ["toolu-plan", "ExitPlanMode", { plan: "- risk: the parser splits on single spaces only" }],
+      ] as const) {
+        yield claudeToolUse(id, tool, input);
+        decisions[tool] = await sdk.permission(tool, input, id);
+        if (tool === "Write" && decisions.Write!.behavior === "allow") writeFileSync(parserPath, OVERWRITE);
+        const result = decisions[tool]!;
+        yield claudeToolResult(id, result.behavior === "deny" ? result.message : "allowed", result.behavior === "deny");
+      }
       yield claudeText("SILENT");
       yield claudeSuccessResult("SILENT", "completed");
     });
@@ -328,20 +358,34 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     const turn = await runtime.settled(runtime.startCheck().id);
 
     expectWatcherRunInput(runtime.inputs[0], "claude");
-    expect(record.options[0]).toMatchObject({ permissionMode: "plan", allowDangerouslySkipPermissions: false, settingSources: [] });
+    expect(runtime.inputs[0]!.systemInstruction).toBe(`[inertia-watcher]\n${WATCHER_ROLE}`);
+    expect(runtime.inputs[0]!.prompt).not.toContain(WATCHER_ROLE);
+    expect(record.options[0]).toMatchObject({ permissionMode: "default", allowDangerouslySkipPermissions: false, settingSources: [] });
+    expect(record.options[0]).not.toHaveProperty("planModeInstructions");
+    expect(record.options[0]!.systemPrompt).toMatchObject({ type: "preset", snapshot: false });
+    expect(record.options[0]!.systemPrompt!.append).toContain(WATCHER_ROLE);
     expect(typeof record.options[0]!.canUseTool).toBe("function");
     expect(decisions.Read).toMatchObject({ behavior: "allow" });
     expect(decisions.Grep).toMatchObject({ behavior: "allow" });
     expect(outputs[0]).toBe(PARSER_SOURCE);
     expect(outputs[1]).toContain("src/parser.ts:1:export function parse");
-    expect(decisions.Write).toMatchObject({ behavior: "deny", message: "User declined tool execution." });
-    expect(runtime.violations).toEqual([expect.objectContaining({ linkId: runtime.linkId, kind: "write-attempt", stopped: false })]);
+    expect(decisions.Write).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_WRITE_REFUSAL });
+    expect(decisions.AskUserQuestion).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_QUESTION_REFUSAL });
+    expect(decisions.ExitPlanMode).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_PLAN_REFUSAL });
+    expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped])).toEqual([
+      ["write-attempt", false],
+      ["command-attempt", false],
+    ]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
-    expect(runtime.activities()).toEqual([
+    expect(runtime.events.some((event) => event.type === "agent.input.requested")).toBe(false);
+    expect(runtime.activities()).toEqual(expect.arrayContaining([
       { kind: "tool", status: "completed", title: "Read" },
       { kind: "tool", status: "completed", title: "Grep" },
       { kind: "status", status: "completed", title: "Needed permission: Claude wants to use Write — declined (watchers are read-only)" },
-    ].sort(byActivity));
+      { kind: "status", status: "completed", title: "Needed permission: Claude wants to use ExitPlanMode — declined (watchers are read-only)" },
+    ]));
+    expect(runtime.store.watcherLinks.digest.plan(runtime.watcherId, turn.id)?.explanation)
+      .toBe("- risk: the parser splits on single spaces only");
     expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
     expect(before.status).toBe("");
@@ -377,13 +421,16 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
 
     const turn = await runtime.settled(runtime.startCheck().id);
 
-    expect(record.options[0]).toMatchObject({ permissionMode: "plan", planModeInstructions: CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS });
+    expect(record.options[0]).toMatchObject({ permissionMode: "default" });
+    expect(record.options[0]).not.toHaveProperty("planModeInstructions");
     expect(record.options[0]!.env?.GIT_OPTIONAL_LOCKS).toBe("0");
-    expect(CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS).toContain("ExitPlanMode");
     expect(decisions["toolu-status"]).toMatchObject({ behavior: "allow" });
     expect(decisions["toolu-cat"]).toMatchObject({ behavior: "allow" });
     expect(outputs["toolu-cat"]).toBe(PARSER_SOURCE);
-    expect(decisions["toolu-rewrite"]).toMatchObject({ behavior: "deny", message: "User declined tool execution." });
+    expect(decisions["toolu-rewrite"]).toEqual({
+      behavior: "deny",
+      message: `The command uses shell syntax that watchers cannot run. ${readOnlyCommandReminder("posix")}`,
+    });
     expect(runtime.violations).toEqual([expect.objectContaining({ linkId: runtime.linkId, kind: "command-attempt", stopped: false })]);
     expect(runtime.events.some((event) => event.type === "agent.approval.requested")).toBe(false);
     const commands = runtime.store.conversationDetail(runtime.watcherId)!.activities.filter(({ kind }) => kind === "command");
@@ -469,34 +516,37 @@ describe("watcher turns on the Claude Agent SDK harness", () => {
     expect(record.options[0]!.env?.GIT_OPTIONAL_LOCKS).toBeUndefined();
   });
 
-  it("stops a started edit before it runs, cancels the query and shuts down cleanly", async () => {
-    const root = portableFixtureRoot("watcher claude cancel");
+  it("lets the broker decline a started edit with a reason instead of stopping the check", async () => {
+    const root = portableFixtureRoot("watcher claude edit");
     roots.push(root);
     const repo = repository(root, []);
     const parserPath = join(repo, "src", "parser.ts");
-    let abortedBeforeEdit: boolean | null = null;
-    const { manager, record } = claudeManager(async function* (sdk) {
+    let decision: PermissionResult | null = null;
+    const { manager } = claudeManager(async function* (sdk) {
       yield claudeSystem("init");
       yield claudeStream({ type: "message_start", message: { id: "msg-edit", content: [] } });
       yield claudeStream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu-edit", name: "Edit", input: {} } });
-      abortedBeforeEdit = await sdk.aborted();
-      if (!abortedBeforeEdit) writeFileSync(parserPath, OVERWRITE);
+      const input = { file_path: parserPath, old_string: "split", new_string: "splice" };
+      decision = await sdk.permission("Edit", input, "toolu-edit");
+      if (decision.behavior === "allow") writeFileSync(parserPath, OVERWRITE);
+      yield claudeToolResult("toolu-edit", decision.behavior === "deny" ? decision.message : "edited", decision.behavior === "deny");
+      yield claudeText("- risk: the parser splits on single spaces only");
+      yield claudeSuccessResult("- risk: the parser splits on single spaces only", "completed");
     });
     const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }));
     const before = await checkoutState(repo);
 
     const turn = await runtime.settled(runtime.startCheck().id);
 
-    expect(abortedBeforeEdit).toBe(true);
-    expect(turn).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
-    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", stopped: true })]);
-    expect(record.closed + record.interrupted).toBeGreaterThan(0);
+    expect(decision).toEqual({ behavior: "deny", message: CLAUDE_WATCHER_WRITE_REFUSAL });
+    expect(turn).toMatchObject({ status: "completed" });
+    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", stopped: false })]);
     expect(manager.isRunning(runtime.watcherId)).toBe(false);
     expect(await checkoutState(repo)).toEqual(before);
   });
 });
 
-type CodexScenario = "read-then-write" | "malformed";
+type CodexScenario = "read-then-write" | "malformed" | "edit";
 
 function codexAppServer(root: string, repo: string, scenario: CodexScenario) {
   const command = portableNodeExecutable(root, "codex");
@@ -541,6 +591,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: { turn: turn("inProgress") } });
     send({ method: "turn/started", params: { threadId, turn: turn("inProgress") } });
     if (scenario === "malformed") return process.stdout.write("{not-json}\\n");
+    if (scenario === "edit") {
+      const change = { id: "edit-1", type: "fileChange", changes: [{ path: target, kind: { type: "update", move_path: null }, diff: "" }] };
+      item("item/started", { ...change, status: "inProgress" });
+      return send({ id: "approval-edit", method: "item/fileChange/requestApproval", params: {
+        threadId, turnId, itemId: "edit-1", startedAtMs: Date.now(), reason: "Fix the parser", grantRoot: null,
+        availableDecisions: ["accept", "decline", "cancel"],
+      } });
+    }
     // A known-safe read runs inside the read-only sandbox without an approval.
     item("item/started", { id: "read-1", type: "commandExecution", command: "cat src/parser.ts", status: "inProgress" });
     item("item/completed", { id: "read-1", type: "commandExecution", command: "cat src/parser.ts", status: "completed", aggregatedOutput: fs.readFileSync(target, "utf8") });
@@ -550,6 +608,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       command: "tee src/parser.ts", cwd: process.cwd(), commandActions: [], reason: "Rewrite the parser",
       availableDecisions: ["accept", "decline", "cancel"],
     } });
+  }
+  if (message.id === "approval-edit") {
+    const accepted = message.result?.decision === "accept";
+    if (accepted) fs.writeFileSync(target, ${JSON.stringify(OVERWRITE)});
+    item("item/completed", { id: "edit-1", type: "fileChange", changes: [], status: accepted ? "completed" : "declined" });
+    return finish();
   }
   if (message.id === "approval-write") {
     const accepted = message.result?.decision === "accept";
@@ -605,10 +669,14 @@ describe("watcher turns on the Codex app-server harness", () => {
         default_permissions: ":read-only",
         mcp_servers: { filesystem: { enabled: false }, github: { enabled: false } },
       },
+      developerInstructions: `[inertia-watcher]\n${WATCHER_ROLE}`,
     });
+    expect((threadStart.config as Record<string, unknown>)["tools.experimental_request_user_input.enabled"]).toBe(false);
     expect(CODEX_WATCHER_DISABLED_CONFIG_KEYS).toEqual(expect.arrayContaining([
       "features.apps", "features.plugins", "features.hooks", "features.multi_agent", "features.standalone_web_search",
+      "tools.experimental_request_user_input.enabled",
     ]));
+    expect(String((turnStart.input as Array<{ text: string }>)[0]!.text)).not.toContain(WATCHER_ROLE);
     expect(turnStart).toEqual({
       threadId: "watcher-thread",
       input: [expect.objectContaining({ type: "text" })],
@@ -617,7 +685,6 @@ describe("watcher turns on the Codex app-server harness", () => {
       sandboxPolicy: { type: "readOnly", networkAccess: false },
       model: "model-a",
       summary: "auto",
-      collaborationMode: { mode: "plan", settings: { model: "model-a", reasoning_effort: null, developer_instructions: null } },
     });
     expect(requests.find(({ id }) => id === "approval-write")).toMatchObject({ result: { decision: "decline" } });
     expect(runtime.activities()).toEqual([
@@ -639,6 +706,36 @@ describe("watcher turns on the Codex app-server harness", () => {
     expect(await checkoutState(repo)).toEqual(before);
     await codex.manager.disposeAll();
     await expectProcessGone(codex.pid());
+  });
+
+  it("declines a file change that started before its approval as a write attempt and keeps checking", async () => {
+    const root = portableFixtureRoot("watcher codex edit");
+    roots.push(root);
+    const repo = repository(root, ["app-server"]);
+    const codex = codexAppServer(root, repo, "edit");
+    const runtime = watcherHarnessRuntime(root, repo, codex.manager, providerNativeModelSelection({ providerId: "codex", modelId: "model-a" }));
+    const before = await checkoutState(repo);
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expect(codex.requests().find(({ id }) => id === "approval-edit")).toMatchObject({ result: { decision: "decline" } });
+    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", stopped: false })]);
+    expect(turn).toMatchObject({ status: "completed" });
+    expect(await checkoutState(repo)).toEqual(before);
+    await codex.manager.disposeAll();
+  });
+
+  it("keeps a watcher thread in the read-only sandbox without network whatever access its input names", () => {
+    for (const access of ["supervised", "auto-edit", "full"] as const) {
+      expect(codexAccessPolicy({ access, planMode: false, readOnlyProfile: "watcher" })).toEqual({
+        approvalPolicy: "untrusted",
+        threadSandbox: "read-only",
+        turnSandboxPolicy: { type: "readOnly", networkAccess: false },
+      });
+    }
+    expect(codexAccessPolicy({ access: "full", planMode: false })).toMatchObject({ threadSandbox: "danger-full-access" });
+    expect(codexAutoApprovesFileChange("item/fileChange/requestApproval", {}, { access: "auto-edit", planMode: false, readOnlyProfile: "watcher" }))
+      .toBe(false);
   });
 
   it("disables the user's MCP servers, apps, plugins, hooks and web search on a resumed watcher thread too", async () => {
@@ -711,6 +808,7 @@ interface OpenCodeCapture {
   offeredTools?: string[];
   calls: Array<{ tool: string; action: string; reply?: string }>;
   aborted?: boolean;
+  prompt?: { agent: string | null; system: string | null };
   gitOptionalLocks: string | null;
   ripgrepConfigPath: string | null;
 }
@@ -807,6 +905,8 @@ const server = http.createServer((req, res) => {
     if (req.method === "GET" && url.pathname === "/event") { events = res; res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" }); return res.flushHeaders(); }
     if (req.method === "POST" && url.pathname === "/session/" + sessionID + "/prompt_async") {
       promptMessageID = parsed.messageID;
+      capture.prompt = { agent: parsed.agent ?? null, system: parsed.system ?? null };
+      save();
       json(res, undefined, 204);
       sendEvent({ type: "message.updated", properties: { sessionID, info: { id: "assistant-1", parentID: promptMessageID, sessionID, role: "assistant", tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } } } });
       return step(0);
@@ -909,6 +1009,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ]);
     expect(capture.offeredTools).toEqual(["bash", "read", "glob", "grep", "list"]);
+    expect(capture.prompt).toEqual({ agent: null, system: `[inertia-watcher]\n${WATCHER_ROLE}` });
     expect(capture.gitOptionalLocks).toBe("0");
     expect(capture.calls).toEqual([
       { tool: "read", action: "allow" },
@@ -1081,5 +1182,215 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     expect(() => validateProviderRunInput(input("plan", "full"))).toThrow("The read-only profile is invalid.");
     expect(() => validateProviderRunInput({ ...input("plan", "supervised"), readOnlyProfile: "other" as never }))
       .toThrow("The read-only profile is invalid.");
+  });
+});
+
+function acpWatcherAgent(root: string, repo: string, provider: "cursor" | "kimi", prompt: string) {
+  const command = portableNodeExecutable(root, provider === "cursor" ? "cursor-agent" : "kimi");
+  const capturePath = join(root, `${provider}-capture.json`);
+  writeNodeSubcommand(repo, "acp", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const captured = [];
+const save = () => fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(captured));
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "${provider}-watcher-session";
+const update = (value) => send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: value } });
+let promptId;
+const finish = (stopReason) => send({ jsonrpc: "2.0", id: promptId, result: { stopReason } });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  captured.push(message);
+  save();
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "${provider === "cursor" ? "Cursor" : "Kimi Code CLI"}", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }, { id: "plan", name: "Plan" }] }, configOptions: [] } });
+  if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+  if (message.method === "session/cancel") return finish("cancelled");
+${prompt}
+});
+`);
+  return {
+    command,
+    captured: () => JSON.parse(readFileSync(capturePath, "utf8")) as Array<Record<string, unknown>>,
+    response: (id: number) => (JSON.parse(readFileSync(capturePath, "utf8")) as Array<{ id?: unknown; result?: unknown }>)
+      .find((message) => message.id === id && message.result !== undefined)?.result,
+  };
+}
+
+const PERMISSION_OPTIONS = `[{ optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" }]`;
+
+describe("watcher turns on providers that enforce read-only through approvals", () => {
+  it("keeps Cursor in its plan mode, declines its edit approval as a write, and declines its question and plan hand-off without counting them", async () => {
+    const root = portableFixtureRoot("watcher cursor");
+    roots.push(root);
+    const repo = repository(root, ["acp"]);
+    const agent = acpWatcherAgent(root, repo, "cursor", `
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    update({ sessionUpdate: "tool_call", toolCallId: "read-1", title: "Read parser", kind: "read", status: "completed" });
+    update({ sessionUpdate: "tool_call", toolCallId: "edit-1", title: "Edit parser", kind: "edit", status: "pending", rawInput: { path: "src/parser.ts" } });
+    return send({ jsonrpc: "2.0", id: 100, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "edit-1", title: "Edit parser", kind: "edit", status: "pending", rawInput: { path: "src/parser.ts" } }, options: ${PERMISSION_OPTIONS} } });
+  }
+  if (message.id === 100) {
+    update({ sessionUpdate: "tool_call_update", toolCallId: "edit-1", status: "failed", rawOutput: "Permission denied" });
+    return send({ jsonrpc: "2.0", id: 101, method: "cursor/ask_question", params: { toolCallId: "ask-1", title: "Scope", questions: [{ id: "scope", prompt: "Which file?", options: [{ id: "a", label: "A" }], allowMultiple: false }] } });
+  }
+  if (message.id === 101) return send({ jsonrpc: "2.0", id: 102, method: "cursor/create_plan", params: { toolCallId: "plan-1", plan: "- risk: the parser splits on single spaces only", todos: [] } });
+  if (message.id === 102) {
+    update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Plan submitted for review." } });
+    return finish("end_turn");
+  }`);
+    const manager = ProviderManager.createForTests({ commands: { cursor: agent.command } }, new AgentHarnessRegistry([createCursorAcpHarness()]));
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "cursor", modelId: "provider-default" }));
+    const before = await checkoutState(repo);
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expectWatcherRunInput(runtime.inputs[0], "cursor");
+    expect(runtime.inputs[0]).not.toHaveProperty("systemInstruction");
+    expect(runtime.inputs[0]!.prompt).toContain(`[inertia-watcher]\n${WATCHER_ROLE}`);
+    expect(agent.captured().find(({ method }) => method === "session/set_mode")).toMatchObject({ params: { modeId: "plan" } });
+    expect(agent.response(100)).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+    expect(agent.response(101)).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(agent.response(102)).toEqual({ outcome: { outcome: "rejected" } });
+    expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped])).toEqual([["write-attempt", false]]);
+    expect(runtime.events.some((event) => event.type === "agent.approval.requested" || event.type === "agent.input.requested")).toBe(false);
+    expect(runtime.activities().map(({ title }) => title)).toEqual(expect.arrayContaining([
+      "Needed permission: Edit parser — declined (watchers are read-only)",
+      ACP_WATCHER_QUESTION_DECLINED,
+      ACP_WATCHER_PLAN_DECLINED,
+    ]));
+    expect(runtime.store.watcherLinks.digest.plan(runtime.watcherId, turn.id)?.explanation)
+      .toBe("- risk: the parser splits on single spaces only");
+    expect(runtime.handoffs).toEqual(["- risk: the parser splits on single spaces only"]);
+    expect(watcherReplyDefersToPlan("Plan submitted for review.")).toBe(true);
+    expect(turn).toMatchObject({ status: "completed" });
+    expect(await checkoutState(repo)).toEqual(before);
+  });
+
+  it("declines a Kimi Code question without counting it and declines its edit approval as a write", async () => {
+    const root = portableFixtureRoot("watcher kimi");
+    roots.push(root);
+    const repo = repository(root, ["acp"]);
+    const agent = acpWatcherAgent(root, repo, "kimi", `
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    return send({ jsonrpc: "2.0", id: 101, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "ask-1", title: "AskUserQuestion", kind: "other", status: "pending", content: [{ type: "content", content: { type: "text", text: "Which file?" } }] }, options: [{ optionId: "q0_opt_0", name: "A", kind: "allow_once" }, { optionId: "q0_skip", name: "Skip", kind: "reject_once" }] } });
+  }
+  if (message.id === 101) {
+    update({ sessionUpdate: "tool_call", toolCallId: "write-1", title: "Write file", kind: "edit", status: "pending", rawInput: { path: "src/parser.ts" } });
+    return send({ jsonrpc: "2.0", id: 102, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "write-1", title: "Write file", kind: "edit", status: "pending", rawInput: { path: "src/parser.ts" } }, options: ${PERMISSION_OPTIONS} } });
+  }
+  if (message.id === 102) {
+    update({ sessionUpdate: "tool_call_update", toolCallId: "write-1", status: "failed", rawOutput: "Permission denied" });
+    update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "SILENT" } });
+    return finish("end_turn");
+  }`);
+    const manager = ProviderManager.createForTests({ commands: { kimi: agent.command } }, new AgentHarnessRegistry([createKimiAcpHarness()]));
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "kimi", modelId: "provider-default" }));
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expectWatcherRunInput(runtime.inputs[0], "kimi");
+    expect(agent.response(101)).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(agent.response(102)).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+    expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped])).toEqual([["write-attempt", false]]);
+    expect(runtime.events.some((event) => event.type === "agent.input.requested")).toBe(false);
+    expect(runtime.activities().map(({ title }) => title)).toContain(ACP_WATCHER_QUESTION_DECLINED);
+    expect(turn).toMatchObject({ status: "completed" });
+  });
+
+  it("hands Kimi Code's plan to the watcher as its finding and asks Kimi to revise instead of cancelling", async () => {
+    const root = portableFixtureRoot("watcher kimi plan");
+    roots.push(root);
+    const repo = repository(root, ["acp"]);
+    const agent = acpWatcherAgent(root, repo, "kimi", `
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    return send({ jsonrpc: "2.0", id: 101, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "plan-1", title: "ExitPlanMode", kind: "other", status: "pending", content: [{ type: "content", content: { type: "text", text: "- bug: src/parser.ts drops the last token" } }] }, options: [{ optionId: "plan_approve", name: "Approve", kind: "allow_once" }, { optionId: "plan_revise", name: "Revise", kind: "reject_once" }, { optionId: "plan_reject_and_exit", name: "Reject", kind: "reject_once" }] } });
+  }
+  if (message.id === 101) {
+    update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Plan submitted for review." } });
+    return finish("end_turn");
+  }`);
+    const manager = ProviderManager.createForTests({ commands: { kimi: agent.command } }, new AgentHarnessRegistry([createKimiAcpHarness()]));
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "kimi", modelId: "provider-default" }));
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expect(agent.response(101)).toEqual({ outcome: { outcome: "selected", optionId: "plan_revise" } });
+    expect(runtime.handoffs).toEqual(["- bug: src/parser.ts drops the last token"]);
+    expect(runtime.store.watcherLinks.digest.plan(runtime.watcherId, turn.id)?.explanation).toBe("- bug: src/parser.ts drops the last token");
+    expect(runtime.activities().map(({ title }) => title)).toContain(ACP_WATCHER_PLAN_DECLINED);
+    expect(runtime.violations).toEqual([]);
+    expect(runtime.events.some((event) => event.type === "agent.input.requested")).toBe(false);
+    expect(turn).toMatchObject({ status: "completed" });
+  });
+
+  it("stops a check when an ACP tool of kind edit is running, whatever its title says", async () => {
+    const root = portableFixtureRoot("watcher kimi edit kind");
+    roots.push(root);
+    const repo = repository(root, ["acp"]);
+    const agent = acpWatcherAgent(root, repo, "kimi", `
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    return update({ sessionUpdate: "tool_call", toolCallId: "tool-1", title: "src/parser.ts", kind: "edit", status: "in_progress", rawInput: { path: "src/parser.ts" } });
+  }`);
+    const manager = ProviderManager.createForTests({ commands: { kimi: agent.command } }, new AgentHarnessRegistry([createKimiAcpHarness()]));
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "kimi", modelId: "provider-default" }));
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expect(turn).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
+    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: "src/parser.ts", stopped: true })]);
+  });
+});
+
+describe("watcher turns on a provider that enforces read-only itself", () => {
+  it("runs Antigravity in its plan mode and stops the check when a file-writing tool starts", async () => {
+    const root = portableFixtureRoot("watcher antigravity");
+    roots.push(root);
+    const repo = repository(root, []);
+    const capturePath = join(root, "agy-capture.json");
+    const command = writeNodeFlagExecutable(root, "agy", `
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ argv: process.argv.slice(2) }));
+const emit = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+process.stdin.resume();
+process.stdin.on("end", () => {
+  emit({ event: "init", conversation_id: "4f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a11", init: { cwd: process.cwd(), tools: ["view_file", "write_to_file"], permission_mode: "plan" } });
+  emit({ event: "step_update", step_update: { step_index: 1, state: "ACTIVE", tool_name: "view_file" } });
+  emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "view_file" } });
+  emit({ event: "step_update", step_update: { step_index: 2, state: "ACTIVE", tool_name: "write_to_file" } });
+  setInterval(() => undefined, 1000);
+});
+`);
+    const manager = ProviderManager.createForTests({ commands: { antigravity: command } }, new AgentHarnessRegistry([createAntigravityCliHarness()]));
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "antigravity", modelId: "provider-default" }));
+    const before = await checkoutState(repo);
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expectWatcherRunInput(runtime.inputs[0], "antigravity");
+    const argv = (JSON.parse(readFileSync(capturePath, "utf8")) as { argv: string[] }).argv;
+    expect(argv.join(" ")).toContain("--mode plan");
+    expect(argv).not.toContain("accept-edits");
+    expect(argv).not.toContain("--dangerously-skip-permissions");
+    expect(turn).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
+    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: "write_to_file", stopped: true })]);
+    expect(await checkoutState(repo)).toEqual(before);
+  });
+
+  it("maps a read-only watcher to plan mode whatever access its input names, and knows Antigravity's file-writing tools", () => {
+    const base = nativeProviderRunInput({ providerId: "antigravity", conversationId: "agy-args", cwd: process.cwd(), prompt: "Review.", interactionMode: "build", access: "full" });
+    expect(antigravityArguments({ ...base, readOnlyProfile: "watcher" }).join(" ")).toContain("--mode plan");
+    expect(antigravityArguments({ ...base, readOnlyProfile: "watcher" })).not.toContain("--dangerously-skip-permissions");
+    expect(antigravityArguments(base)).toContain("--dangerously-skip-permissions");
+    for (const tool of ["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "delete_file", "WRITE_TO_FILE"]) {
+      expect(antigravityFileMutationTool(tool)).toBe(true);
+    }
+    for (const tool of ["view_file", "run_command", "invoke_subagent", "grep_search"]) {
+      expect(antigravityFileMutationTool(tool)).toBe(false);
+    }
   });
 });

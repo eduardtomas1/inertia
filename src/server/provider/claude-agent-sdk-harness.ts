@@ -77,12 +77,6 @@ import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 
-export const CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS = [
-  "You are a read-only reviewer, not a planner.",
-  "Answer each check directly in your reply.",
-  "Never write or edit a plan file, never call ExitPlanMode and never ask to leave plan mode.",
-].join(" ");
-
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
@@ -374,7 +368,7 @@ function startClaudeRun(
           // here would let a repository's .claude/settings.json install hooks
           // or allow rules that execute before canUseTool can ask the user.
           settingSources: [],
-          ...claudeIdentityOptions(identity),
+          ...claudeIdentityOptions(identity, options.input.systemInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
           ...(supportsFastMode
             ? {
@@ -384,14 +378,15 @@ function startClaudeRun(
                 },
               }
             : {}),
-          permissionMode: options.input.interactionMode === "plan"
-            ? "plan"
-            : options.input.access === "full"
-              ? "bypassPermissions"
-              : options.input.access === "auto-edit"
-                ? "acceptEdits"
-                : "default",
-          ...(options.input.readOnlyProfile === "watcher" ? { planModeInstructions: CLAUDE_WATCHER_PLAN_MODE_INSTRUCTIONS } : {}),
+          permissionMode: options.input.readOnlyProfile === "watcher"
+            ? "default"
+            : options.input.interactionMode === "plan"
+              ? "plan"
+              : options.input.access === "full"
+                ? "bypassPermissions"
+                : options.input.access === "auto-edit"
+                  ? "acceptEdits"
+                  : "default",
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool: permissions.canUseTool,
           ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),

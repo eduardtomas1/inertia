@@ -22,6 +22,9 @@ const SHORTENED_MARKER = "\n\n[Shortened by Inertia.]";
 const MAX_WATCHER_RESOLVED_CHECKS = 20;
 const RESOLVED_LINE_PATTERN = /^resolved: check \d{1,9}(?:, check \d{1,9})*\.?$/iu;
 const MAX_RESOLVED_LINE_CHARS = 400;
+const MAX_PLAN_HANDOFF_CHARS = 160;
+const PLAN_WORD = /\bplan\b/iu;
+const PLAN_HANDOFF_WORD = /\b(?:submit(?:ted)?|ready|present(?:ed)?|review|approv(?:e|al)|above|proposed)\b/iu;
 
 function unwrap(value: string): string {
   let current = value.trim();
@@ -41,6 +44,13 @@ export function classifyWatcherReply(text: string | null): WatcherReplyClass {
   if (trimmed.length === 0) return "silent";
   if (trimmed.length > MAX_SILENT_CANDIDATE_CHARS) return "finding";
   return SILENT_PATTERN.test(unwrap(trimmed)) ? "silent" : "finding";
+}
+
+export function watcherReplyDefersToPlan(text: string | null): boolean {
+  const trimmed = unwrap((text ?? "").trim());
+  if (trimmed.length === 0) return true;
+  if (trimmed.length > MAX_PLAN_HANDOFF_CHARS || trimmed.includes("\n") || /^(?:[-*•]|\d+[.)])\s/u.test(trimmed)) return false;
+  return PLAN_WORD.test(trimmed) && PLAN_HANDOFF_WORD.test(trimmed);
 }
 
 export function splitWatcherResolvedLine(text: string): { text: string; resolved: number[] } {

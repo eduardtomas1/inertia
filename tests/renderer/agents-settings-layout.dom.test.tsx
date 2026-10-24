@@ -89,6 +89,29 @@ afterEach(() => {
 });
 
 describe("Agents providers layout", () => {
+  it("shows recovery guidance for Claude while keeping Codex controls usable", async () => {
+    const claude = {
+      ...settingsProvider("claude", "Claude"), available: false, canRun: false,
+      installState: "recovery-required" as const, authState: "unknown" as const,
+      version: null, executable: null,
+      statusMessage: "Provider update recovery requires attention. Restart Inertia to retry recovery.",
+    };
+    render(<SettingsView {...settingsViewProps({
+      target: { section: "agents" },
+      providers: [settingsProvider("codex", "Codex"), claude],
+    })} />);
+    const chooseClaude = await screen.findByRole("button", { name: "Configure Claude" });
+    expect(chooseClaude).toHaveAccessibleDescription("Recovery required");
+    fireEvent.click(chooseClaude);
+    expect(screen.getByText(claude.statusMessage)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Claude executable path" }))
+      .toHaveAttribute("placeholder", "Executable check paused for recovery");
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
+    expect(screen.queryByText("Checking")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Configure Codex" }));
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Browse" })).toBeEnabled();
+  });
   it("shows each provider status once per place as icon, word and version, without pills", async () => {
     const claude = { ...settingsProvider("claude", "Claude"), authState: "unauthenticated" as const, canRun: false, statusMessage: "Sign in required" };
     const { container } = render(<SettingsView {...settingsViewProps({

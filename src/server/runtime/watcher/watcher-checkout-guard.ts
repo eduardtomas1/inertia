@@ -276,8 +276,12 @@ export class WatcherCheckoutGuard {
       });
       if (!diff.headChanged && unexplained.length === 0) return { state: "clean", paths: [], pauseDetail: null };
       const paths = unexplained.slice(0, MAX_WATCHER_GUARD_PATHS);
-      const context: ReadOnlyCommandContext = { cwd: window.checkoutPath, windows: this.#platform === "win32" };
-      if (window.commandSeen || window.busy || !own.some((activity) => watcherActivityMayWrite(activity, context))) {
+      const windowsHost = this.#platform === "win32";
+      const contexts: ReadOnlyCommandContext[] = windowsHost
+        ? [{ cwd: window.checkoutPath, windows: true }, { cwd: window.checkoutPath, windows: false, windowsPaths: true }]
+        : [{ cwd: window.checkoutPath, windows: false }];
+      const outsideAllowlist = (activity: AgentActivity) => contexts.every((context) => watcherActivityMayWrite(activity, context));
+      if (window.commandSeen || window.busy || !own.some(outsideAllowlist)) {
         return { state: "inconclusive", paths, pauseDetail: null };
       }
       return { state: "changed", paths, pauseDetail: pauseDetail(paths, unexplained.length, diff.headChanged) };

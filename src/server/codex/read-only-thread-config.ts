@@ -13,6 +13,7 @@ export const CODEX_WATCHER_DISABLED_CONFIG_KEYS = [
   "features.request_permissions_tool",
   "features.standalone_web_search",
   "features.tool_suggest",
+  "tools.experimental_request_user_input.enabled",
 ] as const;
 
 export function disabledCodexMcpServers(config: JsonObject): JsonObject {

@@ -14,6 +14,7 @@ import {
   watcherBudgetsSchema,
   watcherDeliveryPolicySchema,
   watcherHarnessAllowed,
+  watcherReadOnlyEnforcement,
   watcherInstructionsSchema,
   watcherPresetSchema,
   watcherPrivateConnectSchema,
@@ -79,6 +80,7 @@ export interface WatcherLinkDraft {
   budgets: WatcherBudgets;
   privateConnect: WatcherPrivateConnect;
   delivery?: WatcherDeliveryPolicy;
+  readOnly?: boolean;
 }
 
 interface WatcherConversationPlan {
@@ -150,6 +152,8 @@ interface WatcherLinkRepositoryContext {
 export const WATCHER_ARCHIVED_REFUSAL = "Archived chats can't be watched.";
 export const WATCHER_OF_WATCHER_REFUSAL = "A watcher can't watch another watcher.";
 export const WATCHER_LIMIT_REFUSAL = `Inertia already has ${MAX_ACTIVE_WATCHERS} active watchers. Stop one first.`;
+export const WATCHER_READ_ONLY_UNAVAILABLE_REFUSAL = "This agent can't run as a read-only watcher. Attach it with chat access instead.";
+export const WATCHER_READ_ONLY_REFUSAL = "A read-only watcher stays read-only. Attach it again with chat access to choose its mode and access level.";
 const TERMINAL_TURN_STATUSES_SQL = "('completed', 'failed', 'cancelled', 'interrupted')";
 const MAX_RETIRED_WAKES_PER_CHECK = 4;
 const ACTIVE_WAKE_STATES_SQL = "('dispatching', 'running')";
@@ -197,11 +201,16 @@ export class WatcherLinkRepository {
       budgets: watcherBudgetsSchema.parse(input.link.budgets),
       privateConnect: watcherPrivateConnectSchema.parse(input.link.privateConnect),
       delivery: watcherDeliveryPolicySchema.parse(input.link.delivery ?? "manual"),
+      readOnly: input.link.readOnly !== false,
     };
     return this.database.transaction(() => {
       const existing = this.get(input.link.id);
       if (existing) {
-        if (existing.watchedConversationId !== input.link.watchedConversationId || existing.status === "detached") {
+        if (
+          existing.watchedConversationId !== input.link.watchedConversationId
+          || existing.status === "detached"
+          || existing.readOnly !== draft.readOnly
+        ) {
           throw new WatcherPolicyError("This watcher already exists.");
         }
         return { link: existing, conversation: this.context.conversations.get(existing.watcherConversationId), created: false };
@@ -225,6 +234,11 @@ export class WatcherLinkRepository {
       if (active >= MAX_ACTIVE_WATCHERS) {
         throw new WatcherPolicyError(WATCHER_LIMIT_REFUSAL);
       }
+      if (draft.readOnly && (
+        input.conversation.options.interactionMode !== "plan" || input.conversation.options.accessMode !== "supervised"
+      )) {
+        throw new WatcherPolicyError(WATCHER_READ_ONLY_REFUSAL);
+      }
       const conversation = this.context.conversations.create(
         input.conversation.projectId,
         input.conversation.title,
@@ -235,12 +249,12 @@ export class WatcherLinkRepository {
       this.database.prepare(`
         INSERT INTO watcher_links (
           id, watcher_conversation_id, watched_conversation_id, project_id, preset, instructions,
-          sharing_json, budgets_json, private_connect, delivery, status, wake_allowance, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'watching', ?, ?, ?)
+          sharing_json, budgets_json, private_connect, delivery, read_only, status, wake_allowance, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'watching', ?, ?, ?)
       `).run(
         input.link.id, conversation.id, watched.id, watched.project_id, draft.preset, draft.instructions,
         JSON.stringify(draft.sharing), JSON.stringify(draft.budgets), draft.privateConnect, draft.delivery,
-        draft.budgets.wakesPerWatchedTurn, at, at,
+        draft.readOnly ? 1 : 0, draft.budgets.wakesPerWatchedTurn, at, at,
       );
       return { link: this.require(input.link.id), conversation, created: true };
     })();
@@ -666,20 +680,23 @@ export class WatcherLinkRepository {
     return { totalTokens };
   }
 
-  policyForConversation(conversationId: string): { linkId: string; status: WatcherStatus } | null {
-    const row = cachedStatement(this.database, "SELECT id, status FROM watcher_links WHERE watcher_conversation_id = ?")
-      .get(conversationId) as { id: string; status: WatcherStatus } | undefined;
-    return row ? { linkId: row.id, status: row.status } : null;
+  policyForConversation(conversationId: string): { linkId: string; status: WatcherStatus; readOnly: boolean } | null {
+    const row = cachedStatement(this.database, "SELECT id, status, read_only FROM watcher_links WHERE watcher_conversation_id = ?")
+      .get(conversationId) as { id: string; status: WatcherStatus; read_only: number } | undefined;
+    return row ? { linkId: row.id, status: row.status, readOnly: row.read_only !== 0 } : null;
   }
 
   assertRunConfigurationAllowed(conversationId: string, configuration: WatcherRunConfiguration): void {
     const policy = this.policyForConversation(conversationId);
     if (!policy || policy.status === "detached") return;
-    if (configuration.interactionMode !== "plan" || configuration.accessMode !== "supervised") {
-      throw new WatcherPolicyError("A watcher stays read-only: plan mode with supervised access.");
+    if (policy.readOnly && (configuration.interactionMode !== "plan" || configuration.accessMode !== "supervised")) {
+      throw new WatcherPolicyError(WATCHER_READ_ONLY_REFUSAL);
     }
     if (!watcherHarnessAllowed(configuration.harnessId)) {
       throw new WatcherPolicyError("This agent can't run as a watcher.");
+    }
+    if (policy.readOnly && watcherReadOnlyEnforcement(configuration.harnessId) === null) {
+      throw new WatcherPolicyError(WATCHER_READ_ONLY_UNAVAILABLE_REFUSAL);
     }
   }
 

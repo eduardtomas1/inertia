@@ -110,6 +110,8 @@ export interface ProviderMaintenanceControllerOptions {
   ): void | Promise<void>;
   /** Durable authority written before installation replacement is admitted. */
   maintenanceJournal: ProviderMaintenanceJournalAuthority;
+  /** Prior-runtime records remain durable without claiming a live child here. */
+  startupRecoveryOperationIds?: ReadonlySet<string>;
 }
 
 interface ActiveProviderMaintenanceOperation {
@@ -302,10 +304,19 @@ export class ProviderMaintenanceController {
 
   /** Bounded diagnostic state with no operation or installation identity. */
   diagnosticStates(): ProviderMaintenanceDiagnosticState[] {
+    let pendingRecoveryProviders: ReadonlySet<ProviderMaintenanceProviderId>;
+    try {
+      pendingRecoveryProviders = new Set(this.options.maintenanceJournal.pending().map(
+        (record) => record.installationIdentity.providerId,
+      ));
+    } catch {
+      pendingRecoveryProviders = new Set(PROVIDER_MAINTENANCE_PROVIDER_IDS);
+    }
     return PROVIDER_MAINTENANCE_PROVIDER_IDS.map((providerId) => {
       const operation = this.active.get(providerId)?.operation;
       const state: ProviderMaintenanceDiagnosticState["state"] =
         this.quarantinedProviders.has(providerId)
+          || (!this.active.has(providerId) && pendingRecoveryProviders.has(providerId))
           ? "quarantined"
           : this.active.get(providerId)?.verificationAuthority
             ? "verifying"
@@ -456,7 +467,9 @@ export class ProviderMaintenanceController {
     if (this.quarantinedProviders.size > 0) {
       throw new Error("Provider maintenance installation quarantine remains unresolved.");
     }
-    if (this.options.maintenanceJournal.pending().length > 0) {
+    if (this.options.maintenanceJournal.pending().some(
+      (record) => !this.options.startupRecoveryOperationIds?.has(record.operationId),
+    )) {
       throw new Error("Provider maintenance journal ownership remains unresolved.");
     }
   }

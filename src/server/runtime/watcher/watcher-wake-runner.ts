@@ -4,6 +4,7 @@ import type { AgentTurn, ModelSelection } from "../../../shared/contracts";
 import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import {
   MAX_WATCHER_FINDING_BYTES,
+  watcherReadOnlyEnforcement,
   type WatcherWakeOutcome,
   type WatcherWakeTrigger,
 } from "../../../shared/watcher";
@@ -20,7 +21,12 @@ import { conversationOrNull } from "./watcher-link-coordinator";
 import { buildWatcherDigest, type WatcherDigest, type WatcherOpenReply } from "./watcher-digest";
 import { watcherInstruction } from "./watcher-instructions";
 import type { WatcherLiveProjection } from "./watcher-live-projection";
-import { classifyWatcherReply, findingPreview, splitWatcherResolvedLine } from "./watcher-outcome";
+import {
+  classifyWatcherReply,
+  findingPreview,
+  splitWatcherResolvedLine,
+  watcherReplyDefersToPlan,
+} from "./watcher-outcome";
 import type { WatcherRouteReadiness } from "./watcher-route";
 import {
   WATCHER_MAX_PENDING_FINALS,
@@ -30,6 +36,7 @@ import {
 } from "./watcher-wake-scheduler";
 
 export const WATCHER_USAGE_LIMIT_DETAIL = "The watcher's own account reached its usage limit.";
+export const WATCHER_ANSWERED_NOTHING = "The watcher answered nothing.";
 const WATCHER_WRITE_ATTEMPTS_DETAIL = "The watcher tried to edit a file twice during one turn of the main chat.";
 export const WATCHER_ROUTE_RETRY_LIMIT = 3;
 export const WATCHER_DISPATCH_FAILURE_LIMIT = 3;
@@ -81,6 +88,7 @@ interface RunningWake {
   restore: WatcherTransition;
   violations: ReadOnlyWatcherViolation[];
   pause: WatcherTransition | null;
+  handoff: string | null;
 }
 
 class TurnMemory<T> {
@@ -117,6 +125,14 @@ function advanced({ start, digest }: Pick<RunningWake, "start" | "digest">): boo
     || digest.cursor.activityId !== start.activityId
     || digest.cursor.messageAt !== start.messageAt
     || digest.cursor.messageId !== start.messageId;
+}
+
+function skippedGuardWindow(watcherConversationId: string): WatcherGuardWindow {
+  return {
+    watcherConversationId,
+    after: () => Promise.resolve({ state: "skipped", paths: [], pauseDetail: null }),
+    dispose: () => undefined,
+  };
 }
 
 const VIOLATION_OUTCOMES: ReadonlyArray<[ReadOnlyWatcherViolation["kind"][], WatcherWakeOutcome]> = [
@@ -244,7 +260,7 @@ export class WatcherWakeRunner {
         ...diff,
       });
       if (!digest) return release("skipped");
-      window = await this.#deps.guard.before(watcher.id);
+      window = claimed.readOnly ? await this.#deps.guard.before(watcher.id) : skippedGuardWindow(watcher.id);
       if (turns.isActive(watcher.id) || turns.isClosing()) {
         window.dispose();
         return release("transient");
@@ -269,10 +285,12 @@ export class WatcherWakeRunner {
         queuedTurnId = turns.queue({
           conversationId: watcher.id,
           content: digest.content,
-          internalInstructions: [watcherInstruction(claimed, { title: watched.title, id: watched.id }, {
+          systemInstructions: [watcherInstruction(claimed, { title: watched.title, id: watched.id }, {
             contextAccess: route.contextAccess,
+            enforcement: watcherReadOnlyEnforcement(route.selection.harnessId),
           })],
           activateConversation: false,
+          ...(claimed.readOnly ? {} : { turnCheckpoint: true }),
           skills: [],
           authorizedWatcherWakeId: wake.wakeId,
         }).turn.id;
@@ -289,7 +307,7 @@ export class WatcherWakeRunner {
       }
       this.#running.set(queuedTurnId, {
         linkId, wakeId: wake.wakeId, watcherConversationId: watcher.id, window, digest,
-        start: cursor, finalTurnId, finalPage, request, requestPage, lastPage, restore, violations: [], pause: null,
+        start: cursor, finalTurnId, finalPage, request, requestPage, lastPage, restore, violations: [], pause: null, handoff: null,
       });
       if (!staleTurn) this.#planKeys.set(linkId, digest.planKey);
       this.#deps.live.begin(linkId, watcher.id, queuedTurnId);
@@ -398,6 +416,11 @@ export class WatcherWakeRunner {
     return true;
   }
 
+  onPlanHandoff(turn: AgentTurn, text: string): void {
+    const running = this.#running.get(turn.id);
+    if (running) running.handoff = text;
+  }
+
   onViolation(turn: AgentTurn, violation: ReadOnlyWatcherViolation): void {
     const { store, turns } = this.#deps;
     const link = store.watcherLinks.get(violation.linkId);
@@ -445,7 +468,7 @@ export class WatcherWakeRunner {
       } catch {
         guard = { state: "unavailable", paths: [], pauseDetail: null };
       }
-      const reply = this.#replyOutcome(turn);
+      const reply = this.#replyOutcome(turn, running?.handoff ?? null);
       const { usageLimited, resolved } = reply;
       let { finding } = reply;
       outcome = reply.outcome;
@@ -529,7 +552,7 @@ export class WatcherWakeRunner {
     return true;
   }
 
-  #replyOutcome(turn: AgentTurn): {
+  #replyOutcome(turn: AgentTurn, handoff: string | null): {
     outcome: WatcherWakeOutcome;
     finding: string | null;
     resolved: number[];
@@ -541,8 +564,28 @@ export class WatcherWakeRunner {
     if (usageLimited) return ended("usage-limited");
     if (turn.status !== "completed") return ended("failed");
     const reply = this.#reply(turn.terminalAssistantMessageId);
-    const outcome = classifyWatcherReply(reply.text);
-    return { outcome, finding: outcome === "finding" ? findingPreview(reply.text) : null, resolved: reply.resolved, usageLimited };
+    const text = handoff !== null && watcherReplyDefersToPlan(reply.text) ? handoff : reply.text;
+    if (text.trim().length === 0 && reply.resolved.length === 0) {
+      this.#answeredNothing(turn);
+      return ended("failed");
+    }
+    const outcome = classifyWatcherReply(text);
+    return { outcome, finding: outcome === "finding" ? findingPreview(text) : null, resolved: reply.resolved, usageLimited };
+  }
+
+  #answeredNothing(turn: AgentTurn): void {
+    try {
+      this.#deps.store.addActivity({
+        conversationId: turn.conversationId,
+        runId: turn.runId,
+        turnId: turn.id,
+        kind: "error",
+        title: WATCHER_ANSWERED_NOTHING,
+        detail: null,
+        status: "failed",
+      });
+    } catch {
+    }
   }
 
   #reply(messageId: string | null): { text: string; resolved: number[] } {

@@ -151,7 +151,7 @@ export class TurnProviderEventProjector {
           });
           if (recorded.runsChanged) this.broadcastConversationShell(active);
         }
-        if (active.readOnlyWatcher && isReadOnlyWriteActivity(event)) {
+        if (active.readOnlyWatcher && isReadOnlyWriteActivity(event, active.readOnlyWatcher.editsGatedBeforeStart)) {
           this.options.interactions.stopForReadOnly(active, "write-attempt", event.label);
         }
         break;
@@ -221,6 +221,15 @@ export class TurnProviderEventProjector {
           type: "agent.plan.updated",
           plan,
         });
+        if (event.handoff === true) {
+          const handoff = event.explanation?.trim() || event.steps.map(({ step }) => `- ${step}`).join("\n").trim();
+          if (handoff) {
+            try {
+              this.options.hooks.onPlanHandoff?.(active.turn, handoff);
+            } catch {
+            }
+          }
+        }
         break;
       }
       case "goal-updated": {

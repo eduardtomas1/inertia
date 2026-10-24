@@ -62,7 +62,7 @@ export interface ProviderEmitter {
   approvalResolved: (requestId: string, decision: AgentApprovalDecision | "cancelled") => void;
   input: (request: AgentInputRequest) => void;
   inputResolved: (requestId: string) => void;
-  plan: (explanation: string | null, steps: AgentPlanStep[]) => void;
+  plan: (explanation: string | null, steps: AgentPlanStep[], handoff?: true) => void;
   reasoning: (text: string) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
   metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;
@@ -195,7 +195,7 @@ export function createProviderEmitter(
     approvalResolved: (requestId, decision) => event({ ...base, type: "approval-resolved", requestId, decision }),
     input: (request) => event({ ...base, type: "input", request }),
     inputResolved: (requestId) => event({ ...base, type: "input-resolved", requestId }),
-    plan: (explanation, steps) => event({ ...base, type: "plan", explanation, steps }),
+    plan: (explanation, steps, handoff) => event({ ...base, type: "plan", explanation, steps, ...(handoff ? { handoff } : {}) }),
     reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
     metadata: (metadata, source, complete) => event({ ...base, type: "metadata", metadata, source, complete }),
@@ -250,7 +250,7 @@ function emitInteractiveExtension(
       emitter.inputResolved(event.requestId);
       break;
     case "plan":
-      emitter.plan(event.explanation, event.steps);
+      emitter.plan(event.explanation, event.steps, event.handoff);
       break;
     case "reasoning-summary":
       emitter.reasoning(event.text);

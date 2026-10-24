@@ -11,6 +11,7 @@ import {
   type ProviderDetection,
 } from "./providers";
 import { productionProviderCapabilityManifests } from "./provider/capability-manifest";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../shared/provider-maintenance";
 
 function declaredCapabilityContract(
   providerId: ProviderInfo["id"],
@@ -64,9 +65,11 @@ function agentThreadManagement(
 export function initialProviderSnapshots(
   executionEnabled = true,
   cached: Partial<Record<ProviderInfo["id"], Pick<ProviderInfo, "models" | "rateLimits" | "metadataState">>> = {},
+  recoveryBlockedProviders: ReadonlySet<ProviderInfo["id"]> = new Set(),
 ): ProviderInfo[] {
   return PROVIDERS.map((provider) => {
     const capabilityContract = declaredCapabilityContract(provider.id);
+    const recoveryRequired = recoveryBlockedProviders.has(provider.id);
     return {
       id: provider.id,
       label: provider.name,
@@ -74,10 +77,12 @@ export function initialProviderSnapshots(
       available: false,
       version: null,
       executable: null,
-      installState: "checking" as const,
-      authState: "checking" as const,
-      canRun: !executionEnabled,
-      statusMessage: "Checking installation and connection",
+      installState: recoveryRequired ? "recovery-required" as const : "checking" as const,
+      authState: recoveryRequired ? "unknown" as const : "checking" as const,
+      canRun: !executionEnabled && !recoveryRequired,
+      statusMessage: recoveryRequired
+        ? PROVIDER_MAINTENANCE_RECOVERY_MESSAGE
+        : "Checking installation and connection",
       models: cached[provider.id]?.models ?? [],
       rateLimits: cached[provider.id]?.rateLimits ?? [],
       metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),

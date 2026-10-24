@@ -33,6 +33,7 @@ const contextPacketTriggers = [
 ];
 
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < 101 && version >= 99) database.exec("ALTER TABLE watcher_links DROP COLUMN read_only");
   if (version < 100) {
     database.exec("DROP INDEX todos_project_idx");
     for (const column of ["due_time", "project_id", "linked_at"]) database.exec(`ALTER TABLE todos DROP COLUMN ${column}`);
@@ -138,13 +139,14 @@ describe("database health check for settings and subagent columns", () => {
     ...watcherTriggers.map((trigger) => ({ version: 99, sql: `DROP TRIGGER ${trigger}` })),
     { version: 100, sql: "DROP INDEX todos_project_idx" },
     { version: 100, sql: "ALTER TABLE todos DROP COLUMN linked_at" },
+    { version: 101, sql: "ALTER TABLE watcher_links DROP COLUMN read_only" },
   ])("skips a schema $version backup after $sql", async ({ version, sql }) => {
     const { older, report, messages } = await backups(version, (database) => database.exec(sql));
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: older.filename, invalidBackupsSkipped: 1 });
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99])("restores a complete schema %i backup and upgrades it", async (version) => {
+  it.each([87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

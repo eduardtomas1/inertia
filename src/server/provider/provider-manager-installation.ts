@@ -22,6 +22,8 @@ import {
 } from "./installation-lease";
 import type { ProviderMetadataCache } from "./metadata";
 import { MULTIPLEXING_SHIMS } from "../environment";
+import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../shared/provider-maintenance";
+import { PROVIDER_INFO } from "./catalog";
 
 function providerExecutableFileIdentity(
   executable: string | null,
@@ -76,6 +78,7 @@ export interface ProviderInstallationUseAdmission {
 }
 
 export interface ProviderManagerInstallationOptions {
+  providerRecoveryPending?: (providerId: ProviderId) => boolean;
   leases?: ProviderInstallationLeaseCoordinator;
   metadataCache: ProviderMetadataCache;
   operationId(): string;
@@ -87,6 +90,28 @@ export class ProviderManagerInstallationAuthority {
   private readonly uncertainProviders = new Set<ProviderId>();
 
   constructor(private readonly options: ProviderManagerInstallationOptions) {}
+
+  recoveryPending(providerId: ProviderId): boolean {
+    return this.options.providerRecoveryPending?.(providerId) ?? false;
+  }
+
+  assertRecoveryComplete(providerId: ProviderId): void {
+    if (this.recoveryPending(providerId)) {
+      throw new ProviderRuntimeError("invalid_input", PROVIDER_MAINTENANCE_RECOVERY_MESSAGE);
+    }
+  }
+
+  recoveryDetection(providerId: ProviderId): ProviderDetection | null {
+    return this.recoveryPending(providerId) ? {
+      provider: PROVIDER_INFO[providerId],
+      available: false,
+      installState: "recovery-required",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage: PROVIDER_MAINTENANCE_RECOVERY_MESSAGE,
+    } : null;
+  }
 
   /** True while any provider's installation authority is uncertain. */
   get uncertain(): boolean {
@@ -154,6 +179,7 @@ export class ProviderManagerInstallationAuthority {
     versionOverride?: string | null,
     replacementBoundaryInput?: string,
   ): ProviderInstallationUseAdmission | null {
+    if (!verificationAuthority) this.assertRecoveryComplete(providerId);
     if (!this.options.leases) return null;
     const identity = this.identity(
       providerId,

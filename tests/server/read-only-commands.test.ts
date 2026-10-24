@@ -10,6 +10,7 @@ import {
 const POSIX = { cwd: "/work/repo", windows: false };
 const WINDOWS = { cwd: "C:\\work\\repo", windows: true };
 const POWERSHELL = { ...POSIX, powershell: true };
+const GIT_BASH = { cwd: "C:\\work\\repo", windows: false, windowsPaths: true };
 
 const allowed = (command: string, context = POSIX) => classifyReadOnlyCommand(command, context);
 
@@ -163,7 +164,6 @@ describe("classifyReadOnlyCommand", () => {
     "git diff \\; rm -rf .",
     "git diff \\&\\& rm -rf .",
     "cat src\\parser.ts",
-    "cat \"src\\\"; rm -rf .; \\\"\"",
     "git diff 'unterminated",
     "git diff \"unterminated",
     "FOO=bar git diff",
@@ -519,6 +519,87 @@ describe("classifyReadOnlyCommand", () => {
       expect(allowed(command, POWERSHELL)).toMatchObject({ allowed: false });
       expect(allowed(command, WINDOWS)).toMatchObject({ allowed: false });
     }
+  });
+
+  it.each([
+    "sed -n '10,40p' src/parser.ts",
+    "sed -n '1,5p;20,30p' src/parser.ts",
+    "sed -n 12p src/parser.ts",
+    "sed -n '$p' src/parser.ts",
+    "sed -n '40,$p' src/parser.ts",
+    "git show HEAD:src/parser.ts | sed -n '1,20p'",
+  ])("allows the line-range sed form %s", (command) => {
+    expect(allowed(command).allowed).toBe(true);
+    expect(allowed(command, GIT_BASH).allowed).toBe(true);
+  });
+
+  it.each([
+    "sed -i '1d' src/parser.ts",
+    "sed -n -i '1p' src/parser.ts",
+    "sed '1,5p' src/parser.ts",
+    "sed -n '1,5p;6p;7p' src/parser.ts",
+    "sed -n '1w out.txt' src/parser.ts",
+    "sed -n '1W out.txt' src/parser.ts",
+    "sed -n '1r /etc/passwd' src/parser.ts",
+    "sed -n '1R /etc/passwd' src/parser.ts",
+    "sed -n '1e date' src/parser.ts",
+    "sed -n 's/a/b/w out.txt' src/parser.ts",
+    "sed -n 's/a/b/p' src/parser.ts",
+    "sed -n '/x/p' src/parser.ts",
+    "sed -n '1,5p' --in-place src/parser.ts",
+    "sed -n -e '1,5p' src/parser.ts",
+    "sed -n '1,5p' .env",
+    "sed -n '1,5p' ../outside.txt",
+  ])("refuses the sed form %s", (command) => {
+    expect(allowed(command)).toMatchObject({ allowed: false, reason: expect.any(String) });
+  });
+
+  it("names the allowed sed forms when it refuses one", () => {
+    expect(allowed("sed -i '1d' src/parser.ts")).toEqual({
+      allowed: false,
+      reason: "sed can only print line ranges in a watcher, as sed -n '10,40p' file or sed -n '1,5p;20,30p' file.",
+    });
+  });
+
+  it("applies POSIX quoting with Windows paths when the shell is Git Bash on a Windows host", () => {
+    for (const command of [
+      "rg \"parse input\" src",
+      "rg -n \"a\\\\(b\" src",
+      "rg \"say \\\"hi\\\"\" src",
+      "rg 'a\\b' src",
+      "git log --oneline 2>/dev/null | head -5",
+      "cat \"src/parser.ts\"",
+    ]) {
+      expect(allowed(command, GIT_BASH)).toMatchObject({ allowed: true });
+      expect(allowed(command, WINDOWS)).toMatchObject({ allowed: false });
+    }
+    for (const command of [
+      "cat C:/Windows/win.ini",
+      "cat /etc/passwd",
+      "cat '..\\outside.txt'",
+      "rg \"a$b\" src",
+      "rg \"a$(id)\" src",
+      "cat \"src\\\"; rm -rf .; \\\"\" .env",
+      "cat src\\parser.ts",
+      "git diff; rm -rf .",
+      "cat .env",
+    ]) {
+      expect(allowed(command, GIT_BASH)).toMatchObject({ allowed: false });
+    }
+  });
+
+  it("reads Windows paths on a Windows host whichever shell runs the command", () => {
+    for (const command of ["cat src/parser.ts", "cat C:/work/repo/src/parser.ts"]) {
+      expect(allowed(command, GIT_BASH)).toEqual({ allowed: true, program: "cat" });
+      expect(allowed(command, WINDOWS)).toEqual({ allowed: true, program: "cat" });
+    }
+    expect(allowed("rg \"a\\$(id)\" src", GIT_BASH)).toEqual({ allowed: true, program: "rg" });
+  });
+
+  it("keeps an escaped double quote inside one POSIX argument", () => {
+    expect(allowed("cat \"src\\\"; rm -rf .; \\\"\"")).toEqual({ allowed: true, program: "cat" });
+    expect(allowed("cat \"src\\\"; rm -rf .; \\\"\"", POWERSHELL)).toMatchObject({ allowed: false });
+    expect(allowed("cat \"src\\\"; rm -rf .; \\\"\"", WINDOWS)).toMatchObject({ allowed: false });
   });
 
   it("names the reason for a refused command", () => {

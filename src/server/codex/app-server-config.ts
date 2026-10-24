@@ -111,8 +111,15 @@ export function commandExecutionLabel(item: JsonObject): string {
 }
 
 export function codexAccessPolicy(
-  options: Pick<CodexAppServerOptions, "access" | "planMode">,
+  options: Pick<CodexAppServerOptions, "access" | "planMode" | "readOnlyProfile">,
 ): CodexAccessPolicy {
+  if (options.readOnlyProfile === "watcher") {
+    return {
+      approvalPolicy: "untrusted",
+      threadSandbox: "read-only",
+      turnSandboxPolicy: { type: "readOnly", networkAccess: false },
+    };
+  }
   if (options.access === "full") {
     return {
       approvalPolicy: "never",

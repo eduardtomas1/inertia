@@ -57,7 +57,7 @@ export const SERVER_EVENT_OPTIONS = Object.freeze({
   }),
   providerInstallStates: exhaustiveOptions<ProviderInstallState>({
     checking: true, installed: true, "not-installed": true,
-    unresponsive: true, error: true,
+    unresponsive: true, "recovery-required": true, error: true,
   }),
   providerAuthStates: exhaustiveOptions<ProviderAuthState>({
     checking: true, authenticated: true, unauthenticated: true,

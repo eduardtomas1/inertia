@@ -37,7 +37,7 @@ export const PROVIDER_IDS = [
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderInteractionMode = "build" | "plan";
 export type ProviderAccessMode = "full" | "supervised" | "auto-edit";
-export type ProviderInstallState = "checking" | "installed" | "not-installed" | "unresponsive" | "error";
+export type ProviderInstallState = "checking" | "installed" | "not-installed" | "unresponsive" | "recovery-required" | "error";
 export type ProviderAuthState = "checking" | "authenticated" | "unauthenticated" | "configured" | "unknown" | "error";
 
 export interface ProviderInfo {
@@ -127,6 +127,7 @@ interface ProviderRunRequest {
    */
   maxBudgetUsd?: number;
   readOnlyProfile?: "watcher";
+  systemInstruction?: string;
   /** Provider-owned control operation that must never become a durable turn. */
   operation?: {
     kind: "compact";
@@ -250,6 +251,7 @@ export interface ProviderActivityEvent extends ProviderEventBase {
   /** Bounded, scrubbed technical input/output; never assistant prose. */
   detail?: string;
   outputDelta?: string;
+  fileMutation?: true;
 }
 
 export interface ProviderStatusEvent extends ProviderEventBase {
@@ -296,6 +298,7 @@ export interface ProviderPlanEvent extends ProviderEventBase {
   type: "plan";
   explanation: string | null;
   steps: AgentPlanStep[];
+  handoff?: true;
 }
 
 export interface ProviderGoalSnapshot {
@@ -656,6 +659,8 @@ export function isProviderRunRefusal(
 }
 
 export interface ProviderManagerOptions {
+  /** Durable maintenance recovery blocks every launch for this provider. */
+  providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;
   cancelGraceMs?: number;
   /** Runtime-owned cancellation authority shared by passive provider operations. */

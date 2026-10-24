@@ -22,11 +22,13 @@ Yes. Use [split view](working-side-by-side.md), give chats their own windows, or
 
 ## Can a watcher change my files?
 
-No. A [watcher](watcher.md) runs in Plan mode with Supervised access, its approval requests, including requests to edit a file, are declined automatically, and Inertia stops a check in which the watcher starts to edit a file. If files change during a check in which the watcher started an edit or ran a command outside its read-only allowlist, and no running agent accounts for them, the watcher pauses and lists the paths.
+Not by default. A [watcher](watcher.md) is read-only unless you give it chat access when you add it. On Claude Code, Codex and OpenCode, a read-only watcher's approval requests, including requests to edit a file, are declined automatically, and Inertia stops a check in which the watcher starts to edit a file. If files change during a check in which the watcher started an edit or ran a command outside its read-only allowlist, and no running agent accounts for them, the watcher pauses and lists the paths. Every agent can be a watcher, but on Cursor, Kimi Code and Antigravity Inertia holds it to read-only less strictly; see [Which agents can be watchers](watcher.md#which-agents-can-be-watchers).
+
+With **Supervised**, **Auto-accept edits** or **Full access**, the watcher works like a chat with that access, and its approvals appear in the watcher chat.
 
 ## Can the watcher run commands?
 
-Only read-only ones. On Claude Code and OpenCode it runs commands from Inertia's read-only allowlist, such as `git diff`, `git log`, `rg` and `cat`, without asking, and Inertia declines any other command that reaches it. Claude Code also runs the commands that its own plan mode treats as read-only. Codex runs its own known-safe read-only commands inside its read-only sandbox. See [Read-only guarantees](watcher.md#read-only-guarantees).
+A read-only watcher runs only read-only ones. On Claude Code and OpenCode it runs commands from Inertia's read-only allowlist, such as `git diff`, `git log`, `rg` and `cat`, without asking, and Inertia declines any other command that reaches it. Claude Code also runs its own read and search tools without asking; its commands go through the same allowlist. Codex runs its own known-safe read-only commands inside its read-only sandbox. See [Read-only guarantees](watcher.md#read-only-guarantees). A watcher you gave chat access runs commands like a chat with that access.
 
 ## Can I use Inertia from another device?
 

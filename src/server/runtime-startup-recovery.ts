@@ -19,6 +19,8 @@ import { reconcileInterruptedDuoLaunches } from
   "./runtime/duo/duo-launch-coordinator.js";
 import { recoverInterruptedTurns } from
   "./runtime/turns/turn-recovery.js";
+import { ProviderMaintenanceJournal } from "./provider/maintenance-journal.js";
+import { RuntimeStartupBlockerError } from "../shared/runtime-startup-diagnostics.js";
 
 export interface RuntimeStartupRecovery {
   readonly dataDirectory: string;
@@ -35,6 +37,7 @@ export interface RuntimeStartupRecovery {
 export interface InitializedRuntimePersistence {
   readonly conversationAttachments: ConversationAttachmentStore;
   readonly recovery: ReturnType<typeof recoverInterruptedTurns>;
+  readonly providerMaintenanceJournal: ProviderMaintenanceJournal;
 }
 
 export async function initializeRuntimePersistence(
@@ -54,6 +57,10 @@ export async function initializeRuntimePersistence(
   } = startup;
   let conversationAttachments: ConversationAttachmentStore | null = null;
   try {
+    const providerMaintenanceJournal = new ProviderMaintenanceJournal(dataDirectory, {
+      runtimeGenerationId: options.runtimeGenerationId,
+      systemBootId: options.systemBootId,
+    });
     for (const generationId of confirmedGenerations) {
       store.providerRunOwnership.clearRuntimeGeneration(generationId);
     }
@@ -108,6 +115,22 @@ export async function initializeRuntimePersistence(
       }
       await reconcileInterruptedDuoLaunches(store);
       store.watcherLinks.recoverInterruptedWakes(new Date().toISOString());
+      try {
+        providerMaintenanceJournal.reconcile({
+          confirmedRuntimeGenerationIds: new Set([
+            ...confirmedGenerations,
+            ...manuallyRetiredGenerations,
+            ...authorizedModernGenerationIds,
+          ]),
+          currentSystemBootId: options.systemBootId,
+          priorBootCleanupConfirmed: priorBootLeasesCleared,
+        });
+      } catch {
+        throw new RuntimeStartupBlockerError(
+          "provider-installation-quarantined",
+          "Provider maintenance cleanup proof could not be preserved safely.",
+        );
+      }
       // Recovery receipts reset the supervisor's one fresh readiness window.
       // Emit them only after every mandatory startup reconciliation succeeds;
       // otherwise remaining recovery work would consume that second phase.
@@ -130,7 +153,7 @@ export async function initializeRuntimePersistence(
         );
       }
     }
-    return { conversationAttachments, recovery };
+    return { conversationAttachments, recovery, providerMaintenanceJournal };
   } catch (error) {
     // Release every acquired persistent resource on startup failure. Windows
     // otherwise retains SQLite handles and a retry appears to require reboot.

@@ -145,3 +145,18 @@ describe("readOnlyCommandPathProblem", () => {
     await expect(readOnlyCommandPathProblem("cat ./file-1.txt", { cwd: "/work/repo", windows: false }, files)).resolves.toBeNull();
   });
 });
+
+describe("readOnlyCommandPathProblem for a POSIX shell on the host's paths", () => {
+  const posixShell = (command: string) => readOnlyCommandPathProblem(command, {
+    cwd: workspace,
+    windows: false,
+    windowsPaths: process.platform === "win32",
+  });
+
+  it("keeps reads inside the workspace and refuses a link out of it", async () => {
+    await expect(posixShell("cat \"src/parser.ts\"")).resolves.toBeNull();
+    await expect(posixShell("sed -n '1,5p' real.txt")).resolves.toBeNull();
+    await expect(posixShell("cat linkdir/secret.txt")).resolves.toBe(OUTSIDE);
+    await expect(posixShell("sed -n '1,5p' linkdir/secret.txt")).resolves.toBe(OUTSIDE);
+  });
+});

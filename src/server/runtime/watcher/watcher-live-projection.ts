@@ -1,6 +1,6 @@
 import { activityExecutionCategory, hostToolActivityTitle } from "../../../shared/activity-display";
 import { clipCodeUnits } from "../../../shared/code-units";
-import type { AgentActivity, RuntimeMutationEvent } from "../../../shared/contracts";
+import type { AgentActivity, AgentApprovalRequest, AgentInputRequest, RuntimeMutationEvent } from "../../../shared/contracts";
 import {
   MAX_WATCHER_LIVE_LABEL_CHARS,
   type WatcherLivePhase,
@@ -72,6 +72,25 @@ export class WatcherLiveProjection {
     if (!state || activity.turnId !== state.turnId || activity.conversationId !== state.watcherConversationId) return;
     const phase = PHASES[activityExecutionCategory(activity)];
     this.#offer(linkId, phase, watcherLiveLabel(activity));
+  }
+
+  observeApproval(linkId: string, request: Pick<AgentApprovalRequest, "conversationId" | "turnId" | "title">): void {
+    const state = this.#links.get(linkId);
+    if (!state || request.turnId !== state.turnId || request.conversationId !== state.watcherConversationId) return;
+    this.#offer(linkId, "approval", watcherLiveLabel({ kind: "status", title: request.title, status: "running" }));
+  }
+
+  observeQuestion(linkId: string, request: Pick<AgentInputRequest, "conversationId" | "turnId" | "questions">): void {
+    const state = this.#links.get(linkId);
+    if (!state || request.turnId !== state.turnId || request.conversationId !== state.watcherConversationId) return;
+    const question = request.questions[0]?.question ?? "";
+    this.#offer(linkId, "question", watcherLiveLabel({ kind: "status", title: question, status: "running" }));
+  }
+
+  interactionResolved(linkId: string, turnId: string): void {
+    const state = this.#links.get(linkId);
+    if (!state || turnId !== state.turnId) return;
+    this.#offer(linkId, "thinking", null);
   }
 
   end(linkId: string): void {

@@ -315,7 +315,7 @@ function startCursorRun(
         () => parseAcpSessionNotification(value) as SessionNotification,
         "Cursor ACP sent an invalid session update.",
       ), ({ params }) => {
-      const safeParams = redactHostMcpPayload(params);
+      const safeParams = secretRedactor.streamNotification(params);
       if (!sessionId || safeParams.sessionId !== sessionId || cancelRequested) return;
       if (
         acceptsCommandAdvertisement

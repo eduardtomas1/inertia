@@ -17,7 +17,7 @@ function Host() {
 }
 
 describe("thread submenu", () => {
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
   it("opens beside its row even when its menu becomes the containing block for fixed elements", () => {
     const frame = { left: 131, top: 232 };
@@ -53,6 +53,49 @@ describe("thread submenu", () => {
     fireEvent.click(trigger, { detail: 1 });
     expect(screen.getByRole("menu", { name: "Copy" })).toBeInTheDocument();
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the hover submenu open while the pointer crosses its gap, then closes after leaving", () => {
+    vi.useFakeTimers();
+    render(<Host />);
+    const owner = screen.getByRole("menuitem", { name: "Copy" }).parentElement!;
+    fireEvent.pointerEnter(owner);
+    const submenu = screen.getByRole("menu", { name: "Copy" });
+
+    fireEvent.pointerLeave(owner, { relatedTarget: screen.getByRole("menu", { name: "Thread actions" }) });
+    expect(submenu).toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(50); });
+    fireEvent.pointerEnter(submenu);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(submenu).toBeInTheDocument();
+
+    fireEvent.pointerLeave(submenu, { relatedTarget: document.body });
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.queryByRole("menu", { name: "Copy" })).toBeNull();
+  });
+
+  it("keeps keyboard focus in the submenu if it arrives during the pointer gap", () => {
+    vi.useFakeTimers();
+    render(<Host />);
+    const owner = screen.getByRole("menuitem", { name: "Copy" }).parentElement!;
+    fireEvent.pointerEnter(owner);
+    fireEvent.pointerLeave(owner, { relatedTarget: document.body });
+    const item = screen.getByRole("menuitem", { name: "Path" });
+    act(() => { item.focus(); vi.advanceTimersByTime(1_000); });
+    expect(item).toHaveFocus();
+    expect(screen.getByRole("menu", { name: "Copy" })).toBeInTheDocument();
+  });
+
+  it("cancels a pending pointer close when the submenu unmounts", () => {
+    vi.useFakeTimers();
+    const onOpenChange = vi.fn();
+    const view = render(<ThreadSubmenu label="Copy" icon={null} open onOpenChange={onOpenChange}>
+      <button type="button" role="menuitem">Path</button>
+    </ThreadSubmenu>);
+    fireEvent.pointerLeave(screen.getByRole("menuitem", { name: "Copy" }).parentElement!, { relatedTarget: document.body });
+    view.unmount();
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("opens on a click without hover and moves keyboard activation into the submenu", async () => {

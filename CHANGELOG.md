@@ -67,6 +67,8 @@ dependable Duo judge, and Claude's own agents, skills and instructions.
   slower machines.
 - **Jump to latest**, search results and other explicit transcript navigation
   stop an older scroll restoration from pulling you back into history.
+- Keep Copy and Snooze submenus open while the pointer crosses the gap from
+  their chat-menu row into the submenu.
 
 ### Dependencies
 
@@ -74,6 +76,14 @@ dependable Duo judge, and Claude's own agents, skills and instructions.
   1.9.0, keyring to 2.1.2, React Virtual to 3.14.21 and Lucide to 1.59.0.
 - Update electron-vite to 6.0.0 and adapt the build configuration to its
   supported dependency externalization options.
+
+### Security
+
+- Keep Cursor and Kimi's local tool-bridge credentials out of replies and
+  reasoning when another credential shares part of their value, including
+  responses split across multiple updates.
+- Update HTTP request parsing and URI/IP validation libraries to patched
+  releases, along with the affected development dependencies.
 
 ### Release verification
 

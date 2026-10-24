@@ -8,10 +8,11 @@ import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import { ProviderManager } from "../../src/server/providers";
 import { providerInstallationVerifier } from "../../src/server/provider/provider-info-refresh";
 import { PROVIDER_INFO } from "../../src/server/provider/catalog";
+import { PROVIDER_IDS } from "../../src/server/provider/contracts";
 import { portableFixtureRoot, removePortableFixture, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
-it("blocks every discovery and launch entry point for a provider with pending maintenance recovery", async () => {
+it.each(PROVIDER_IDS)("blocks discovery and launch while %s has pending maintenance recovery", async (providerId) => {
   const detect = vi.fn(async (providerId: keyof typeof PROVIDER_INFO) => ({
     provider: PROVIDER_INFO[providerId], available: false,
     installState: "not-installed" as const, authState: "unknown" as const,
@@ -20,27 +21,59 @@ it("blocks every discovery and launch entry point for a provider with pending ma
   const manager = ProviderManager.createProduction({
     installationLeases: new ProviderInstallationLeaseCoordinator(),
     conversationProviderGate: () => undefined,
-    providerRecoveryPending: (id) => id === "claude",
+    providerRecoveryPending: (id) => id === providerId,
     detectProvider: detect,
   });
   try {
-    await expect(manager.detect("claude", { refreshEnvironment: true })).resolves.toMatchObject({
+    await expect(manager.detect(providerId, { refreshEnvironment: true })).resolves.toMatchObject({
       installState: "recovery-required", authState: "unknown", canRun: false,
     });
     expect(detect).not.toHaveBeenCalled();
-    await expect(manager.validateCommand("claude", process.execPath)).rejects.toThrow("recovery");
-    await expect(manager.authLaunch("claude")).rejects.toThrow("recovery");
-    await expect(manager.terminalResumeLaunch("chat", "claude", "session", process.cwd())).rejects.toThrow("recovery");
-    await expect(manager.metadata("claude", process.cwd(), { force: true })).rejects.toThrow("recovery");
+    await expect(manager.validateCommand(providerId, process.execPath)).rejects.toThrow("recovery");
+    await expect(manager.authLaunch(providerId)).rejects.toThrow("recovery");
+    await expect(manager.terminalResumeLaunch("chat", providerId, "session", process.cwd())).rejects.toThrow("recovery");
+    await expect(manager.metadata(providerId, process.cwd(), { force: true })).rejects.toThrow("recovery");
+    if (providerId === "claude") await expect(manager.claudeSkills(process.cwd(), true)).rejects.toThrow("recovery");
     const input = nativeProviderRunInput({
-      providerId: "claude", conversationId: "blocked-chat", cwd: process.cwd(),
+      providerId, conversationId: "blocked-chat", cwd: process.cwd(),
       prompt: "Synthetic turn", interactionMode: "build", access: "supervised",
     });
     expect(() => manager.run(input)).toThrow("recovery");
     expect(() => manager.compact(input)).toThrow("recovery");
     expect(detect).not.toHaveBeenCalled();
-    await expect(manager.detect("codex")).resolves.toMatchObject({ installState: "not-installed" });
-    expect(detect).toHaveBeenCalledOnce();
+    for (const otherProvider of PROVIDER_IDS.filter((id) => id !== providerId)) {
+      await expect(manager.detect(otherProvider)).resolves.toMatchObject({ installState: "not-installed" });
+    }
+    expect(detect.mock.calls.map(([id]) => id)).toEqual(PROVIDER_IDS.filter((id) => id !== providerId));
+  } finally {
+    await manager.disposeAll();
+  }
+});
+
+it.each((["codex", "claude", "opencode"] as const).flatMap((providerId) =>
+  [false, true].map((cached) => [providerId, cached] as const),
+))("retains recovery guidance for %s usage reads (cached executable: %s)", async (providerId, cached) => {
+  let recoveryPending = false;
+  const detect = vi.fn(async () => ({
+    provider: PROVIDER_INFO[providerId], available: true, executable: process.execPath, version: "2.0.0",
+    installState: "installed" as const, authState: "authenticated" as const,
+    canRun: true, protocolVerified: true, cleanupConfirmed: true,
+  }));
+  const manager = ProviderManager.createProduction({
+    installationLeases: new ProviderInstallationLeaseCoordinator(),
+    conversationProviderGate: () => undefined,
+    providerRecoveryPending: (id) => recoveryPending && id === providerId,
+    detectProvider: detect,
+  });
+  try {
+    if (cached) await manager.detect(providerId);
+    recoveryPending = true;
+    detect.mockClear();
+    const read = providerId === "codex" ? manager.codexControlContext(process.cwd())
+      : providerId === "claude" ? manager.claudeUsage(process.cwd())
+      : manager.openCodeUsageAccount(process.cwd(), "opencode-go/fixture", new AbortController().signal);
+    await expect(read).rejects.toThrow("recovery");
+    expect(detect).not.toHaveBeenCalled();
   } finally {
     await manager.disposeAll();
   }

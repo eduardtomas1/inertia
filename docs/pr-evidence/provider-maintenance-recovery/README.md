@@ -15,6 +15,9 @@ before preserving the proof needed by a retained maintenance record.
   harness are not mutated or republished during initialization.
 - Prior-runtime maintenance remains quarantined and durable while the current
   runtime can close cleanly. New unfinished maintenance still fails shutdown.
+- Limits retains recovery guidance and clears cached quota windows for blocked
+  providers. Usage entry points refuse recovery before resolving commands or
+  reading provider credentials.
 
 ## Cleanup proof
 
@@ -43,6 +46,13 @@ Regression coverage includes exact/mismatched generation proof, prior-boot proof
 interrupted checkpoint publication and retirement, retry after receipt consumption,
 disabled execution, provider launch guards, native recovery/retirement, unrelated
 provider readiness, credential reads without mutation, clean shutdown, and Settings.
+
+Runtime integration covers every provider in the registry: Codex, Claude, Cursor,
+Kimi, OpenCode, and Antigravity. Each provider is tested both as the blocked
+installation and with unrelated providers available. Coverage also includes
+simultaneous recoveries with different outcomes, signed-out recovery, Kimi's
+session-time authentication, and Antigravity's deferred sign-in check. Native
+discovery fixtures remain separate from the injected runtime integration tests.
 
 The local browser fixture rendered the real `ProvidersSettings` component with
 synthetic before/after snapshots. At 1280 x 800, the semantic snapshots showed

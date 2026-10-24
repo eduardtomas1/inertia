@@ -26,7 +26,7 @@ const MAX_RECORD_BYTES = 4 * 1024;
 const MAX_RECORDS = 32;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
-type ProviderMaintenanceJournalPhase = "owning" | "verified";
+type ProviderMaintenanceJournalPhase = "owning" | "cleaned" | "verified";
 
 interface ProviderMaintenanceJournalPayload {
   schemaVersion: typeof JOURNAL_SCHEMA_VERSION;
@@ -66,6 +66,7 @@ export interface ProviderMaintenanceRecoveryRecord {
   runtimeGenerationId: string;
   systemBootId: string;
   verifiedIdentity: ProviderInstallationIdentity | null;
+  runtimeCleanupConfirmed: boolean;
 }
 
 export interface ProviderMaintenanceJournalAuthority {
@@ -185,7 +186,7 @@ function parseRecord(
       || typeof record.integrity !== "string"
       || !SHA256_PATTERN.test(record.integrity)
     ) return null;
-    const observedFieldsValid = record.phase === "owning"
+    const observedFieldsValid = record.phase !== "verified"
       ? record.observedBoundaryId === null
         && record.observedScopeId === null
         && record.observedFingerprint === null
@@ -257,7 +258,7 @@ function readProviderMaintenanceJournalRecords(
   const records: ReadProviderMaintenanceJournalRecord[] = [];
   for (const name of names) {
     const match = name.match(
-      /^\.provider-maintenance-([0-9a-f]{64})\.(owning|verified)\.(json|publish\.tmp)$/u,
+      /^\.provider-maintenance-([0-9a-f]{64})\.(owning|cleaned|verified)\.(json|publish\.tmp)$/u,
     );
     if (!match) {
       throw new Error("Provider maintenance journal storage contains a foreign entry.");
@@ -299,6 +300,7 @@ function maintenanceRecoveryRecords(
 ): ProviderMaintenanceRecoveryRecord[] {
   const grouped = new Map<string, {
     owning?: ReadProviderMaintenanceJournalRecord;
+    cleaned?: ReadProviderMaintenanceJournalRecord;
     verified?: ReadProviderMaintenanceJournalRecord;
   }>();
   for (const record of records) {
@@ -310,26 +312,28 @@ function maintenanceRecoveryRecords(
     grouped.set(record.record.operationId, current);
   }
   return [...grouped].map(([operationId, pair]) => {
-    if (!pair.owning) {
+    // Keep cleanup proof until the last unlink. If retirement is interrupted
+    // after removing ownership, the cleaned record still identifies the work.
+    const owning = pair.owning ?? pair.cleaned;
+    if (!owning) {
       throw new Error("A provider maintenance verification has no owning record.");
     }
-    if (
-      pair.verified
-      && (
-        pair.verified.record.providerId !== pair.owning.record.providerId
-        || pair.verified.record.boundaryId !== pair.owning.record.boundaryId
-        || pair.verified.record.scopeId !== pair.owning.record.scopeId
-        || pair.verified.record.fingerprint !== pair.owning.record.fingerprint
-        || pair.verified.record.runtimeGenerationId
-          !== pair.owning.record.runtimeGenerationId
-        || pair.verified.record.systemBootId !== pair.owning.record.systemBootId
-      )
-    ) throw new Error("Provider maintenance journal phases conflict.");
+    for (const phase of [pair.cleaned, pair.verified]) {
+      if (phase && (
+        phase.record.providerId !== owning.record.providerId
+        || phase.record.boundaryId !== owning.record.boundaryId
+        || phase.record.scopeId !== owning.record.scopeId
+        || phase.record.fingerprint !== owning.record.fingerprint
+        || phase.record.runtimeGenerationId !== owning.record.runtimeGenerationId
+        || phase.record.systemBootId !== owning.record.systemBootId
+      )) throw new Error("Provider maintenance journal phases conflict.");
+    }
     return {
       operationId,
-      installationIdentity: maintenanceIdentity(pair.owning.record),
-      runtimeGenerationId: pair.owning.record.runtimeGenerationId,
-      systemBootId: pair.owning.record.systemBootId,
+      installationIdentity: maintenanceIdentity(owning.record),
+      runtimeGenerationId: owning.record.runtimeGenerationId,
+      systemBootId: owning.record.systemBootId,
+      runtimeCleanupConfirmed: !!pair.cleaned,
       verifiedIdentity: pair.verified
         ? {
             providerId: pair.verified.record.providerId,
@@ -402,13 +406,14 @@ implements ProviderMaintenanceJournalAuthority {
     operationId: string,
     observedIdentity: ProviderInstallationIdentity,
   ): boolean {
-    const owning = this.exactOperation(operationId)?.owning;
+    const pair = this.exactOperation(operationId);
+    const owning = pair?.owning ?? pair?.cleaned;
     if (
       !owning
       || owning.record.providerId !== observedIdentity.providerId
       || owning.record.boundaryId !== observedIdentity.boundaryId
     ) return false;
-    const existing = this.exactOperation(operationId)?.verified;
+    const existing = pair?.verified;
     if (existing) {
       return existing.record.observedScopeId === observedIdentity.scopeId
         && existing.record.observedBoundaryId === observedIdentity.boundaryId
@@ -429,14 +434,18 @@ implements ProviderMaintenanceJournalAuthority {
   ): boolean {
     const pair = this.exactOperation(operationId);
     if (
-      !pair?.owning
+      !(pair?.owning ?? pair?.cleaned)
       || !pair.verified
       || pair.verified.record.providerId !== observedIdentity.providerId
       || pair.verified.record.observedBoundaryId !== observedIdentity.boundaryId
       || pair.verified.record.observedScopeId !== observedIdentity.scopeId
       || pair.verified.record.observedFingerprint !== observedIdentity.fingerprint
     ) return false;
-    return this.retire([pair.verified, pair.owning]);
+    return this.retire([
+      pair.verified,
+      ...(pair.owning ? [pair.owning] : []),
+      ...(pair.cleaned ? [pair.cleaned] : []),
+    ]);
   }
 
   abandonUnadmitted(
@@ -446,6 +455,7 @@ implements ProviderMaintenanceJournalAuthority {
     const pair = this.exactOperation(operationId);
     if (
       !pair?.owning
+      || pair.cleaned
       || pair.verified
       || pair.owning.record.providerId !== identity.providerId
       || pair.owning.record.boundaryId !== identity.boundaryId
@@ -462,10 +472,20 @@ implements ProviderMaintenanceJournalAuthority {
   reconcile(
     reconciliation: ProviderMaintenanceJournalReconciliation,
   ): readonly ProviderMaintenanceRecoveryRecord[] {
-    // Runtime cleanup proves only that the old process tree stopped. It cannot
-    // prove whether an update command replaced half of an installation. Keep
-    // every record until a recovery owner re-resolves and attests it exactly.
-    void reconciliation;
+    // Transfer exact cleanup proof before the supervisor consumes its receipt.
+    // This attests only process cleanup; installation conformance must still
+    // succeed on every retry before ownership can be retired.
+    for (const record of this.pending()) {
+      if (record.runtimeCleanupConfirmed) continue;
+      if (!reconciliation.confirmedRuntimeGenerationIds.has(record.runtimeGenerationId)
+        && !(reconciliation.priorBootCleanupConfirmed
+          && record.systemBootId !== reconciliation.currentSystemBootId)) continue;
+      const owning = this.exactOperation(record.operationId)?.owning;
+      if (!owning || !this.publish({
+        ...this.payload(owning.record),
+        phase: "cleaned",
+      })) throw new Error("Provider maintenance cleanup proof could not be persisted.");
+    }
     return this.pending();
   }
 
@@ -481,6 +501,7 @@ implements ProviderMaintenanceJournalAuthority {
 
   private exactOperation(operationId: string): {
     owning?: ReadProviderMaintenanceJournalRecord;
+    cleaned?: ReadProviderMaintenanceJournalRecord;
     verified?: ReadProviderMaintenanceJournalRecord;
   } | null {
     if (!validOperationId(operationId)) return null;
@@ -488,6 +509,7 @@ implements ProviderMaintenanceJournalAuthority {
       candidate.record.operationId === operationId);
     const pair: {
       owning?: ReadProviderMaintenanceJournalRecord;
+      cleaned?: ReadProviderMaintenanceJournalRecord;
       verified?: ReadProviderMaintenanceJournalRecord;
     } = {};
     for (const record of records) {

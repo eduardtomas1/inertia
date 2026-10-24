@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { chmodSync, copyFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { ProviderInstallationLeaseCoordinator } from "../../src/server/provider/installation-lease";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
@@ -10,6 +10,41 @@ import { providerInstallationVerifier } from "../../src/server/provider/provider
 import { PROVIDER_INFO } from "../../src/server/provider/catalog";
 import { portableFixtureRoot, removePortableFixture, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+
+it("blocks every discovery and launch entry point for a provider with pending maintenance recovery", async () => {
+  const detect = vi.fn(async (providerId: keyof typeof PROVIDER_INFO) => ({
+    provider: PROVIDER_INFO[providerId], available: false,
+    installState: "not-installed" as const, authState: "unknown" as const,
+    canRun: false, cleanupConfirmed: true,
+  }));
+  const manager = ProviderManager.createProduction({
+    installationLeases: new ProviderInstallationLeaseCoordinator(),
+    conversationProviderGate: () => undefined,
+    providerRecoveryPending: (id) => id === "claude",
+    detectProvider: detect,
+  });
+  try {
+    await expect(manager.detect("claude", { refreshEnvironment: true })).resolves.toMatchObject({
+      installState: "recovery-required", authState: "unknown", canRun: false,
+    });
+    expect(detect).not.toHaveBeenCalled();
+    await expect(manager.validateCommand("claude", process.execPath)).rejects.toThrow("recovery");
+    await expect(manager.authLaunch("claude")).rejects.toThrow("recovery");
+    await expect(manager.terminalResumeLaunch("chat", "claude", "session", process.cwd())).rejects.toThrow("recovery");
+    await expect(manager.metadata("claude", process.cwd(), { force: true })).rejects.toThrow("recovery");
+    const input = nativeProviderRunInput({
+      providerId: "claude", conversationId: "blocked-chat", cwd: process.cwd(),
+      prompt: "Synthetic turn", interactionMode: "build", access: "supervised",
+    });
+    expect(() => manager.run(input)).toThrow("recovery");
+    expect(() => manager.compact(input)).toThrow("recovery");
+    expect(detect).not.toHaveBeenCalled();
+    await expect(manager.detect("codex")).resolves.toMatchObject({ installState: "not-installed" });
+    expect(detect).toHaveBeenCalledOnce();
+  } finally {
+    await manager.disposeAll();
+  }
+});
 
 function writeCodexLauncher(path: string): void {
   const staged = `${path}.next`;

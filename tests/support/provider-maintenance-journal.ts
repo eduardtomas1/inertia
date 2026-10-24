@@ -63,6 +63,7 @@ ProviderMaintenanceJournalAuthority {
         runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
         systemBootId: "test:00000000-0000-4000-8000-000000000001",
         verifiedIdentity: record.verified,
+        runtimeCleanupConfirmed: false,
       }),
     ),
   };

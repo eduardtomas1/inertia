@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const PROVIDER_MAINTENANCE_RECOVERY_MESSAGE =
+  "Provider update recovery requires attention. Restart Inertia to retry recovery. If this persists, contact support before using this provider.";
+
 export const PROVIDER_MAINTENANCE_PROVIDER_IDS = [
   "codex",
   "claude",

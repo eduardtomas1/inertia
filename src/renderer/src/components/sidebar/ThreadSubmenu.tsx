@@ -8,6 +8,10 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
 }): React.JSX.Element {
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
+  const pointerClose = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelPointerClose = (): void => {
+    clearTimeout(pointerClose.current);
+  };
   const focusFirstItem = (): void => {
     requestAnimationFrame(() => popup.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus());
   };
@@ -31,21 +35,31 @@ export function ThreadSubmenu({ label, icon, disabled, children, open, onOpenCha
     position();
     // The parent positions after its children's layout effects on initial open.
     const frame = requestAnimationFrame(position);
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    window.addEventListener("animationend", position, true);
-    window.addEventListener("animationcancel", position, true);
+    const events = ["resize", "scroll", "animationend", "animationcancel"] as const;
+    for (const event of events) window.addEventListener(event, position, event !== "resize");
     return () => {
+      clearTimeout(pointerClose.current);
       cancelAnimationFrame(frame);
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", position, true);
-      window.removeEventListener("animationend", position, true);
-      window.removeEventListener("animationcancel", position, true);
+      for (const event of events) window.removeEventListener(event, position, event !== "resize");
     };
   }, [open]);
-  return <div className="thread-submenu-owner" onPointerEnter={() => !disabled && setOpen(true)}
-    onPointerLeave={() => { if (!popup.current?.contains(document.activeElement)) setOpen(false); }}
-    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+  return <div className="thread-submenu-owner" onPointerEnter={() => {
+    cancelPointerClose();
+    if (!disabled) setOpen(true);
+  }} onPointerLeave={() => {
+    if (!open) return;
+    cancelPointerClose();
+    // The popup sits four pixels from its row. Give the pointer time to cross
+    // that gap; entering either the row or popup cancels the pending close.
+    pointerClose.current = setTimeout(() => {
+      if (!popup.current?.contains(document.activeElement)) setOpen(false);
+    }, 150);
+  }} onBlur={(event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      cancelPointerClose();
+      setOpen(false);
+    }
+  }}>
     <button type="button" role="menuitem" tabIndex={-1} ref={trigger} disabled={disabled}
       aria-haspopup="menu" aria-expanded={open}
       onClick={(event) => {

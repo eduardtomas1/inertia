@@ -67,6 +67,8 @@ dependable Duo judge, and Claude's own agents, skills and instructions.
   slower machines.
 - **Jump to latest**, search results and other explicit transcript navigation
   stop an older scroll restoration from pulling you back into history.
+- Keep Copy and Snooze submenus open while the pointer crosses the gap from
+  their chat-menu row into the submenu.
 
 ### Dependencies
 

@@ -872,7 +872,7 @@ describe("durable provider activity lifecycle contract", () => {
     await finish(value);
   });
 
-  it("records each distinct Codex turn diff once and ignores empty or repeated diffs", async () => {
+  it("records a Codex turn diff when its content changes and ignores empty or repeated diffs", async () => {
     const value = await runtime();
     const codex = codexEvents(value);
     const owned = { threadId: "codex-thread", turnId: "codex-turn" };
@@ -887,10 +887,11 @@ describe("durable provider activity lifecycle contract", () => {
       codex.handleNotification("turn/diff/updated", { ...owned, diff });
       runTimers(value.scheduler, 64);
     }
-    expect(writes).toEqual({ inserted: 2, updated: 0 });
+    expect(writes).toEqual({ inserted: 3, updated: 0 });
     const patches = turnActivities(value).filter(({ title }) => title === "Patch updated")
       .sort((left, right) => (left.detail?.length ?? 0) - (right.detail?.length ?? 0));
     expect(patches).toEqual([
+      expect.objectContaining({ status: "completed", detail: `Diff:\n${first}` }),
       expect.objectContaining({ status: "completed", detail: `Diff:\n${first}` }),
       expect.objectContaining({ status: "completed", detail: `Diff:\n${second}` }),
     ]);

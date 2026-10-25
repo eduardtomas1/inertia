@@ -850,10 +850,10 @@ export class CodexAppServerEvents {
       return;
     }
     if (method === "turn/diff/updated") {
-      const diff = boundedText(params.diff, 128_000);
-      if (!diff || this.latestDiffs.get(notificationTurnId ?? "") === diff) return;
+      const diff = boundedText(params.diff, 128_000) ?? "";
+      if (this.latestDiffs.get(notificationTurnId ?? "") === diff) return;
       this.latestDiffs.set(notificationTurnId ?? "", diff);
-      this.emitActivity("tool", "completed", "Patch updated", { detail: `Diff:\n${diff}` });
+      if (diff) this.emitActivity("tool", "completed", "Patch updated", { detail: `Diff:\n${diff}` });
       return;
     }
     if (method === "turn/plan/updated") {

@@ -1,4 +1,5 @@
 import type { WatcherWakeSummary } from "@shared/watcher";
+import type { ContextCompactionTrigger } from "@shared/context-compaction";
 import type { RefObject } from "react";
 import type {
   AgentActivity,
@@ -57,6 +58,7 @@ export interface ResponseTimelineProps {
   autoScrollToFinalAnswer?: boolean;
   detailLoading?: boolean;
   compactingSince?: string | null;
+  compactingTrigger?: ContextCompactionTrigger | null;
   checkpointRestoreDisabled: boolean;
   omittedTurnIds?: readonly string[];
   turnAnchorId?: string | null;

@@ -105,6 +105,12 @@ function classifiedMessageSendError(
   );
 }
 
+export interface CompactionHandoff {
+  conversationId: string;
+  attachments: Awaited<ReturnType<TrustedAttachmentResolver["resolvePayloads"]>>;
+  attachmentsTaken: boolean;
+}
+
 interface UndeliveredFollowUp {
   conversationId: string;
   id: string;
@@ -121,6 +127,7 @@ export interface TurnInteractionCommandDependencies {
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   watcherDelivery?: import("../watcher/watcher-note-instruction").WatcherNoteDelivery;
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
+  compactionHandoff?: CompactionHandoff;
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
   backendProfileController: BackendProfileController;
@@ -163,12 +170,14 @@ export function createTurnInteractionCommandHandler(
         const scheduledDispatch = dependencies.limitResetDispatch ?? dependencies.restartContinuationDispatch;
         let messageSendStage: MessageSendStage = "conversation-state";
         let conversation: ReturnType<RuntimeStore["conversation"]>;
+        let handedOff = false;
         let contextPacketIds: readonly string[] = [];
         let resolvedTurnContext: TurnRequestContext | undefined;
         try {
           conversation = dependencies.store.conversation(
             command.payload.conversationId,
           );
+          handedOff = dependencies.compactionHandoff?.conversationId === conversation.id;
           scheduledDispatch?.assertCurrent();
           if (dependencies.queuedMessage && (
             dependencies.queuedMessage.conversationId !== conversation.id
@@ -204,7 +213,13 @@ export function createTurnInteractionCommandHandler(
           contextService.assertSendable(conversation.id, contextPacketIds);
         }
         messageSendStage = "active-route";
-        if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
+        if (handedOff && (
+          dependencies.turns.isActive(conversation.id)
+          || !dependencies.providerTerminalResumes.isActive(conversation.id)
+        )) {
+          throw new RuntimeRequestError("The chat changed while it was compacting. Send the message again.");
+        }
+        if (!handedOff && dependencies.providerTerminalResumes.isActive(conversation.id)) {
           throw new RuntimeRequestError(
             "Wait for this chat's current operation (such as compaction) to finish. If you resumed it in a terminal, close that terminal first.",
           );
@@ -484,6 +499,9 @@ export function createTurnInteractionCommandHandler(
             if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
             resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });
           }
+        } else if (handedOff && dependencies.compactionHandoff) {
+          resolvedAttachments = [...dependencies.compactionHandoff.attachments];
+          dependencies.compactionHandoff.attachmentsTaken = true;
         } else if (command.payload.attachments.length > 0) {
           const resolver = dependencies.attachmentResolver;
           if (!resolver) {
@@ -666,7 +684,7 @@ export function createTurnInteractionCommandHandler(
             conversation.id,
             resolvedSkills.routeKey,
           );
-          if (dependencies.enableProviders) {
+          if (dependencies.enableProviders && !handedOff) {
             const acquisition =
               dependencies.providerTerminalResumes.acquireWhenAvailable(
                 conversation.id,

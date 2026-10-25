@@ -5,6 +5,7 @@ import type {
 import { isApiKeyBackendPresetId, normalizeBackendBaseUrl } from "../../../shared/backend-presets";
 import type { BackendCompatibilityProbeResult } from "../../../shared/backend-probe";
 import type { HarnessBackendCompatibility } from "../../../shared/model-routing";
+import { promptCacheTtlAllowed } from "../../../shared/compact-on-return";
 
 export function backendConnectionSemantics(
   profile: Pick<
@@ -75,6 +76,7 @@ export function backendDraftForValidation(
     models: requested.models,
     routing: requested.routing,
     capabilityHints: requested.capabilityHints,
+    ...(requested.promptCacheTtl ? { promptCacheTtl: requested.promptCacheTtl } : {}),
   };
   if (isApiKeyBackendPresetId(requested.preset)) {
     return {
@@ -98,4 +100,16 @@ export function backendDraftForValidation(
     allowInsecureLocalhost: requested.allowInsecureLocalhost,
     allowPrivateNetwork: requested.allowPrivateNetwork,
   };
+}
+
+export function withPromptCacheTtl(
+  stored: PersistedModelBackendProfile,
+  update: Omit<ModelBackendProfileUpdate, "enabled">,
+): PersistedModelBackendProfile {
+  const { promptCacheTtl: requested, ...connection } = update;
+  const { promptCacheTtl: _stored, ...merged } = { ...stored, ...connection };
+  const next = requested === undefined
+    ? promptCacheTtlAllowed(merged) ? stored.promptCacheTtl : undefined
+    : requested ?? undefined;
+  return next ? { ...merged, promptCacheTtl: next } : merged;
 }

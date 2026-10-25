@@ -83,7 +83,7 @@ import {
   backendConnectionSemantics,
   backendDraftForValidation,
   backendPersistedState,
-  compatibilityFailureMessage,
+  compatibilityFailureMessage, withPromptCacheTtl,
   profileProbesOverHttp,
   sameNormalizedBaseUrl,
 } from "./backend-profile-rules";
@@ -250,6 +250,7 @@ export class BackendProfileController {
       models: this.withPresetReasoning(values.preset, values.models),
       routing: values.routing,
       capabilityHints: values.capabilityHints,
+      ...(draft.promptCacheTtl ? { promptCacheTtl: draft.promptCacheTtl } : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -298,7 +299,7 @@ export class BackendProfileController {
       );
     }
     const { enabled: requestedEnabled, ...settings } = update;
-    const requested = { ...stored.profile, ...settings };
+    const requested = withPromptCacheTtl(stored.profile, settings);
     if (
       stored.profile.source === "custom"
       && Object.keys(settings).length > 0

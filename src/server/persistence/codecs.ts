@@ -62,7 +62,8 @@ import {
   resolveHarnessBackendCompatibility,
   versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
-import { providerTimestamp, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
+import { providerTimestamp, validatePromptCacheFacts, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
+import { COMPACT_ON_RETURN_SETTINGS, DEFAULT_COMPACT_ON_RETURN, type CompactOnReturnSetting } from "../../shared/compact-on-return";
 import {
   boundedSubagentCount,
   boundedSubagentLabel,
@@ -463,6 +464,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     confirmDestructiveActions: state.confirm_destructive_actions === 1,
     desktopNotifications: state.desktop_notifications === 1,
     notifyOnlyInBackground: state.notify_only_in_background === 1,
+    compactOnReturn: compactOnReturnFromState(state.compact_on_return),
     quotaWarnings: {
       enabled: state.quota_warnings_enabled !== 0,
       firstThreshold: isQuotaWarningThreshold(state.quota_warning_threshold)
@@ -947,8 +949,25 @@ export function usageFromRow(row: ThreadUsageRow): ThreadUsageSnapshot {
     compactsAutomatically: row.compacts_automatically === null
       ? null
       : row.compacts_automatically === 1,
+    ...promptCacheFromRow(row),
     updatedAt: row.updated_at,
   };
+}
+
+function promptCacheFromRow(row: ThreadUsageRow): Pick<ThreadUsageSnapshot, "promptCache"> {
+  if (!row.prompt_cache_source) return {};
+  const promptCache = validatePromptCacheFacts({
+    lastRequestStartedAt: row.last_request_started_at ?? null,
+    lifetimeMs: row.prompt_cache_lifetime_ms ?? null,
+    source: row.prompt_cache_source,
+  });
+  return promptCache ? { promptCache } : {};
+}
+
+function compactOnReturnFromState(value: string | undefined): CompactOnReturnSetting {
+  return COMPACT_ON_RETURN_SETTINGS.includes(value as CompactOnReturnSetting)
+    ? value as CompactOnReturnSetting
+    : DEFAULT_COMPACT_ON_RETURN;
 }
 
 export function workspaceRunFromRow(row: WorkspaceRunRow): WorkspaceRun {

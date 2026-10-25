@@ -243,6 +243,15 @@ function startClaudeRun(
     ? requestedFastMode === "fast" ? "on" : "off"
     : null;
   let fastModeVerified = requestedFastModeState === null;
+  const promptCacheTtl = options.harnessConfiguration?.kind === "claude-messages"
+    ? options.harnessConfiguration.promptCacheTtl
+    : null;
+  const launchSettings = {
+    ...(supportsFastMode
+      ? { fastMode: requestedFastMode === "fast", fastModePerSessionOptIn: true }
+      : {}),
+    ...(promptCacheTtl ? { promptCacheTtl } : {}),
+  };
   let sessionUnavailable = false;
   const ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
@@ -315,6 +324,7 @@ function startClaudeRun(
     },
     refreshContextUsage,
     checklistTasks: () => checklistTasks,
+    configuredPromptCacheTtl: promptCacheTtl,
   });
   const providerResult = (async (): Promise<ProviderRunResult> => {
     try {
@@ -377,14 +387,7 @@ function startClaudeRun(
           settingSources: [],
           ...claudeIdentityOptions(identity, options.input.systemInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
-          ...(supportsFastMode
-            ? {
-                settings: {
-                  fastMode: requestedFastMode === "fast",
-                  fastModePerSessionOptIn: true,
-                },
-              }
-            : {}),
+          ...(Object.keys(launchSettings).length > 0 ? { settings: launchSettings } : {}),
           permissionMode: options.input.readOnlyProfile === "watcher"
             ? "default"
             : options.input.interactionMode === "plan"

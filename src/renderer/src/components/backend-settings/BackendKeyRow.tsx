@@ -18,6 +18,8 @@ import {
 import { LoadingMark } from "../ui";
 import { BackendProfileEditor } from "./BackendProfileForms";
 import { BackendStateBadge } from "./ProviderAccountRow";
+import { promptCacheSummary } from "./PromptCacheChoice";
+import { promptCacheTtlAllowed } from "@shared/compact-on-return";
 import type { BackendSetupStatus, BackendSetupStatusListener } from "./useBackendSetup";
 import {
   failureMessage,
@@ -201,7 +203,10 @@ export function BackendKeyRow({
       <div className="backend-key-row-summary">
         <span className="backend-key-row-copy">
           <strong id={nameId}>{name}</strong>
-          <small>{backendEndpointLabel(profile)} · {profile.models.length} {profile.models.length === 1 ? "model" : "models"}</small>
+          <small>
+            {backendEndpointLabel(profile)} · {profile.models.length} {profile.models.length === 1 ? "model" : "models"}
+            {promptCacheTtlAllowed(profile) && ` · ${promptCacheSummary(profile.promptCacheTtl)}`}
+          </small>
         </span>
         <BackendStateBadge state={state} id={stateId} />
       </div>

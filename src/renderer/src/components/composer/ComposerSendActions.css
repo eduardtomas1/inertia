@@ -118,3 +118,65 @@
     display: none;
   }
 }
+
+.composer-shell .composer-input-actions .send-button.has-label {
+  display: inline-flex;
+  width: auto;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 9px;
+  border-radius: 999px;
+}
+
+.send-button-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.composer-history-chip {
+  display: inline-flex;
+  height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.composer-history-chip:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.composer-history-chip[aria-pressed="true"] {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+@container (max-width: 420px) {
+  .composer-shell .composer-input-actions .send-button.has-label {
+    width: var(--composer-send-size);
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+
+  .send-button-label {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .composer-history-chip {
+    border-color: ButtonText;
+  }
+}

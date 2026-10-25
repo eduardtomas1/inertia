@@ -124,6 +124,12 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
   ]],
   [100, "todos", ["due_time", "project_id", "linked_at"]],
   [101, "watcher_links", ["read_only"]],
+  [104, "app_state", ["compact_on_return"]],
+  [104, "thread_usage", [
+    "last_request_started_at",
+    "prompt_cache_lifetime_ms",
+    "prompt_cache_source",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

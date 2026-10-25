@@ -27,6 +27,7 @@ interface QueuedMessageRuntimeOptions {
   signal: AbortSignal;
   track<T>(operation: () => Promise<T>): Promise<T>;
   onWatcherNoteUndelivered?(note: WatcherNoteAttribution, reason: string): void;
+  compacting?(conversationId: string): boolean;
 }
 
 export const WATCHER_NOTE_REMOVED_REASON = "it was removed from the main chat's queue";
@@ -83,6 +84,7 @@ export function createQueuedMessageRuntime(
       return;
     }
     if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
+    if (options.compacting?.(conversationId)) return;
     const conversation = store.conversation(conversationId);
     if (conversation.archivedAt !== null) return;
     if (!manual && !releasesQueue(store.latestAgentTurnForConversation(conversationId))) return;
@@ -396,6 +398,9 @@ export function createQueuedMessageRuntime(
     enqueueWatcherNote,
     withdrawWatcherNote,
     onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
+    onCompactionSettled(conversationId: string): void {
+      if (store.queuedMessages.list(conversationId).length > 0) void schedule(conversationId).catch(() => undefined);
+    },
     start(): void {
       store.queuedMessages.reconcile();
       for (const conversationId of store.queuedMessages.pendingConversationIds()) void schedule(conversationId).catch(() => undefined);

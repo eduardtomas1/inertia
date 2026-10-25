@@ -6,6 +6,7 @@ import type {
   AgentConversationContextRequest,
   ChatAttachment,
   Conversation,
+  ConversationCompactAndSendResult,
   ConversationContextPacketSummary,
   ConversationLatestTurnSummary,
   MessageSendAcceptance,
@@ -21,6 +22,7 @@ import type {
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
+import type { CompactOnReturnSetting, ConversationCompactionState } from "@shared/compact-on-return";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
@@ -33,7 +35,7 @@ import type {
 } from "../conversation-context/types";
 
 export interface ComposerProps {
-  conversation: Conversation;
+  conversation: Conversation & { compaction?: ConversationCompactionState };
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
   scratchWorkspace?: boolean;
@@ -79,6 +81,13 @@ export interface ComposerProps {
     message: string;
     instructionForwarded: boolean;
   }>;
+  compaction?: ConversationCompactionState | null;
+  compactOnReturnSetting?: CompactOnReturnSetting;
+  onCompactAndSend?: (
+    message: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+  ) => Promise<ConversationCompactAndSendResult>;
   onListSkills: (forceReload?: boolean) => Promise<void>;
   promptPresets?: readonly PromptPreset[];
   onPromptPresetCommand?: PromptPresetCommandRunner;

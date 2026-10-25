@@ -9,6 +9,7 @@ import type {
   AgentInputRequest,
   ChatMessage,
   Conversation,
+  ConversationCompactAndSendResult,
   Project,
   TurnGitArtifact,
 } from "../../src/shared/contracts";
@@ -57,6 +58,7 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
     Composer: memo(function MockComposer({
       onSend,
       onCompact,
+      onCompactAndSend,
       running,
       promptHistory,
       onStop,
@@ -66,6 +68,7 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
         attachments: [],
       ): Promise<TranscriptMessageSendAcceptance | null | void>;
       onCompact?: (instruction?: string) => Promise<unknown>;
+      onCompactAndSend?: (content: string, attachments: []) => Promise<unknown>;
       running: boolean;
       promptHistory?: readonly { id: string; content: string }[];
       onStop: () => Promise<void>;
@@ -101,6 +104,14 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
               Compact from composer mock
             </button>
           )}
+          {onCompactAndSend && (
+            <button
+              type="button"
+              onClick={() => void onCompactAndSend("Pick up the migration", []).catch(() => undefined)}
+            >
+              Compact and send from composer mock
+            </button>
+          )}
         </>
       );
     }),
@@ -117,6 +128,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       inputRequests: AgentInputRequest[];
       detailLoading?: boolean;
       compactingSince?: string | null;
+      compactingTrigger?: string | null;
       onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
       onReaderNavigationIntent?: () => void;
       onTurnAnchorSettled?: (turnId: string) => void;
@@ -129,6 +141,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
         inputRequests,
         detailLoading,
         compactingSince,
+        compactingTrigger,
         onFinalAnswerAutoScroll,
         onReaderNavigationIntent,
         onTurnAnchorSettled,
@@ -163,6 +176,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
             {detailLoading ? "loading" : "ready"}
           </div>
           <div data-testid="timeline-compacting">{compactingSince ?? "none"}</div>
+          <div data-testid="timeline-compacting-trigger">{compactingTrigger ?? "none"}</div>
           <div data-testid="timeline-turn-projection">
             {turns.map((turn) => (
               `${turn.conversationId}:${turn.id}:${turn.status}`
@@ -751,6 +765,49 @@ describe("draft turn anchoring", () => {
       pending[1]!.reject(new Error("Provider not ready for compaction."));
     });
     expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
+  });
+
+  it("shows compact and send in the timeline and follows the turn it starts", async () => {
+    const pending = deferred<ConversationCompactAndSendResult>();
+    const onCompactAndSendMessage = vi.fn(() => pending.promise);
+    const current = conversation("conversation-returning");
+    render(
+      <ChatWorkspace
+        {...workspaceProps(current, async () => null)}
+        onCompactAndSendMessage={onCompactAndSendMessage}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Compact and send from composer mock" }));
+    expect(onCompactAndSendMessage).toHaveBeenCalledWith("Pick up the migration", [], undefined);
+    expect(Number.isFinite(Date.parse(screen.getByTestId("timeline-compacting").textContent ?? ""))).toBe(true);
+    expect(screen.getByTestId("timeline-compacting-trigger")).toHaveTextContent("on-return");
+
+    await act(async () => {
+      pending.resolve({
+        kind: "conversation.compact-and-send",
+        outcome: "sent",
+        conversationId: current.id,
+        turnId: "turn-after-compaction",
+        userMessageId: "message-after-compaction",
+        disposition: "new-turn",
+        compaction: { providerId: "claude", beforeTokens: 252_000, afterTokens: 18_300, instructionForwarded: false, trigger: "on-return" },
+      });
+      await pending.promise;
+    });
+    expect(screen.getByTestId("timeline-compacting")).toHaveTextContent("none");
+    await waitFor(() => expect(screen.getByTestId("turn-anchor-projection")).toHaveTextContent("turn-after-compaction"));
+  });
+
+  it("shows a compaction the chat reports from another window", async () => {
+    const startedAt = "2026-10-25T10:20:00.000Z";
+    render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-elsewhere-compacting"), async () => null)}
+        compaction={{ state: "compacting", trigger: "on-return", startedAt }}
+      />,
+    );
+    expect(await screen.findByTestId("timeline-compacting")).toHaveTextContent(startedAt);
+    expect(screen.getByTestId("timeline-compacting-trigger")).toHaveTextContent("on-return");
   });
 
   it("keeps each conversation's in-flight compaction when another chat compacts meanwhile", async () => {

@@ -6,6 +6,7 @@ import {
   CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS,
   CONVERSATION_DETAIL_REQUEST_TIMEOUT_MS,
   CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS,
+  CONVERSATION_COMPACT_AND_SEND_REQUEST_TIMEOUT_MS,
   DUO_CANCEL_REQUEST_TIMEOUT_MS,
   DUO_DISPATCH_REQUEST_TIMEOUT_MS,
   GIT_MUTATION_REQUEST_TIMEOUT_MS,
@@ -128,6 +129,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "conversation.archive": shortMutation,
   "conversation.compact": {
     timeoutMs: CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS,
+    timeoutDelivery: "ambiguous",
+  },
+  "conversation.compact-and-send": {
+    timeoutMs: CONVERSATION_COMPACT_AND_SEND_REQUEST_TIMEOUT_MS,
     timeoutDelivery: "ambiguous",
   },
   "conversation.create": gitMutation,

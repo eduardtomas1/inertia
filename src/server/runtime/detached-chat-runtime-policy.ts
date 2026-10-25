@@ -81,6 +81,7 @@ export function detachedChatCommandRejection(
         ? null
         : REJECTION;
     case "message.send":
+    case "conversation.compact-and-send":
       return ownsExistingConversation(command.payload.conversationId)
         && command.payload.activate === false
         && !command.payload.context?.conversationContextPacketIds?.length

@@ -34,6 +34,7 @@ async function fixture(
   const events: ServerEvent[] = [];
   const hooks: { operationSettled?: () => void } = {};
   const admission = { closed: false, refusals: 0 };
+  const compaction = { active: false };
   const dependencies: TurnInteractionCommandDependencies = {
     store: runtime.store, turns: runtime.controller, conversationAttachments: attachments,
     backendProfileController: {
@@ -53,7 +54,7 @@ async function fixture(
     providerInfo: () => [turnControllerTestProviderInfo()], broadcast: () => undefined,
     broadcastSnapshot: () => undefined, send: (_socket, event) => { events.push(event); },
   };
-  queue = createQueuedMessageRuntime(dependencies, { signal: abort.signal, track: (operation) => {
+  queue = createQueuedMessageRuntime(dependencies, { signal: abort.signal, compacting: () => compaction.active, track: (operation) => {
     if (admission.closed && ++admission.refusals < 50) return Promise.reject(new Error("The runtime is preparing for an application update."));
     const task = operation().then((value) => { hooks.operationSettled?.(); return value; }); tasks.add(task); void task.finally(() => tasks.delete(task)); return task;
   } });
@@ -82,7 +83,7 @@ async function fixture(
     });
     return requestId;
   };
-  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, drain, command, followUp, stopAndSend, abort,
+  return { ...runtime, dependencies, queue, attachments, events, hooks, admission, compaction, drain, command, followUp, stopAndSend, abort,
     close: async () => { abort.abort(); await drain(); await runtime.controller.dispose(); await attachments.close(); runtime.store.close(); },
   };
 }
@@ -328,6 +329,31 @@ describe("Send now while the agent works", () => {
 });
 
 describe("durable runtime message queue", () => {
+  it("keeps queued messages waiting while the chat compacts and sends them when compaction ends", async () => {
+    const f = await fixture();
+    try {
+      const initial = f.controller.queue({ conversationId: f.conversationId, content: "First" });
+      f.controller.start(initial.turn.id);
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      f.compaction.active = true;
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      await f.command("message.queue.send", id);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", error: null });
+      expect(f.provider.runCount).toBe(1);
+      f.compaction.active = false;
+      f.queue.onCompactionSettled(f.conversationId);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(2);
+      f.queue.onCompactionSettled(f.conversationId);
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
   it("dispatches in the background after completion and replays a lost enqueue acknowledgement without a duplicate turn", async () => {
     const f = await fixture();
     try {

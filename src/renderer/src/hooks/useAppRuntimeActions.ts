@@ -8,7 +8,9 @@ import {
 
 import type {
   ChatAttachment,
+  ClientCommand,
   Conversation,
+  ConversationCompactAndSendResult,
   ConversationCompactionResult,
   MessageSendAcceptance,
   ServerEvent,
@@ -49,6 +51,13 @@ export interface AppRuntimeActions {
     conversationId: string,
     instruction?: string,
   ) => Promise<ConversationCompactionResult>;
+  compactAndSendToConversation: (
+    conversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    activate?: boolean,
+  ) => Promise<ConversationCompactAndSendResult>;
   updateConversationById: (
     conversationId: string,
     update: Partial<Pick<
@@ -61,6 +70,22 @@ export interface AppRuntimeActions {
       | "accessMode"
     >>,
   ) => Promise<void>;
+}
+
+function messagePayload(
+  conversationId: string,
+  content: string,
+  attachments: ChatAttachment[],
+  context: TurnRequestContext | undefined,
+  activate: boolean,
+) {
+  return {
+    conversationId,
+    content,
+    attachments: attachments.map(({ id, name, path, mimeType, size }) => ({ id, name, path, mimeType, size })),
+    activate,
+    ...(context ? { context } : {}),
+  };
 }
 
 export function useAppRuntimeActions(options: {
@@ -159,26 +184,15 @@ export function useAppRuntimeActions(options: {
         );
       });
   }, [setActionError]);
-  const sendMessageToConversation = useCallback(async (
+  const deliverMessage = useCallback(async <Result,>(
     targetConversationId: string,
-    content: string,
     attachments: ChatAttachment[],
-    context?: TurnRequestContext,
-    activate = true,
-  ): Promise<MessageSendAcceptance | null> => {
+    command: ClientCommand,
+    accept: (event: ServerEvent) => Result,
+  ): Promise<Result> => {
     setSendingConversationIds((current) =>
       new Set(current).add(targetConversationId));
     setActionError(null);
-    const command = withRequestId({
-      type: "message.send",
-      payload: {
-        conversationId: targetConversationId,
-        content,
-        attachments: attachments.map(({ id, name, path, mimeType, size }) => ({ id, name, path, mimeType, size })),
-        activate,
-        ...(context ? { context } : {}),
-      },
-    });
     let handoffPrepared = false;
     let preserveAmbiguousHandoff = false;
     try {
@@ -189,17 +203,7 @@ export function useAppRuntimeActions(options: {
         });
         handoffPrepared = true;
       }
-      const event = await sendCommand(command);
-      if (
-        event.type === "request.result"
-        && event.result.kind === "message.accepted"
-      ) return event.result;
-      if (event.type === "request.ok") return null;
-      if (event.type === "request.result" && event.result.kind === "message.queue") {
-        window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: targetConversationId }));
-        return null;
-      }
-      throw new Error("The local service returned an unexpected message response.");
+      return accept(await sendCommand(command));
     } catch (error) {
       preserveAmbiguousHandoff = runtimeCommandDelivery(error) === "ambiguous";
       setActionError(messageSendFailureText(error));
@@ -216,6 +220,56 @@ export function useAppRuntimeActions(options: {
       });
     }
   }, [sendCommand, setActionError]);
+  const sendMessageToConversation = useCallback((
+    targetConversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    activate = true,
+  ): Promise<MessageSendAcceptance | null> => deliverMessage(
+    targetConversationId,
+    attachments,
+    withRequestId({
+      type: "message.send",
+      payload: messagePayload(targetConversationId, content, attachments, context, activate),
+    }),
+    (event) => {
+      if (
+        event.type === "request.result"
+        && event.result.kind === "message.accepted"
+      ) return event.result;
+      if (event.type === "request.ok") return null;
+      if (event.type === "request.result" && event.result.kind === "message.queue") {
+        window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: targetConversationId }));
+        return null;
+      }
+      throw new Error("The local service returned an unexpected message response.");
+    },
+  ), [deliverMessage]);
+  const compactAndSendToConversation = useCallback((
+    targetConversationId: string,
+    content: string,
+    attachments: ChatAttachment[],
+    context?: TurnRequestContext,
+    activate = true,
+  ): Promise<ConversationCompactAndSendResult> => deliverMessage(
+    targetConversationId,
+    attachments,
+    withRequestId({
+      type: "conversation.compact-and-send",
+      payload: {
+        ...messagePayload(targetConversationId, content, attachments, context, activate),
+        reason: "on-return",
+      },
+    }),
+    (event) => {
+      if (
+        event.type === "request.result"
+        && event.result.kind === "conversation.compact-and-send"
+      ) return event.result;
+      throw new Error("The local service returned an unexpected compaction response.");
+    },
+  ), [deliverMessage]);
   const updateConversationById = useCallback(async (
     targetConversationId: string,
     update: Parameters<AppRuntimeActions["updateConversationById"]>[1],
@@ -274,6 +328,7 @@ export function useAppRuntimeActions(options: {
     openProjectPath,
     sendMessageToConversation,
     compactConversation,
+    compactAndSendToConversation,
     updateConversationById,
   };
 }

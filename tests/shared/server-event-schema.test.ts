@@ -2118,3 +2118,73 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(parseServerEvent(ready({ contextReads: [read] }))).toBeTruthy();
   });
 });
+describe("compact on return projections", () => {
+  const usage = conversationDetail.usage[0]!;
+  const promptCache = { lastRequestStartedAt: checkedAt, lifetimeMs: 300_000, source: "configured" };
+  const usageEvent = (value: unknown): unknown => ({ type: "agent.usage", usage: value });
+  const shellEvent = (shell: unknown): unknown => ({ type: "conversation.shell.updated", conversation: shell, runs: [] });
+  const settingsEvent = (settings: unknown): unknown => ({
+    type: "snapshot.updated",
+    snapshot: { projects: [], conversations: [], runs: [], providers: [], settings, activeProjectId: null, activeConversationId: null },
+  });
+
+  it("accepts prompt cache facts on live and persisted usage and keeps them optional", () => {
+    expect(parseServerEvent(usageEvent(usage))).toMatchObject({ type: "agent.usage" });
+    for (const facts of [
+      promptCache,
+      { lastRequestStartedAt: null, lifetimeMs: null, source: "assumed" },
+      { ...promptCache, source: "reported", lifetimeMs: 3_600_000 },
+    ]) {
+      expect(parseServerEvent(usageEvent({ ...usage, promptCache: facts }))).toMatchObject({ usage: { promptCache: facts } });
+    }
+    expect(parseServerEvent(event({
+      kind: "conversation.detail", conversationId: conversation.id, state: "ready",
+      detail: { ...conversationDetail, usage: [{ ...usage, promptCache }] },
+    }))).toMatchObject({ type: "request.result" });
+  });
+
+  it.each([
+    ["source", { ...promptCache, source: "guessed" }],
+    ["lifetime", { ...promptCache, lifetimeMs: -1 }],
+    ["fractional lifetime", { ...promptCache, lifetimeMs: 1.5 }],
+    ["timestamp", { ...promptCache, lastRequestStartedAt: "soon" }],
+    ["missing field", { lifetimeMs: 300_000, source: "configured" }],
+    ["shape", "5m"],
+  ])("rejects malformed prompt cache %s", (_label, facts) => {
+    expect(() => parseServerEvent(usageEvent({ ...usage, promptCache: facts }))).toThrow("Malformed server event");
+  });
+
+  it("accepts the compacting state on shells and keeps it optional", () => {
+    expect(parseServerEvent(shellEvent(conversationShell))).toMatchObject({ type: "conversation.shell.updated" });
+    for (const compaction of [
+      { state: "idle", trigger: null, startedAt: null },
+      { state: "compacting", trigger: "on-return", startedAt: checkedAt },
+      { state: "compacting", trigger: "manual", startedAt: checkedAt },
+    ]) {
+      expect(parseServerEvent(shellEvent({ ...conversationShell, compaction })))
+        .toMatchObject({ conversation: { compaction } });
+    }
+  });
+
+  it.each([
+    ["unknown state", { state: "running", trigger: null, startedAt: null }],
+    ["idle with a trigger", { state: "idle", trigger: "manual", startedAt: null }],
+    ["idle with a start", { state: "idle", trigger: null, startedAt: checkedAt }],
+    ["compacting without a trigger", { state: "compacting", trigger: null, startedAt: checkedAt }],
+    ["compacting without a start", { state: "compacting", trigger: "on-return", startedAt: null }],
+    ["unknown trigger", { state: "compacting", trigger: "automatic", startedAt: checkedAt }],
+    ["unreadable start", { state: "compacting", trigger: "manual", startedAt: "now" }],
+  ])("rejects a shell compaction state with %s", (_label, compaction) => {
+    expect(() => parseServerEvent(shellEvent({ ...conversationShell, compaction }))).toThrow("Malformed server event");
+  });
+
+  it("accepts the compact on return setting and settings from older runtimes", () => {
+    expect(defaultSettings.compactOnReturn).toBe("offer");
+    for (const compactOnReturn of ["offer", "never"]) {
+      expect(parseServerEvent(settingsEvent({ ...defaultSettings, compactOnReturn }))).toMatchObject({ type: "snapshot.updated" });
+    }
+    const { compactOnReturn: _setting, ...legacy } = defaultSettings;
+    expect(parseServerEvent(settingsEvent(legacy))).toMatchObject({ type: "snapshot.updated" });
+    expect(() => parseServerEvent(settingsEvent({ ...defaultSettings, compactOnReturn: "always" }))).toThrow("Malformed server event");
+  });
+});

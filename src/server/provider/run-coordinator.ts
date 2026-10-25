@@ -525,6 +525,15 @@ export class ProviderRunCoordinator {
             "Codex backend configuration was supplied to a different harness.",
           );
         }
+        if (
+          launchOptions.harnessConfiguration?.kind === "claude-messages"
+          && harness.id !== "claude-agent-sdk"
+        ) {
+          throw new ProviderRuntimeError(
+            "invalid_input",
+            "Claude backend configuration was supplied to a different harness.",
+          );
+        }
         const launchInput = launchOptions.modelArgument === undefined
           ? input
           : {

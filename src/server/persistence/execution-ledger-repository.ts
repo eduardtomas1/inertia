@@ -528,15 +528,18 @@ export class ExecutionLedgerRepository {
         throw new Error("The usage snapshot turn belongs to a different conversation.");
       }
     }
+    const validated = validateProviderUsage(usage);
+    const promptCache = validated.promptCache ?? this.usageForConversation(usage.conversationId)?.promptCache;
     const next: ThreadUsageSnapshot = {
       conversationId: usage.conversationId,
       turnId,
-      ...validateProviderUsage(usage),
+      ...validated,
+      ...(promptCache ? { promptCache } : {}),
       updatedAt: new Date().toISOString(),
     };
     this.context.database.prepare(`
-      INSERT INTO thread_usage (conversation_id, turn_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens, input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens, compacts_automatically, updated_at)
-      VALUES (@conversationId, @turnId, @usedTokens, @totalProcessedTokens, @totalProcessedScope, @maxTokens, @inputTokens, @cachedInputTokens, @cacheWriteInputTokens, @outputTokens, @reasoningOutputTokens, @compactsAutomatically, @updatedAt)
+      INSERT INTO thread_usage (conversation_id, turn_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens, input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens, compacts_automatically, last_request_started_at, prompt_cache_lifetime_ms, prompt_cache_source, updated_at)
+      VALUES (@conversationId, @turnId, @usedTokens, @totalProcessedTokens, @totalProcessedScope, @maxTokens, @inputTokens, @cachedInputTokens, @cacheWriteInputTokens, @outputTokens, @reasoningOutputTokens, @compactsAutomatically, @lastRequestStartedAt, @promptCacheLifetimeMs, @promptCacheSource, @updatedAt)
       ON CONFLICT(conversation_id) DO UPDATE SET
         turn_id = excluded.turn_id,
         used_tokens = excluded.used_tokens,
@@ -549,8 +552,28 @@ export class ExecutionLedgerRepository {
         output_tokens = excluded.output_tokens,
         reasoning_output_tokens = excluded.reasoning_output_tokens,
         compacts_automatically = excluded.compacts_automatically,
+        last_request_started_at = excluded.last_request_started_at,
+        prompt_cache_lifetime_ms = excluded.prompt_cache_lifetime_ms,
+        prompt_cache_source = excluded.prompt_cache_source,
         updated_at = excluded.updated_at
-    `).run({ ...next, compactsAutomatically: next.compactsAutomatically === null ? null : Number(next.compactsAutomatically) });
+    `).run({
+      conversationId: next.conversationId,
+      turnId: next.turnId,
+      usedTokens: next.usedTokens,
+      totalProcessedTokens: next.totalProcessedTokens,
+      totalProcessedScope: next.totalProcessedScope,
+      maxTokens: next.maxTokens,
+      inputTokens: next.inputTokens,
+      cachedInputTokens: next.cachedInputTokens,
+      cacheWriteInputTokens: next.cacheWriteInputTokens,
+      outputTokens: next.outputTokens,
+      reasoningOutputTokens: next.reasoningOutputTokens,
+      compactsAutomatically: next.compactsAutomatically === null ? null : Number(next.compactsAutomatically),
+      lastRequestStartedAt: promptCache?.lastRequestStartedAt ?? null,
+      promptCacheLifetimeMs: promptCache?.lifetimeMs ?? null,
+      promptCacheSource: promptCache?.source ?? null,
+      updatedAt: next.updatedAt,
+    });
     return next;
   }
 

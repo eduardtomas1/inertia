@@ -60,6 +60,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["auto-open-plan", "Open plan automatically", ["plan panel", "general"]],
       ["confirm-destructive-actions", "Confirm destructive actions", ["delete", "warning", "confirmation", "general"]],
       ["usage-display", "Usage display", ["quota", "token", "tokens", "limit", "limits", "context", "usage and context", "general"]],
+      ["compact-on-return", "Compact large API chats when you return", ["compact on return", "compaction", "compact", "summarize", "prompt cache", "cache", "api key", "tokens", "cost", "context"]],
     ],
     "Review and terminal": [
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],
@@ -136,7 +137,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["provider-updates", "Provider updates", ["maintenance", "upgrade", "update", "version"]],
     ],
     "Accounts and API keys": [
-      ["model-backends", "Accounts and API keys", ["api key", "api keys", "anthropic", "openai", "console", "credits", "billing", "sign in", "account", "custom backends", "model backends", "backends", "token", "openai compatible", "endpoint", "model", "kimi"]],
+      ["model-backends", "Accounts and API keys", ["api key", "api keys", "anthropic", "openai", "console", "credits", "billing", "sign in", "account", "custom backends", "model backends", "backends", "token", "openai compatible", "endpoint", "model", "kimi", "prompt cache", "cache", "1 hour"]],
     ],
   }),
   section("devices", "Devices & integrations", {

@@ -17,6 +17,8 @@ import { useRovingRadios } from "../../hooks/useRovingRadios";
 import { IconButton, Switch } from "../ui";
 import { SettingCopy } from "../settings/SettingsLayout";
 import { ModelDiscoveryPicker } from "./ModelDiscoveryPicker";
+import { PromptCacheChoice } from "./PromptCacheChoice";
+import { promptCacheTtlAllowed } from "@shared/compact-on-return";
 import { failureMessage } from "./backendSettingsActions";
 
 const routingModes = ["simple", "advanced"] as const;
@@ -89,6 +91,7 @@ export function BackendDraftFields({
         ? "api-key"
         : draft.authenticationMode,
       routing: { mode: "simple", primaryModelId: draft.models[0]?.id ?? "" },
+      promptCacheTtl: harnessId === "claude-agent-sdk" ? draft.promptCacheTtl : undefined,
     });
   };
   const updateModel = (
@@ -238,6 +241,13 @@ export function BackendDraftFields({
               <Switch label="Allow private network addresses" checked={draft.allowPrivateNetwork} disabled={disabled} onChange={(allowPrivateNetwork) => onChange({ ...draft, allowPrivateNetwork })} />
             </div>
           </>
+        )}
+        {promptCacheTtlAllowed(draft) && (
+          <PromptCacheChoice
+            value={draft.promptCacheTtl ?? "5m"}
+            disabled={disabled}
+            onChange={(promptCacheTtl) => onChange({ ...draft, promptCacheTtl })}
+          />
         )}
       </div>
 

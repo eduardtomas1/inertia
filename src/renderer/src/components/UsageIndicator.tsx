@@ -10,6 +10,7 @@ import type {
 } from "@shared/contracts";
 import {
   API_KEY_USAGE_UNAVAILABLE,
+  compactTokenCount,
   contextUsageDisplayValue,
   type ContextUsageDataQuality,
   type ContextUsageDisplayValue,
@@ -20,6 +21,8 @@ import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension"
 import { TooltipButton } from "./TooltipButton";
 import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
+import { promptCacheStatus } from "../utils/compactOnReturn";
+import type { PromptCacheFacts } from "@shared/compact-on-return";
 
 const UsageAccountsHint = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageAccountsHint }));
 
@@ -37,8 +40,11 @@ type UsageIndicatorProps = {
   mode: UsageDisplayMode;
   providerLabel: string;
   contextQuality?: ContextUsageDataQuality;
+  promptCache?: Pick<PromptCacheFacts, "lastRequestStartedAt" | "lifetimeMs" | "source"> | null;
   onModeChange: (mode: UsageDisplayMode) => void;
 };
+
+const PROMPT_CACHE_REFRESH_MS = 30_000;
 
 const processedScopes = new Set<NonNullable<ThreadUsageSnapshot["totalProcessedScope"]>>([
   "thread",
@@ -48,13 +54,6 @@ const processedScopes = new Set<NonNullable<ThreadUsageSnapshot["totalProcessedS
 
 export const CONTEXT_NEAR_LIMIT_REMAINING_PERCENT = 20;
 export type ContextRingState = "current" | "stale" | "near-limit" | "unavailable";
-
-function compactNumber(value: number): string {
-  return new Intl.NumberFormat(INTERFACE_LOCALE, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
 
 export function displayPercent(value: number): number | null {
   return Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
@@ -162,9 +161,9 @@ function contextDetail(usage: ThreadUsageSnapshot | null): string | null {
     && (maxTokens === null || usedTokens <= maxTokens);
   const validMax = validTokenCount(maxTokens) && maxTokens > 0;
   if (validUsed) {
-    return `${compactNumber(usedTokens)} used${validMax ? ` of ${compactNumber(maxTokens)}` : ""}`;
+    return `${compactTokenCount(usedTokens)} used${validMax ? ` of ${compactTokenCount(maxTokens)}` : ""}`;
   }
-  return validMax ? `${compactNumber(maxTokens)} window · occupancy unavailable` : null;
+  return validMax ? `${compactTokenCount(maxTokens)} window · occupancy unavailable` : null;
 }
 
 export function contextRingState(context: ContextUsageDisplayValue): ContextRingState {
@@ -230,10 +229,12 @@ export function UsageIndicator({
   mode,
   providerLabel,
   contextQuality = usage ? "current" : "unavailable",
+  promptCache = null,
   onModeChange,
 }: UsageIndicatorProps): React.JSX.Element | null {
   const limitsContext = useUsageLimitsContext();
   const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   useNativePreviewSuspension(open);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -274,6 +275,13 @@ export function UsageIndicator({
     setOpen(false);
   }, [mode, providerLabel, quotaSource]);
 
+  const tracksPromptCache = open && promptCache !== null;
+  useEffect(() => {
+    if (!tracksPromptCache) return;
+    const timer = window.setInterval(() => setNow(Date.now()), PROMPT_CACHE_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [tracksPromptCache]);
+
   // Release document capture handlers before a successor dialog takes input.
   useLayoutEffect(() => {
     if (!open) return;
@@ -313,6 +321,7 @@ export function UsageIndicator({
   const triggerSummary = contextTriggerSummary(context, quotaRefreshing);
   const triggerLabel = `${open ? "Close" : "Open"} usage and context. ${triggerSummary}`;
   const ringState = contextRingState(context);
+  const cacheStatus = promptCache ? promptCacheStatus(promptCache, now) : null;
 
   return (
     <section
@@ -335,7 +344,10 @@ export function UsageIndicator({
           aria-expanded={open}
           tooltip={triggerSummary}
           describeTooltip={false}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => {
+            setNow(Date.now());
+            setOpen((current) => !current);
+          }}
         >
           <ContextRing context={context} quotaRefreshing={quotaRefreshing} />
           {behavior.showAdjacentValue && ringState !== "unavailable" && (
@@ -385,6 +397,7 @@ export function UsageIndicator({
                         Automatic compaction {usage.compactsAutomatically ? "enabled" : "disabled"}
                       </small>
                     )}
+                  {cacheStatus && <small className="usage-prompt-cache">{cacheStatus}</small>}
                   {contextUpdated && <small>{contextUpdated}</small>}
                 </div>
               </div>
@@ -399,7 +412,7 @@ export function UsageIndicator({
                   {breakdown.map((row) => (
                     <div key={row.id}>
                       <dt>{row.label}</dt>
-                      <dd>{compactNumber(row.value)}</dd>
+                      <dd>{compactTokenCount(row.value)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -412,7 +425,7 @@ export function UsageIndicator({
                   <strong id={`${reactId}-processed-heading`}>Processed in this {processed.scope}</strong>
                 </div>
                 <div className="usage-popover-value">
-                  <strong>{compactNumber(processed.value)}</strong>
+                  <strong>{compactTokenCount(processed.value)}</strong>
                 </div>
               </section>
             )}

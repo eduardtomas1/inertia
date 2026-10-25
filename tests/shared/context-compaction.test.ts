@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextCompactionLabel, isContextCompaction } from "../../src/shared/context-compaction";
+import { CONTEXT_COMPACTION_TRIGGERS, contextCompactionLabel, isContextCompaction } from "../../src/shared/context-compaction";
 import { chatMessageSchema } from "../../src/shared/contracts/chat-message-schema";
 
 const compaction = { providerId: "codex" as const, beforeTokens: 173000, afterTokens: 5690, instructionForwarded: false };
@@ -18,5 +18,15 @@ describe("confirmed context compaction receipts", () => {
     for (const afterTokens of [NaN, Infinity, -1, 1.5, "5690"]) expect(isContextCompaction({ ...compaction, afterTokens })).toBe(false);
     expect(isContextCompaction({ ...compaction, providerId: "unknown" })).toBe(false);
     expect(isContextCompaction({ ...compaction, extra: true })).toBe(false);
+  });
+  it("records an optional manual or on-return trigger within the stored size", () => {
+    expect(CONTEXT_COMPACTION_TRIGGERS).toEqual(["manual", "on-return"]);
+    for (const trigger of CONTEXT_COMPACTION_TRIGGERS) expect(isContextCompaction({ ...compaction, trigger })).toBe(true);
+    for (const trigger of ["automatic", null, "", 1]) expect(isContextCompaction({ ...compaction, trigger })).toBe(false);
+    expect(isContextCompaction({ ...compaction, trigger: undefined })).toBe(false);
+    expect(isContextCompaction({ ...compaction, trigger: "on-return", extra: true })).toBe(false);
+    const widest = { providerId: "antigravity", beforeTokens: Number.MAX_SAFE_INTEGER, afterTokens: Number.MAX_SAFE_INTEGER, instructionForwarded: false, trigger: "on-return" };
+    expect(isContextCompaction(widest)).toBe(true);
+    expect(JSON.stringify(widest).length).toBeLessThan(256);
   });
 });

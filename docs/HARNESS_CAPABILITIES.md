@@ -884,6 +884,50 @@ profiles, so a chat runs on exactly one of them and never switches silently.
   because no keyring is available. Install or unlock a Secret Service keyring,
   such as GNOME Keyring or KWallet, then restart Inertia."
 
+### Prompt cache and compact on return
+
+Key routes pay for context at the uncached rate once the provider's prompt
+cache expires, so Inertia records when each chat last sent a request and how
+long its cache lives, and offers to compact a long chat before the next message
+(the flow is described in [Snapshots and compaction](SNAPSHOTS_AND_COMPACTION.md#compact-on-return)).
+
+| Harness and route | Eligible | Cache lifetime | Source |
+| --- | --- | --- | --- |
+| Claude, **Anthropic API key** preset | yes | 5 minutes, or 1 hour with `promptCacheTtl: "1h"` | reported from `message_start` usage when Claude breaks cache writes down, otherwise configured or assumed |
+| Claude, native, `Console API key` account kind | yes | 5 minutes | reported or assumed |
+| Claude, native, `Claude account` | no | Claude Code chooses its own cache length on subscriptions | |
+| Claude, Kimi preset | no | Kimi Code is a quota membership, not per-token billing, and manages its own context | |
+| Claude, custom gateway | no | no published lifetime | |
+| Codex, **OpenAI API key** preset | yes | 30 minutes | assumed |
+| Codex, native ChatGPT account | no | | |
+| OpenCode, Cursor, Antigravity | no | | |
+
+- **One-hour cache.** A Claude Agent SDK profile on Anthropic Messages may set
+  `promptCacheTtl` to `"5m"` or `"1h"` on `backend.profile.create` and
+  `backend.profile.update`; it is stored with the profile, shown on its view
+  and detail, and changes neither the configuration revision nor the enabled
+  state. The shared schema refuses it on every other harness or protocol and
+on the Kimi preset; a value already stored on a Kimi profile is ignored at
+launch and dropped at its next update.
+  When a launch uses such a profile, the backend resolver adds the harness
+  configuration `{ kind: "claude-messages", promptCacheTtl }`, and the Claude
+  harness passes it as the SDK `settings.promptCacheTtl` (merged with the fast
+  mode settings) for the main conversation. The key name was checked against
+  `Settings.promptCacheTtl` in `@anthropic-ai/claude-agent-sdk` 0.3.303 and the
+  bundled CLI. One-hour cache writes are billed at a higher rate. Subagents
+  keep Claude Code's own default (`subagentPromptCacheTtl` is not set).
+- **Environment.** `CLAUDE_CODE_PROMPT_CACHE_TTL` takes precedence over the
+  settings key, so non-native Claude launches remove it with the other Claude
+  routing variables; only the profile decides. A native Claude launch keeps the
+  person's environment, so a value set there is not seen by Inertia and the
+  native lifetime stays "assumed" unless Claude reports a breakdown.
+- **Codex.** Codex does not report cache lifetimes or individual request
+  starts. Its facts are always "assumed": 30 minutes, measured from the time
+  Inertia receives each usage report. The request began before its report, so
+  this never overstates how long the chat has been idle.
+- **Not a turn.** Compaction, manual or on return, does not create an
+  `AgentTurn`, does not wake a watcher, and does not count as a watched turn.
+
 ### Not verified against live services
 
 The deterministic fixtures cover the request shapes, headers, network policy
@@ -891,7 +935,13 @@ and failure handling. These have not been exercised against the real services:
 the Anthropic and OpenAI APIs with real keys, model lists from those APIs,
 `claude auth login --console` on an installed Claude Code, Claude Code with a
 first-party API key through the custom launch options, Codex `model_providers`
-with an OpenAI key, and the Kimi key route.
+with an OpenAI key, and the Kimi key route. The prompt-cache facts were checked
+against fixture streams only: whether the real Anthropic API reports the
+`cache_creation` breakdown on `message_start` for every model, whether Claude
+Code honours `settings.promptCacheTtl` on an API key, the real expiry of the
+OpenAI cache, whether Codex requests extended cache retention, and that Claude
+Code limits its own idle compaction to the 1-hour cache (read from the binary,
+not documented) have not been observed.
 
 ## What the open-source review changed
 

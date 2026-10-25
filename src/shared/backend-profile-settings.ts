@@ -36,6 +36,12 @@ import {
   type ModelSelection,
 } from "./model-routing";
 import type { ProviderId } from "./provider";
+import {
+  PROMPT_CACHE_TTLS,
+  PROMPT_CACHE_TTL_UNAVAILABLE_MESSAGE,
+  promptCacheTtlAllowed,
+  type PromptCacheTtl,
+} from "./compact-on-return";
 
 export const MODEL_BACKEND_PROFILE_PRESETS = [
   "native",
@@ -149,6 +155,7 @@ export interface PersistedModelBackendProfile extends ModelBackendProfile {
   models: readonly BackendModelDefinition[];
   routing: BackendModelRouting;
   capabilityHints: readonly ModelCapability[];
+  promptCacheTtl?: PromptCacheTtl;
   createdAt: string;
   updatedAt: string;
 }
@@ -198,6 +205,7 @@ export interface ModelBackendProfileDraft {
   models: readonly BackendModelDefinition[];
   routing: BackendModelRouting;
   capabilityHints: readonly ModelCapability[];
+  promptCacheTtl?: PromptCacheTtl;
 }
 
 export interface ModelBackendPresetProfileDraft {
@@ -212,6 +220,7 @@ export interface ModelBackendPresetProfileDraft {
   models?: readonly BackendModelDefinition[];
   routing?: BackendModelRouting;
   capabilityHints?: readonly ModelCapability[];
+  promptCacheTtl?: PromptCacheTtl;
 }
 
 export type ModelBackendProfileCreateDraft =
@@ -389,6 +398,7 @@ export const backendModelRoutingSchema = z.discriminatedUnion("mode", [
 
 const capabilityHintsSchema =
   z.array(modelCapabilitySchema).max(MODEL_CAPABILITY_IDS.length);
+const promptCacheTtlSchema = z.enum(PROMPT_CACHE_TTLS);
 
 const persistedModelBackendProfileShape = modelBackendProfileSchema.extend({
   harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS),
@@ -404,6 +414,7 @@ const persistedModelBackendProfileShape = modelBackendProfileSchema.extend({
   models: z.array(backendModelDefinitionSchema).min(1).max(128),
   routing: backendModelRoutingSchema,
   capabilityHints: capabilityHintsSchema,
+  promptCacheTtl: promptCacheTtlSchema.optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
 });
@@ -435,6 +446,19 @@ function validateRouting(
       code: "custom",
       path: ["routing"],
       message: "Advanced tier mappings are available only to Claude harness profiles.",
+    });
+  }
+}
+
+function validatePromptCacheTtl(
+  values: { promptCacheTtl?: PromptCacheTtl | undefined; harnessId: string; protocol: string; preset?: string | null },
+  context: z.RefinementCtx,
+): void {
+  if (values.promptCacheTtl !== undefined && !promptCacheTtlAllowed(values)) {
+    context.addIssue({
+      code: "custom",
+      path: ["promptCacheTtl"],
+      message: PROMPT_CACHE_TTL_UNAVAILABLE_MESSAGE,
     });
   }
 }
@@ -558,6 +582,7 @@ function validateProfileRelationships(
   });
   validateRouting(profile.routing, modelIds, profile.protocol, context);
   validateUniqueCapabilityHints(profile.capabilityHints, context);
+  validatePromptCacheTtl({ promptCacheTtl: profile.promptCacheTtl, harnessId: profile.harnessId, protocol: profile.protocol }, context);
   if (
     profile.source === "custom"
     && profile.preset !== "custom"
@@ -756,6 +781,7 @@ const customDraftShape = z.object({
   models: draftModelsSchema,
   routing: backendModelRoutingSchema,
   capabilityHints: capabilityHintsSchema,
+  promptCacheTtl: promptCacheTtlSchema.optional(),
 }).strict();
 
 const presetDraftShape = z.object({
@@ -770,6 +796,7 @@ const presetDraftShape = z.object({
   models: draftModelsSchema.optional(),
   routing: backendModelRoutingSchema.optional(),
   capabilityHints: capabilityHintsSchema.optional(),
+  promptCacheTtl: promptCacheTtlSchema.optional(),
 }).strict();
 
 function validateCustomDraft(
@@ -810,6 +837,7 @@ function validateCustomDraft(
     models: draft.models,
     routing: draft.routing,
     capabilityHints: draft.capabilityHints,
+    promptCacheTtl: draft.promptCacheTtl,
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   }, context);
@@ -830,6 +858,12 @@ function validatePresetDraft(
     );
   }
   if (draft.capabilityHints) validateUniqueCapabilityHints(draft.capabilityHints, context);
+  validatePromptCacheTtl({
+    promptCacheTtl: draft.promptCacheTtl,
+    harnessId: draft.harnessId ?? preset.harnessId,
+    protocol: draft.protocol ?? preset.protocol,
+    preset: draft.preset,
+  }, context);
 }
 
 export const modelBackendProfileDraftSchema = z.discriminatedUnion("preset", [
@@ -852,8 +886,16 @@ export const modelBackendProfileUpdateSchema = z.object({
   models: draftModelsSchema,
   routing: backendModelRoutingSchema,
   capabilityHints: capabilityHintsSchema,
+  promptCacheTtl: promptCacheTtlSchema.nullable(),
   enabled: z.boolean(),
-}).partial().strict();
+}).partial().strict().superRefine((update, context) => {
+  validatePromptCacheTtl({
+    promptCacheTtl: update.promptCacheTtl ?? undefined,
+    harnessId: update.harnessId ?? "claude-agent-sdk",
+    protocol: update.protocol ?? "anthropic-messages",
+    preset: update.preset ?? null,
+  }, context);
+});
 
 export type ModelBackendProfileUpdate = z.infer<typeof modelBackendProfileUpdateSchema>;
 

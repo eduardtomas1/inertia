@@ -26,6 +26,12 @@ describe("restore defaults copy", () => {
       .toEqual(["projectGrouping", "compactSidebar"]);
   });
 
+  it("restores compact on return with the chat preferences", () => {
+    expect(restoredDefaultSettings(defaultSettings).compactOnReturn).toBe("offer");
+    expect(RESTORE_DEFAULTS_RESETS.find(({ label }) => label === "chat and notification preferences")?.keys)
+      .toContain("compactOnReturn");
+  });
+
   it("keeps imported sounds", () => {
     const library = [{ file: "0123456789abcdef.wav" as const, name: "Bell" }];
     expect(restoredDefaultSettings({ completionSound: { ...defaultSettings.completionSound, library } }).completionSound)

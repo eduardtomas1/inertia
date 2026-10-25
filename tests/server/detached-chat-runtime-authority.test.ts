@@ -403,6 +403,31 @@ describe("detached chat runtime authority", () => {
     } as ClientCommand)).not.toBeNull();
   });
 
+  it("lets a detached chat compact and send to itself on the same terms as a message", () => {
+    type CompactAndSend = Extract<ClientCommand, { type: "conversation.compact-and-send" }>;
+    const compactAndSend = (
+      payload: Partial<CompactAndSend["payload"]> = {},
+    ): CompactAndSend => ({
+      type: "conversation.compact-and-send",
+      requestId: REQUEST,
+      payload: {
+        conversationId: CONVERSATION,
+        content: "hello",
+        attachments: [],
+        activate: false,
+        reason: "on-return",
+        ...payload,
+      },
+    });
+    expect(rejection(compactAndSend())).toBeNull();
+    expect(rejection(compactAndSend({ context: { fileReferences: [{ path: "src/app.ts" }] } }))).toBeNull();
+    expect(rejection(compactAndSend({ activate: true }))).not.toBeNull();
+    expect(rejection(compactAndSend({ activate: undefined }))).not.toBeNull();
+    expect(rejection(compactAndSend({ context: { conversationContextPacketIds: [REQUEST] } }))).not.toBeNull();
+    expect(rejection(compactAndSend({ conversationId: OTHER_CONVERSATION }))).not.toBeNull();
+    expect(mainRejection(compactAndSend({ activate: true }))).toBeNull();
+  });
+
   it("keeps update-everything commands to the main window", () => {
     const commands: ClientCommand[] = [
       { type: "updates.run", requestId: REQUEST, payload: { providerIds: ["codex"], includeApp: true, continueChats: true } },

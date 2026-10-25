@@ -28,10 +28,18 @@ export interface BackendSetupInput {
 
 export type BackendSetupPhase = "idle" | "running" | "choose-models" | "failed" | "done";
 
+export const SETUP_PAUSED_MESSAGE = "Setup paused: choose models to continue";
+
 export type BackendSetupStatus =
   | { state: "running" }
   | { state: "failed"; message: string }
+  | { state: "paused"; message: string; models: readonly BackendDiscoveredModel[] }
   | { state: "done" };
+
+export interface BackendSetupResume {
+  profile: ModelBackendProfileDetail;
+  models: readonly BackendDiscoveredModel[];
+}
 
 export type BackendSetupStatusListener = (
   profile: ModelBackendProfileView,
@@ -69,6 +77,7 @@ export function useBackendSetup(
     "onCreate" | "onSetCredential" | "onDiscoverModels" | "onUpdate" | "onProbe"
   >,
   onStatus?: BackendSetupStatusListener,
+  resume?: BackendSetupResume,
 ) {
   const statusRef = useRef(onStatus);
   statusRef.current = onStatus;
@@ -76,20 +85,42 @@ export function useBackendSetup(
     const current = progressRef.current.profile;
     if (current) statusRef.current?.(current, status);
   }, []);
-  const [steps, setSteps] = useState<BackendSetupStep[]>([]);
-  const [phase, setPhase] = useState<BackendSetupPhase>("idle");
+  const [steps, setSteps] = useState<BackendSetupStep[]>(() => resume
+    ? stepsFor({ secret: "", discover: true }).map((step) =>
+      step.id === "create" || step.id === "key" ? { ...step, state: "done" } : step)
+    : []);
+  const [phase, setPhase] = useState<BackendSetupPhase>(resume ? "choose-models" : "idle");
   const [error, setError] = useState<string | null>(null);
-  const [discovered, setDiscovered] = useState<BackendDiscoveredModel[] | null>(null);
-  const [profile, setProfile] = useState<ModelBackendProfileDetail | null>(null);
-  const [keyStores, setKeyStores] = useState(0);
-  const progressRef = useRef<SetupProgress>({ profile: null, keyStored: false, modelsChosen: false });
-  const inputRef = useRef<BackendSetupInput | null>(null);
+  const [discovered, setDiscovered] = useState<BackendDiscoveredModel[] | null>(
+    () => resume ? [...resume.models] : null,
+  );
+  const [profile, setProfile] = useState<ModelBackendProfileDetail | null>(resume?.profile ?? null);
+  const [keyStores, setKeyStores] = useState(resume ? 1 : 0);
+  const progressRef = useRef<SetupProgress>({
+    profile: resume?.profile ?? null,
+    keyStored: resume !== undefined,
+    modelsChosen: false,
+  });
+  const inputRef = useRef<BackendSetupInput | null>(resume
+    ? { draft: () => { throw new Error("The route already exists."); }, secret: "", discover: true }
+    : null);
   const runningRef = useRef(false);
   const mountedRef = useRef(true);
+  const pausedModelsRef = useRef<readonly BackendDiscoveredModel[] | null>(resume ? resume.models : null);
+  const notifyPausedIfChoosing = useCallback(() => {
+    const models = pausedModelsRef.current;
+    const current = progressRef.current.profile;
+    if (models && current && !progressRef.current.modelsChosen) {
+      statusRef.current?.(current, { state: "paused", message: SETUP_PAUSED_MESSAGE, models });
+    }
+  }, []);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
+    return () => {
+      mountedRef.current = false;
+      notifyPausedIfChoosing();
+    };
+  }, [notifyPausedIfChoosing]);
 
   const mark = useCallback((id: BackendSetupStepId, state: BackendSetupStepState) => {
     if (!mountedRef.current) return;
@@ -135,9 +166,13 @@ export function useBackendSetup(
         current = "models";
         mark("models", "running");
         const models = await actions.onDiscoverModels(profileId);
-        if (!mountedRef.current) return;
         if (models.length === 0) {
           throw new Error("The endpoint did not list any models. Choose the default models instead.");
+        }
+        pausedModelsRef.current = models;
+        if (!mountedRef.current) {
+          report({ state: "paused", message: SETUP_PAUSED_MESSAGE, models });
+          return;
         }
         setDiscovered(models);
         setPhase("choose-models");
@@ -155,6 +190,7 @@ export function useBackendSetup(
       mark("enable", "running");
       if (!tested.enabled) adopt(await actions.onUpdate(profileId, { enabled: true }));
       mark("enable", "done");
+      pausedModelsRef.current = null;
       report({ state: "done" });
       if (mountedRef.current) setPhase("done");
     } catch (reason) {
@@ -172,6 +208,7 @@ export function useBackendSetup(
     runningRef.current = true;
     inputRef.current = input;
     const progress = progressRef.current;
+    if (!input.discover) pausedModelsRef.current = null;
     setSteps((current) => {
       const next = stepsFor(input);
       return next.map((step) => {

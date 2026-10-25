@@ -47,6 +47,7 @@ export function BackendKeyRow({
   initiallyOpenModels = false,
   setupStatus = null,
   onSetupStatus,
+  onResumeSetup,
 }: {
   profile: ModelBackendProfileView;
   actions: BackendProfileActions;
@@ -55,6 +56,7 @@ export function BackendKeyRow({
   initiallyOpenModels?: boolean;
   setupStatus?: BackendSetupStatus | null;
   onSetupStatus?: BackendSetupStatusListener;
+  onResumeSetup?: () => void;
 }): React.JSX.Element {
   const nameId = useId();
   const stateId = useId();
@@ -107,6 +109,8 @@ export function BackendKeyRow({
     ? { tone: "checking" as const, label: "Setting up…" }
     : setupStatus?.state === "failed"
       ? { tone: "unavailable" as const, label: `Failed: ${setupStatus.message}` }
+      : setupStatus?.state === "paused"
+        ? { tone: "attention" as const, label: setupStatus.message }
       : backendKeyState(profile, busy === "test" || busy === "key");
   const results = tested
     && tested.configurationRevision >= profile.configurationRevision
@@ -202,6 +206,17 @@ export function BackendKeyRow({
         <BackendStateBadge state={state} id={stateId} />
       </div>
       <div className="backend-key-row-actions" role="group" aria-label={`${name} actions`}>
+        {setupStatus?.state === "paused" && onResumeSetup && (
+          <button
+            type="button"
+            className="secondary-button"
+            aria-label={`Choose models for ${name}`}
+            aria-disabled={inactive || undefined}
+            onClick={() => { if (!inactive) onResumeSetup(); }}
+          >
+            Choose models
+          </button>
+        )}
         {setupStatus?.state === "failed" && (
           <button
             type="button"

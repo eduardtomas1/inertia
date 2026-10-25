@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 
-import type { ApiKeyBackendPresetId } from "@shared/backend-presets";
+import { isApiKeyBackendPresetId, type ApiKeyBackendPresetId } from "@shared/backend-presets";
 import type {
+  ModelBackendProfileDetail,
   ModelBackendProfileView,
   ProviderId,
   ProviderInfo,
@@ -22,6 +23,7 @@ import { CustomBackendCreator } from "./backend-settings/BackendProfileForms";
 import { ProviderAccountRow } from "./backend-settings/ProviderAccountRow";
 import type { BackendProfileActions } from "./backend-settings/backendSettingsActions";
 import type {
+  BackendSetupResume,
   BackendSetupStatus,
   BackendSetupStatusListener,
 } from "./backend-settings/useBackendSetup";
@@ -72,6 +74,7 @@ function ProviderAccessCard({
   onAddKey,
   setups,
   onSetupStatus,
+  onResumeSetup,
 }: {
   providerId: ProviderId;
   provider: ProviderInfo | undefined;
@@ -86,6 +89,7 @@ function ProviderAccessCard({
   onAddKey: (preset: ApiKeyBackendPresetId) => void;
   setups: ReadonlyMap<string, BackendSetupStatus>;
   onSetupStatus: BackendSetupStatusListener;
+  onResumeSetup: (profileId: string) => void;
 }): React.JSX.Element {
   const headingId = useId();
   const keysHeadingId = useId();
@@ -138,6 +142,7 @@ function ProviderAccessCard({
                 initiallyOpenModels={profile.id === initialProfileId && initialProfilePanel === "models"}
                 setupStatus={setups.get(profile.id) ?? null}
                 onSetupStatus={onSetupStatus}
+                onResumeSetup={() => onResumeSetup(profile.id)}
               />
             ))}
           </ul>
@@ -169,6 +174,7 @@ export function ModelBackendsSettings({
   onDelete,
 }: ModelBackendsSettingsProps): React.JSX.Element {
   const [dialogPreset, setDialogPreset] = useState<ApiKeyBackendPresetId | null>(null);
+  const [dialogResume, setDialogResume] = useState<BackendSetupResume | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
   const [setups, setSetups] = useState<ReadonlyMap<string, { status: BackendSetupStatus; profile: ModelBackendProfileView }>>(
     () => new Map(),
@@ -249,6 +255,15 @@ export function ModelBackendsSettings({
             onAddKey={setDialogPreset}
             setups={setupStatuses}
             onSetupStatus={onSetupStatus}
+            onResumeSetup={(profileId) => {
+              const entry = setups.get(profileId);
+              if (entry?.status.state !== "paused" || !isApiKeyBackendPresetId(entry.profile.preset)) return;
+              setDialogResume({
+                profile: entry.profile as ModelBackendProfileDetail,
+                models: entry.status.models,
+              });
+              setDialogPreset(entry.profile.preset);
+            }}
           />
         ))}
       </div>
@@ -293,7 +308,11 @@ export function ModelBackendsSettings({
           preset={dialogPreset}
           actions={actions}
           onStatus={onSetupStatus}
-          onClose={() => setDialogPreset(null)}
+          {...(dialogResume ? { resume: dialogResume } : {})}
+          onClose={() => {
+            setDialogPreset(null);
+            setDialogResume(null);
+          }}
         />
       )}
     </section>

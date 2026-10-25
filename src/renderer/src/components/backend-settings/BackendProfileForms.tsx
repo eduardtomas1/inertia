@@ -187,7 +187,7 @@ export function BackendProfileEditor({
   const keyErrorId = useId();
   const [secret, setSecret] = useState("");
   const [original, setOriginal] = useState(() => backendEditDraftFromDetail(profile));
-  const [keyCleared, setKeyCleared] = useState(false);
+  const [credentialPending, setCredentialPending] = useState(false);
   const [draft, setDraft] = useState<BackendProfileEditDraft>(() => backendEditDraftFromDetail(profile));
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState<"save" | "test" | null>(null);
@@ -213,7 +213,7 @@ export function BackendProfileEditor({
     || draft.harnessId !== original.harnessId
     || draft.authenticationMode !== original.authenticationMode
   );
-  const needsKeyAgain = (connectionChanged || keyCleared) && draft.authenticationMode !== "none";
+  const needsKeyAgain = (connectionChanged || credentialPending) && draft.authenticationMode !== "none";
   const keyIssue = needsKeyAgain ? backendCredentialSecretIssue(secret) : null;
   const credentialLabel = draft.authenticationMode === "bearer-token" ? "Bearer token" : "API key";
   const submit = async (): Promise<void> => {
@@ -241,16 +241,20 @@ export function BackendProfileEditor({
       let saved = profile;
       if (updating) {
         saved = await actions.onUpdate(profile.id, update);
-        if (mountedRef.current) setOriginal(draft);
+        if (mountedRef.current) {
+          setOriginal(draft);
+          if (needsKeyAgain) setCredentialPending(true);
+        }
       }
       if (needsKeyAgain) {
-        const value = secret.trim();
-        setSecret("");
-        saved = await actions.onSetCredential(profile.id, value);
-        if (mountedRef.current) setKeyCleared(false);
+        saved = await actions.onSetCredential(profile.id, secret.trim());
+        if (mountedRef.current) {
+          setSecret("");
+          setCredentialPending(false);
+        }
       } else if (hadKey && saved.authState === "missing" && draft.authenticationMode !== "none") {
         if (mountedRef.current) {
-          setKeyCleared(true);
+          setCredentialPending(true);
           setSubmitted(false);
           setError("The key was removed with this change. Paste it again to finish.");
         }

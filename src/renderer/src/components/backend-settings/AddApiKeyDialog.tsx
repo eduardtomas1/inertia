@@ -15,7 +15,11 @@ import { DialogShell } from "../DialogShell";
 import { BackendSetupSteps } from "./BackendSetupSteps";
 import { MAX_ROUTE_MODELS, ModelDiscoveryPicker } from "./ModelDiscoveryPicker";
 import type { BackendProfileActions } from "./backendSettingsActions";
-import { useBackendSetup, type BackendSetupStatusListener } from "./useBackendSetup";
+import {
+  useBackendSetup,
+  type BackendSetupResume,
+  type BackendSetupStatusListener,
+} from "./useBackendSetup";
 
 type ModelChoice = "defaults" | "discover";
 
@@ -29,6 +33,7 @@ export function AddApiKeyDialog({
   preset,
   actions,
   onStatus,
+  resume,
   onClose,
 }: {
   preset: ApiKeyBackendPresetId;
@@ -37,6 +42,7 @@ export function AddApiKeyDialog({
     "onCreate" | "onSetCredential" | "onDiscoverModels" | "onUpdate" | "onProbe"
   >;
   onStatus?: BackendSetupStatusListener;
+  resume?: BackendSetupResume;
   onClose: (profile: ModelBackendProfileDetail | null) => void;
 }): React.JSX.Element {
   const definition = backendPresetDefinition(preset);
@@ -47,18 +53,18 @@ export function AddApiKeyDialog({
   const keyId = useId();
   const keyHintId = useId();
   const keyErrorId = useId();
-  const [name, setName] = useState(definition.displayName);
+  const [name, setName] = useState(resume?.profile.displayName ?? definition.displayName);
   const [secret, setSecret] = useState("");
-  const [models, setModels] = useState<ModelChoice>("defaults");
+  const [models, setModels] = useState<ModelChoice>(resume ? "discover" : "defaults");
   const [submitted, setSubmitted] = useState(false);
   const keyRef = useRef<HTMLInputElement>(null);
-  const setup = useBackendSetup(actions, onStatus);
+  const setup = useBackendSetup(actions, onStatus, resume);
   useNativePreviewSuspension(true);
   useLayoutEffect(() => {
     const restore = captureModalFocus();
-    keyRef.current?.focus();
+    if (!resume) keyRef.current?.focus();
     return restore;
-  }, []);
+  }, [resume]);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
@@ -205,6 +211,7 @@ export function AddApiKeyDialog({
           models={setup.discovered}
           existingIds={new Set()}
           busy={false}
+          autoFocusSearch={resume !== undefined}
           maxSelectable={MAX_ROUTE_MODELS}
           confirmLabel={(count) => count === 0 ? "Choose models" : `Use ${count} ${count === 1 ? "model" : "models"}`}
           onConfirm={(chosen) => { void setup.chooseModels(chosen); }}

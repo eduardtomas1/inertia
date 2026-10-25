@@ -10,6 +10,7 @@ export function ModelDiscoveryPicker({
   models,
   existingIds,
   busy,
+  autoFocusSearch = false,
   maxSelectable = MAX_ROUTE_MODELS,
   confirmLabel,
   onConfirm,
@@ -18,6 +19,7 @@ export function ModelDiscoveryPicker({
   models: readonly BackendDiscoveredModel[];
   existingIds: ReadonlySet<string>;
   busy: boolean;
+  autoFocusSearch?: boolean;
   maxSelectable?: number;
   confirmLabel: (count: number) => string;
   onConfirm: (models: BackendDiscoveredModel[]) => void;
@@ -53,6 +55,7 @@ export function ModelDiscoveryPicker({
           id={searchId}
           className="setting-input"
           type="search"
+          autoFocus={autoFocusSearch}
           value={query}
           spellCheck={false}
           autoComplete="off"

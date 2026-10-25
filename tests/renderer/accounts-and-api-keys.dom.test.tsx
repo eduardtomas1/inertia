@@ -1019,3 +1019,90 @@ describe("Long model lists", () => {
     expect(onProbe).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("Interrupted key replacement", () => {
+  it("keeps asking for the key after an address change when storing it fails, and Save retries only the store", async () => {
+    const user = userEvent.setup();
+    const custom = anthropicKey({ id: "custom:team", displayName: "Team gateway", preset: "custom", baseUrl: "https://gateway.example.test" });
+    const moved = { ...custom, configurationRevision: 2, enabled: false, authState: "missing" as const };
+    const keyed = { ...moved, authState: "configured" as const };
+    const onUpdate = vi.fn(async (_id: string, update: { enabled?: boolean }) => update.enabled ? { ...withProbes(keyed), enabled: true } : moved);
+    const onSetCredential = vi.fn()
+      .mockRejectedValueOnce(new Error("The credential vault is locked."))
+      .mockResolvedValueOnce(keyed);
+    const onProbe = vi.fn(async () => withProbes(keyed));
+    render(<ModelBackendsSettings {...props({
+      profiles: [custom],
+      onLoadDetail: vi.fn(async () => custom),
+      onUpdate,
+      onSetCredential,
+      onProbe,
+    })} />);
+    await user.click(screen.getByRole("button", { name: "Edit Team gateway" }));
+    const form = await screen.findByRole("form", { name: "Edit Team gateway" });
+    const url = within(form).getByRole("textbox", { name: "Base URL" });
+    await user.clear(url);
+    await user.type(url, "https://moved.example.test");
+    await user.type(within(form).getByLabelText("API key"), "team-key{Enter}");
+    expect(await within(form).findByRole("alert")).toHaveTextContent("The credential vault is locked.");
+    const key = within(form).getByLabelText("API key");
+    expect(key).toHaveValue("team-key");
+    await user.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenLastCalledWith("custom:team", { enabled: true }));
+    expect(onUpdate).toHaveBeenNthCalledWith(1, "custom:team", { baseUrl: "https://moved.example.test" });
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+    expect(onSetCredential).toHaveBeenCalledTimes(2);
+    expect(onSetCredential).toHaveBeenLastCalledWith("custom:team", "team-key");
+    expect(onProbe).toHaveBeenCalledWith("custom:team");
+  });
+});
+
+describe("Discovery after the dialog closes", () => {
+  it("pauses setup on the row when the dialog closes at the model picker, and continues from there", async () => {
+    const user = userEvent.setup();
+    const created = anthropicKey({ id: "custom:new", displayName: "Personal key", enabled: false, authState: "missing" });
+    const keyed = { ...created, authState: "configured" as const };
+    const onDiscoverModels = vi.fn(async () => [
+      { id: "claude-opus-5-5", displayName: "Claude Opus 5.5" },
+      { id: "claude-haiku-5-5", displayName: "Claude Haiku 5.5" },
+    ]);
+    const onUpdate = vi.fn(async (_id: string, update: { enabled?: boolean }) =>
+      update.enabled ? { ...keyChecked(keyed), enabled: true } : keyed);
+    const onProbe = vi.fn(async () => keyChecked(keyed));
+    const actions = {
+      onCreate: vi.fn(async () => created),
+      onSetCredential: vi.fn(async () => keyed),
+      onDiscoverModels,
+      onUpdate,
+      onProbe,
+    };
+    const view = render(<ModelBackendsSettings {...props({ profiles: [], ...actions })} />);
+    await user.click(screen.getByRole("button", { name: "Add API key for Claude Code" }));
+    const dialog = screen.getByRole("dialog");
+    await user.clear(within(dialog).getByRole("textbox", { name: "Name" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Personal key");
+    await user.click(within(dialog).getByRole("radio", { name: /Discover models from the endpoint/u }));
+    await user.type(within(dialog).getByLabelText("API key"), "sk-ant{Enter}");
+    await within(dialog).findByRole("group", { name: "Discovered models" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    view.rerender(<ModelBackendsSettings {...props({ profiles: [keyed], ...actions })} />);
+    const row = screen.getByRole("listitem", { name: "Personal key" });
+    expect(row).toHaveTextContent("Setup paused: choose models to continue");
+    await user.click(within(row).getByRole("button", { name: "Choose models for Personal key" }));
+    const reopened = screen.getByRole("dialog");
+    const picker = within(reopened).getByRole("group", { name: "Discovered models" });
+    await user.click(within(picker).getByRole("checkbox", { name: /Claude Haiku 5.5/u }));
+    await user.click(within(picker).getByRole("button", { name: "Use 1 model" }));
+    await waitFor(() => expect(onUpdate).toHaveBeenLastCalledWith("custom:new", { enabled: true }));
+    expect(onUpdate).toHaveBeenNthCalledWith(1, "custom:new", {
+      models: [expect.objectContaining({ id: "claude-haiku-5-5" })],
+      routing: { mode: "simple", primaryModelId: "claude-haiku-5-5" },
+    });
+    expect(onDiscoverModels).toHaveBeenCalledOnce();
+    expect(actions.onCreate).toHaveBeenCalledOnce();
+    expect(onProbe).toHaveBeenCalledExactlyOnceWith("custom:new", []);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(row).not.toHaveTextContent("Setup paused"));
+  });
+});

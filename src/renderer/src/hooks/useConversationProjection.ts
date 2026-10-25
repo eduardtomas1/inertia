@@ -24,6 +24,7 @@ import {
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
+import { announceRuntimeQueueChanged } from "../components/composer/runtimeQueueEvents";
 import type { StreamingAgentChannel } from "../utils/responseTimeline";
 import {
   appendStreamingReasoning,
@@ -622,6 +623,7 @@ export function useConversationProjection({
         && event.conversationId === activeConversation?.id
       ) {
         setDetailRefresh((current) => current + 1);
+        announceRuntimeQueueChanged(event.conversationId);
       }
       return;
     }

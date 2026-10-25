@@ -78,6 +78,7 @@ import {
   initialTranscriptNavigation,
   isTranscriptReaderNavigationKey,
   type TranscriptMessageSendAcceptance,
+  type TranscriptNavigationAction,
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
@@ -467,6 +468,10 @@ export function ChatWorkspace({
     : initialTranscriptNavigation(conversationId, readTranscriptPosition(conversationId)?.wasFollowing === false);
   const navigationRef = useRef(activeNavigation);
   navigationRef.current = activeNavigation;
+  const navigate = useCallback((action: TranscriptNavigationAction): void => {
+    navigationRef.current = transcriptNavigationReducer(navigationRef.current, action);
+    dispatchNavigation(action);
+  }, []);
   const readerIntentRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
   const pendingFinalAnswerNavigationRef = useRef<{
@@ -641,7 +646,7 @@ export function ChatWorkspace({
     clearReaderIntent();
     clearPendingFinalAnswerNavigation();
     forgetTranscriptPosition(conversationId);
-    dispatchNavigation({
+    navigate({
       type: "latest.requested",
       conversationId,
     });
@@ -650,6 +655,7 @@ export function ChatWorkspace({
     clearPendingFinalAnswerNavigation,
     clearReaderIntent,
     conversationId,
+    navigate,
     performScrollToLatest,
   ]);
 
@@ -680,14 +686,14 @@ export function ChatWorkspace({
         followsLatest: event.followsLatest,
       };
     }
-    dispatchNavigation({
+    navigate({
       type: "reader.scrolled",
       conversationId: event.conversationId,
       followsLatest: event.followsLatest,
       intentional: true,
     });
     onLatestContentVisibilityChange?.(event.followsLatest);
-  }, [clearPendingFinalAnswerNavigation, onLatestContentVisibilityChange]);
+  }, [clearPendingFinalAnswerNavigation, navigate, onLatestContentVisibilityChange]);
 
   const revealPendingInput = useCallback((): void => {
     if (!pendingInputRequest) return;
@@ -709,7 +715,7 @@ export function ChatWorkspace({
     finalAnswerAutoScrollOwnerRef.current = null;
     clearPendingFinalAnswerNavigation();
     clearReaderIntent();
-    dispatchNavigation({
+    navigate({
       type: "conversation.changed",
       conversationId,
       readingHistory: readTranscriptPosition(conversationId)?.wasFollowing === false,
@@ -721,6 +727,7 @@ export function ChatWorkspace({
     clearPendingFinalAnswerNavigation,
     clearReaderIntent,
     conversationId,
+    navigate,
     performScrollToLatest,
   ]);
 
@@ -803,11 +810,7 @@ export function ChatWorkspace({
   const noteResponseTimelineNavigationIntent = useCallback((): void => {
     noteReaderIntent();
     if (!conversationId) return;
-    navigationRef.current = {
-      mode: "reading-history",
-      conversationId,
-    };
-    dispatchNavigation({
+    navigate({
       type: "reader.scrolled",
       conversationId,
       followsLatest: false,
@@ -816,6 +819,7 @@ export function ChatWorkspace({
     onLatestContentVisibilityChange?.(false);
   }, [
     conversationId,
+    navigate,
     noteReaderIntent,
     onLatestContentVisibilityChange,
   ]);
@@ -856,7 +860,7 @@ export function ChatWorkspace({
       intentional,
     } as const;
     if (transcriptNavigationReducer(navigationRef.current, scrolled) !== navigationRef.current) {
-      dispatchNavigation(scrolled);
+      navigate(scrolled);
     }
     onLatestContentVisibilityChange?.(follows);
   };
@@ -868,12 +872,12 @@ export function ChatWorkspace({
     if (acceptance.disposition === "new-turn") forgetTranscriptPosition(acceptance.conversationId);
     clearPendingFinalAnswerNavigation();
     clearReaderIntent();
-    dispatchNavigation({
+    navigate({
       type: "message.accepted",
       acceptance,
       sourceConversationId,
     });
-  }, [clearPendingFinalAnswerNavigation, clearReaderIntent]);
+  }, [clearPendingFinalAnswerNavigation, clearReaderIntent, navigate]);
 
   const sendMessage = useCallback(async (
     content: string,
@@ -915,22 +919,22 @@ export function ChatWorkspace({
     : null;
   const onTurnAnchorSettled = useCallback((turnId: string): void => {
     if (!conversationId) return;
-    dispatchNavigation({
+    navigate({
       type: "turn.anchored",
       conversationId,
       turnId,
     });
     onLatestContentVisibilityChange?.(true);
-  }, [conversationId, onLatestContentVisibilityChange]);
+  }, [conversationId, navigate, onLatestContentVisibilityChange]);
   const onTurnAnchorCancelled = useCallback((turnId: string): void => {
     if (!conversationId) return;
-    dispatchNavigation({
+    navigate({
       type: "turn.anchor-cancelled",
       conversationId,
       turnId,
     });
     onLatestContentVisibilityChange?.(false);
-  }, [conversationId, onLatestContentVisibilityChange]);
+  }, [conversationId, navigate, onLatestContentVisibilityChange]);
 
   if (loading && !detailLoading) {
     return (

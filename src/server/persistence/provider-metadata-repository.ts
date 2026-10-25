@@ -45,45 +45,48 @@ export class ProviderMetadataRepository {
     const rateLimitsJson = JSON.stringify(metadata.rateLimits);
     if (modelsJson.length > 262_144 || rateLimitsJson.length > 65_536) return;
     const scopeKey = currentProviderMetadataScopeKey(metadata.scope);
-    if (metadata.scope.version !== null) this.database.prepare(`
-      DELETE FROM provider_metadata_scoped_cache
-      WHERE provider_id = @providerId AND harness_id = @harnessId
-        AND backend_profile_id = @backendProfileId AND model_id = @modelId
-        AND version IS NOT @version
-    `).run(metadata.scope);
-    this.database.prepare(`
-      INSERT INTO provider_metadata_scoped_cache (
-        scope_key, provider_id, harness_id, backend_profile_id, model_id,
-        executable, version, backend_configuration_revision, auth_state,
-        models_json, models_updated_at, models_last_attempted_at, models_provenance, models_stale,
-        rate_limits_json, rate_limits_updated_at, rate_limits_last_attempted_at, rate_limits_provenance, rate_limits_stale
-      ) VALUES (
-        @scopeKey, @providerId, @harnessId, @backendProfileId, @modelId,
-        @executable, @version, @backendConfigurationRevision, @authState,
-        @modelsJson, @modelsUpdatedAt, @modelsLastAttemptedAt, @modelsProvenance, @modelsStaleValue,
-        @rateLimitsJson, @rateLimitsUpdatedAt, @rateLimitsLastAttemptedAt, @rateLimitsProvenance, @rateLimitsStaleValue
-      ) ON CONFLICT(scope_key) DO UPDATE SET
-        executable = excluded.executable,
-        version = excluded.version,
-        auth_state = excluded.auth_state,
-        models_json = excluded.models_json,
-        models_updated_at = excluded.models_updated_at,
-        models_last_attempted_at = excluded.models_last_attempted_at,
-        models_provenance = excluded.models_provenance,
-        models_stale = excluded.models_stale,
-        rate_limits_json = excluded.rate_limits_json,
-        rate_limits_updated_at = excluded.rate_limits_updated_at,
-        rate_limits_last_attempted_at = excluded.rate_limits_last_attempted_at,
-        rate_limits_provenance = excluded.rate_limits_provenance,
-        rate_limits_stale = excluded.rate_limits_stale
-    `).run({
-      scopeKey,
-      ...metadata.scope,
-      ...metadata,
-      modelsJson,
-      rateLimitsJson,
-      modelsStaleValue: metadata.modelsStale ? 1 : 0,
-      rateLimitsStaleValue: metadata.rateLimitsStale ? 1 : 0,
-    });
+    this.database.transaction(() => {
+      if (metadata.scope.version !== null) this.database.prepare(`
+        DELETE FROM provider_metadata_scoped_cache
+        WHERE provider_id = @providerId AND harness_id = @harnessId
+          AND backend_profile_id = @backendProfileId AND model_id = @modelId
+          AND executable IS @executable AND version IS NOT NULL
+          AND version IS NOT @version
+      `).run(metadata.scope);
+      this.database.prepare(`
+        INSERT INTO provider_metadata_scoped_cache (
+          scope_key, provider_id, harness_id, backend_profile_id, model_id,
+          executable, version, backend_configuration_revision, auth_state,
+          models_json, models_updated_at, models_last_attempted_at, models_provenance, models_stale,
+          rate_limits_json, rate_limits_updated_at, rate_limits_last_attempted_at, rate_limits_provenance, rate_limits_stale
+        ) VALUES (
+          @scopeKey, @providerId, @harnessId, @backendProfileId, @modelId,
+          @executable, @version, @backendConfigurationRevision, @authState,
+          @modelsJson, @modelsUpdatedAt, @modelsLastAttemptedAt, @modelsProvenance, @modelsStaleValue,
+          @rateLimitsJson, @rateLimitsUpdatedAt, @rateLimitsLastAttemptedAt, @rateLimitsProvenance, @rateLimitsStaleValue
+        ) ON CONFLICT(scope_key) DO UPDATE SET
+          executable = excluded.executable,
+          version = excluded.version,
+          auth_state = excluded.auth_state,
+          models_json = excluded.models_json,
+          models_updated_at = excluded.models_updated_at,
+          models_last_attempted_at = excluded.models_last_attempted_at,
+          models_provenance = excluded.models_provenance,
+          models_stale = excluded.models_stale,
+          rate_limits_json = excluded.rate_limits_json,
+          rate_limits_updated_at = excluded.rate_limits_updated_at,
+          rate_limits_last_attempted_at = excluded.rate_limits_last_attempted_at,
+          rate_limits_provenance = excluded.rate_limits_provenance,
+          rate_limits_stale = excluded.rate_limits_stale
+      `).run({
+        scopeKey,
+        ...metadata.scope,
+        ...metadata,
+        modelsJson,
+        rateLimitsJson,
+        modelsStaleValue: metadata.modelsStale ? 1 : 0,
+        rateLimitsStaleValue: metadata.rateLimitsStale ? 1 : 0,
+      });
+    })();
   }
 }

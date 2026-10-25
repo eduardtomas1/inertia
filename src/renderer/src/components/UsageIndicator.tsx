@@ -23,6 +23,7 @@ import { outsidePointerShouldRestoreFocus } from "../utils/dismissibleMenu";
 import { INTERFACE_LOCALE } from "../lib/locale";
 import { promptCacheStatus } from "../utils/compactOnReturn";
 import type { PromptCacheFacts } from "@shared/compact-on-return";
+import { formatUpdatedAge } from "../lib/format";
 
 const UsageAccountsHint = lazy(async () => ({ default: (await import("./UsageLimitsPanel")).UsageAccountsHint }));
 
@@ -77,7 +78,11 @@ function dateLabel(
 
 function quotaStateLabel(state: ProviderMetadataFieldState): string {
   if (state.refreshing) return state.freshness === "stale" ? "Refreshing · stale" : "Refreshing";
-  if (state.freshness === "stale") return state.provenance === "persistent-cache" ? "Cached · stale" : "Stale";
+  if (state.freshness === "stale") {
+    const age = formatUpdatedAge(state.updatedAt);
+    if (age) return `Cached · ${age}`;
+    return state.provenance === "persistent-cache" ? "Cached · stale" : "Stale";
+  }
   return state.freshness === "fresh" ? "Fresh" : "Unavailable";
 }
 

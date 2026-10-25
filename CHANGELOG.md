@@ -38,8 +38,9 @@ The useful changes in each Inertia release, in plain language.
   and finish commands.
 - Idle usage-limit checks start the provider CLIs less often: every 3 minutes
   at first, then up to every 30 minutes while the limits do not change, and
-  not at all while no window is connected. The usage reading can be up to
-  30 minutes old while Inertia is idle.
+  not at all while no window is connected. A reading older than five minutes
+  shows as "Cached · updated N min ago", and usage is read again as soon as a
+  window reconnects.
 - On Linux, each agent, terminal and Git process is watched at 500 ms instead
   of 50 ms once it has started, and its exit is still seen within milliseconds.
 - The hourly backup is skipped when nothing changed since the last one, and a
@@ -60,6 +61,8 @@ The useful changes in each Inertia release, in plain language.
 - Failed-command incidents record the command type.
 - New chats that are not saved yet no longer send a queue request that the
   runtime must reject.
+- A message queued from another window or by a watcher now appears in an idle
+  chat as soon as the runtime reports it.
 - Repeated or empty Codex diff updates no longer add duplicate activity rows.
 
 ## 0.0.77 — 2026-10-25

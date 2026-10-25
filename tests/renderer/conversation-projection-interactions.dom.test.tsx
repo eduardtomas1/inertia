@@ -18,6 +18,7 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { useConversationProjection } from "../../src/renderer/src/hooks/useConversationProjection";
+import { RUNTIME_QUEUE_CHANGED } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 
 const primaryId = "11111111-1111-4111-8111-111111111111";
@@ -321,6 +322,33 @@ describe("useConversationProjection pending interactions", () => {
       },
     });
     expect(source.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the open chat's queue to reload when the runtime invalidates that chat", async () => {
+    const source = createEventSource();
+    const request = vi.fn(async (): Promise<ServerEvent> => ({ type: "request.ok", requestId: crypto.randomUUID() }));
+    const announced: unknown[] = [];
+    const listener = (event: Event): void => { announced.push((event as CustomEvent<unknown>).detail); };
+    window.addEventListener(RUNTIME_QUEUE_CHANGED, listener);
+    try {
+      renderHook(() => useConversationProjection({
+        snapshot,
+        status: "online",
+        request,
+        subscribe: source.subscribe,
+        enabled: true,
+        autoOpenPlan: false,
+        onOpenPlan: vi.fn(),
+        onTerminal: vi.fn(),
+      }));
+      act(() => {
+        source.emit({ type: "conversation.detail.invalidated", conversationId: secondaryId });
+        source.emit({ type: "conversation.detail.invalidated", conversationId: primaryId });
+      });
+      expect(announced).toEqual([primaryId]);
+    } finally {
+      window.removeEventListener(RUNTIME_QUEUE_CHANGED, listener);
+    }
   });
 
   it("reloads only explicit authoritative detail invalidations without rebinding", async () => {

@@ -1,5 +1,7 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
+export const TURN_SCOPED_INDEXES_SCHEMA_VERSION = 105;
+
 export const turnScopedIndexesMigration: DatabaseMigrationDefinition = {
   name: "IndexTurnScopedRows",
   up: `

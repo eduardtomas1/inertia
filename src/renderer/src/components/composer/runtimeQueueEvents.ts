@@ -1,6 +1,10 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 export const RUNTIME_QUEUE_CHANGED = "inertia:runtime-queue-changed";
+
+export function announceRuntimeQueueChanged(conversationId: string): void {
+  window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
+}
 const RUNTIME_QUEUE_LENGTH_CHANGED = "inertia:runtime-queue-length-changed";
 const queueLengths = new Map<string, number>();
 

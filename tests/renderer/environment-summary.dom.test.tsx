@@ -381,7 +381,7 @@ describe("Environment content in its workspace surfaces", () => {
             valueLabel: "72% · stale",
             accessibleLabel: "Context 72% remaining, stale",
           },
-          quota: { ...summary.usage!.quota, freshness: "stale", limits: [] },
+          quota: { ...summary.usage!.quota, freshness: "stale", updatedAt: null, limits: [] },
         }}
       />,
     );
@@ -422,6 +422,18 @@ describe("Environment content in its workspace surfaces", () => {
 
     view.rerender(<UsageSurface usage={null} onRefreshUsage={onRefreshUsage} />);
     expect(screen.getByText("No provider route selected")).toBeVisible();
+  });
+
+  it("labels Usage older than the freshness window as cached with its age", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-12T10:09:40.000Z"));
+      render(<UsageSurface usage={{ ...summary.usage!, quota: { ...summary.usage!.quota, freshness: "stale" } }} />);
+      expect(screen.getByText("Cached · updated 9 min ago")).toBeVisible();
+      expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("moves local servers into Run with their status in text, not a dot", async () => {

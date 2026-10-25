@@ -28,6 +28,7 @@ export interface ProviderUsageRefreshDependencies<Metadata> {
   activeProviderIds(): ReadonlySet<ProviderId>;
   track(operation: () => Promise<void>): Promise<void>;
   clientPresent?(): boolean;
+  subscribeClientConnected?(listener: () => void): () => void;
   now?(): number;
 }
 
@@ -35,8 +36,8 @@ const RATE_LIMIT_PROVIDER_IDS: readonly ProviderId[] = ["codex", "claude"];
 export const IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS = 3 * 60 * 1_000;
 const RATE_LIMIT_READ_BUDGET_MS = 30 * 1_000;
 const IDLE_READ_WINDOW_MS = RATE_LIMIT_PROVIDER_IDS.length * RATE_LIMIT_READ_BUDGET_MS;
+export const RATE_LIMIT_TTL_MS = IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS + 2 * IDLE_READ_WINDOW_MS;
 const MAX_IDLE_RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1_000;
-export const RATE_LIMIT_TTL_MS = MAX_IDLE_RATE_LIMIT_BACKOFF_MS + 2 * IDLE_READ_WINDOW_MS;
 export const RESET_READ_DELAY_MS = 5 * 1_000;
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -206,24 +207,37 @@ export function startIdleRateLimitRefresh<Metadata>(
         ? intervalMs
         : previous.delayMs;
       cadence.set(providerId, { ...current, delayMs });
+      if (rateLimits.updatedAt === null) return false;
+      const age = now() - Date.parse(rateLimits.updatedAt);
       return dependencies.canRun(providerId)
         && !busy.has(providerId)
         && (retry.get(providerId)?.at ?? 0) <= now()
-        && rateLimits.updatedAt !== null
-        && (rateLimits.freshness !== "fresh"
-          || now() - Date.parse(rateLimits.updatedAt) + intervalMs > delayMs + IDLE_READ_WINDOW_MS);
+        && ((rateLimits.freshness !== "fresh" && age <= RATE_LIMIT_TTL_MS)
+          || age + intervalMs > delayMs + IDLE_READ_WINDOW_MS);
     });
     if (due.length === 0) armReset();
     else refresh(due);
   };
   const timer = setInterval(tick, intervalMs);
   timer.unref();
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const unsubscribe = dependencies.subscribeClientConnected?.(() => {
+    if (!absent || stopped || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!stopped) tick();
+    }, 0);
+    reconnectTimer.unref();
+  });
   armReset();
   const stop = (): void => {
     stopped = true;
     clearInterval(timer);
     if (resetTimer) clearTimeout(resetTimer);
     resetTimer = null;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    unsubscribe?.();
   };
   dependencies.signal.addEventListener("abort", stop, { once: true });
   return stop;

@@ -68,7 +68,7 @@ import {
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
-import { closeRuntimeConnection, openRuntimeConnection } from "./persistence/runtime-connection-pragmas";
+import { openRuntimeConnection } from "./persistence/runtime-connection-pragmas";
 import { requireRow } from "./persistence/required-row";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
 import { ProjectRepository } from "./persistence/project-repository";
@@ -302,7 +302,7 @@ export class RuntimeStore {
   close(): void {
     this.backupManager.stop();
     this.conversationWork.clear();
-    closeRuntimeConnection(this.database);
+    if (this.database.open) this.database.close();
   }
 
   startBackups(): void {

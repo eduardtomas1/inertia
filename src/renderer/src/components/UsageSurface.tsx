@@ -3,6 +3,7 @@ import { Gauge, RefreshCw, Users } from "lucide-react";
 
 import type { EnvironmentUsageSummary } from "../utils/environmentSummary";
 import { API_KEY_USAGE_UNAVAILABLE } from "../utils/usageDisplay";
+import { formatUpdatedAge } from "../lib/format";
 import {
   clampRemainingPercent,
   HEADER_METER_LOW_REMAINING_PERCENT,
@@ -20,13 +21,17 @@ export interface UsageSurfaceProps {
 }
 
 function freshnessLabel(
-  freshness: EnvironmentUsageSummary["quota"]["freshness"],
-  source: EnvironmentUsageSummary["quota"]["source"],
+  quota: EnvironmentUsageSummary["quota"],
+  now: number,
 ): string {
+  const { freshness, source } = quota;
   if (source === "api-key") return "Not available for API keys";
   if (source === "isolated") return "Unavailable for this backend";
   if (freshness === "current") return "Current";
-  if (freshness === "stale") return "Stale";
+  if (freshness === "stale") {
+    const age = formatUpdatedAge(quota.updatedAt, now);
+    return age ? `Cached · ${age}` : "Stale";
+  }
   if (freshness === "refreshing") return "Refreshing";
   return "Unavailable";
 }
@@ -56,7 +61,7 @@ export function UsageSurface({
               <ProviderBrandIcon providerId={usage.providerId} decorative size={14} />
               <h3 title={usage.providerLabel}>{usage.providerLabel}</h3>
               <small data-freshness={usage.quota.freshness}>
-                {freshnessLabel(usage.quota.freshness, usage.quota.source)}
+                {freshnessLabel(usage.quota, now)}
               </small>
             </header>
             {usage.quota.limits.length > 0 ? (

@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
-import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
+import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
+import { TURN_SCOPED_INDEXES_SCHEMA_VERSION, turnScopedIndexesMigration } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { optimizeRuntimeConnection } from "../../src/server/persistence/runtime-connection-pragmas";
 
 const fixture = resolve(import.meta.dirname, "..", "fixtures", "database", "v0.0.6.sqlite");
@@ -48,6 +49,11 @@ function plan(database: Database.Database, sql: string, ...parameters: unknown[]
 }
 
 describe("turn-scoped row indexes", () => {
+  it("is registered at its declared schema version", () => {
+    expect(runtimeMigrationCatalog().find(({ version }) => version === TURN_SCOPED_INDEXES_SCHEMA_VERSION))
+      .toMatchObject({ name: turnScopedIndexesMigration.name, up: turnScopedIndexesMigration.up });
+  });
+
   it("upgrades schema 101 so turn deletion searches child rows by turn and the prefix indexes are gone", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "published.sqlite");
@@ -99,7 +105,34 @@ describe("turn-scoped row indexes", () => {
     }
   });
 
-  it("collects planner statistics for a writable runtime database without touching read-only connections", async () => {
+  it("closes without planner work while another connection holds the write lock", async () => {
+    const directory = await temporaryDirectory();
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const databasePath = join(directory, "inertia.sqlite");
+    const store = new RuntimeStore(databasePath, workspace, { recoverInterruptedRuns: false });
+    const project = store.createProject("Shutdown", workspace);
+    for (let index = 0; index < 400; index += 1) store.createConversation(project.id, `Chat ${index}`, { activate: false });
+    store.shellSnapshot();
+    const statisticsBefore = new Database(databasePath, { readonly: true });
+    const before = statisticsBefore.prepare("SELECT tbl, idx, stat FROM sqlite_stat1 ORDER BY tbl, idx").all();
+    statisticsBefore.close();
+    const writer = new Database(databasePath);
+    writer.exec("BEGIN IMMEDIATE");
+    try {
+      const started = performance.now();
+      store.close();
+      expect(performance.now() - started).toBeLessThan(1_000);
+    } finally {
+      writer.exec("ROLLBACK");
+      writer.close();
+    }
+    const statisticsAfter = new Database(databasePath, { readonly: true });
+    expect(statisticsAfter.prepare("SELECT tbl, idx, stat FROM sqlite_stat1 ORDER BY tbl, idx").all()).toEqual(before);
+    statisticsAfter.close();
+  });
+
+  it("collects planner statistics when a writable runtime database opens without touching read-only connections", async () => {
     const directory = await temporaryDirectory();
     const workspace = join(directory, "workspace");
     await mkdir(workspace);
@@ -108,6 +141,7 @@ describe("turn-scoped row indexes", () => {
     const project = store.createProject("Statistics", workspace);
     for (let index = 0; index < 12; index += 1) store.createConversation(project.id, `Chat ${index}`, { activate: false });
     store.close();
+    new RuntimeStore(databasePath, workspace, { recoverInterruptedRuns: false }).close();
     const statistics = (path: string) => {
       const database = new Database(path, { readonly: true });
       try {
